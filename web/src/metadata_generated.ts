@@ -11,10 +11,9 @@ export type MetadataDecisionRow = { id: string; target: string; printing_id: str
 export type MetadataDecisionInput = { target: "live" | "marketplace"; printing_id: string; edition_id?: string | null; decision: "verify_source" | "correct" | "reject_source" | "unmap" | "unsupported"; reviewed_value?: Record<string, unknown> | null; basis_revision: number; evidence_digest: string; evidence_url: string; reason: string; report_ids?: (string)[] };
 export type MetadataDecisionResult = { decision_id: string; target: string; decision: string; state: string; reason: string | null; mapping_revision: number | null; public_revision: number; closed_report_ids: (string)[]; public_delivery: "delivered" | "pending" };
 export type RuleVersionView = { version: number; code_digest: string };
-export type ActiveRuleView = { activation_id: string; version: number | null; activated_at: string; evidence_url: string; reason: string; digest_current: boolean };
-export type MetadataRuleView = { kind: "live_derivation" | "marketplace_matching"; versions: (RuleVersionView)[]; active: ActiveRuleView | null };
-export type MetadataRuleActivation = { version?: number | null; evidence_url: string; reason: string };
-export type MetadataRuleResult = { kind: string; version: number | null; printings: number; editions: number; public_revision: number; public_delivery: "delivered" | "pending" };
+export type ActiveRuleView = { activation_id: string; version: number | null; activated_at: string; evidence_url: string; reason: string; digest_current: boolean; source: "owner" | "deploy" | "rollback"; release_commit: string | null };
+export type RuleRolloutView = { phase: "live" | "editions" | "quote_variants" | "deliver" | "done" | "failed"; failed_phase: string | null; total: number | null; done: number; changed: number; started_at: string; updated_at: string; finished_at: string | null; error: string | null };
+export type MetadataRuleView = { kind: "live_derivation" | "marketplace_matching"; versions: (RuleVersionView)[]; active: ActiveRuleView | null; rollout: RuleRolloutView | null; problem: "digest_mismatch" | "newer_than_code" | null };
 export type AttributeValues = { regulation_mark?: string | null; card_kind?: "pokemon" | "trainer" | "energy" | null; basic_energy?: boolean | null; types?: ("Grass" | "Fire" | "Water" | "Lightning" | "Psychic" | "Fighting" | "Darkness" | "Metal" | "Fairy" | "Dragon" | "Colorless")[] | null; rule_box?: boolean | null; ace_spec?: boolean | null; radiant?: boolean | null; prism_star?: boolean | null; basic_pokemon?: boolean | null; trainer_type?: "supporter" | "item" | "tool" | "stadium" | null };
 export type AttributeReportInput = { printing_id: string; proposed: AttributeValues; evidence_url?: string | null; note?: string };
 export type AttributeReportView = { id: string; printing_id: string; proposed: Record<string, unknown>; evidence_url: string | null; note: string; status: string; review_reason: string | null; created_at: string; updated_at: string };
@@ -55,7 +54,6 @@ export const getMetadataHistory=(kind: MetadataTargetKind,targetId: string)=>req
 export const decideMetadata=(body: MetadataDecisionInput)=>request<MetadataDecisionResult>('POST','/api/admin/catalog-metadata/decisions',body);
 export const decideMetadataReport=(reportId: string,body: MetadataReportDecision)=>request<MetadataReportView>('POST',`/api/admin/catalog-metadata/reports/${id(reportId)}/decision`,body);
 export const getMetadataRules=()=>request<MetadataRuleView[]>('GET','/api/admin/catalog-rules');
-export const activateMetadataRule=(kind: MetadataRuleView['kind'],body: MetadataRuleActivation)=>request<MetadataRuleResult>('POST',`/api/admin/catalog-rules/${kind}/activate`,body);
 export const submitAttributeReport=(body: AttributeReportInput)=>request<AttributeReportView>('POST','/api/catalog/attribute-reports',body);
 export const getMyAttributeReports=()=>request<AttributeReportView[]>('GET','/api/catalog/attribute-reports');
 export const getMyAttributeReport=(reportId: string)=>request<AttributeReportView>('GET',`/api/catalog/attribute-reports/${id(reportId)}`);

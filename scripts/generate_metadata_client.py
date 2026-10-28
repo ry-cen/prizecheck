@@ -3,8 +3,8 @@ import client_generator as gen
 
 TARGET = "web/src/metadata_generated.ts"
 NAMES = ('MetadataReportInput','MetadataReportView','MetadataReportUpdate','MetadataReportDecision','MatchedProduct','MetadataQueueItem','MetadataQueuePage',
-             'MetadataDecisionRow','MetadataDecisionInput','MetadataDecisionResult','RuleVersionView','ActiveRuleView','MetadataRuleView',
-             'MetadataRuleActivation','MetadataRuleResult','AttributeValues','AttributeReportInput','AttributeReportView',
+             'MetadataDecisionRow','MetadataDecisionInput','MetadataDecisionResult','RuleVersionView','ActiveRuleView','RuleRolloutView','MetadataRuleView',
+             'AttributeValues','AttributeReportInput','AttributeReportView',
              'AttributeReportUpdate','AttributeReportDecision','AttributeEvidence','AttributeQueuePage','AttributeDecisionRow',
              'AttributeDecisionInput','AttributeDecisionResult','ReprintGroupPrinting','GroupLegality','ReprintGroupView',
              'CardIdentityEvidence','CardIdentityQueueItem','CardIdentityQueuePage','CardIdentityDecisionRow',
@@ -32,7 +32,6 @@ export const getMetadataHistory=(kind: MetadataTargetKind,targetId: string)=>req
 export const decideMetadata=(body: MetadataDecisionInput)=>request<MetadataDecisionResult>('POST','/api/admin/catalog-metadata/decisions',body);
 export const decideMetadataReport=(reportId: string,body: MetadataReportDecision)=>request<MetadataReportView>('POST',`/api/admin/catalog-metadata/reports/${id(reportId)}/decision`,body);
 export const getMetadataRules=()=>request<MetadataRuleView[]>('GET','/api/admin/catalog-rules');
-export const activateMetadataRule=(kind: MetadataRuleView['kind'],body: MetadataRuleActivation)=>request<MetadataRuleResult>('POST',`/api/admin/catalog-rules/${kind}/activate`,body);
 export const submitAttributeReport=(body: AttributeReportInput)=>request<AttributeReportView>('POST','/api/catalog/attribute-reports',body);
 export const getMyAttributeReports=()=>request<AttributeReportView[]>('GET','/api/catalog/attribute-reports');
 export const getMyAttributeReport=(reportId: string)=>request<AttributeReportView>('GET',`/api/catalog/attribute-reports/${id(reportId)}`);

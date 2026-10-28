@@ -22,7 +22,7 @@ from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
 from .format_standing import rebuild_stale_best_effort
 from .evolution_roots import refresh_evolution_roots
-from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, ensure_matching_rule, refresh_editions,
+from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, refresh_editions,
                               refresh_printing)
 from .price_binding import rebind_best_effort
 from .public_catalog import publish_catalog_best_effort
@@ -586,7 +586,6 @@ def _promote(conn, run_id: UUID, first, records, normalized, set_details, raw, b
         state = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton FOR UPDATE").fetchone()
         # Take the commit-ordered public revision before any metadata row is touched.
         conn.execute("SELECT catalog_begin_correction()")
-        ensure_matching_rule(conn)  # before TargetContext loads the active rules
         targets = TargetContext(conn)
         targets.prime_claims(item["metadata"]["export_candidate"] for item in normalized)
         old_id = state["active_generation"]
@@ -810,3 +809,7 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 conn.rollback()
                 conn.execute("SELECT pg_advisory_unlock(914703)")
                 conn.commit()
+    # Finish or apply this release's catalog rules (ADR 0021); never raises. Success path only, after runner lock 914703
+    # is released, so a long rollout never blocks the next catalog run.
+    from . import rule_rollout
+    rule_rollout.resume()

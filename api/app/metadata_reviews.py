@@ -12,7 +12,6 @@ import json
 import logging
 import re
 from datetime import datetime
-from threading import Thread
 from typing import Literal
 from uuid import UUID
 
@@ -21,9 +20,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
 from . import public_catalog
-from .price_binding import rebind_best_effort, spawn_rebind
-from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, MatchingRulesV4, TargetContext, activate_rule,
-                              automatic_matching, code_digest, ensure_matching_rule, fingerprint, is_unspecified,
+from .price_binding import spawn_rebind
+from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, MatchingRulesV4, TargetContext,
+                              code_digest, fingerprint, is_unspecified,
                               refresh_editions, refresh_printing, verified_elsewhere)
 from .holdings import fail
 from .db import connect
@@ -646,7 +645,7 @@ def apply_live(conn, context, printing_id, plan, decision_id):
         fail(409, "LIVE_CONFLICT")
 
 
-# ---------------------------------------------------------------- rule activation
+# ---------------------------------------------------------------- rules (read-only; ADR 0021)
 
 
 class RuleVersionView(BaseModel):
@@ -660,29 +659,30 @@ class ActiveRuleView(BaseModel):
     activated_at: datetime
     evidence_url: str
     reason: str
-    # False when the code changed after approval; the rule is then inactive until re-approved.
+    # False when the code changed after the version was applied; the rule is then inactive and never re-applied.
     digest_current: bool
+    source: Literal["owner", "deploy", "rollback"]
+    release_commit: str | None
+
+
+class RuleRolloutView(BaseModel):
+    phase: Literal["live", "editions", "quote_variants", "deliver", "done", "failed"]
+    failed_phase: str | None
+    total: int | None
+    done: int
+    changed: int
+    started_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+    error: str | None
 
 
 class MetadataRuleView(BaseModel):
     kind: Literal["live_derivation", "marketplace_matching"]
     versions: list[RuleVersionView]
     active: ActiveRuleView | None
-
-
-class MetadataRuleActivation(BaseModel):
-    version: int | None = Field(default=None, ge=1, le=999_999)
-    evidence_url: HttpUrl
-    reason: str = Field(min_length=1, max_length=2000)
-
-
-class MetadataRuleResult(BaseModel):
-    kind: str
-    version: int | None
-    printings: int
-    editions: int
-    public_revision: int
-    public_delivery: Literal["delivered", "pending"]
+    rollout: RuleRolloutView | None
+    problem: Literal["digest_mismatch", "newer_than_code"] | None
 
 
 @router.get("/api/admin/catalog-rules", response_model=list[MetadataRuleView])
@@ -691,65 +691,25 @@ def rules(user_id: str = Depends(verified_user)):
         require_owner(conn, user_id)
         views = []
         for kind in (LIVE, MATCHING):
-            row = conn.execute("""SELECT a.id,a.version,a.code_digest,a.activated_at,a.evidence_url,a.reason FROM catalog_rule_state s
-              JOIN catalog_rule_activation a ON a.id=s.activation_id WHERE s.kind=%s""", (kind,)).fetchone()
-            active = None
+            row = conn.execute("""SELECT a.id,a.version,a.code_digest,a.activated_at,a.evidence_url,a.reason,a.source,a.release_commit,
+              r.phase,r.failed_phase,r.total,r.done,r.changed,r.started_at,r.updated_at,r.finished_at,r.error,
+              r.activation_id AS rollout_id
+              FROM catalog_rule_state s JOIN catalog_rule_activation a ON a.id=s.activation_id
+              LEFT JOIN catalog_rule_rollout r ON r.activation_id=s.activation_id WHERE s.kind=%s""", (kind,)).fetchone()
+            active = rollout = problem = None
             if row:
-                current = row["version"] is not None and row["version"] in REGISTRIES[kind] and code_digest(kind, row["version"]) == row["code_digest"]
+                registered = row["version"] is not None and row["version"] in REGISTRIES[kind]
+                current = registered and code_digest(kind, row["version"]) == row["code_digest"]
+                if row["version"] is not None and not registered:
+                    problem = "newer_than_code"
+                elif registered and not current:
+                    problem = "digest_mismatch"
                 active = ActiveRuleView(activation_id=row["id"], version=row["version"], activated_at=row["activated_at"],
-                                        evidence_url=row["evidence_url"], reason=row["reason"], digest_current=current or row["version"] is None)
-            views.append(MetadataRuleView(kind=kind, active=active, versions=[
+                                        evidence_url=row["evidence_url"], reason=row["reason"], digest_current=current or row["version"] is None,
+                                        source=row["source"], release_commit=row["release_commit"])
+                if row["rollout_id"] is not None:
+                    rollout = RuleRolloutView(**{key: row[key] for key in RuleRolloutView.model_fields})
+            views.append(MetadataRuleView(kind=kind, active=active, rollout=rollout, problem=problem, versions=[
                 RuleVersionView(version=version, code_digest=code_digest(kind, version)) for version in sorted(REGISTRIES[kind])]))
         return views
 
-
-@router.post("/api/admin/catalog-rules/{kind}/activate", response_model=MetadataRuleResult)
-def activate(kind: Literal["live_derivation", "marketplace_matching"], command: MetadataRuleActivation,
-             user_id: str = Depends(verified_user)):
-    reason = " ".join(command.reason.split())
-    if not reason:
-        fail(422, "REASON_REQUIRED")
-    with connect() as conn, conn.transaction():
-        require_owner(conn, user_id)
-        if command.version is not None and command.version not in REGISTRIES[kind]:
-            fail(422, "UNKNOWN_RULE_VERSION")
-    try:
-        with connect() as conn, conn.transaction():
-            require_owner(conn, user_id)
-            conn.execute(f"SET LOCAL lock_timeout='{LOCK_TIMEOUT}'")
-            revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
-            conn.execute("SELECT 1 FROM catalog_rule_state WHERE kind=%s FOR UPDATE", (kind,))
-            changed = activate_rule(conn, kind, command.version, user_id, str(command.evidence_url), reason)
-    except psycopg.errors.LockNotAvailable:
-        fail(409, "CATALOG_BUSY")
-    # A short drain delivers the urgent invalidations (priority 0 first). A rule can change thousands of targets, so
-    # whatever remains is delivered by an unbounded drain in a detached process; until then the owner sees "pending".
-    public_catalog.publish_catalog_best_effort()
-    if kind == MATCHING:
-        spawn_rebind()
-    delivery = delivery_status(revision=revision)
-    if delivery == "pending":
-        public_catalog.spawn_background_drain()
-    return MetadataRuleResult(kind=kind, version=command.version, printings=changed["printings"], editions=changed["editions"],
-                              public_revision=revision, public_delivery=delivery)
-
-
-def _apply_automatic_matching():
-    try:
-        with connect() as conn, conn.transaction():
-            conn.execute(f"SET LOCAL lock_timeout='{LOCK_TIMEOUT}'")
-            changed = ensure_matching_rule(conn)
-    except Exception as exc:  # A busy catalog or a missing schema waits for the next promotion, which also ensures it.
-        log.warning("Automatic matching rule not applied at startup (%s)", type(exc).__name__)
-        return
-    if changed is not None:
-        log.warning("Automatic matching rule activated; %d Editions changed", changed["editions"])
-        public_catalog.publish_catalog_best_effort()
-        rebind_best_effort()
-        public_catalog.spawn_background_drain()
-
-
-def automatic_matching_on_startup():
-    # Re-evaluating every unverified Edition can take minutes, so it never holds up startup or health checks.
-    if automatic_matching():
-        Thread(target=_apply_automatic_matching, daemon=True, name="automatic-matching").start()

@@ -10,7 +10,7 @@ import pytest
 
 from app.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
                                  LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, MatchingRulesV4, PrintingState, TargetContext, activate_rule,
-                                 code_digest, complete_quote_variant, rematch_promos, edition_state, edition_targets, ensure_matching_rule, evaluate_edition, normalized_name,
+                                 code_digest, complete_quote_variant, rematch_promos, edition_state, edition_targets, evaluate_edition, normalized_name,
                                  evaluate_printing, fingerprint, load_active, printing_live, refresh_printing)
 from app.main import connect
 from test_catalog import reset_catalog
@@ -246,29 +246,6 @@ def test_v3_sets_aside_only_third_party_and_still_checks_it_against_the_product(
     # Other facets still name no finish, and the lookup's thirdParty ID must still be the selected product.
     assert evaluate(MatchingRulesV3, descriptor(stamp="x")) == Failure("conflict")
     assert evaluate(MatchingRulesV3, {**descriptor(), "type": "reverse"}) == Failure("conflict")
-
-
-def test_automatic_matching_keeps_the_newest_rule_active_without_an_approval(monkeypatch):
-    reset_catalog()
-    owner()
-    run(Records(repeated_block(1)))
-    with connect() as conn, conn.transaction():
-        assert ensure_matching_rule(conn) is None  # off unless MARKETPLACE_MATCHING=automatic
-    assert {row["mapping_reason"] for row in metadata()[1].values()} == {"no_matching_rule"}
-    monkeypatch.setenv("MARKETPLACE_MATCHING", "automatic")
-    with connect() as conn, conn.transaction():
-        assert ensure_matching_rule(conn) == {"printings": 0, "editions": 2}
-    with connect() as conn, conn.transaction():
-        assert ensure_matching_rule(conn) is None  # already the newest version
-        assert load_active(conn, MATCHING).version == max(MATCHING_RULES)
-        assert conn.execute("""SELECT a.reason FROM catalog_rule_state s JOIN catalog_rule_activation a ON a.id=s.activation_id
-          WHERE s.kind=%s""", (MATCHING,)).fetchone()["reason"].startswith("Automatic")
-    assert {row["mapping_state"] for row in metadata()[1].values()} == {"verified"}
-    # A deactivated rule comes back with the next import, and that import's new cards verify in the same promotion.
-    activate(MATCHING, None)
-    run(Records(repeated_block(1), repeated_block(2)))
-    assert load_active_version() == max(MATCHING_RULES)
-    assert {row["mapping_state"] for row in metadata("meta-2")[1].values()} == {"verified"}
 
 
 def load_active_version():
@@ -624,16 +601,6 @@ def test_never_eligible_contested_printing_waits_and_then_qualifies_once_unconte
     run(Records(ambiguous))
     printing, _ = metadata()
     assert printing["live_state"] == "eligible" and printing["live_basis"] == "rule"
-
-
-def test_deactivating_the_rule_suspends_and_reactivation_does_not_requalify():
-    reset_catalog(); run(Records(furret())); activate(LIVE, 99)
-    assert metadata()[0]["live_state"] == "eligible"
-    assert activate(LIVE, None) == {"printings": 1, "editions": 0}
-    printing, _ = metadata()
-    assert (printing["live_state"], printing["live_reason"]) == ("suspended", "no_active_rule")
-    activate(LIVE, 99)
-    assert metadata()[0]["live_state"] == "suspended"
 
 
 def test_live_identity_collisions_leave_neither_printing_eligible():
@@ -1216,14 +1183,6 @@ def test_activating_v4_re_evaluates_only_unverified_open_editions(tcgplayer_prod
     assert states("xyp-1") == [("verified", None, 900, "holofoil")]
 
 
-def test_automatic_matching_activates_v4(monkeypatch):
-    reset_catalog(); owner(); run(Records(repeated_block(1)))
-    monkeypatch.setenv("MARKETPLACE_MATCHING", "automatic")
-    with connect() as conn, conn.transaction():
-        ensure_matching_rule(conn)
-    assert load_active_version() == 4
-
-
 def test_an_activation_the_code_lacks_verifies_nothing_new_and_unmatches_nothing(monkeypatch):
     class Newer(MatchingRulesV4):
         pass
@@ -1281,7 +1240,8 @@ def test_rematch_does_nothing_without_an_active_matching_rule(tcgplayer_products
     listing(910, "Pikachu", "9", 22872)
     activate(MATCHING, 3)
     run(Records(promo("svp-1", "9", "svp", "Pikachu")))
-    activate(MATCHING, None)
+    with connect() as conn:
+        conn.execute("UPDATE catalog_rule_state SET activation_id=NULL WHERE kind='marketplace_matching'")
     before = states("svp-1")
     assert rematched() == 0
     assert states("svp-1") == before and before[0][0] == "unverified"
@@ -1295,3 +1255,9 @@ def test_rematch_two_products_on_a_number_stay_rule_failed(tcgplayer_products):
     listing(912, "Zorua (XY27)", "XY27", 1451)
     assert rematched() == 0
     assert states("xyp-27") == [("unverified", "rule_failed", None, None)]
+
+
+def test_activate_rule_refuses_deactivation():
+    reset_catalog()
+    with connect() as conn, conn.transaction(), pytest.raises(ValueError, match="Deactivation was removed"):
+        activate_rule(conn, LIVE, None, owner(), "https://example.org/rule", "Reviewed against the target")

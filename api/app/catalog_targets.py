@@ -13,7 +13,6 @@ the caller's transaction after ``catalog_begin_correction()`` has taken the cloc
 import hashlib
 import inspect
 import json
-import os
 import re
 import unicodedata
 from collections import Counter
@@ -793,34 +792,62 @@ def refresh_printing(conn, context, printing_id, reviewed=False):
     return True
 
 
+UNVERIFIED_EDITIONS = "mapping_state='unverified' AND NOT auto_closed"
+QUOTE_VARIANT_EDITIONS = "mapping_state='verified' AND quote_variant IS NULL AND mapping_basis='matching_rule'"
+LIVE_CANDIDATES = """live_state IN ('unsupported','eligible') AND NOT (live_state='unsupported'
+            AND (live_auto_closed OR live_reason='reviewed_unsupported'))
+            AND (export_candidate<>'{}'::jsonb OR live_inputs IS NOT NULL)"""
+
+
+def record_activation(conn, kind, version, reviewer_id, evidence_url, reason, *, source="owner", release_commit=None, digest=None):
+    """Insert an activation and point the rule state at it; returns its id. Re-evaluates nothing.
+
+    Runs in the caller's transaction. ``digest`` overrides the code's digest for a rollback, which restores the digest
+    recorded when its version was first applied.
+    """
+    if kind not in REGISTRIES or version is None or version not in REGISTRIES[kind]:
+        raise ValueError("Unknown rule kind or version")
+    revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
+    activation = conn.execute("""INSERT INTO catalog_rule_activation(kind,version,code_digest,reviewer_id,evidence_url,reason,clock_revision,
+      source,release_commit) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                              (kind, version, digest or code_digest(kind, version), reviewer_id, evidence_url, reason, revision,
+                               source, release_commit)).fetchone()["id"]
+    conn.execute("UPDATE catalog_rule_state SET activation_id=%s WHERE kind=%s", (activation, kind))
+    return activation
+
+
+def reevaluate_live(conn, context):
+    """Re-evaluate every candidate Live Printing under the active live rule in this transaction; returns the count changed.
+
+    One pass with the claims primed over all rows, so a collision is decided with both claimants present.
+    """
+    rows = conn.execute(f"""SELECT printing_id,export_candidate FROM catalog_printing_metadata
+      WHERE {LIVE_CANDIDATES} ORDER BY printing_id""").fetchall()
+    context.prime_claims(row["export_candidate"] for row in rows if row["export_candidate"])
+    return sum(refresh_printing(conn, context, row["printing_id"]) for row in rows)
+
+
 def activate_rule(conn, kind, version, reviewer_id, evidence_url, reason):
-    """Record a maintainer's rule activation (version None deactivates) and re-evaluate affected targets.
+    """Record a maintainer's rule activation and re-evaluate affected targets in this transaction.
+
+    The synchronous path for tests and seeds; a deploy applies rules through ``rule_rollout`` (ADR 0021), which
+    batches the same work. Deactivation was removed.
 
     Re-evaluation covers unsupported and eligible Printings and unverified, not auto-closed
     Editions only: quarantined, suspended and previously verified targets are never re-qualified. A matching-rule
     Edition verified without a quote variant may gain the one the new rule names (``complete_quote_variant``).
     """
-    if kind not in REGISTRIES or (version is not None and version not in REGISTRIES[kind]):
-        raise ValueError("Unknown rule kind or version")
-    revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
-    activation = conn.execute("""INSERT INTO catalog_rule_activation(kind,version,code_digest,reviewer_id,evidence_url,reason,clock_revision)
-      VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                              (kind, version, code_digest(kind, version) if version else None, reviewer_id,
-                               evidence_url, reason, revision)).fetchone()["id"]
-    conn.execute("UPDATE catalog_rule_state SET activation_id=%s WHERE kind=%s", (activation, kind))
+    if version is None:
+        raise ValueError("Deactivation was removed (ADR 0021)")
+    record_activation(conn, kind, version, reviewer_id, evidence_url, reason)
     context = TargetContext(conn)
     if kind == LIVE:
-        rows = conn.execute("""SELECT printing_id,export_candidate FROM catalog_printing_metadata
-          WHERE live_state IN ('unsupported','eligible') AND NOT (live_state='unsupported'
-            AND (live_auto_closed OR live_reason='reviewed_unsupported'))
-            AND (export_candidate<>'{}'::jsonb OR live_inputs IS NOT NULL) ORDER BY printing_id""").fetchall()
-        context.prime_claims(row["export_candidate"] for row in rows if row["export_candidate"])
-        return {"printings": sum(refresh_printing(conn, context, row["printing_id"]) for row in rows), "editions": 0}
-    ids = [row["edition_id"] for row in conn.execute("""SELECT edition_id FROM catalog_edition_metadata
-      WHERE mapping_state='unverified' AND NOT auto_closed ORDER BY edition_id""")]
+        return {"printings": reevaluate_live(conn, context), "editions": 0}
+    ids = [row["edition_id"] for row in conn.execute(f"""SELECT edition_id FROM catalog_edition_metadata
+      WHERE {UNVERIFIED_EDITIONS} ORDER BY edition_id""")]
     changed = sum(refresh_editions(conn, context, ids[start:start + 500]) for start in range(0, len(ids), 500))
-    ids = [row["edition_id"] for row in conn.execute("""SELECT edition_id FROM catalog_edition_metadata
-      WHERE mapping_state='verified' AND quote_variant IS NULL AND mapping_basis='matching_rule' ORDER BY edition_id""")]
+    ids = [row["edition_id"] for row in conn.execute(f"""SELECT edition_id FROM catalog_edition_metadata
+      WHERE {QUOTE_VARIANT_EDITIONS} ORDER BY edition_id""")]
     changed += sum(refresh_editions(conn, context, ids[start:start + 500], complete=True) for start in range(0, len(ids), 500))
     return {"printings": 0, "editions": changed}
 
@@ -843,35 +870,6 @@ def rematch_promos(conn, batch=500):
             conn.execute("SELECT catalog_begin_correction()")
             changed += refresh_editions(conn, TargetContext(conn), ids[start:start + batch])
     return changed
-
-
-AUTOMATIC_MATCHING_EVIDENCE = "https://github.com/ry-cen/tcg-tracker/blob/dev/api/app/catalog_targets.py"
-AUTOMATIC_MATCHING_REASON = "Automatic: MARKETPLACE_MATCHING=automatic keeps the newest matching rule active"
-
-
-def automatic_matching() -> bool:
-    return os.environ.get("MARKETPLACE_MATCHING") == "automatic"
-
-
-def ensure_matching_rule(conn):
-    """With MARKETPLACE_MATCHING=automatic, keep the newest matching rule active without an owner approval.
-
-    The activation is recorded for the bound owner like a manual one and re-evaluates the same Editions. It is a no-op
-    when automatic matching is off, the newest version is already active with its current code, or no owner is bound.
-    Runs in the caller's transaction; returns ``activate_rule``'s counts, or None when nothing changed.
-    """
-    if not automatic_matching():
-        return None
-    version = max(MATCHING_RULES)
-    conn.execute("SELECT catalog_begin_correction()")
-    conn.execute("SELECT 1 FROM catalog_rule_state WHERE kind=%s FOR UPDATE", (MATCHING,))
-    active = load_active(conn, MATCHING)
-    if active is not None and active.version == version:
-        return None
-    owner = conn.execute("SELECT user_id FROM owner_binding WHERE singleton").fetchone()
-    if owner is None:
-        return None
-    return activate_rule(conn, MATCHING, version, owner["user_id"], AUTOMATIC_MATCHING_EVIDENCE, AUTOMATIC_MATCHING_REASON)
 
 
 # ---------------------------------------------------------------- readers (PostgreSQL is authoritative)

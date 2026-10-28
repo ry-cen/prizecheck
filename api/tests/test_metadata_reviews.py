@@ -4,7 +4,6 @@ import hmac
 import json
 import os
 import time
-from types import SimpleNamespace
 from uuid import uuid4
 
 import psycopg
@@ -12,9 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, connect
-from app import metadata_reviews, price_binding, public_catalog
+from app import metadata_reviews, price_binding, public_catalog, rule_rollout
 from app.price_binding import rebind_best_effort
-from app.catalog_targets import LIVE, MATCHING, activate_rule, edition_targets, fingerprint, printing_live
+from app.catalog_targets import LIVE, MATCHING, MATCHING_RULES, activate_rule, code_digest, edition_targets, fingerprint, printing_live
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret
 from test_catalog_reconciliation import run
@@ -466,8 +465,6 @@ def test_only_the_owner_decides_and_a_collector_gets_nothing_from_the_admin_surf
     assert decide(item, "unmap", user=REPORTER).status_code == 403
     assert request("GET", f"{ADMIN}/editions/{world['normal']}", REPORTER).status_code == 403
     assert request("GET", "/api/admin/catalog-rules", REPORTER).status_code == 403
-    assert request("POST", "/api/admin/catalog-rules/live_derivation/activate", REPORTER,
-                   {"version": 1, "evidence_url": "https://example.org/r", "reason": "x"}).status_code == 403
     assert edition_row(world["normal"])["mapping_reason"] == "no_matching_rule"
 
 
@@ -652,8 +649,8 @@ def test_a_marketplace_decision_records_the_matching_activation_only_when_one_is
     assert recorded["rule_activation_id"] == active_activation_id(MATCHING)
     history = request("GET", f"{ADMIN}/editions/{quarantined['normal']}/history", OWNER).json()
     assert (history[0]["rule_kind"], history[0]["rule_version"]) == ("marketplace_matching", 1)
-    with connect() as conn, conn.transaction():
-        activate_rule(conn, MATCHING, None, OWNER, "https://example.org/rule", "Deactivated for the test")
+    with connect() as conn:
+        conn.execute("UPDATE catalog_rule_state SET activation_id=NULL WHERE kind=%s", (MATCHING,))
     item = evidence("editions", quarantined["reverse"])
     without = decide(item, "correct", {"product_id": 4321, "quote_variant": "reverse-holo"})
     assert without.status_code == 200, without.text
@@ -665,21 +662,18 @@ def test_a_marketplace_decision_records_the_matching_activation_only_when_one_is
 # ------------------------------------------------------------------ rule activation
 
 
-def activation(kind, version, **over):
-    body = {"version": version, "evidence_url": "https://example.org/rule", "reason": "Reviewed the table", **over}
-    return request("POST", f"/api/admin/catalog-rules/{kind}/activate", OWNER, body)
-
-
 def test_rules_list_reviewed_versions_with_digests_and_the_active_activation(world):
     listed = request("GET", "/api/admin/catalog-rules", OWNER).json()
     by_kind = {row["kind"]: row for row in listed}
     assert set(by_kind) == {"live_derivation", "marketplace_matching"}
     assert by_kind["marketplace_matching"]["versions"][0]["version"] == 1 and by_kind["marketplace_matching"]["active"] is None
     assert {v["version"] for v in by_kind["live_derivation"]["versions"]} >= {1, 99}
-    response = activation("marketplace_matching", 1)
-    assert response.status_code == 200, response.text
-    active = next(r for r in request("GET", "/api/admin/catalog-rules", OWNER).json() if r["kind"] == "marketplace_matching")["active"]
-    assert (active["version"], active["digest_current"], active["reason"]) == (1, True, "Reviewed the table")
+    activate_as_owner(MATCHING, 1)
+    rule = next(r for r in request("GET", "/api/admin/catalog-rules", OWNER).json() if r["kind"] == "marketplace_matching")
+    active = rule["active"]
+    assert (active["version"], active["digest_current"], active["reason"]) == (1, True, "Reviewed against the target")
+    assert active["source"] == "owner" and active["release_commit"] is None
+    assert rule["rollout"] is None and rule["problem"] is None
     assert [v["code_digest"] for v in active_versions(1)] == [code_digest_of(MATCHING, 1)]
 
 
@@ -693,44 +687,14 @@ def code_digest_of(kind, version):
     return code_digest(kind, version)
 
 
-def test_activating_a_matching_rule_verifies_unverified_editions_and_enqueues_them(world):
-    before = snapshot()
-    response = activation("marketplace_matching", 1)
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert (body["editions"], body["printings"], body["kind"], body["version"]) == (2, 0, "marketplace_matching", 1)
-    assert {edition_row(world[key])["mapping_state"] for key in ("normal", "reverse")} == {"verified"}
-    assert snapshot()["state"] == before["state"] and body["public_revision"] == before["clock"] + 1
-    with connect() as conn:
-        queued = conn.execute("SELECT target_kind,revision FROM catalog_public_outbox WHERE revision=%s", (body["public_revision"],)).fetchall()
-        row = conn.execute("SELECT * FROM catalog_rule_activation ORDER BY activated_at DESC").fetchone()
-    assert {(q["target_kind"]) for q in queued} == {"edition"} and len(queued) == 2
-    assert (row["reviewer_id"], row["version"], row["clock_revision"]) == (OWNER, 1, body["public_revision"])
-    assert body["public_delivery"] in ("delivered", "pending")
-
-
-def test_rule_activation_is_per_kind_and_version_and_deactivation_is_an_ordinary_action(world):
-    unknown = activation("live_derivation", 12345)
-    assert (unknown.status_code, unknown.json()["detail"]["code"]) == (422, "UNKNOWN_RULE_VERSION")
-    assert printing_row(world["printing"])["live_state"] == "unsupported"
-    # A code left in the body by an older web bundle is ignored.
-    assert activation("live_derivation", 99, code="000000").status_code == 200
-    assert printing_row(world["printing"])["live_state"] == "eligible"
-    off = activation("live_derivation", None)
-    assert off.status_code == 200 and off.json()["version"] is None
-    with connect() as conn:
-        assert conn.execute("""SELECT a.version FROM catalog_rule_state s JOIN catalog_rule_activation a ON a.id=s.activation_id
-          WHERE s.kind='live_derivation'""").fetchone()["version"] is None
-    assert printing_row(world["printing"])["live_state"] == "suspended"  # an eligible Printing is suspended, never silently reset
-
-
 # ------------------------------------------------------------------ no refresh route, no personal overrides
 
 
 def test_openapi_has_no_refresh_or_force_route_and_no_report_or_decision_path_is_public():
     paths = app.openapi()["paths"]
     mine = [path for path in paths if path.startswith(("/api/admin/catalog-metadata", "/api/admin/catalog-rules", "/api/catalog/metadata-reports"))]
-    assert len(mine) >= 9
+    assert len(mine) >= 8
+    assert not [p for p in mine if p.endswith("/activate")]
     assert not [path for path in paths if any(word in path.lower() for word in ("refresh", "force", "retry"))]
     assert not [p for p in mine for method in paths[p] if method.lower() not in {"get", "post", "patch"}]
     reads = {(p, m) for p in mine for m in paths[p]}
@@ -766,17 +730,8 @@ def test_a_refused_decision_never_takes_the_catalog_clock(world):
     item = evidence("editions", world["normal"])
     before = clock_revision()
     assert decide(item, "unmap", user=REPORTER).status_code == 403
-    assert activation_as(REPORTER, "marketplace_matching", 1).status_code == 403
     assert clock_revision() == before  # no bare clock bump, and no stamp on the target
     assert decide(item, "unmap").status_code == 200
-    before = clock_revision()
-    assert activation("marketplace_matching", 12345).status_code == 422
-    assert clock_revision() == before
-
-
-def activation_as(user, kind, version):
-    body = {"version": version, "evidence_url": "https://example.org/rule", "reason": "Reviewed the table"}
-    return request("POST", f"/api/admin/catalog-rules/{kind}/activate", user, body)
 
 
 # ------------------------------------------------------------------ a corrected price lookup must belong to the reviewed product
@@ -824,19 +779,6 @@ def test_enrichment_after_a_maintainer_decision_neither_closes_nor_re_stamps_the
     assert queue()["items"] == []
 
 
-def test_rule_activation_hands_an_undelivered_backlog_to_a_detached_drain(world, spawned):
-    response = activation("marketplace_matching", 1)
-    assert response.status_code == 200, response.text
-    assert response.json()["public_delivery"] == "pending"  # the (stubbed) request drain delivered nothing
-    assert spawned == [True]
-    with connect() as conn:
-        conn.execute("UPDATE catalog_public_outbox SET delivered_at=now()")
-    off = activation("marketplace_matching", None)
-    # Verified Editions are never re-qualified, so deactivating changes nothing and starts no drain.
-    assert off.status_code == 200 and off.json()["public_delivery"] == "delivered" and spawned == [True]
-
-
-
 def test_the_maintainer_sees_report_contents_without_the_reporters_identity_and_the_digest_binds_them(quarantined):
     first = evidence("editions", quarantined["normal"])
     created = market_report(quarantined, note="Product 4321 is on the card sleeve", evidence_url="https://example.org/sleeve").json()
@@ -860,16 +802,6 @@ def test_the_maintainer_sees_report_contents_without_the_reporters_identity_and_
     assert answered["evidence_digest"] not in (waiting["evidence_digest"], shown["evidence_digest"], first["evidence_digest"])
     stale = decide(waiting, "unmap")
     assert (stale.status_code, stale.json()["detail"]["code"]) == (409, "METADATA_EVIDENCE_CHANGED")
-
-
-def test_the_automatic_matching_startup_hook_runs_once_under_the_app_lifespan(monkeypatch):
-    applied = []
-    monkeypatch.setattr(metadata_reviews, "automatic_matching", lambda: True)
-    monkeypatch.setattr(metadata_reviews, "_apply_automatic_matching", lambda: applied.append(True))
-    monkeypatch.setattr(metadata_reviews, "Thread", lambda target, **_: SimpleNamespace(start=target))
-    with TestClient(app):
-        pass
-    assert applied == [True]
 
 
 # ------------------------------------------------------------------ card-number matches (#347)
@@ -1015,19 +947,61 @@ def test_a_decision_returns_before_a_busy_price_lock_frees(world, price_store):
     assert all_bindings() == {world["normal"]: ("Normal", None)}
 
 
-def test_activating_a_matching_rule_binds_and_publishes_the_newly_verified_editions(world, price_store):
+def test_applying_the_newest_matching_rule_binds_and_publishes_the_newly_verified_editions(world, price_store, monkeypatch):
+    for version in [v for v in MATCHING_RULES if v > 1]:
+        monkeypatch.delitem(MATCHING_RULES, version)  # version 1 is the newest this test's release knows
+    monkeypatch.setenv("RELEASE_COMMIT", uuid4().hex + "0" * 8)
     stock_prices((1001, "Normal", 2), (1001, "Reverse Holofoil", 5))
     assert all_bindings() == {}
-    response = activation("marketplace_matching", 1)
-    assert response.status_code == 200, response.text
-    price_binding.join_spawned_rebinds()
+    assert rule_rollout.apply_newest_rules()[MATCHING] == "applied"  # deliver runs synchronously: no join needed
     assert all_bindings() == {world["normal"]: ("Normal", None), world["reverse"]: ("Reverse Holofoil", None)}
     assert price_records(price_store) == {world["normal"]: "2", world["reverse"]: "5"}
 
 
-def test_the_automatic_matching_startup_work_binds_and_publishes(world, price_store, monkeypatch):
-    monkeypatch.setenv("MARKETPLACE_MATCHING", "automatic")
-    stock_prices((1001, "Normal", 2), (1001, "Reverse Holofoil", 5))
-    metadata_reviews._apply_automatic_matching()
-    assert all_bindings() == {world["normal"]: ("Normal", None), world["reverse"]: ("Reverse Holofoil", None)}
-    assert price_records(price_store) == {world["normal"]: "2", world["reverse"]: "5"}
+# ------------------------------------------------------------------ rules are read-only (ADR 0021)
+
+
+def rule_view(kind):
+    return next(r for r in request("GET", "/api/admin/catalog-rules", OWNER).json() if r["kind"] == kind)
+
+
+def insert_activation(kind, version, digest, **columns):
+    """Insert an activation row directly and make it current; returns its id."""
+    with connect() as conn, conn.transaction():
+        revision = conn.execute("SELECT catalog_begin_correction() AS r").fetchone()["r"]
+        names = ",".join(columns)
+        marks = ",".join(["%s"] * len(columns))
+        activation = conn.execute(f"""INSERT INTO catalog_rule_activation(kind,version,code_digest,reviewer_id,evidence_url,reason,
+          clock_revision{',' + names if names else ''}) VALUES (%s,%s,%s,%s,'https://example.org/c','Test row',%s{',' + marks if marks else ''})
+          RETURNING id""", (kind, version, digest, OWNER, revision, *columns.values())).fetchone()["id"]
+        conn.execute("UPDATE catalog_rule_state SET activation_id=%s WHERE kind=%s", (activation, kind))
+    return activation
+
+
+def test_the_activation_route_is_gone(world):
+    body = {"version": 1, "evidence_url": "https://example.org/rule", "reason": "x"}
+    for kind in ("live_derivation", "marketplace_matching"):
+        assert request("POST", f"/api/admin/catalog-rules/{kind}/activate", OWNER, body).status_code in (404, 405)
+    assert rule_view("marketplace_matching")["active"] is None
+
+
+def test_the_rules_view_shows_the_deploy_and_its_rollout(world):
+    commit = uuid4().hex + "0" * 8
+    version = max(MATCHING_RULES)
+    activation = insert_activation(MATCHING, version, code_digest(MATCHING, version), source="deploy", release_commit=commit)
+    with connect() as conn:
+        conn.execute("INSERT INTO catalog_rule_rollout(activation_id,phase,total,done,changed) VALUES (%s,'editions',5,2,1)", (activation,))
+    rule = rule_view(MATCHING)
+    assert (rule["active"]["source"], rule["active"]["release_commit"], rule["active"]["version"]) == ("deploy", commit, version)
+    assert (rule["rollout"]["phase"], rule["rollout"]["total"], rule["rollout"]["done"], rule["rollout"]["changed"]) == ("editions", 5, 2, 1)
+    assert rule["rollout"]["finished_at"] is None and rule["rollout"]["error"] is None and rule["problem"] is None
+
+
+def test_the_rules_view_reports_a_digest_mismatch_and_a_newer_version(world):
+    version = max(MATCHING_RULES)
+    insert_activation(MATCHING, version, "0" * 64)
+    rule = rule_view(MATCHING)
+    assert (rule["problem"], rule["active"]["digest_current"]) == ("digest_mismatch", False)
+    insert_activation(MATCHING, version + 1, "1" * 64)
+    rule = rule_view(MATCHING)
+    assert (rule["problem"], rule["active"]["version"]) == ("newer_than_code", version + 1)

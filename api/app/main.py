@@ -30,7 +30,7 @@ from .holdings import router as holdings_router
 from .loan_inventory import router as loan_inventory_router
 from .location_tree import router as location_tree_router
 from .locations import router as locations_router
-from .metadata_reviews import automatic_matching_on_startup, router as metadata_reviews_router
+from .metadata_reviews import router as metadata_reviews_router
 from .missing_cards import router as missing_cards_router
 from .moves import router as moves_router
 from .operation_counts import Count, DatabaseWriter, counter as operation_counter
@@ -43,6 +43,7 @@ from .published_format_checks import router as published_format_checks_router
 from .published_live_export import router as published_live_export_router
 from .published_mass_entry import router as published_mass_entry_router
 from .reprint_group_reviews import router as reprint_group_reviews_router
+from .rule_rollout import start_on_startup as start_rule_rollout
 from .scanner import router as scanner_router
 from .scanner_save import router as scanner_save_router
 from .settings import router as settings_router
@@ -72,7 +73,7 @@ class HealthResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Background startup work, in the order the routers' startup handlers used to run.
-    automatic_matching_on_startup()
+    start_rule_rollout()
     rebuild_format_standing()
     yield
     # Give counts still queued a short, bounded time to reach PostgreSQL, then stop the writer thread.
