@@ -113,10 +113,10 @@ scp compose.deploy.yml root@unraid:/mnt/cache/appdata/prizecheck-dev/compose.dep
 ```
 
 ```bash
-scp deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-dev.env.example root@unraid:/mnt/cache/appdata/prizecheck-dev/bin/
+scp deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-dev.env.example root@unraid:/mnt/cache/appdata/prizecheck-dev/bin/
 ```
 
-The script finds its home as the parent of its `bin/` directory, so keep that layout. Steps 4 and 5 finish the setup.
+The script finds its home as the parent of its `bin/` directory, so keep that layout. The two catalog refresh unit files go in `bin/` too, although Unraid does not run systemd: they are part of the digest CI checks, and `setup` skips the timer here. Steps 4 and 5 finish the setup.
 
 ## 4. Authenticate Unraid with GHCR
 
@@ -318,7 +318,7 @@ A Tailscale container started with `--network=host` behaves like the host case. 
    On your workstation, in the same commit:
 
    ```bash
-   cat compose.deploy.yml deploy/host/prizecheck-deploy.sh | sha256sum
+   cat compose.deploy.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer | sha256sum
    ```
 
 2. Run the workflow: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`** (or `gh workflow run deploy-dev.yml --ref dev`). Pushing to `dev` doesn't start it. The default checks run first (formatting, lint, compilation, build and unit tests), then the images are built and the deploy runs. The deep integration suites do not gate the deploy; run them on demand from **Actions → Verify → Run workflow** with an **integration** choice, or run the full gate locally with `npm run verify`.
@@ -379,19 +379,19 @@ The dev host needs no schedule; pulling by hand from Owner controls keeps workin
 bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh catalog-refresh
 ```
 
-It imports the TCGCSV prices, checks TCGdex for catalog changes (pulling only when the card list changed), then runs the scanner index (skipped only after a pull the check started that failed). Its output appears in the User Scripts log. The systemd units in `deploy/host/` are for the Oracle host and are not used here.
+It imports the TCGCSV prices, checks TCGdex for catalog changes (pulling only when the card list changed), then runs the scanner index (skipped only after a pull the check started that failed). Its output appears in the User Scripts log. The systemd units in `deploy/host/` are for the Oracle host: here they only sit in `bin/` for the digest, and `setup` logs that it skipped the timer.
 
 ## Updating the host files
 
-`compose.deploy.yml` and `prizecheck-deploy.sh` run on Unraid as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own files differ:
+`compose.deploy.yml`, `prizecheck-deploy.sh` and the two catalog refresh unit files run on Unraid as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own files differ:
 
 ```text
-ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml and prizecheck-deploy.sh (docs/deployment-unraid.md, 'Updating the host files')
+ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml, prizecheck-deploy.sh and the catalog refresh units (docs/deployment-unraid.md, 'Updating the host files')
 ```
 
-When a commit changes either file, repeat the two `scp` commands in step 3 from that commit, then re-run the failed workflow run. To check the env file and host files (no containers are touched), run `prizecheck-deploy.sh check-config` on Unraid.
+When a commit changes any of these files, repeat the `scp` commands in step 3 from that commit, then re-run the failed workflow run. To check the env file and host files (no containers are touched), run `prizecheck-deploy.sh check-config` on Unraid.
 
-**Reinstall once after the commit that introduced production.** That commit moved the script from `deploy/unraid/` to `deploy/host/` and changed both `compose.deploy.yml` and `prizecheck-deploy.sh`. Until you repeat the two `scp` commands in step 3 from a `dev` commit that includes it, the next dev deploy fails with the error above. The script now also refuses an env file with an `export KEY=...`, indented or `KEY: value` line, a space between `=` and the value, a quoted value that doesn't close on its own line, or a backslash inside a quoted value (Docker Compose would read those differently from the script's checks), and names the line number. Where Docker Compose is installed, `check-config` and every deploy also render the configuration and refuse it unless the web port is published on your `PRIZECHECK_WEB_BIND` address only. Your existing `prizecheck.env` needs no other change.
+**Reinstall once after the commit that introduced production.** That commit moved the script from `deploy/unraid/` to `deploy/host/` and changed both `compose.deploy.yml` and `prizecheck-deploy.sh`. Until you repeat the `scp` commands in step 3 from a `dev` commit that includes it, the next dev deploy fails with the error above. The script now also refuses an env file with an `export KEY=...`, indented or `KEY: value` line, a space between `=` and the value, a quoted value that doesn't close on its own line, or a backslash inside a quoted value (Docker Compose would read those differently from the script's checks), and names the line number. Where Docker Compose is installed, `check-config` and every deploy also render the configuration and refuse it unless the web port is published on your `PRIZECHECK_WEB_BIND` address only. Your existing `prizecheck.env` needs no other change.
 
 ## Viewing logs
 

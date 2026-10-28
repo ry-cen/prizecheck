@@ -9,11 +9,11 @@ The units and the guide steps are checked in CI. These checks need the productio
 ## Before any check
 
 1. **Reinstall the host files, then deploy the release** that contains the `catalog-refresh` subcommand and the price import step ([#355](https://github.com/ry-cen/prizecheck/issues/355)). Install `prizecheck-deploy.sh` and the compose files from that commit first (Oracle guide, "Updating the host files"), because the deploy refuses until they match, so the first scheduled run includes prices (step 16 of the Oracle guide depends on #355 being deployed).
-2. **Copy the units to the host** as step 16 of the [Oracle guide](../../deployment-oracle.md) says.
+2. **Copy the units into `bin/` with the other host files** (Oracle guide, step 5) and run `sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup`, which installs the units and enables the timer (step 16 of the [Oracle guide](../../deployment-oracle.md)). The units are in the bundle digest, so the deploy refuses until the host files match.
 
 ## Checks
 
-- [ ] Install the units on prod: `sudo install -m 0644` the two files to `/etc/systemd/system/`, `daemon-reload`, `enable --now` the timer.
+- [ ] `setup` on prod installed the units into `/etc/systemd/system/` and enabled the timer; a second `setup` changes nothing; `check-config` prints "Configuration OK (prod)".
 - [ ] `systemd-analyze verify /etc/systemd/system/prizecheck-catalog-refresh.service /etc/systemd/system/prizecheck-catalog-refresh.timer` prints no warning about these two units (Oracle's own `unified-monitoring-agent` units may be named).
 - [ ] `systemctl list-timers prizecheck-catalog-refresh.timer` shows a next run near 04:00 UTC.
 - [ ] First run by hand: `sudo systemctl start --no-block prizecheck-catalog-refresh`; `journalctl -u prizecheck-catalog-refresh` shows the price import, the check and the scanner index and ends with "Catalog refresh finished" (or the errors it names), and `systemctl status` shows the exit status.

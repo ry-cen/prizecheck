@@ -228,6 +228,7 @@ Everything lives under `/opt/prizecheck-prod`:
 | Path                                     | Contents                                                                                                          |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `bin/prizecheck-deploy.sh`               | The deploy script                                                                                                 |
+| `bin/prizecheck-catalog-refresh.*`       | The daily refresh's service and timer units; `setup` installs them into systemd (step 16)                         |
 | `compose.deploy.yml`, `compose.prod.yml` | The stack and the production overlay                                                                              |
 | `prizecheck.env`                         | The env file (mode 600; step 7)                                                                                   |
 | `data/`                                  | PostgreSQL, the public projection store, price runners, mail, card art                                            |
@@ -247,7 +248,7 @@ sudo mkdir -p /opt/prizecheck-prod/bin
 From your workstation, in a checkout of the commit you're going to deploy (step 13), copy the host files to the `ubuntu` user's home. Use the tailnet address:
 
 ```bash
-scp compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-prod.env.example deploy/oracle/Caddyfile ubuntu@100.x.y.z:
+scp compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-prod.env.example deploy/oracle/Caddyfile ubuntu@100.x.y.z:
 ```
 
 On the instance, install them as root:
@@ -258,6 +259,10 @@ sudo install -m 0644 compose.deploy.yml compose.prod.yml /opt/prizecheck-prod/
 
 ```bash
 sudo install -m 0755 prizecheck-deploy.sh /opt/prizecheck-prod/bin/prizecheck-deploy.sh
+```
+
+```bash
+sudo install -m 0644 prizecheck-catalog-refresh.service prizecheck-catalog-refresh.timer /opt/prizecheck-prod/bin/
 ```
 
 ```bash
@@ -535,7 +540,7 @@ journalctl -u caddy --since '10 minutes ago' --no-pager
    On your workstation, in the same commit:
 
    ```bash
-   cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh | sha256sum
+   cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer | sha256sum
    ```
 
 2. Choose the commit. It must be a `dev` commit that includes the change that introduced production. It doesn't need a dev deploy: Deploy prod builds the images when they're missing. `main` is fast-forwarded, never merged:
@@ -686,27 +691,15 @@ The count must be `0`. Caddy may well log that the upstream refused the connecti
 
 ## 16. Install the daily catalog refresh timer
 
-The timer runs `prizecheck-deploy.sh catalog-refresh`, which imports the TCGCSV prices, then checks TCGdex for catalog changes, then runs the scanner index. Install it after the first release (step 13) and the first catalog pull (step 14), because the check needs a deployed release and an active catalog. Install it only once the price import ([#355](https://github.com/ry-cen/prizecheck/issues/355)) is in the deployed release and the installed `prizecheck-deploy.sh` is that release's copy (see "Updating the host files"): an older script runs the check and the index only, and the daily prices would silently stop being imported. Until then, import the prices by hand each day (`prizecheck-deploy.sh tool /app/scripts/price_import_job.py`).
+The timer runs `prizecheck-deploy.sh catalog-refresh`, which imports the TCGCSV prices, then checks TCGdex for catalog changes, then runs the scanner index. `setup` (step 7) installs and enables the timer as soon as the units are in `bin/`, so it exists before the first release; a run before the first release (step 13) logs "Nothing deployed yet; skipping the catalog refresh" and exits 0, and the check records a failed check (CATALOG_RULES_INACTIVE, exit 2) until both catalog rules are active (step 14), so it starts no pull on its own. Install it only once the price import ([#355](https://github.com/ry-cen/prizecheck/issues/355)) is in the deployed release and the installed `prizecheck-deploy.sh` is that release's copy (see "Updating the host files"): an older script runs the check and the index only, and the daily prices would silently stop being imported. Until then, import the prices by hand each day (`prizecheck-deploy.sh tool /app/scripts/price_import_job.py`).
 
-From your workstation, in a checkout of the deployed commit, copy the units to the `ubuntu` user's home:
-
-```bash
-scp deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer ubuntu@100.x.y.z:
-```
-
-On the instance, install and enable them:
+The units are already in `/opt/prizecheck-prod/bin/` if you installed the host files from that commit (step 5, or "Updating the host files"). `setup` copies them into `/etc/systemd/system/` (rewriting the service's `ExecStart` to the installed script's own path), reloads systemd and enables the timer. It writes a unit only when its content differs, so running it again changes nothing:
 
 ```bash
-sudo install -m 0644 prizecheck-catalog-refresh.service prizecheck-catalog-refresh.timer /etc/systemd/system/
+sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup
 ```
 
-```bash
-sudo systemctl daemon-reload
-```
-
-```bash
-sudo systemctl enable --now prizecheck-catalog-refresh.timer
-```
+`setup` stops with an error if the units are missing from `bin/`. `check-config` fails when an installed unit differs from the `bin/` copy or the timer is not enabled. Check the timer:
 
 ```bash
 systemctl list-timers prizecheck-catalog-refresh.timer
@@ -714,7 +707,7 @@ systemctl list-timers prizecheck-catalog-refresh.timer
 
 The list shows the next run at about 04:00 UTC (up to 30 minutes later, from the random delay) and no earlier run yet. The timer fires once a day, not on boot, and a run missed while the instance was off runs once at the next start.
 
-Run it once by hand to see it work. The first run can take more than an hour on 1 OCPU, so start it without waiting:
+Optionally run it once by hand to see it work. The first run can take more than an hour on 1 OCPU, so start it without waiting:
 
 ```bash
 sudo systemctl start --no-block prizecheck-catalog-refresh
@@ -726,7 +719,7 @@ journalctl -u prizecheck-catalog-refresh -f
 
 The script's output lands in the journal: `journalctl -u prizecheck-catalog-refresh`. `systemctl status prizecheck-catalog-refresh` shows whether the last run exited 0. When nothing changed, the run still imports the prices and runs the scanner index (it is skipped only after a pull the check started that failed), then ends with "Catalog refresh finished". Once [#340](https://github.com/ry-cen/prizecheck/issues/340) is deployed, Owner controls shows the last automatic check. The exit codes are in [portable jobs](operations/portable-jobs.md).
 
-The units are host files, not part of the release. Reinstall the timer on every new host, including a move to AWS, with the commands above. After a commit changes either unit, copy and `install` it again and run `sudo systemctl daemon-reload`; systemd keeps using the old unit until then. Stopping the service (`systemctl stop`) ends the script but not a container it already started; `docker ps --filter label=prizecheck.job=catalog-refresh` lists those, and the next deploy stops them.
+The units are host files, not part of the release, and they are part of the bundle digest. On every new host, including a move to AWS, install the host files (step 5) and run `setup`. After a commit changes either unit, the deploy refuses until you reinstall the host files from that commit; run `setup` again then, which copies the changed unit and reloads systemd. Stopping the service (`systemctl stop`) ends the script but not a container it already started; `docker ps --filter label=prizecheck.job=catalog-refresh` lists those, and the next deploy stops them.
 
 ## Opening signup
 
@@ -768,13 +761,13 @@ Nothing is carried when the running release is owner-only, when the proof names 
 
 ## Updating the host files
 
-`compose.deploy.yml`, `compose.prod.yml` and `prizecheck-deploy.sh` run on the instance as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own differ:
+`compose.deploy.yml`, `compose.prod.yml`, `prizecheck-deploy.sh` and the two catalog refresh units run on the instance as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own differ:
 
 ```text
-ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml compose.prod.yml and prizecheck-deploy.sh (docs/deployment-oracle.md, 'Updating the host files')
+ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml compose.prod.yml prizecheck-deploy.sh and the catalog refresh units (docs/deployment-oracle.md, 'Updating the host files')
 ```
 
-When a commit changes any of the three files, repeat the `scp` and `install` commands in step 5 from that commit, then re-run the failed workflow run. The digest covers only those three files: `deploy/oracle/Caddyfile` isn't checked, and the deploy never touches `/etc/caddy/Caddyfile`. Reinstall and reload it yourself (step 12) when a commit changes it. The catalog refresh units in `deploy/host/` aren't in the digest either: reinstall them by hand (step 16) when a commit changes them. The release that ships catalog rule rollout (ADR 0021, #377) changes all three, so it changes the bundle digest: reinstall before the first deploy of it.
+When a commit changes any of these files, repeat the `scp` and `install` commands in step 5 from that commit, run `setup` (it installs a changed unit into systemd and reloads it, and does nothing else when nothing changed), then re-run the failed workflow run. The digest covers only those five files (the digest order is the compose files, the script, the service, the timer): `deploy/oracle/Caddyfile` isn't checked, and the deploy never touches `/etc/caddy/Caddyfile`. Reinstall and reload it yourself (step 12) when a commit changes it. The release that ships catalog rule rollout (ADR 0021, #377) changes the bundle digest: reinstall before the first deploy of it.
 
 ## Viewing logs
 

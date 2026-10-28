@@ -100,7 +100,7 @@ jobs:
       - name: Host file digest
         if: steps.head.outputs.current == 'true'
         id: bundle
-        run: echo "digest=$(cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "digest=$(cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
         if: steps.head.outputs.current == 'true'
         with:

@@ -62,8 +62,8 @@ Each ticket is accepted on its own narrow tests plus `npm run check` and `npm ru
 **Acceptance criteria.**
 
 - [ ] The units pass `systemd-analyze verify`; the timer fires once a day, not on every boot, and a missed run runs once at the next start.
-- [ ] Oracle guide step: `install` the two units to `/etc/systemd/system/`, `daemon-reload`, `enable --now` the timer, `systemctl list-timers` shows it, and a first run by hand with `systemctl start` is shown with where its output lands (`journalctl -u prizecheck-catalog-refresh`).
-- [ ] The step says the timer must be reinstalled on a new host (including an AWS move) and that a changed unit needs `daemon-reload`.
+- [ ] Oracle guide step: the units sit in `bin/` with the other host files and `setup` installs them to `/etc/systemd/system/`, reloads systemd and enables the timer, `systemctl list-timers` shows it, and a first run by hand with `systemctl start` is shown with where its output lands (`journalctl -u prizecheck-catalog-refresh`).
+- [ ] The step says a new host (including an AWS move) installs the host files and runs `setup`, and that a changed unit is in the bundle digest, so the host files are reinstalled and `setup` run again.
 - [ ] The Unraid guide marks the schedule optional and gives the User Scripts command; the Oracle guide's catalog step now says the first pull is still started by hand.
 - [ ] `portable-jobs.md` lists the job, its UTC schedule, its command and exit codes, and links ADR 0018.
 - [ ] ADR 0017's "no scheduler" sentence is read against ADR 0018; if it now misleads, a one-line amendment points to ADR 0018.

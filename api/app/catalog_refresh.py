@@ -12,13 +12,17 @@ check row (the host cannot write the row itself).
 Exit codes of the check:
   0  no_change; a pull the check started and that succeeded; pull_running (a pull was already running); or paused
   1  the database could not be reached
-  2  the check failed (TCGdex error or an invalid list); the host still runs the scanner index and exits non-zero at the end
+  2  the check failed (TCGdex error or an invalid list, or a catalog rule is not active); the host still runs the scanner index and exits non-zero at the end
   4  a pull the check started failed or was interrupted (including a failed launch); the host skips the index
   any other code is a failure to the host, which runs the index only if a check id was printed
 `--record-index` exits 0 once the row is written, 1 otherwise.
 
 Stdout carries exactly one line, `catalog_check_id=<uuid>`, printed as soon as the check's row is committed; every log goes
 to stderr, and no log carries a secret or a raw TCGdex payload.
+
+Rules: when the live-derivation or the marketplace-matching rule is not active, the check records `failed` with error_code
+CATALOG_RULES_INACTIVE and starts nothing: with no active catalog every id looks new, and the check would start a full pull
+before the owner has activated the rules (docs/deployment-oracle.md, step 14).
 
 Pause: when 3 or more pulls this check started have failed since the latest successful pull (whoever started that one), the
 check records `paused` with the newest such failure's error and starts nothing. Any successful pull, owner- or check-started,
@@ -35,6 +39,7 @@ from fastapi import HTTPException
 
 from .catalog import CatalogError, TCGdexSource
 from .catalog_dispatch import RUNNER_LOCK, dispatch_import_detailed
+from .catalog_targets import LIVE, MATCHING, load_active
 from .db import connect
 
 log = logging.getLogger("catalog_refresh")
@@ -139,6 +144,12 @@ def run_check(conn, source=None, out=None) -> int:
     print(f"catalog_check_id={check_id}", file=out, flush=True)
     counts = {"new": None, "removed": None}
     try:
+        if any(load_active(conn, kind) is None for kind in (LIVE, MATCHING)):
+            conn.commit()
+            log.error("check %s: a catalog rule is not active; not starting a pull", check_id)
+            _finish(conn, check_id, "failed", error="CATALOG_RULES_INACTIVE")
+            return EXIT_CHECK_FAILED
+        conn.commit()
         failures = pause_failures(conn)
         if len(failures) >= PAUSE_AFTER:
             log.warning("check %s: %d check-started pulls failed since the last success; not starting another",

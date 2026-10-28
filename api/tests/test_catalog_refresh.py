@@ -11,12 +11,26 @@ import pytest
 
 from app.catalog import CatalogError, TCGdexSource, claim_run, execute_run, user_agent
 from app.catalog_refresh import main, record_index, run_check
+from app.catalog_targets import LIVE, MATCHING, activate_rule
 from app.main import connect
 from test_catalog import Source, reset_catalog
 from test_catalog_excluded_series import PHYSICAL, PocketSource
 from test_catalog_excluded_series import run as import_run
 
 SEED = ("test-1", "test-2")
+
+
+@pytest.fixture(autouse=True)
+def active_rules():
+    """Both catalog rules active, as the check requires; a test can clear them. Cleared again afterwards."""
+    user = f"owner-{uuid4()}"
+    with connect() as conn, conn.transaction():
+        conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s)", (user,))
+        for kind in (LIVE, MATCHING):
+            activate_rule(conn, kind, 1, user, "https://example.org/rule", "Reviewed against the target")
+    yield
+    with connect() as conn:
+        conn.execute("UPDATE catalog_rule_state SET activation_id=NULL")
 
 
 class Listed(Source):
@@ -92,6 +106,29 @@ def test_agreeing_lists_record_no_change_and_start_nothing():
     assert out == f"catalog_check_id={row['id']}\n"
     assert (row["outcome"], row["new_count"], row["removed_count"], row["catalog_run_id"]) == ("no_change", 0, 0, None)
     assert row["finished_at"] is not None and row["started_at"] <= row["finished_at"]
+
+
+@pytest.mark.parametrize("cleared", [LIVE, MATCHING])
+def test_an_inactive_rule_fails_the_check_and_starts_nothing(cleared):
+    seed()
+    before = runs()
+    with connect() as conn:
+        conn.execute("UPDATE catalog_rule_state SET activation_id=NULL WHERE kind=%s", (cleared,))
+    # Every id would look new against a catalog without its rules; the check must not start a pull on it.
+    code, out, row, pull = check(Listed(ids=("test-1", "test-2", "test-3")))
+    assert code == 2 and not pull.children and runs() == before
+    assert out == f"catalog_check_id={row['id']}\n"
+    assert (row["outcome"], row["error_code"], row["catalog_run_id"]) == ("failed", "CATALOG_RULES_INACTIVE", None)
+    assert row["finished_at"] is not None
+
+
+def test_both_rules_deactivated_fail_the_check():
+    seed()
+    with connect() as conn:
+        conn.execute("UPDATE catalog_rule_state SET activation_id=NULL")
+    code, _, row, pull = check(Listed(ids=SEED))
+    assert code == 2 and not pull.children
+    assert (row["outcome"], row["error_code"]) == ("failed", "CATALOG_RULES_INACTIVE")
 
 
 def test_new_ids_start_a_pull_and_the_check_waits_for_it():

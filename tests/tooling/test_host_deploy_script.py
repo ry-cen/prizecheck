@@ -15,6 +15,16 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'deploy/host/prizecheck-deploy.sh'
+UNITS = ('prizecheck-catalog-refresh.service', 'prizecheck-catalog-refresh.timer')
+# A `systemctl` that logs its arguments (printf, never echo: dash's echo eats -n) and keeps "enabled" in a state file.
+FAKE_SYSTEMCTL = '''#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_SYSTEMCTL_LOG"
+case "$1" in
+  enable) : > "$FAKE_SYSTEMCTL_STATE" ;;
+  is-enabled) [ -e "$FAKE_SYSTEMCTL_STATE" ]; exit $? ;;
+esac
+exit 0
+'''
 POSTGRES = 'a1b2c3d4e5' * 4
 SECRET = 'f6e5d4c3b2a1' * 4
 PROD = [
@@ -117,6 +127,8 @@ with open(os.environ['FAKE_LOG'], 'a') as log:
     log.write(json.dumps({'args': args, 'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
 if '/app/scripts/price_import_job.py' in args:
     sys.stderr.write('price log line\n')
+    if os.environ.get('FAKE_CLEAR_CURRENT'):  # no release is current any more when the import ends
+        open(os.path.join(os.environ['HOME'], 'state/current'), 'w').close()
     if os.environ.get('FAKE_NEW_CURRENT'):  # a deploy finished while the import ran
         with open(os.path.join(os.environ['HOME'], 'state/current'), 'w') as current:
             current.write(os.environ['FAKE_NEW_CURRENT'] + '\n')
@@ -171,6 +183,8 @@ class HostDeployScriptTest(unittest.TestCase):
         for name in ('compose.deploy.yml', 'compose.prod.yml'):
             (home / name).write_bytes((ROOT / name).read_bytes())
         (home / 'bin/prizecheck-deploy.sh').write_bytes(SCRIPT.read_bytes())
+        for unit in UNITS:
+            (home / 'bin' / unit).write_bytes((ROOT / 'deploy/host' / unit).read_bytes())
         for sub in ('postgres', 'public', 'price-runners', 'mail', 'art'):
             (home / 'data' / sub).mkdir(parents=True)
         env = home / 'prizecheck.env'
@@ -179,8 +193,10 @@ class HostDeployScriptTest(unittest.TestCase):
         return home
 
     def run_script(self, home, command='check-config', **extra):
+        # No systemd by default (the run dir does not exist), whatever the machine running the tests has.
         return subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), command], capture_output=True, text=True,
-                              timeout=30, env={**os.environ, 'HOME': str(home), **extra})
+                              timeout=30, env={**os.environ, 'HOME': str(home),
+                                               'PRIZECHECK_SYSTEMD_RUN_DIR': str(home / 'no-systemd'), **extra})
 
     def check(self, lines, mode=0o600):
         result = self.run_script(self.make_home(lines, mode))
@@ -511,7 +527,8 @@ class HostDeployScriptTest(unittest.TestCase):
 
     def deploy(self, home, commit, **extra):
         digest = hashlib.sha256(b''.join((home / name).read_bytes()
-                                         for name in ('compose.deploy.yml', 'compose.prod.yml', 'bin/prizecheck-deploy.sh'))).hexdigest()
+                                         for name in ('compose.deploy.yml', 'compose.prod.yml', 'bin/prizecheck-deploy.sh',
+                                                      *(f'bin/{unit}' for unit in UNITS)))).hexdigest()
         for path in ('current.json', 'records/current.json'):
             (home / 'data/public' / path).parent.mkdir(parents=True, exist_ok=True)
             (home / 'data/public' / path).write_text('{}')
@@ -798,8 +815,135 @@ class HostDeployScriptTest(unittest.TestCase):
         prod = self.run_script(self.make_home(PROD), 'bundle-digest')
         self.assertEqual(dev.returncode, 0, dev.stderr)
         self.assertEqual(prod.returncode, 0, prod.stderr)
-        self.assertEqual(dev.stdout.split()[-1], hashlib.sha256(deploy + script).hexdigest())
-        self.assertEqual(prod.stdout.split()[-1], hashlib.sha256(deploy + overlay + script).hexdigest())
+        units = b''.join((ROOT / 'deploy/host' / unit).read_bytes() for unit in UNITS)
+        self.assertEqual(dev.stdout.split()[-1], hashlib.sha256(deploy + script + units).hexdigest())
+        self.assertEqual(prod.stdout.split()[-1], hashlib.sha256(deploy + overlay + script + units).hexdigest())
+
+    def test_the_bundle_digest_changes_with_either_unit_and_needs_both(self):
+        home = self.make_home(PROD)
+        before = self.run_script(home, 'bundle-digest').stdout.split()[-1]
+        for unit in UNITS:
+            path = (home / 'bin').resolve() / unit
+            original = path.read_bytes()
+            path.write_bytes(original + b'# changed\n')
+            self.assertNotEqual(self.run_script(home, 'bundle-digest').stdout.split()[-1], before, unit)
+            path.unlink()
+            result = self.run_script(home, 'bundle-digest')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f'Missing {path}', result.stdout + result.stderr)
+            path.write_bytes(original)
+        self.assertEqual(self.run_script(home, 'bundle-digest').stdout.split()[-1], before)
+
+    def systemd_env(self, home, **extra):
+        """Fake systemd: a run dir, a unit dir, and a logging systemctl; returns the environment."""
+        (home / 'run-systemd').mkdir(exist_ok=True)
+        env = self.fake_env(home, **extra)
+        bin_dir = Path(env['PATH'].split(':')[0])
+        (bin_dir / 'systemctl').write_text(FAKE_SYSTEMCTL)
+        (bin_dir / 'systemctl').chmod(0o755)
+        (bin_dir / 'chown').write_text('#!/bin/sh\nexit 0\n')  # setup chowns to the container users; a test is not root
+        (bin_dir / 'chown').chmod(0o755)
+        self.systemctl_log = bin_dir / 'systemctl.log'
+        return {**env, 'PRIZECHECK_SYSTEMD_RUN_DIR': str(home / 'run-systemd'),
+                'PRIZECHECK_SYSTEMD_UNIT_DIR': str(home / 'units'), 'FAKE_SYSTEMCTL_LOG': str(self.systemctl_log),
+                'FAKE_SYSTEMCTL_STATE': str(bin_dir / 'enabled')}
+
+    def systemctl_calls(self):
+        return self.systemctl_log.read_text().splitlines() if self.systemctl_log.exists() else []
+
+    def test_setup_installs_the_units_and_a_second_setup_changes_nothing(self):
+        home = self.make_home(PROD)
+        env = self.systemd_env(home)
+        result = self.run_script(home, 'setup', **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        script = (home / 'bin/prizecheck-deploy.sh').resolve()
+        service = (home / 'units/prizecheck-catalog-refresh.service').read_text()
+        self.assertIn(f'ExecStart=/bin/bash {script} catalog-refresh\n', service)
+        self.assertNotIn('/opt/prizecheck-prod', service)
+        source = (ROOT / 'deploy/host/prizecheck-catalog-refresh.service').read_text()
+        self.assertEqual(service.replace(str(script), '/opt/prizecheck-prod/bin/prizecheck-deploy.sh'), source)
+        self.assertEqual((home / 'units/prizecheck-catalog-refresh.timer').read_text(),
+                         (ROOT / 'deploy/host/prizecheck-catalog-refresh.timer').read_text())
+        for unit in UNITS:
+            self.assertEqual((home / 'units' / unit).stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.systemctl_calls(), ['daemon-reload', 'enable --now prizecheck-catalog-refresh.timer'])
+        self.assertIn('Installed', result.stdout)
+        # Setup alone is a complete check of the result.
+        result = self.run_script(home, 'check-config', **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # A second run rewrites nothing and does not reload systemd.
+        self.systemctl_log.unlink()
+        stamps = {unit: (home / 'units' / unit).stat().st_mtime_ns for unit in UNITS}
+        result = self.run_script(home, 'setup', **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('Installed', result.stdout)
+        self.assertEqual(stamps, {unit: (home / 'units' / unit).stat().st_mtime_ns for unit in UNITS})
+        self.assertNotIn('daemon-reload', self.systemctl_calls())
+        # A changed unit is replaced, with a reload.
+        (home / 'bin/prizecheck-catalog-refresh.timer').write_text(
+            (ROOT / 'deploy/host/prizecheck-catalog-refresh.timer').read_text() + '# changed\n')
+        self.systemctl_log.unlink()
+        result = self.run_script(home, 'setup', **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('# changed', (home / 'units/prizecheck-catalog-refresh.timer').read_text())
+        self.assertEqual(self.systemctl_calls(), ['daemon-reload', 'enable --now prizecheck-catalog-refresh.timer'])
+
+    def test_setup_dies_when_a_unit_is_missing_on_a_systemd_host(self):
+        for missing in UNITS:
+            home = self.make_home(PROD)
+            (home / 'bin' / missing).unlink()
+            result = self.run_script(home, 'setup', **self.systemd_env(home))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f'Missing {(home / "bin").resolve() / missing}', result.stdout + result.stderr)
+            self.assertIn('with the other host files', result.stdout + result.stderr)
+            self.assertEqual(self.systemctl_calls(), [])
+
+    def test_setup_skips_the_timer_without_systemd(self):
+        home = self.make_home(PROD)
+        env = self.systemd_env(home)
+        # Without a run dir, or without systemctl on PATH, nothing is installed and the units need not be in bin/.
+        (home / 'bin/prizecheck-catalog-refresh.timer').unlink()
+        result = self.run_script(home, 'setup', **{**env, 'PRIZECHECK_SYSTEMD_RUN_DIR': str(home / 'absent')})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('No systemd on this host', result.stdout)
+        self.assertFalse((home / 'units').exists())
+        self.assertEqual(self.systemctl_calls(), [])
+        (Path(env['PATH'].split(':')[0]) / 'systemctl').unlink()
+        result = self.run_script(home, 'setup', **{**env, 'PATH': env['PATH'].split(':')[0] + ':' + '/usr/bin:/bin'})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('No systemd on this host', result.stdout)
+        self.assertFalse((home / 'units').exists())
+
+    def test_check_config_flags_a_differing_missing_or_disabled_unit(self):
+        home = self.make_home(PROD)
+        env = self.systemd_env(home)
+        code = self.run_script(home, 'check-config', **env)
+        self.assertNotEqual(code.returncode, 0)
+        self.assertIn('is missing or differs', code.stdout + code.stderr)
+        self.assertEqual(self.run_script(home, 'setup', **env).returncode, 0)
+        result = self.run_script(home, 'check-config', **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Configuration OK (prod)', result.stdout)
+        # An edited installed unit differs from the rendered bin/ copy.
+        service = home / 'units/prizecheck-catalog-refresh.service'
+        service.write_text(service.read_text() + '# edited\n')
+        result = self.run_script(home, 'check-config', **env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f'{service} is missing or differs', result.stdout + result.stderr)
+        self.assertEqual(self.run_script(home, 'setup', **env).returncode, 0)
+        self.assertEqual(self.run_script(home, 'check-config', **env).returncode, 0)
+        # A unit installed with the /opt path (not this host's script) differs too.
+        service.write_text(source := (ROOT / 'deploy/host/prizecheck-catalog-refresh.service').read_text())
+        self.assertNotEqual(self.run_script(home, 'check-config', **env).returncode, 0)
+        self.assertEqual(self.run_script(home, 'setup', **env).returncode, 0)
+        # A disabled timer fails.
+        Path(env['FAKE_SYSTEMCTL_STATE']).unlink()
+        result = self.run_script(home, 'check-config', **env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('is not enabled', result.stdout + result.stderr)
+        # Without systemd, check-config ignores the units.
+        result = self.run_script(home, 'check-config')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def refresh(self, **extra):
         """Runs `catalog-refresh` in a home whose current release is COMMIT with the refresh fake docker; returns
@@ -1011,13 +1155,21 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn('could not list catalog refresh containers', output)
 
+    def test_catalog_refresh_skips_when_the_release_vanishes_during_the_price_import(self):
+        code, output, calls = self.refresh(FAKE_CLEAR_CURRENT='1')
+        self.assertEqual(code, 0, output)
+        self.assertIn('Nothing deployed yet; skipping the catalog refresh', output)
+        self.assertEqual(self.kinds(calls), ['price'])
+
     def test_catalog_refresh_needs_a_current_release_and_is_listed_in_usage(self):
         home = self.make_home(PROD)
         env = self.fake_env(home)
         result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'catalog-refresh'], capture_output=True,
                                 text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('Nothing deployed yet', result.stdout + result.stderr)
+        # A fresh host's timer run is not a failure: it logs and skips.
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Nothing deployed yet; skipping the catalog refresh', result.stdout + result.stderr)
+        self.assertEqual(self.fake_calls(), [])
         usage = self.run_script(home, 'help').stdout
         self.assertIn('catalog-refresh', usage)
         self.assertIn('Import the TCGCSV prices', usage)

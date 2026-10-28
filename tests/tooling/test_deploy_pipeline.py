@@ -214,8 +214,15 @@ class DeployPipelineTest(unittest.TestCase):
                     self.assertNotIn('${{', line, f'{name}: {line}')
 
     def test_digest_file_lists_match_the_host_script(self):
-        self.assertIn('cat compose.deploy.yml deploy/host/prizecheck-deploy.sh | sha256sum', DEV)
-        self.assertIn('cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh | sha256sum', PROD)
+        units = 'deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer'
+        self.assertIn(f'cat compose.deploy.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum', DEV)
+        self.assertIn(f'cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum', PROD)
+        # The host script concatenates in the same order, and the guides quote the same recipe.
+        self.assertRegex(SCRIPT, r'cat "\$\{COMPOSE_FILES\[@\]\}" "\$SCRIPT_PATH" "\$UNIT_SOURCE_DIR/\$REFRESH_SERVICE" "\$UNIT_SOURCE_DIR/\$REFRESH_TIMER" \| sha256sum')
+        self.assertIn(f'cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum',
+                      (ROOT / 'docs/deployment-oracle.md').read_text())
+        self.assertIn(f'cat compose.deploy.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum',
+                      (ROOT / 'docs/deployment-unraid.md').read_text())
         self.assertIn('"$PRIZECHECK_HOME/compose.prod.yml"', SCRIPT)
 
     def test_the_prod_edge_addresses_agree(self):

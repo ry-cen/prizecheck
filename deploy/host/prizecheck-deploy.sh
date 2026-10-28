@@ -14,6 +14,13 @@ umask 077
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 PRIZECHECK_HOME="$(dirname "$(dirname "$SCRIPT_PATH")")"
+# The daily catalog refresh's systemd units (ADR 0018) travel with this script in bin/, are part of the bundle digest, and are
+# installed by `setup`. The two directories can be overridden so tests need no systemd; production uses the defaults.
+UNIT_SOURCE_DIR="$(dirname "$SCRIPT_PATH")"
+REFRESH_SERVICE=prizecheck-catalog-refresh.service
+REFRESH_TIMER=prizecheck-catalog-refresh.timer
+SYSTEMD_RUN_DIR="${PRIZECHECK_SYSTEMD_RUN_DIR:-/run/systemd/system}"
+SYSTEMD_UNIT_DIR="${PRIZECHECK_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 COMPOSE_FILE="$PRIZECHECK_HOME/compose.deploy.yml"
 ENV_FILE="$PRIZECHECK_HOME/prizecheck.env"
 STATE_DIR="$PRIZECHECK_HOME/state"
@@ -524,7 +531,82 @@ valid_commit() { [[ "$1" =~ ^[0-9a-f]{40}$ ]]; }
 
 bundle_digest() {
   read_environment
-  cat "${COMPOSE_FILES[@]}" "$SCRIPT_PATH" | sha256sum | cut -d' ' -f1
+  local unit
+  for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
+    [[ -f "$UNIT_SOURCE_DIR/$unit" ]] || die "Missing $UNIT_SOURCE_DIR/$unit; install it with the other host files ($GUIDE, 'Updating the host files')"
+  done
+  cat "${COMPOSE_FILES[@]}" "$SCRIPT_PATH" "$UNIT_SOURCE_DIR/$REFRESH_SERVICE" "$UNIT_SOURCE_DIR/$REFRESH_TIMER" | sha256sum | cut -d' ' -f1
+}
+
+# --- Refresh units ------------------------------------------------------------------------------------------------------
+
+# True on a host that runs systemd (the Oracle host); false on Unraid.
+has_systemd() { command -v systemctl >/dev/null 2>&1 && [[ -d "$SYSTEMD_RUN_DIR" ]]; }
+
+# Prints a unit as this host should have it: the service's ExecStart runs this host's own copy of the script.
+render_unit() {
+  local unit="$1" source="$UNIT_SOURCE_DIR/$1" line found=0
+  [[ -f "$source" ]] || die "Missing $source; install it with the other host files ($GUIDE, 'Updating the host files')"
+  if [[ "$unit" != "$REFRESH_SERVICE" ]]; then
+    cat "$source"
+    return
+  fi
+  local prefix='ExecStart=/bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh '
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$prefix"* ]]; then
+      line="ExecStart=/bin/bash $SCRIPT_PATH ${line#"$prefix"}"
+      found=1
+    fi
+    printf '%s\n' "$line"
+  done < "$source"
+  (( found )) || die "$source has no ExecStart line to render"
+}
+
+unit_installed_current() {
+  [[ -f "$SYSTEMD_UNIT_DIR/$1" ]] && render_unit "$1" | cmp -s - "$SYSTEMD_UNIT_DIR/$1"
+}
+
+install_refresh_units() {
+  if ! has_systemd; then
+    log "No systemd on this host; not installing the daily catalog refresh timer (optional: a User Scripts entry, $GUIDE)"
+    return 0
+  fi
+  local unit
+  for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
+    [[ -f "$UNIT_SOURCE_DIR/$unit" ]] || die "Missing $UNIT_SOURCE_DIR/$unit; install the catalog refresh units with the other host files ($GUIDE, 'Updating the host files') and run setup again"
+  done
+  mkdir -p "$SYSTEMD_UNIT_DIR"
+  local changed=0 tmp
+  for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
+    if unit_installed_current "$unit"; then
+      continue
+    fi
+    tmp="$(mktemp "$SYSTEMD_UNIT_DIR/.$unit.XXXXXX")"
+    render_unit "$unit" > "$tmp" || { rm -f "$tmp"; die "Could not render $unit"; }
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$SYSTEMD_UNIT_DIR/$unit"
+    log "Installed $SYSTEMD_UNIT_DIR/$unit"
+    changed=1
+  done
+  if (( changed )); then
+    systemctl daemon-reload || die "systemctl daemon-reload failed"
+  fi
+  systemctl enable --now "$REFRESH_TIMER" || die "Could not enable $REFRESH_TIMER"
+  if (( changed )); then
+    log "Daily catalog refresh timer installed and enabled ($REFRESH_TIMER)"
+  else
+    log "Daily catalog refresh timer already installed; enabled ($REFRESH_TIMER)"
+  fi
+}
+
+# On a systemd host the installed units must be the rendered bin/ copies and the timer enabled.
+check_refresh_units() {
+  has_systemd || return 0
+  local unit
+  for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
+    unit_installed_current "$unit" || die "$SYSTEMD_UNIT_DIR/$unit is missing or differs from the host file; run '$SCRIPT_PATH setup'"
+  done
+  systemctl is-enabled --quiet "$REFRESH_TIMER" || die "$REFRESH_TIMER is not enabled; run '$SCRIPT_PATH setup'"
 }
 
 # --- Registry -----------------------------------------------------------------------------------------------------------
@@ -725,7 +807,7 @@ cmd_deploy() {
   [[ "$expected_bundle" =~ ^[0-9a-f]{64}$ ]] || die "deploy requires the 64-character bundle digest"
   load_config
   if [[ "$(bundle_digest)" != "$expected_bundle" ]]; then
-    die "Host deployment files differ from commit $commit; reinstall ${COMPOSE_FILES[*]##*/} and prizecheck-deploy.sh ($GUIDE, 'Updating the host files')"
+    die "Host deployment files differ from commit $commit; reinstall ${COMPOSE_FILES[*]##*/}, prizecheck-deploy.sh and the catalog refresh units ($GUIDE, 'Updating the host files')"
   fi
   take_lock
   registry_login_from_stdin
@@ -872,6 +954,7 @@ cmd_setup() {
   compose_cmd
   log "Compose: $("${COMPOSE[@]}" version --short)"
   log "Directories ready under $DATA_DIR"
+  install_refresh_units
 }
 
 cmd_backup() {
@@ -921,6 +1004,7 @@ cmd_check_config() {
       log "Warning: the readiness proof does not name the current release $current; until it does, signup-apply runs it owner-only and the next release will not carry signup forward"
     fi
   fi
+  check_refresh_units
   log "Configuration OK ($ENVIRONMENT)"
 }
 
@@ -990,7 +1074,10 @@ cmd_catalog_refresh() {
     return 0
   fi
   local current; current="$(read_state current)"
-  [[ -n "$current" ]] || die "Nothing deployed yet"
+  if [[ -z "$current" ]]; then
+    log "Nothing deployed yet; skipping the catalog refresh"
+    return 0
+  fi
   export PRIZECHECK_IMAGE_TAG="$current"
 
   local failed=0 price_rc=0 check_rc=0 check_out="" check_id="" index_rc=0 record_rc=0 run_index=1
@@ -1021,7 +1108,10 @@ cmd_catalog_refresh() {
   fi
   # A deploy may have started and finished while the import ran; the check and the index belong to the release now current.
   current="$(read_state current)"
-  [[ -n "$current" ]] || die "Nothing deployed yet"
+  if [[ -z "$current" ]]; then
+    log "Nothing deployed yet; skipping the catalog refresh"
+    return 0
+  fi
   export PRIZECHECK_IMAGE_TAG="$current"
 
   # stdout is exactly one line, catalog_check_id=<uuid>; the check logs to stderr, which passes through to this log.
