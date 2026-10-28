@@ -594,7 +594,7 @@ Then sign in:
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/bind_owner.py 'ID-FROM-THE-QUERY'
    ```
 
-3. Apply the catalog rules **before** the first pull. A pull seeds prices only for Editions a matching rule has already verified, so a pull run first seeds nothing. A release applies its newest rules by itself, but only once the owner is bound (step 2), so run it now rather than waiting for the next deploy:
+3. Apply the catalog rules **before** the first pull. The price import prices only the Editions a matching rule has already verified, so an import run before the rules are applied prices nothing. A release applies its newest rules by itself, but only once the owner is bound (step 2), so run it now rather than waiting for the next deploy:
 
    ```bash
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/rule_rollout.py resume
@@ -602,11 +602,17 @@ Then sign in:
 
    Otherwise the first catalog pull applies them. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress shows under Owner controls → **Rules**. Matching v4 also matches the Black Star promo sets by card number from the stored TCGCSV products; promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
 
-4. Refresh, open **Owner controls**, and start the full English catalog pull. A pull seeds prices for at most 10 minutes, so part of the catalog is priced only when someone first opens a card ([#342](https://github.com/ry-cen/prizecheck/issues/342)).
-5. After the catalog pull, build the scanner's index by hand:
+4. Refresh, open **Owner controls**, and start the full English catalog pull. A pull does not fetch prices: they come from the TCGCSV import in step 5.
+5. After the catalog pull, build the scanner's index and import the first prices by hand. The index first:
 
    ```bash
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose run --rm scanner-index
+   ```
+
+   Then the prices. The import reads TCGCSV's daily snapshot and prices the Editions a matching rule has verified, so run it after the catalog pull; after a rule activation that comes later (matching v4 above), run it again with `--force`:
+
+   ```bash
+   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/price_import_job.py
    ```
 
 ## 15. Check the edge on the host

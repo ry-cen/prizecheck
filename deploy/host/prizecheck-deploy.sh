@@ -658,7 +658,7 @@ PY
   done
 }
 
-# The catalog refresh runs its check, scanner index and record calls as one-off containers labelled
+# The catalog refresh runs its price import, check, scanner index and record calls as one-off containers labelled
 # prizecheck.job=catalog-refresh. The check's pull is a child of its container, so `compose stop` of the app services does not
 # reach it: a deploy or rollback stops these first, or the importer could race the migrations or promote old code into a
 # new schema. The interrupted run is reconciled as failed by the next dispatch and counts toward the check's pause.
@@ -956,7 +956,8 @@ cmd_tool() {
   compose run --rm --no-deps tools "$@"
 }
 
-# The daily catalog refresh (ADR 0018, #339), run by hand or by the timer: the change check in the current API image, then
+# The daily catalog refresh (ADR 0018, #339; prices ADR 0019, #355), run by hand or by the timer: the TCGCSV price import
+# (scripts/price_import_job.py; its exit codes are in that file), then the change check in the current API image, then
 # the scanner index job on every run except after a pull the check started that failed, then the index's exit status
 # written on the check's row. Takes its own non-blocking lock (fd 8, not deploy.lock's fd 9) and never deploy.lock: the pull
 # can run for an hour, and a deploy waits only 120 s for deploy.lock. Exit codes of the check are in api/app/catalog_refresh.py.
@@ -992,10 +993,36 @@ cmd_catalog_refresh() {
   [[ -n "$current" ]] || die "Nothing deployed yet"
   export PRIZECHECK_IMAGE_TAG="$current"
 
-  local failed=0 check_rc=0 check_out="" check_id="" index_rc=0 record_rc=0 run_index=1
+  local failed=0 price_rc=0 check_rc=0 check_out="" check_id="" index_rc=0 record_rc=0 run_index=1
   local id_line='^catalog_check_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
-  # #355 inserts the daily price job here, before the change check.
+  # The daily price import runs first; whatever it returns, the check and the index still run. Exit 0 (imported, unchanged, or
+  # another run holds its lock) changes nothing; every other status fails the refresh at the end.
+  compose run --rm --no-deps -T -l "$CATALOG_REFRESH_LABEL" tools /app/scripts/price_import_job.py </dev/null || price_rc=$?
+  case "$price_rc" in
+    0) ;;
+    1) log "The price import exited with status 1 (database unreachable); continuing with the catalog check"; failed=1 ;;
+    2) log "The price import exited with status 2 (failed); continuing with the catalog check"; failed=1 ;;
+    3) log "The price import exited with status 3 (partial); continuing with the catalog check"; failed=1 ;;
+    *)
+      if (( price_rc >= 128 )); then
+        log "The price import was killed (exit $price_rc); continuing with the catalog check"
+      else
+        log "The price import exited with unexpected status $price_rc; continuing with the catalog check"
+      fi
+      failed=1 ;;
+  esac
+  # The import can run long: a deploy that began meanwhile stops these containers itself, so the check would run against the
+  # release it is replacing.
+  if deploy_lock_held; then
+    log "A deployment holds $STATE_DIR/deploy.lock; skipping the catalog check and the scanner index"
+    log "Catalog refresh finished with errors"
+    return 1
+  fi
+  # A deploy may have started and finished while the import ran; the check and the index belong to the release now current.
+  current="$(read_state current)"
+  [[ -n "$current" ]] || die "Nothing deployed yet"
+  export PRIZECHECK_IMAGE_TAG="$current"
 
   # stdout is exactly one line, catalog_check_id=<uuid>; the check logs to stderr, which passes through to this log.
   check_out="$(compose run --rm --no-deps -T -l "$CATALOG_REFRESH_LABEL" tools -m app.catalog_refresh </dev/null)" || check_rc=$?
@@ -1089,7 +1116,7 @@ Usage: $SCRIPT_PATH <command>
   sign-in-code [n]                 Show the newest n delivered sign-in codes (MAIL_MODE=file)
   signup-apply                     Re-check the signup readiness proof and restart the gateway on the result
   tool <script> [args]             Run a Python script in the current API image, e.g. tool /app/scripts/bind_owner.py <id>
-  catalog-refresh                  Check TCGdex for catalog changes (pulling if any), then run the scanner index job
+  catalog-refresh                  Import the TCGCSV prices, check TCGdex for catalog changes (pulling if any), then run the scanner index job
   compose <args>                   Run docker compose for this stack, e.g. compose logs -f api
   check-config                     Validate the env file and host files (no containers are touched)
   bundle-digest                    Print the digest CI must send for the installed host files

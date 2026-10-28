@@ -282,12 +282,18 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertNotIn('take_lock', body)
         self.assertNotIn('9>', body)
         self.assertNotIn('flock -w', body)  # nothing here waits for or holds deploy.lock; the helper only probes it
-        self.assertGreaterEqual(body.count('deploy_lock_held'), 3)  # at the start, before the index, before the record call
+        self.assertGreaterEqual(body.count('deploy_lock_held'), 4)  # at the start, before the check, before the index, before the record call
         probe = SCRIPT[SCRIPT.index('deploy_lock_held() {'):SCRIPT.index('cmd_catalog_refresh() {')]
         self.assertIn('flock -n "$STATE_DIR/deploy.lock" true', probe)
         self.assertIn('1) return 0', probe)  # only status 1 is "held"; anything else dies
         self.assertIn('-m app.catalog_refresh', body)
         self.assertIn('--record-index', body)
+        # The price import (ADR 0019) is the first container run, labelled like the others, ahead of the check.
+        price = 'tools /app/scripts/price_import_job.py </dev/null'
+        self.assertIn(price, body)
+        self.assertIn('-l "$CATALOG_REFRESH_LABEL" ' + price, body)
+        self.assertLess(body.index(price), body.index('-m app.catalog_refresh'))
+        self.assertLess(body.index(price), body.index('scanner-index'))
 
     def test_the_prod_overlay_forces_production(self):
         compose = uncommented(COMPOSE_PROD)

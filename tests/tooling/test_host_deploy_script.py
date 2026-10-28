@@ -102,7 +102,7 @@ with open(os.environ['FAKE_LOG'], 'a') as log:
                           'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
 '''.replace('#!PYTHON', '#!' + sys.executable)
 # A `docker` for the catalog-refresh tests: every call is logged as JSON; `run ... tools ... app.catalog_refresh` prints the
-# check id (FAKE_CHECK_STDOUT, default one valid line) and exits FAKE_CHECK_EXIT, `--record-index` exits FAKE_RECORD_EXIT,
+# price import (`tools /app/scripts/price_import_job.py`) exits FAKE_PRICE_EXIT, the check id (FAKE_CHECK_STDOUT, default one valid line) and exits FAKE_CHECK_EXIT, `--record-index` exits FAKE_RECORD_EXIT,
 # and the scanner index exits FAKE_INDEX_EXIT.
 FAKE_REFRESH_DOCKER = r'''#!PYTHON
 import json, os, sys
@@ -115,6 +115,12 @@ if 'run' not in args:
     sys.exit(0)
 with open(os.environ['FAKE_LOG'], 'a') as log:
     log.write(json.dumps({'args': args, 'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
+if '/app/scripts/price_import_job.py' in args:
+    sys.stderr.write('price log line\n')
+    if os.environ.get('FAKE_NEW_CURRENT'):  # a deploy finished while the import ran
+        with open(os.path.join(os.environ['HOME'], 'state/current'), 'w') as current:
+            current.write(os.environ['FAKE_NEW_CURRENT'] + '\n')
+    sys.exit(int(os.environ.get('FAKE_PRICE_EXIT', '0')))
 if 'scanner-index' in args:
     sys.exit(int(os.environ.get('FAKE_INDEX_EXIT', '0')))
 if '--record-index' in args:
@@ -813,16 +819,19 @@ class HostDeployScriptTest(unittest.TestCase):
         names = []
         for call in calls:
             args = call['args']
-            names.append('record' if '--record-index' in args else 'index' if 'scanner-index' in args else 'check')
+            names.append('record' if '--record-index' in args else 'index' if 'scanner-index' in args
+                         else 'price' if '/app/scripts/price_import_job.py' in args else 'check')
         return names
 
-    def test_catalog_refresh_runs_the_check_then_the_index_and_records_its_exit_code(self):
+    def test_catalog_refresh_runs_the_prices_then_the_check_then_the_index_and_records_its_exit_code(self):
         code, output, calls = self.refresh()
         self.assertEqual(code, 0, output)
-        self.assertEqual(self.kinds(calls), ['check', 'index', 'record'])
+        self.assertEqual(self.kinds(calls), ['price', 'check', 'index', 'record'])
         self.assertTrue(all(call['tag'] == COMMIT for call in calls))
-        self.assertIn('app.catalog_refresh', calls[0]['args'])
-        self.assertEqual(calls[2]['args'][-3:], ['--record-index', '0f8f6a2c-1b3d-4e5f-8a9b-0c1d2e3f4a5b', '0'])
+        self.assertEqual(calls[0]['args'][-2:], ['tools', '/app/scripts/price_import_job.py'])
+        self.assertIn('app.catalog_refresh', calls[1]['args'])
+        self.assertIn('price log line', output)
+        self.assertEqual(calls[3]['args'][-3:], ['--record-index', '0f8f6a2c-1b3d-4e5f-8a9b-0c1d2e3f4a5b', '0'])
         self.assertIn('check log line', output)
         for call in calls:  # every refresh container carries the label a deploy stops them by
             self.assertIn('prizecheck.job=catalog-refresh', call['args'], call)
@@ -833,8 +842,29 @@ class HostDeployScriptTest(unittest.TestCase):
         for killed in (137, 143):
             code, output, calls = self.refresh(FAKE_CHECK_EXIT=str(killed))
             self.assertNotEqual(code, 0, killed)
-            self.assertEqual(self.kinds(calls), ['check'], killed)
+            self.assertEqual(self.kinds(calls), ['price', 'check'], killed)
             self.assertIn(f'killed (exit {killed})', output)
+
+    def test_a_failed_price_import_still_runs_the_check_and_the_index_and_ends_non_zero(self):
+        for price_exit in (1, 2, 3, 9, 137, 143):
+            code, output, calls = self.refresh(FAKE_PRICE_EXIT=str(price_exit))
+            self.assertNotEqual(code, 0, (price_exit, output))
+            self.assertEqual(self.kinds(calls), ['price', 'check', 'index', 'record'], price_exit)
+            self.assertIn('price import', output)
+            self.assertIn('Catalog refresh finished with errors', output)
+            self.assertEqual(calls[3]['args'][-1], '0')  # the index's own status is recorded, not the price import's
+
+    def test_a_release_deployed_during_the_price_import_is_the_one_the_check_and_the_index_use(self):
+        code, output, calls = self.refresh(FAKE_NEW_CURRENT=OTHER)
+        self.assertEqual(code, 0, output)
+        self.assertEqual([call['tag'] for call in calls], [COMMIT, OTHER, OTHER, OTHER])
+
+    def test_a_clean_price_import_changes_nothing_else(self):
+        code, output, calls = self.refresh(FAKE_PRICE_EXIT='0')
+        self.assertEqual(code, 0, output)
+        self.assertIn('Catalog refresh finished', output)
+        self.assertNotIn('price import exited', output)
+        self.assertNotIn('with errors', output)
 
     def deploy_calls(self, **extra):
         home = self.signup_home(PROD)
@@ -878,6 +908,7 @@ class HostDeployScriptTest(unittest.TestCase):
     def test_catalog_refresh_runs_the_index_after_every_check_but_a_failed_pull(self):
         for check_exit, index_runs, exit_zero in ((0, True, True), (2, True, False), (4, False, False), (1, True, False), (9, True, False)):
             code, output, calls = self.refresh(FAKE_CHECK_EXIT=str(check_exit))
+            self.assertEqual(self.kinds(calls)[0], 'price', check_exit)
             self.assertEqual('index' in self.kinds(calls), index_runs, (check_exit, output))
             self.assertEqual(code == 0, exit_zero, (check_exit, output))
             self.assertEqual('record' in self.kinds(calls), index_runs, check_exit)
@@ -886,19 +917,19 @@ class HostDeployScriptTest(unittest.TestCase):
         for stdout in ('', 'catalog_check_id=nope\n', 'catalog_check_id=0f8f6a2c-1b3d-4e5f-8a9b-0c1d2e3f4a5b\nextra\n',
                        'noise\ncatalog_check_id=0f8f6a2c-1b3d-4e5f-8a9b-0c1d2e3f4a5b\n'):
             code, output, calls = self.refresh(FAKE_CHECK_STDOUT=stdout)
-            self.assertEqual(self.kinds(calls), ['check', 'index'], stdout)
+            self.assertEqual(self.kinds(calls), ['price', 'check', 'index'], stdout)
             self.assertNotEqual(code, 0, output)  # even a clean exit 0 without an id is a failure
         code, output, calls = self.refresh(FAKE_CHECK_STDOUT='', FAKE_CHECK_EXIT='1')
-        self.assertEqual(self.kinds(calls), ['check'])
+        self.assertEqual(self.kinds(calls), ['price', 'check'])
         self.assertNotEqual(code, 0)
 
     def test_catalog_refresh_fails_when_the_index_or_the_record_call_fails(self):
         for extra in ({'FAKE_INDEX_EXIT': '1'}, {'FAKE_INDEX_EXIT': '2'}, {'FAKE_INDEX_EXIT': '3'}, {'FAKE_RECORD_EXIT': '1'}):
             code, output, calls = self.refresh(**extra)
             self.assertNotEqual(code, 0, extra)
-            self.assertEqual(self.kinds(calls), ['check', 'index', 'record'], extra)
+            self.assertEqual(self.kinds(calls), ['price', 'check', 'index', 'record'], extra)
         code, output, calls = self.refresh(FAKE_INDEX_EXIT='3')
-        self.assertEqual(calls[2]['args'][-1], '3')
+        self.assertEqual(calls[3]['args'][-1], '3')
         self.assertIn('scanner index job exited with status 3', output)
 
     def test_catalog_refresh_exits_quietly_while_another_refresh_holds_its_lock(self):
@@ -957,17 +988,21 @@ class HostDeployScriptTest(unittest.TestCase):
             self.assertIn('flock exited 127', output)
             self.assertEqual(calls, [])
 
-    def test_catalog_refresh_looks_at_deploy_lock_again_before_the_index_and_the_record_call(self):
+    def test_catalog_refresh_looks_at_deploy_lock_again_before_the_check_the_index_and_the_record_call(self):
         # The own lock is free; the probe finds deploy.lock free `FAKE_FREE_PROBES` times, then held.
         body = ('[ "$2" = 8 ] && exit 0\nn=$(cat "$FAKE_LOG.probe" 2>/dev/null || echo 0)\necho $((n + 1)) > "$FAKE_LOG.probe"\n'
                 '[ "$n" -lt "$FAKE_FREE_PROBES" ]\n')
         code, output, calls = self.refresh_with_flock(body, FAKE_FREE_PROBES='1')
         self.assertNotEqual(code, 0, output)
-        self.assertEqual(self.kinds(calls), ['check'])
-        self.assertIn('skipping the scanner index', output)
+        self.assertEqual(self.kinds(calls), ['price'])
+        self.assertIn('skipping the catalog check and the scanner index', output)
         code, output, calls = self.refresh_with_flock(body, FAKE_FREE_PROBES='2')
         self.assertNotEqual(code, 0, output)
-        self.assertEqual(self.kinds(calls), ['check', 'index'])
+        self.assertEqual(self.kinds(calls), ['price', 'check'])
+        self.assertIn('skipping the scanner index', output)
+        code, output, calls = self.refresh_with_flock(body, FAKE_FREE_PROBES='3')
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(self.kinds(calls), ['price', 'check', 'index'])
         self.assertIn('not recording the scanner index status', output)
 
     @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
@@ -983,7 +1018,9 @@ class HostDeployScriptTest(unittest.TestCase):
                                 text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Nothing deployed yet', result.stdout + result.stderr)
-        self.assertIn('catalog-refresh', self.run_script(home, 'help').stdout)
+        usage = self.run_script(home, 'help').stdout
+        self.assertIn('catalog-refresh', usage)
+        self.assertIn('Import the TCGCSV prices', usage)
         # The SSH gate does not offer it.
         self.assertNotIn('catalog-refresh', SCRIPT.read_text().split('ssh_gate() {')[1].split('main() {')[0])
 

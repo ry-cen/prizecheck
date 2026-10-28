@@ -2,12 +2,15 @@
 
 The implementation selects no provider. A scheduler invokes independent commands in the application working directory, with secrets injected as environment variables. The backup and watchdog commands do not invoke one another. Install these schedules through the scheduler adapter chosen at deployment:
 
-| Job                         | UTC schedule            | Command                                                                                   |
-| --------------------------- | ----------------------- | ----------------------------------------------------------------------------------------- |
-| Daily logical backup        | Daily, 03:00            | `.venv/bin/python scripts/operations_job.py backup`                                       |
-| Independent backup watchdog | Hourly, minute15        | `.venv/bin/python scripts/operations_job.py watchdog`                                     |
-| Disposable recovery drill   | Monthly, first day04:00 | `.venv/bin/python scripts/operations_job.py restore --target tcg_recovery_monthly_YYYYMM` |
-| Format Standing rule dates  | Daily, 00:05 UTC        | `.venv/bin/python scripts/format_standing_job.py`                                         |
+| Job                         | UTC schedule                           | Command                                                                                   |
+| --------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Daily logical backup        | Daily, 03:00                           | `.venv/bin/python scripts/operations_job.py backup`                                       |
+| Independent backup watchdog | Hourly, minute15                       | `.venv/bin/python scripts/operations_job.py watchdog`                                     |
+| Disposable recovery drill   | Monthly, first day04:00                | `.venv/bin/python scripts/operations_job.py restore --target tcg_recovery_monthly_YYYYMM` |
+| Format Standing rule dates  | Daily, 00:05 UTC                       | `.venv/bin/python scripts/format_standing_job.py`                                         |
+| TCGCSV price import         | Daily, first step of `catalog-refresh` | `python scripts/price_import_job.py [--force] [--rematch] \| --rebind-only`               |
+
+The TCGCSV price import ([ADR 0019](../adr/0019-tcgcsv-daily-prices.md)) downloads TCGCSV's daily Pokemon snapshot into PostgreSQL, binds each verified Edition to one price row and publishes the public price records. On the Oracle host it is the first step of `prizecheck-deploy.sh catalog-refresh`, which carries on to the catalog check and the scanner index whatever it returned and ends non-zero when the import exited with anything but 0. Run it by hand with `prizecheck-deploy.sh tool /app/scripts/price_import_job.py` (`--force` downloads again although TCGCSV's `last-updated.txt` is unchanged; `--rebind-only` downloads nothing and only rebinds, refreshes art and publishes; `--rematch` also re-evaluates the unverified promo Editions under the active matching rule). It exits 0 when it imported, found nothing new, or another run holds its lock; 1 when the database is unreachable; 2 when it failed; 3 when it was partial.
 
 The scanner index job is a portable job that no scheduler runs (ADR 0002): the operator runs it by hand after a catalog pull, in its own image, with `prizecheck-deploy.sh compose run --rm scanner-index` (add `--full` after a preprocessing change or to refresh the artwork). Inside the image the command is `python scripts/scanner_index_job.py [--full]`. It fetches each active printing's `low.webp` from `assets.tcgdex.net`, embeds it, and publishes the fingerprint file the scanner downloads. It exits 0 when the index was published or nothing was due, 1 when the database is unreachable, 2 when more than 2% of the printings failed (nothing is published; rerun later) or the embedder is unusable, and 3 when another run holds advisory lock 914711. A deploy pulls its image with the other services, so it is ready to run on the deployed commit.
 
