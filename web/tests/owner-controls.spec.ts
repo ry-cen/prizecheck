@@ -81,6 +81,47 @@ async function seedRun(): Promise<string> {
   return run.id;
 }
 
+/** Empties the price import tables; the panel tests start from "never imported". */
+async function resetPriceImports() {
+  await query(
+    "TRUNCATE price_import, tcgplayer_product, tcgplayer_price RESTART IDENTITY"
+  );
+}
+
+/** One finished price_import row finished `hoursAgo` hours ago, plus any extra column values. */
+async function seedImport(
+  outcome: string,
+  hoursAgo = 0,
+  extra: Record<string, unknown> = {}
+) {
+  const names = [
+    "outcome",
+    "finished_at",
+    "source_updated_at",
+    ...Object.keys(extra),
+  ];
+  const marks = [
+    "$1",
+    "now()-$2*interval '1 hour'",
+    "now()-$2*interval '1 hour'",
+    ...Object.keys(extra).map((_, i) => `$${i + 3}`),
+  ];
+  await query(
+    `INSERT INTO price_import(${names.join(",")}) VALUES (${marks.join(",")})`,
+    [outcome, hoursAgo, ...Object.values(extra)]
+  );
+}
+
+async function seedPrice(hoursAgo = 0) {
+  await query(
+    "INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at) VALUES (1,'Normal',1,now(),now()-$1*interval '1 hour')",
+    [hoursAgo]
+  );
+}
+
+const priceImport = (page: Page) =>
+  page.getByRole("region", { name: "Price import" });
+
 const sections = (page: Page) =>
   page.getByRole("tablist", { name: "Owner controls sections" });
 const sectionTab = (page: Page, name: string | RegExp) =>
@@ -342,6 +383,114 @@ test.describe("desktop", () => {
     } finally {
       await query("DELETE FROM catalog_run WHERE id=$1", [runId]);
       await undoHealth();
+    }
+  });
+
+  test("Status shows the price import: never imported, an imported run, and one warning line for each problem", async ({
+    page,
+  }) => {
+    await signInAsOwner(page);
+    await resetPriceImports();
+    try {
+      await openFromAccountMenu(page);
+      const panel = priceImport(page);
+      const refresh = async () => {
+        await page
+          .getByRole("region", { name: "English catalog pull" })
+          .getByRole("button", { name: "Refresh" })
+          .click();
+      };
+      await expect(panel).toContainText("Prices have not been imported yet.");
+      await expect(panel.getByRole("alert")).toHaveCount(0);
+
+      await seedPrice();
+      await seedImport("imported", 0, {
+        verified_editions: 1200,
+        priced_editions: 1100,
+        unpriced: JSON.stringify({ ambiguous: 60, no_price: 40 }),
+        fallback_art: 25,
+      });
+      await refresh();
+      await expect(panel).toContainText("TCGplayer data from");
+      await expect(panel).toContainText(
+        "1,100 of 1,200 verified Editions priced"
+      );
+      await expect(panel).toContainText("ambiguous 60");
+      await expect(panel).toContainText("no price 40");
+      await expect(panel).toContainText("25 Printings use TCGplayer art");
+      await expect(panel.getByRole("alert")).toHaveCount(0);
+
+      await seedImport("partial", 0, {
+        groups_failed: 3,
+        error_code: "group_failed",
+      });
+      await refresh();
+      await expect(panel.getByRole("alert")).toHaveCount(1);
+      await expect(panel.getByRole("alert")).toContainText(
+        "The latest price import was partial (group_failed) · Groups failed: 3"
+      );
+
+      await seedImport("failed", 0, { error_code: "stale_source" });
+      await refresh();
+      await expect(panel.getByRole("alert")).toHaveCount(1);
+      await expect(panel.getByRole("alert")).toContainText(
+        "The latest price import failed (stale_source)"
+      );
+
+      await seedImport("imported", 0, { public_error: "publish failed" });
+      await refresh();
+      await expect(panel.getByRole("alert")).toHaveCount(1);
+      await expect(panel.getByRole("alert")).toContainText(
+        "Publishing prices failed: publish failed"
+      );
+
+      // The last good run is over 48 hours old.
+      await resetPriceImports();
+      await seedPrice();
+      await seedImport("imported", 49);
+      await seedImport("failed", 0, { error_code: "group_list" });
+      await refresh();
+      await expect(panel.getByRole("alert")).toHaveCount(2);
+      await expect(panel).toContainText(
+        "The last good price import is over 48 hours old"
+      );
+
+      // The latest run is unchanged, yet TCGCSV's own update time is frozen over 48 hours back.
+      await resetPriceImports();
+      await seedPrice(50);
+      await seedImport("unchanged", 0);
+      await refresh();
+      await expect(panel.getByRole("alert")).toHaveCount(1);
+      await expect(panel.getByRole("alert")).toContainText(
+        "TCGCSV's own update time is over 48 hours old"
+      );
+      await expectPageChecks(
+        page,
+        "Owner controls, Status price import (desktop)"
+      );
+    } finally {
+      await resetPriceImports();
+    }
+  });
+
+  test("a collector's pages carry no price import text", async ({ page }) => {
+    await signInAsOwner(page);
+    await resetPriceImports();
+    try {
+      await seedPrice();
+      await seedImport("failed", 0, {
+        error_code: "stale_source",
+        public_error: "publish failed",
+      });
+      await page.goto(`${ORIGIN}/catalog`);
+      await expect(
+        page.getByRole("navigation", { name: "Main views" })
+      ).toBeVisible();
+      const text = (await page.locator("body").innerText()).toLowerCase();
+      for (const word of ["tcgcsv", "price import", "stale_source", "imported"])
+        expect(text).not.toContain(word);
+    } finally {
+      await resetPriceImports();
     }
   });
 

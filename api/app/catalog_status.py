@@ -39,9 +39,31 @@ class CatalogReview(BaseModel):
     created_at: datetime
 
 
+class PriceImportRun(BaseModel):
+    """The newest finished price import (owner only; collector responses never carry it)."""
+    outcome: str
+    started_at: datetime
+    finished_at: datetime | None
+    source_updated_at: datetime | None
+    groups_total: int | None
+    groups_failed: int
+    verified_editions: int | None
+    priced_editions: int | None
+    unpriced: dict[str, int]
+    fallback_art: int | None
+    public_error: str | None
+    error_code: str | None
+
+
 class OwnerCatalogStatus(BaseModel):
     catalog: CatalogStatus
     run: CatalogRun | None
+    last_price_import: PriceImportRun | None = None
+    last_good_price_import_at: datetime | None = None
+    source_updated_at_max: datetime | None = None
+    # Computed in the database so the 48 h rule never depends on the browser's clock.
+    price_import_stale: bool = False
+    price_source_stale: bool = False
     pending_reviews: list[CatalogReview]
 
 
@@ -65,7 +87,20 @@ def owner_catalog_status(user_id: str = Depends(verified_user)):
           FROM catalog_run ORDER BY (outcome IS NULL) DESC,started_at DESC LIMIT 1""").fetchone()
         reviews = conn.execute("""SELECT id,kind,source_id,detail,created_at FROM catalog_review
           WHERE status='pending' ORDER BY created_at LIMIT 50""").fetchall()
+        latest = conn.execute("""SELECT outcome,started_at,finished_at,source_updated_at,groups_total,groups_failed,verified_editions,
+          priced_editions,unpriced,fallback_art,public_error,error_code
+          FROM price_import WHERE outcome IS NOT NULL ORDER BY id DESC LIMIT 1""").fetchone()
+        ages = conn.execute("""SELECT
+          (SELECT max(finished_at) FROM price_import WHERE outcome IN ('imported','unchanged')) AS good,
+          (SELECT max(source_updated_at) FROM tcgplayer_price) AS source_max,
+          coalesce((SELECT max(finished_at) FROM price_import WHERE outcome IN ('imported','unchanged')) < now()-interval '48 hours',
+            true) AS import_stale,
+          coalesce((SELECT max(source_updated_at) FROM tcgplayer_price) < now()-interval '48 hours', true) AS source_stale""").fetchone()
         return OwnerCatalogStatus(catalog=catalog_status_row(conn), run=CatalogRun(**run) if run else None,
+                                  last_price_import=PriceImportRun(**latest) if latest else None,
+                                  last_good_price_import_at=ages["good"], source_updated_at_max=ages["source_max"],
+                                  price_import_stale=bool(latest) and ages["import_stale"],
+                                  price_source_stale=bool(latest) and ages["source_stale"],
                                   pending_reviews=[CatalogReview(**row) for row in reviews])
 
 
