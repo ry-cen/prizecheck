@@ -227,7 +227,7 @@ test.describe("desktop", () => {
     ).toBeFocused();
     await expectPageChecks(page, "Catalog, set picker open");
     await picker.getByRole("searchbox", { name: "Filter sets" }).fill("mega");
-    await picker.getByRole("button", { name: /^Mega Evolution/ }).click();
+    await picker.getByRole("button", { name: /^Mega Evolution\s+MEG/ }).click();
     await expect(picker).toBeHidden();
     await expect(chip(page, "Set: Mega Evolution")).toBeFocused();
     // Collector number order within a set.
@@ -247,6 +247,103 @@ test.describe("desktop", () => {
       "Switch, MEG 130, Mega Evolution, Normal, 1 owned"
     );
     await expect(tile(page, "Switch, MEG 130")).toContainText("×1");
+  });
+
+  test("the set picker groups sets into era folders, newest first, and opens the chosen set's folder", async ({
+    page,
+  }) => {
+    seedGallery();
+    await signIn(page);
+    const folder = (era: string) =>
+      page
+        .getByRole("dialog", { name: "Choose a set" })
+        .getByRole("button", { name: new RegExp(`^${era} \\d+ sets?$`) });
+    const picker = page.getByRole("dialog", { name: "Choose a set" });
+    const folderSets = (era: string) =>
+      picker.getByRole("list", { name: era, exact: true }).getByRole("button");
+    await chip(page, "Any set").click();
+    await expect(picker).toBeVisible();
+
+    // Any set leads, outside the folders; the folders run newest era first, the sets with no era last, all closed.
+    await expect(
+      picker
+        .getByRole("list", { name: "Sets", exact: true })
+        .getByRole("button")
+        .first()
+    ).toHaveAccessibleName("Any set");
+    await expect(picker.getByRole("button", { expanded: false })).toHaveText([
+      /^Mega Evolution\s*2 sets$/,
+      /^Scarlet & Violet\s*2 sets$/,
+      /^Sword & Shield\s*1 set$/,
+      /^Black & White\s*1 set$/,
+      /^Other sets\s*1 set$/,
+    ]);
+    await expect(picker.getByRole("button", { expanded: true })).toHaveCount(0);
+    await expect(
+      picker.getByRole("button", { name: /^Paldea Evolved/ })
+    ).toHaveCount(0);
+
+    // A folder opens and closes, with newest release first inside it; the keyboard works too.
+    await folder("Scarlet & Violet").click();
+    await expect(folder("Scarlet & Violet")).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+    await expect(folderSets("Scarlet & Violet")).toHaveText([
+      /^Paldea Evolved/,
+      /^Scarlet & Violet/,
+    ]);
+    await folder("Scarlet & Violet").click();
+    await expect(folder("Scarlet & Violet")).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    await folder("Black & White").focus();
+    await page.keyboard.press("Enter");
+    await expect(folderSets("Black & White")).toHaveText([/^Dragons Exalted/]);
+
+    // A folder opened by hand does not flip the other way once a filter is typed; clearing the filter closes them all.
+    await folder("Scarlet & Violet").click();
+    const filterBox = picker.getByRole("searchbox", { name: "Filter sets" });
+    await filterBox.fill("paldea");
+    await expect(folder("Scarlet & Violet")).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+    await expect(folderSets("Scarlet & Violet")).toHaveText([
+      /^Paldea Evolved/,
+    ]);
+    await filterBox.fill("");
+    await expect(picker.getByRole("button", { expanded: true })).toHaveCount(0);
+    await expect(picker.getByRole("button", { expanded: false })).toHaveCount(
+      5
+    );
+
+    // Typing opens the folders that still have a match and hides the others; a set inside one can be chosen.
+    await picker.getByRole("searchbox", { name: "Filter sets" }).fill("delta");
+    await expect(picker.getByRole("button", { expanded: false })).toHaveCount(
+      0
+    );
+    await expect(picker.getByRole("button", { expanded: true })).toHaveText([
+      /^Mega Evolution\s*1 set$/,
+    ]);
+    await expect(folderSets("Mega Evolution")).toHaveText([/^Delta Reign/]);
+    await folderSets("Mega Evolution").first().click();
+    await expect(picker).toBeHidden();
+    await expect(chip(page, "Set: Delta Reign")).toBeFocused();
+
+    // Reopened, only the chosen set's folder is open.
+    await chip(page, "Set: Delta Reign").click();
+    await expect(picker.getByRole("button", { expanded: true })).toHaveText([
+      /^Mega Evolution\s*2 sets$/,
+    ]);
+    await expect(picker.getByRole("button", { expanded: false })).toHaveCount(
+      4
+    );
+    await expect(
+      picker.getByRole("button", { name: /^Delta Reign/ })
+    ).toHaveAttribute("aria-pressed", "true");
+    await picker.getByRole("button", { name: "Close set picker" }).click();
   });
 
   test("a tile opens the card popup, a stale page starts again from page one, and a failed page offers Retry", async ({
@@ -362,6 +459,10 @@ test.describe("phone", () => {
     await chip(page, "Any set").tap();
     const picker = page.getByRole("dialog", { name: "Choose a set" });
     await expect(picker).toBeVisible();
+    await expectTouchTarget(
+      picker.getByRole("button", { name: /^Mega Evolution \d+ sets?$/ }),
+      ["height"]
+    );
     await expectPageChecks(page, "Catalog on a phone, set picker open");
     await picker.getByRole("button", { name: "Close set picker" }).tap();
     await expect(picker).toBeHidden();

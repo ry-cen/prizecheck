@@ -51,7 +51,7 @@ current once more, but only while the request is younger than ``RETRY_WITHIN_S``
 import re
 import time
 import unicodedata
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, NamedTuple
 from uuid import UUID
 
@@ -194,6 +194,11 @@ class CatalogSet(BaseModel):
     set_name: str
     set_code: str
     printings: int
+    # The set's era as TCGdex names its series, and its release date, from the last import (``catalog_generation_set``,
+    # migrations 044 and 155); null for a set that import gave none, and for every set until the next import.
+    series_id: str | None
+    series_name: str | None
+    release_date: date | None
 
 
 class CatalogSetList(BaseModel):
@@ -453,14 +458,22 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
 
 @router.get("/sets", response_model=CatalogSetList)
 def catalog_sets(user_id: str = Depends(verified_user)):
-    """Every set in the active catalog, once each, for Catalog's set picker: A–Z by name."""
+    """Every set in the active catalog, once each, for Catalog's set picker: A–Z by name, each with the era and release
+    date the last import stored (the picker groups by them)."""
     with connect() as conn, conn.transaction():
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         state = conn.execute("SELECT active_generation,revision FROM catalog_state WHERE singleton").fetchone()
         if not state["active_generation"]:
             return CatalogSetList(available=False, catalog_revision=state["revision"], sets=[])
-        rows = conn.execute("""SELECT set_id,min(set_name) AS set_name,count(*) AS printings
-          FROM catalog_generation_printing WHERE generation_id=%s AND NOT tombstoned
-          GROUP BY set_id ORDER BY lower(min(set_name)),set_id""", (state["active_generation"],)).fetchall()
+        # The release date is the one the import stored, else the rules files' (as the gallery orders), else null.
+        rows = conn.execute("""SELECT gp.set_id,min(gp.set_name) AS set_name,count(*) AS printings,
+            min(gs.series_id) AS series_id,min(gs.series_name) AS series_name,
+            coalesce(min(gs.release_date),min(rd.released)) AS release_date
+          FROM catalog_generation_printing gp
+          LEFT JOIN catalog_generation_set gs ON gs.generation_id=gp.generation_id AND gs.set_id=gp.set_id
+          LEFT JOIN unnest(%s::text[],%s::date[]) AS rd(set_id,released) ON rd.set_id=gp.set_id
+          WHERE gp.generation_id=%s AND NOT gp.tombstoned
+          GROUP BY gp.set_id ORDER BY lower(min(gp.set_name)),gp.set_id""",
+                            [*_rules_release_dates(), state["active_generation"]]).fetchall()
         return CatalogSetList(available=True, catalog_revision=state["revision"],
                               sets=[CatalogSet(**row, set_code=set_codes.code_for(row["set_id"])) for row in rows])

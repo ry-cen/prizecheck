@@ -19,7 +19,8 @@ from psycopg.conninfo import make_conninfo
 
 from app import format_evaluator as evaluator
 from app import format_standing
-from app.catalog import TCGdexSource
+from app.catalog import SetDetails, TCGdexSource
+from app.catalog_browse import _rules_release_dates
 from app.main import app, connect
 from test_attribute_corrections import decide, seed
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, EX_BW, SUPPORTER, SWITCH_ME, card, edition_of
@@ -68,7 +69,13 @@ def seed_gallery():
     because the rules don't record their sets."""
     reset_catalog()
     bulbasaur = {**BULBASAUR_ME, "image": "https://assets.tcgdex.net/en/me/me01/001"}
-    run(Records(bulbasaur, *(record for record in CARDS if record is not BULBASAUR_ME), *FILLERS))
+    # Eras for the set picker's folders (web/tests/catalog-gallery.spec.ts). The dates are the ones the rules files give
+    # (so the gallery order is the same), me06 has none, and fixturezz has no series: it lands in the last folder.
+    mega, sv, swsh, bw = ("mega", "Mega Evolution"), ("sv", "Scarlet & Violet"), ("swsh", "Sword & Shield"), ("bw", "Black & White")
+    run(DatedRecords({"me01": date(2025, 9, 26), "sv01": date(2023, 3, 31), "sv02": date(2023, 6, 9),
+                      "swsh2": date(2020, 5, 1), "bw6": date(2012, 8, 15)},
+                     bulbasaur, *(record for record in CARDS if record is not BULBASAUR_ME), *FILLERS,
+                     series={"me01": mega, "me06": mega, "sv01": sv, "sv02": sv, "swsh2": swsh, "bw6": bw}))
 
 
 def seed_popup():
@@ -600,14 +607,18 @@ def test_a_retired_edition_has_no_tile():
 
 
 class DatedRecords(Records):
-    """A catalog source that, like TCGdexSource, gives each set's release date (None: TCGdex gives none)."""
+    """A catalog source that, like TCGdexSource, gives each set's release date and series (None or absent: TCGdex gives
+    none). ``series`` maps a set ID to a (series id, series name) pair."""
 
-    def __init__(self, dates, *records):
+    def __init__(self, dates, *records, series=None):
         super().__init__(*records)
         self.dates = dates
+        self.series = series or {}
 
-    def set_release_dates(self, set_ids):
-        return {set_id: self.dates[set_id] for set_id in set_ids if self.dates.get(set_id)}
+    def set_details(self, set_ids):
+        found = {set_id: SetDetails(self.dates.get(set_id), *self.series.get(set_id, (None, None)))
+                 for set_id in set_ids}
+        return {set_id: value for set_id, value in found.items() if value.release_date or value.series_id}
 
 
 def numbered(set_id, set_name, count, name="Card"):
@@ -661,23 +672,77 @@ def test_keyset_pages_cross_a_set_boundary_and_reach_undated_sets():
     assert (stale.status_code, error(stale)) == (409, "CATALOG_CHANGED")
 
 
-def test_tcgdex_set_dates_are_best_effort():
+def test_tcgdex_set_details_are_best_effort():
     source = TCGdexSource()
 
     def answer(request):
         set_id = request.url.path.rsplit("/", 1)[1]
         if set_id == "good":
-            return httpx.Response(200, json={"id": "good", "releaseDate": "2024-11-08"})
+            return httpx.Response(200, json={"id": "good", "releaseDate": "2024-11-08",
+                                             "serie": {"id": "sv", "name": "Scarlet & Violet"}})
         if set_id == "bad-date":
-            return httpx.Response(200, json={"id": "bad-date", "releaseDate": "2024/11/08"})
+            return httpx.Response(200, json={"id": "bad-date", "releaseDate": "2024/11/08",
+                                             "serie": {"id": "sv", "name": "Scarlet & Violet"}})
+        if set_id == "no-serie":
+            return httpx.Response(200, json={"id": "no-serie", "releaseDate": "2020-02-07"})
+        if set_id == "bad-serie":
+            return httpx.Response(200, json={"id": "bad-serie", "releaseDate": "2020-02-07",
+                                             "serie": {"id": 7, "name": "Seven"}})
+        if set_id == "blank-serie":
+            return httpx.Response(200, json={"id": "blank-serie", "serie": {"id": "xy", "name": "  "}})
+        if set_id == "serie-not-object":
+            return httpx.Response(200, json={"id": "serie-not-object", "serie": "xy"})
+        if set_id == "nul-name":
+            return httpx.Response(200, json={"id": "nul-name", "serie": {"id": "xy", "name": "X\x00Y"}})
+        if set_id == "long-name":
+            return httpx.Response(200, json={"id": "long-name", "serie": {"id": "xy", "name": "x" * 201}})
+        if set_id == "long-id":
+            return httpx.Response(200, json={"id": "long-id", "serie": {"id": "x" * 129, "name": "XY"}})
+        if set_id == "nothing":
+            return httpx.Response(200, json={"id": "nothing"})
         if set_id == "wrong-id":
-            return httpx.Response(200, json={"id": "other", "releaseDate": "2024-11-08"})
+            return httpx.Response(200, json={"id": "other", "releaseDate": "2024-11-08",
+                                             "serie": {"id": "sv", "name": "Scarlet & Violet"}})
         if set_id == "broken":
             raise httpx.ConnectError("down")
         return httpx.Response(404)
 
     source.client = httpx.Client(transport=httpx.MockTransport(answer))
-    assert source.set_release_dates(["good", "bad-date", "wrong-id", "broken", "missing"]) == {"good": date(2024, 11, 8)}
+    ids = ["good", "bad-date", "no-serie", "bad-serie", "blank-serie", "serie-not-object", "nul-name", "long-name", "long-id", "nothing", "wrong-id",
+           "broken", "missing"]
+    assert source.set_details(ids) == {
+        "good": SetDetails(date(2024, 11, 8), "sv", "Scarlet & Violet"),
+        "bad-date": SetDetails(None, "sv", "Scarlet & Violet"),  # a series without a date still has a row
+        "no-serie": SetDetails(date(2020, 2, 7), None, None),
+        "bad-serie": SetDetails(date(2020, 2, 7), None, None)}
+
+
+def test_an_import_stores_each_sets_series_and_the_sets_endpoint_returns_it_with_the_release_date():
+    reset_catalog()
+    sv, ssh = ("sv", "Scarlet & Violet"), ("swsh", "Sword & Shield")
+    run(DatedRecords({"sv01": date(2023, 3, 31), "swsh2": None},
+                     *numbered("sv01", "Scarlet & Violet", 2, "Violet"), *numbered("swsh2", "Rebel Clash", 1, "Clash"),
+                     *numbered("zundated", "Undated Set", 1, "Old"), series={"sv01": sv, "swsh2": ssh}))
+    with connect() as conn:
+        stored = {row["set_id"]: (row["release_date"], row["series_id"], row["series_name"]) for row in conn.execute(
+            "SELECT set_id,release_date,series_id,series_name FROM catalog_generation_set").fetchall()}
+    # A series with no valid date has a row with a null date; a set with neither has no row.
+    assert stored == {"sv01": (date(2023, 3, 31), "sv", "Scarlet & Violet"), "swsh2": (None, "swsh", "Sword & Shield")}
+    sets = call("GET", "/api/catalog/sets", collector()).json()["sets"]
+    rules = dict(zip(*_rules_release_dates()))
+    assert rules.get("swsh2") and "zundated" not in rules
+    assert [(entry["set_id"], entry["series_id"], entry["series_name"], entry["release_date"]) for entry in sets] == [
+        ("swsh2", "swsh", "Sword & Shield", rules["swsh2"].isoformat()),  # no stored date: the rules files' date
+        ("sv01", "sv", "Scarlet & Violet", "2023-03-31"),  # the stored date wins
+        ("zundated", None, None, None)]  # still A-Z by set name; a set with neither returns nulls
+
+
+def test_a_catalog_imported_before_set_series_returns_null_series_and_the_rules_files_dates():
+    reset_catalog()
+    run(Records(*numbered("sv01", "Scarlet & Violet", 1), *numbered("zundated", "Undated Set", 1)))
+    sets = call("GET", "/api/catalog/sets", collector()).json()["sets"]
+    assert [(entry["set_id"], entry["series_id"], entry["series_name"], entry["release_date"]) for entry in sets] == [
+        ("sv01", None, None, dict(zip(*_rules_release_dates()))["sv01"].isoformat()), ("zundated", None, None, None)]
 
 
 def test_migration_044_creates_an_empty_table_and_runs_again():
@@ -705,6 +770,41 @@ def test_migration_044_creates_an_empty_table_and_runs_again():
             assert conn.execute("SELECT count(*) FROM catalog_generation_set").fetchone()[0] == 1
             conn.execute("DELETE FROM catalog_generation WHERE id=%s", (generation,))
             assert conn.execute("SELECT count(*) FROM catalog_generation_set").fetchone()[0] == 0
+    finally:
+        with psycopg.connect(admin, autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+
+
+def test_migration_155_keeps_a_dated_row_adds_the_series_columns_and_runs_again():
+    admin = os.environ.get("RECOVERY_TEST_DATABASE_URL")
+    if not admin:
+        pytest.skip("RECOVERY_TEST_DATABASE_URL names the disposable PostgreSQL server")
+    name = "tcg_set_series_" + uuid4().hex
+    with psycopg.connect(admin, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    url = make_conninfo(admin, dbname=name)
+    try:
+        migrate(url, before="155_set_series.sql")
+        with psycopg.connect(url) as conn:
+            revisions = conn.execute("""SELECT (SELECT revision FROM catalog_state),
+              (SELECT revision FROM catalog_attribute_state)""").fetchone()
+            generation = conn.execute("""INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256)
+              VALUES (gen_random_uuid(),0,'',repeat('0',64)) RETURNING id""").fetchone()[0]
+            conn.execute("INSERT INTO catalog_generation_set VALUES (%s,'sv08','2024-11-08')", (generation,))
+        migrate(url)
+        with psycopg.connect(url) as conn:
+            assert conn.execute("SELECT set_id,release_date,series_id,series_name FROM catalog_generation_set"
+                                ).fetchall() == [("sv08", date(2024, 11, 8), None, None)]
+            assert conn.execute("""SELECT (SELECT revision FROM catalog_state),
+              (SELECT revision FROM catalog_attribute_state)""").fetchone() == revisions
+            conn.execute("INSERT INTO catalog_generation_set VALUES (%s,'sv09',NULL,'sv','Scarlet & Violet')", (generation,))
+            for bad in ("'x',NULL,NULL,NULL",  # says nothing
+                        "'x','2024-01-01','sv',NULL", "'x','2024-01-01',NULL,'Name'",  # half a series
+                        "'x',NULL,'sv',''"):
+                with pytest.raises(psycopg.errors.CheckViolation), conn.transaction():
+                    conn.execute(f"INSERT INTO catalog_generation_set VALUES (%s,{bad})", (generation,))
+            conn.execute((ROOT_MIGRATIONS / "155_set_series.sql").read_text())  # runs again
+            assert conn.execute("SELECT count(*) FROM catalog_generation_set").fetchone()[0] == 2
     finally:
         with psycopg.connect(admin, autocommit=True) as conn:
             conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))

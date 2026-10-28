@@ -5,6 +5,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   getCatalogSets,
   type BrowseFormat,
@@ -13,8 +14,10 @@ import {
 } from "../catalog_browse_generated";
 import { Chip, PickerChip } from "../ui/Chip";
 import { Dialog } from "../ui/Dialog";
+import { Icon } from "../ui/Icon";
 import { SearchField } from "../ui/SearchField";
 import { FORMATS, KINDS } from "./catalogText";
+import { eraKeyOf, groupSetsByEra, hasEras, type SetEra } from "./setEras";
 
 type Props = {
   format: BrowseFormat | null;
@@ -124,7 +127,11 @@ export function CatalogFilters({
 const SET_ROW =
   "box-border m-0 flex min-h-control w-full cursor-pointer items-center justify-between gap-3 rounded-control border border-transparent bg-transparent px-2 py-1 text-left font-sans text-control text-text hover:bg-surface-raised aria-pressed:border-accent-border aria-pressed:bg-surface-selected aria-pressed:text-accent-strong phone:min-h-tap";
 
-/** The set picker: every set in the catalog, A–Z by name, with a box that narrows the list. */
+/**
+ * The set picker: every set in the catalog with a box that narrows the list. Sets sit in collapsible folders by era,
+ * newest first (setEras.ts); all folders are closed on open except the one holding the chosen set, and typing in the
+ * box opens every folder that still has a match. Until a catalog import has named the eras, the list is flat, A–Z.
+ */
 function SetPicker({
   open,
   current,
@@ -141,10 +148,13 @@ function SetPicker({
   const [sets, setSets] = useState<CatalogSet[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [filter, setFilter] = useState("");
+  // The folders the collector flipped from their starting state (closed, or open while a filter is typed).
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     if (!open) return;
     setFilter("");
+    setFlipped(new Set());
     if (sets) return;
     setFailed(false);
     let cancelled = false;
@@ -168,6 +178,31 @@ function SetPicker({
       entry.set_id.toLowerCase().startsWith(wanted) ||
       entry.set_code.toLowerCase().startsWith(wanted)
   );
+  const eras = sets && hasEras(sets) ? groupSetsByEra(shown) : null;
+  const startsOpen = (era: SetEra) =>
+    wanted !== "" || era.key === eraKeyOf(current);
+  const isOpen = (era: SetEra) => startsOpen(era) !== flipped.has(era.key);
+  const flip = (key: string) =>
+    setFlipped((before) => {
+      const next = new Set(before);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  const setRow = (entry: CatalogSet) => (
+    <li key={entry.set_id}>
+      <button
+        type="button"
+        aria-pressed={current?.set_id === entry.set_id}
+        className={SET_ROW}
+        onClick={() => onPick(entry)}
+      >
+        <span className="min-w-0 truncate">{entry.set_name}</span>
+        <span className="shrink-0 text-meta text-text-subtle tabular-nums">
+          {entry.set_code} · {entry.printings.toLocaleString()}
+        </span>
+      </button>
+    </li>
+  );
   return (
     <Dialog
       open={open}
@@ -181,7 +216,10 @@ function SetPicker({
           label="Filter sets"
           placeholder="Set name or code"
           value={filter}
-          onChange={(event) => setFilter(event.target.value)}
+          onChange={(event) => {
+            setFilter(event.target.value);
+            setFlipped(new Set()); // folders start again from the new filter's state
+          }}
           data-autofocus=""
         />
         {failed ? (
@@ -207,21 +245,40 @@ function SetPicker({
                 Any set
               </button>
             </li>
-            {shown.map((entry) => (
-              <li key={entry.set_id}>
-                <button
-                  type="button"
-                  aria-pressed={current?.set_id === entry.set_id}
-                  className={SET_ROW}
-                  onClick={() => onPick(entry)}
-                >
-                  <span className="min-w-0 truncate">{entry.set_name}</span>
-                  <span className="shrink-0 text-meta text-text-subtle tabular-nums">
-                    {entry.set_code} · {entry.printings.toLocaleString()}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {eras
+              ? eras.map((era) => (
+                  <li key={era.key}>
+                    <button
+                      type="button"
+                      aria-expanded={isOpen(era)}
+                      className={`${SET_ROW} font-semibold`}
+                      onClick={() => flip(era.key)}
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <Icon
+                          icon={isOpen(era) ? ChevronDown : ChevronRight}
+                          size={16}
+                        />
+                        <span className="min-w-0 truncate">{era.name}</span>
+                      </span>
+                      <span className="shrink-0 text-meta font-normal text-text-subtle tabular-nums">
+                        {era.sets.length.toLocaleString()}
+                        <span className="sr-only">
+                          {era.sets.length === 1 ? " set" : " sets"}
+                        </span>
+                      </span>
+                    </button>
+                    {isOpen(era) && (
+                      <ul
+                        aria-label={era.name}
+                        className="m-0 mt-0.5 flex list-none flex-col gap-0.5 p-0 pl-4"
+                      >
+                        {era.sets.map(setRow)}
+                      </ul>
+                    )}
+                  </li>
+                ))
+              : shown.map(setRow)}
           </ul>
         )}
       </div>

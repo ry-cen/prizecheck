@@ -10,6 +10,7 @@ import time
 import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import date
+from typing import NamedTuple
 from urllib.parse import quote
 from uuid import UUID
 
@@ -153,6 +154,13 @@ def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
     return descriptors, ambiguous
 
 
+class SetDetails(NamedTuple):
+    """What a set's TCGdex record gives besides its cards: any part it gives no valid value for is None."""
+    release_date: date | None
+    series_id: str | None
+    series_name: str | None
+
+
 class TCGdexSource:
     def __init__(self):
         self.client = httpx.Client(timeout=20, follow_redirects=False,
@@ -211,28 +219,40 @@ class TCGdexSource:
                 set_ids.add(set_id)
         return frozenset(set_ids), frozenset(card_ids)
 
-    def set_release_dates(self, set_ids) -> dict[str, date]:
-        """Each set's TCGdex releaseDate (YYYY-MM-DD), for Catalog's newest-first order (migration 044). Best effort and
-        never fails the run: a set whose record can't be read in two tries, or gives no valid date, is left out."""
+    def set_details(self, set_ids) -> dict[str, SetDetails]:
+        """Each set's TCGdex releaseDate (YYYY-MM-DD) and serie (id and name), for Catalog's newest-first order and its
+        set picker's era folders (migrations 044 and 155). Best effort and never fails the run: a set whose record can't
+        be read in two tries is left out, and a part the record gives no valid value for is None."""
         root = BASE_URL.rsplit("/", 1)[0]
 
-        def released(set_id: str) -> date | None:
+        def detail(set_id: str) -> SetDetails | None:
             for _ in range(2):
                 try:
                     response = self.client.get(f"{root}/sets/{quote(set_id, safe='-._~')}")
                     if response.status_code != 200:
                         continue
                     data = response.json()
-                    value = data.get("releaseDate") if isinstance(data, dict) and data.get("id") == set_id else None
-                    return date.fromisoformat(value) if isinstance(value, str) and re.fullmatch(
+                    if not isinstance(data, dict) or data.get("id") != set_id:
+                        return None
+                    value = data.get("releaseDate")
+                    released = date.fromisoformat(value) if isinstance(value, str) and re.fullmatch(
                         r"\d{4}-\d{2}-\d{2}", value) else None
+                    serie = data.get("serie")
+                    series_id = serie.get("id") if isinstance(serie, dict) else None
+                    series_name = serie.get("name") if isinstance(serie, dict) else None
+                    if not (isinstance(series_id, str) and re.fullmatch(SOURCE_ID_PATTERN, series_id)
+                            and isinstance(series_name, str) and series_name.isprintable()
+                            and 1 <= len(series_name.strip()) <= 200):
+                        series_id = series_name = None
+                    return SetDetails(released, series_id, series_name.strip() if series_name else None)
                 except (httpx.HTTPError, ValueError):
                     continue
             return None
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            found = dict(zip(set_ids, pool.map(released, set_ids)))
-        return {set_id: value for set_id, value in found.items() if value is not None}
+            found = dict(zip(set_ids, pool.map(detail, set_ids)))
+        return {set_id: value for set_id, value in found.items()
+                if value is not None and (value.release_date or value.series_id)}
 
     def fetch(self, source_id: str) -> dict:
         response = self._response(f"{BASE_URL}/{quote(source_id, safe='-._~')}")
@@ -538,17 +558,17 @@ def _validate_records(conn, run_id: UUID, source, first, records) -> list:
     return normalized
 
 
-def _release_dates(source, normalized) -> dict:
-    """Read each set's release date from the source, best effort."""
-    # Each set's release date (migration 044), read before the promotion transaction. A source without the method
-    # (the test sources) dates nothing.
-    dating = getattr(source, "set_release_dates", None)
+def _set_details(source, normalized) -> dict:
+    """Read each set's release date and series from the source, best effort."""
+    # Each set's release date and series (migrations 044 and 155), read before the promotion transaction. A source
+    # without the method (the test sources) dates nothing.
+    detailing = getattr(source, "set_details", None)
     try:
-        release_dates = dating(sorted({item["set_id"] for item in normalized})) if dating else {}
-    except Exception as error:  # Dates are best effort: an import never fails for them.
-        logging.getLogger(__name__).warning("Set release dates unavailable: %s", type(error).__name__)
-        release_dates = {}
-    return release_dates
+        details = detailing(sorted({item["set_id"] for item in normalized})) if detailing else {}
+    except Exception as error:  # These are best effort: an import never fails for them.
+        logging.getLogger(__name__).warning("Set details unavailable: %s", type(error).__name__)
+        details = {}
+    return details
 
 
 def _build_raw(records, first) -> bytes:
@@ -560,7 +580,7 @@ def _build_raw(records, first) -> bytes:
     return raw
 
 
-def _promote(conn, run_id: UUID, first, records, normalized, release_dates, raw, before_promotion) -> None:
+def _promote(conn, run_id: UUID, first, records, normalized, set_details, raw, before_promotion) -> None:
     """Promote the run to the active generation in one transaction."""
     with conn.transaction():
         state = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton FOR UPDATE").fetchone()
@@ -572,10 +592,12 @@ def _promote(conn, run_id: UUID, first, records, normalized, release_dates, raw,
         old_id = state["active_generation"]
         conn.execute("INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256) VALUES (%s,%s,%s,%s)",
                      (run_id, len(first), raw, hashlib.sha256(raw).hexdigest()))
-        if release_dates:
-            conn.execute("""INSERT INTO catalog_generation_set(generation_id,set_id,release_date)
-              SELECT %s,t.set_id,t.released FROM unnest(%s::text[],%s::date[]) AS t(set_id,released)""",
-                         (run_id, list(release_dates), list(release_dates.values())))
+        if set_details:
+            conn.execute("""INSERT INTO catalog_generation_set(generation_id,set_id,release_date,series_id,series_name)
+              SELECT %s,t.set_id,t.released,t.series_id,t.series_name
+              FROM unnest(%s::text[],%s::date[],%s::text[],%s::text[]) AS t(set_id,released,series_id,series_name)""",
+                         (run_id, list(set_details), [d.release_date for d in set_details.values()],
+                          [d.series_id for d in set_details.values()], [d.series_name for d in set_details.values()]))
         # Each set's printed card count (migration 150), from the records just fetched.
         insert_set_counts(conn, run_id, set_counts(records.values()))
         if before_promotion:
@@ -768,10 +790,10 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
         _progress(conn, run_id, "fetching", enumerated_count=len(first))
         records = _fetch_records(conn, run_id, source, first)
         normalized = _validate_records(conn, run_id, source, first, records)
-        release_dates = _release_dates(source, normalized)
+        set_details = _set_details(source, normalized)
         raw = _build_raw(records, first)
         _progress(conn, run_id, "promoting", validated_count=len(normalized))
-        _promote(conn, run_id, first, records, normalized, release_dates, raw, before_promotion)
+        _promote(conn, run_id, first, records, normalized, set_details, raw, before_promotion)
         _publish_after_commit(conn, run_id, source)
     except BaseException as exc:
         conn.rollback()
