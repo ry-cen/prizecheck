@@ -36,7 +36,7 @@ Backoff schedule: failure k waits `min(60 * 2^(k-1), 900)` s times a jitter in 0
 
 ## Invariants
 
-1. Only a fence holder writes `result:`/`quote:`: a runner's claim, or an import seed that advances `fence:` in the same CAS (see Import seeding). Both write only under the Edition's current revision.
+1. Only a fence holder writes `result:`/`quote:`: a runner's claim. It writes only under the Edition's current revision.
 2. `result.attempt == quote.attempt == fence.attempt`, as integers.
 3. `checked_at` changes only on a validated write.
 4. Absence is always `absent` plus `quote` deleted, written in one CAS.
@@ -150,23 +150,3 @@ The worker imports `app.price_source` and `app.tcgdex_record` lazily. It calls `
 | Both processes die (SIGKILL)                 | Lock is free; same-host reclaim requeues the jobs; one extra fetch.         |
 | Runner stopped (SIGSTOP)                     | Lock is held; reclaim returns `uncertain`; the runner resumes and finishes. |
 | Another host dies                            | `uncertain`; operator release.                                              |
-
-## Import seeding (ADR 0013)
-
-Code: `api/app/price_seed.py`, called by `catalog.execute_run` after `publish_catalog_best_effort`, under the importer's lock. `TCGdexSource.fetch` keeps each card's price view in `price_views`: `id`, `pricing` and `variants_detailed`, parsed again from the same response with `parse_float=str` as `price_source.fetch` parses a card, together with the epoch milliseconds it arrived. The record the import itself stores, its fingerprints and its raw generation are unchanged. A source without `price_views` seeds nothing; that covers the test fakes and the CI process fixture.
-
-1. One committed PostgreSQL read lists the new generation's active TCGdex Editions that `edition_targets` reports `verified` with a product and a quote lookup, leaving out Unspecified Variants. No transaction is open during store I/O. With no such Edition the store is not opened.
-2. Batches of 16 Editions read `result:`, `quote:`, `fence:`, `work:`, `catalog:edition:` and `quarantine:edition:` (96 keys). An Edition is skipped, keeping what the cache holds, when:
-   - the store's catalog records disagree with PostgreSQL on state, mapping revision, product or lookup (`ineligible`);
-   - `work:` is running or queued and unexpired (`in_flight`); an expired queued record that pruning left behind is ignored, though its version is still expected so a fresh admission fences the seed out;
-   - `work:` is unreadable (`unreadable_work`);
-   - the result is pending or invalid (`unreadable_result`);
-   - the fence is invalid (`unreadable_fence`);
-   - the cached `checked_at` is at or after the fetch time (`newer_check`);
-   - `select_quote` returns `Absent` (`absent`) or a failure or invalid amount (`invalid`).
-3. Otherwise `attempt = max(fence.attempt, result.attempt) + 1`. One CAS per batch expects all six keys of every planned Edition and writes `fence: {v:1, attempt}`, `result: {state:'quote', attempt, checked_at}` and the quote payload, with `provider_updated_at` nulled when it fails validation, as the runner does. The scheduler, `work:` and `backoff:` are never touched. A lost CAS re-reads and re-plans the batch, up to three times; what still conflicts is left to the runner (`conflict`).
-4. Each store call has 5 s and the whole seed 600 s (`budget`). The first `ProjectionUnavailable` ends seeding (`store_unavailable`), and any other error ends it (`error`). The import's outcome never changes. Only counts are logged.
-
-A pull requested while the previous run is still seeding is ignored, because the importer's lock is held until seeding ends. Start it again after the run finishes.
-
-Invariants: the seed holds the fence it advances (1); `result`, `quote` and `fence` carry one attempt (2); `checked_at` comes from a validated quote (3); it never writes absence (4, 5); it does no source I/O (6); it never writes the scheduler (9).
