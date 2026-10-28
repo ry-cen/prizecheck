@@ -1,6 +1,6 @@
 # Refresh accessed card prices after one-hour cache expiry
 
-**Status:** accepted — owner instruction, 2026-10-08.
+**Status:** accepted — owner instruction, 2026-10-08. Superseded in part by [ADR 0019](0019-tcgcsv-daily-prices.md): prices now come from one daily TCGCSV import, so the one-hour, 24-hour and three-second age bands, admission, waiting for a fetch and coalesced in-flight work no longer apply. No manual price-refresh control and zero PostgreSQL connections for anonymous Published Deck access still apply.
 
 During [Decide price refresh scope and workload bounds](https://github.com/ry-cen/prizecheck/issues/41), the owner directed: “lets only update cards that are accessed and have stale prices”, following discussion of a one-hour cache expiry. This replaces the earlier daily refresh preference, including the proposed daily fallback for unvisited owned or published cards.
 

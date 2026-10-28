@@ -1,6 +1,6 @@
 # Catalog imports seed the price cache
 
-**Status:** accepted — owner decision, 2026-10-12.
+**Status:** accepted — owner decision, 2026-10-12. Superseded in part by [ADR 0019](0019-tcgcsv-daily-prices.md): catalog imports no longer seed prices. Its viewport rule (a price slot asks only when it comes near the viewport) still applies.
 
 Catalog pages showed "No cached price yet · Refresh timed out" for rows further down the page. Every uncached row asked for a refresh at once, and the runner's TCGdex token bucket (8 tokens, refilling one per second) answers about ten cards inside the 2.5 s wait. Meanwhile a full pull already receives every card's TCGdex pricing, and `docs/prices.md` said that snapshot never seeds a price. The owner decided: "we really should not be discarding the information only to pull again".
 

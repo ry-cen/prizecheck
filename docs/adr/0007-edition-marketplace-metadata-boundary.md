@@ -1,6 +1,6 @@
 # Preserve physical Edition identity while separating marketplace metadata
 
-**Status:** accepted — owner decisions, 2026-10-08.
+**Status:** accepted — owner decisions, 2026-10-08. Refined by [ADR 0019](0019-tcgcsv-daily-prices.md): the reviewed product mapping still decides which product an Edition is; matching rule v4 and a derived price subtype build on it.
 
 Marketplace IDs currently enter physical Variant Descriptor keys, while raw quote changes can alter fingerprints used by identity reviews. The owner accepted separate mutable provider/marketplace lookup data and quote state, with physical facets defining Card Editions. Existing immutable Edition IDs and all inventory/override/public references are preserved; cleaned physical correspondence may recognize an existing Edition only when proven one-to-one, while ambiguous collisions require maintainer review and never automatically merge quantities.
 
