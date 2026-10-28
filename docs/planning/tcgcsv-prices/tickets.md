@@ -14,7 +14,7 @@ change ([verification](../../agents/verification.md)). Collector screens must sh
 Issues: P1 [#345](https://github.com/ry-cen/prizecheck/issues/345), P2 [#346](https://github.com/ry-cen/prizecheck/issues/346), P2b [#347](https://github.com/ry-cen/prizecheck/issues/347), P3 [#348](https://github.com/ry-cen/prizecheck/issues/348), P4 [#349](https://github.com/ry-cen/prizecheck/issues/349), P4b [#350](https://github.com/ry-cen/prizecheck/issues/350), P5 [#351](https://github.com/ry-cen/prizecheck/issues/351), P5b [#352](https://github.com/ry-cen/prizecheck/issues/352), P6 [#353](https://github.com/ry-cen/prizecheck/issues/353), P7 [#354](https://github.com/ry-cen/prizecheck/issues/354), P8 [#355](https://github.com/ry-cen/prizecheck/issues/355), P9 [#356](https://github.com/ry-cen/prizecheck/issues/356).
 
 Order: P1 → P2 and P3 (parallel) → P2b, P5, P6 and P7 (after P2/P3) → **release A** → P4, P4b and P5b → **release B** → P8 (after
-#339) → P9 (≥7 days after release B). The two releases are the staged cutover in brief §4.11. Release A changes no
+#339) → P9 (≥7 days after release B). The two releases are the staged cutover in [design](design.md) §4.11. Release A changes no
 collector-visible price; release B switches readers onto data that is already complete. P4 and P5b must not reach `main`
 before release A has run in production.
 
@@ -34,7 +34,7 @@ before release A has run in production.
 
 - [ ] With a fake TCGCSV (an `httpx.MockTransport` serving two groups), a run stores every product and price row and
       records `imported` with the counts and `source_updated_at`.
-- [ ] `tcgplayer_product.number_key` is `number_key(Number)` (brief §4.4). A product without a Number has a null key.
+- [ ] `tcgplayer_product.number_key` is `number_key(Number)` ([design](design.md) §4.4). A product without a Number has a null key.
 - [ ] Amounts are exact decimals: `954.65` stays `954.650000`.
 - [ ] A negative, non-finite, ≥10^12 or 7-decimal value **keeps the previously stored value** of that field and counts
       in `rejected_rows`. A legitimate JSON null stores NULL, and a zero stores 0.
@@ -157,7 +157,7 @@ screen under `web/src/owner/`, the generated client, `api/tests/test_metadata_re
 - `rebind` is always full (no partial form). It is called by the import job, after catalog promotion (best effort,
   **after** the existing `seed_from_import`, which P4 removes), after a marketplace decision, and after a rule
   activation.
-- The special-Edition rule and the shared-price guard follow brief §4.3.
+- The special-Edition rule and the shared-price guard follow [design](design.md) §4.3.
 - `price_import_job.py --rebind-only` runs `rebind`, `refresh_fallbacks` (once P7 exists) and `publish` (once P5 exists)
   without fetching. It is the data-repair step of the fix-forward plan.
 
@@ -211,7 +211,7 @@ api/tests/test_catalog.py -k "promot or publish"`
   records.
 - Regenerate clients.
 
-- Add the `PRICE_READS` kill switch (brief §4.11): read by `prices.py` and passed to `api` in `compose.deploy.yml`
+- Add the `PRICE_READS` kill switch ([design](design.md) §4.11): read by `prices.py` and passed to `api` in `compose.deploy.yml`
   (`PRICE_READS: ${PRICE_READS:-on}`), with the line documented in both env examples.
 
 **Acceptance criteria.**
@@ -416,7 +416,7 @@ web/tests/workspace-prices.spec.ts` (or the gallery spec the worker extends).
 - [ ] `catalog-refresh` with a stubbed `docker` runs the price job, then the check, then the index. A price exit of 2
       still runs the check and the index and ends non-zero. A price exit of 0 changes nothing else.
 - [ ] `catalog-refresh` and the job appear in `usage` and in the deploy-script tests.
-- [ ] The launch checklist lists the two-release cutover of brief §4.11 (release A: the deploy, the first import by hand, the v4 activation on the host (or through Owner
+- [ ] The launch checklist lists the two-release cutover of [design](design.md) §4.11 (release A: the deploy, the first import by hand, the v4 activation on the host (or through Owner
       controls once #343 ships), the `--force` re-import and the spot checks of AC 4/5; release B: the reader switch and its checks) and the fix-forward procedure (`PRICE_READS=off`, `--rebind-only` or a
       `--force` re-import, a follow-up release). It says plainly that release A is never redeployed to restore TCGdex
       prices.
