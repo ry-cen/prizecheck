@@ -224,6 +224,17 @@ def test_half_the_prices_going_null_is_not_a_burst(conn):
     assert prices(conn)[(101, "Normal")]["market_price"] is None
 
 
+def test_a_small_group_going_null_is_not_a_burst(conn):
+    fake = Tcgcsv()
+    fake.products[1] = [product(101, "Card 1", "1")]
+    fake.prices[1] = [price(101, "Normal", 1.0)]
+    run(conn, fake)
+    fake.updated = T2
+    fake.prices[1] = [price(101, "Normal", None)]
+    assert run(conn, fake).outcome == "imported"
+    assert prices(conn)[(101, "Normal")]["market_price"] is None
+
+
 def test_a_row_missing_from_today_keeps_its_values_and_dates(conn):
     fake = Tcgcsv()
     run(conn, fake)

@@ -33,6 +33,7 @@ TIMEOUT_SECONDS = 30
 ATTEMPTS = 3
 BACKOFF_SECONDS = (1, 4)
 MAX_AMOUNT = Decimal(10) ** 12
+NULL_BURST_FLOOR = 4  # a group with fewer stored market prices never counts as a burst: one card going null is news, not noise
 MAX_FRACTION_DIGITS = 6
 SUBTYPE_VOCABULARY = frozenset({
     "Normal", "Reverse Holofoil", "Holofoil", "1st Edition", "Unlimited", "Unlimited Holofoil", "1st Edition Holofoil"})
@@ -212,7 +213,7 @@ def price_rows(items, result):
 
 def write_group(conn, group_id, products, prices, snapshot, result):
     """Upserts one group in one transaction, or raises SourceError('group_unusable') without writing: an empty answer where
-    rows are stored, or a null burst (more than half of the stored market prices arriving null)."""
+    rows are stored, or a null burst (more than half of at least NULL_BURST_FLOOR stored market prices arriving null)."""
     with conn.transaction():
         if not products and conn.execute("SELECT 1 FROM tcgplayer_product WHERE group_id = %s LIMIT 1",
                                          (group_id,)).fetchone():
@@ -228,7 +229,7 @@ def write_group(conn, group_id, products, prices, snapshot, result):
                     "FROM tcgplayer_price WHERE product_id = ANY(%s)", (sorted({pid for pid, _ in prices}),)):
                 stored[(row["product_id"], row["sub_type_name"])] = row
         had_market = [key for key in prices if key in stored and stored[key]["market_price"] is not None]
-        if had_market and sum(1 for key in had_market if prices[key]["market_price"] == (True, None)) * 2 > len(had_market):
+        if len(had_market) >= NULL_BURST_FLOOR and sum(1 for key in had_market if prices[key]["market_price"] == (True, None)) * 2 > len(had_market):
             raise SourceError("group_unusable")
         rejected = 0
         for key, fields in prices.items():
