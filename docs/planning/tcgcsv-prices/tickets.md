@@ -4,13 +4,13 @@ Decision: [ADR 0019](../../adr/0019-tcgcsv-daily-prices.md). Design sections are
 
 - #339, #340 and #341 are unchanged; P8 builds on #339, and P6 lands after #340.
 - #342 is superseded by P4.
-- #343 is unchanged and recommended before the cutover.
+- #343 was unchanged and recommended before the cutover; P11 (#377) now supersedes it.
 
 Each ticket is accepted on its own narrow tests plus `npm run check` and `npm run guardrails`. The pull request is accepted on
 green GitHub CI; the full local gate and the burn-in are optional ([verification](../../agents/verification.md)). Collector screens must show no source, time or refresh state
 ([AGENTS.md](../../../AGENTS.md)). The single exception, decided by the owner, is P4b's footer line "Prices from TCGCSV".
 
-Issues: P1 [#345](https://github.com/ry-cen/prizecheck/issues/345), P2 [#346](https://github.com/ry-cen/prizecheck/issues/346), P2b [#347](https://github.com/ry-cen/prizecheck/issues/347), P3 [#348](https://github.com/ry-cen/prizecheck/issues/348), P4 [#349](https://github.com/ry-cen/prizecheck/issues/349), P4b [#350](https://github.com/ry-cen/prizecheck/issues/350), P5 [#351](https://github.com/ry-cen/prizecheck/issues/351), P5b [#352](https://github.com/ry-cen/prizecheck/issues/352), P6 [#353](https://github.com/ry-cen/prizecheck/issues/353), P7 [#354](https://github.com/ry-cen/prizecheck/issues/354), P8 [#355](https://github.com/ry-cen/prizecheck/issues/355), P9 [#356](https://github.com/ry-cen/prizecheck/issues/356).
+Issues: P1 [#345](https://github.com/ry-cen/prizecheck/issues/345), P2 [#346](https://github.com/ry-cen/prizecheck/issues/346), P2b [#347](https://github.com/ry-cen/prizecheck/issues/347), P3 [#348](https://github.com/ry-cen/prizecheck/issues/348), P4 [#349](https://github.com/ry-cen/prizecheck/issues/349), P4b [#350](https://github.com/ry-cen/prizecheck/issues/350), P5 [#351](https://github.com/ry-cen/prizecheck/issues/351), P5b [#352](https://github.com/ry-cen/prizecheck/issues/352), P6 [#353](https://github.com/ry-cen/prizecheck/issues/353), P7 [#354](https://github.com/ry-cen/prizecheck/issues/354), P8 [#355](https://github.com/ry-cen/prizecheck/issues/355), P9 [#356](https://github.com/ry-cen/prizecheck/issues/356), P10 [#376](https://github.com/ry-cen/prizecheck/issues/376), P11 [#377](https://github.com/ry-cen/prizecheck/issues/377), P12 [#378](https://github.com/ry-cen/prizecheck/issues/378).
 
 Order: P1 → P2 and P3 (parallel) → P2b, P5, P6 and P7 (after P2/P3) → **release A** → P4, P4b and P5b → **release B** → P8 (after
 #339) → P9 (≥7 days after release B). The two releases are the staged cutover in [design](design.md) §4.11. Release A changes no
@@ -466,10 +466,155 @@ runner tests).
 **Verification.** `npm run verify -- --fast`, because P9 deletes across suites, then, because it crosses suites, an
 integration run on CI (`gh workflow run verify.yml -f integration=sharded`) before the release PR.
 
+## P10. Matching rule v5: card-level TCGplayer ids and the 30th Anniversary sets (#376)
+
+Added after release (v0.2.1). Design §4.14.
+
+**What to build.**
+
+- `MatchingRulesV5(MatchingRulesV4)` registered as 5 (§4.14), with:
+  - `card_product`, the card-level TCGdex `thirdParty.tcgplayer` for a plain Edition whose variant names no id (source 3);
+  - `TCGPLAYER_GROUPS`, V4's ten sets plus `30th: 24722` and `30th-c: 24837`;
+  - `NAME_ONLY_SETS = {"30th-c"}` and the name-only match.
+- `refresh_editions` fills `tcgplayer_candidates` from the active rule's table: the group's numbered products for name-only
+  sets, and `number_key` matches otherwise. For name-only sets it also fills `set_name_count`.
+- `tcgplayer_candidates`, `rematch_promos` and `matched_by_number_editions` read the active rule's table and predicate
+  (falling back to the newest registered rule) instead of `MatchingRulesV4` directly.
+- The owner list "Matched by card number" becomes "Matched by number or name" and includes the 30th sets.
+
+**Acceptance criteria.**
+
+- [ ] An `xy11-116`-shaped Edition (one variant `{type: normal}` with no `thirdParty`, card `thirdParty.tcgplayer`
+      121240, no `pricing` in the stored record) verifies to 121240 under v5 and fails `no_product` under v4. With
+      TCGCSV offering only `Holofoil` it binds `Holofoil`. With `Normal` and `Holofoil` both offered it binds `Normal`.
+- [ ] A card with `normal` and `reverse` variants and only a card-level id verifies both to that product. They bind
+      `Normal` and `Reverse Holofoil`.
+- [ ] A stamped (non-1st-Edition) variant of such a card stays `rule_failed`.
+- [ ] A variant with its own `thirdParty.tcgplayer` uses that id, not the card's.
+- [ ] The card's product already verified on another Printing gives `duplicate_mapping`.
+- [ ] A `30th` Edition `021` "Greninja ex" verifies to the product numbered `021/128` named "Greninja ex - 021/128".
+      `087` "Nidoran♀" against "Nidoran F" stays `rule_failed`. A sealed product with no number is never a candidate.
+- [ ] A `30th-c` Edition `001` "Charizard" verifies to the group's product "Charizard", numbered `4/102`. `003`
+      "Metagross" against "Metagross (Delta Species)" stays `rule_failed`. Two Printings with the same name in a
+      name-only set both stay `rule_failed`, even when one product matches exactly.
+- [ ] A `30th-c` Printing verified by name gets TCGplayer fallback art from `card_art.refresh_fallbacks` (TCGdex has no
+      image for any of the 30; all 30 TCGCSV products have one). A `30th` Printing keeps its TCGdex image.
+- [ ] `TCGPLAYER_GROUPS` equals exactly V4's table plus `{30th: 24722, 30th-c: 24837}`, and `NAME_ONLY_SETS` equals
+      `{30th-c}`. A set outside the table never takes the set path, and a card with a TCGdex id never takes it.
+- [ ] `--rematch` verifies a `30th` Edition whose product appears in `tcgplayer_product` after activation.
+- [ ] The owner list shows a `30th-c` name match beside a dpp number match. Rejecting it keeps it unverified through
+      later activations and rematches.
+- [ ] `test_registered_rule_digests_are_pinned` pins v5's digest. Editing V1–V4 still fails it.
+- [ ] Applying v5 (through P11's rollout) re-evaluates unverified, not auto-closed Editions only. Quarantined and
+      maintainer-decided Editions are unchanged.
+- [ ] No collector response or screen changes, apart from cards that now have a price.
+
+**Blocked by.** P11 [#377](https://github.com/ry-cen/prizecheck/issues/377) (v5 reaches production by deploy, not by an owner activation). The code can be built in parallel.
+
+**Likely touched.** `api/app/catalog_targets.py`, `api/app/metadata_reviews.py`, `web/src/owner/NumberMatches.tsx`,
+`api/tests/test_catalog_targets.py`, `api/tests/test_metadata_reviews.py` and `api/tests/test_price_binding.py`.
+
+**Verification.** `npm run verify -- --suite api -- api/tests/test_catalog_targets.py api/tests/test_metadata_reviews.py
+api/tests/test_price_binding.py`, plus `npm run check` and `npm run guardrails`.
+
+## P11. Deploying a release applies its newest catalog rules (#377)
+
+Decision: [ADR 0021](../../adr/0021-deploy-applies-newest-catalog-rules.md). Design §4.15. Supersedes #343. This touches
+concurrency, a migration and a public (owner) interface, so it needs an independent review before it merges.
+
+**What to build.**
+
+- Migration `157_rule_rollout.sql`: `catalog_rule_activation.source` and `release_commit`, plus the
+  `catalog_rule_rollout` table (§4.15 point 2).
+- `api/app/rule_rollout.py`: `apply_newest_rules` and `resume`, which hold the advisory lock on a dedicated autocommit
+  connection. Each kind takes one of the apply, resume, digest-mismatch or newer-than-code paths. The phases are `live`
+  (one transaction), `editions` and `quote_variants` (batched), then `deliver`. It retries with backoff and marks
+  `failed` (§4.15 points 3–5).
+- Callers: API startup (background thread, never blocking health), `price_import_job.py`, and the catalog promotion path,
+  which calls `resume`.
+- `scripts/rule_rollout.py restore --to <commit>`, called by `cmd_rollback` before the previous release starts (point
+  6).
+- Removals: `MARKETPLACE_MATCHING`, `automatic_matching`, `ensure_matching_rule`, `_apply_automatic_matching`, the
+  activation route and form, and deactivation.
+- Owner controls: the read-only rules panel (point 7), with generated clients regenerated.
+- Docs and config listed in point 8. `compose.deploy.yml` passes `RELEASE_COMMIT: ${PRIZECHECK_IMAGE_TAG:-}` to the `api`
+  and `tools` services (today only `auth` has it).
+
+**Acceptance criteria.**
+
+- [ ] Starting the API with the newest version unapplied records exactly one `deploy` activation per kind, with
+      `release_commit`, and completes the rollout. Starting it again records nothing.
+- [ ] Two processes starting at once record one activation (advisory lock).
+- [ ] With `RULE_ROLLOUT_BATCH=2`, killing the rollout mid-`editions` and calling `resume` finishes from the cursor. The
+      final mapping states equal those of a single uninterrupted run, and `deliver` runs once more after a crash inside
+      it.
+- [ ] A concurrent collection write (`inventory_owner ... FOR UPDATE`) completes while a rollout runs, waiting no longer
+      than one batch.
+- [ ] A live-rule collision whose two claimants fall in different 500-row ranges suspends both and never qualifies
+      either first.
+- [ ] Same version with a different recorded digest: nothing is recorded or re-evaluated, and the panel shows the
+      mismatch.
+- [ ] An active version newer than the code knows: nothing is recorded, and verified Editions stay verified.
+- [ ] `restore --to` a commit whose newest matching version is 4, after v5 was applied: a `rollback` activation for v4
+      becomes current, nothing is re-evaluated, and v4 code then evaluates a live Printing without `no_active_rule`.
+- [ ] No bound owner: nothing is recorded, and the next `resume` after binding applies it.
+- [ ] A promotion during a rollout evaluates its new Editions under the new rule.
+- [ ] `POST /api/admin/catalog-rules/{kind}/activate` is gone (404/405). The panel shows progress and has no activate
+      control (browser test). `MARKETPLACE_MATCHING` appears nowhere in compose, env examples or docs.
+- [ ] `test_registered_rule_digests_are_pinned` still pins every version.
+
+**Blocked by.** Nothing. P10 is blocked by this ticket.
+
+**Likely touched.** `migrations/157_rule_rollout.sql`, `api/app/rule_rollout.py`, `api/app/catalog_targets.py`,
+`api/app/metadata_reviews.py`, `api/app/catalog.py`, `api/app/main.py`, `scripts/price_import_job.py`,
+`scripts/rule_rollout.py`, `deploy/host/prizecheck-deploy.sh`, `compose.deploy.yml`, `compose.prod.yml`,
+`deploy/host/prizecheck-prod.env.example`, `docs/deployment-oracle.md`, `docs/prices.md`,
+`docs/adr/0019-tcgcsv-daily-prices.md`, the owner rules panel under `web/src/owner/`, the generated clients,
+`api/tests/test_rule_rollout.py`, `api/tests/test_metadata_reviews.py`, `tests/tooling/test_deploy_pipeline.py` and
+`web/tests/owner-controls.spec.ts`.
+
+**Verification.** `npm run verify -- --suite api -- api/tests/test_rule_rollout.py api/tests/test_catalog_targets.py
+api/tests/test_metadata_reviews.py`; `npm run verify -- --suite browser -- web/tests/owner-controls.spec.ts`;
+`python -m pytest tests/tooling/test_deploy_pipeline.py`; `npm run check`; `npm run guardrails`.
+
+## P12. Matching rule v6: main-set cards with no TCGdex id (#378)
+
+Design §4.16.
+
+**What to build.**
+
+- `scripts/propose_set_groups.py`: proposes the TCGdex set → TCGCSV group(s) table and writes a per-set match report to
+  `docs/planning/tcgcsv-prices/set-groups-report.md`.
+- `MatchingRulesV6(MatchingRulesV5)`, registered as 6, with:
+  - `TCGPLAYER_SET_GROUPS`, the reviewed table;
+  - multi-group candidates;
+  - the reviewed name equivalences (`δ` ↔ `(Delta Species)`, hyphenated ↔ spaced `EX`/`GX`/`V`/`VMAX`/`VSTAR`/`ex`).
+- `refresh_editions` and `rematch_promos` cover every listed set.
+
+**Acceptance criteria.**
+
+- [ ] The report lists, for every proposed set: its group(s), TCGdex card count, cards with no id, exact matches and
+      misses with their candidates. The table contains only sets accepted in review.
+- [ ] `ex15` `1` "Ampharos δ" matches "Ampharos (Delta Species)". `sma` `SV46` "Leafeon-GX" matches "Leafeon GX" in
+      group 2594 and never in Shining Fates 2781. `bw11` Radiant Collection cards match in group 1465.
+- [ ] "Deoxys δ" against "Deoxys (Delta Species - Attack Forme)" and "Gengar" against "Gengar (Prime)" stay
+      `rule_failed`.
+- [ ] A card with any TCGdex id never takes the path. Special Editions are never matched.
+- [ ] `test_registered_rule_digests_are_pinned` pins v6.
+- [ ] After P11's rollout, the owner list shows the main-set matches, and matched Printings without a TCGdex image get
+      fallback art.
+
+**Blocked by.** P10 and P11.
+
+**Likely touched.** `scripts/propose_set_groups.py`, `api/app/catalog_targets.py`, `api/app/metadata_reviews.py`,
+`api/tests/test_catalog_targets.py` and `docs/planning/tcgcsv-prices/set-groups-report.md`.
+
+**Verification.** `npm run verify -- --suite api -- api/tests/test_catalog_targets.py api/tests/test_metadata_reviews.py`,
+plus `npm run check` and `npm run guardrails`.
+
 ## Not ticketed (recorded follow-ups)
 
 - Scanner fingerprints of fallback art. They are blocked by the scanner page's COEP and the CDN's missing CORS header.
 - An owner subtype override for ambiguous or shared Editions. Only if the P6 counts show it is needed.
-- Group/number matching outside the Black Star promo sets (trainer kits, McDonald's and other promo groups). Each would
-  need an owner decision and a new rule version.
+- Group/number matching for trainer kits, McDonald's and other promo groups not covered by P12's reviewed table.
 - The 91 scanner-index failures (TCGdex assets, unrelated to fallback art). Query `scanner_fingerprint_failure` first.
