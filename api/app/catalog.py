@@ -161,22 +161,31 @@ class SetDetails(NamedTuple):
     series_name: str | None
 
 
+def user_agent() -> str:
+    """How the importer and the scheduled change check identify themselves to TCGdex: PrizeCheck-catalog/1 (+<contact>),
+    the contact from SCANNER_INDEX_CONTACT, else OWNER_EMAIL (as scripts/scanner_index_job.py does)."""
+    contact = os.environ.get("SCANNER_INDEX_CONTACT") or os.environ.get("OWNER_EMAIL")
+    return f"PrizeCheck-catalog/1 (+{contact.strip()})" if contact and contact.strip() else "PrizeCheck-catalog/1"
+
+
 class TCGdexSource:
-    def __init__(self):
-        self.client = httpx.Client(timeout=20, follow_redirects=False,
+    def __init__(self, attempts: int = 12, max_backoff: float = 30):
+        # The importer retries a failing request up to 12 times; the daily change check passes far fewer.
+        self.attempts, self.max_backoff = attempts, max_backoff
+        self.client = httpx.Client(timeout=20, follow_redirects=False, headers={"User-Agent": user_agent()},
                                    limits=httpx.Limits(max_connections=MAX_WORKERS, max_keepalive_connections=MAX_WORKERS))
         self.excluded_sets, self.excluded_ids = frozenset(), frozenset()
 
     def _response(self, url: str):
-        for attempt in range(12):
+        for attempt in range(self.attempts):
             try:
                 response = self.client.get(url)
                 response.raise_for_status()
                 return response
             except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
-                if attempt == 11 or isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500 and exc.response.status_code != 429:
+                if attempt == self.attempts - 1 or isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500 and exc.response.status_code != 429:
                     raise CatalogError("TCGdex request failed") from exc
-                time.sleep(min(30, 2 ** attempt) + random.uniform(0, 0.5))
+                time.sleep(min(self.max_backoff, 2 ** attempt) + random.uniform(0, 0.5))
         raise CatalogError("TCGdex request failed")
 
     def _get(self, url: str):

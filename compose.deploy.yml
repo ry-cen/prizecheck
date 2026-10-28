@@ -34,6 +34,8 @@ x-api-environment: &api-environment
   ART_FETCH_CONTACT: ${SCANNER_INDEX_CONTACT:-${OWNER_EMAIL}}
   # The release's commit: the API applies its newest catalog rules (ADR 0021).
   RELEASE_COMMIT: ${PRIZECHECK_IMAGE_TAG:-}
+  # The catalog importer (api) and the daily change check (tools) send the same TCGdex User-Agent, PrizeCheck-catalog/1 (+contact).
+  SCANNER_INDEX_CONTACT: ${SCANNER_INDEX_CONTACT:-${OWNER_EMAIL}}
   # The owner panel shows the last day's new accounts against this cap; the auth gateway enforces it.
   DAILY_SIGNUP_CAP: ${DAILY_SIGNUP_CAP:-100}
   NODE_ENV: ${PRIZECHECK_NODE_ENV:-development}

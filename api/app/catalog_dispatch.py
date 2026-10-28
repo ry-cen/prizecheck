@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 from threading import Thread
+from typing import NamedTuple
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -23,7 +24,28 @@ def launch_import(run_id: UUID):
     return child
 
 
+class Dispatch(NamedTuple):
+    """What dispatch decided inside its locks. run_id is None while a promotion is committing (no run is visible).
+    started: this call reserved a new run (and launched it, unless the launch raised). child: the launched process."""
+    run_id: UUID | None
+    started: bool
+    child: subprocess.Popen | None = None
+    declined: bool = False  # the caller's guard said a new run is no longer wanted
+
+
 def dispatch_import(conn):
+    """The owner routes' contract: one run id for a new run and for an already-active one, None while a promotion commits."""
+    return dispatch_import_detailed(conn).run_id
+
+
+def dispatch_import_detailed(conn, on_reserved=None, guard=None) -> Dispatch:
+    """dispatch_import, but telling a started run from one that was already active, and handing back the child.
+
+    guard(conn) is asked, inside the locks and only when a new run would be reserved, whether to go ahead; False returns
+    Dispatch(None, False, declined=True) with nothing reserved (a guard that raises propagates and reserves
+    nothing either). on_reserved(conn, run_id) runs once the reservation is committed and before the launch (still inside
+    the locks), so a crash or a failed launch stays attributable to the caller. If on_reserved or the launch fails, the run
+    is marked CATALOG_DISPATCH_FAILED and the same 503 is raised."""
     runner_owned = False
     conn.execute('SELECT pg_advisory_lock(%s)', (DISPATCH_LOCK,))
     conn.commit()
@@ -33,11 +55,13 @@ def dispatch_import(conn):
             active = conn.execute("""SELECT id,coalesce(lease_until,started_at+interval '2 minutes')>clock_timestamp() AS healthy
               FROM catalog_run WHERE outcome IS NULL FOR UPDATE""").fetchone()
             if active and (not runner_owned or active['healthy']):
-                return active['id']
+                return Dispatch(active['id'], False)
             if not runner_owned:
                 # No visible active row while publication is committing. A new
                 # reservation here would misrepresent the live runner's state.
-                return None
+                return Dispatch(None, False)
+            if guard is not None and not guard(conn):
+                return Dispatch(None, False, declined=True)
             if active:
                 conn.execute("""UPDATE catalog_run SET phase='failed',outcome='failed',
                   error='Catalog import interrupted; start a new pull',finished_at=now(),lease_until=NULL
@@ -48,13 +72,17 @@ def dispatch_import(conn):
         conn.commit()
         runner_owned = False
         try:
-            launch_import(run_id)
+            if on_reserved is not None:
+                on_reserved(conn, run_id)
+                conn.commit()
+            child = launch_import(run_id)
         except Exception:
+            conn.rollback()
             conn.execute("""UPDATE catalog_run SET phase='failed',outcome='failed',error='CATALOG_DISPATCH_FAILED',
               finished_at=now(),lease_until=NULL WHERE id=%s AND outcome IS NULL""",(run_id,))
             conn.commit()
             raise HTTPException(503,{'code':'CATALOG_DISPATCH_FAILED'}) from None
-        return run_id
+        return Dispatch(run_id, True, child)
     finally:
         conn.rollback()
         if runner_owned:

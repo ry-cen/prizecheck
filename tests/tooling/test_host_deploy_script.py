@@ -49,6 +49,14 @@ if 'config' in args:
     print('{"services": {"web": {"ports": [{"host_ip": "127.0.0.1", "target": 8080, "published": "8088"}]}}}'); sys.exit(0)
 if 'inspect' in args:
     print('ghcr.io/example/prizecheck-api:' + os.environ['FAKE_COMMIT']); sys.exit(0)
+if 'ps' in args and 'label=prizecheck.job=catalog-refresh' in args:
+    with open(os.environ['FAKE_LOG'], 'a') as log:
+        log.write(json.dumps({'args': args, 'mode': None, 'snapshots': None}) + '\n')
+    if os.environ.get('FAKE_PS_FAIL'):
+        sys.exit(1)
+    if os.environ.get('FAKE_REFRESH_IDS'):
+        print(os.environ['FAKE_REFRESH_IDS'].replace(',', '\n'))
+    sys.exit(0)
 if 'ps' in args and '-q' in args:
     print('container'); sys.exit(0)
 if 'exec' in args and 'printenv' in args:
@@ -62,7 +70,7 @@ if 'run' in args and 'tools' in args:
         sys.exit(int(os.environ.get('FAKE_RESTORE_EXIT', '0')))
     if '-c' in args and os.environ.get('FAKE_NO_ROLLOUT_SCRIPT'):  # the probe for scripts/rule_rollout.py in the image
         sys.exit(int(os.environ['FAKE_NO_ROLLOUT_SCRIPT']))
-    print('schema'); sys.exit(0)
+    print(os.environ.get('FAKE_TOOLS_OUT', 'schema').replace(',', '\n')); sys.exit(0)
 if 'run' in args and 'auth' in args:
     # The candidate proof is the directory mounted with -v, named by the SIGNUP_READINESS_FILE given with -e.
     mount = args[args.index('-v') + 1].split(':')
@@ -93,6 +101,30 @@ with open(os.environ['FAKE_LOG'], 'a') as log:
     log.write(json.dumps({'args': args, 'mode': os.environ.get('PRIZECHECK_SIGNUP_MODE'), 'snapshots': snapshots,
                           'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
 '''.replace('#!PYTHON', '#!' + sys.executable)
+# A `docker` for the catalog-refresh tests: every call is logged as JSON; `run ... tools ... app.catalog_refresh` prints the
+# check id (FAKE_CHECK_STDOUT, default one valid line) and exits FAKE_CHECK_EXIT, `--record-index` exits FAKE_RECORD_EXIT,
+# and the scanner index exits FAKE_INDEX_EXIT.
+FAKE_REFRESH_DOCKER = r'''#!PYTHON
+import json, os, sys
+args = sys.argv[1:]
+if 'version' in args:
+    print('v2'); sys.exit(0)
+if 'config' in args:
+    print('{"services": {"web": {"ports": [{"host_ip": "127.0.0.1", "target": 8080, "published": "8088"}]}}}'); sys.exit(0)
+if 'run' not in args:
+    sys.exit(0)
+with open(os.environ['FAKE_LOG'], 'a') as log:
+    log.write(json.dumps({'args': args, 'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
+if 'scanner-index' in args:
+    sys.exit(int(os.environ.get('FAKE_INDEX_EXIT', '0')))
+if '--record-index' in args:
+    sys.exit(int(os.environ.get('FAKE_RECORD_EXIT', '0')))
+if 'app.catalog_refresh' in args:
+    sys.stdout.write(os.environ.get('FAKE_CHECK_STDOUT', 'catalog_check_id=' + CHECK_ID + '\n'))
+    sys.stderr.write('check log line\n')
+    sys.exit(int(os.environ.get('FAKE_CHECK_EXIT', '0')))
+sys.exit(0)
+'''.replace('#!PYTHON', '#!' + sys.executable).replace('CHECK_ID', repr('0f8f6a2c-1b3d-4e5f-8a9b-0c1d2e3f4a5b'))
 # Smoke only needs plausible answers from the web port.
 FAKE_CURL = '''#!/bin/sh
 case " $* " in
@@ -762,6 +794,198 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertEqual(prod.returncode, 0, prod.stderr)
         self.assertEqual(dev.stdout.split()[-1], hashlib.sha256(deploy + script).hexdigest())
         self.assertEqual(prod.stdout.split()[-1], hashlib.sha256(deploy + overlay + script).hexdigest())
+
+    def refresh(self, **extra):
+        """Runs `catalog-refresh` in a home whose current release is COMMIT with the refresh fake docker; returns
+        (exit code, output, recorded run calls)."""
+        home = self.make_home(PROD)
+        (home / 'state').mkdir()
+        (home / 'state/current').write_text(COMMIT + '\n')
+        env = self.fake_env(home, **extra)
+        (Path(env['PATH'].split(':')[0]) / 'docker').write_text(FAKE_REFRESH_DOCKER)
+        self.refresh_home = home
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'catalog-refresh'], capture_output=True,
+                                text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
+        return result.returncode, result.stdout + result.stderr, self.fake_calls()
+
+    @staticmethod
+    def kinds(calls):
+        names = []
+        for call in calls:
+            args = call['args']
+            names.append('record' if '--record-index' in args else 'index' if 'scanner-index' in args else 'check')
+        return names
+
+    def test_catalog_refresh_runs_the_check_then_the_index_and_records_its_exit_code(self):
+        code, output, calls = self.refresh()
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.kinds(calls), ['check', 'index', 'record'])
+        self.assertTrue(all(call['tag'] == COMMIT for call in calls))
+        self.assertIn('app.catalog_refresh', calls[0]['args'])
+        self.assertEqual(calls[2]['args'][-3:], ['--record-index', '0f8f6a2c-1b3d-4e5f-8a9b-0c1d2e3f4a5b', '0'])
+        self.assertIn('check log line', output)
+        for call in calls:  # every refresh container carries the label a deploy stops them by
+            self.assertIn('prizecheck.job=catalog-refresh', call['args'], call)
+            self.assertEqual(call['args'][call['args'].index('-l') + 1], 'prizecheck.job=catalog-refresh')
+            self.assertIn('--no-deps', call['args'])
+
+    def test_a_killed_check_skips_the_index_and_fails(self):
+        for killed in (137, 143):
+            code, output, calls = self.refresh(FAKE_CHECK_EXIT=str(killed))
+            self.assertNotEqual(code, 0, killed)
+            self.assertEqual(self.kinds(calls), ['check'], killed)
+            self.assertIn(f'killed (exit {killed})', output)
+
+    def deploy_calls(self, **extra):
+        home = self.signup_home(PROD)
+        code, output = self.deploy(home, OTHER, **extra)
+        return code, output, [call['args'] for call in self.fake_calls() if 'args' in call]
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_deploy_stops_catalog_refresh_containers_before_the_app_services(self):
+        code, output, calls = self.deploy_calls(FAKE_REFRESH_IDS='abc123,def456', FAKE_TOOLS_OUT='empty,999_pending.sql')
+        self.assertEqual(code, 0, output)
+        self.assertIn('Stopping catalog refresh containers', output)
+        label_ps = next(i for i, args in enumerate(calls) if 'label=prizecheck.job=catalog-refresh' in args)
+        self.assertIn('label=com.docker.compose.project=prizecheck-prod', calls[label_ps])
+        stop = next(i for i, args in enumerate(calls) if args == ['stop', 'abc123', 'def456'])
+        app_stop = next(i for i, args in enumerate(calls) if 'compose' in args[:1] and 'stop' in args and 'api' in args)
+        up = next(i for i, args in enumerate(calls) if 'up' in args)
+        self.assertLess(label_ps, stop)
+        self.assertLess(stop, app_stop)
+        self.assertLess(stop, up)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_deploy_without_refresh_containers_stops_none(self):
+        code, output, calls = self.deploy_calls()
+        self.assertEqual(code, 0, output)
+        self.assertFalse([args for args in calls if args[:1] == ['stop']])
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_rollback_stops_catalog_refresh_containers_first(self):
+        home = self.signup_home(PROD)
+        (home / 'state/previous').write_text(OTHER + '\n')
+        for path in ('current.json', 'records/current.json'):
+            (home / 'data/public' / path).parent.mkdir(parents=True, exist_ok=True)
+            (home / 'data/public' / path).write_text('{}')
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'rollback'], capture_output=True, text=True,
+                                timeout=60, stdin=subprocess.DEVNULL,
+                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, FAKE_COMMIT=OTHER, FAKE_REFRESH_IDS='abc123')})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = [call['args'] for call in self.fake_calls() if 'args' in call]
+        self.assertLess(calls.index(['stop', 'abc123']), next(i for i, args in enumerate(calls) if 'up' in args))
+
+    def test_catalog_refresh_runs_the_index_after_every_check_but_a_failed_pull(self):
+        for check_exit, index_runs, exit_zero in ((0, True, True), (2, True, False), (4, False, False), (1, True, False), (9, True, False)):
+            code, output, calls = self.refresh(FAKE_CHECK_EXIT=str(check_exit))
+            self.assertEqual('index' in self.kinds(calls), index_runs, (check_exit, output))
+            self.assertEqual(code == 0, exit_zero, (check_exit, output))
+            self.assertEqual('record' in self.kinds(calls), index_runs, check_exit)
+
+    def test_catalog_refresh_without_a_usable_check_id_records_nothing(self):
+        for stdout in ('', 'catalog_check_id=nope\n', 'catalog_check_id=0f8f6a2c-1b3d-4e5f-8a9b-0c1d2e3f4a5b\nextra\n',
+                       'noise\ncatalog_check_id=0f8f6a2c-1b3d-4e5f-8a9b-0c1d2e3f4a5b\n'):
+            code, output, calls = self.refresh(FAKE_CHECK_STDOUT=stdout)
+            self.assertEqual(self.kinds(calls), ['check', 'index'], stdout)
+            self.assertNotEqual(code, 0, output)  # even a clean exit 0 without an id is a failure
+        code, output, calls = self.refresh(FAKE_CHECK_STDOUT='', FAKE_CHECK_EXIT='1')
+        self.assertEqual(self.kinds(calls), ['check'])
+        self.assertNotEqual(code, 0)
+
+    def test_catalog_refresh_fails_when_the_index_or_the_record_call_fails(self):
+        for extra in ({'FAKE_INDEX_EXIT': '1'}, {'FAKE_INDEX_EXIT': '2'}, {'FAKE_INDEX_EXIT': '3'}, {'FAKE_RECORD_EXIT': '1'}):
+            code, output, calls = self.refresh(**extra)
+            self.assertNotEqual(code, 0, extra)
+            self.assertEqual(self.kinds(calls), ['check', 'index', 'record'], extra)
+        code, output, calls = self.refresh(FAKE_INDEX_EXIT='3')
+        self.assertEqual(calls[2]['args'][-1], '3')
+        self.assertIn('scanner index job exited with status 3', output)
+
+    def test_catalog_refresh_exits_quietly_while_another_refresh_holds_its_lock(self):
+        home = self.make_home(PROD)
+        (home / 'state').mkdir()
+        (home / 'state/current').write_text(COMMIT + '\n')
+        env = self.fake_env(home)
+        bin_dir = Path(env['PATH'].split(':')[0])
+        (bin_dir / 'docker').write_text(FAKE_REFRESH_DOCKER)
+        # A flock that reports the lock as held, and records the file it was asked for.
+        (bin_dir / 'flock').write_text('#!/bin/sh\necho "$@" >> "$FAKE_LOG.flock"\nexit 1\n')
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'catalog-refresh'], capture_output=True,
+                                text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.fake_calls(), [])
+        self.assertEqual(Path(str(self.fake_log) + '.flock').read_text().strip(), '-n 8')
+        self.assertTrue((home / 'state/catalog-refresh.lock').exists())
+        self.assertFalse((home / 'state/deploy.lock').exists())
+
+    def test_catalog_refresh_skips_while_a_deployment_holds_deploy_lock(self):
+        home = self.make_home(PROD)
+        (home / 'state').mkdir()
+        (home / 'state/current').write_text(COMMIT + '\n')
+        env = self.fake_env(home)
+        bin_dir = Path(env['PATH'].split(':')[0])
+        (bin_dir / 'docker').write_text(FAKE_REFRESH_DOCKER)
+        # Its own lock is free; deploy.lock is held. The probe never waits.
+        (bin_dir / 'flock').write_text('#!/bin/sh\necho "$@" >> "$FAKE_LOG.flock"\n[ "$2" = 8 ]\n')
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'catalog-refresh'], capture_output=True,
+                                text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.fake_calls(), [])
+        self.assertIn('skipping this catalog refresh', result.stdout + result.stderr)
+        own, probe = Path(str(self.fake_log) + '.flock').read_text().splitlines()
+        self.assertEqual(own, '-n 8')
+        self.assertTrue(probe.startswith('-n ') and probe.endswith('/state/deploy.lock true'), probe)
+
+    def refresh_with_flock(self, flock_body, **extra):
+        home = self.make_home(PROD)
+        (home / 'state').mkdir()
+        (home / 'state/current').write_text(COMMIT + '\n')
+        env = self.fake_env(home, **extra)
+        bin_dir = Path(env['PATH'].split(':')[0])
+        (bin_dir / 'docker').write_text(FAKE_REFRESH_DOCKER)
+        (bin_dir / 'flock').write_text('#!/bin/sh\n' + flock_body)
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'catalog-refresh'], capture_output=True,
+                                text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
+        return result.returncode, result.stdout + result.stderr, self.fake_calls()
+
+    def test_catalog_refresh_dies_on_a_flock_failure_that_is_not_a_held_lock(self):
+        # Only status 1 means "held"; a missing flock (127) must not read as a free or a held lock.
+        for body, message in (('exit 127\n', 'Could not take'), ('[ "$2" = 8 ] && exit 0\nexit 127\n', 'Could not probe')):
+            code, output, calls = self.refresh_with_flock(body)
+            self.assertNotEqual(code, 0, output)
+            self.assertIn(message, output)
+            self.assertIn('flock exited 127', output)
+            self.assertEqual(calls, [])
+
+    def test_catalog_refresh_looks_at_deploy_lock_again_before_the_index_and_the_record_call(self):
+        # The own lock is free; the probe finds deploy.lock free `FAKE_FREE_PROBES` times, then held.
+        body = ('[ "$2" = 8 ] && exit 0\nn=$(cat "$FAKE_LOG.probe" 2>/dev/null || echo 0)\necho $((n + 1)) > "$FAKE_LOG.probe"\n'
+                '[ "$n" -lt "$FAKE_FREE_PROBES" ]\n')
+        code, output, calls = self.refresh_with_flock(body, FAKE_FREE_PROBES='1')
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(self.kinds(calls), ['check'])
+        self.assertIn('skipping the scanner index', output)
+        code, output, calls = self.refresh_with_flock(body, FAKE_FREE_PROBES='2')
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(self.kinds(calls), ['check', 'index'])
+        self.assertIn('not recording the scanner index status', output)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_failing_docker_ps_is_warned_about_and_does_not_stop_the_deploy(self):
+        code, output, calls = self.deploy_calls(FAKE_PS_FAIL='1')
+        self.assertEqual(code, 0, output)
+        self.assertIn('could not list catalog refresh containers', output)
+
+    def test_catalog_refresh_needs_a_current_release_and_is_listed_in_usage(self):
+        home = self.make_home(PROD)
+        env = self.fake_env(home)
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'catalog-refresh'], capture_output=True,
+                                text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Nothing deployed yet', result.stdout + result.stderr)
+        self.assertIn('catalog-refresh', self.run_script(home, 'help').stdout)
+        # The SSH gate does not offer it.
+        self.assertNotIn('catalog-refresh', SCRIPT.read_text().split('ssh_gate() {')[1].split('main() {')[0])
 
 
 if __name__ == '__main__':

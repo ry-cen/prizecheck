@@ -658,6 +658,25 @@ PY
   done
 }
 
+# The catalog refresh runs its check, scanner index and record calls as one-off containers labelled
+# prizecheck.job=catalog-refresh. The check's pull is a child of its container, so `compose stop` of the app services does not
+# reach it: a deploy or rollback stops these first, or the importer could race the migrations or promote old code into a
+# new schema. The interrupted run is reconciled as failed by the next dispatch and counts toward the check's pause.
+CATALOG_REFRESH_LABEL="prizecheck.job=catalog-refresh"
+stop_catalog_refresh_jobs() {
+  local project ids filter=(--filter "label=$CATALOG_REFRESH_LABEL") stop_ids=()
+  project="$(trimmed_value PRIZECHECK_PROJECT)"
+  [[ -z "$project" ]] || filter+=(--filter "label=com.docker.compose.project=$project")
+  if ! ids="$(docker ps -q "${filter[@]}" 2>/dev/null </dev/null)"; then
+    log "Warning: could not list catalog refresh containers (docker ps failed); any running refresh is not stopped"
+    return 0
+  fi
+  [[ -n "$ids" ]] || return 0
+  read -r -a stop_ids <<<"$(tr '\n' ' ' <<<"$ids")"
+  log "Stopping catalog refresh containers before the release changes: ${stop_ids[*]}"
+  docker stop "${stop_ids[@]}" >/dev/null || log "Warning: could not stop every catalog refresh container"
+}
+
 # Starts the application services on a release and checks them. Does not touch state files.
 start_release() {
   local commit="$1"
@@ -715,6 +734,7 @@ cmd_deploy() {
   export PRIZECHECK_IMAGE_TAG="$commit"
 
   pull_images || die "Image pull failed"
+  stop_catalog_refresh_jobs
   compose up -d --wait --wait-timeout 120 db || die "PostgreSQL did not become healthy"
 
   local state existing pending
@@ -803,6 +823,7 @@ cmd_rollback() {
   current="$(read_state current)"; previous="$(read_state previous)"
   [[ -n "$previous" ]] || die "No previous release recorded"
   log "Rolling back from ${current:-none} to $previous. Migrations are not reversed: $previous runs against the current schema."
+  stop_catalog_refresh_jobs
   # Restore the catalog rules the previous release knows, with the current release's tool.
   if [[ -n "$current" ]]; then
     if ! restore_rules "$current" "$previous"; then
@@ -935,6 +956,103 @@ cmd_tool() {
   compose run --rm --no-deps tools "$@"
 }
 
+# The daily catalog refresh (ADR 0018, #339), run by hand or by the timer: the change check in the current API image, then
+# the scanner index job on every run except after a pull the check started that failed, then the index's exit status
+# written on the check's row. Takes its own non-blocking lock (fd 8, not deploy.lock's fd 9) and never deploy.lock: the pull
+# can run for an hour, and a deploy waits only 120 s for deploy.lock. Exit codes of the check are in api/app/catalog_refresh.py.
+# True while a deploy or rollback holds deploy.lock. Only probed, never held. Only flock's status 1 means "held"; any other
+# failure (flock missing, the file cannot be opened) stops the refresh rather than being read as a free lock.
+deploy_lock_held() {
+  local rc=0
+  flock -n "$STATE_DIR/deploy.lock" true || rc=$?
+  case "$rc" in
+    0) return 1 ;;
+    1) return 0 ;;
+    *) die "Could not probe $STATE_DIR/deploy.lock (flock exited $rc)" ;;
+  esac
+}
+
+cmd_catalog_refresh() {
+  load_config
+  exec 8>"$STATE_DIR/catalog-refresh.lock"
+  local lock_rc=0
+  flock -n 8 || lock_rc=$?
+  case "$lock_rc" in
+    0) ;;
+    1) log "Another catalog refresh holds $STATE_DIR/catalog-refresh.lock; nothing to do"; return 0 ;;
+    *) die "Could not take $STATE_DIR/catalog-refresh.lock (flock exited $lock_rc)" ;;
+  esac
+  # A deploy or rollback in progress would run this against the release it is replacing; skip, and the next run catches
+  # up. Only probed, never held: a deploy that starts after this point stops the refresh's containers itself.
+  if deploy_lock_held; then
+    log "A deployment holds $STATE_DIR/deploy.lock; skipping this catalog refresh"
+    return 0
+  fi
+  local current; current="$(read_state current)"
+  [[ -n "$current" ]] || die "Nothing deployed yet"
+  export PRIZECHECK_IMAGE_TAG="$current"
+
+  local failed=0 check_rc=0 check_out="" check_id="" index_rc=0 record_rc=0 run_index=1
+  local id_line='^catalog_check_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+  # #355 inserts the daily price job here, before the change check.
+
+  # stdout is exactly one line, catalog_check_id=<uuid>; the check logs to stderr, which passes through to this log.
+  check_out="$(compose run --rm --no-deps -T -l "$CATALOG_REFRESH_LABEL" tools -m app.catalog_refresh </dev/null)" || check_rc=$?
+  if [[ -n "$check_out" && "$check_out" != *$'\n'* && "$check_out" =~ $id_line ]]; then
+    check_id="${check_out#catalog_check_id=}"
+  else
+    log "Warning: the catalog check printed no usable check id; its index status will not be recorded"
+  fi
+  if (( check_rc >= 128 )); then
+    # Killed by a signal (137, 143): a deploy stopped it, or the host did. Its pull is interrupted; do not index on top of it.
+    log "The catalog check was killed (exit $check_rc); skipping the scanner index"
+    failed=1; run_index=0
+    check_rc=-1
+  fi
+  case "$check_rc" in
+    -1) ;;
+    0) [[ -n "$check_id" ]] || failed=1 ;;
+    2) log "Catalog check failed (exit 2); running the scanner index anyway"; failed=1 ;;
+    4) log "The pull the catalog check started failed (exit 4); skipping the scanner index"; failed=1; run_index=0 ;;
+    *)
+      log "Catalog check exited with status $check_rc"; failed=1
+      [[ -n "$check_id" ]] || run_index=0 ;;
+  esac
+
+  # A deploy that began while the check ran stops these containers itself; the index and the record call would otherwise
+  # run against the release it is replacing, so each step looks again.
+  if [[ "$run_index" == 1 ]] && deploy_lock_held; then
+    log "A deployment holds $STATE_DIR/deploy.lock; skipping the scanner index"
+    failed=1; run_index=0
+  fi
+  if [[ "$run_index" == 1 ]]; then
+    compose run --rm --no-deps -T -l "$CATALOG_REFRESH_LABEL" scanner-index </dev/null || index_rc=$?
+    if [[ "$index_rc" != 0 ]]; then
+      log "The scanner index job exited with status $index_rc (1 database, 2 systemic failure, 3 another run holds its lock)"
+      failed=1
+    fi
+    if [[ -n "$check_id" ]]; then
+      if deploy_lock_held; then
+        log "A deployment holds $STATE_DIR/deploy.lock; not recording the scanner index status on check $check_id"
+        failed=1
+      else
+        compose run --rm --no-deps -T -l "$CATALOG_REFRESH_LABEL" tools -m app.catalog_refresh --record-index "$check_id" "$index_rc" </dev/null || record_rc=$?
+        if [[ "$record_rc" != 0 ]]; then
+          log "Could not record the scanner index status on check $check_id (exit $record_rc)"
+          failed=1
+        fi
+      fi
+    fi
+  fi
+
+  if [[ "$failed" != 0 ]]; then
+    log "Catalog refresh finished with errors"
+    return 1
+  fi
+  log "Catalog refresh finished"
+}
+
 cmd_compose() {
   load_config
   local current running; current="$(read_state current)"
@@ -971,6 +1089,7 @@ Usage: $SCRIPT_PATH <command>
   sign-in-code [n]                 Show the newest n delivered sign-in codes (MAIL_MODE=file)
   signup-apply                     Re-check the signup readiness proof and restart the gateway on the result
   tool <script> [args]             Run a Python script in the current API image, e.g. tool /app/scripts/bind_owner.py <id>
+  catalog-refresh                  Check TCGdex for catalog changes (pulling if any), then run the scanner index job
   compose <args>                   Run docker compose for this stack, e.g. compose logs -f api
   check-config                     Validate the env file and host files (no containers are touched)
   bundle-digest                    Print the digest CI must send for the installed host files
@@ -1017,6 +1136,7 @@ main() {
     init-store) cmd_init_store "$@" ;;
     signup-apply) cmd_signup_apply ;;
     tool) cmd_tool "$@" ;;
+    catalog-refresh) cmd_catalog_refresh ;;
     compose) cmd_compose "$@" ;;
     check-config) cmd_check_config ;;
     bundle-digest) bundle_digest ;;

@@ -262,6 +262,33 @@ class DeployPipelineTest(unittest.TestCase):
             self.assertRegex(uncommented(text), r'(?m)^OWNER_EMAIL=')
             self.assertIn('PRICE_IMPORT_CONTACT', text)
 
+    def test_the_catalog_importer_and_check_get_the_same_user_agent_contact(self):
+        # api (owner-started imports) and tools (the daily check) share the anchor that carries the contact.
+        anchor = COMPOSE_DEV[COMPOSE_DEV.index('x-api-environment:'):COMPOSE_DEV.index('\nservices:')]
+        self.assertIn('SCANNER_INDEX_CONTACT: ${SCANNER_INDEX_CONTACT:-${OWNER_EMAIL}}', anchor)
+        for service in ('api', 'tools'):
+            block = COMPOSE_DEV[COMPOSE_DEV.index(f'\n  {service}:\n'):]
+            block = block[:block.index('    depends_on:')]
+            self.assertTrue('environment: *api-environment' in block or '<<: *api-environment' in block, service)
+
+    def test_catalog_refresh_is_a_subcommand_with_its_own_lock(self):
+        body = SCRIPT[SCRIPT.index('cmd_catalog_refresh() {'):SCRIPT.index('cmd_compose() {')]
+        self.assertIn('catalog-refresh) cmd_catalog_refresh ;;', SCRIPT)
+        self.assertIn('catalog-refresh ', SCRIPT[SCRIPT.index('usage() {'):SCRIPT.index('ssh_gate() {')])
+        # Its own non-blocking lock on fd 8; deploy.lock (take_lock, fd 9), which a deploy waits only 120 s for, is only
+        # probed without waiting and never held.
+        self.assertIn('exec 8>"$STATE_DIR/catalog-refresh.lock"', body)
+        self.assertIn('flock -n 8', body)
+        self.assertNotIn('take_lock', body)
+        self.assertNotIn('9>', body)
+        self.assertNotIn('flock -w', body)  # nothing here waits for or holds deploy.lock; the helper only probes it
+        self.assertGreaterEqual(body.count('deploy_lock_held'), 3)  # at the start, before the index, before the record call
+        probe = SCRIPT[SCRIPT.index('deploy_lock_held() {'):SCRIPT.index('cmd_catalog_refresh() {')]
+        self.assertIn('flock -n "$STATE_DIR/deploy.lock" true', probe)
+        self.assertIn('1) return 0', probe)  # only status 1 is "held"; anything else dies
+        self.assertIn('-m app.catalog_refresh', body)
+        self.assertIn('--record-index', body)
+
     def test_the_prod_overlay_forces_production(self):
         compose = uncommented(COMPOSE_PROD)
         self.assertEqual(compose.count('NODE_ENV: production'), 3)

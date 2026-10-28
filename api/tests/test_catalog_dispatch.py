@@ -94,3 +94,58 @@ def test_orphan_recovery_waits_startup_grace_and_respects_live_session_lock():
     with patch('app.catalog_dispatch.launch_import') as launcher:
         assert start(str(uuid4())).status_code == 403
         launcher.assert_not_called()
+
+
+def test_detailed_dispatch_tells_started_from_active_and_keeps_the_owner_contract():
+    from app.catalog_dispatch import dispatch_import, dispatch_import_detailed
+    owner_fixture()
+    with patch('app.catalog_dispatch.launch_import') as launcher, connect() as conn:
+        first = dispatch_import_detailed(conn)
+        assert first.started and first.child is launcher.return_value and first.run_id is not None
+        second = dispatch_import_detailed(conn)
+        assert (second.run_id, second.started, second.child) == (first.run_id, False, None)
+        assert dispatch_import(conn) == first.run_id and launcher.call_count == 1
+
+
+def test_detailed_dispatch_reports_a_committing_promotion_as_no_run():
+    from app.catalog_dispatch import dispatch_import_detailed
+    owner_fixture()
+    with connect() as holder, connect() as conn:
+        holder.execute('SELECT pg_advisory_lock(914703)')
+        try:
+            with patch('app.catalog_dispatch.launch_import') as launcher:
+                result = dispatch_import_detailed(conn)
+        finally:
+            holder.execute('SELECT pg_advisory_unlock(914703)')
+    assert (result.run_id, result.started, result.declined) == (None, False, False)
+    launcher.assert_not_called()
+
+
+def test_dispatch_guard_declines_before_reserving_and_on_reserved_runs_before_the_launch():
+    from app.catalog_dispatch import dispatch_import_detailed
+    owner_fixture()
+    order = []
+    with patch('app.catalog_dispatch.launch_import', side_effect=lambda run_id: order.append('launch')) as launcher, connect() as conn:
+        declined = dispatch_import_detailed(conn, guard=lambda c: False)
+        assert declined.declined and declined.run_id is None and not declined.started
+        assert conn.execute('SELECT count(*) AS n FROM catalog_run').fetchone()['n'] == 0
+        started = dispatch_import_detailed(conn, guard=lambda c: True,
+                                           on_reserved=lambda c, run_id: order.append(('reserved', run_id)))
+        assert order == [('reserved', started.run_id), 'launch']
+        assert conn.execute('SELECT outcome FROM catalog_run WHERE id=%s', (started.run_id,)).fetchone()['outcome'] is None
+
+
+def test_a_failing_on_reserved_marks_the_run_failed_without_launching():
+    from app.catalog_dispatch import dispatch_import_detailed
+    from fastapi import HTTPException
+    owner_fixture()
+
+    def broken(c, run_id):
+        raise RuntimeError('secret')
+
+    with patch('app.catalog_dispatch.launch_import') as launcher, connect() as conn:
+        with pytest.raises(HTTPException) as caught:
+            dispatch_import_detailed(conn, on_reserved=broken)
+        assert caught.value.detail == {'code': 'CATALOG_DISPATCH_FAILED'}
+        assert conn.execute('SELECT outcome,error FROM catalog_run').fetchone() == {'outcome': 'failed', 'error': 'CATALOG_DISPATCH_FAILED'}
+    launcher.assert_not_called()
