@@ -1,11 +1,10 @@
 name: Deploy dev
-# Push to dev -> full verification gate -> per-architecture images (built natively) joined into multi-arch images in GHCR
-# tagged with the commit -> Tailscale -> forced-command SSH to the Unraid host, which pulls, backs up, migrates, starts and
-# checks the release (deploy/host/prizecheck-deploy.sh). Production (deploy-prod.yml) deploys these same images.
+# Manual only (Actions -> Deploy dev -> Run workflow on dev): a push to dev deploys nothing. The default checks and
+# multi-arch images in GHCR tagged with the commit (build-images.yml) -> Tailscale -> forced-command SSH to the Unraid
+# host, which pulls, backs up, migrates, starts and checks the release (deploy/host/prizecheck-deploy.sh). Production
+# (deploy-prod.yml) reuses these images when they exist and builds them the same way when they don't.
 # One-time setup: docs/deployment-unraid.md.
 on:
-  push:
-    branches: [dev]
   workflow_dispatch:
     inputs:
       operation:
@@ -16,89 +15,18 @@ on:
 
 permissions: {}
 
-env:
-  REGISTRY: ghcr.io/ry-cen
-
 jobs:
-  verify:
+  build:
     if: github.ref == 'refs/heads/dev' && inputs.operation != 'rollback'
-    uses: ./.github/workflows/verify.yml
-    # verify.yml runs only its default checks when called (formatting, lint, compilation, build, unit tests); the deep
-    # integration suites run on demand.
-    permissions:
-      contents: read
-
-  images:
-    needs: verify
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    uses: ./.github/workflows/build-images.yml
+    with:
+      pointer: dev
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: true
-      matrix:
-        service: [api, auth, web, scanner-index]
-        arch: [amd64, arm64]
-        include:
-          - arch: amd64
-            runner: ubuntu-latest
-            cache: ""
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            cache: "-arm64"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deploy/docker/${{ matrix.service }}.Dockerfile
-          push: true
-          platforms: linux/${{ matrix.arch }}
-          # Each runner builds its own architecture natively (QEMU would make the builds several times slower); the
-          # `manifests` job joins the two tags into the commit tag the hosts deploy.
-          tags: ${{ env.REGISTRY }}/prizecheck-${{ matrix.service }}:${{ github.sha }}-${{ matrix.arch }}
-          build-args: GIT_COMMIT=${{ github.sha }}
-          # One cache scope per architecture: two in one scope would overwrite each other.
-          cache-from: type=gha,scope=prizecheck-${{ matrix.service }}${{ matrix.cache }}
-          cache-to: type=gha,mode=max,scope=prizecheck-${{ matrix.service }}${{ matrix.cache }}
-
-  manifests:
-    needs: images
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      packages: write
-    strategy:
-      fail-fast: true
-      matrix:
-        service: [api, auth, web, scanner-index]
-    steps:
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Join the architectures
-        env:
-          SERVICE: ${{ matrix.service }}
-        run: |
-          repo="$REGISTRY/prizecheck-$SERVICE"
-          # The commit tag the hosts deploy, now one index for both architectures; `dev` stays a convenience pointer.
-          docker buildx imagetools create -t "$repo:$GITHUB_SHA" -t "$repo:dev" "$repo:$GITHUB_SHA-amd64" "$repo:$GITHUB_SHA-arm64"
-          docker buildx imagetools inspect "$repo:$GITHUB_SHA"
 
   deploy:
-    needs: manifests
+    needs: build
     # Off until the one-time host, Tailscale and secret setup is done: set the repository variable DEV_DEPLOY_ENABLED=true.
     if: vars.DEV_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
@@ -115,35 +43,19 @@ jobs:
       contents: read
       packages: read
     steps:
-      - name: Skip superseded commits
-        id: head
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          head="$(gh api "repos/${GITHUB_REPOSITORY}/branches/dev" --jq .commit.sha)"
-          if [ "$head" != "$GITHUB_SHA" ]; then
-            echo "dev is now at $head; that run deploys instead of $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
-            echo "current=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "current=true" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.head.outputs.current == 'true'
         with:
           persist-credentials: false
       - name: Host file digest
-        if: steps.head.outputs.current == 'true'
         id: bundle
         run: echo "digest=$(cat compose.deploy.yml deploy/host/prizecheck-deploy.sh | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
-        if: steps.head.outputs.current == 'true'
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: ${{ vars.UNRAID_SSH_HOST }}
       - name: Configure SSH
-        if: steps.head.outputs.current == 'true'
         env:
           SSH_KEY: ${{ secrets.UNRAID_SSH_PRIVATE_KEY }}
           KNOWN_HOSTS: ${{ vars.UNRAID_SSH_KNOWN_HOSTS }}
@@ -153,7 +65,6 @@ jobs:
           chmod 600 ~/.ssh/prizecheck_deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
       - name: Deploy on Unraid
-        if: steps.head.outputs.current == 'true'
         env:
           HOST: ${{ vars.UNRAID_SSH_HOST }}
           SSH_USER: ${{ vars.UNRAID_SSH_USER || 'root' }}

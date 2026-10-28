@@ -1,5 +1,6 @@
-"""The deployment pipeline's wiring (spec: docs/deployment-oracle.md, docs/deployment-unraid.md): dev builds each
-architecture natively and joins them, production deploys only dev's images and never builds, and the addresses that make
+"""The deployment pipeline's wiring (spec: docs/deployment-oracle.md, docs/deployment-unraid.md): one shared build
+checks the commit, builds each architecture natively and joins them, dev deploys only by hand, production reuses a dev
+build or runs the same shared build itself, and the addresses that make
 up the client-IP chain (compose.prod.yml, deploy/docker/nginx.conf, deploy/oracle/Caddyfile) agree. Text and regex only:
 no YAML library is available to the tooling tests."""
 import ipaddress
@@ -10,6 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 DEV = (ROOT / '.github/workflows/deploy-dev.yml').read_text()
+BUILD = (ROOT / '.github/workflows/build-images.yml').read_text()
 PROD = (ROOT / '.github/workflows/deploy-prod.yml').read_text()
 VERIFY = (ROOT / '.github/workflows/verify.yml').read_text()
 SCRIPT = (ROOT / 'deploy/host/prizecheck-deploy.sh').read_text()
@@ -50,7 +52,7 @@ def one(pattern, text):
 
 class DeployPipelineTest(unittest.TestCase):
     def test_every_deploy_action_is_pinned_to_a_commit(self):
-        for name, text in (('deploy-dev.yml', DEV), ('deploy-prod.yml', PROD)):
+        for name, text in (('deploy-dev.yml', DEV), ('build-images.yml', BUILD), ('deploy-prod.yml', PROD)):
             uses = re.findall(r'(?m)^\s*-?\s*uses:\s*(\S.*)$', text)
             self.assertTrue(uses, name)
             for line in uses:
@@ -58,15 +60,27 @@ class DeployPipelineTest(unittest.TestCase):
                     continue
                 self.assertRegex(line, r'@[0-9a-f]{40} # v\d', f'{name}: {line}')
 
-    def test_dev_builds_each_architecture_natively_then_joins_them(self):
-        self.assertIn('runner: ubuntu-24.04-arm', DEV)
-        self.assertIn('platforms: linux/${{ matrix.arch }}', DEV)
-        self.assertIn('arch: [amd64, arm64]', DEV)
-        create = one(r'(?m)^.*imagetools create.*$', DEV)
-        for part in ('-t "$repo:$GITHUB_SHA"', '-t "$repo:dev"', '"$repo:$GITHUB_SHA-amd64"', '"$repo:$GITHUB_SHA-arm64"'):
+    def test_the_shared_build_builds_each_architecture_natively_then_joins_them(self):
+        self.assertIn('runner: ubuntu-24.04-arm', BUILD)
+        self.assertIn('platforms: linux/${{ matrix.arch }}', BUILD)
+        self.assertIn('arch: [amd64, arm64]', BUILD)
+        create = one(r'(?m)^.*imagetools create.*$', BUILD)
+        for part in ('-t "$repo:$GITHUB_SHA"', '-t "$repo:$POINTER"', '"$repo:$GITHUB_SHA-amd64"', '"$repo:$GITHUB_SHA-arm64"'):
             self.assertIn(part, create)
-        deploy = between(DEV, '\n  deploy:', '\n  rollback:')
-        self.assertRegex(deploy, r'(?m)^    needs: manifests$')
+        self.assertRegex(BUILD, r'(?m)^  workflow_call:$')
+        # A caller's env doesn't reach a called workflow, so the build names its own registry.
+        self.assertRegex(BUILD, r'(?m)^  REGISTRY: ghcr\.io/ry-cen$')
+        self.assertNotRegex(BUILD, r'(?m)^  (push|pull_request|workflow_dispatch):')
+
+    def test_dev_deploys_only_when_run_by_hand(self):
+        trigger = between(DEV, '\non:', '\npermissions:')
+        self.assertIn('workflow_dispatch:', trigger)
+        self.assertNotIn('push:', trigger)
+        self.assertRegex(between(DEV, '\n  build:', '\n  deploy:'), r'uses: \./\.github/workflows/build-images\.yml')
+        self.assertRegex(between(DEV, '\n  deploy:', '\n  rollback:'), r'(?m)^    needs: build$')
+        for forbidden in ('build-push-action', 'imagetools create'):
+            self.assertNotIn(forbidden, DEV)
+        self.assertIn('pointer: dev', DEV)
 
     def test_the_scanner_index_image_builds_on_both_architectures_without_the_real_model_test(self):
         job = job_body('scanner-index-image')
@@ -146,21 +160,34 @@ class DeployPipelineTest(unittest.TestCase):
         # An unrecognised choice fails instead of passing with everything skipped.
         self.assertIn('exit 1', script)
 
-    def test_dev_gates_its_images_on_the_verify_check(self):
-        self.assertRegex(between(DEV, '\n  verify:', '\n  images:'), r'uses: \./\.github/workflows/verify\.yml')
-        self.assertRegex(between(DEV, '\n  images:', '\n    runs-on'), r'(?m)^    needs: verify$')
+    def test_the_shared_build_gates_its_images_on_the_verify_check(self):
+        self.assertRegex(between(BUILD, '\n  verify:', '\n  images:'), r'uses: \./\.github/workflows/verify\.yml')
+        self.assertRegex(between(BUILD, '\n  images:', '\n    runs-on'), r'(?m)^    needs: verify$')
         self.assertNotRegex(PROD, r'verify\.yml')
 
-    def test_prod_never_builds_images(self):
-        for forbidden in ('build-push-action', 'packages: write', 'imagetools create'):
+    def test_prod_builds_only_through_the_shared_build_when_images_are_missing(self):
+        for forbidden in ('build-push-action', 'imagetools create'):
             self.assertNotIn(forbidden, PROD)
-        for required in ('branches: [main]', 'linux/arm64', 'actions/workflows/deploy-dev.yml/runs'):
+        for required in ('branches: [main]', 'linux/arm64', 'missing=true', 'missing=false'):
             self.assertIn(required, PROD)
+        build = between(PROD, '\n  build:', '\n  deploy:')
+        self.assertRegex(build, r'uses: \./\.github/workflows/build-images\.yml')
+        self.assertIn('pointer: main', build)
+        # Only the build may push; finding and deploying the images only read them.
+        self.assertEqual(PROD.count('packages: write'), 1)
+        self.assertIn('packages: write', build)
+        self.assertIn('packages: read', between(PROD, '\n  images:', '\n  build:'))
+        self.assertIn("needs.images.outputs.missing == 'true'", build)
+        deploy = between(PROD, '\n  deploy:', '\n  rollback:')
+        self.assertRegex(deploy, r'(?m)^    needs: \[images, build\]$')
+        for required in ("needs.images.result == 'success'", "needs.build.result == 'success'",
+                         "needs.build.result == 'skipped'", '!cancelled()'):
+            self.assertIn(required, deploy)
 
     def test_every_prod_job_is_gated_and_scoped_to_prod(self):
         jobs = PROD[PROD.index('\njobs:'):]
         names = re.findall(r'(?m)^  ([a-z-]+):$', jobs)
-        self.assertEqual(names, ['images', 'deploy', 'rollback'])
+        self.assertEqual(names, ['images', 'build', 'deploy', 'rollback'])
         bodies = re.split(r'(?m)^  [a-z-]+:$', jobs)[1:]
         for name, body in zip(names, bodies):
             gates = re.findall(r"(?m)^    if: .*vars\.PROD_DEPLOY_ENABLED == 'true'.*$", body)
@@ -172,7 +199,7 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertEqual(set(re.findall(r'tag:ci[\w-]*', PROD)), {'tag:ci-prod'})
 
     def test_no_expression_is_interpolated_inside_a_run_script(self):
-        for name, text in (('deploy-dev.yml', DEV), ('deploy-prod.yml', PROD)):
+        for name, text in (('deploy-dev.yml', DEV), ('build-images.yml', BUILD), ('deploy-prod.yml', PROD)):
             indent = None
             for line in text.splitlines():
                 if indent is not None and (not line.strip() or len(line) - len(line.lstrip()) > indent):

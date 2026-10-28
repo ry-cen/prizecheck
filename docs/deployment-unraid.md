@@ -1,17 +1,18 @@
 # Dev deployment on Unraid
 
-Every push to `dev` that passes the verification gate deploys PrizeCheck to an Unraid server. The app is reachable only on your Tailscale tailnet, at an HTTPS address such as `https://unraid.<tailnet>.ts.net`. There's no port forwarding, Funnel, or public reverse proxy.
+Running **Deploy dev** by hand on `dev` deploys PrizeCheck to an Unraid server once the commit passes the verification gate. A push to `dev` deploys nothing. The app is reachable only on your Tailscale tailnet, at an HTTPS address such as `https://unraid.<tailnet>.ts.net`. There's no port forwarding, Funnel, or public reverse proxy.
 
-This guide covers the dev environment. Production runs on Oracle Cloud and reuses the same images and deploy script, with its own project name, data directory, secrets, GitHub environment and SSH key (see [Adding production later](#adding-production-later)).
+This guide covers the dev environment. Production runs on Oracle Cloud and reuses the same image build and deploy script, with its own project name, data directory, secrets, GitHub environment and SSH key (see [Adding production later](#adding-production-later)).
 
 ## How it works
 
 ```
-push to dev
+Actions → Deploy dev → Run workflow (branch dev)
   └─ GitHub Actions: Deploy dev (.github/workflows/deploy-dev.yml)
-       ├─ verify   the default checks: format, lint, compile, build, unit tests (.github/workflows/verify.yml)
-       ├─ images   build api, auth, web and scanner-index natively for amd64 and arm64; push per-architecture tags to GHCR
-       ├─ manifests join them into one :<commit> index per image (plus a moving :dev pointer)
+       ├─ build    the shared build (.github/workflows/build-images.yml), which production also uses:
+       │    ├─ verify    the default checks: format, lint, compile, build, unit tests (.github/workflows/verify.yml)
+       │    ├─ images    build api, auth, web and scanner-index natively for amd64 and arm64; push per-architecture tags
+       │    └─ manifests join them into one :<commit> index per image (plus a moving :dev pointer)
        └─ deploy   join the tailnet as tag:ci (ephemeral) → SSH to Unraid with a forced command
                      └─ prizecheck-deploy.sh deploy <commit> <host-file digest>
                           ├─ pull the three :<commit> images (one-time GHCR login, deleted afterwards)
@@ -58,7 +59,7 @@ Deploy state lives under `PRIZECHECK_HOME` (`state/current`, `state/previous`, `
 | `compose.deploy.yml`                                                                   | Create the directories and the env file on Unraid (steps 3 to 5)        |
 | `deploy/host/prizecheck-deploy.sh` (deploy, rollback, backup, operator helpers)        | Generate the deploy SSH key and install it as a forced command (step 6) |
 | `deploy/host/prizecheck-dev.env.example`                                               | Tailscale tag, policy, OAuth client and Serve (steps 7 and 9)           |
-| `.github/workflows/deploy-dev.yml`; `verify.yml` made reusable                         | GitHub environment, secrets and variables (step 8)                      |
+| `.github/workflows/deploy-dev.yml`, `build-images.yml`; `verify.yml` made reusable     | GitHub environment, secrets and variables (step 8)                      |
 | Health checks, smoke checks, pre-migration backups, automatic rollback                 | First deploy, owner binding, catalog import (steps 10 and 11)           |
 
 Nothing in this guide has been run against your server yet. The images were not built locally (there was no Docker on the development machine), so the first run of the `images` job is also their first build.
@@ -320,7 +321,7 @@ A Tailscale container started with `--network=host` behaves like the host case. 
    cat compose.deploy.yml deploy/host/prizecheck-deploy.sh | sha256sum
    ```
 
-2. Trigger the workflow by pushing to `dev`, or run it manually: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`**. The default checks run first (formatting, lint, compilation, build and unit tests), then the images are built and the deploy runs. The deep integration suites do not gate the deploy; run them on demand from **Actions → Verify → Run workflow** with an **integration** choice, or run the full gate locally with `npm run verify`.
+2. Run the workflow: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`** (or `gh workflow run deploy-dev.yml --ref dev`). Pushing to `dev` doesn't start it. The default checks run first (formatting, lint, compilation, build and unit tests), then the images are built and the deploy runs. The deep integration suites do not gate the deploy; run them on demand from **Actions → Verify → Run workflow** with an **integration** choice, or run the full gate locally with `npm run verify`.
 3. On a new installation the script applies all migrations and initializes the public projection store. It initializes the store only when the store is empty **and** nothing has been deployed before. A missing store on an existing install stops the deploy instead of silently creating an empty one; see [public projections](public-projections.md) for recovery.
 
 ## 11. Verify the application
@@ -475,6 +476,6 @@ Don't run `backup` while a deploy is migrating; the deploy lock prevents this wh
 
 ## Adding production later
 
-Production runs on Oracle Cloud and is described in [Production deployment on Oracle Cloud](deployment-oracle.md). It reuses these images, `compose.deploy.yml` plus `compose.prod.yml`, and the same deploy script with `PRIZECHECK_ENVIRONMENT=prod` in its env file. A push to `main` deploys the images that dev already built for that commit.
+Production runs on Oracle Cloud and is described in [Production deployment on Oracle Cloud](deployment-oracle.md). It reuses these images, `compose.deploy.yml` plus `compose.prod.yml`, and the same deploy script with `PRIZECHECK_ENVIRONMENT=prod` in its env file. A push to `main` deploys that commit's images: the ones a dev deploy built, or, if no dev deploy built that commit, images it builds the same way (`build-images.yml`).
 
 The release gate and launch checks in [release](operations/release.md) and [deployment boundaries](deployment-boundaries.md) still apply to production.

@@ -1,12 +1,12 @@
 name: Verify
 on:
-  # Pull requests, and each dev deploy through deploy-dev.yml's call. No push trigger: a push to dev already runs this
-  # workflow as the deploy gate, and other branches are checked when their pull request opens.
+  # Pull requests, and each image build through build-images.yml's call (manual dev deploys, and prod releases that no
+  # dev deploy built). No push trigger: branches are checked when their pull request opens.
   pull_request:
   # The default checks (formatting, lint, compilation, build, unit tests) are what an automatic run does, except on a
   # pull request to main (a release), which also runs the sharded integration suites. Otherwise the deep integration
   # suites (PostgreSQL-backed API tests, the auth server tests and Playwright) run only on demand: Actions -> Verify ->
-  # Run workflow, with an integration choice other than none. The default checks run in that run too. deploy-dev.yml's
+  # Run workflow, with an integration choice other than none. The default checks run in that run too. build-images.yml's
   # call is not a pull request, so it runs the default checks only.
   workflow_dispatch:
     inputs:
@@ -197,7 +197,7 @@ jobs:
           include-hidden-files: true
   # The scanner index job's image (deploy/docker/scanner-index.Dockerfile): a build check of the job image, on both
   # architectures because production runs the arm64 image. The image's default stage does not depend on the test stage,
-  # so the real-model test is not built or run here; integration-scanner-model does that on demand. deploy-dev.yml
+  # so the real-model test is not built or run here; integration-scanner-model does that on demand. build-images.yml
   # pushes the same image once this workflow has passed.
   scanner-index-image:
     name: scanner-index-image (${{ matrix.runner }})
@@ -256,7 +256,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=prizecheck-scanner-index-test${{ matrix.cache }}
       - name: Real-model test
         run: docker run --rm prizecheck-scanner-index-test
-  # The one check that stands for the whole run: pull requests and deploy-dev.yml's images job wait on "verify".
+  # The one check that stands for the whole run: pull requests and build-images.yml's images job wait on "verify".
   # always() makes it run and fail after a failed or cancelled job instead of being skipped with it, because a skipped
   # check counts as passing. The default checks must always succeed. Each optional job must succeed when this run asked
   # for it, by the dispatch input or by a pull request to main, and must be skipped when it did not, so a job skipped by a wrong condition fails here instead of passing.
