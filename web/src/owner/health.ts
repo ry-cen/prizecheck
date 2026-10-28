@@ -1,4 +1,4 @@
-import type { OperationsStatus } from "../generated";
+import type { OperationsStatus, OwnerCatalogStatus } from "../generated";
 
 /** bad: wrong now (a stale backup); warn: needs attention soon (a 70% allowance warning); unverified: no
  * recent measurement; ok: fine. A check isn't OK only when the server flags it or can't measure it. Counts
@@ -163,4 +163,51 @@ export function problems(checks: HealthCheck[]): HealthCheck[] {
   return checks
     .filter((check) => check.tone !== "ok")
     .sort((a, b) => RANK[a.tone] - RANK[b.tone]);
+}
+
+/** The owner panel's price import lines (design 4.12): what the last import did, then one red line per problem.
+ * Owner screens may name TCGCSV and TCGplayer and show times; collector screens never do. */
+export function priceImportLines(status: OwnerCatalogStatus): {
+  info: string[];
+  warnings: string[];
+} {
+  const last = status.last_price_import;
+  if (!last)
+    return { info: ["Prices have not been imported yet."], warnings: [] };
+  const info: string[] = [];
+  const warnings: string[] = [];
+  const good = when(status.last_good_price_import_at ?? null);
+  const source = when(last.source_updated_at ?? null);
+  info.push(
+    `Prices: imported ${good ?? "never"} (TCGplayer data from ${source ?? "unknown"})` +
+      (last.verified_editions == null || last.priced_editions == null
+        ? ""
+        : `, ${last.priced_editions.toLocaleString()} of ${last.verified_editions.toLocaleString()} verified Editions priced`)
+  );
+  const unpriced = Object.entries(last.unpriced ?? {}) as [string, number][];
+  if (unpriced.length)
+    info.push(
+      `Unpriced: ${unpriced.map(([reason, n]) => `${reason.replaceAll("_", " ")} ${n.toLocaleString()}`).join(" · ")}`
+    );
+  if (last.fallback_art !== null && last.fallback_art !== undefined)
+    info.push(
+      `${last.fallback_art.toLocaleString()} Printings use TCGplayer art`
+    );
+  if (last.outcome === "failed" || last.outcome === "partial")
+    warnings.push(
+      `The latest price import ${last.outcome === "failed" ? "failed" : "was partial"}` +
+        (last.error_code ? ` (${last.error_code})` : "") +
+        ` · Groups failed: ${last.groups_failed}`
+    );
+  if (last.public_error)
+    warnings.push(`Publishing prices failed: ${last.public_error}`);
+  if (status.price_import_stale)
+    warnings.push(
+      `The last good price import is over 48 hours old (${good ?? "never"}).`
+    );
+  if (status.price_source_stale)
+    warnings.push(
+      `TCGCSV's own update time is over 48 hours old (${when(status.source_updated_at_max ?? null) ?? "never"}).`
+    );
+  return { info, warnings };
 }

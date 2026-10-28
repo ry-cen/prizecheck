@@ -3,7 +3,7 @@ import type { OperationsStatus, OwnerCatalogStatus } from "../generated";
 import { Button } from "../ui/Button";
 import { Pill, type PillTone } from "../ui/Pill";
 import { ScrollTable } from "../ui/ScrollTable";
-import { healthChecks } from "./health";
+import { healthChecks, priceImportLines } from "./health";
 
 export const PANEL =
   "box-border flex min-w-0 flex-col gap-3 rounded-panel border border-border bg-surface p-4";
@@ -51,6 +51,8 @@ export function StatusPanel({
     runLabel = "Progress stale";
   }
   const count = (value: number) => value.toLocaleString();
+  const prices = priceImportLines(status);
+  const pricesId = useId();
 
   return (
     <>
@@ -112,6 +114,26 @@ export function StatusPanel({
             if it was interrupted.
           </p>
         )}
+      </section>
+
+      <section aria-labelledby={pricesId} className={PANEL}>
+        <h2 id={pricesId} className="m-0 text-body font-semibold">
+          Price import
+        </h2>
+        {prices.info.map((line) => (
+          <p key={line} className="m-0 break-words text-meta">
+            {line}
+          </p>
+        ))}
+        {prices.warnings.map((line) => (
+          <p
+            key={line}
+            role="alert"
+            className="m-0 break-words text-meta text-danger"
+          >
+            {line}
+          </p>
+        ))}
       </section>
 
       <section aria-labelledby={healthId} className={PANEL}>

@@ -5,6 +5,7 @@ import time
 from uuid import uuid4
 
 import psycopg
+from psycopg.types.json import Jsonb
 import pytest
 from fastapi.testclient import TestClient
 
@@ -152,3 +153,97 @@ def test_missing_energy_type_is_unresolved():
         execute_run(conn, run_id, UncertainEnergy(ids=("test-1",)))
         row = conn.execute("SELECT basic_energy FROM catalog_generation_printing WHERE generation_id=%s", (run_id,)).fetchone()
         assert row["basic_energy"] == "unresolved"
+
+
+def price_import_owner():
+    owner, other = f"owner-{uuid4()}", f"other-{uuid4()}"
+    with connect() as conn:
+        conn.execute("TRUNCATE price_import, tcgplayer_product, tcgplayer_price RESTART IDENTITY")
+        conn.execute("DELETE FROM owner_binding")
+        conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s),(%s)", (owner, other))
+        conn.execute("INSERT INTO owner_binding(singleton,user_id) VALUES (true,%s)", (owner,))
+    return owner, other
+
+
+def add_import(outcome, hours_ago=0, **columns):
+    """One finished price_import row, finished `hours_ago` hours ago; extra columns are bound values."""
+    if "unpriced" in columns:
+        columns["unpriced"] = Jsonb(columns["unpriced"])
+    names = ",".join(["outcome", "finished_at", "source_updated_at", *columns])
+    marks = ",".join(["%s", "now()-%s*interval '1 hour'", "now()", *["%s"] * len(columns)])
+    with connect() as conn:
+        conn.execute(f"INSERT INTO price_import({names}) VALUES ({marks})", [outcome, hours_ago, *columns.values()])
+
+
+def add_price(hours_ago=0):
+    with connect() as conn:
+        conn.execute("INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at) "
+                     "VALUES (1,'Normal',1,now(),now()-%s*interval '1 hour')", (hours_ago,))
+
+
+def owner_status(owner):
+    path = "/api/admin/catalog-runs"
+    response = client.get(path, headers=headers(owner, "GET", path))
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_catalog_runs_price_import_before_any_import_and_access():
+    owner, other = price_import_owner()
+    body = owner_status(owner)
+    assert body["last_price_import"] is None and body["last_good_price_import_at"] is None
+    assert body["price_import_stale"] is False and body["price_source_stale"] is False
+    path = "/api/admin/catalog-runs"
+    assert client.get(path, headers=headers(other, "GET", path)).status_code == 403
+    collector = client.get("/api/catalog/status", headers=headers(other, "GET", "/api/catalog/status")).text
+    assert "price" not in collector.lower() and "tcg" not in collector.lower()
+
+
+def test_catalog_runs_price_import_after_imported_run():
+    owner, _ = price_import_owner()
+    add_price()
+    add_import("imported", verified_editions=10, priced_editions=7, groups_total=3,
+               unpriced={"ambiguous": 2, "no_price": 1}, fallback_art=4)
+    body = owner_status(owner)
+    last = body["last_price_import"]
+    assert (last["outcome"], last["verified_editions"], last["priced_editions"]) == ("imported", 10, 7)
+    assert last["unpriced"] == {"ambiguous": 2, "no_price": 1} and last["fallback_art"] == 4
+    assert body["last_good_price_import_at"] and body["source_updated_at_max"]
+    assert body["price_import_stale"] is False and body["price_source_stale"] is False
+    assert last["public_error"] is None and last["error_code"] is None
+
+
+def test_catalog_runs_price_import_partial_failed_and_public_error_are_reported():
+    owner, _ = price_import_owner()
+    add_price()
+    add_import("imported")
+    add_import("partial", groups_failed=2, groups_total=5)
+    last = owner_status(owner)["last_price_import"]
+    assert (last["outcome"], last["groups_failed"]) == ("partial", 2)
+    add_import("failed", error_code="stale_source")
+    last = owner_status(owner)["last_price_import"]
+    assert (last["outcome"], last["error_code"]) == ("failed", "stale_source")
+    add_import("imported", public_error="publish failed")
+    body = owner_status(owner)
+    assert body["last_price_import"]["public_error"] == "publish failed"
+    assert body["price_import_stale"] is False
+
+
+def test_catalog_runs_price_import_last_good_run_over_48_hours_is_stale():
+    owner, _ = price_import_owner()
+    add_price()
+    add_import("imported", 49)
+    add_import("failed", error_code="group_list")
+    body = owner_status(owner)
+    assert body["price_import_stale"] is True and body["price_source_stale"] is False
+    add_import("unchanged", 47)
+    assert owner_status(owner)["price_import_stale"] is False
+
+
+def test_catalog_runs_price_import_frozen_source_is_stale_though_latest_run_is_unchanged():
+    owner, _ = price_import_owner()
+    add_price(50)
+    add_import("unchanged")
+    body = owner_status(owner)
+    assert body["last_price_import"]["outcome"] == "unchanged"
+    assert body["price_import_stale"] is False and body["price_source_stale"] is True
