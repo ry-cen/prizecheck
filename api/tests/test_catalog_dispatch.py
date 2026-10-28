@@ -171,3 +171,29 @@ def test_expired_lease_is_stale_only_when_no_session_holds_the_runner_lock():
         finally:
             runner.execute('SELECT pg_advisory_unlock(%s)',(RUNNER_LOCK,))
     assert stale() is True
+
+
+def test_importer_holds_the_runner_lock_through_promotion_so_an_expired_lease_is_not_stale():
+    from app.catalog import claim_run, execute_run
+    from test_catalog_metadata import Records, furret
+    owner = owner_fixture()
+    seen = {}
+    with connect() as conn:
+        run_id = conn.execute('INSERT INTO catalog_run DEFAULT VALUES RETURNING id').fetchone()['id']
+        conn.commit()
+        claim_run(conn,run_id)
+
+        def during_promotion():
+            # The importer's own transaction is open here; expire the lease from another session.
+            with connect() as other:
+                other.execute("UPDATE catalog_run SET lease_until=now()-interval '5 minutes' WHERE id=%s",(run_id,))
+                other.commit()
+            response = client.get(PATH,headers=headers(owner,'GET',PATH))
+            assert response.status_code == 200
+            seen.update(response.json()['run'])
+
+        execute_run(conn,run_id,Records(furret()),before_promotion=during_promotion)
+        conn.commit()
+    assert seen['phase'] == 'promoting' and seen['heartbeat_stale'] is False
+    with connect() as conn:
+        assert conn.execute('SELECT outcome FROM catalog_run WHERE id=%s',(run_id,)).fetchone()['outcome'] == 'succeeded'
