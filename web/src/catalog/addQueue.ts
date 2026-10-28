@@ -41,6 +41,19 @@ export function without(queue: AddQueue, editionId: string): AddQueue {
   return next;
 }
 
+/** The queue less what a settled batch added: each Edition's count drops by its copies, and leaves at 0. */
+export function minus(queue: AddQueue, items: readonly AddItem[]): AddQueue {
+  const next = new Map(queue);
+  for (const item of items) {
+    const current = next.get(item.editionId);
+    if (!current) continue;
+    const count = current.count - item.quantity;
+    if (count <= 0) next.delete(item.editionId);
+    else next.set(item.editionId, { ...current, count });
+  }
+  return next;
+}
+
 export function totalCopies(queue: AddQueue): number {
   let total = 0;
   for (const queued of queue.values()) total += queued.count;

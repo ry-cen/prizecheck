@@ -381,19 +381,12 @@ test.describe("desktop", () => {
         isBrowse(request.url()) &&
         !new URL(request.url()).searchParams.has("cursor")
     );
-    // Focus reaching the last tile (the keyboard path) asks for the page that answers 409.
-    const lastTile = tiles(page).last().getByRole("button");
-    await lastTile.focus();
-    const focusedId = await lastTile.getAttribute("data-edition-id");
+    await tiles(page).last().scrollIntoViewIfNeeded();
     await restart;
     await expect(status(page)).toContainText(
       "Catalog changed. Results refreshed from page one."
     );
     await expect(tiles(page)).toHaveCount(70);
-    // The restart redraws the rows but keeps keyboard focus on the tile it was on (#196).
-    await expect(
-      results(page).locator(`[data-edition-id="${focusedId}"]`)
-    ).toBeFocused();
 
     // A failed page shows Retry at the end of the gallery and loads nothing more until it is pressed. Focus reaching
     // the last tile (the keyboard path) asks for the next page, and loading never moves focus.
@@ -423,6 +416,51 @@ test.describe("desktop", () => {
     await expect(tiles(page)).toHaveCount(70);
     await expect(results(page)).toContainText("All 70 cards shown");
     await expect(failure).toHaveCount(0);
+  });
+
+  test("a restart that brings back fewer rows puts keyboard focus on the last tile, in this gallery's own list (#196)", async ({
+    page,
+  }) => {
+    seedGallery();
+    await signIn(page);
+    await expect(tiles(page)).toHaveCount(60);
+    // The second page arrives with a cursor that has more to give, so 70 rows are shown and the walk is still open.
+    // Every later cursor read answers 409: the walk starts again, and the refill that follows fails, so page one's 60
+    // rows are all that come back.
+    let cursorReads = 0;
+    let release!: () => void;
+    const focused = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+      (url) => isBrowse(url.href) && url.searchParams.has("cursor"),
+      async (route) => {
+        cursorReads += 1;
+        if (cursorReads > 1) {
+          // Held until the keyboard is on the 70th tile, so the read cannot answer before then.
+          await focused;
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({ detail: { code: "CATALOG_CHANGED" } }),
+          });
+          return;
+        }
+        const response = await route.fetch();
+        const body = (await response.json()) as { next_cursor: string | null };
+        await route.fulfill({
+          response,
+          json: { ...body, next_cursor: "more" },
+        });
+      }
+    );
+    await tileButton(page, 59).focus();
+    await expect(tiles(page)).toHaveCount(70);
+    await tileButton(page, 69).focus();
+    release();
+    await expect(status(page)).toContainText(
+      "Catalog changed. Results refreshed from page one."
+    );
+    await expect(tiles(page)).toHaveCount(60);
+    await expect(tileButton(page, 59)).toBeFocused();
   });
 
   test("the live region announces the end of the list once, not each page (#196)", async ({

@@ -22,7 +22,9 @@ import { addToCollection, type AddCommand } from "./cardActions";
 import {
   addedText,
   addFailed,
+  addMayHaveCompletedFor,
   copies,
+  earlierAddFinishedFor,
   FORMATS,
   MAX_ADD,
   STANDING_WORDS,
@@ -58,6 +60,9 @@ type Props = {
   canNext: boolean;
   onPrevious: () => void;
   onNext: () => void;
+  /** The Add row's pending command for an Edition (an add that may have completed), kept by the gallery so closing or
+   * stepping away and pressing Add again still resends it under its own key (#196). */
+  pendingFor: (editionId: string) => { current: AddCommand | null };
   /** The Add row's Location (null: Unsorted, else the first), and a new choice in it. The gallery keeps it from card to
    * card, and sets it to Add mode's target when the popup opens in Add mode (#175). */
   location: string | null;
@@ -119,6 +124,7 @@ export function CatalogCardPopup({
   canNext,
   onPrevious,
   onNext,
+  pendingFor,
   location,
   onLocation,
   alsoOffer,
@@ -376,6 +382,8 @@ export function CatalogCardPopup({
           {selected && (
             <AddRows
               key={cardKey}
+              cardName={name}
+              pendingFor={pendingFor}
               edition={selected}
               places={places}
               alsoOffer={alsoOffer}
@@ -583,12 +591,22 @@ function Where({
   );
 }
 
+/** The Add row's last trouble: the Edition it was for, and what to say about it. */
+type AddNote = {
+  editionId: string;
+  words: string;
+  retry: boolean;
+  text: string;
+};
+
 /**
  * The Add row: Collection | Location | − N + | Add N. The Location chosen stays chosen while the page is open (the
  * popup stays mounted). Add N puts physical copies in a Storage Leaf through a batch add of one item (#175), with an
  * Undo record.
  */
 function AddRows({
+  cardName,
+  pendingFor,
   edition,
   places,
   alsoOffer,
@@ -596,6 +614,8 @@ function AddRows({
   onLocation,
   onAdded,
 }: {
+  cardName: string;
+  pendingFor: (editionId: string) => { current: AddCommand | null };
   edition: PopupEdition;
   places: Places;
   alsoOffer: Place | null;
@@ -616,28 +636,52 @@ function AddRows({
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
-  const [failure, setFailure] = useState("");
-  const pendingAdd = useRef<AddCommand | null>(null);
+  const words = (of: PopupEdition) =>
+    `${cardName} ${variantLabel(of.descriptor)}`;
+  // The last add's trouble: the Edition it was for (an add that may have completed stays resendable, kept by the
+  // gallery), and what to say about it.
+  const heldNote = (of: PopupEdition): AddNote | null =>
+    pendingFor(of.id).current
+      ? {
+          editionId: of.id,
+          words: words(of),
+          retry: true,
+          text: addFailed("", true),
+        }
+      : null;
+  const [note, setNote] = useState<AddNote | null>(() => heldNote(edition));
   const usable = edition.active;
-  // Another Edition was picked: the count stays, the last Edition's result line goes.
+  const shown = useRef(edition.id);
+  shown.current = edition.id;
+  // Another Edition was picked: the count stays and the last Edition's result line goes. An add that may have
+  // completed is not forgotten: the Edition picked now says so if it holds one, else the note names the other one.
   const [shownFor, setShownFor] = useState(edition.id);
   if (shownFor !== edition.id) {
     setShownFor(edition.id);
     setDone("");
-    setFailure("");
+    setNote(
+      heldNote(edition) ??
+        (note?.retry && note.editionId !== edition.id ? note : null)
+    );
   }
+  const failure = !note
+    ? ""
+    : note.editionId === edition.id
+      ? note.text
+      : addMayHaveCompletedFor(note.words);
 
   async function add() {
     if (!location || busy) return;
     setBusy(true);
     setDone("");
-    setFailure("");
+    setNote(null);
+    const sent = edition;
     const outcome = await addToCollection(
       location.id,
       location.label,
-      edition.id,
+      sent.id,
       count,
-      pendingAdd
+      pendingFor(sent.id)
     );
     setBusy(false);
     if (outcome.ok) {
@@ -647,8 +691,23 @@ function AddRows({
         (sum, item) => sum + item.quantity,
         0
       );
-      setDone(addedText(copiesAdded, outcome.path));
-      if (!outcome.settledEarlier) setCount(1);
+      setDone(
+        outcome.settledEarlier
+          ? earlierAddFinishedFor(
+              copiesAdded,
+              outcome.items.some((item) => item.editionId === sent.id)
+                ? words(sent)
+                : cardName,
+              outcome.path
+            )
+          : addedText(copiesAdded, outcome.path)
+      );
+      // The count is kept only when the settled batch was for another Edition than the one shown now.
+      if (
+        !outcome.settledEarlier ||
+        outcome.items.some((item) => item.editionId === shown.current)
+      )
+        setCount(1);
       onAdded({
         locationId: outcome.locationId,
         path: outcome.path,
@@ -659,7 +718,12 @@ function AddRows({
         from: "popup",
       });
     } else {
-      setFailure(addFailed(outcome.code, outcome.retry));
+      setNote({
+        editionId: sent.id,
+        words: words(sent),
+        retry: outcome.retry,
+        text: addFailed(outcome.code, outcome.retry),
+      });
       if (outcome.code === "LOCATION_NOT_FOUND") places.reload();
     }
   }

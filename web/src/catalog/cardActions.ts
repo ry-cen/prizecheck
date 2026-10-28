@@ -84,13 +84,30 @@ function send(command: AddCommand) {
   });
 }
 
+/** The codes the batch handler itself answers before it commits anything (api/app/holdings.py), under the owner lock:
+ * a refusal with one of them proves the batch never committed. A status alone proves nothing: a gateway's 401, 403 or
+ * 429, or a 422 without a code (the request's shape), can come while the earlier send is still being worked on. */
+const REFUSED_FOR_GOOD: ReadonlySet<string> = new Set([
+  "LOCATION_NOT_FOUND",
+  "EDITION_UNAVAILABLE",
+  "QUANTITY_OVERFLOW",
+  "DUPLICATE_ADD_ITEM",
+  "INVALID_QUANTITY",
+]);
+
+/** The answer for a key whose replay row no longer says what it did: resending can never settle it. */
+export const OUTCOME_UNAVAILABLE = "REPLAY_OUTCOME_UNAVAILABLE";
+
 function failed(cause: unknown): Extract<AddOutcome, { ok: false }> {
   const failure = cause instanceof HoldingError ? cause : null;
+  const code = failure?.code ?? "";
   return {
     ok: false,
-    code: failure?.code ?? "",
+    code,
     editionId: failure?.editionId ?? null,
-    retry: !(failure !== null && failure.status < 500),
+    // Only the handler's own refusals end the command; the unavailable outcome can't be resent, so it ends too (its copy
+    // says the add may have completed).
+    retry: !REFUSED_FOR_GOOD.has(code) && code !== OUTCOME_UNAVAILABLE,
   };
 }
 
@@ -121,9 +138,10 @@ export async function addCards(
     } catch (cause) {
       const outcome = failed(cause);
       if (outcome.retry) return outcome;
-      // The server refused it for good (so it never committed), or can no longer say: the new batch goes on its own.
+      // The handler refused it for good (so it never committed): the new batch goes on its own. When it can no longer
+      // say what happened, the add may have completed, so nothing new is sent.
       pending.current = null;
-      if (outcome.code === "REPLAY_OUTCOME_UNAVAILABLE") return outcome;
+      if (outcome.code === OUTCOME_UNAVAILABLE) return outcome;
     }
   }
   const command = pending.current ?? {

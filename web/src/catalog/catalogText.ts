@@ -79,6 +79,29 @@ export function addedText(count: number, path: string): string {
   return `Added ${copies(count)} to ${path}.`;
 }
 
+/** The popup: an add of another Edition may have completed while this one is shown. */
+export function addMayHaveCompletedFor(words: string): string {
+  return `Adding ${words} may have completed. Choose it again and press Add to check safely.`;
+}
+
+/** The popup, after an earlier add that may have completed was settled instead of this press (#196). */
+export function earlierAddFinishedFor(
+  count: number,
+  words: string,
+  path: string
+): string {
+  return `Your earlier add finished: added ${copies(count)} of ${words} to ${path}. Press Add again for the count shown.`;
+}
+
+/** Add mode, after the same: the cards still queued were not sent. */
+export function earlierBatchFinished(
+  count: number | string,
+  path: string,
+  queuedLeft: boolean
+): string {
+  return `Your earlier add finished: added ${cards(count)} to ${path}.${queuedLeft ? " Press Add for the cards still queued." : ""}`;
+}
+
 const ADD_ERRORS: Record<string, string> = {
   EDITION_UNAVAILABLE: "This Edition is no longer available to add.",
   LOCATION_NOT_FOUND: "That Location is gone. Choose another.",
@@ -86,7 +109,12 @@ const ADD_ERRORS: Record<string, string> = {
   INVALID_QUANTITY: "Choose between 1 and 999 copies.",
 };
 
+/** An add whose answer was lost and then could not be looked up again: it may or may not be in the collection. */
+export const ADD_UNKNOWN =
+  "Your earlier add may have finished. Check your collection before adding again.";
+
 export function addFailed(code: string, retry: boolean): string {
+  if (code === "REPLAY_OUTCOME_UNAVAILABLE") return ADD_UNKNOWN;
   if (retry) return "Add may have completed. Press Add again to check safely.";
   return ADD_ERRORS[code] ?? "Add failed. Please retry.";
 }
@@ -129,6 +157,7 @@ export function batchFailed(
   retry: boolean,
   card: string | null
 ): string {
+  if (code === "REPLAY_OUTCOME_UNAVAILABLE") return ADD_UNKNOWN;
   if (retry)
     return "Adding may have completed. Press Add again to check safely.";
   if (code === "EDITION_UNAVAILABLE")

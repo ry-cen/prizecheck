@@ -28,6 +28,7 @@ import {
   EMPTY_QUEUE,
   editionWords,
   hasRoom,
+  minus,
   queueItems,
   without,
   type AddQueue,
@@ -38,6 +39,7 @@ import { CatalogFilters } from "./CatalogFilters";
 import {
   batchFailed,
   CATALOG_UNAVAILABLE,
+  earlierBatchFinished,
   FORMAT_NAMES,
   MAX_ADD,
   QUEUE_FULL,
@@ -115,7 +117,8 @@ export function CatalogGallery({
     () => ({ q, format, kind, set_id: set?.set_id ?? null, owned }),
     [q, format, kind, set, owned]
   );
-  const browse = useCatalogBrowse(query, active);
+  const tiles = useRef<HTMLUListElement>(null);
+  const browse = useCatalogBrowse(query, active, tiles);
   const { loadMore, noteAdded } = browse;
   const [card, setCard] = useState<CardRequest | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -147,6 +150,20 @@ export function CatalogGallery({
   const busyRef = useRef(false);
   const [failure, setFailure] = useState("");
   const pendingAdd = useRef<AddCommand | null>(null);
+  // What the last Add found: an earlier add that may have completed was settled (#196), or "".
+  const [settled, setSettled] = useState("");
+  // The popup's adds that may have completed, one per Edition, kept while the popup is closed or stepped away.
+  const popupPending = useRef(
+    new Map<string, { current: AddCommand | null }>()
+  );
+  const pendingFor = useCallback((editionId: string) => {
+    let slot = popupPending.current.get(editionId);
+    if (!slot) {
+      slot = { current: null };
+      popupPending.current.set(editionId, slot);
+    }
+    return slot;
+  }, []);
   // The popup's Location: the last one chosen in it, reset to the target when the popup opens in Add mode.
   const [popupLocation, setPopupLocation] = useState<string | null>(null);
 
@@ -223,8 +240,8 @@ export function CatalogGallery({
     if (card || !closedOn.current) return;
     const id = closedOn.current;
     closedOn.current = null;
-    const tile = document.querySelector<HTMLElement>(
-      `[data-edition-id="${CSS.escape(id)}"]`
+    const tile = tiles.current?.querySelector<HTMLElement>(
+      `[data-edition-id="${CSS.escape(id)}"] button`
     );
     if (tile && tile !== document.activeElement) tile.focus();
   }, [card]);
@@ -268,6 +285,7 @@ export function CatalogGallery({
   function queueChange(edition: BrowseEdition, by: 1 | -1) {
     if (busyRef.current) return;
     setFailure("");
+    setSettled("");
     setQueue((current) => bump(current, edition, by));
   }
 
@@ -276,13 +294,21 @@ export function CatalogGallery({
     busyRef.current = true;
     setBusy(true);
     setFailure("");
+    setSettled("");
     const items = queueItems(queue);
     const outcome = await addCards(target.id, target.label, items, pendingAdd);
     busyRef.current = false;
     setBusy(false);
     if (outcome.ok) {
-      // A batch that may have completed earlier is settled first (#196): the queue stays for the collector to review.
-      if (!outcome.settledEarlier) setQueue(EMPTY_QUEUE);
+      // A batch that may have completed earlier is settled first (#196): only its copies leave the queue, and the rest
+      // stay for the collector to review before the next press.
+      if (outcome.settledEarlier) {
+        const left = minus(queue, outcome.items);
+        setQueue(left);
+        setSettled(
+          earlierBatchFinished(outcome.copies, outcome.path, left.size > 0)
+        );
+      } else setQueue(EMPTY_QUEUE);
       added({
         locationId: outcome.locationId,
         path: outcome.path,
@@ -334,9 +360,11 @@ export function CatalogGallery({
           ready={target !== null}
           busy={busy}
           failure={failure}
+          settled={settled}
           note={hasRoom(queue) ? "" : QUEUE_FULL}
           onClear={() => {
             setFailure("");
+            setSettled("");
             setQueue(EMPTY_QUEUE);
           }}
           onAdd={() => void addAll()}
@@ -398,7 +426,7 @@ export function CatalogGallery({
           </p>
           {browse.editions.length > 0 && (
             <ul
-              data-catalog-tiles=""
+              ref={tiles}
               aria-busy={browse.loading || browse.loadingMore}
               className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-medium),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0"
             >
@@ -409,6 +437,7 @@ export function CatalogGallery({
                 return (
                   <li
                     key={edition.edition_id}
+                    data-edition-id={edition.edition_id}
                     className="relative min-w-0"
                     // A keyboard path past the loaded rows: focus reaching the last tile loads the next page.
                     onFocus={
@@ -456,11 +485,10 @@ export function CatalogGallery({
           <p className="m-0 text-meta text-text-subtle empty:hidden">
             {browse.loadingMore ? "Loading more cards…" : ""}
           </p>
-          <p
-            aria-live="polite"
-            className="m-0 text-meta text-text-subtle empty:hidden"
-          >
+          {/* Always in the page, so a screen reader is watching it before its text arrives. */}
+          <p aria-live="polite" className="m-0 text-meta text-text-subtle">
             {!browse.loadingMore &&
+            !browse.loading &&
             browse.editions.length > 0 &&
             browse.nextCursor === null
               ? `All ${browse.editions.length.toLocaleString()} cards shown`
@@ -488,6 +516,7 @@ export function CatalogGallery({
         }
         onPrevious={onPrevious}
         onNext={onNext}
+        pendingFor={pendingFor}
         location={popupLocation}
         onLocation={setPopupLocation}
         alsoOffer={adding ? target : null}
@@ -535,7 +564,6 @@ function CatalogTile({
       priceId={priceId}
       queued={queued}
       aria-describedby={priceId}
-      data-edition-id={edition.edition_id}
       onClick={(event) => onOpen(event.currentTarget)}
     />
   );

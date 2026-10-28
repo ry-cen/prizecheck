@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import {
   browseEditions,
   CatalogBrowseError,
@@ -62,7 +68,10 @@ function failure(cause: unknown): string {
  */
 export function useCatalogBrowse(
   query: BrowseQuery,
-  active: boolean
+  active: boolean,
+  /** The gallery's own list (its `<li>`s carry `data-edition-id`): where keyboard focus is kept across a restart. The
+   * Catalog page stays mounted while hidden and Collection renders a second gallery, so no document-wide query. */
+  list?: RefObject<HTMLElement | null>
 ): CatalogBrowse {
   const [first, setFirst] = useState<BrowsePage | null>(null);
   const [editions, setEditions] = useState<BrowseEdition[]>([]);
@@ -93,16 +102,17 @@ export function useCatalogBrowse(
     restoreFocus.current = null;
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
-    const tiles = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        "[data-catalog-tiles] [data-edition-id]"
-      )
+    const rows = Array.from(
+      list?.current?.querySelectorAll<HTMLElement>("[data-edition-id]") ?? []
     );
+    // The tile's button, even when a quick add button held the focus.
     (
-      tiles.find((tile) => tile.dataset.editionId === wanted.id) ??
-      tiles[Math.min(wanted.index, tiles.length - 1)]
-    )?.focus();
-  }, [editions, loading]);
+      rows.find((row) => row.dataset.editionId === wanted.id) ??
+      rows[Math.min(wanted.index, rows.length - 1)]
+    )
+      ?.querySelector<HTMLElement>("button")
+      ?.focus();
+  }, [editions, loading, list]);
 
   const load = useCallback(async (why = "", depth = 0) => {
     const mine = ++latest.current;
@@ -174,14 +184,14 @@ export function useCatalogBrowse(
           why = quiet ? "" : COLLECTION_REFRESHED;
         }
         // Keyboard focus on a tile when the walk starts again (#196): put it back once the rows are redrawn.
-        restoreFocus.current = focusedTile();
+        restoreFocus.current = focusedTile(list?.current ?? null);
         void load(why, shownRows.current);
       } else setError({ text: failure(cause), more: true });
     } finally {
       inFlight.current = false;
       setLoadingMore(false);
     }
-  }, [nextCursor, load]);
+  }, [nextCursor, load, list]);
 
   // True when the owner revision moved only by the collector's own Adds on this page since the first page.
   async function onlyOwnChanges(): Promise<boolean> {
@@ -256,14 +266,12 @@ export function useCatalogBrowse(
   };
 }
 
-/** The gallery tile that holds keyboard focus, and its place among the tiles. */
-function focusedTile(): { id: string; index: number } | null {
-  const tile = document.activeElement?.closest<HTMLElement>(
-    "[data-catalog-tiles] [data-edition-id]"
-  );
-  if (!tile?.dataset.editionId) return null;
-  const tiles = Array.from(
-    document.querySelectorAll("[data-catalog-tiles] [data-edition-id]")
-  );
-  return { id: tile.dataset.editionId, index: tiles.indexOf(tile) };
+/** The gallery row (tile or its quick add) that holds keyboard focus, and its place among the rows. */
+function focusedTile(
+  list: HTMLElement | null
+): { id: string; index: number } | null {
+  const row = document.activeElement?.closest<HTMLElement>("[data-edition-id]");
+  if (!list || !row?.dataset.editionId || !list.contains(row)) return null;
+  const rows = Array.from(list.querySelectorAll("[data-edition-id]"));
+  return { id: row.dataset.editionId, index: rows.indexOf(row) };
 }

@@ -22,6 +22,8 @@ type Props = {
   busy: boolean;
   /** Why the last Add N cards added nothing, or "". */
   failure: string;
+  /** An earlier add that may have completed was settled by the last Add (#196), or "". */
+  settled: string;
   /** A note under the queue, such as the 200-Edition limit, or "". */
   note: string;
   onClear: () => void;
@@ -44,6 +46,7 @@ export function AddBar({
   ready,
   busy,
   failure,
+  settled,
   note,
   onClear,
   onAdd,
@@ -136,7 +139,13 @@ export function AddBar({
         </div>
       </div>
       {note && <p className="m-0 mt-1.5 text-meta text-text-muted">{note}</p>}
-      {/* Always mounted, so a screen reader announces each failure. */}
+      {/* Always mounted, so a screen reader announces each result. */}
+      <p
+        aria-live="polite"
+        className={`m-0 text-meta text-text${settled ? " mt-1.5" : ""}`}
+      >
+        {settled}
+      </p>
       <p
         role="alert"
         className={`m-0 text-meta text-danger${failure ? " mt-1.5" : ""}`}

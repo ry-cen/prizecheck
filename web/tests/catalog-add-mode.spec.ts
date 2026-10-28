@@ -149,6 +149,42 @@ const BULBASAUR = "Bulbasaur MEG 001 Normal";
 const CANDY = "Rare Candy MEG 125 Normal";
 const SWITCH = "Switch MEG 130 Normal";
 
+/** What one batch add request meets, in order: "lost" commits on the server and loses the answer, "dropped" never
+ * reaches it, "pass" goes through, and an object is the answer instead. Returns the idempotency keys it saw. */
+type Step = "lost" | "dropped" | "pass" | { status: number; body: object };
+async function scriptBatch(page: Page, steps: Step[]): Promise<string[]> {
+  const keys: string[] = [];
+  await page.route("**/api/holdings/batch", async (route) => {
+    keys.push(
+      (route.request().postDataJSON() as { idempotency_key: string })
+        .idempotency_key
+    );
+    const step = steps[keys.length - 1] ?? "pass";
+    if (step === "lost") {
+      await route.fetch();
+      await route.abort("failed");
+    } else if (step === "dropped") await route.abort("failed");
+    else if (step === "pass") await route.continue();
+    else
+      await route.fulfill({
+        status: step.status,
+        contentType: "application/json",
+        body: JSON.stringify(step.body),
+      });
+  });
+  return keys;
+}
+
+async function unsortedId(page: Page): Promise<string> {
+  const response = await page.request.get(`${ORIGIN}/api/location-tree`);
+  return ((await response.json()) as { locations: TreeNode[] }).locations.find(
+    (node) => node.name === "Unsorted"
+  )!.id;
+}
+
+const MAY_HAVE_COMPLETED =
+  "Adding may have completed. Press Add again to check safely.";
+
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -396,7 +432,11 @@ test.describe("desktop", () => {
     await more(page, CANDY).click();
     await bar.getByRole("button", { name: "Add 2 cards" }).click();
     await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
-    await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`, `1× ${CANDY}`]);
+    await expect(bar).toContainText(
+      "Your earlier add finished: added 1 card to Unsorted. Press Add for the cards still queued."
+    );
+    // Only the settled card leaves the queue: pressing Add again must not add it twice.
+    await expect(queued(page)).toHaveText([`1× ${CANDY}`]);
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
     const response = await page.request.get(`${ORIGIN}/api/location-tree`);
@@ -405,12 +445,148 @@ test.describe("desktop", () => {
     ).locations.find((node) => node.name === "Unsorted")!.id;
     expect(await held(page, unsorted)).toEqual(["1 Bulbasaur"]);
 
-    // The edited queue goes on its own key when the collector presses Add again.
-    await bar.getByRole("button", { name: "Add 2 cards" }).click();
-    await expect(toast(page)).toHaveText("Added 2 cards to Unsorted.");
+    // What is still queued goes on its own key when the collector presses Add again.
+    await bar.getByRole("button", { name: "Add 1 card" }).click();
+    await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+    await expect(bar).not.toContainText("Your earlier add finished");
     expect(keys).toHaveLength(3);
     expect(keys[2]).not.toBe(keys[0]);
-    expect(await held(page, unsorted)).toEqual(["1 Rare Candy", "2 Bulbasaur"]);
+    await expect
+      .poll(() => held(page, unsorted))
+      .toEqual(["1 Bulbasaur", "1 Rare Candy"]);
+  });
+
+  test("an add whose resend is still unknown sends nothing new, and the queue stays as it was (#196)", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await mode(page, "Add to a Location").click();
+    const keys = await scriptBatch(page, ["lost", "dropped"]);
+    const bar = addBar(page);
+    await more(page, BULBASAUR).click();
+    await bar.getByRole("button", { name: "Add 1 card" }).click();
+    await expect(bar).toContainText(MAY_HAVE_COMPLETED);
+
+    await more(page, CANDY).click();
+    await bar.getByRole("button", { name: "Add 2 cards" }).click();
+    await expect(bar).toContainText(MAY_HAVE_COMPLETED);
+    // Only the first batch was sent again, under its own key; the edited queue waits.
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`, `1× ${CANDY}`]);
+    expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
+
+    // Once the resend gets through, the first batch settles and only it leaves the queue.
+    await bar.getByRole("button", { name: "Add 2 cards" }).click();
+    await expect(bar).toContainText("Your earlier add finished");
+    await expect(queued(page)).toHaveText([`1× ${CANDY}`]);
+    expect(keys[2]).toBe(keys[0]);
+    expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
+  });
+
+  test("when the handler refuses the earlier add for good, the edited queue goes ahead under its own key (#196)", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await mode(page, "Add to a Location").click();
+    const keys = await scriptBatch(page, [
+      "dropped",
+      { status: 422, body: { detail: { code: "QUANTITY_OVERFLOW" } } },
+    ]);
+    const bar = addBar(page);
+    await more(page, BULBASAUR).click();
+    await bar.getByRole("button", { name: "Add 1 card" }).click();
+    await expect(bar).toContainText(MAY_HAVE_COMPLETED);
+
+    await more(page, CANDY).click();
+    await bar.getByRole("button", { name: "Add 2 cards" }).click();
+    await expect(toast(page)).toHaveText("Added 2 cards to Unsorted.");
+    await expect(queued(page)).toHaveCount(0);
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
+    await expect
+      .poll(async () => held(page, await unsortedId(page)))
+      .toEqual(["1 Bulbasaur", "1 Rare Candy"].sort());
+  });
+
+  test("a gateway's 401 during the resend keeps the earlier add pending, and the next press resends it (#196)", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await mode(page, "Add to a Location").click();
+    const keys = await scriptBatch(page, ["lost", { status: 401, body: {} }]);
+    const bar = addBar(page);
+    await more(page, BULBASAUR).click();
+    await bar.getByRole("button", { name: "Add 1 card" }).click();
+    await expect(bar).toContainText(MAY_HAVE_COMPLETED);
+
+    await more(page, CANDY).click();
+    await bar.getByRole("button", { name: "Add 2 cards" }).click();
+    await expect(bar).toContainText(MAY_HAVE_COMPLETED);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+
+    await bar.getByRole("button", { name: "Add 2 cards" }).click();
+    await expect(bar).toContainText("Your earlier add finished");
+    expect(keys).toHaveLength(3);
+    expect(keys[2]).toBe(keys[0]);
+    expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
+  });
+
+  test("in the popup, an add that may have completed is settled by the next press, even after closing it, and says which card (#196)", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    const keys = await scriptBatch(page, ["lost"]);
+    const open = () =>
+      tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal").click();
+    await open();
+    const dialog = page.getByRole("dialog", { name: "Bulbasaur" });
+    await addRow(page).getByRole("button", { name: "Add 1" }).click();
+    await expect(dialog).toContainText(
+      "Add may have completed. Press Add again to check safely."
+    );
+
+    // Another Edition picked: the notice stays and names the Edition it is about.
+    await dialog
+      .getByRole("group", { name: "Editions" })
+      .getByRole("button")
+      .nth(1)
+      .click();
+    await expect(dialog).toContainText(
+      "Adding Bulbasaur Normal may have completed. Choose it again and press Add to check safely."
+    );
+    await dialog
+      .getByRole("group", { name: "Editions" })
+      .getByRole("button")
+      .nth(0)
+      .click();
+    await expect(dialog).toContainText(
+      "Add may have completed. Press Add again to check safely."
+    );
+
+    // Closed and reopened, the pending add is still there: a different count settles it first.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await open();
+    await addRow(page)
+      .getByRole("button", { name: "Increase Copies to add" })
+      .click();
+    await addRow(page).getByRole("button", { name: "Add 2" }).click();
+    await expect(dialog).toContainText(
+      "Your earlier add finished: added 1 copy of Bulbasaur Normal to Unsorted. Press Add again for the count shown."
+    );
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    await expect(
+      addRow(page).getByRole("button", { name: "Add 1" })
+    ).toBeVisible();
+    expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
   });
 
   test("an Undo that finishes after a newer toast came leaves the newer toast alone (#177)", async ({
