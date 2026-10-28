@@ -191,6 +191,8 @@ export function CopySheet({
               deckId={editing.deckId}
               identityId={line.line.identity_id}
               editionId={line.line.edition_id}
+              currentName={line.line.name}
+              currentEdition={editionText(line)}
               onSwap={editing.onSwap}
             />
           )}
