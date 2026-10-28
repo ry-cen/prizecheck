@@ -6,7 +6,6 @@ import fcntl
 import json
 import multiprocessing
 import os
-from types import SimpleNamespace
 import subprocess
 import sys
 import threading
@@ -980,32 +979,3 @@ def test_follow_up_reads_after_the_hard_wait_leave_the_postgresql_reserve(env):
     assert admission.outcomes[1].failed_at_ms is not None             # the shortened poll still left room for the follow-up
     store.slow = False
     admission.release()
-
-
-def test_the_route_helper_rereads_changed_rows_inside_the_wait_window(env):
-    from app import main  # noqa: F401
-    from app import prices
-    store = Sluggish(env.store, 0.2)
-    env.seed(1, 25 * HOUR)
-    env.seed(2, 25 * HOUR)
-    budget = Budget(hard=time.monotonic() + 1.5, caller='user:a')
-    pairs = [(ref(1), 1), (ref(2), 1)]
-    states = quote_states(store, pairs, deadline=deadline())
-    found = {i: (None, None, SimpleNamespace(quote_lookup={'card': f'c-{i}', 'variant': 'normal'}, product_id=77)) for i in (1, 2)}
-    # A runner writes row 1 before the wait starts, so the wait resolves it; row 2 stays pending until the window ends.
-    original = price_refresh.Admission.wait
-
-    def write_then_wait(self, budget=None):
-        env.seed(1, 0)
-        store.slow = True
-        return original(self, budget)
-    price_refresh.Admission.wait = write_then_wait
-    releases = []
-    try:
-        admission = prices._admit([1, 2], pairs, found, states, budget, store, releases)
-    finally:
-        price_refresh.Admission.wait = original
-    assert budget.remaining() >= 0.45, budget.remaining()
-    assert admission.outcomes[1].refresh == 'refreshed'
-    store.slow = False
-    releases[0]()

@@ -436,11 +436,11 @@ WHERE e.id = ANY(%s)
 - `marketplace_states` reads `price:<ref>` at the same pinned generation instead of `quote_states`, for verified,
   product-eligible refs. `MarketplaceState.quote` is renamed `price` (validated dict or None). A record is valid only when
   its keys are exactly the allowlist, `mapping_revision == market.mapping_revision`, `product_id == market.product_id` and
-  `parse_amount(amount)` is not None. Otherwise the field is None and the row is unpriced. `price_eligible` becomes
+  `parse_amount(amount)` is not None and greater than zero. Otherwise the field is None and the row is unpriced. `price_eligible` becomes
   `product_eligible` (`quote_lookup` no longer required).
 - `published_cost.public_quotes`: drop admission and the wait. `_label` returns `no_price` when `state.price is None`, and
-  the view is built from `state.price['amount']`. The final eligibility re-read and the token/version/digest checks are
-  kept unchanged. `editions[]` amounts come from the same views.
+  the view is built from `state.price['amount']`. Eligibility and price are read once at one pinned generation (no admission
+  wait remains, so there is no final eligibility re-read); the token/version/digest checks are kept unchanged. `editions[]` amounts come from the same views.
 - `publish_refresh.py`: remove its admission and its call site, and delete the module once nothing imports it.
 - **Lag:** a quarantine still reaches public pages through the outbox as today. A new price reaches them in the same job
   run. A rebind after an owner decision calls `public_prices.publish(conn)` best effort (full, diff-only).

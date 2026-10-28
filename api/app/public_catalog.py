@@ -717,7 +717,7 @@ def _price(value, mapping_revision, product):
         return None
     if type(value['mapping_revision']) is not int or value['mapping_revision'] != mapping_revision \
             or type(value['product_id']) is not int or value['product_id'] != product \
-            or not isinstance(value['amount'], str) or parse_amount(value['amount']) is None:
+            or not isinstance(value['amount'], str) or not (parse_amount(value['amount']) or 0) > 0:
         return None
     return dict(value)
 

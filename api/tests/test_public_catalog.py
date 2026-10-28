@@ -336,7 +336,7 @@ def test_a_price_record_is_kept_only_when_exactly_the_allowlist_and_it_agrees_wi
     assert price(good) == good
     for bad in ({**good, 'mapping_revision': revision + 1}, {**good, 'product_id': 1002}, {**good, 'extra': 1},
                 {'mapping_revision': revision, 'product_id': 1001}, {**good, 'amount': '1.0000000'}, {**good, 'amount': 1.0},
-                {**good, 'amount': '-1'}, {**good, 'mapping_revision': True}, 'x', [], None):
+                {**good, 'amount': '-1'}, {**good, 'amount': '0'}, {**good, 'amount': '0.00'}, {**good, 'mapping_revision': True}, 'x', [], None):
         assert price(bad) is None, bad
     price(good)
     # Quarantined: no price is exposed even though the record remains.
