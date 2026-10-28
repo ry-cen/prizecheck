@@ -151,7 +151,13 @@ export function CatalogGallery({
   const [failure, setFailure] = useState("");
   const pendingAdd = useRef<AddCommand | null>(null);
   // What the last Add found: an earlier add that may have completed was settled (#196), or "".
-  const [settled, setSettled] = useState("");
+  const [settledAdd, setSettledAdd] = useState<{
+    copies: number | string;
+    path: string;
+  } | null>(null);
+  const settled = settledAdd
+    ? earlierBatchFinished(settledAdd.copies, settledAdd.path, queue.size > 0)
+    : "";
   // The popup's adds that may have completed, one per Edition, kept while the popup is closed or stepped away.
   const popupPending = useRef(
     new Map<string, { current: AddCommand | null }>()
@@ -282,10 +288,16 @@ export function CatalogGallery({
     onLinkOpened?.();
   }, [link, onLinkOpened]);
 
+  // An earlier add's notice belongs to the Location it was for.
+  const targetId = target?.id;
+  useEffect(() => {
+    setSettledAdd(null);
+  }, [targetId]);
+
   function queueChange(edition: BrowseEdition, by: 1 | -1) {
     if (busyRef.current) return;
     setFailure("");
-    setSettled("");
+    setSettledAdd(null);
     setQueue((current) => bump(current, edition, by));
   }
 
@@ -294,7 +306,7 @@ export function CatalogGallery({
     busyRef.current = true;
     setBusy(true);
     setFailure("");
-    setSettled("");
+    setSettledAdd(null);
     const items = queueItems(queue);
     const outcome = await addCards(target.id, target.label, items, pendingAdd);
     busyRef.current = false;
@@ -303,11 +315,8 @@ export function CatalogGallery({
       // A batch that may have completed earlier is settled first (#196): only its copies leave the queue, and the rest
       // stay for the collector to review before the next press.
       if (outcome.settledEarlier) {
-        const left = minus(queue, outcome.items);
-        setQueue(left);
-        setSettled(
-          earlierBatchFinished(outcome.copies, outcome.path, left.size > 0)
-        );
+        setQueue((current) => minus(current, outcome.items));
+        setSettledAdd({ copies: outcome.copies, path: outcome.path });
       } else setQueue(EMPTY_QUEUE);
       added({
         locationId: outcome.locationId,
@@ -364,7 +373,7 @@ export function CatalogGallery({
           note={hasRoom(queue) ? "" : QUEUE_FULL}
           onClear={() => {
             setFailure("");
-            setSettled("");
+            setSettledAdd(null);
             setQueue(EMPTY_QUEUE);
           }}
           onAdd={() => void addAll()}

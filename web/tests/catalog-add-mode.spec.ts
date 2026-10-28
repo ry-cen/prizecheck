@@ -485,6 +485,41 @@ test.describe("desktop", () => {
     expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
   });
 
+  test("a Clear pressed while the resend is in flight stays cleared when the earlier add settles (#196)", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await mode(page, "Add to a Location").click();
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/holdings/batch", async (route) => {
+      calls += 1;
+      if (calls === 1) {
+        await route.fetch();
+        await route.abort("failed");
+        return;
+      }
+      await gate;
+      await route.continue();
+    });
+    const bar = addBar(page);
+    await more(page, BULBASAUR).click();
+    await bar.getByRole("button", { name: "Add 1 card" }).click();
+    await expect(bar).toContainText(MAY_HAVE_COMPLETED);
+
+    await more(page, CANDY).click();
+    await bar.getByRole("button", { name: "Add 2 cards" }).click();
+    await expect.poll(() => calls).toBe(2);
+    await bar.getByRole("button", { name: "Clear" }).click();
+    await expect(queued(page)).toHaveCount(0);
+    release();
+    await expect(bar).toContainText("Your earlier add finished");
+    await expect(queued(page)).toHaveCount(0);
+    await expect(bar).not.toContainText("Press Add for the cards still queued");
+  });
+
   test("when the handler refuses the earlier add for good, the edited queue goes ahead under its own key (#196)", async ({
     page,
   }) => {
@@ -576,15 +611,16 @@ test.describe("desktop", () => {
     await open();
     await addRow(page)
       .getByRole("button", { name: "Increase Copies to add" })
-      .click();
-    await addRow(page).getByRole("button", { name: "Add 2" }).click();
+      .click({ clickCount: 3 });
+    await addRow(page).getByRole("button", { name: "Add 4" }).click();
     await expect(dialog).toContainText(
       "Your earlier add finished: added 1 copy of Bulbasaur Normal to Unsorted. Press Add again for the count shown."
     );
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
+    // Only the settled copy leaves the count, as in Add mode: 4 less 1 is 3.
     await expect(
-      addRow(page).getByRole("button", { name: "Add 1" })
+      addRow(page).getByRole("button", { name: "Add 3" })
     ).toBeVisible();
     expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
   });

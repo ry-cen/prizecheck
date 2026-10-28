@@ -33,6 +33,9 @@ export function AttributeSearch({ queued, onOpenQueued, onDone }: Props) {
   const [found, setFound] = useState<PrintingView[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [finding, setFinding] = useState(false);
+  // The name the last Find searched: Show more continues that search, not whatever the box says now.
+  const [searched, setSearched] = useState("");
   const [chosen, setChosen] = useState("");
   const [picked, setPicked] = useState<AttributeEvidence | null>(null);
   const [error, setError] = useState("");
@@ -50,22 +53,26 @@ export function AttributeSearch({ queued, onOpenQueued, onDone }: Props) {
     const request = ++searchRequest.current;
     setError("");
     setLoadingMore(false);
+    setFinding(true);
     try {
       const page = await searchCatalog({ name });
       if (request !== searchRequest.current) return;
+      setSearched(name);
       setFound(page.printings);
       setNext(page.next_cursor ?? null);
       setChosen("");
     } catch {
       if (request !== searchRequest.current) return;
       setError("Unable to search the catalog. Please retry.");
+    } finally {
+      if (request === searchRequest.current) setFinding(false);
     }
   }
 
   /** The next page of the search that is showing; the catalog changing under it starts over from page one. */
   async function showMore() {
-    const name = query.trim();
-    if (!next || !name) return;
+    const name = searched;
+    if (!next || !name || finding) return;
     const request = ++searchRequest.current;
     setError("");
     setLoadingMore(true);
@@ -155,7 +162,10 @@ export function AttributeSearch({ queued, onOpenQueued, onDone }: Props) {
             Review card
           </Button>
           {next && (
-            <Button disabled={loadingMore} onClick={() => void showMore()}>
+            <Button
+              disabled={loadingMore || finding}
+              onClick={() => void showMore()}
+            >
               Show more
             </Button>
           )}

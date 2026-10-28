@@ -691,23 +691,20 @@ function AddRows({
         (sum, item) => sum + item.quantity,
         0
       );
+      // Like Add mode, only the settled copies leave the count; when that covers all of it, this is a plain success.
+      const settledQuantity = outcome.settledEarlier
+        ? outcome.items
+            .filter((item) => item.editionId === shown.current)
+            .reduce((sum, item) => sum + item.quantity, 0)
+        : count;
+      const remaining = count - settledQuantity;
+      const stillPending = outcome.settledEarlier && remaining > 0;
       setDone(
-        outcome.settledEarlier
-          ? earlierAddFinishedFor(
-              copiesAdded,
-              outcome.items.some((item) => item.editionId === sent.id)
-                ? words(sent)
-                : cardName,
-              outcome.path
-            )
+        stillPending
+          ? earlierAddFinishedFor(copiesAdded, words(sent), outcome.path)
           : addedText(copiesAdded, outcome.path)
       );
-      // The count is kept only when the settled batch was for another Edition than the one shown now.
-      if (
-        !outcome.settledEarlier ||
-        outcome.items.some((item) => item.editionId === shown.current)
-      )
-        setCount(1);
+      setCount(Math.max(1, remaining));
       onAdded({
         locationId: outcome.locationId,
         path: outcome.path,

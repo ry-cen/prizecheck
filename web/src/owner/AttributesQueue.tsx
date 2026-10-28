@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getAttributeQueue,
   type AttributeEvidence,
@@ -19,6 +19,7 @@ import { ReviewQueue } from "./ReviewQueue";
  */
 export function AttributesQueue({ onDecided }: { onDecided: () => void }) {
   const toast = useToast();
+  const section = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<AttributeEvidence[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -62,8 +63,8 @@ export function AttributesQueue({ onDecided }: { onDecided: () => void }) {
   function openQueued(printingId: string) {
     if (open === printingId) {
       // One row is open at a time: its Review button names the card it controls.
-      const controls = document
-        .querySelector('button[aria-expanded="true"][aria-controls]')
+      const controls = section.current
+        ?.querySelector('button[aria-expanded="true"][aria-controls]')
         ?.getAttribute("aria-controls");
       document
         .getElementById(controls ?? "")
@@ -98,64 +99,66 @@ export function AttributesQueue({ onDecided }: { onDecided: () => void }) {
   }
 
   return (
-    <ReviewQueue
-      title="Card attributes"
-      intro="Printings with an open collector report, and manual Printings with no attributes yet. A correction overrides the derived value of each attribute it sets until it is removed."
-      tableLabel="Attribute review queue"
-      rows={items.map((item) => ({
-        key: item.printing_id,
-        label: item.name ?? "Unnamed Printing",
-        card: item.name ?? "Unnamed Printing",
-        setNumber:
-          [item.set_id, item.collector_number].filter(Boolean).join(" · ") ||
-          "None",
-        kind: queueKind(item),
-        reports: String(item.reports.length),
-        opened: item.opened_at,
-      }))}
-      emptyText="Nothing waits for review."
-      open={open}
-      onOpen={setOpen}
-      renderCard={(key, close) => {
-        const item = items.find((entry) => entry.printing_id === key);
-        return (
-          item && (
-            <AttributeReviewCard
-              key={key}
-              item={item}
-              onClose={close}
-              onDone={(message, removed, fresh) =>
-                done(key, message, removed, fresh)
-              }
-            />
+    <div ref={section}>
+      <ReviewQueue
+        title="Card attributes"
+        intro="Printings with an open collector report, and manual Printings with no attributes yet. A correction overrides the derived value of each attribute it sets until it is removed."
+        tableLabel="Attribute review queue"
+        rows={items.map((item) => ({
+          key: item.printing_id,
+          label: item.name ?? "Unnamed Printing",
+          card: item.name ?? "Unnamed Printing",
+          setNumber:
+            [item.set_id, item.collector_number].filter(Boolean).join(" · ") ||
+            "None",
+          kind: queueKind(item),
+          reports: String(item.reports.length),
+          opened: item.opened_at,
+        }))}
+        emptyText="Nothing waits for review."
+        open={open}
+        onOpen={setOpen}
+        renderCard={(key, close) => {
+          const item = items.find((entry) => entry.printing_id === key);
+          return (
+            item && (
+              <AttributeReviewCard
+                key={key}
+                item={item}
+                onClose={close}
+                onDone={(message, removed, fresh) =>
+                  done(key, message, removed, fresh)
+                }
+              />
+            )
+          );
+        }}
+        onRefresh={() => void load()}
+        status={status}
+        before={
+          <AttributeSearch
+            queued={(printingId) =>
+              items.some((item) => item.printing_id === printingId)
+            }
+            onOpenQueued={openQueued}
+            onDone={(message) => {
+              toast.show({ message });
+              onDecided();
+              // A manual Printing may have left or joined the queue.
+              void load();
+            }}
+          />
+        }
+        after={
+          next && (
+            <div>
+              <Button disabled={loadingMore} onClick={() => void loadMore()}>
+                Load more
+              </Button>
+            </div>
           )
-        );
-      }}
-      onRefresh={() => void load()}
-      status={status}
-      before={
-        <AttributeSearch
-          queued={(printingId) =>
-            items.some((item) => item.printing_id === printingId)
-          }
-          onOpenQueued={openQueued}
-          onDone={(message) => {
-            toast.show({ message });
-            onDecided();
-            // A manual Printing may have left or joined the queue.
-            void load();
-          }}
-        />
-      }
-      after={
-        next && (
-          <div>
-            <Button disabled={loadingMore} onClick={() => void loadMore()}>
-              Load more
-            </Button>
-          </div>
-        )
-      }
-    />
+        }
+      />
+    </div>
   );
 }

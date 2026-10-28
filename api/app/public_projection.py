@@ -48,7 +48,7 @@ class FilePublicProjection:
 
     def read_state(self, timeout=None):
         try:
-            with self.path.open() as stream:
+            with self.path.open(encoding='utf-8') as stream:
                 return _manifest(json.load(stream))
         except (OSError, ValueError) as exc:
             raise ProjectionUnavailable() from exc
