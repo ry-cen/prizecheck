@@ -320,15 +320,21 @@ def matched_by_number_editions(conn) -> list:
     Maintainer decisions are left out (the owner chose those). Rows carry the product and the rule version.
     """
     rows = conn.execute("""SELECT e.id AS edition_id,m.product_id,p.name AS product_name,p.group_id,a.version AS rule_version,
-      m.mapping_candidate,d.set_id
+      m.mapping_candidate->'candidate' AS lookup,d.set_id,
+      CASE WHEN jsonb_typeof(pm.source_record)='object' THEN jsonb_build_object('pricing',pm.source_record->'pricing',
+        'thirdParty',pm.source_record->'thirdParty','variants_detailed',
+        CASE WHEN jsonb_typeof(pm.source_record->'variants_detailed')='array' THEN
+          (SELECT coalesce(jsonb_agg(jsonb_build_object('pricing',v->'pricing','thirdParty',v->'thirdParty')),'[]'::jsonb)
+           FROM jsonb_array_elements(pm.source_record->'variants_detailed') v) END) END AS record
       FROM catalog_edition_metadata m JOIN catalog_edition e ON e.id=m.edition_id
       JOIN catalog_printing_display d ON d.printing_id=e.printing_id
+      LEFT JOIN catalog_printing_metadata pm ON pm.printing_id=e.printing_id
       LEFT JOIN catalog_rule_activation a ON a.id=m.matching_activation_id
       LEFT JOIN tcgplayer_product p ON p.product_id=m.product_id
       WHERE m.mapping_state='verified' AND m.mapping_basis='matching_rule' AND d.set_id=ANY(%s)
       ORDER BY e.id""", (list(MatchingRulesV4.TCGPLAYER_GROUPS),)).fetchall()
     return [row for row in rows if MatchingRulesV4.matched_by_number(
-        {"display": {"set_id": row["set_id"]}, "lookup": (row["mapping_candidate"] or {}).get("candidate") or {}})]
+        {"display": {"set_id": row["set_id"]}, "lookup": row["lookup"] or {}, "source_record": row["record"] or {}})]
 
 
 def _matched_page(conn, after: UUID) -> MetadataQueuePage:

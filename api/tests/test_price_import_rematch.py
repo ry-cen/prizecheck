@@ -23,15 +23,27 @@ def test_the_script_lists_the_flag():
     assert out.returncode == 0 and "--rematch" in out.stdout and "--force" in out.stdout
 
 
-@pytest.mark.parametrize("code,flag,changed,expected", [
-    (0, True, 4, ["run", "rematch", "rebind"]), (3, True, 4, ["run", "rematch", "rebind"]),
-    (0, True, 0, ["run", "rematch"]), (2, True, 4, ["run"]), (1, True, 4, ["run"]), (0, False, 4, ["run"])])
-def test_the_rematch_runs_after_a_finished_import_only_when_asked(monkeypatch, capsys, code, flag, changed, expected):
+@pytest.mark.parametrize("code,flag,changed,expected,outcome", [
+    (0, True, 4, ["run", "rematch", "rebind"], "imported"), (3, True, 4, ["run", "rematch", "rebind"], "partial"),
+    (0, True, 0, ["run", "rematch"], "unchanged"), (2, True, 4, ["run"], "failed"), (1, True, 4, ["run"], "failed"),
+    (0, False, 4, ["run"], "imported"),
+    (0, True, 4, ["run"], "locked")])  # another job holds the import lock: this one does no work at all
+def test_the_rematch_runs_after_a_finished_import_only_when_asked(monkeypatch, capsys, code, flag, changed, expected, outcome):
     seen = []
     monkeypatch.setattr("app.db.connect", lambda **_: Conn())
-    monkeypatch.setattr(price_import, "run", lambda conn, force: seen.append("run") or SimpleNamespace(exit_code=code))
+    monkeypatch.setattr(price_import, "run",
+                        lambda conn, force: seen.append("run") or SimpleNamespace(exit_code=code, outcome=outcome))
     monkeypatch.setattr("app.catalog_targets.rematch_promos", lambda conn: seen.append("rematch") or changed)
     monkeypatch.setattr(price_import, "rebind_only", lambda conn: seen.append("rebind") or 0)
     assert price_import.main(["--force", "--rematch"] if flag else ["--force"]) == code
     assert seen == expected
     assert (f"rematch changed {changed}" in capsys.readouterr().out) == ("rematch" in expected)
+
+
+def test_a_rematch_that_raises_anything_is_logged_by_class_and_never_raised(monkeypatch, capsys):
+    def explode(conn):
+        raise ValueError("secret detail")
+    monkeypatch.setattr("app.catalog_targets.rematch_promos", explode)
+    price_import.rematch(Conn())
+    output = capsys.readouterr().out
+    assert "the rematch failed (ValueError)" in output and "secret detail" not in output

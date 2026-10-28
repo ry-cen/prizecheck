@@ -168,7 +168,10 @@ services:
     init: true
     entrypoint: ["python"]
     command: ["--version"]
-    environment: *api-environment
+    environment:
+      <<: *api-environment
+      # The price import names this contact in its User-Agent and refuses to run without one.
+      PRICE_IMPORT_CONTACT: ${PRICE_IMPORT_CONTACT:-${OWNER_EMAIL}}
     volumes:
       - ${PRIZECHECK_DATA_DIR}/public:/var/lib/prizecheck/public
       - ${PRIZECHECK_DATA_DIR}/price-runners:/var/lib/prizecheck/price-runners

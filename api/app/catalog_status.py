@@ -93,12 +93,11 @@ def owner_catalog_status(user_id: str = Depends(verified_user)):
         latest = conn.execute("""SELECT outcome,started_at,finished_at,source_updated_at,groups_total,groups_failed,verified_editions,
           priced_editions,unpriced,fallback_art,public_error,error_code
           FROM price_import WHERE outcome IS NOT NULL ORDER BY id DESC LIMIT 1""").fetchone()
-        ages = conn.execute("""SELECT
-          (SELECT max(finished_at) FROM price_import WHERE outcome IN ('imported','unchanged')) AS good,
-          (SELECT max(source_updated_at) FROM tcgplayer_price) AS source_max,
-          coalesce((SELECT max(finished_at) FROM price_import WHERE outcome IN ('imported','unchanged')) < now()-interval '48 hours',
-            true) AS import_stale,
-          coalesce((SELECT max(source_updated_at) FROM tcgplayer_price) < now()-interval '48 hours', true) AS source_stale""").fetchone()
+        ages = conn.execute("""SELECT g.good,s.source_max,
+          coalesce(g.good < now()-interval '48 hours', true) AS import_stale,
+          coalesce(s.source_max < now()-interval '48 hours', true) AS source_stale
+          FROM (SELECT max(finished_at) AS good FROM price_import WHERE outcome IN ('imported','unchanged')) g,
+               (SELECT max(source_updated_at) AS source_max FROM tcgplayer_price) s""").fetchone()
         return OwnerCatalogStatus(catalog=catalog_status_row(conn), run=CatalogRun(**run) if run else None,
                                   last_price_import=PriceImportRun(**latest) if latest else None,
                                   last_good_price_import_at=ages["good"], source_updated_at_max=ages["source_max"],
