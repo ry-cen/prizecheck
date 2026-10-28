@@ -21,6 +21,7 @@ import {
 import { BorrowDraftsProvider } from "../loans/BorrowDrafts";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
+import { PriceCredit } from "../ui/PriceCredit";
 import { takeLandingToast } from "../scanner/ui/landing";
 import { ToastProvider, useToast } from "../ui/Toast";
 import { FriendsButton, FriendsProvider } from "../social/FriendsDrawer";
@@ -360,7 +361,6 @@ function ShellFrame({
             key={def.id}
             id={def.id === showing ? "main-content" : undefined}
             hidden={def.id !== showing}
-            className="phone:pb-tabbar"
             ref={(element) => {
               if (element) containers.current.set(def.id, element);
               else containers.current.delete(def.id);
@@ -374,15 +374,16 @@ function ShellFrame({
           </div>
         ))}
         {other && (
-          <div
-            key={other.key}
-            id="main-content"
-            className="phone:pb-tabbar"
-            ref={otherContainer}
-          >
+          <div key={other.key} id="main-content" ref={otherContainer}>
             {other.content}
           </div>
         )}
+
+        {/* The price credit ends the page area on every shell page; on a phone the padding keeps it, and the last of
+          the page, clear of the fixed tab bar. */}
+        <div className="phone:pb-tabbar">
+          <PriceCredit />
+        </div>
 
         {/* Phone bottom tab bar. */}
         <nav
