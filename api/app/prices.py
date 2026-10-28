@@ -23,13 +23,11 @@ from . import quote_contract
 from .price_reads import price_reads_enabled
 from .identity import verified_user
 from .price_budget import MAX_BODY_BYTES, Budget, trusted_budget
-from .public_records import QuoteState
 from .quote_contract import parse_amount  # noqa: F401  (moved; re-exported so `prices.parse_amount` keeps working)
 
 router = APIRouter(prefix='/api/prices', tags=['prices'])
 
 STALE_AFTER = timedelta(hours=48)
-FUTURE_TOLERANCE = timedelta(minutes=5)
 MAX_EDITIONS = 64
 
 Status = Literal['quote', 'unavailable', 'failed', 'pending']
@@ -69,64 +67,12 @@ def format_usd(amount: Decimal) -> str:
         return f'${amount.quantize(_CENT, rounding=ROUND_HALF_UP):,.2f}'
 
 
-def _timestamp(value, now: datetime) -> datetime | None:
-    """A timezone-aware ISO time that is not (materially) in the future, else None."""
-    if type(value) is not str or not 0 < len(value) <= 40:
-        return None
-    try:
-        moment = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if moment.tzinfo is None or moment.utcoffset() is None:
-        return None
-    moment = moment.astimezone(timezone.utc)
-    return None if moment > now + FUTURE_TOLERANCE else moment
-
-
 def _text(moment: datetime) -> str:
     return moment.isoformat().replace('+00:00', 'Z')
 
 
 def _unavailable(reason: Reason, status: Status = 'unavailable') -> QuoteView:
     return QuoteView(status=status, reason=reason)
-
-
-def validate_quote(lookup: dict, state: QuoteState, now: datetime) -> QuoteView:
-    """What a store state means for an Edition whose PostgreSQL ``quote_lookup`` is ``lookup``. Pure."""
-    result = state.result if isinstance(state.result, dict) else {}
-    checked = _timestamp(result.get('checked_at'), now)
-    checked_text = _text(checked) if checked else None
-    if state.status == 'unknown':
-        return _unavailable('not_cached')
-    if state.status == 'absent':
-        return QuoteView(status='unavailable', reason='confirmed_absent', checked_at=checked_text)
-    if state.status == 'pending':
-        return QuoteView(status='pending')
-    if state.status == 'invalid':  # a malformed result/quote row: this row only
-        return _unavailable('invalid_quote', 'failed')
-    payload = state.quote
-    if state.status != 'quote' or not isinstance(payload, dict):
-        return _unavailable('invalid_quote', 'failed')
-    if payload.get('card') != lookup.get('card') or payload.get('variant') != lookup.get('variant'):
-        return _unavailable('lookup_mismatch', 'failed')
-    amount = parse_amount(payload.get('amount'))
-    # A zero is never shown: a missing price must not be indistinguishable from a free card.
-    if amount is None or payload.get('currency') != 'USD' or payload.get('source') != 'tcgdex':
-        return _unavailable('invalid_quote', 'failed')
-    provider = _timestamp(payload.get('provider_updated_at'), now)
-    age = 'known' if provider else 'unknown'
-    stale = (now - provider) > STALE_AFTER if provider else None
-    return QuoteView(status='quote', amount=payload['amount'], display_amount=format_usd(amount),
-                     provider_updated_at=_text(provider) if provider else None, checked_at=checked_text,
-                     age=age, stale=stale)
-
-
-def _with_refresh(view: QuoteView, outcome) -> QuoteView:
-    """Kept for the Published Deck cost route until its reader moves to the price records (P5b)."""
-    if outcome is None or outcome.refresh is None:
-        return view
-    failed = quote_contract.iso_from_ms(outcome.failed_at_ms) if outcome.failed_at_ms is not None else None
-    return view.model_copy(update={'refresh': outcome.refresh, 'refresh_failed_at': failed})
 
 
 # --- Reading ---------------------------------------------------------------------------------------------------

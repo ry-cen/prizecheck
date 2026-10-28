@@ -14,10 +14,9 @@ their Reprint Groups), and recomputed when any of them moves. The facts are read
 is what confirms a result: a cached result never stands in for an unreadable store. A snapshot whose facts can't be read
 in time (store unavailable, deadline) is left out, never listed unchecked.
 
-Cost. Each summary carries ``cost: {amount, priced_copies, total_copies}`` from the cached quotes alone, read at the same
-store generation as the facts with the Published Deck cost route's eligibility proof (``published_cost._label``) and fold
-(``deck_cost.summarize``). Discover never admits a price refresh and writes nothing: no record, no manifest byte, no
-discovery revision. Stale cached quotes count as priced; no price age is sent.
+Cost. Each summary carries ``cost: {amount, priced_copies, total_copies}`` from the public ``price:`` records alone, read at the same
+store generation as the facts with the Published Deck cost route's eligibility proof and price view (``published_cost._view``) and fold
+(``deck_cost.summarize``). Discover writes nothing: no record, no manifest byte, no discovery revision. No price age is sent.
 
 Contract: docs/public-projections.md ("Discover lists legal decks").
 """
@@ -44,7 +43,7 @@ from .deck_format_checks import TargetFormat, today
 from .public_catalog import marketplace_states
 from .public_projection import ProjectionUnavailable, public_projection_store
 from .public_records import public_record_store
-from .published_cost import _label
+from .published_cost import _view
 from .publications import PublicModel, TOKEN, PUBLIC_HEADERS
 
 router = APIRouter(tags=['public discovery'])
@@ -195,8 +194,8 @@ def target_status(token, active, facts, on):
 
 
 # --- Summaries -----------------------------------------------------------------------------------------------------
-def cost(active, states, now) -> DiscoverCost:
-    """The snapshot's cost from cached quotes only: no admission, no refresh, no wait. ``states`` is None when the store
+def cost(active, states) -> DiscoverCost:
+    """The snapshot's cost from the public price records only. ``states`` is None when the store
     couldn't be read (only a fixture-listed snapshot gets this far then): every copy is unpriced."""
     quantities, frozen = {}, {}
     for index, row in enumerate(active.rows):
@@ -207,9 +206,7 @@ def cost(active, states, now) -> DiscoverCost:
     views = {key: prices._unavailable('not_found') for key in quantities if key not in frozen or states is None}
     for key, printing_ref in frozen.items():
         if states is not None:
-            state = states[key]
-            label = _label(state, printing_ref)
-            views[key] = label if label is not None else prices.validate_quote(state.quote_lookup, state.quote, now)
+            views[key] = _view(states[key], printing_ref)
     figures = summarize(quantities, views)
     return DiscoverCost(amount=figures['amount'] if figures['status'] == 'priced' else None,
                         priced_copies=figures.get('priced_copies', '0'), total_copies=figures['total_copies'])
@@ -233,7 +230,7 @@ def featured(active, facts):
     return (pictured[0].image_url, pictured[0].name) if pictured else (None, None)
 
 
-def summary(token, active, facts, states, now) -> PublicDeckSummary:
+def summary(token, active, facts, states) -> PublicDeckSummary:
     public = active.snapshot
     checks = public.checks
     image_url, name = featured(active, facts)
@@ -242,7 +239,7 @@ def summary(token, active, facts, states, now) -> PublicDeckSummary:
              over_limit_groups=sum(item.status=='over_limit' for item in checks.identities),
              unresolved_groups=sum(item.status=='unresolved' for item in checks.identities)),
         image_url=image_url, featured_name=name, target_format=public.target_format, target_format_status='legal',
-        cost=cost(active, states, now))
+        cost=cost(active, states))
 
 
 def confirm(chunk, deadline, on) -> tuple[dict[str, PublicDeckSummary], bool]:
@@ -262,8 +259,7 @@ def confirm(chunk, deadline, on) -> tuple[dict[str, PublicDeckSummary], bool]:
     except (ProjectionUnavailable, ValueError):
         states = facts = None
         readable = False
-    now = prices._now()
-    return ({token: summary(token, active, facts, states, now) for token, active in chunk
+    return ({token: summary(token, active, facts, states) for token, active in chunk
              if target_status(token, active, facts, on) == 'legal'}, readable)
 
 

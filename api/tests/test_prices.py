@@ -6,23 +6,7 @@ import pytest
 
 from app.main import app, connect, operation_counter  # noqa: F401
 from app.price_budget import Budget
-from app.prices import format_usd, parse_amount, validate_quote
-from app.public_records import QuoteState
-
-NOW = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
-LOOKUP = {"source": "tcgdex", "card": "meta-1", "variant": "normal"}
-
-
-def iso(delta):
-    return (NOW - delta).isoformat().replace("+00:00", "Z")
-
-
-def quote_state(amount="0.43", updated=None, checked=None, **payload):
-    body = {"attempt": 1, "amount": amount, "currency": "USD", "source": "tcgdex", "card": "meta-1", "variant": "normal",
-            "provider_updated_at": updated, **payload}
-    result = {"state": "quote", "attempt": 1, "checked_at": checked}
-    return QuoteState("quote", result, body, "g1")
-
+from app.prices import format_usd, parse_amount
 
 # ------------------------------------------------------------------ amounts and display
 
@@ -48,83 +32,6 @@ def test_display_rounds_half_up_to_cents_only_at_display_and_marks_sub_cent_amou
     assert format_usd(Decimal("0.01")) == "$0.01"
     assert format_usd(Decimal("0.009999")) == "<$0.01"
     assert format_usd(Decimal("0.000001")) == "<$0.01"
-
-
-# ------------------------------------------------------------------ what a state means
-
-
-def view(state, lookup=LOOKUP, now=NOW):
-    return validate_quote(lookup, state, now)
-
-
-def test_an_unknown_state_is_not_cached_and_never_a_zero():
-    result = view(QuoteState("unknown", None, None, "g"))
-    assert (result.status, result.reason, result.amount, result.display_amount) == ("unavailable", "not_cached", None, None)
-    assert result.currency == "USD" and result.age == "unknown" and result.stale is None
-
-
-def test_absent_is_confirmed_unavailable_and_pending_hides_any_quote():
-    absent = view(QuoteState("absent", {"state": "absent", "checked_at": iso(timedelta(hours=1))}, None, "g"))
-    assert (absent.status, absent.reason, absent.amount) == ("unavailable", "confirmed_absent", None)
-    assert absent.checked_at == iso(timedelta(hours=1))
-    pending = view(QuoteState("pending", {"state": "pending"}, None, "g"))
-    assert (pending.status, pending.amount, pending.display_amount) == ("pending", None, None)
-
-
-def test_a_valid_quote_carries_exact_and_display_amounts_and_keeps_provider_age_apart_from_the_check():
-    result = view(quote_state("0.435", updated=iso(timedelta(hours=3)), checked=iso(timedelta(minutes=5))))
-    assert (result.status, result.reason, result.amount, result.display_amount) == ("quote", None, "0.435", "$0.44")
-    assert result.provider_updated_at == iso(timedelta(hours=3)) and result.checked_at == iso(timedelta(minutes=5))
-    assert (result.age, result.stale) == ("known", False)
-
-
-def test_staleness_is_strictly_over_48_hours_of_provider_age():
-    at = view(quote_state(updated=iso(timedelta(hours=48))))
-    over = view(quote_state(updated=iso(timedelta(hours=48, microseconds=1))))
-    assert (at.age, at.stale) == ("known", False)
-    assert (over.age, over.stale) == ("known", True)
-
-
-def test_a_fresh_check_never_renews_provider_age():
-    result = view(quote_state(updated=iso(timedelta(days=30)), checked=iso(timedelta(seconds=1))))
-    assert result.stale is True and result.provider_updated_at == iso(timedelta(days=30))
-
-
-@pytest.mark.parametrize("updated", [None, "", "garbage", "2026-10-08T12:00:00", 17, "2999-01-01T00:00:00Z",
-                                     "2026-10-09T12:06:00Z", "12/10/2026"])
-def test_missing_garbled_naive_or_future_provider_time_is_age_unknown_not_fresh(updated):
-    result = view(quote_state(updated=updated))
-    assert result.status == "quote" and result.age == "unknown" and result.stale is None and result.provider_updated_at is None
-
-
-@pytest.mark.parametrize("amount", ["1e3", "NaN", "-0.01", 0.43, 43, "12345678901234", "0.4300000", None])
-def test_a_bad_amount_fails_only_that_quote_closed(amount):
-    result = view(quote_state(amount))
-    assert (result.status, result.reason, result.amount, result.display_amount) == ("failed", "invalid_quote", None, None)
-
-
-def test_a_validated_zero_quote_is_a_real_zero_price():
-    # spec: quotes are finite, nonnegative decimals; only missing data must never read as $0.
-    result = view(quote_state("0"))
-    assert (result.status, result.amount, result.display_amount) == ("quote", "0", "$0.00")
-
-
-@pytest.mark.parametrize("change", [{"currency": "EUR"}, {"currency": None}, {"source": "other"}])
-def test_currency_or_source_other_than_usd_tcgdex_is_invalid(change):
-    state = quote_state(updated=iso(timedelta(hours=1)))
-    state = QuoteState("quote", state.result, {**state.quote, **change}, "g")
-    assert view(state).reason == "invalid_quote"
-
-
-@pytest.mark.parametrize("change", [{"card": "other"}, {"variant": "holofoil"}, {"card": None}])
-def test_a_quote_for_another_card_or_variant_than_the_reviewed_lookup_fails_closed(change):
-    result = view(quote_state(**change))
-    assert (result.status, result.reason, result.amount) == ("failed", "lookup_mismatch", None)
-
-
-def test_a_malformed_provider_time_never_hides_a_valid_amount_and_a_malformed_check_time_is_dropped():
-    result = view(quote_state(updated="nope", checked="also nope"))
-    assert result.status == "quote" and result.checked_at is None and result.age == "unknown"
 
 
 # ------------------------------------------------------------------ budget arithmetic
@@ -249,27 +156,6 @@ def ago(delta):
     return (datetime.now(timezone.utc) - delta).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def seed_quote(store, edition, amount="0.43", *, variant=None, card_id=None, state="quote", revision=None, updated=RELATIVE,
-               checked=RELATIVE, payload=True, result=None, **over):
-    """Legacy record-store seeding for the readers that still read ``quote:``/``result:`` records (Published Deck cost,
-    Discover, the price runner tests; retired with P5b and P9). Writes what ticket 08 wrote: a result marker plus a quote payload under the Edition's reference and revision."""
-    revision = revision or edition["mapping_revision"]
-    ref = edition["public_ref"]
-    # Defaults are relative to the wall clock: a provider time a day old and a check ten minutes old (under the 1 h
-    # fresh band), so no seeded record ages into another band as the calendar moves.
-    updated = ago(timedelta(days=1)) if updated is RELATIVE else updated
-    checked = ago(timedelta(minutes=10)) if checked is RELATIVE else checked
-    quote = {"attempt": 1, "amount": amount, "currency": "USD", "source": "tcgdex", "card": card_id or edition["source_id"],
-             "variant": variant or edition["quote_variant"], "provider_updated_at": updated, **over}
-    marker = result if result is not None else {"state": state, "attempt": 1, "checked_at": checked}
-    keys = [quote_key(ref, revision), result_key(ref, revision)]
-    snapshot = store.read_records(keys, deadline=time.monotonic() + 5)
-    changes = {keys[1]: marker}
-    if payload:
-        changes[keys[0]] = quote
-    assert store.compare_and_swap({key: snapshot.records[key].version for key in changes}, changes, deadline=time.monotonic() + 5)
-
-
 SUB_TYPES = {"normal": "Normal", "reverse-holofoil": "Reverse Holofoil"}
 
 
@@ -297,6 +183,20 @@ def seed(store, edition, amount="0.43", *, low=None, mid=None, sub_type=None, pr
                          (edition["id"], product_id, revision, sub_type))
 
 
+def publish_prices(store=None):
+    """Write the public ``price:`` records (what the import job's last step does) for every priced Edition, so the readers
+    that never touch PostgreSQL (Published Deck cost, Discover) see what ``seed`` stored."""
+    from app.public_prices import publish
+    with connect() as conn:
+        return publish(conn, store or public_record_store())
+
+
+def seed_public(store, edition, amount="0.43", **options):
+    """``seed`` the Edition's price row and binding, then publish the ``price:`` records."""
+    seed(store, edition, amount, **options)
+    publish_prices(store)
+
+
 def ui_world(pagers=0):
     """Browser-spec seeding (web/tests/prices.spec.ts): the catalog, as ids. Quotes are seeded by ui_apply."""
     found = world(pagers)
@@ -308,8 +208,8 @@ ROW_KEYS = ("amount", "low", "mid", "sub_type", "product_id", "revision", "updat
 
 def ui_apply(commands):
     """Browser-spec commands against the live stack's database. {op:'quote', edition, ...seed arguments} seeds a price row and
-    its binding (what the private readers read), and also writes the legacy record-store quote that the Published Deck cost
-    and Discover readers still read until P5b; {op:'sql', statement, edition} runs one UPDATE for the Edition."""
+    its binding (what the private readers read) and then publishes the ``price:`` records (what the Published Deck cost and
+    Discover read); {op:'sql', statement, edition} runs one UPDATE for the Edition and publishes again."""
     store = public_record_store()
     for command in commands:
         with connect() as conn:
@@ -320,10 +220,9 @@ def ui_apply(commands):
               JOIN catalog_edition_metadata m ON m.edition_id=e.id JOIN catalog_printing p ON p.id=e.printing_id WHERE e.id=%s""",
                                    (command["edition"],)).fetchone()
         arguments = {key: value for key, value in command.items() if key not in ("op", "edition")}
-        if set(arguments) <= set(ROW_KEYS) and arguments.get("updated", "") is not None and arguments.get("checked", "") is not None:
-            seed(store, edition, **arguments)
-        legacy = {key: value for key, value in arguments.items() if key not in ("low", "mid", "sub_type", "product_id", "bind")}
-        seed_quote(store, edition, **legacy)
+        assert set(arguments) <= set(ROW_KEYS), arguments
+        seed(store, edition, **arguments)
+    publish_prices(store)
 
 
 def prices_of(response):

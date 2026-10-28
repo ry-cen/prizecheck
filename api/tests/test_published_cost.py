@@ -19,11 +19,10 @@ import pytest
 from app.main import app, connect  # noqa: F401
 from app import price_launcher, public_deck, published_cost
 from app.public_projection import FilePublicProjection, ProjectionUnavailable
-from app.public_records import public_record_store, quarantine_key
+from app.public_records import price_key, public_record_store, quarantine_key
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
-from test_deck_cost import scheduler
 from test_holdings import add
-from test_prices import ago, client, headers_for, seed_quote as seed, world
+from test_prices import ago, client, headers_for, seed_public as seed, world
 from test_publications import command, legacy_snapshot, stored_decks
 
 USER = "published-cost-owner"
@@ -42,6 +41,7 @@ def store(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def launches(monkeypatch):
+    """Kept for the many test modules that import it (nothing admits a refresh now, so it stays empty); P9 removes it."""
     calls = []
     monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
     return calls
@@ -118,17 +118,16 @@ def quarantine(store, ref):
                                   deadline=time.monotonic() + 5)
 
 
-def wait_for_permit(store):
-    """Until the cost request holds its interactive permit, i.e. it is inside its wait window."""
-    deadline = time.monotonic() + 3
-    while True:
-        try:
-            if scheduler(store)["interactive"]:
-                return
-        except (KeyError, TypeError):
-            pass
-        assert time.monotonic() < deadline, "the cost request never reached its wait window"
-        time.sleep(0.05)
+def write_price(store, ref, value):
+    """Replace one Edition's ``price:`` record (None deletes it)."""
+    key = price_key(ref)
+    row = store.read_records([key], deadline=time.monotonic() + 5).records[key]
+    assert store.compare_and_swap({key: row.version}, {key: value}, deadline=time.monotonic() + 5)
+
+
+def read_price(store, ref):
+    key = price_key(ref)
+    return store.read_records([key], deadline=time.monotonic() + 5).records[key].value
 
 
 def test_published_cost_labels_empty_unpriced_and_unreadable_snapshots(store, monkeypatch):
@@ -210,32 +209,103 @@ def test_only_a_token_and_a_version_reach_the_published_cost(store, monkeypatch)
     assert post.status_code == 405
 
 
-@pytest.mark.parametrize("change, status", [("republish", 409), ("rewrite", 409), ("quarantine", 200)])
-def test_an_answer_is_withheld_when_the_snapshot_or_eligibility_changes_during_the_wait(store, change, status):
+def test_an_answer_is_withheld_when_the_snapshot_changes_while_the_prices_are_read(store, monkeypatch):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
     seed(store, normal, "0.25")
-    deck, token = publish({normal["id"]: 3, reverse["id"]: 2})
-    box = {}
-    thread = threading.Thread(target=lambda: box.update(response=public_cost(token, 1, guard=False)))
-    thread.start()
-    wait_for_permit(store)
-    if change == "republish":
-        assert command(USER, deck, "PUT").status_code == 200
-    elif change == "rewrite":
-        rewrite_snapshot(token, lambda s: s["identities"][0]["editions"][0].update(quantity="4"))
-    else:
-        quarantine(store, reverse["public_ref"])
     seed(store, reverse, "0.43")
-    thread.join(10)
-    assert not thread.is_alive()
-    response = box["response"]
-    assert response.status_code == status, response.text
-    if status == 409:
-        assert response.json()["detail"]["code"] == "PUBLISHED_DECK_CHANGED"
-    else:
-        body = body_of(response)
-        assert (body["status"], body["amount"], body["priced_copies"], body["total_copies"]) == ("priced", "0.75", "3", "5")
+    _, token = publish({normal["id"]: 3, reverse["id"]: 2})
+    real = published_cost.public_quotes
+
+    def changed_meanwhile(*args, **kwargs):
+        views = real(*args, **kwargs)
+        rewrite_snapshot(token, lambda s: s["identities"][0]["editions"][0].update(quantity="4"))
+        return views
+    monkeypatch.setattr(published_cost, "public_quotes", changed_meanwhile)
+    response = public_cost(token, 1)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "PUBLISHED_DECK_CHANGED"
+
+
+def test_totals_and_edition_amounts_come_from_the_price_records(store):
+    editions = world()
+    normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.435")
+    _, token = publish({normal["id"]: 3, reverse["id"]: 2, plain["id"]: 1})
+    before = generation(store)
+    body = body_of(public_cost(token, 1))
+    assert (body["status"], body["amount"], body["priced_copies"], body["total_copies"]) == ("priced", "1.62", "5", "6")
+    assert {entry["edition_ref"]: entry["amount"] for entry in body["editions"]} == {
+        normal["public_ref"]: "0.25", reverse["public_ref"]: "0.435", plain["public_ref"]: None}
+    assert generation(store) == before
+    # The record, not PostgreSQL, is what the route reads: change the record and the answer follows.
+    write_price(store, reverse["public_ref"], {**read_price(store, reverse["public_ref"]), "amount": "1"})
+    body = body_of(public_cost(token, 1))
+    assert (body["amount"], body["priced_copies"]) == ("2.75", "5")
+    write_price(store, reverse["public_ref"], None)
+    body = body_of(public_cost(token, 1))
+    assert (body["amount"], body["priced_copies"]) == ("0.75", "3")
+    assert {entry["edition_ref"]: entry["amount"] for entry in body["editions"]}[reverse["public_ref"]] is None
+
+
+@pytest.mark.parametrize("change", [
+    {"mapping_revision": 99}, {"product_id": 987654321}, {"extra": "x"}, {"amount": "0.4300000"}, {"amount": "-1"},
+    {"amount": 0.43}, {"amount": "1e3"}, {"amount": None}, {"mapping_revision": True}, {"product_id": "1"}, "no_amount"])
+def test_a_price_record_that_disagrees_with_the_catalog_or_is_malformed_leaves_the_row_unpriced(store, change):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.43")
+    _, token = publish({normal["id"]: 3, reverse["id"]: 2})
+    record = read_price(store, reverse["public_ref"])
+    assert set(record) == {"mapping_revision", "product_id", "amount"}
+    bad = {key: value for key, value in record.items() if key != "amount"} if change == "no_amount" else {**record, **change}
+    write_price(store, reverse["public_ref"], bad)
+    body = body_of(public_cost(token, 1))
+    assert (body["status"], body["amount"], body["priced_copies"], body["total_copies"]) == ("priced", "0.75", "3", "5")
+    assert {entry["edition_ref"]: entry["amount"] for entry in body["editions"]}[reverse["public_ref"]] is None
+
+
+def test_a_quarantine_unprices_the_row_while_its_price_record_remains(store):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.43")
+    _, token = publish({normal["id"]: 3, reverse["id"]: 2})
+    assert body_of(public_cost(token, 1))["amount"] == "1.61"
+    quarantine(store, reverse["public_ref"])
+    assert read_price(store, reverse["public_ref"]) is not None
+    body = body_of(public_cost(token, 1))
+    assert (body["amount"], body["priced_copies"]) == ("0.75", "3")
+    assert {entry["edition_ref"]: entry["amount"] for entry in body["editions"]}[reverse["public_ref"]] is None
+
+
+def test_price_reads_off_answers_no_quotes_with_null_amounts_and_reads_no_price_record(store, monkeypatch):
+    editions = world()
+    normal = editions["normal"]
+    seed(store, normal, "0.25")
+    _, token = publish({normal["id"]: 2})
+    assert body_of(public_cost(token, 1))["amount"] == "0.5"
+    read = []
+    real = type(store).read_records
+
+    def spy(self, keys, **kwargs):
+        read.extend(keys)
+        return real(self, keys, **kwargs)
+    monkeypatch.setattr(type(store), "read_records", spy)
+    monkeypatch.setenv("PRICE_READS", "off")
+    body = body_of(public_cost(token, 1))
+    assert (body["status"], body["amount"], body["priced_copies"], body["total_copies"]) == ("no_quotes", None, "0", "2")
+    assert [entry["amount"] for entry in body["editions"]] == [None]
+    assert read and not [key for key in read if key.startswith("price:")]
+    monkeypatch.setenv("PRICE_READS", "on")
+    assert body_of(public_cost(token, 1))["amount"] == "0.5"
+
+
+def test_publishing_a_deck_admits_nothing_and_the_module_is_gone():
+    import importlib.util
+    assert importlib.util.find_spec("app.publish_refresh") is None
 
 
 def test_legacy_and_unproven_rows_stay_readable_and_unpriced_until_a_republish_captures_them(store):
