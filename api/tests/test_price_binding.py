@@ -305,3 +305,60 @@ def test_rebind_over_40000_editions_finishes_inside_30_seconds(world):
     print(f"rebind of {count} Editions: first {first:.2f}s, repeat {time.monotonic() - started:.2f}s")
     assert counts["verified"] == count and counts["bound"] == count and counts["priced"] == count
     assert first < 30
+
+
+# --- spawn_rebind: one coalescing worker -------------------------------------------------------------------------------
+
+def test_rebind_burst_coalesces_into_two_passes(monkeypatch):
+    import threading
+    started, release = threading.Event(), threading.Event()
+    state = {"passes": 0, "running": 0, "max": 0, "threads": set()}
+    lock = threading.Lock()
+
+    def fake():
+        with lock:
+            state["passes"] += 1
+            state["running"] += 1
+            state["max"] = max(state["max"], state["running"])
+            state["threads"].add(threading.get_ident())
+        started.set()
+        release.wait(10)
+        with lock:
+            state["running"] -= 1
+
+    monkeypatch.setattr(price_binding, "rebind_best_effort", fake)
+    price_binding.spawn_rebind()
+    assert started.wait(10)
+    for _ in range(20):
+        price_binding.spawn_rebind()
+    release.set()
+    price_binding.join_spawned_rebinds()
+    assert state["passes"] == 2 and state["max"] == 1 and len(state["threads"]) == 1
+
+
+def test_rebind_after_idle_starts_a_new_pass(monkeypatch):
+    passes = []
+    monkeypatch.setattr(price_binding, "rebind_best_effort", lambda: passes.append(1))
+    price_binding.spawn_rebind()
+    price_binding.join_spawned_rebinds()
+    price_binding.spawn_rebind()
+    price_binding.join_spawned_rebinds()
+    assert len(passes) == 2
+
+
+def test_rebind_pass_exception_is_logged_and_worker_keeps_serving(monkeypatch, caplog):
+    calls = []
+
+    def fake():
+        calls.append(1)
+        if len(calls) == 1:
+            raise ValueError("secret detail")
+
+    monkeypatch.setattr(price_binding, "rebind_best_effort", fake)
+    with caplog.at_level("WARNING"):
+        price_binding.spawn_rebind()
+        price_binding.join_spawned_rebinds()
+    assert "ValueError" in caplog.text and "secret detail" not in caplog.text
+    price_binding.spawn_rebind()
+    price_binding.join_spawned_rebinds()
+    assert len(calls) == 2
