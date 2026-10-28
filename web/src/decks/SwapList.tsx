@@ -19,8 +19,10 @@ type Found =
       more: boolean;
     };
 
-const ROW =
-  "box-border m-0 flex min-h-control w-full cursor-pointer flex-col items-start gap-0.5 rounded-control border border-solid border-border-strong bg-surface-raised px-2 py-1 text-left font-sans text-meta text-text enabled:hover:border-control-outline phone:min-h-tap";
+const BOX =
+  "box-border m-0 flex min-h-control w-full flex-col items-start gap-0.5 rounded-control border border-solid bg-surface-raised px-2 py-1 text-left font-sans text-meta text-text phone:min-h-tap";
+const ROW = `${BOX} cursor-pointer border-border-strong enabled:hover:border-control-outline`;
+const CURRENT_ROW = `${BOX} border-control-outline`;
 
 /**
  * "Swap this copy for" in the copy sheet (#177): every other active Edition of the line's Card Identity, from the
@@ -32,12 +34,17 @@ export function SwapList({
   deckId,
   identityId,
   editionId,
+  currentName,
+  currentEdition,
   onSwap,
 }: {
   deckId: string;
   identityId: string;
-  /** The copy's own Edition, left out of the list. */
+  /** The copy's own Edition: shown first in the list, marked Current, and not offered as a swap. */
   editionId: string;
+  /** The copy's card name and "Set · number · Variant" words, for the Current row (the Edition may be on a later page). */
+  currentName: string;
+  currentEdition: string;
   onSwap: (row: BrowseEdition) => void;
 }) {
   const headingId = useId();
@@ -85,6 +92,10 @@ export function SwapList({
     }
   }
 
+  const loadedCurrent =
+    found.state === "ready"
+      ? found.rows.find((row) => row.edition_id === editionId)
+      : undefined;
   const others =
     found.state === "ready"
       ? found.rows.filter((row) => row.edition_id !== editionId)
@@ -107,12 +118,19 @@ export function SwapList({
             Retry
           </Button>
         </div>
-      ) : others.length === 0 ? (
-        <p className="m-0 text-meta text-text-muted">
-          This card has no other Edition.
-        </p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
+          <CurrentRow
+            editionId={editionId}
+            name={currentName}
+            edition={currentEdition}
+            owned={loadedCurrent ? ownedWords(loadedCurrent) : null}
+          />
+          {others.length === 0 && (
+            <li className="text-meta text-text-muted">
+              This card has no other Edition.
+            </li>
+          )}
           {others.map((row) => (
             <SwapRow key={row.edition_id} row={row} onSwap={onSwap} />
           ))}
@@ -128,6 +146,37 @@ export function SwapList({
         </Button>
       )}
     </section>
+  );
+}
+
+/**
+ * The copy's own Edition, pinned at the top of the list whichever page it falls on (so Show more never adds it
+ * again or loses it). It is marked Current and has no button: swapping a copy for its own Edition changes nothing.
+ */
+function CurrentRow({
+  editionId,
+  name,
+  edition,
+  owned,
+}: {
+  editionId: string;
+  name: string;
+  edition: string;
+  owned: string | null;
+}) {
+  return (
+    <li aria-current="true" className={CURRENT_ROW}>
+      <span className="font-semibold">
+        {name} <span className="font-normal text-text-muted">· Current</span>
+      </span>
+      <span className="text-text-muted tabular-nums">
+        {edition}
+        {owned ? ` · ${owned}` : ""}
+      </span>
+      <span className={`${TILE_PRICE} max-w-full tabular-nums`}>
+        <EditionPrice editionId={editionId} />
+      </span>
+    </li>
   );
 }
 
