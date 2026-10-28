@@ -610,6 +610,246 @@ because the files are the same.
   cutover; the host-run workaround is otherwise documented in step 3.
 - **#338:** unrelated.
 
+### 4.14 Matching rule v5: card-level TCGplayer ids and the 30th Anniversary sets (added 2026-10-27, after release)
+
+Added after v4 shipped (v0.2.1), against `origin/dev` at `d1c4cd3`. Ticket P10. V4's digest is pinned, so both additions
+ship as `MatchingRulesV5(MatchingRulesV4)`, registered as 5. They are tried only when V4 returns `Failure("no_product")`,
+after every V1 physical check, and they never override a V3 or V4 `conflict` or `duplicate`.
+
+**Evidence (live, 2026-10-27).**
+
+- `xy11-116` Gardevoir EX (Steam Siege) lists one variant, `{type: "normal"}`, with no `thirdParty` of its own. The
+  **card** carries `thirdParty: {tcgplayer: 121240}`, and TCGCSV offers 121240 only as `Holofoil` (market 109.41). V4
+  reads only the variant's `thirdParty` (`listed_product(facts["lookup"])`), and V3's borrowed block cannot help: the
+  catalog import strips `pricing` from the stored `source_record` (`catalog.RECORD_QUOTE_KEYS`), and the Edition's
+  candidate lookup is just `{variantId: "generated"}`. So v4 leaves the card `no_product`.
+- Dev catalog, 2026-10-27: 7,415 of 21,256 stored records carry a card-level `thirdParty.tcgplayer`. **2,295** unverified
+  `rule_failed` Editions have that card-level id and no variant id. About 800 of them are special (stamped, foil pattern,
+  subtype), and about 1,495 are plain, 1,480 of them on single-variant cards.
+- `30th` "30th Celebration" (158 cards) and `30th-c` "30th Classic Collection" (30 cards), released 2026-09-16, have no
+  TCGplayer id anywhere in TCGdex (no block product and no `thirdParty`, on any card or variant). TCGCSV has them as group
+  **24722** "ME: 30th Celebration" and **24837** "ME: 30th Celebration Classic Collection".
+- Group 24722 has 222 products but only 161 with an `extendedData` Number. The other 61 are sealed products and
+  accessories (booster packs, Elite Trainer Boxes, tins, blisters, sticker collections), and they never become candidates
+  because `number_key(None)` is None. Each card product has one price row, `Holofoil`. Of the 161 numbers, 158 are the
+  TCGdex cards, and the other three are Mew `R/RGB`, `G/RGB` and `B/RGB`, which TCGdex does not list.
+  Under V4's number and exact-name rule, **156 of 158** match. The two misses are spellings only: `087` "Nidoran♀" against
+  "Nidoran F", and `126` "Poké Pad" against "Poke Pad".
+- Group 24837 numbers its products by their **original** set (`4/102` Charizard, `33/181` Pikachu & Zekrom GX), while
+  TCGdex numbers them `001`–`030`. The number path therefore matches none of them. By exact name alone, **24 of 30** have
+  exactly one product, and every product is a card. The six misses: `003` Metagross ("Metagross (Delta Species)"), `004`
+  Genesect EX ("Genesect EX (Team Plasma)"), `018` Gengar ("Gengar (Prime)"), `019` and `020` Darkrai & Cresselia LEGEND
+  ("… Legend (Top)" and "(Bottom)"), and `022` Palkia ("Palkia LV.X").
+
+**Source 3: the card's own TCGplayer id (`card_product`).** Applies only when all of these hold:
+
+- the Edition's own lookup has no TCGdex id (`not has_tcgdex_id(facts["lookup"])`), so a variant's own id always wins;
+- `source_record["thirdParty"]["tcgplayer"]` is an int in 1..2^31-1;
+- the descriptor is not `special` (§4.4). Stamped, foil-pattern and other special Editions stay unverified for the owner,
+  because the card's product is the unstamped card's.
+
+The result is `(card thirdParty.tcgplayer, finish_key(plain(descriptor)))`, with `verified_elsewhere` applied as in V4.
+Siblings may share the product. A TCGplayer product covers every finish of a card, through its subtypes (`Normal`,
+`Reverse Holofoil`, `Holofoil`). Two siblings that resolve to the same `(product, subtype)` are left unbound by the
+binding's shared-price guard (§4.3).
+
+This is safe because the product is the one TCGdex names on this card's own record. The subtype is still derived by the
+binding (§4.3), not taken from TCGdex:
+
+- `sub_type_for` binds each finish to its own subtype when TCGCSV offers it;
+- it binds an ordinary `normal`/`holo` Edition to a product's only `Normal` or `Holofoil` row (Gardevoir: `Holofoil`);
+- with both `Normal` and `Holofoil` offered, it binds the descriptor's finish, so a mislabelled finish never takes
+  another finish's price.
+
+`price_binding.py` does not change. It replaces the earlier "card's only finish" idea, which read the card's `pricing`
+block. The import does not keep that block.
+
+**Source 2, extended: the reviewed set path.**
+
+- `MatchingRulesV5.TCGPLAYER_GROUPS` is V4's ten sets plus `"30th": 24722` and `"30th-c": 24837`.
+- `NAME_ONLY_SETS = frozenset({"30th-c"})`. Both go into `table()`, so they are part of the digest.
+- `30th` uses V4's number and exact-name path unchanged.
+- **No accent or symbol folding is added** for "Nidoran♀"/"Poké Pad". It would change the name rule for every set, to
+  win two cards, so those two stay for the owner.
+- **Name-only sets.** The candidates are every product in the group with a non-null `number` (card products only). An
+  Edition matches when exactly one candidate's `fold(name)` equals `fold(display_name)`. No qualifier is stripped, because
+  the product numbers do not relate to the card's number.
+  The match also requires `facts["set_name_count"] == 1`, meaning no other Printing in the set has the same display name.
+  Without that, two Printings could contend for one product, and the winner would depend on evaluation order.
+  Otherwise the Edition stays `no_product` for the owner.
+- `matched_by_number` keeps its name, and now covers V5's sets.
+- The owner list (P2b) is relabelled **"Matched by number or name"** (owner screen; it may name TCGplayer). It lists
+  `30th` and `30th-c` matches beside the promos.
+- **When TCGdex adds ids later.** The set path stops applying as soon as the card's record gains a TCGdex id, and the
+  TCGdex-id sources decide at the next re-evaluation of the changed candidate, as for any record change.
+
+**Which rule each caller reads.** These call sites read `MatchingRulesV4.TCGPLAYER_GROUPS` directly today:
+
+- `tcgplayer_candidates` and `refresh_editions` (`catalog_targets.py`);
+- `rematch_promos`;
+- `metadata_reviews.matched_by_number_editions`, together with its predicate.
+
+They switch to the **active** matching rule (`load_active`), falling back to the newest registered rule when none is
+active. Under v4, the extra facts for the 30th sets are simply ignored. `refresh_editions` adds
+`facts["tcgplayer_candidates"]` for every set in the table, filling name-only sets with the group's numbered products. For
+name-only sets it also adds `facts["set_name_count"]`, one `count(*)` over `catalog_printing_display` on
+`(set_id, display_name)`. `rematch_promos` therefore also re-evaluates the 30th sets after each daily import, so cards
+TCGCSV lists later are picked up.
+
+**Activation.** Activating v5 re-evaluates every `unverified AND NOT auto_closed` Edition, as for v4. Quarantined Editions
+and owner decisions are untouched. The price import already runs daily, so `tcgplayer_product` rows exist. #343 is still
+open, so on prod the activation runs on the host at a quiet time, following the Oracle guide's existing step. After it
+commits, the activation route's rebind and publish price the new matches. No collector screen or response changes.
+
+**Expected outcome.** About 1,500 plain Editions with a card-level id and 180 cards of the 30th sets (156 + 24) gain a price. TCGdex has no
+image for any `30th-c` card (`image: null` in every language, and the asset URL returns 404), so the 24 matched there also
+gain TCGplayer fallback art (§4.8), which needs a verified product. Eight 30th cards
+(2 + 6) are left in the unverified queue, where the owner can verify a product by decision. Ticket: P10 (#376).
+
+### 4.15 Deploying a release applies its newest catalog rules (added 2026-10-27)
+
+Decision: [ADR 0021](../../adr/0021-deploy-applies-newest-catalog-rules.md). Ticket P11 (#377). Supersedes #343. This section is
+about catalog rules in general, but it sits here because P10's v5 is the first version it ships.
+
+**Today.**
+
+- `activate_rule` (`catalog_targets.py`) records an append-only `catalog_rule_activation` row (`reviewer_id` NOT NULL FK
+  to `inventory_owner`, `migrations/023_metadata_review.sql`) and points `catalog_rule_state` at it.
+- It then re-evaluates, all in the caller's single transaction:
+  - every unverified, not auto-closed Edition;
+  - for matching rules, the `complete_quote_variant` pass;
+  - for live rules, every candidate Printing, with collision claims primed over the whole set.
+- Owner controls calls it from `POST /api/admin/catalog-rules/{kind}/activate` (`metadata_reviews.py`).
+- With `MARKETPLACE_MATCHING=automatic` (dev only), `ensure_matching_rule` does the same at startup and at every
+  promotion.
+- `load_active` returns None for a version the code does not know, or for a digest that is not the approved one. A live
+  rule that is None suspends eligible Printings (`no_active_rule`). A matching rule that is None only relabels unverified
+  Editions (`no_matching_rule`).
+- The deploy stops the app services before migrating (`deploy/host/prizecheck-deploy.sh` `cmd_deploy`), so two releases'
+  API containers never run at once. Host jobs (`catalog-refresh`) run in the current release's tools image.
+
+**Decisions.**
+
+1. **The intended rule** of each kind is `max(REGISTRIES[kind])` with its current `code_digest`. `MARKETPLACE_MATCHING`,
+   `automatic_matching`, `ensure_matching_rule`, the activation route and its form, and deactivation (version None) are
+   removed. The digest pin test stays, and so do all registered classes.
+2. **Migration `157_rule_rollout.sql`** (the next free number when built):
+   - `catalog_rule_activation` gains `source text NOT NULL DEFAULT 'owner' CHECK (source IN ('owner','deploy','rollback'))`
+     and `release_commit text`. Existing rows stay `owner`. The table stays append-only.
+   - `reviewer_id` stays the bound owner. For `deploy` rows it means "the owner's release", not a per-rule review.
+   - New mutable table `catalog_rule_rollout`:
+     `activation_id uuid PRIMARY KEY REFERENCES catalog_rule_activation`,
+     `phase text NOT NULL CHECK (phase IN ('live','editions','quote_variants','deliver','done','failed'))`,
+     `cursor uuid`, `total int`, `done int NOT NULL DEFAULT 0`, `changed int NOT NULL DEFAULT 0`,
+     `started_at`, `updated_at`, `finished_at timestamptz`, `error text`.
+3. **Applying (`api/app/rule_rollout.py`, `apply_newest_rules(conn_factory)`).** It runs in a background thread at API
+   startup, and again from `price_import_job.py` and the catalog promotion path, which call `resume` (cheap when there is
+   nothing to do).
+   - It holds a session `pg_try_advisory_lock` on one **dedicated autocommit connection** for the whole run, and returns
+     at once when another process holds the lock.
+   - For each kind, live first, it reads the active activation and does one of these:
+     - same version and same digest: nothing to apply, but it resumes any unfinished rollout for that activation;
+     - **same version, different digest:** an integrity failure. It logs, records nothing, and the panel shows "Rule code
+       differs from the applied version". It is never applied. A changed rule ships as a new version;
+     - **active version newer than the code knows** (a release older than the data): nothing, logged. Rollback prevents
+       this (point 6);
+     - otherwise, with no active row or a lower version: in **one short transaction** under `catalog_begin_correction()`,
+       it inserts the activation (`source='deploy'`, `release_commit` from the image's `RELEASE_COMMIT`, reviewer = the
+       bound owner, evidence URL = the commit on `github.com/ry-cen/prizecheck`, reason "Applied by deploying
+       <short sha>"), points `catalog_rule_state` at it, and inserts the rollout row at its first phase. With no bound
+       owner it records nothing and retries on the next call.
+4. **The rollout phases.** Each batch is its own transaction:
+   - `catalog_begin_correction()`;
+   - check that the rollout's activation is still current (otherwise stop: a newer apply owns the work);
+   - a fresh `TargetContext`;
+   - refresh the batch;
+   - advance `cursor`, `done` and `changed` in the same transaction.
+
+   A batch is 200 Editions by default (`RULE_ROLLOUT_BATCH`). It must stay under about 2 s on production, and is tuned
+   from the test timing.
+   - `live`: **one transaction**, as today (v1 took 26 s on production). This keeps the claims primed over the whole
+     candidate set, so a collision found late cannot qualify, then suspend, a claimant.
+   - `editions`: unverified, not auto-closed Editions with `edition_id > cursor`, ordered by id. Editions inserted later
+     below the cursor are evaluated by the promotion that inserted them, which uses the active rule.
+   - `quote_variants`: the `complete_quote_variant` pass, batched the same way. It never changes a verified Edition's
+     product.
+   - `deliver`: `publish_catalog_best_effort`, the full price `rebind` and `publish`, `card_art.refresh_fallbacks` (so newly
+     verified Printings without a TCGdex image get their art at once, not after the next daily import), then `spawn_background_drain`. Each
+     is idempotent. The phase becomes `done` with `finished_at` only after all of them have returned. A crash re-runs
+     `deliver`.
+   - A batch that hits `lock_timeout` is retried with backoff. Five consecutive failures set `failed` with the error.
+     Any later `resume` retries a failed rollout from its cursor.
+5. **During a rollout,** `catalog_rule_state` already points at the new rule. Promotions, imports and `rematch_promos`
+   use it, because they load `TargetContext` after `catalog_begin_correction()`. Editions the rollout has not reached
+   keep their previous state. Nothing un-verifies an Edition, so no product mapping or price is lost.
+6. **Rollback.** `cmd_rollback`, before starting the previous release, runs the **current** release's tool
+   `scripts/rule_rollout.py restore --to <previous commit>`. For each kind it finds the newest activation whose version
+   the target release registers, using the `release_commit` on `deploy` rows, or else the activation current before the
+   newer release's first `deploy` row. In one transaction it inserts a `rollback` activation copying that version and
+   digest, and points `catalog_rule_state` at it. Nothing is re-evaluated. Editions verified under the newer rule stay
+   verified, so the older code finds a version it knows and never suspends Printings. The script is part of P11, so this
+   protects rollbacks *from* P11 onward. Rolling back to a release before P11 also works, because that release's
+   versions are in earlier activation rows.
+7. **Owner controls.** The rules panel becomes read-only. Per kind it shows:
+   - the applied version and its source (`deploy`, `owner` or `rollback`);
+   - the release commit and the time it was applied;
+   - the rollout ("Applying: 1,200 of 9,101 Editions", done, or failed with its error and a note that it retries
+     automatically);
+   - the digest-mismatch error, when there is one;
+   - the archived versions.
+
+   The `GET` view keeps its shape plus these fields. Generated clients are regenerated. The activation route is removed.
+8. **Removed config and docs.**
+   - `MARKETPLACE_MATCHING` goes from `compose.deploy.yml`, `compose.prod.yml` and
+     `deploy/host/prizecheck-prod.env.example`.
+   - The deploy pipeline tests are updated to match.
+   - The Oracle guide's activation step and its `MARKETPLACE_MATCHING` notes are removed.
+   - `docs/prices.md`'s activation paragraph is updated.
+   - ADR 0019's "activated like every rule" note points to ADR 0021.
+
+**The first production deploy with P11** applies the newest versions (v5 if P10 ships with it). It re-evaluates about
+9k Editions in batches while the site stays usable. The owner panel shows the progress.
+
+### 4.16 Matching rule v6: main-set cards with no TCGdex id (added 2026-10-27)
+
+Ticket P12 (#378). Ships after P10 and P11, as `MatchingRulesV6(MatchingRulesV5)`.
+
+**Evidence (dev catalog and live, 2026-10-27).**
+
+- About 1,556 unverified `rule_failed` Editions have no TCGplayer id anywhere in TCGdex. About 420 are Black Star promos
+  (v4) and 188 are the 30th sets (v5). The remaining **≈950** are spread over about 60 main sets: ex15 154, ex13 105,
+  sma 94, ex11 72, bw11 37, g1 37, then 1–20 per set (probably secret rares and later additions).
+- A trial with number and exact name matched only part of each set:
+
+  | Set | Matched | Group(s) |
+  | --- | --- | --- |
+  | ex15 Dragon Frontiers | 21 of 101 | 1411 |
+  | ex13 Holon Phantoms | 58 of 111 | 1379 |
+  | sma Shiny Vault | 55 of 94 | 2594 (the trial also wrongly pulled Shining Fates' 2781) |
+  | bw11 Legendary Treasures | 112 of 140 | 1409 + 1465 Radiant Collection |
+
+  Almost every miss is a naming convention, not a different card. TCGdex writes `Ampharos δ` where TCGplayer writes
+  `Ampharos (Delta Species)`, and `Leafeon-GX`/`Victini-EX` where it writes `Leafeon GX`/`Victini EX`.
+
+**Decisions.**
+
+1. **A reviewed set table for every TCGdex set** (`TCGPLAYER_SET_GROUPS: {tcgdex_set: (group_id, ...)}`). It is
+   generated once by `scripts/propose_set_groups.py` from TCGdex and TCGCSV set names, release dates and card counts. The
+   script writes the proposal and a per-set report (cards, exact matches, misses with candidates). The table is reviewed
+   in the P12 pull request, and only sets whose report the reviewer accepts go in. A set may list several groups (a main
+   group plus a subset such as Radiant Collection or a Trainer Gallery). Pocket and sets with no TCGCSV group are left
+   out.
+2. **The set path covers any card with no TCGdex id** in a listed set. It uses V4's number and exact-name rule, plus
+   reviewed **name equivalences**, applied to both sides before the comparison:
+   - `<name> δ` = `<name> (Delta Species)`;
+   - `-EX`, `-GX`, `-V`, `-VMAX`, `-VSTAR`, `-ex` = the same suffix after a space;
+   - any further equivalence the report justifies, each with a test.
+
+   Nothing else is folded: `LV.X`, `(Prime)`, stamps and forme qualifiers still fail.
+3. **Collision and review** work as in v4. Exactly one exact candidate is accepted. Special Editions are excluded.
+   Matches appear in the owner list "Matched by number or name", and misses go to the unverified queue.
+4. **Fallback art** follows automatically for matched Printings that have no TCGdex image (§4.8).
+
 ## 5. Out of scope
 
 - A price history or trends; a subtype override in owner decisions; scanner fingerprints of fallback art.
@@ -698,3 +938,12 @@ Stop and report instead of improvising when any of these happen:
 
 > Owner confirmation (2026-10-27): promo number-and-name matches are priced when the v4 rule is activated; the owner
 > reviews and rejects from the P2b "Matched by card number" list afterwards (not approve-each-first).
+
+6. **Rule v5 (2026-10-27, after release):** use the card-level TCGdex `thirdParty.tcgplayer` id for plain Editions whose
+   variant names none (§4.14), and add the 30th Celebration and 30th Classic Collection sets to the reviewed set path, the Classic
+   Collection by exact name alone. Like v4, matches are priced on activation and the owner reviews them afterwards (P10).
+7. **No rule activation (2026-10-27):** deploying a release applies its newest catalog rules. Older versions stay as an
+   archive, and the owner approves a rule by merging its release ([ADR 0021](../../adr/0021-deploy-applies-newest-catalog-rules.md),
+   §4.15, P11).
+8. **Main-set backfill (2026-10-27):** match the ≈950 main-set cards with no TCGdex id by a reviewed set → group table
+   plus reviewed name equivalences (§4.16, P12).
