@@ -8,7 +8,7 @@ The units and the guide steps are checked in CI. These checks need the productio
 
 ## Before any check
 
-1. **Deploy the release** that contains the `catalog-refresh` subcommand and the price import step ([#355](https://github.com/ry-cen/prizecheck/issues/355)), and reinstall `prizecheck-deploy.sh` on the host from that commit, so the first scheduled run includes prices (step 16 of the Oracle guide depends on #355 being deployed).
+1. **Reinstall the host files, then deploy the release** that contains the `catalog-refresh` subcommand and the price import step ([#355](https://github.com/ry-cen/prizecheck/issues/355)). Install `prizecheck-deploy.sh` and the compose files from that commit first (Oracle guide, "Updating the host files"), because the deploy refuses until they match, so the first scheduled run includes prices (step 16 of the Oracle guide depends on #355 being deployed).
 2. **Copy the units to the host** as step 16 of the [Oracle guide](../../deployment-oracle.md) says.
 
 ## Checks
