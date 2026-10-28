@@ -162,7 +162,7 @@ def mixed_world(store):
     count is exercised. Returns (owner, decks oldest first)."""
     found = world()
     editions = [found["normal"], found["reverse-holofoil"], found["unspecified"]]
-    for edition in editions:
+    for edition in editions[:2]:         # the Unspecified Variant is never priced
         seed(store, edition, "0.25")
     a, b, c = (str(edition["id"]) for edition in editions)
     owner, unsorted = new_owner()

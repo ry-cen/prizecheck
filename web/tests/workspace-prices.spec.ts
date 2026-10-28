@@ -181,7 +181,7 @@ test.afterAll(async () => {
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1600, height: 900 } });
 
-  test("the inspector shows the inspected Edition's price with age, stale and unavailable labels and never $0", async ({
+  test("the inspector shows the inspected Edition's market price, an unavailable label when there is none, and never $0", async ({
     page,
   }) => {
     const ids = priceWorld();
@@ -222,13 +222,14 @@ test.describe("desktop", () => {
     await expect(inspector(page)).toContainText("Price unavailable");
     await expect(inspector(page)).not.toContainText("$");
 
-    // No provider time: still the amount alone, with no Age unknown label.
+    // Only the market price counts: an empty one is no price, even with a low and a mid price stored.
     quote([
       {
         op: "quote",
         edition: ids["reverse-holofoil"],
-        amount: "0.43",
-        updated: null,
+        amount: null,
+        low: "0.40",
+        mid: "0.45",
       },
     ]);
     await page.reload();
@@ -236,9 +237,9 @@ test.describe("desktop", () => {
       page,
       "Furret, Darkness Ablaze 1, Reverse Holo, copy 1, Old"
     ).click();
-    await expect(inspector(page)).toContainText("$0.43");
+    await expect(inspector(page)).toContainText("Price unavailable");
+    await expect(inspector(page)).not.toContainText("$0.4");
     await expect(inspector(page)).not.toContainText("Age unknown");
-    await expect(inspector(page)).not.toContainText("Stale");
   });
 
   test("a Printing with no TCGdex image shows TCGplayer art in its tile and the larger size in the inspector", async ({

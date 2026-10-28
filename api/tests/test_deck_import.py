@@ -15,7 +15,6 @@ import pytest
 
 from app.main import app, connect  # noqa: F401
 from app import price_launcher, prices
-from app.public_projection import ProjectionUnavailable
 from app.public_records import public_record_store, result_key
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -290,15 +289,15 @@ def test_without_a_stored_quote_new_copies_take_the_first_edition_in_catalog_ord
     assert [e["display_price"] for e in two["editions"]] == [None]
 
 
-def test_an_unreadable_price_cache_is_prices_unavailable(monkeypatch):
+def test_an_unreadable_price_read_is_prices_unavailable(monkeypatch):
     owner = str(uuid4())
     furret_world(owner)
 
     def unavailable(*args, **kwargs):
-        raise ProjectionUnavailable()
+        raise psycopg.OperationalError("down")
 
     with monkeypatch.context() as patch:
-        patch.setattr(prices, "public_record_store", unavailable)
+        patch.setattr(prices, "_read_rows", unavailable)
         refused = call("POST", REVIEW, owner, {"source": {"text": "2 Furret DAA 1\n"}, "fixes": []})
         assert refused.status_code == 503 and code(refused) == "PRICES_UNAVAILABLE"
         assert review(owner, "4 Iono\n")["totals"]["to_resolve"] == 1

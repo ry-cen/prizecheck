@@ -1,7 +1,6 @@
 import httpx
 import pytest
 
-from app import quote_contract
 from app.catalog import CatalogError, TCGdexSource
 
 
@@ -46,19 +45,13 @@ def test_live_enumeration_id_shapes_round_trip_through_card_urls():
     source.client.close()
 
 
-def test_a_card_fetch_keeps_an_exact_text_price_view_beside_the_unchanged_record(monkeypatch):
+def test_a_card_fetch_keeps_only_the_import_record_and_no_price_view():
     source = TCGdexSource()
-    body = (b'{"id":"sv01-001","name":"Pikachu","pricing":{"tcgplayer":{"normal":{"productId":7,"marketPrice":0.10}}},'
-            b'"variants_detailed":[{"type":"normal","pricing":{"tcgplayer":{"normal":{"productId":7,"marketPrice":1.50}}}}]}')
-    monkeypatch.setattr(quote_contract, 'wall_ms', lambda: 1_700_000_000_000)
+    body = (b'{"id":"sv01-001","name":"Pikachu","pricing":{"tcgplayer":{"normal":{"productId":7,"marketPrice":0.10}}}}')
     source._response = lambda url: httpx.Response(200, content=body, request=httpx.Request('GET', url))
     record = source.fetch('sv01-001')
     assert record['pricing']['tcgplayer']['normal']['marketPrice'] == 0.1  # the import's record still parses floats
-    view, fetched_ms = source.price_views['sv01-001']
-    assert view == {'id': 'sv01-001', 'pricing': {'tcgplayer': {'normal': {'productId': 7, 'marketPrice': '0.10'}}},
-                    'variants_detailed': [{'type': 'normal',
-                                           'pricing': {'tcgplayer': {'normal': {'productId': 7, 'marketPrice': '1.50'}}}}]}
-    assert fetched_ms == 1_700_000_000_000
+    assert not hasattr(source, 'price_views')
     source.client.close()
 
 

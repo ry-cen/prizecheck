@@ -1,36 +1,29 @@
-"""Cached exact-Edition prices.
+"""Exact-Edition prices, read from PostgreSQL only (ADR 0019).
 
-This module reads PostgreSQL (reviewed Edition state, the authority) and the public record store (quotes written
-by the runners of ticket 08). It never writes PostgreSQL, never fetches a source in-request, and never reads
-``catalog_edition_metadata.quote_candidate``. A read of rows checked under one hour ago writes nothing. Older rows
-are admitted for refresh (``price_refresh``: coordination records only, never a quote) and hard rows wait briefly
-for the runner. A key is read only
-under the PostgreSQL ``mapping_revision`` and only when the Edition has a published ``quote_lookup``; the
-store's own quarantine record is ignored because PostgreSQL is authoritative.
-
-Contract for the later writer (ticket 08) and for tickets 09/12: docs/prices.md.
+One REPEATABLE READ query joins the reviewed Edition state, its price binding and the imported TCGCSV price row. Only the
+market price is ever shown (``chosen_amount``). This module never writes PostgreSQL, never fetches a source and never
+touches the record store. ``PRICE_READS=off`` (``price_reads.price_reads_enabled``) answers every row
+unavailable/no_price without a query.
 """
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 import os
 import threading
-import time
 from typing import Literal
 from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from psycopg.rows import dict_row
 
-from .catalog_targets import edition_targets, is_unspecified
-from . import price_refresh, quote_contract
+from .catalog_targets import is_unspecified
+from . import quote_contract
+from .price_reads import price_reads_enabled
 from .identity import verified_user
 from .price_budget import MAX_BODY_BYTES, Budget, trusted_budget
-from .public_projection import ProjectionUnavailable
-from .public_records import QuoteState, public_record_store, quote_states
+from .public_records import QuoteState
 from .quote_contract import parse_amount  # noqa: F401  (moved; re-exported so `prices.parse_amount` keeps working)
 
 router = APIRouter(prefix='/api/prices', tags=['prices'])
@@ -40,7 +33,7 @@ FUTURE_TOLERANCE = timedelta(minutes=5)
 MAX_EDITIONS = 64
 
 Status = Literal['quote', 'unavailable', 'failed', 'pending']
-Reason = Literal['not_found', 'unverified', 'quarantined', 'unspecified_variant', 'no_quote_variant', 'not_cached',
+Reason = Literal['not_found', 'no_price', 'unverified', 'quarantined', 'unspecified_variant', 'no_quote_variant', 'not_cached',
                  'confirmed_absent', 'lookup_mismatch', 'invalid_quote', 'store_unavailable', 'deadline',
                  'validation_unavailable']
 Refresh = Literal['background', 'refreshed', 'timeout', 'busy', 'backoff', 'failed']
@@ -128,6 +121,14 @@ def validate_quote(lookup: dict, state: QuoteState, now: datetime) -> QuoteView:
                      age=age, stale=stale)
 
 
+def _with_refresh(view: QuoteView, outcome) -> QuoteView:
+    """Kept for the Published Deck cost route until its reader moves to the price records (P5b)."""
+    if outcome is None or outcome.refresh is None:
+        return view
+    failed = quote_contract.iso_from_ms(outcome.failed_at_ms) if outcome.failed_at_ms is not None else None
+    return view.model_copy(update={'refresh': outcome.refresh, 'refresh_failed_at': failed})
+
+
 # --- Reading ---------------------------------------------------------------------------------------------------
 class _Late(Exception):
     """Work did not finish inside the budget; its thread is abandoned and ends on its own PostgreSQL timeouts."""
@@ -153,39 +154,56 @@ def _bounded(call, timeout: float):
     return box['value']
 
 
-def _read_targets(ids: list[UUID], timeout_ms: int) -> dict:
-    """Reviewed state per Edition from one REPEATABLE READ snapshot. It commits before returning, so no connection or
-    lock is held while the record store is read."""
+PRICE_QUERY = """SELECT e.id, e.descriptor, m.mapping_state, m.mapping_reason, m.product_id,
+       b.sub_type_name, b.reason AS bind_reason,
+       p.market_price, p.low_price, p.mid_price, p.source_updated_at, p.seen_at
+FROM catalog_edition e
+LEFT JOIN catalog_edition_metadata m ON m.edition_id = e.id
+LEFT JOIN edition_price_binding b ON b.edition_id = e.id AND b.product_id = m.product_id
+                                  AND b.mapping_revision = m.mapping_revision AND m.mapping_state = 'verified'
+LEFT JOIN tcgplayer_price p ON p.product_id = b.product_id AND p.sub_type_name = b.sub_type_name
+WHERE e.id = ANY(%s)"""
+
+
+def _read_rows(ids: list[UUID], timeout_ms: int) -> dict:
+    """One REPEATABLE READ snapshot: reviewed state, binding and price per Edition. Nothing else is read."""
     with psycopg.connect(os.environ['DATABASE_URL'], row_factory=dict_row, connect_timeout=2) as conn:
         conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
         with conn.transaction():
             conn.execute(f'SET LOCAL statement_timeout = {int(timeout_ms)}')
             conn.execute(f'SET LOCAL lock_timeout = {int(timeout_ms)}')
-            editions = {row['id']: row for row in conn.execute(
-                'SELECT id,public_ref,descriptor FROM catalog_edition WHERE id=ANY(%s)', (ids,))}
-            targets = edition_targets(conn, list(editions))
-    return {edition_id: (row['public_ref'], row['descriptor'], targets.get(edition_id)) for edition_id, row in editions.items()}
+            return {row['id']: row for row in conn.execute(PRICE_QUERY, (ids,))}
 
 
-def _label(found) -> QuoteView | None:
-    """Why an Edition has no store lookup, or None when it has one."""
-    if found is None:
+def chosen_amount(row) -> Decimal | None:
+    """The only place that picks the figure shown: the market price, or None when it is null or not above zero.
+    There is no fallback to mid or low (owner answer 1)."""
+    value = row.get('market_price')
+    return value if isinstance(value, Decimal) and value.is_finite() and value > 0 else None
+
+
+def _row_view(row, now: datetime) -> QuoteView:
+    if row is None:
         return _unavailable('not_found')
-    _, descriptor, target = found
-    if is_unspecified(descriptor):
+    if is_unspecified(row['descriptor']):
         return _unavailable('unspecified_variant')
-    if target is None:
-        return _unavailable('unverified')
-    if target.state == 'quarantined':
+    state = row['mapping_state']
+    if state == 'quarantined':
         return _unavailable('quarantined')
-    if target.state != 'verified':
-        return _unavailable('unspecified_variant' if target.reason == 'unspecified_variant' else 'unverified')
-    return None if target.quote_lookup else _unavailable('no_quote_variant')
-
-
-def _signature(found):
-    target = found[2]
-    return (found[0], target.state, target.mapping_revision, target.quote_lookup)
+    if state != 'verified':
+        return _unavailable('unspecified_variant' if row['mapping_reason'] == 'unspecified_variant' else 'unverified')
+    amount = chosen_amount(row) if row['sub_type_name'] and not row['bind_reason'] else None
+    if amount is None:
+        return _unavailable('no_price')
+    text = format(amount.normalize(), 'f')
+    if parse_amount(text) is None:
+        return _unavailable('no_price')
+    provider = row['source_updated_at']
+    return QuoteView(status='quote', amount=text, display_amount=format_usd(amount),
+                     provider_updated_at=_text(provider.astimezone(timezone.utc)) if provider else None,
+                     checked_at=_text(row['seen_at'].astimezone(timezone.utc)) if row['seen_at'] else None,
+                     age='known' if provider else 'unknown',
+                     stale=(now - provider) > STALE_AFTER if provider else None)
 
 
 def _failed(ids, reason: Reason) -> dict[UUID, QuoteView]:
@@ -193,127 +211,45 @@ def _failed(ids, reason: Reason) -> dict[UUID, QuoteView]:
 
 
 def private_edition_quotes(edition_ids, budget: Budget, releases: list | None = None) -> dict[UUID, QuoteView]:
-    """Price view per Edition id, in request order, within ``budget``. Never writes PostgreSQL, never fetches a source.
-
-    Stale rows are admitted for background refresh. The interactive permit that admission may take is released by a
-    callback: appended to ``releases`` when a list is given (the route runs it after the response), else run before
-    returning."""
-    local = [] if releases is None else releases
-    try:
-        return _quotes(edition_ids, budget, local)
-    finally:
-        if releases is None:
-            for release in local:
-                release()
-
-
-def _quotes(edition_ids, budget: Budget, releases: list) -> dict[UUID, QuoteView]:
+    """Price view per Edition id, in request order, within ``budget``. Reads PostgreSQL only: it never writes, never
+    fetches a source and never touches the record store. ``releases`` is accepted for the callers' signature and unused."""
     ids = list(dict.fromkeys(edition_ids))
+    if not price_reads_enabled():
+        return {edition_id: _unavailable('no_price') for edition_id in ids}
     if budget.wait_remaining() <= 0:
         return _failed(ids, 'deadline')
     try:
-        found = _bounded(lambda: _read_targets(ids, budget.pg_timeout_ms()), budget.wait_remaining())
+        found = _bounded(lambda: _read_rows(ids, budget.pg_timeout_ms()), budget.wait_remaining())
     except _Late:
         return _failed(ids, 'deadline')
     except (psycopg.Error, OSError, KeyError):
         return _failed(ids, 'deadline' if budget.wait_remaining() <= 0 else 'validation_unavailable')
-    views = {edition_id: _label(found.get(edition_id)) for edition_id in ids}
-    lookable = [edition_id for edition_id in ids if views[edition_id] is None]
-    if lookable:
-        views.update(_priced(lookable, found, budget, releases))
+    now = _now()
+    views = {edition_id: _row_view(found.get(edition_id), now) for edition_id in ids}
     if budget.expired():
         return _failed(ids, 'deadline')
-    return {edition_id: views[edition_id] for edition_id in ids}
+    return views
 
 
-def _priced(lookable: list[UUID], found: dict, budget: Budget, releases: list) -> dict[UUID, QuoteView]:
-    pairs = [(found[edition_id][0], found[edition_id][2].mapping_revision) for edition_id in lookable]
-    try:
-        store = public_record_store()
-        states = quote_states(store, pairs, deadline=budget.wait_until)
-    except (ProjectionUnavailable, ValueError):
-        return _failed(lookable, 'deadline' if budget.wait_remaining() <= 0 else 'store_unavailable')
-    if budget.wait_remaining() <= 0:
-        return _failed(lookable, 'deadline')
-    admission = _admit(lookable, pairs, found, states, budget, store, releases)
-    # Final validation inside the reserve: PostgreSQL must still say what it said when the keys were chosen.
-    try:
-        fresh = _bounded(lambda: _read_targets(lookable, budget.pg_timeout_ms(final=True)), budget.remaining())
-    except (_Late, psycopg.Error, OSError, KeyError):
-        return _failed(lookable, 'deadline' if budget.expired() else 'validation_unavailable')
-    now = _now()
-    result = {}
-    refresh = admission.outcomes if admission else {}
-    for edition_id, pair in zip(lookable, pairs):
-        current = fresh.get(edition_id)
-        label = _label(current)
-        if label is not None:
-            result[edition_id] = label
-        elif _signature(current) != _signature(found[edition_id]):
-            result[edition_id] = _unavailable('not_cached')
-        else:
-            result[edition_id] = _with_refresh(validate_quote(current[2].quote_lookup, states[pair], now), refresh.get(edition_id))
-    return result
-
-
-def _with_refresh(view: QuoteView, outcome) -> QuoteView:
-    if outcome is None or outcome.refresh is None:
-        return view
-    failed = quote_contract.iso_from_ms(outcome.failed_at_ms) if outcome.failed_at_ms is not None else None
-    return view.model_copy(update={'refresh': outcome.refresh, 'refresh_failed_at': failed})
-
-
-def _admit(lookable, pairs, found, states, budget: Budget, store, releases: list):
-    """Admit stale rows and wait for hard ones. Mutates ``states`` with any result the wait saw change."""
-    rows = [price_refresh.Row(edition_id, pair[0], pair[1], found[edition_id][2].quote_lookup, found[edition_id][2].product_id,
-                              states[pair]) for edition_id, pair in zip(lookable, pairs)]
-    admission = price_refresh.evaluate_and_admit(rows, budget.caller, budget, store)
-    releases.append(admission.release)
-    changed = admission.wait(budget)
-    if changed:
-        wanted = [(r.edition_ref, r.mapping_revision) for r in rows if r.key in changed]
-        try:
-            fresh = quote_states(store, wanted, deadline=budget.wait_until)
-            states.update(fresh)
-        except (ProjectionUnavailable, ValueError):
-            for key in changed:
-                admission.outcomes[key].refresh = 'timeout'
-    return admission
-
-
-# --- Stored quotes without access -------------------------------------------------------------------------------
-STORED_READ_SECONDS = 1.0  # Whole wait for a stored-quote read on a write path: PostgreSQL targets plus the record store.
+# --- Stored prices on write paths --------------------------------------------------------------------------------
+STORED_READ_SECONDS = 1.0  # Whole wait for a stored-price read on a write path.
 
 
 def stored_edition_quotes(edition_ids, wait_seconds: float = STORED_READ_SECONDS) -> dict[UUID, QuoteView] | None:
-    """What the cache holds now for each Edition, for write paths that choose by price but display none.
-
-    No admission, no refresh, no runner wait and no write of any kind: under ADR 0006 only displayed prices and complete
-    Deck costs are accesses, so this read never wakes the price runner, whatever a row's check age. Rows are labelled and
-    labelled and validated with the same rules as ``private_edition_quotes``, without its final re-read: a mapping
-    change during the read is not detected (a malformed row fails only itself). Returns None when the
-    reviewed state or the record store could not be read inside ``wait_seconds``: the caller cannot tell "unpriced" from
-    "unread" then. Holds no connection or lock while the store is read."""
+    """What PostgreSQL holds now for each Edition, for write paths that choose by price but display none. The same rows and
+    labels as ``private_edition_quotes``. Returns None when PostgreSQL could not answer inside ``wait_seconds``: the caller
+    cannot tell "unpriced" from "unread" then."""
     ids = list(dict.fromkeys(edition_ids))
     if not ids:
         return {}
-    deadline = time.monotonic() + wait_seconds
+    if not price_reads_enabled():
+        return {edition_id: _unavailable('no_price') for edition_id in ids}
     try:
-        found = _bounded(lambda: _read_targets(ids, max(1, int(wait_seconds * 1000))), wait_seconds)
+        found = _bounded(lambda: _read_rows(ids, max(1, int(wait_seconds * 1000))), wait_seconds)
     except (_Late, psycopg.Error, OSError, KeyError):
         return None
-    views = {edition_id: _label(found.get(edition_id)) for edition_id in ids}
-    lookable = [edition_id for edition_id in ids if views[edition_id] is None]
-    if lookable:
-        pairs = [(found[edition_id][0], found[edition_id][2].mapping_revision) for edition_id in lookable]
-        try:
-            states = quote_states(public_record_store(), pairs, deadline=deadline)
-        except (ProjectionUnavailable, ValueError):
-            return None
-        now = _now()
-        for edition_id, pair in zip(lookable, pairs):
-            views[edition_id] = validate_quote(found[edition_id][2].quote_lookup, states[pair], now)
-    return {edition_id: views[edition_id] for edition_id in ids}
+    now = _now()
+    return {edition_id: _row_view(found.get(edition_id), now) for edition_id in ids}
 
 
 # --- HTTP ------------------------------------------------------------------------------------------------------
@@ -352,14 +288,16 @@ def edition_prices(body: bytes = Depends(bounded_body), user_id: str = Depends(v
         command = PriceRequest.model_validate_json(body)
     except ValidationError:
         raise HTTPException(422, {'code': 'INVALID_REQUEST'}) from None
-    releases: list = []
-    quotes = private_edition_quotes(command.edition_ids, budget, releases)
+    quotes = private_edition_quotes(command.edition_ids, budget)
     rows = [PriceRow(edition_id=edition_id, **view.model_dump()) for edition_id, view in quotes.items()]
     withheld = any(view.reason in ('deadline', 'validation_unavailable') for view in quotes.values())
     return JSONResponse(PricesResponse(prices=rows, withheld=withheld).model_dump(mode='json'),
-                        headers={'cache-control': 'no-store'}, background=BackgroundTask(_release_all, releases))
+                        headers={'cache-control': 'no-store'})
+
 
 
 def _release_all(releases: list) -> None:
+    """Run the callbacks a caller collected. Reads no longer take an interactive permit, so the list stays empty; the Deck,
+    Want List and Trade routes still pass one until their signatures are tidied (P9)."""
     for release in releases:
         release()

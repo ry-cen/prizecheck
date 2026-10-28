@@ -1,4 +1,5 @@
-"""A catalog import seeds the price cache with the records a successful runner check writes (ADR 0013)."""
+"""Seeding the price cache with the records a successful runner check writes (ADR 0013). The catalog import no longer calls it
+(ADR 0019); these tests call it after the import, until P9 removes the module."""
 import copy
 import json
 import time
@@ -7,7 +8,6 @@ from datetime import timedelta
 import pytest
 
 from app import price_seed, quote_contract
-from app.catalog import price_view
 from app.catalog_targets import MATCHING
 from app.main import connect
 from app.public_catalog import marketplace_states
@@ -15,9 +15,26 @@ from app.public_projection import ProjectionUnavailable
 from app.public_records import catalog_edition_key, fence_key, public_record_store, quote_key, result_key
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret
-from test_catalog_reconciliation import run
+from test_catalog_reconciliation import run as import_run
 from test_catalog_targets import activate, card, isolated_rules  # noqa: F401  (isolated_rules is autouse)
-from test_prices import ago, ids, post, prices_of, seed, world
+from test_prices import ago, seed_quote as seed, world
+
+PRICE_VIEW_KEYS = ("id", "pricing", "variants_detailed")
+
+
+def price_view(record):
+    return {key: record[key] for key in PRICE_VIEW_KEYS if key in record} if isinstance(record, dict) else None
+
+
+def run(source):
+    """The import, then the seeding the import used to do after its commit."""
+    run_id = import_run(source)
+    views = getattr(source, "price_views", None)
+    if views:
+        with connect() as conn:
+            price_seed.seed_from_import(conn, run_id, dict(views))
+    return run_id
+
 
 PROVIDER_TIME = "2026-10-07T22:55:02Z"   # card(1)'s TCGplayer "updated"
 
@@ -94,12 +111,6 @@ def test_an_import_seeds_each_verified_edition_with_the_records_a_runner_check_w
                          "variant": edition["quote_variant"], "provider_updated_at": PROVIDER_TIME}
         assert fence == {"v": 1, "attempt": 1}
     assert cached(store, unspecified) == (None, None, None)
-    # The private route shows them without a refresh, and the public records read them at the same revision.
-    rows = prices_of(post(ids(normal["id"], reverse["id"], unspecified["id"])))
-    assert (rows[str(normal["id"])]["status"], rows[str(normal["id"])]["amount"]) == ("quote", "0.25")
-    assert (rows[str(reverse["id"])]["status"], rows[str(reverse["id"])]["amount"]) == ("quote", "0.43")
-    assert rows[str(normal["id"])]["provider_updated_at"] == PROVIDER_TIME and rows[str(normal["id"])]["refresh"] is None
-    assert rows[str(unspecified["id"])]["reason"] == "unspecified_variant"
     states = marketplace_states(store, [normal["public_ref"]], time.monotonic() + 5)
     assert states[normal["public_ref"]].quote.status == "quote"
 
