@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from .art_urls import route_address
 from .db import connect
 from .identity import verified_user
+from . import set_codes
 from .holdings import HoldingView, fail
 from .social import counts
 
@@ -46,7 +47,7 @@ def views(rows, model=HoldingView):
     """The page's rows as views. Rows carry the art source, not the address: the route address (ADR 0020) is built here,
     for the page only, so a large Collection does not hash a version for every catalog row."""
     return [model(**{**{key:value for key,value in row.items() if key!='art_source'},'quantity':str(row['quantity']),
-             'image_url':route_address(row['printing_id'],row['art_source'])}) for row in rows]
+             'set_code':set_codes.code_for(row['set_id']),'image_url':route_address(row['printing_id'],row['art_source'])}) for row in rows]
 
 def encode_cursor(context, key):
     data=json.dumps({'context':context,'key':key},separators=(',',':')).encode()

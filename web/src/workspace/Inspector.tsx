@@ -163,7 +163,7 @@ export function CardDetails({
         </h2>
       )}
       <p className={`m-0 ${sheet ? "pt-4" : "pt-1"} ${META}`}>
-        {holding.set_name} · {holding.collector_number}
+        {holding.set_code} · {holding.collector_number}
       </p>
       <dl className="m-0 flex gap-2 pt-1 text-meta text-text-muted">
         <dt className="text-text-subtle">Variant</dt>

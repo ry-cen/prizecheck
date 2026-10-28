@@ -558,6 +558,7 @@ const Tile = memo(function Tile({
       title={tileTitle(holding, ordinal, path)}
       name={holding.printing_name}
       setName={holding.set_name}
+      setCode={holding.set_code}
       collectorNumber={holding.collector_number}
       variant={variantLabel(holding.descriptor)}
       imageUrl={holding.image_url}

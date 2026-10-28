@@ -32,6 +32,7 @@ const row = (n: number, quantity: number) => ({
   printing_name: `Fake Card ${n}`,
   set_id: "fake",
   set_name: "Fake Set",
+  set_code: "fake",
   collector_number: String(n),
   descriptor: { finish: "normal" },
   image_url: null,

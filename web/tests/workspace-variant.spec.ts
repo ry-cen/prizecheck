@@ -232,12 +232,12 @@ test.describe("desktop", () => {
     // Names on: "Set · Number · Variant" on the second line, cut with an ellipsis when too long.
     await names.click();
     await expect(names).toHaveAttribute("aria-pressed", "true");
-    await expect(normal).toContainText("Fixture Set · 1 · Normal");
-    await expect(reverse).toContainText("Fixture Set · 1 · Reverse Holo");
+    await expect(normal).toContainText("fixture · 1 · Normal");
+    await expect(reverse).toContainText("fixture · 1 · Reverse Holo");
     await expect(unspecified).toContainText(
-      "Fixture Set · 2 · Unspecified Variant"
+      "fixture · 2 · Unspecified Variant"
     );
-    const line = long.getByText(`Fixture Set · 2 · ${LONG_VARIANT}`, {
+    const line = long.getByText(`fixture · 2 · ${LONG_VARIANT}`, {
       exact: true,
     });
     expect(
@@ -290,7 +290,7 @@ test.describe("desktop", () => {
     await expect(
       panel.getByRole("heading", { name: "Spread Abra" })
     ).toBeVisible();
-    await expect(panel).toContainText("Fixture Set · 1");
+    await expect(panel).toContainText("fixture · 1");
     await expect(panel).toContainText(/Variant\s*Normal/);
     await expect(panel).toContainText("2 copies here");
     await expect(panel).toContainText("6 copies owned");
@@ -396,14 +396,14 @@ test.describe("phone", () => {
     await page.keyboard.press("Escape");
     await expect(display).toBeHidden();
     await expect(tiles(page).first()).toContainText(
-      "Fixture Set · 1 · Reverse Holo"
+      "fixture · 1 · Reverse Holo"
     );
     await expectPageChecks(page, "phone Collection, Names on");
 
     await tiles(page).first().tap();
     const sheet = page.getByRole("dialog", { name: "Sheet Abra" });
     await expect(sheet).toBeVisible();
-    await expect(sheet).toContainText("Fixture Set · 1");
+    await expect(sheet).toContainText("fixture · 1");
     await expect(sheet).toContainText(/Variant\s*Reverse Holo/);
     await expect(sheet).toContainText("2 copies here");
     await expect(sheet).toContainText("3 copies owned");

@@ -69,6 +69,8 @@ def test_add_replay_increment_privacy_and_boundaries():
     assert len(page.json()["holdings"]) == 1
     assert page.json()["holdings"][0]["quantity"] == "5"
     assert page.json()["holdings"][0]["printing_name"] == "Pikachu"
+    # The set is not in the printed-code table, so the code is its TCGdex id, as Catalog shows it.
+    assert page.json()["holdings"][0]["set_id"] == "base" and page.json()["holdings"][0]["set_code"] == "base"
     for invalid in ("0", "-1", "1.5", "", "9223372036854775808"):
         assert add(owner, leaf, edition, invalid).status_code == 422
     assert add(owner, leaf, edition, str(2**63 - 3)).json()["detail"]["code"] == "QUANTITY_OVERFLOW"

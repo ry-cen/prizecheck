@@ -200,11 +200,20 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
   await expect(copy).not.toContainText("Gallery Pikachu");
   await expect(copy).not.toContainText("Fixture Set");
 
-  // Names on: the name, then set name and collector number on a second line.
+  // Names on: the name, then printed set code and collector number on a second line. The fixture set has
+  // no printed code in the display table, so its TCGdex id stands in, as in Catalog.
   await names.click();
   await expect(names).toHaveAttribute("aria-pressed", "true");
   await expect(copy).toContainText("Gallery Pikachu");
-  await expect(copy).toContainText("Fixture Set · 2");
+  await expect(copy).toContainText("fixture · 2 · Normal");
+  await expect(copy).not.toContainText("Fixture Set");
+  await expect(copy).toHaveAccessibleName(/Fixture Set 2/);
+
+  // The inspector's preview shows the same code and number, with no set name.
+  await copy.hover();
+  const details = page.getByRole("complementary", { name: "Card details" });
+  await expect(details).toContainText("fixture · 2");
+  await expect(details).not.toContainText("Fixture Set");
   await expect(copy).toContainText("Binder 2");
   await names.click();
   await expect(copy).not.toContainText("Gallery Pikachu");

@@ -23,6 +23,7 @@ from .art_urls import route_address
 from .db import connect
 from .identity import verified_user
 from .idempotency import expire
+from . import set_codes
 from .inventory_core import MAX_QUANTITY, REPLAY, leaf, lock_owner, quantity, record_undo, undo_id_for
 
 router = APIRouter(prefix="/api/holdings", tags=["holdings"])
@@ -74,6 +75,8 @@ class HoldingView(BaseModel):
     printing_name: str
     set_id: str
     set_name: str
+    # The printed set code ("PAL"), or the TCGdex set ID when the set has none (set_codes), as Catalog shows it.
+    set_code: str
     collector_number: str
     descriptor: dict
     image_url: str | None
@@ -316,7 +319,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
         page = rows[:48]
         views = [HoldingView(edition_id=row["edition_id"], quantity=str(row["quantity"]), version=row["version"],
                              printing_id=row["printing_id"], printing_name=row["printing_name"],
-                             set_id=row["set_id"], set_name=row["set_name"], collector_number=row["collector_number"],
+                             set_id=row["set_id"], set_name=row["set_name"], set_code=set_codes.code_for(row["set_id"]), collector_number=row["collector_number"],
                              descriptor=row["descriptor"], image_url=route_address(row["printing_id"], row["art_source"]),
                              location_id=row["location_id"], location_name=row["location_name"]) for row in page]
         return LeafHoldings(holdings=views, owner_revision=revision, catalog_revision=state["revision"],

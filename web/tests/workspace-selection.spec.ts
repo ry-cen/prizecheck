@@ -594,7 +594,7 @@ test.describe("desktop", () => {
     await expect(
       panel.getByRole("heading", { name: "Insp Zubat" })
     ).toBeVisible();
-    await expect(panel).toContainText("Fixture Set · 2");
+    await expect(panel).toContainText("fixture · 2");
     await expect(panel).toContainText(`${shelf} / Box`);
     await expect(panel).toContainText("1 copy here");
     await expect(panel).toContainText("1 copy owned");
@@ -752,7 +752,7 @@ test.describe("mobile", () => {
     await tiles(page).nth(0).tap();
     const sheet = page.getByRole("dialog", { name: "Pocket Abra" });
     await expect(sheet).toBeVisible();
-    await expect(sheet).toContainText("Fixture Set · 1");
+    await expect(sheet).toContainText("fixture · 1");
     await expect(sheet).toContainText(`Alpha ${suffix}`);
     await expect(sheet).toContainText("2 copies here");
     await expect(sheet).toContainText("2 copies owned");

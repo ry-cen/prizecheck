@@ -69,6 +69,8 @@ def test_holdings_list_by_edition_then_location_path_for_all_owned_and_one_leaf(
         'Unsorted', 'shelf / alpha', 'shelf / beta', 'Unsorted', 'deck one', 'shelf / alpha']
     first = body['holdings'][0]
     assert first['set_name'] == 'Base Set' and first['collector_number'] == '1' and first['image_url'] is None
+    # The fixture's set has no printed code, so the code falls back to its TCGdex id, as in Catalog.
+    assert first['set_id'] == 'base' and first['set_code'] == 'base'
     assert all(row['version'] >= 1 for row in body['holdings'])
     assert body['totals'] == {'holdings': 6, 'editions': 3, 'copies': '10'}
     assert body['next_cursor'] is None

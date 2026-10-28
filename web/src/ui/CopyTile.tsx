@@ -17,6 +17,8 @@ type Props = Omit<
   /** The Printing's name: the Names line's first line, and the artwork's stand-in. */
   name: string;
   setName: string;
+  /** The printed set code ("PAL"). When given, the Names line shows it in place of the set's name. */
+  setCode?: string;
   collectorNumber: string;
   /** The Variant Descriptor as words (ui/variantLabel), shown after set and number on the Names line. */
   variant: string;
@@ -75,6 +77,7 @@ export function CopyTile({
   title,
   name,
   setName,
+  setCode,
   collectorNumber,
   variant,
   imageUrl,
@@ -111,7 +114,7 @@ export function CopyTile({
           <span
             className={`${LINE} text-micro leading-3.5 text-text-subtle tabular-nums`}
           >
-            {setName} · {collectorNumber} · {variant}
+            {setCode ?? setName} · {collectorNumber} · {variant}
           </span>
         </span>
       )}

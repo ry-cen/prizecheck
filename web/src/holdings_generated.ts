@@ -1,5 +1,5 @@
 // Generated from FastAPI OpenAPI by scripts/generate_holdings_client.py. Do not edit.
-export type HoldingView = { edition_id: string; quantity: string; version: number; printing_id: string; printing_name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string };
+export type HoldingView = { edition_id: string; quantity: string; version: number; printing_id: string; printing_name: string; set_id: string; set_name: string; set_code: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string };
 export type LeafHoldings = { holdings: HoldingView[]; owner_revision: number; catalog_revision: number; next_cursor: string | null };
 export type AddResult = { location_id: string; edition_id: string; quantity: string; version: number; owner_revision: number };
 export type AddHolding = { location_id: string; edition_id: string; quantity: string; idempotency_key: string };
