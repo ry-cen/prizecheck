@@ -1035,3 +1035,20 @@ def test_the_rules_view_reports_a_digest_mismatch_and_a_newer_version(world):
     insert_activation(MATCHING, version + 1, "1" * 64)
     rule = rule_view(MATCHING)
     assert (rule["problem"], rule["active"]["version"]) == ("newer_than_code", version + 1)
+
+
+def test_the_matched_list_shows_main_set_matches_under_v6_with_the_group_and_leaves_out_cards_with_a_tcgdex_id(tcgplayer_products):
+    seed_users()
+    listing(900, "Ampharos (Delta Species)", "1/101", 1411)
+    listing(901, "Radiant Charizard", "RC1/RC25", 1465)
+    listing(902, "Leafeon GX", "SV46/SV94", 2594)
+    run(Records(promo("ex15-1", "1", "ex15", "Ampharos δ"), promo("bw11-rc1", "RC1", "bw11", "Radiant Charizard"),
+                promo("sma-46", "SV46", "sma", "Leafeon-GX"), promo("ex15-3", "3", "ex15", "Deoxys δ"),
+                promo("ex15-9", "9", "ex15", "Gengar", [{"type": "holo", "size": "standard", "thirdParty": {"tcgplayer": 477184}}])))
+    activate_as_owner(MATCHING, 5)
+    assert matches()["items"] == []
+    activate_as_owner(MATCHING, 6)
+    listed = sorted((item["name"], item["set_id"], item["matched_product"]["product_id"], item["matched_product"]["group_id"],
+                     item["rule_version"]) for item in matches()["items"])
+    assert listed == [("Ampharos δ", "ex15", 900, 1411, 6), ("Leafeon-GX", "sma", 902, 2594, 6),
+                      ("Radiant Charizard", "bw11", 901, 1465, 6)]
