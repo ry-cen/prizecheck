@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from . import catalog_dispatch
 from .db import connect
+from .metadata_reviews import matched_by_number_editions
 from .identity import require_owner, verified_user
 
 router = APIRouter()
@@ -64,6 +65,8 @@ class OwnerCatalogStatus(BaseModel):
     # Computed in the database so the 48 h rule never depends on the browser's clock.
     price_import_stale: bool = False
     price_source_stale: bool = False
+    # Verified Editions the card-number path matched (the Metadata tab lists them for review).
+    matched_by_number: int = 0
     pending_reviews: list[CatalogReview]
 
 
@@ -99,6 +102,7 @@ def owner_catalog_status(user_id: str = Depends(verified_user)):
         return OwnerCatalogStatus(catalog=catalog_status_row(conn), run=CatalogRun(**run) if run else None,
                                   last_price_import=PriceImportRun(**latest) if latest else None,
                                   last_good_price_import_at=ages["good"], source_updated_at_max=ages["source_max"],
+                                  matched_by_number=len(matched_by_number_editions(conn)),
                                   price_import_stale=bool(latest) and ages["import_stale"],
                                   price_source_stale=bool(latest) and ages["source_stale"],
                                   pending_reviews=[CatalogReview(**row) for row in reviews])
