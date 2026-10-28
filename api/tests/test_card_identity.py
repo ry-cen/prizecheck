@@ -11,6 +11,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
 import app.catalog as catalog_module
+import app.catalog_targets as catalog_targets_module
 from app.card_identity import card_identity_key
 from app.catalog import claim_run, execute_run
 from app.main import connect
@@ -280,6 +281,9 @@ def test_migration_merges_subtitled_identities_and_keeps_every_reference(project
                                catalog_module.IDENTITY_UPSERT.replace("coalesce(merged_into,id)", "id"))
                 # And evolution roots, with migration 043.
                 legacy.setattr(catalog_module, "refresh_evolution_roots", lambda conn, contain=True: 0)
+                # And the TCGCSV products the matching rules' set paths read, with migration 152.
+                legacy.setattr(catalog_targets_module, "set_path_facts", lambda conn, rule, row: {})
+                legacy.setattr(catalog_targets_module, "v6_set_path_facts", lambda conn, rule, row: {})
                 import_into(conn, *LEGACY_RECORDS)
             ids = seed_legacy_extras(conn)
             conn.commit()
