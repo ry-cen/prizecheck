@@ -363,6 +363,7 @@ promote({'card-1': 'Pikachu'})`,
 
     // Removal asks first; Cancel leaves the copies. Confirming removes them, and Undo restores them.
     await tiles.nth(0).click();
+    await expect(bar).toContainText("1 copy selected"); // the anchor is set before the Shift-click
     await tiles.nth(2).click({ modifiers: ["Shift"] });
     await expect(bar).toContainText("3 copies selected");
     await bar.getByRole("button", { name: "Actions" }).click();
