@@ -8,10 +8,10 @@ from uuid import uuid4
 
 import pytest
 
-from app import public_catalog
-from app.catalog_targets import LIVE, MATCHING
+from app.games.pokemon.catalog import public_catalog
+from app.games.pokemon.prices.catalog_targets import LIVE, MATCHING
 from app.main import connect
-from app.public_catalog import LOCK, drain, mark_all_dirty, rebuild, stored_revision
+from app.games.pokemon.catalog.public_catalog import LOCK, drain, mark_all_dirty, rebuild, stored_revision
 from app.public_projection import FilePublicProjection, ProjectionUnavailable, public_record_store
 from app.public_records import FilePublicRecords, _clear_cache, catalog_edition_key, catalog_printing_key, quarantine_key
 from test_catalog import reset_catalog
@@ -700,7 +700,7 @@ def plant_foreign_timeline(edition_ref, mapping_revision, *, revision_gap=1000):
 
 
 def test_r3_never_reuses_a_mapping_revision_the_lost_timeline_already_wrote_quotes_under():
-    from app.public_catalog import marketplace_states
+    from app.games.pokemon.catalog.public_catalog import marketplace_states
     printing, normal, printing_ref, edition_ref = stage()
     with connect() as conn:
         before = conn.execute('SELECT mapping_revision FROM catalog_edition_metadata WHERE edition_id=%s', (normal['id'],)).fetchone()['mapping_revision']
@@ -728,7 +728,7 @@ def test_a_request_drain_delivers_the_callers_own_targets_before_an_unrelated_ba
     run(Records(card(1), card(2), card(3), card(4)))
     with connect() as conn:
         drain(conn)
-    monkeypatch.setattr('app.catalog.publish_catalog_best_effort', lambda *args, **kwargs: True)  # an import with a backlog
+    monkeypatch.setattr('app.games.pokemon.catalog.catalog.publish_catalog_best_effort', lambda *args, **kwargs: True)  # an import with a backlog
     run(Records(card(1), changed_product(2), changed_product(3), changed_product(4)))  # older, unrelated invalidations
     run(Records(changed_product(1), changed_product(2), changed_product(3), changed_product(4)))  # then the caller's own
     mine, rows = metadata('meta-1')
@@ -863,5 +863,5 @@ def test_the_detached_drain_entry_delivers_everything_pending_and_reports_the_re
     assert not pending()
     refused = subprocess.run([sys.executable, '-m', 'app.catalog_import'], cwd=api, env=os.environ.copy(), capture_output=True, timeout=60)
     assert refused.returncode == 2  # neither --run-id nor --drain is a usage error, never a silent no-op
-    from app import catalog_import
+    from app.games.pokemon.catalog import catalog_import
     assert catalog_import.main(['--drain']) == 0

@@ -4,8 +4,10 @@ the Live export table. No database is needed."""
 import re
 from pathlib import Path
 
-from app import format_evaluator, set_codes
-from app.catalog_targets import LiveRulesV1
+from app.games.pokemon.formats import format_evaluator
+
+from app.games.pokemon.catalog import set_codes
+from app.games.pokemon.prices.catalog_targets import LiveRulesV1
 
 APP = Path(set_codes.__file__).parent
 # A printed code that reads the same as a different set's TCGdex set ID. The code wins in search; the other set shows

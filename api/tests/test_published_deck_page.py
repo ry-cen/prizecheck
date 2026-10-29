@@ -209,7 +209,7 @@ def page_world(owner, prefix):
     "Over" holds five Professor's Research (a card-level copy-limit issue) and is Listed; "Orphan" is legal and
     Unlisted, and its Deck is gone (its publication unlinked, as deleting the Deck leaves it). Returns the tokens and
     the Legal Deck's id."""
-    from app import public_catalog
+    from app.games.pokemon.catalog import public_catalog
     from app.public_records import public_record_store
     from test_discover_listing import LEGAL as LISTED_LEGAL, OVER, catalog, list_publicly, priced
     from test_published_cost import listed_deck

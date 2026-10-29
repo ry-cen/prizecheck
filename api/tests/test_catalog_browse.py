@@ -18,10 +18,10 @@ from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
-from app import format_evaluator as evaluator
-from app import format_standing
-from app.catalog import SetDetails, TCGdexSource
-from app.catalog_browse import _rules_release_dates
+from app.games.pokemon.formats import format_evaluator as evaluator
+from app.games.pokemon.formats import format_standing
+from app.games.pokemon.catalog.catalog import SetDetails, TCGdexSource
+from app.games.pokemon.catalog.catalog_browse import _rules_release_dates
 from app.main import app, connect
 from test_attribute_corrections import decide, seed
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, EX_BW, SUPPORTER, SWITCH_ME, card, edition_of
@@ -439,7 +439,7 @@ def test_busy_standings_answer_503_and_a_reader_retries_once_while_the_request_i
     assert (response.status_code, error(response), len(calls)) == (503, "FORMAT_STANDING_BUSY", 2)
     # No retry once the request is older than RETRY_WITHIN_S, so the proxy never times out first.
     calls.clear()
-    from app import catalog_browse
+    from app.games.pokemon.catalog import catalog_browse
     monkeypatch.setattr(catalog_browse, "RETRY_WITHIN_S", 0.0)
     response = call("GET", EDITIONS, user)
     assert (response.status_code, len(calls)) == (503, 1)

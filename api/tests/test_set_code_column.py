@@ -2,7 +2,7 @@
 ``catalog_printing_set_code`` gives every Printing ``set_codes.code_for(coalesce(pd.set_id, ''))`` once."""
 from uuid import uuid4
 
-from app import set_codes
+from app.games.pokemon.catalog import set_codes
 from app.main import connect
 from want_list_swap_fixtures import seed_swap_catalog
 

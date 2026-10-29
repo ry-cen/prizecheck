@@ -6,10 +6,14 @@ from uuid import uuid4
 
 import pytest
 
-from app import catalog, price_binding, price_import
-from app.catalog_targets import MATCHING, activate_rule
+from app.games.pokemon.catalog import catalog
+
+from app.games.pokemon.prices import price_binding
+
+from app.games.pokemon.prices import price_import
+from app.games.pokemon.prices.catalog_targets import MATCHING, activate_rule
 from app.db import connect
-from app.price_binding import rebind, sub_type_for
+from app.games.pokemon.prices.price_binding import rebind, sub_type_for
 from test_catalog import reset_catalog
 from test_price_import import T1, Tcgcsv, price, product
 

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from .copy_allocation import Availability, available_to
-from .import_energy_matching import CATALOG_NAME
+from app.games.pokemon.imports.import_energy_matching import CATALOG_NAME
 from .import_match_core import ACTIVE, NEWEST_COLUMNS, RELEASE_JOINS, newest_first, release_params
 from .import_replace import ReplacedDeck, read_replaced
 from .location_tree import error

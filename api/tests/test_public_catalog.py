@@ -10,7 +10,7 @@ import pytest
 from app.main import connect
 from app.public_projection import FilePublicProjection, ProjectionUnavailable, public_record_store
 from app.public_records import FilePublicRecords, catalog_edition_key, catalog_format_key, catalog_printing_key
-from app.catalog_targets import LIVE, MATCHING
+from app.games.pokemon.prices.catalog_targets import LIVE, MATCHING
 from app.public_records import quarantine_key
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -52,7 +52,7 @@ def catalog_rows(conn):
 
 
 def test_rebuild_publishes_exact_allowlisted_records_and_is_idempotent():
-    from app.public_catalog import rebuild
+    from app.games.pokemon.catalog.public_catalog import rebuild
     reset_catalog()
     owner, _, _, _, edition, _ = fixture()
     with connect() as conn:
@@ -101,7 +101,7 @@ def test_rebuild_publishes_exact_allowlisted_records_and_is_idempotent():
 
 
 def test_verified_priced_edition_and_eligible_printing_publish_only_the_reviewed_public_fields():
-    from app.public_catalog import rebuild
+    from app.games.pokemon.catalog.public_catalog import rebuild
     reset_catalog()
     activate(MATCHING, 1)
     activate(LIVE, 99)
@@ -126,7 +126,7 @@ def test_verified_priced_edition_and_eligible_printing_publish_only_the_reviewed
 
 
 def test_quote_lookup_is_public_only_when_verified_and_a_quote_variant_is_set():
-    from app.public_catalog import rebuild
+    from app.games.pokemon.catalog.public_catalog import rebuild
     reset_catalog()
     activate(MATCHING, 1)
     record = card(1)
@@ -188,7 +188,7 @@ def test_records_store_failure_does_not_roll_back_import_or_change_publication(m
 
 
 def test_backfill_recovers_a_missing_record_and_is_idempotent():
-    from app.public_catalog import backfill
+    from app.games.pokemon.catalog.public_catalog import backfill
     promote({'card-1': 'Pikachu'})
     with connect() as conn:
         row = catalog_rows(conn)[0]
@@ -221,7 +221,7 @@ def test_backfill_script_publishes_existing_data_and_refuses_an_uninitialized_st
 
 def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_cursor_unchanged():
     from app.discovery import cursor_encode
-    from app.public_catalog import backfill
+    from app.games.pokemon.catalog.public_catalog import backfill
     from app.public_records import quote_key, result_key
     from test_discovery import visibility
     from test_holdings import client
@@ -252,7 +252,7 @@ def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_
 @pytest.mark.timing
 @pytest.mark.slow(reason='capacity: a full-scale catalog')
 def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_deadline(monkeypatch):
-    from app import public_catalog
+    from app.games.pokemon.catalog import public_catalog
     cards = {f'card-{index}': f'Card {index}' for index in range(1, 301)}
     calls = []
     original = FilePublicRecords.compare_and_swap
@@ -277,7 +277,7 @@ def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_dea
 
 
 def staged_refs():
-    from app.public_catalog import drain
+    from app.games.pokemon.catalog.public_catalog import drain
     reset_catalog()
     with connect() as conn:
         conn.execute('DELETE FROM tcgplayer_price')  # an earlier test's rows would bind during the import's rebind
@@ -300,7 +300,7 @@ def swap(changes):
 
 
 def test_marketplace_and_live_readers_use_one_generation_and_expose_quotes_only_for_verified_priced_editions():
-    from app.public_catalog import live_states, marketplace_states
+    from app.games.pokemon.catalog.public_catalog import live_states, marketplace_states
     from app.public_records import price_key
     pref, refs = staged_refs()
     normal = refs['normal']
@@ -325,7 +325,7 @@ def test_marketplace_and_live_readers_use_one_generation_and_expose_quotes_only_
 
 
 def test_a_price_record_is_kept_only_when_exactly_the_allowlist_and_it_agrees_with_the_edition_record(monkeypatch):
-    from app.public_catalog import marketplace_states
+    from app.games.pokemon.catalog.public_catalog import marketplace_states
     from app.public_records import price_key
     pref, refs = staged_refs()
     normal = refs['normal']
@@ -350,7 +350,7 @@ def test_a_price_record_is_kept_only_when_exactly_the_allowlist_and_it_agrees_wi
 
 
 def test_price_reads_off_reads_no_price_record(monkeypatch):
-    from app.public_catalog import marketplace_states
+    from app.games.pokemon.catalog.public_catalog import marketplace_states
     from app.public_records import FilePublicRecords, price_key
     pref, refs = staged_refs()
     normal = refs['normal']
@@ -369,7 +369,7 @@ def test_price_reads_off_reads_no_price_record(monkeypatch):
 
 
 def test_readers_fail_closed_on_missing_malformed_or_inconsistent_records():
-    from app.public_catalog import live_states, marketplace_states
+    from app.games.pokemon.catalog.public_catalog import live_states, marketplace_states
     pref, refs = staged_refs()
     normal, reverse = refs['normal'], refs['reverse']
     store = public_record_store()
@@ -442,7 +442,7 @@ def printing_outbox(printing_id):
 
 
 def test_format_facts_are_restamped_only_when_a_published_fact_changes():
-    from app.public_catalog import drain
+    from app.games.pokemon.catalog.public_catalog import drain
     reset_catalog()
     run(Records(card(1)))
     with connect() as conn:
@@ -480,7 +480,7 @@ def test_format_facts_are_restamped_only_when_a_published_fact_changes():
 
 
 def test_backfill_publishes_format_facts_into_a_store_written_before_them():
-    from app.public_catalog import rebuild
+    from app.games.pokemon.catalog.public_catalog import rebuild
     reset_catalog()
     fixture()
     with connect() as conn:
@@ -507,7 +507,7 @@ def test_backfill_publishes_format_facts_into_a_store_written_before_them():
 
 
 def test_a_format_record_that_differs_at_the_same_revision_is_rewritten_not_stuck():
-    from app.public_catalog import drain
+    from app.games.pokemon.catalog.public_catalog import drain
     reset_catalog()
     fixture()
     with connect() as conn:
@@ -529,7 +529,7 @@ def test_a_format_record_that_differs_at_the_same_revision_is_rewritten_not_stuc
 
 
 def test_format_facts_reader_fails_closed_on_missing_or_malformed_records():
-    from app.public_catalog import FormatFacts, format_facts
+    from app.games.pokemon.catalog.public_catalog import FormatFacts, format_facts
     pref, _ = staged_refs()
     store = public_record_store()
     key = catalog_format_key(pref)
@@ -575,8 +575,8 @@ def test_format_facts_reader_fails_closed_on_missing_or_malformed_records():
 def test_a_reprint_group_longer_than_readers_accept_is_published_with_a_warning(monkeypatch, caplog):
     """The writer publishes every member, but a reader refuses a list over MAX_REPRINT_PRINTINGS and the group's
     printings check as unknown publicly, so the writer logs the group (Deck Lists 19, from #99)."""
-    from app import public_catalog
-    from app.card_attributes import ATTRIBUTE_COLUMNS
+    from app.games.pokemon.catalog import public_catalog
+    from app.games.pokemon.catalog.card_attributes import ATTRIBUTE_COLUMNS
     monkeypatch.setattr(public_catalog, 'MAX_REPRINT_PRINTINGS', 2)
     row = {'printing_ref': 'a' * 48, 'public_revision': 3, 'format_set_id': 'sv01', 'format_collector_number': '191',
            'identity_key': 'rare-candy', 'identity_name': 'Rare Candy', 'reprint_group_id': 'f' * 32,
@@ -584,7 +584,7 @@ def test_a_reprint_group_longer_than_readers_accept_is_published_with_a_warning(
     for count, warned in ((2, False), (3, True)):
         printings = sorted('%048x' % n for n in range(count))
         caplog.clear()
-        with caplog.at_level('WARNING', logger='app.public_catalog'):
+        with caplog.at_level('WARNING', logger='app.games.pokemon.catalog.public_catalog'):
             value = public_catalog.format_value({**row, 'reprint_printings': printings})
         assert value['reprint_group']['printings'] == printings      # published whole either way
         ref = value['reprint_group']['ref']

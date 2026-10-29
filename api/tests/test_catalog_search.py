@@ -5,7 +5,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.art_urls import art_url
-from app.catalog import claim_run, execute_run
+from app.games.pokemon.catalog.catalog import claim_run, execute_run
 from app.main import app, connect
 from test_catalog import Source, headers, reset_catalog
 

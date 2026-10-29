@@ -15,8 +15,8 @@ from .holdings import parse_quantity
 from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply_edit, cleaned_name,
                             owner_and_rows, replay, check_name, store_result, error, node_model)
 from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, held_in, read_ownership
-from .deck_format_checks import DeckFormatChecks, TargetFormat, command_format_checks, held_format_checks
-from .format_evaluator import FORMATS
+from app.games.pokemon.formats.deck_format_checks import DeckFormatChecks, TargetFormat, command_format_checks, held_format_checks
+from app.games.pokemon.formats.format_evaluator import FORMATS
 from .deck_list_display import CardKind, TrainerType, read_line_display, with_line_display
 from .borrowed_copies import borrowed_at, borrowed_in, lenders_in, physical
 from .copy_allocation import deck_lines, held_for_line
@@ -24,7 +24,7 @@ from .settings import WantListCounting, read_settings
 from .social import counts
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
-from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
+from app.games.pokemon.formats.construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
 
 
 class CreateDeck(BaseModel):

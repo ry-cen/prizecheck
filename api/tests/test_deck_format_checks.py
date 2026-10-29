@@ -7,7 +7,7 @@ rules are the real Standard rules file. Every check passes an explicit ``as_of``
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
-from app.format_evaluator import FORMATS
+from app.games.pokemon.formats.format_evaluator import FORMATS
 
 from test_card_attributes import (ACE_SPEC_ENERGY, ACE_SPEC_SV, BULBASAUR_ME, ENERGY_SEARCH, ENERGY_SV, RARE_CANDY_ME,
                                   SWITCH_ME, card, edition_of)

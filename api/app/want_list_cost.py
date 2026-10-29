@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from . import prices
+from app.games.pokemon.prices import prices
 from .deck_cost import DeckCostFigures, summarize
 from .identity import verified_user
 from .price_budget import Budget, trusted_budget

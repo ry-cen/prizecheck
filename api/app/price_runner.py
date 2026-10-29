@@ -10,8 +10,8 @@ Process model (docs/price-refresh.md, ADR 0008):
   each Edition with its own CAS, release the permit. It exits 2 s after it last had anything to do.
 - Both processes inherit the flock fd the launcher took; the lock is held while either lives.
 
-This module never imports psycopg, ``app.main`` or ``app.prices``, and its environment has no ``DATABASE_URL``. The
-source client and the quote selector live in ``app.price_source`` / ``app.tcgdex_record`` and are imported lazily.
+This module never imports psycopg, ``app.main`` or ``app.games.pokemon.prices.prices``, and its environment has no ``DATABASE_URL``. The
+source client and the quote selector live in ``app.games.pokemon.prices.price_source`` / ``app.games.pokemon.prices.tcgdex_record`` and are imported lazily.
 
 Interface assumed from those modules (reconcile when they land):
 
@@ -111,12 +111,12 @@ def eligible(work, edition, quarantine):
 
 # --- Source seam ------------------------------------------------------------------------------------------------------
 def _default_fetcher():
-    module = importlib.import_module('app.price_source')
+    module = importlib.import_module('app.games.pokemon.prices.price_source')
     return module.fetch
 
 
 def _default_selector():
-    module = importlib.import_module('app.tcgdex_record')
+    module = importlib.import_module('app.games.pokemon.prices.tcgdex_record')
     return module.select_quote
 
 
@@ -615,7 +615,7 @@ def worker_main(control, slot, owner):
     """The forked worker: parked until the supervisor's claim commits, then the scheduler loop."""
     code = 1
     try:
-        for name in ('app.price_source', 'app.tcgdex_record'):  # Warm the imports while the claim CAS is in flight.
+        for name in ('app.games.pokemon.prices.price_source', 'app.games.pokemon.prices.tcgdex_record'):  # Warm the imports while the claim CAS is in flight.
             try:
                 importlib.import_module(name)
             except ImportError:

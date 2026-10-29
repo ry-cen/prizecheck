@@ -9,9 +9,9 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.art_urls import art_url
-from app.catalog_search import EditionView
+from app.games.pokemon.catalog.catalog_search import EditionView
 from app.main import app, connect
-from app.scanner import default_edition
+from app.games.pokemon.scanner.scanner import default_edition
 from test_catalog import headers
 from test_catalog_search import promote
 

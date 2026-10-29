@@ -25,7 +25,7 @@ def start(owner):
 
 def test_concurrent_dispatch_launches_once_and_returns_promptly():
     owner = owner_fixture()
-    with patch('app.catalog_dispatch.launch_import') as launcher:
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import') as launcher:
         with ThreadPoolExecutor(max_workers=2) as pool:
             responses = list(pool.map(lambda _: start(owner),range(2)))
     assert [response.status_code for response in responses] == [200,200]
@@ -34,7 +34,7 @@ def test_concurrent_dispatch_launches_once_and_returns_promptly():
 
 
 def test_exact_run_child_claim_rejects_superseded_and_completed():
-    from app.catalog import claim_run
+    from app.games.pokemon.catalog.catalog import claim_run
     owner_fixture()
     with connect() as conn:
         first = conn.execute('INSERT INTO catalog_run DEFAULT VALUES RETURNING id').fetchone()['id']
@@ -51,22 +51,22 @@ def test_exact_run_child_claim_rejects_superseded_and_completed():
 
 def test_launch_failure_is_safe_and_next_explicit_start_recovers():
     owner = owner_fixture()
-    with patch('app.catalog_dispatch.launch_import',side_effect=OSError('secret credential')):
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import',side_effect=OSError('secret credential')):
         response = start(owner)
     assert response.status_code == 503 and response.json()['detail']['code'] == 'CATALOG_DISPATCH_FAILED'
     with connect() as conn:
         failed = conn.execute('SELECT * FROM catalog_run ORDER BY started_at DESC LIMIT 1').fetchone()
     assert failed['outcome'] == 'failed' and failed['error'] == 'CATALOG_DISPATCH_FAILED'
-    with patch('app.catalog_dispatch.launch_import') as launcher:
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import') as launcher:
         response = start(owner)
         assert response.status_code == 200 and response.json()['run']['id'] != str(failed['id'])
         assert launcher.call_count == 1
 
 
 def test_orphan_recovery_waits_startup_grace_and_respects_live_session_lock():
-    from app.catalog import claim_run, RunnerBusy
+    from app.games.pokemon.catalog.catalog import claim_run, RunnerBusy
     owner = owner_fixture()
-    with patch('app.catalog_dispatch.launch_import') as launcher:
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import') as launcher:
         original = start(owner).json()['run']['id']
         assert start(owner).json()['run']['id'] == original
         assert launcher.call_count == 1
@@ -91,15 +91,15 @@ def test_orphan_recovery_waits_startup_grace_and_respects_live_session_lock():
         with connect() as delayed:
             assert claim_run(delayed,replacement) is None
     assert client.post(PATH).status_code == 401
-    with patch('app.catalog_dispatch.launch_import') as launcher:
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import') as launcher:
         assert start(str(uuid4())).status_code == 403
         launcher.assert_not_called()
 
 
 def test_detailed_dispatch_tells_started_from_active_and_keeps_the_owner_contract():
-    from app.catalog_dispatch import dispatch_import, dispatch_import_detailed
+    from app.games.pokemon.catalog.catalog_dispatch import dispatch_import, dispatch_import_detailed
     owner_fixture()
-    with patch('app.catalog_dispatch.launch_import') as launcher, connect() as conn:
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import') as launcher, connect() as conn:
         first = dispatch_import_detailed(conn)
         assert first.started and first.child is launcher.return_value and first.run_id is not None
         second = dispatch_import_detailed(conn)
@@ -108,12 +108,12 @@ def test_detailed_dispatch_tells_started_from_active_and_keeps_the_owner_contrac
 
 
 def test_detailed_dispatch_reports_a_committing_promotion_as_no_run():
-    from app.catalog_dispatch import dispatch_import_detailed
+    from app.games.pokemon.catalog.catalog_dispatch import dispatch_import_detailed
     owner_fixture()
     with connect() as holder, connect() as conn:
         holder.execute('SELECT pg_advisory_lock(914703)')
         try:
-            with patch('app.catalog_dispatch.launch_import') as launcher:
+            with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import') as launcher:
                 result = dispatch_import_detailed(conn)
         finally:
             holder.execute('SELECT pg_advisory_unlock(914703)')
@@ -122,10 +122,10 @@ def test_detailed_dispatch_reports_a_committing_promotion_as_no_run():
 
 
 def test_dispatch_guard_declines_before_reserving_and_on_reserved_runs_before_the_launch():
-    from app.catalog_dispatch import dispatch_import_detailed
+    from app.games.pokemon.catalog.catalog_dispatch import dispatch_import_detailed
     owner_fixture()
     order = []
-    with patch('app.catalog_dispatch.launch_import', side_effect=lambda run_id: order.append('launch')) as launcher, connect() as conn:
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import', side_effect=lambda run_id: order.append('launch')) as launcher, connect() as conn:
         declined = dispatch_import_detailed(conn, guard=lambda c: False)
         assert declined.declined and declined.run_id is None and not declined.started
         assert conn.execute('SELECT count(*) AS n FROM catalog_run').fetchone()['n'] == 0
@@ -136,14 +136,14 @@ def test_dispatch_guard_declines_before_reserving_and_on_reserved_runs_before_th
 
 
 def test_a_failing_on_reserved_marks_the_run_failed_without_launching():
-    from app.catalog_dispatch import dispatch_import_detailed
+    from app.games.pokemon.catalog.catalog_dispatch import dispatch_import_detailed
     from fastapi import HTTPException
     owner_fixture()
 
     def broken(c, run_id):
         raise RuntimeError('secret')
 
-    with patch('app.catalog_dispatch.launch_import') as launcher, connect() as conn:
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import') as launcher, connect() as conn:
         with pytest.raises(HTTPException) as caught:
             dispatch_import_detailed(conn, on_reserved=broken)
         assert caught.value.detail == {'code': 'CATALOG_DISPATCH_FAILED'}
@@ -152,7 +152,7 @@ def test_a_failing_on_reserved_marks_the_run_failed_without_launching():
 
 
 def test_expired_lease_is_stale_only_when_no_session_holds_the_runner_lock():
-    from app.catalog_dispatch import RUNNER_LOCK
+    from app.games.pokemon.catalog.catalog_dispatch import RUNNER_LOCK
     owner = owner_fixture()
     with connect() as conn:
         conn.execute("INSERT INTO catalog_run(phase,started_at,lease_until) VALUES ('promoting',now()-interval '10 minutes',now()-interval '5 minutes')")
@@ -174,7 +174,7 @@ def test_expired_lease_is_stale_only_when_no_session_holds_the_runner_lock():
 
 
 def test_importer_holds_the_runner_lock_through_promotion_so_an_expired_lease_is_not_stale():
-    from app.catalog import claim_run, execute_run
+    from app.games.pokemon.catalog.catalog import claim_run, execute_run
     from test_catalog_metadata import Records, furret
     owner = owner_fixture()
     seen = {}

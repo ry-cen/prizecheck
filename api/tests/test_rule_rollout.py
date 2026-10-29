@@ -12,8 +12,12 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app import card_art, public_catalog, rule_rollout
-from app.catalog_targets import LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, LiveRulesV1, activate_rule, load_active
+from app.games.pokemon.prices import card_art
+
+from app.games.pokemon.catalog import public_catalog
+
+from app.games.pokemon.catalog import rule_rollout
+from app.games.pokemon.prices.catalog_targets import LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, LiveRulesV1, activate_rule, load_active
 from app.main import app, connect
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret, owner

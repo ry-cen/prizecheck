@@ -9,7 +9,7 @@ quantity. Card kind, Trainer Type and evolves from come from the effective card 
 the one source of card type, migration 041), so a reviewed correction shows on the next read. The Card Identity is the
 Printing's current one (``catalog_printing.identity_id``, which a Card Identity merge rewrites), the same identity the
 basic four-copy check groups by. A Pokémon line also carries its evolution root and its stage from that root, read from
-``catalog_evolution_root`` (migration 043, ``app.evolution_roots``), so the builder can group an evolution line even when
+``catalog_evolution_root`` (migration 043, ``app.games.pokemon.catalog.evolution_roots``), so the builder can group an evolution line even when
 the deck skips a stage; both are null for other cards and until the roots are first derived.
 
 The display read is one query keyed by the lines' Edition ids, never a join against ``deck_list_line``: a large Deck's

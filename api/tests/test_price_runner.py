@@ -1,8 +1,8 @@
 """Price runner (ticket 08-B): worker loop, supervisor, launcher and reclaim.
 
 Store semantics run against both adapters (filesystem and the HTTP relay). Process tests launch the real detached
-supervisor through ``price_launcher.spawn`` with a test-local ``sitecustomize`` that registers fake ``app.price_source`` /
-``app.tcgdex_record`` modules which talk to a real local HTTP server, so the runner is exercised end to end without
+supervisor through ``price_launcher.spawn`` with a test-local ``sitecustomize`` that registers fake ``app.games.pokemon.prices.price_source`` /
+``app.games.pokemon.prices.tcgdex_record`` modules which talk to a real local HTTP server, so the runner is exercised end to end without
 08-A. Admission (07-A) is simulated by seeding records with the ``quote_contract`` builders.
 """
 from timing_support import within_budget
@@ -21,7 +21,11 @@ from uuid import uuid4
 
 import pytest
 
-from app import price_launcher, price_refresh, price_runner, price_source, tcgdex_record
+from app import price_launcher, price_refresh, price_runner
+
+from app.games.pokemon.prices import price_source
+
+from app.games.pokemon.prices import tcgdex_record
 from app import quote_contract as qc
 from app.price_budget import Budget
 from app.public_projection import ProjectionUnavailable
@@ -455,7 +459,7 @@ def test_idle_exit_declines_while_runnable_jobs_wait(fs_env):
 
 # --- Marketplace parity -----------------------------------------------------------------------------------------------------
 def test_marketplace_validation_matches_the_catalog_reader():
-    from app.public_catalog import _marketplace
+    from app.games.pokemon.catalog.public_catalog import _marketplace
     good = edition_record(1, 'c-1', 'normal')
     cases = [
         (good, quarantine_record(1)), (good, quarantine_record(1, state='quarantined')), (good, quarantine_record(1, revision=2)),
@@ -474,7 +478,7 @@ def test_marketplace_validation_matches_the_catalog_reader():
 
 
 def test_runner_modules_load_no_postgres_code():
-    code = 'import sys; sys.path.insert(0, "'+str(API_DIR)+'"); import app.price_runner, app.price_launcher, app.price_source, app.tcgdex_record; bad=[m for m in sys.modules if m.split(".")[0] in ("psycopg","psycopg_pool") or m in ("app.main","app.prices","app.public_catalog")]; print(bad)'
+    code = 'import sys; sys.path.insert(0, "'+str(API_DIR)+'"); import app.price_runner, app.price_launcher, app.games.pokemon.prices.price_source, app.games.pokemon.prices.tcgdex_record; bad=[m for m in sys.modules if m.split(".")[0] in ("psycopg","psycopg_pool") or m in ("app.main","app.games.pokemon.prices.prices","app.games.pokemon.catalog.public_catalog")]; print(bad)'
     out = subprocess.run([sys.executable, '-c', code], cwd=API_DIR, env={'PYTHONPATH': str(API_DIR), 'PATH': os.environ['PATH']},
                          capture_output=True, text=True, check=True).stdout
     assert out.strip() == '[]'
@@ -732,7 +736,7 @@ import price_fixture
 price_fixture.install()
 _fake = os.path.join(os.environ.get("PRICE_RUNNER_LOCK_DIR", "/nonexistent"), "fake-source.json")
 if os.path.exists(_fake):
-    for name, source in (("app.price_source", {source!r}), ("app.tcgdex_record", {record!r})):
+    for name, source in (("app.games.pokemon.prices.price_source", {source!r}), ("app.games.pokemon.prices.tcgdex_record", {record!r})):
         module = types.ModuleType(name)
         exec(compile(source, name, "exec"), module.__dict__)
         sys.modules[name] = module

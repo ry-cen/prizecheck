@@ -25,10 +25,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'api'))
 import psycopg  # noqa: E402
-from app.catalog import RunnerBusy, rederive_card_attributes  # noqa: E402
+from app.games.pokemon.catalog.catalog import RunnerBusy, rederive_card_attributes  # noqa: E402
 from app.main import connect  # noqa: E402
-from app.format_standing import rebuild_stale_best_effort  # noqa: E402
-from app.public_catalog import publish_catalog_best_effort  # noqa: E402
+from app.games.pokemon.formats.format_standing import rebuild_stale_best_effort  # noqa: E402
+from app.games.pokemon.catalog.public_catalog import publish_catalog_best_effort  # noqa: E402
 
 
 def main():

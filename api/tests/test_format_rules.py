@@ -8,8 +8,8 @@ from datetime import date
 
 import pytest
 
-from app.card_attributes import CardAttributeRules
-from app.format_evaluator import FORMATS, RULES_DIR, FormatRulesError, format_rules, load_rules, second_friday_after
+from app.games.pokemon.catalog.card_attributes import CardAttributeRules
+from app.games.pokemon.formats.format_evaluator import FORMATS, RULES_DIR, FormatRulesError, format_rules, load_rules, second_friday_after
 
 # Editing a rules file changes its digest: bump its `revision`, set `published`, and pin the new pair here.
 PINNED_RULES = {"standard": (1, "bc0d234758d673925a6da168317a4ecfef28d9fbafc297b4e1c50ba7026aff98"),

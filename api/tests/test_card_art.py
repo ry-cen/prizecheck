@@ -5,11 +5,13 @@ from uuid import uuid4
 
 import pytest
 
-from app import card_art, price_import
+from app.games.pokemon.prices import card_art
+
+from app.games.pokemon.prices import price_import
 from app.art_urls import art_version
-from app.catalog_targets import MATCHING  # noqa: F401  (imported so the rule tables exist in the schema under test)
+from app.games.pokemon.prices.catalog_targets import MATCHING  # noqa: F401  (imported so the rule tables exist in the schema under test)
 from app.db import connect
-from app.public_catalog import drain
+from app.games.pokemon.catalog.public_catalog import drain
 from app.public_projection import FilePublicProjection, public_record_store
 from app.public_records import catalog_printing_key
 from test_catalog import reset_catalog

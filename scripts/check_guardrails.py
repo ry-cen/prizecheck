@@ -228,7 +228,7 @@ def onnxruntime_import_violations(source, filename):
 # art-URL module (`api/app/art_urls.py`, the scanner's TCGdex-only rule) and the scanner's own query; the web build
 # never spells them, so a client cannot derive a size by editing an address.
 WEBP_SUFFIX = re.compile(r'/(?:low|high)\.webp')
-WEBP_SUFFIX_MODULES = ('api/app/scanner.py', 'api/app/art_urls.py')
+WEBP_SUFFIX_MODULES = ('api/app/games/pokemon/scanner/scanner.py', 'api/app/art_urls.py')
 
 
 def webp_suffix_violations(source, filename):
@@ -379,7 +379,7 @@ def set_code_migration_violations(migrations, tsv_text):
 def main():
     failed = False
     migrations = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
-    for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/set_codes.tsv').read_text(encoding='utf-8')):
+    for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/games/pokemon/catalog/set_codes.tsv').read_text(encoding='utf-8')):
         print(f'{name}: {reason}')
         failed = True
     for relative in ('scripts/release.py', 'scripts/release_runtime.py'):

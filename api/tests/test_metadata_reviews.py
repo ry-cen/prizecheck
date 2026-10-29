@@ -11,9 +11,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, connect
-from app import metadata_reviews, price_binding, public_catalog, rule_rollout
-from app.price_binding import rebind_best_effort
-from app.catalog_targets import LIVE, MATCHING, MATCHING_RULES, activate_rule, code_digest, edition_targets, fingerprint, printing_live
+from app.games.pokemon.prices import metadata_reviews
+from app.games.pokemon.prices import price_binding
+from app.games.pokemon.catalog import public_catalog
+from app.games.pokemon.catalog import rule_rollout
+from app.games.pokemon.prices.price_binding import rebind_best_effort
+from app.games.pokemon.prices.catalog_targets import LIVE, MATCHING, MATCHING_RULES, activate_rule, code_digest, edition_targets, fingerprint, printing_live
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret
 from test_catalog_reconciliation import run
@@ -53,7 +56,8 @@ def spawned(monkeypatch):
 @pytest.fixture(autouse=True)
 def price_store(monkeypatch, tmp_path):
     """The `price:` store the post-commit publish writes to; every thread the routes spawn is joined before the next test."""
-    from app import price_binding, public_prices
+    from app.games.pokemon.prices import price_binding
+    from app.games.pokemon.prices import public_prices
     from app.public_records import FilePublicRecords
     records = FilePublicRecords(tmp_path / "price-store")
     records.initialize(deadline=time.monotonic() + 10)
@@ -683,7 +687,7 @@ def active_versions(version):
 
 
 def code_digest_of(kind, version):
-    from app.catalog_targets import code_digest
+    from app.games.pokemon.prices.catalog_targets import code_digest
     return code_digest(kind, version)
 
 
@@ -806,7 +810,7 @@ def test_the_maintainer_sees_report_contents_without_the_reporters_identity_and_
 
 # ------------------------------------------------------------------ card-number matches (#347)
 
-from app.catalog_targets import rematch_promos  # noqa: E402
+from app.games.pokemon.prices.catalog_targets import rematch_promos  # noqa: E402
 from test_catalog_targets import listing, promo, tcgplayer_products  # noqa: E402,F401
 
 

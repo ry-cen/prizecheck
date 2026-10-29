@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import price_import
+from app.games.pokemon.prices import price_import
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "price_import_job.py"
@@ -33,7 +33,7 @@ def test_the_rematch_runs_after_a_finished_import_only_when_asked(monkeypatch, c
     monkeypatch.setattr("app.db.connect", lambda **_: Conn())
     monkeypatch.setattr(price_import, "run",
                         lambda conn, force: seen.append("run") or SimpleNamespace(exit_code=code, outcome=outcome))
-    monkeypatch.setattr("app.catalog_targets.rematch_promos", lambda conn: seen.append("rematch") or changed)
+    monkeypatch.setattr("app.games.pokemon.prices.catalog_targets.rematch_promos", lambda conn: seen.append("rematch") or changed)
     monkeypatch.setattr(price_import, "rebind_only", lambda conn: seen.append("rebind") or 0)
     assert price_import.main(["--force", "--rematch"] if flag else ["--force"]) == code
     assert seen == expected
@@ -43,7 +43,7 @@ def test_the_rematch_runs_after_a_finished_import_only_when_asked(monkeypatch, c
 def test_a_rematch_that_raises_anything_is_logged_by_class_and_never_raised(monkeypatch, capsys):
     def explode(conn):
         raise ValueError("secret detail")
-    monkeypatch.setattr("app.catalog_targets.rematch_promos", explode)
+    monkeypatch.setattr("app.games.pokemon.prices.catalog_targets.rematch_promos", explode)
     price_import.rematch(Conn())
     output = capsys.readouterr().out
     assert "the rematch failed (ValueError)" in output and "secret detail" not in output

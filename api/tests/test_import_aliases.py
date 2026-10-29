@@ -4,9 +4,11 @@ exports, Format Standing and public records. No database is needed."""
 import re
 from pathlib import Path
 
-from app import import_aliases, set_codes
-from app.catalog_targets import LiveRulesV1
-from app.import_name_matching import NAME_SUFFIXES
+from app.games.pokemon.imports import import_aliases
+
+from app.games.pokemon.catalog import set_codes
+from app.games.pokemon.prices.catalog_targets import LiveRulesV1
+from app.games.pokemon.imports.import_name_matching import NAME_SUFFIXES
 from test_set_codes import imported_sets
 
 APP = Path(import_aliases.__file__).parent

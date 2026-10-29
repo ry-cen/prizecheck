@@ -20,7 +20,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from . import prices
+from app.games.pokemon.prices import prices
 from .decks import (DeckListCommandResult, advance_deck_list, check_revision, keep_response, line_exists, replayed,
                     require_deck)
 from .holdings import parse_quantity

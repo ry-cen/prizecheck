@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import psycopg
 
-from app.card_attributes import ATTRIBUTE_COLUMNS, RULES, derive, derive_evolves_from
+from app.games.pokemon.catalog.card_attributes import ATTRIBUTE_COLUMNS, RULES, derive, derive_evolves_from
 from test_collection_holdings import PAGE, location
 from test_holdings import add, call, fixture
 

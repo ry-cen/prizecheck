@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app import price_import
+from app.games.pokemon.prices import price_import
 from app.db import connect
 
 ROOT = Path(__file__).resolve().parents[2]

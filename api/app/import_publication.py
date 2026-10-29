@@ -25,8 +25,10 @@ one. Nothing here writes, reads prices or touches the owner's inventory.
 from dataclasses import dataclass
 from uuid import UUID
 
-from . import public_deck, set_codes
-from .decklist_text import MAX_CARD_LINES, CardLine
+from . import public_deck
+
+from app.games.pokemon.catalog import set_codes
+from app.games.pokemon.imports.decklist_text import MAX_CARD_LINES, CardLine
 from .import_match_core import ACTIVE, Match
 from .location_tree import error
 from .public_projection import ProjectionUnavailable

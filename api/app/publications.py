@@ -16,8 +16,8 @@ from .api_errors import api_error
 from .art_urls import large_direct_url
 from .db import connect
 from .identity import verified_user
-from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
-from .deck_format_checks import TargetFormat, held_format_checks
+from app.games.pokemon.formats.construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
+from app.games.pokemon.formats.deck_format_checks import TargetFormat, held_format_checks
 from .deck_list_display import CardKind, TrainerType
 from .public_projection import public_projection_store, ProjectionUnavailable
 

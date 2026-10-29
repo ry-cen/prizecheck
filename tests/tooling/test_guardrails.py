@@ -272,7 +272,7 @@ class FlakeGuardrailTest(unittest.TestCase):
             for other in ('api/app/collection.py', 'api/app/art_store.py', 'web/src/ui/largeArt.ts',
                           'web/src/ui/EditionTile.tsx', 'api/app/social/friend_reads.py'):
                 self.assertTrue(guardrails.webp_suffix_violations(source, other), (source, other))
-            for owner in ('api/app/art_urls.py', 'api/app/scanner.py'):
+            for owner in ('api/app/art_urls.py', 'api/app/games/pokemon/scanner/scanner.py'):
                 self.assertFalse(guardrails.webp_suffix_violations(source, owner), (source, owner))
 
     def test_other_webp_mentions_are_allowed(self):

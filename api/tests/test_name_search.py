@@ -1,6 +1,6 @@
 """Close spellings for Catalog's name search (api/app/name_search.py): pure functions over names the database has
 already normalized (catalog_search_words, migration 048)."""
-from app.name_search import FUZZY_MIN_LENGTH, close_names, edits_allowed, near_prefix
+from app.games.pokemon.catalog.name_search import FUZZY_MIN_LENGTH, close_names, edits_allowed, near_prefix
 
 
 def test_edits_allowed_grow_with_the_word():

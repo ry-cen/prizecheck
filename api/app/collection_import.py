@@ -66,9 +66,9 @@ import psycopg
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import collection_import_finish as finishes
-from . import collection_import_matcher as matcher
-from . import collection_import_reader as reader
+from app.games.pokemon.imports import collection_import_finish as finishes
+from app.games.pokemon.imports import collection_import_matcher as matcher
+from app.games.pokemon.imports import collection_import_reader as reader
 from .db import connect
 from .identity import verified_user
 from .moves import lock_owner

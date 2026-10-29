@@ -19,7 +19,7 @@ with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
 
     # The printed set codes (WP-C1): the table must equal set_codes.tsv and the view must give each Printing its code.
     if conn.execute("SELECT to_regclass('catalog_set_code') IS NOT NULL AS present").fetchone()[0]:
-        codes = set_code_migration.parse((root / "api/app/set_codes.tsv").read_text(encoding="utf-8"))
+        codes = set_code_migration.parse((root / "api/app/games/pokemon/catalog/set_codes.tsv").read_text(encoding="utf-8"))
         problems = []
         stored = {tuple(row) for row in conn.execute("SELECT set_id, code FROM catalog_set_code")}
         wanted = set(codes.items())

@@ -7,44 +7,44 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from .art_store import router as art_router, start_warmups, stop_warmups
-from .attribute_corrections import router as attribute_corrections_router
-from .catalog_browse import router as catalog_browse_router
-from .catalog_reconciliation import router as catalog_reconciliation_router
-from .catalog_search import router as catalog_search_router
-from .catalog_status import router as catalog_status_router
+from app.games.pokemon.catalog.attribute_corrections import router as attribute_corrections_router
+from app.games.pokemon.catalog.catalog_browse import router as catalog_browse_router
+from app.games.pokemon.catalog.catalog_reconciliation import router as catalog_reconciliation_router
+from app.games.pokemon.catalog.catalog_search import router as catalog_search_router
+from app.games.pokemon.catalog.catalog_status import router as catalog_status_router
 from .collection import router as collection_router
 from .collection_import import router as collection_import_router
 from .db import connect
 from .deck_cost import router as deck_cost_router
 from .deck_deletion import router as deck_deletion_router
-from .deck_format_checks import router as deck_format_checks_router
-from .deck_import import router as deck_import_router
+from app.games.pokemon.formats.deck_format_checks import router as deck_format_checks_router
+from app.games.pokemon.imports.deck_import import router as deck_import_router
 from .deck_list_printing import router as deck_list_printing_router
-from .deck_live_export import router as deck_live_export_router
-from .deck_mass_entry import router as deck_mass_entry_router
+from app.games.pokemon.exports.deck_live_export import router as deck_live_export_router
+from app.games.pokemon.exports.deck_mass_entry import router as deck_mass_entry_router
 from .deck_pick_list import router as deck_pick_list_router
 from .decks import router as decks_router
 from .discovery import router as discovery_router
-from .format_standing import rebuild_on_startup as rebuild_format_standing, router as format_standing_router
+from app.games.pokemon.formats.format_standing import rebuild_on_startup as rebuild_format_standing, router as format_standing_router
 from .holdings import router as holdings_router
 from .loan_inventory import router as loan_inventory_router
 from .location_tree import router as location_tree_router
 from .locations import router as locations_router
-from .metadata_reviews import router as metadata_reviews_router
+from app.games.pokemon.prices.metadata_reviews import router as metadata_reviews_router
 from .missing_cards import router as missing_cards_router
 from .moves import router as moves_router
 from .operation_counts import Count, DatabaseWriter, counter as operation_counter
 from .operations import router as operations_router
 from .price_budget import is_budgeted
-from .prices import router as prices_router
+from app.games.pokemon.prices.prices import router as prices_router
 from .publications import router as publications_router
 from .published_cost import router as published_cost_router
-from .published_format_checks import router as published_format_checks_router
-from .published_live_export import router as published_live_export_router
-from .published_mass_entry import router as published_mass_entry_router
-from .reprint_group_reviews import router as reprint_group_reviews_router
-from .rule_rollout import start_on_startup as start_rule_rollout
-from .scanner import router as scanner_router
+from app.games.pokemon.formats.published_format_checks import router as published_format_checks_router
+from app.games.pokemon.exports.published_live_export import router as published_live_export_router
+from app.games.pokemon.exports.published_mass_entry import router as published_mass_entry_router
+from app.games.pokemon.catalog.reprint_group_reviews import router as reprint_group_reviews_router
+from app.games.pokemon.catalog.rule_rollout import start_on_startup as start_rule_rollout
+from app.games.pokemon.scanner.scanner import router as scanner_router
 from .scanner_save import router as scanner_save_router
 from .settings import router as settings_router
 from .social.conversations import router as conversations_router, traders_router as conversation_traders_router
@@ -63,7 +63,7 @@ from .trade_value import router as trade_value_router
 from .trade_wants import router as trade_wants_router
 from .want_list import router as want_list_router
 from .want_list_cost import router as want_list_cost_router
-from .want_list_mass_entry import router as want_list_mass_entry_router
+from app.games.pokemon.exports.want_list_mass_entry import router as want_list_mass_entry_router
 
 
 class HealthResponse(BaseModel):

@@ -3,36 +3,36 @@
 # Regenerate (only to record a removal) with: .venv/bin/python scripts/check_python_boundaries.py --write-baseline
 
 [edges]
-app.collection_import -> app.collection_import_finish
-app.collection_import -> app.collection_import_matcher
-app.collection_import -> app.collection_import_reader
-app.deck_cost -> app.prices
-app.deck_list_printing -> app.prices
-app.decks -> app.construction_checks
-app.decks -> app.deck_format_checks
-app.decks -> app.format_evaluator
-app.discovery -> app.card_attributes
-app.discovery -> app.deck_format_checks
-app.discovery -> app.format_evaluator
-app.discovery -> app.prices
-app.discovery -> app.public_catalog
-app.discovery -> app.published_format_checks
-app.host_readiness -> app.catalog_targets
-app.import_match_core -> app.catalog_browse
-app.import_match_core -> app.decklist_text
-app.import_owned -> app.import_energy_matching
-app.import_publication -> app.decklist_text
-app.import_publication -> app.set_codes
-app.missing_cards -> app.card_identity
-app.missing_cards -> app.public_catalog
-app.price_runner -> app.price_source
-app.price_runner -> app.tcgdex_record
-app.publications -> app.construction_checks
-app.publications -> app.deck_format_checks
-app.published_cost -> app.prices
-app.published_cost -> app.public_catalog
-app.trade_value -> app.prices
-app.want_list_cost -> app.prices
+app.collection_import -> app.games.pokemon.imports.collection_import_finish
+app.collection_import -> app.games.pokemon.imports.collection_import_matcher
+app.collection_import -> app.games.pokemon.imports.collection_import_reader
+app.deck_cost -> app.games.pokemon.prices.prices
+app.deck_list_printing -> app.games.pokemon.prices.prices
+app.decks -> app.games.pokemon.formats.construction_checks
+app.decks -> app.games.pokemon.formats.deck_format_checks
+app.decks -> app.games.pokemon.formats.format_evaluator
+app.discovery -> app.games.pokemon.catalog.card_attributes
+app.discovery -> app.games.pokemon.formats.deck_format_checks
+app.discovery -> app.games.pokemon.formats.format_evaluator
+app.discovery -> app.games.pokemon.prices.prices
+app.discovery -> app.games.pokemon.catalog.public_catalog
+app.discovery -> app.games.pokemon.formats.published_format_checks
+app.host_readiness -> app.games.pokemon.prices.catalog_targets
+app.import_match_core -> app.games.pokemon.catalog.catalog_browse
+app.import_match_core -> app.games.pokemon.imports.decklist_text
+app.import_owned -> app.games.pokemon.imports.import_energy_matching
+app.import_publication -> app.games.pokemon.imports.decklist_text
+app.import_publication -> app.games.pokemon.catalog.set_codes
+app.missing_cards -> app.games.pokemon.catalog.card_identity
+app.missing_cards -> app.games.pokemon.catalog.public_catalog
+app.price_runner -> app.games.pokemon.prices.price_source
+app.price_runner -> app.games.pokemon.prices.tcgdex_record
+app.publications -> app.games.pokemon.formats.construction_checks
+app.publications -> app.games.pokemon.formats.deck_format_checks
+app.published_cost -> app.games.pokemon.prices.prices
+app.published_cost -> app.games.pokemon.catalog.public_catalog
+app.trade_value -> app.games.pokemon.prices.prices
+app.want_list_cost -> app.games.pokemon.prices.prices
 
 [sql]
 app.host_readiness: owner_binding
@@ -40,5 +40,5 @@ app.host_readiness: user
 app.identity: owner_binding
 app.operations: auth_rate_event
 app.operations: auth_send_event
-app.rule_rollout: owner_binding
+app.games.pokemon.catalog.rule_rollout: owner_binding
 app.social.profile: released_handle

@@ -1,7 +1,7 @@
 """The Want List's Swap hint (decklist import #211; spec "The Want List": Swap hint).
 
 A line that still needs copies carries a hint when another Edition in its effective Reprint Group
-(``catalog_reprint_group_member``, ``app.reprint_groups``) has copies the counting setting makes available to the line's
+(``catalog_reprint_group_member``, ``app.games.pokemon.catalog.reprint_groups``) has copies the counting setting makes available to the line's
 Deck. **Swap** then sends one existing Deck List changes batch (``POST /api/decks/{id}/deck-list/changes``) that lowers
 the line by the hint's ``count`` and raises or adds the other Edition's line by as many; its Undo is the inverse batch.
 Nothing here writes.

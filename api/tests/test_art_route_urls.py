@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from app import public_catalog
+from app.games.pokemon.catalog import public_catalog
 from app.art_urls import art_url, art_version, large_direct_url
 from app.main import app, connect
 from app.public_projection import public_projection_store, public_record_store
@@ -206,5 +206,5 @@ def test_only_the_anonymous_reads_the_art_route_and_the_paged_lists_select_the_s
                  if path.name not in anonymous | paged and re.search(r"\bart\.(low|high)_image_url\b", path.read_text())]
     assert offenders == []
     for name in paged:
-        text = (root / name).read_text()
+        text = next(root.rglob(name)).read_text()
         assert "route_address(" in text and "art.small_art_url" not in text, name

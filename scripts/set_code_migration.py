@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TSV = ROOT / "api/app/set_codes.tsv"
+TSV = ROOT / "api/app/games/pokemon/catalog/set_codes.tsv"
 CODE = re.compile(r"^[A-Z0-9]{2,4}$")
 DIGEST_LINE = re.compile(r"^-- set_codes\.tsv digest: ([0-9a-f]{16})$")
 

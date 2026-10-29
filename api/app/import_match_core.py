@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Literal
 from uuid import UUID
 
-from .catalog_browse import NUMBER_KEY, _rules_release_dates
-from .decklist_text import CardLine
+from app.games.pokemon.catalog.catalog_browse import NUMBER_KEY, _rules_release_dates
+from app.games.pokemon.imports.decklist_text import CardLine
 
 MatchStatus = Literal['matched', 'by_name', 'energy', 'ambiguous', 'not_found', 'unreadable']
 

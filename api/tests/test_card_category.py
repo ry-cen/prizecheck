@@ -9,7 +9,7 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
-from app.catalog import execute_run
+from app.games.pokemon.catalog.catalog import execute_run
 from app.main import connect
 from test_catalog import claim_current, reset_catalog
 from test_catalog_references import migrate

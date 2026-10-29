@@ -131,5 +131,5 @@ def quiet_art_warm_up():
 def join_price_rebinds():
     """The owner routes start a background price rebind; none may outlive its test."""
     yield
-    from app import price_binding
+    from app.games.pokemon.prices import price_binding
     price_binding.join_spawned_rebinds()

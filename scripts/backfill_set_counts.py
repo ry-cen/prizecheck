@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'api'))
 import psycopg  # noqa: E402
-from app.set_counts import carries_card_count, insert_set_counts, set_counts  # noqa: E402
+from app.games.pokemon.catalog.set_counts import carries_card_count, insert_set_counts, set_counts  # noqa: E402
 
 
 def main():

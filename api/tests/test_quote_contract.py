@@ -17,11 +17,11 @@ ANON = 'anon:' + '0f' * 16
 
 def test_module_is_pure_and_prices_reexports_the_amount_parser():
     code = ("import sys, json; import app.quote_contract; "
-            "print(json.dumps([m for m in ('psycopg', 'app.main', 'app.prices') if m in sys.modules]))")
+            "print(json.dumps([m for m in ('psycopg', 'app.main', 'app.games.pokemon.prices.prices') if m in sys.modules]))")
     out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout) == []
     import app.main  # noqa: F401
-    from app import prices
+    from app.games.pokemon.prices import prices
     assert prices.parse_amount is qc.parse_amount
 
 

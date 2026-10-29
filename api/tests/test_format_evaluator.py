@@ -13,8 +13,8 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 
-from app.card_attributes import UNKNOWN, CardAttributes
-from app.format_evaluator import (ACE_SPEC_LIMIT, ACE_SPEC_NOT_ALLOWED, ATTRIBUTE_UNKNOWN, BANNED,
+from app.games.pokemon.catalog.card_attributes import UNKNOWN, CardAttributes
+from app.games.pokemon.formats.format_evaluator import (ACE_SPEC_LIMIT, ACE_SPEC_NOT_ALLOWED, ATTRIBUTE_UNKNOWN, BANNED,
                                   BEFORE_RULES_COVERAGE, COPY_LIMIT, DECK_SIZE, FORMATS, NO_BASIC_POKEMON,
                                   NOT_IN_CARD_POOL,
                                   EXCLUSIVE_CARDS, PRISM_STAR_LIMIT, RADIANT_LIMIT, REGULATION_MARK_NOT_IN_RULES,

@@ -17,7 +17,10 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import format_evaluator, public_catalog, public_deck, published_format_checks
+from app import public_deck
+from app.games.pokemon.formats import format_evaluator
+from app.games.pokemon.catalog import public_catalog
+from app.games.pokemon.formats import published_format_checks
 from app.public_projection import ProjectionUnavailable
 from app.public_records import catalog_format_key, public_record_store
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, RARE_CANDY_ME, edition_of
@@ -488,7 +491,7 @@ def test_a_reprint_group_change_restamps_every_printing_of_the_groups_it_touches
     assert format_record("sv01-191")[1] not in listed and len(listed) == len(old_group)
     # A rederivation puts it back: the same printings are stamped again, and the records list it again.
     with connect() as conn:
-        from app.catalog import rederive_card_attributes
+        from app.games.pokemon.catalog.catalog import rederive_card_attributes
         rederive_card_attributes(conn)
     again = printing_revisions(*every)
     assert {source_id for source_id in every if again[source_id] != after[source_id]} == {"sv01-191", *old_group}

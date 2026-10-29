@@ -10,9 +10,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.card_attributes import RULES, UNKNOWN, CardAttributeRules, CardAttributes, attribute_revision, \
+from app.games.pokemon.catalog.card_attributes import RULES, UNKNOWN, CardAttributeRules, CardAttributes, attribute_revision, \
     read_card_attributes, rules_digest
-from app.catalog import RunnerBusy, rederive_card_attributes
+from app.games.pokemon.catalog.catalog import RunnerBusy, rederive_card_attributes
 from app.main import connect
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records

@@ -183,24 +183,24 @@ RULES = {
     # printed code (holdings, collection). app.social.friend_reads is new here: the old top-level glob never scanned the
     # social package.
     'set-codes-importers': {
-        'imported': 'app.set_codes',
-        'importers': {'app.catalog_browse', 'app.collection_import_matcher', 'app.deck_import',
-                      'app.import_aliases', 'app.import_matching', 'app.import_publication', 'app.scanner'}},
+        'imported': 'app.games.pokemon.catalog.set_codes',
+        'importers': {'app.games.pokemon.catalog.catalog_browse', 'app.games.pokemon.imports.collection_import_matcher', 'app.games.pokemon.imports.deck_import',
+                      'app.games.pokemon.imports.import_aliases', 'app.games.pokemon.imports.import_matching', 'app.import_publication', 'app.games.pokemon.scanner.scanner'}},
     # test_set_codes reads the data file beside format_evaluator; this pins that layout fact.
-    'format-rules-beside-evaluator': {'module': 'app.format_evaluator', 'file': 'format_rules/imported_sets.txt'},
+    'format-rules-beside-evaluator': {'module': 'app.games.pokemon.formats.format_evaluator', 'file': 'format_rules/imported_sets.txt'},
     # The alias table feeds the import reviews alone: import_matching runs its step, deck_import fills the Missing cards
     # report, and Collection Import's matcher reads a pasted line's set code through it (#234).
     'import-aliases-importers': {
-        'imported': 'app.import_aliases',
-        'importers': {'app.collection_import_matcher', 'app.deck_import', 'app.import_matching'}},
+        'imported': 'app.games.pokemon.imports.import_aliases',
+        'importers': {'app.games.pokemon.imports.collection_import_matcher', 'app.games.pokemon.imports.deck_import', 'app.games.pokemon.imports.import_matching'}},
     # Repository paths, not module names: the files under api/app and scripts that name the table's file.
     'import-aliases-tsv-readers': {
         'pattern': re.compile(r"""['"]import_aliases\.tsv['"]"""),
-        'readers': {'api/app/import_aliases.py'}},
+        'readers': {'api/app/games/pokemon/imports/import_aliases.py'}},
     # The TCGdex price client: one origin literal, a client that follows no redirect and reads no proxy environment, every
     # json.loads keeps floats as text, and fetch takes the card and a may_retry callable.
     'price-source-client': {
-        'module': 'app.price_source',
+        'module': 'app.games.pokemon.prices.price_source',
         'origins': ['https://api.tcgdex.net'],
         'client': 'httpx.Client',
         'client_keywords': {'follow_redirects': 'False', 'trust_env': 'False'},
@@ -209,7 +209,7 @@ RULES = {
         'function': 'fetch',
         'function_arguments': ['card', 'may_retry']},
     # Only the price import talks to the TCGCSV host. A subset: the module may also stop naming it.
-    'tcgcsv-host': {'host': 'tcgcsv.com', 'allowed': {'app.price_import'}},
+    'tcgcsv-host': {'host': 'tcgcsv.com', 'allowed': {'app.games.pokemon.prices.price_import'}},
     # In the social area only friend_copies (the choke point) and hidden_locations (the rule it calls) may read inventory.
     'social-inventory-readers': {'readers': {'app.social.friend_copies', 'app.social.hidden_locations'}},
     'social-allowed-imports': {'allowed': ALLOWED_IMPORTS},

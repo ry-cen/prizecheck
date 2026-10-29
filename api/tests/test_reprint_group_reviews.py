@@ -11,10 +11,10 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-import app.catalog as catalog_module
-import app.reprint_groups as reprint_groups
-from app.card_attributes import attribute_revision
-from app.catalog import rederive_card_attributes
+import app.games.pokemon.catalog.catalog as catalog_module
+import app.games.pokemon.catalog.reprint_groups as reprint_groups
+from app.games.pokemon.catalog.card_attributes import attribute_revision
+from app.games.pokemon.catalog.catalog import rederive_card_attributes
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, card, edition_of, printing_ids
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records

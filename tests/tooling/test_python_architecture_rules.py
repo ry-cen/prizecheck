@@ -132,7 +132,7 @@ class PriceSourceTest(unittest.TestCase):
     DATA = REAL.RULES['price-source-client']
 
     def fails(self, source, *details):
-        found = run('price-source-client', {'api/app/price_source.py': source}, **self.DATA)
+        found = run('price-source-client', {'api/app/games/pokemon/prices/price_source.py': source}, **self.DATA)
         self.assertEqual(found, [f'price-source-client: {detail}' for detail in details])
 
     def test_the_clean_client_passes(self):
@@ -166,7 +166,7 @@ class PriceSourceTest(unittest.TestCase):
         self.fails(CLEAN_PRICE_SOURCE.replace('def fetch', 'def get'), "fetch takes None, not ['card', 'may_retry']")
 
     def test_a_missing_module_fails(self):
-        self.assertEqual(run('price-source-client', {}, **self.DATA), ['price-source-client: no module app.price_source'])
+        self.assertEqual(run('price-source-client', {}, **self.DATA), ['price-source-client: no module app.games.pokemon.prices.price_source'])
 
 
 class HostTest(unittest.TestCase):
@@ -396,7 +396,7 @@ class EngineTest(unittest.TestCase):
     def test_the_real_pins_hold_todays_values(self):
         pins = boundaries.architecture(boundaries.ROOT, REAL)[0]
         self.assertEqual(pins['set-codes-importers'], sorted(REAL.RULES['set-codes-importers']['importers']))
-        self.assertEqual(pins['import-aliases-tsv-readers'], ['api/app/import_aliases.py'])
+        self.assertEqual(pins['import-aliases-tsv-readers'], ['api/app/games/pokemon/imports/import_aliases.py'])
         self.assertEqual(pins['social-area-complete'], ['app.social'])
 
     def test_a_rule_in_the_data_without_an_engine_fails_and_so_does_an_unconfigured_engine_rule(self):

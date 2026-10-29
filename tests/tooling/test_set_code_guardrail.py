@@ -52,7 +52,7 @@ class SetCodeGuardrailTest(unittest.TestCase):
 
     def test_the_committed_migrations_match_the_committed_tsv(self):
         files = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
-        self.assertEqual(guardrails.set_code_migration_violations(files, (ROOT/'api/app/set_codes.tsv').read_text(encoding='utf-8')), [])
+        self.assertEqual(guardrails.set_code_migration_violations(files, (ROOT/'api/app/games/pokemon/catalog/set_codes.tsv').read_text(encoding='utf-8')), [])
 
     def test_the_script_refuses_to_overwrite_a_migration(self):
         with tempfile.TemporaryDirectory() as folder:

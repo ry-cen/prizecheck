@@ -3,7 +3,7 @@ import copy
 import json
 from uuid import uuid4
 
-from app.catalog import fingerprint
+from app.games.pokemon.catalog.catalog import fingerprint
 from app.main import connect
 from test_catalog import Source, reset_catalog
 from test_catalog_reconciliation import run
@@ -331,7 +331,7 @@ def test_decided_reference_review_clears_the_conflict_only_with_its_ambiguity_re
 
 
 def test_contradicted_verified_mapping_stays_quarantined_after_its_review_is_decided():
-    from app.catalog_targets import MATCHING, activate_rule
+    from app.games.pokemon.prices.catalog_targets import MATCHING, activate_rule
     reset_catalog(); run(Records(furret()))
     user = owner()
     with connect() as conn, conn.transaction():

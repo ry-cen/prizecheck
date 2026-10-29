@@ -12,9 +12,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.catalog import rederive_card_attributes
-from app.evolution_roots import EvolutionRoot, evolution_roots
-from app.format_standing import ensure_current
+from app.games.pokemon.catalog.catalog import rederive_card_attributes
+from app.games.pokemon.catalog.evolution_roots import EvolutionRoot, evolution_roots
+from app.games.pokemon.formats.format_standing import ensure_current
 from app.main import connect
 from test_attribute_corrections import seed
 from test_card_attributes import card, edition_of, revision
@@ -132,7 +132,7 @@ def test_a_vote_for_a_merged_card_identity_counts_for_its_survivor():
 def test_a_failed_roots_refresh_is_contained_and_leaves_the_callers_transaction_usable(monkeypatch, caplog):
     """The refresh runs in a savepoint: a SQL failure inside it rolls back only the roots work (the stored roots stay),
     is logged, and the caller's earlier writes and later statements in the same transaction still commit."""
-    from app import evolution_roots as module
+    from app.games.pokemon.catalog import evolution_roots as module
     seed(*CARDS)
     owner = f"roots-{uuid4()}"
     with connect() as conn:
@@ -157,7 +157,7 @@ def test_a_failed_roots_refresh_is_contained_and_leaves_the_callers_transaction_
 def test_an_uncontained_roots_refresh_raises_and_the_derivation_fails_loudly(monkeypatch):
     """``scripts/derive_card_attributes.py`` exists to rebuild the roots, so its failure must not be swallowed: the
     savepoint is rolled back (the stored roots stay) and the error reaches the caller, which rolls the derivation back."""
-    from app import evolution_roots as module
+    from app.games.pokemon.catalog import evolution_roots as module
     seed(*CARDS)
     with connect() as conn:
         before = conn.execute("SELECT identity_key,root_name,stage FROM catalog_evolution_root ORDER BY identity_key"

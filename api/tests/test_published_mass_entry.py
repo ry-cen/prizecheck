@@ -12,8 +12,10 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import deck_mass_entry, public_deck, published_mass_entry
-from app.public_catalog import MarketplaceState
+from app import public_deck
+from app.games.pokemon.exports import deck_mass_entry
+from app.games.pokemon.exports import published_mass_entry
+from app.games.pokemon.catalog.public_catalog import MarketplaceState
 from app.public_projection import ProjectionUnavailable
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse: clears rule activations)
 from test_prices import client, world
