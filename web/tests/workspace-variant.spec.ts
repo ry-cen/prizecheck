@@ -310,12 +310,12 @@ test.describe("desktop", () => {
     await expect(panel).toContainText("1 copy owned");
     await expect(leaves(panel)).toHaveText([`1 in Shelf ${s} / Box`]);
 
-    // Hover previews show the same breakdown while nothing is selected.
+    // Selecting another card shows its breakdown.
     await page.keyboard.press("Escape");
     await tile(
       page,
       `Spread Abra, Fixture Set 1, Normal, copy 1, Alpha ${s}`
-    ).hover();
+    ).click();
     await expect(panel).toContainText("1 copy here");
     await expect(leaves(panel)).toHaveCount(3);
   });
