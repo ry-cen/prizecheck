@@ -7,6 +7,10 @@ re-evaluates the affected targets in a resumable rollout of short transactions:
     live rule      live -> deliver -> done
     matching rule  editions -> quote_variants -> deliver -> done
 
+The ``editions`` phase first gives each batch's unverified Editions the candidate keys the active rule reads and only the
+catalog import used to write (``card_tcgplayer``, rebuilt from the stored source record), so a release's new input does not
+wait for the next catalog pull. This is enrichment: it never moves a mapping revision.
+
 One runner at a time holds a session advisory lock on a dedicated autocommit connection that does no other work. Every
 transaction first checks that the rule state still points at its activation and that the rollout row is in the phase and
 cursor the runner expects, so a stale runner (or one that lost its lock connection) writes nothing. ``restore`` brings the
@@ -25,7 +29,7 @@ import psycopg
 
 from . import card_art, price_binding, public_catalog, public_prices
 from .catalog_targets import (LIVE, LIVE_CANDIDATES, MATCHING, QUOTE_VARIANT_EDITIONS, REGISTRIES, UNVERIFIED_EDITIONS,
-                              TargetContext, code_digest, load_active, record_activation, reevaluate_live, refresh_editions)
+                              TargetContext, add_card_tcgplayer, code_digest, load_active, record_activation, reevaluate_live, refresh_editions)
 from .db import connect
 
 log = logging.getLogger(__name__)
@@ -286,7 +290,10 @@ class _Runner:
             ids = [r["edition_id"] for r in conn.execute(f"""SELECT edition_id FROM catalog_edition_metadata
               WHERE {filter_} AND (%(c)s::uuid IS NULL OR edition_id > %(c)s) ORDER BY edition_id LIMIT %(n)s""",
                                                            {"c": cursor, "n": size})]
-            changed = refresh_editions(conn, TargetContext(conn), ids, complete=(phase == "quote_variants"))
+            context = TargetContext(conn)
+            if phase == "editions" and context.matching is not None and hasattr(context.matching.rule, "card_product"):
+                add_card_tcgplayer(conn, ids)  # candidates stored before the import kept this key gain it, then are evaluated
+            changed = refresh_editions(conn, context, ids, complete=(phase == "quote_variants"))
             _in_batch(phase)
             if len(ids) < size:
                 _advance(conn, activation, phase, cursor, "phase=%s, cursor=NULL, done=0, total=NULL, changed=changed+%s",
