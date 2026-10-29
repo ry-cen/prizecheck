@@ -113,6 +113,40 @@ const htmlBackground = (page: Page) =>
     () => getComputedStyle(document.documentElement).backgroundColor
   );
 
+/** The landing page keeps the bare origin public and links into sign-in and Discover. */
+async function checkLanding(page: Page, state: string) {
+  await page.goto(`${ORIGIN}/`);
+  await expect(heading(page)).toHaveText(TAGLINE);
+  await expect(page).toHaveURL(`${ORIGIN}/`);
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText([
+    "Every copy has a place",
+    "Decks made of real cards",
+    "See what you still need",
+    "Lend, borrow and trade with friends",
+    "Bring your cards with you",
+    "Share a deck",
+  ]);
+  for (const region of [page.getByRole("banner"), page.getByRole("main")]) {
+    await expect(
+      region.getByRole("link", { name: "Sign in", exact: true })
+    ).toHaveAttribute("href", "/sign-in");
+    await expect(
+      region.getByRole("link", { name: "Discover decks" })
+    ).toHaveAttribute("href", "/discover");
+  }
+  await expect(page.getByRole("banner").locator("[aria-current]")).toHaveCount(
+    0
+  );
+  await expectPageChecks(page, state);
+  await page
+    .getByRole("main")
+    .getByRole("link", { name: "Sign in", exact: true })
+    .click();
+  await expect(page).toHaveURL(`${ORIGIN}/sign-in`);
+  await expect(heading(page)).toHaveText("Sign in to PrizeCheck");
+  await expect(card(page)).toBeVisible();
+}
+
 /** Opens `path` while /auth/session is held back, on a paused clock, and checks the loading screen: the dark
  * page and the muted wordmark at once, "Loading…" only once 600 ms have passed, and no placeholder or shell.
  * Then lets the session through. */
@@ -276,12 +310,16 @@ test.describe("desktop", () => {
     await expect(mainViews(page)).toBeVisible();
   });
 
+  test("signed-out / shows the landing page", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await checkLanding(page, "the landing page on desktop");
+  });
+
   test("the subtitle says when signing in returns to the page asked for", async ({
     page,
   }) => {
     for (const [path, subtitle] of [
       ["/collection", TAGLINE],
-      ["/", TAGLINE],
       ["/sign-in", TAGLINE],
       ["/sign-in?next=https%3A%2F%2Fexample.com%2Fsteal", TAGLINE],
       ["/decks", CONTINUING],
@@ -479,6 +517,10 @@ test.describe("phone", () => {
     viewport: { width: 375, height: 812 },
     isMobile: true,
     hasTouch: true,
+  });
+
+  test("signed-out / shows the landing page on a phone", async ({ page }) => {
+    await checkLanding(page, "the landing page on a phone");
   });
 
   test("the sign-in card fills the width between the page margins, and provider sign-in works in it", async ({

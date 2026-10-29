@@ -34,10 +34,12 @@ import {
 } from "./shell/routes";
 import { useRoute } from "./shell/useRoute";
 import { DeadEnd } from "./public/DeadEnd";
+import { LandingPage } from "./public/LandingPage";
 import { LoadingScreen } from "./public/LoadingScreen";
 import { PublicLayout } from "./public/PublicLayout";
 import { PublicPageView } from "./public/PublicPageView";
 import {
+  LANDING_PATH,
   publicPageAt,
   publicPageLabel,
   SIGN_IN_PATH,
@@ -146,10 +148,17 @@ function App() {
       friendHandle === null &&
       friendTradeHandle === null
     )
-      navigate(pageDef(page).path, { replace: true });
+      // The bare origin keeps its query and hash on the way to Collection, as the old-address rewrite did.
+      navigate(
+        path === LANDING_PATH
+          ? `${DEFAULT_PATH}${location.search}${location.hash}`
+          : pageDef(page).path,
+        { replace: true }
+      );
   }, [
     signedIn,
     isPublic,
+    path,
     def,
     friendHandle,
     friendTradeHandle,
@@ -238,6 +247,12 @@ function App() {
   if (session === null && !(isPublic && message))
     return <LoadingScreen message={message} />;
   if (!signedIn) {
+    if (path === LANDING_PATH)
+      return (
+        <PublicLayout onNavigate={go}>
+          <LandingPage onNavigate={go} />
+        </PublicLayout>
+      );
     if (publicPage)
       return (
         <PublicLayout
@@ -472,18 +487,22 @@ function App() {
   );
 }
 
-// Old addresses (/, /workspace and /locations for Collection, /settings/sign-ins for Settings) are rewritten before
+// Old addresses (/workspace and /locations for Collection, /settings/sign-ins for Settings) are rewritten before
 // anything renders, keeping the query, so /workspace?location=<id> still opens that Location and a sign-in link
 // failure returned to /settings/sign-ins still reaches the Sign-ins section.
-if (canonicalPath(location.pathname) !== location.pathname)
+// Keep / for signed-out visitors; the signed-in route effect opens Collection.
+if (
+  location.pathname !== LANDING_PATH &&
+  canonicalPath(location.pathname) !== location.pathname
+)
   history.replaceState(
     null,
     "",
     `${canonicalPath(location.pathname)}${location.search}${location.hash}`
   );
 
-// Starts the first page's code alongside the session read.
-preloadInitialPage(location.pathname);
+// Starts the first page's code alongside the session read. The bare origin is Collection once signed in.
+preloadInitialPage(canonicalPath(location.pathname));
 
 createRoot(document.getElementById("root")!).render(
   <>

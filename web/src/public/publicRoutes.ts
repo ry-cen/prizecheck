@@ -1,6 +1,7 @@
 import type { MouseEvent } from "react";
 
 /** The signed-out addresses outside the app's pages (#163). The app's own pages are in shell/routes.ts. */
+export const LANDING_PATH = "/";
 export const SIGN_IN_PATH = "/sign-in";
 export const DISCOVER_PATH = "/discover";
 
