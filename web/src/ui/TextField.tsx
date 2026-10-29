@@ -1,4 +1,5 @@
-import type { ComponentPropsWithRef } from "react";
+import { useCallback, useRef, type ComponentPropsWithRef } from "react";
+import { OverlayScrollbarFor } from "./ScrollArea";
 import { CONTROL, CONTROL_BOX, FIELD_LABEL } from "./control";
 
 type FieldProps = Omit<ComponentPropsWithRef<"input">, "className"> & {
@@ -21,15 +22,28 @@ type AreaProps = Omit<ComponentPropsWithRef<"textarea">, "className"> & {
 };
 
 /** A labelled text area that grows by hand (a reason, a note). */
-export function TextArea({ label, rows = 2, ...rest }: AreaProps) {
+export function TextArea({ label, rows = 2, ref, ...rest }: AreaProps) {
+  const own = useRef<HTMLTextAreaElement | null>(null);
+  const setRef = useCallback(
+    (element: HTMLTextAreaElement | null) => {
+      own.current = element;
+      if (typeof ref === "function") ref(element);
+      else if (ref) ref.current = element;
+    },
+    [ref]
+  );
   return (
     <label className={FIELD_LABEL}>
       <span>{label}</span>
-      <textarea
-        rows={rows}
-        className={`${CONTROL_BOX} min-h-16 resize-y py-1.5`}
-        {...rest}
-      />
+      <div className="relative flex flex-col">
+        <textarea
+          rows={rows}
+          className={`${CONTROL_BOX} min-h-16 resize-y py-1.5`}
+          {...rest}
+          ref={setRef}
+        />
+        <OverlayScrollbarFor target={own} clearGrip />
+      </div>
     </label>
   );
 }

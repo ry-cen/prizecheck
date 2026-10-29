@@ -12,6 +12,7 @@ import {
   type RemovalRow,
 } from "./inventoryActionsModel";
 import { KitLayer } from "./KitLayer";
+import { ScrollArea } from "../ui/ScrollArea";
 import { isFolder, type LocationIndex } from "./locationTree";
 import type { SelectedGroup } from "./selectionModel";
 
@@ -36,9 +37,9 @@ function Feedback({ progress, error }: { progress: string; error: string }) {
   );
 }
 
-/** The explorer's and the Removal list's scrolling box. */
+/** The explorer's and the Removal list's scrolling box: the frame (this) around a ScrollArea whose viewport has the padding. */
 const LIST_BOX =
-  "box-border max-h-[40dvh] min-h-30 flex-auto overflow-auto rounded-panel border border-border p-1";
+  "box-border max-h-[40dvh] min-h-30 flex-auto rounded-panel border border-border";
 const LIST = "m-0 flex list-none flex-col gap-1 p-0";
 /** An explorer row; the indent comes from its level (inline style). */
 const ROW =
@@ -196,7 +197,7 @@ export function MoveDialog({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <div className={LIST_BOX}>
+          <ScrollArea className={LIST_BOX} viewportClassName="p-1" bothAxes>
             {needle ? (
               matches.length ? (
                 <ul aria-label="Matching locations" className={LIST}>
@@ -216,7 +217,7 @@ export function MoveDialog({
                 {index.children(null).map((node) => branch(node, 0))}
               </ul>
             )}
-          </div>
+          </ScrollArea>
           <div
             className="flex flex-col gap-1 text-meta tabular-nums"
             aria-live="polite"
@@ -304,11 +305,15 @@ export function RemovalDialog({
             These copies leave your tracked Collection. You can undo this for
             ten minutes.
           </p>
-          <div
+          <ScrollArea
             className={LIST_BOX}
-            role="group"
-            aria-label="Copies to remove"
-            tabIndex={0}
+            viewportClassName="p-1"
+            bothAxes
+            viewportProps={{
+              role: "group",
+              "aria-label": "Copies to remove",
+              tabIndex: 0,
+            }}
           >
             {groups.map((group) => (
               <div key={group.locationId} className="p-2">
@@ -327,7 +332,7 @@ export function RemovalDialog({
                 </ul>
               </div>
             ))}
-          </div>
+          </ScrollArea>
           <Feedback progress={progress} error={error} />
           <div className="flex justify-end gap-2">
             <Button

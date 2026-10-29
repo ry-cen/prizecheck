@@ -336,6 +336,10 @@ Compact, flat and plainly labelled, with an optional leading icon.
 - **Style:** Felt, Stitch border, 14 px corners, 480 px wide on desktop, over a 60% black scrim. A header row holds a Heading title and a quiet close button above a Seam divider.
 - **Variants:** left and right drawers take the full height with square corners; on a phone, a centred dialog becomes a bottom sheet.
 
+### Scroll bars
+
+With a mouse or trackpad (`(hover: hover) and (pointer: fine)`, at any window width) the browser's scroll bar is hidden everywhere, so a screen lays out the same whether or not it scrolls. An overlay bar replaces it: a 6 px rounded thumb in `--color-scroll-thumb` (Parchment, the system text colour in forced-colors mode) on a 12 px rail that takes no layout space and no clicks except on the thumb. It shows only while the region can scroll, fades in while the pointer is over the region or it scrolls, and can be dragged. Every scrolling region is a `ScrollArea` (or, for a textarea or `<pre>` that scrolls itself, carries an `OverlayScrollbarFor`); `check_guardrails.py` rejects `overflow-auto` classes elsewhere. Touch devices keep their own overlay bars and get no rail. The page's bar is `DocumentScrollbar`, below the sticky header and above the phone tab bar.
+
 ### Toast
 
 A single bar at the bottom centre (above the tab bar on a phone): Raised Felt, Stitch border, 10 px corners, Control text, and an inline action such as Undo in semibold Pale Gold.

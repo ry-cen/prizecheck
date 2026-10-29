@@ -88,6 +88,48 @@ class GuardrailTest(unittest.TestCase):
         self.assertIn('web/src/main.tsx', names)
         self.assertIn('web/src/tokens.css', names)
 
+class ScrollClassGuardrailTest(unittest.TestCase):
+    FILE = 'web/src/workspace/Panel.tsx'
+
+    def test_overflow_scroll_classes_outside_scroll_area_are_rejected(self):
+        for source in ('<div className="flex overflow-y-auto">', '"overflow-auto p-4"', '`overflow-x-scroll`',
+                       '"[&_pre]:overflow-auto"', 'x ? "overflow-scroll" : ""', '"phone:overflow-y-auto"'):
+            self.assertTrue(guardrails.scroll_class_violations(source, self.FILE), source)
+
+    def test_other_overflow_classes_and_names_are_allowed(self):
+        for source in ('"overflow-hidden"', '"overflow-clip"', '"overflow-visible"', '"overscroll-contain"',
+                       '"overflow-y-hidden"', 'const overflowAuto = 1;', '"my-overflow-auto-thing"'):
+            self.assertFalse(guardrails.scroll_class_violations(source, self.FILE), source)
+
+    def test_scroll_area_and_the_allowlist_may_set_them(self):
+        source = '"overflow-y-auto"'
+        self.assertFalse(guardrails.scroll_class_violations(source, 'web/src/ui/ScrollArea.tsx'))
+        for allowed in guardrails.SCROLL_CLASS_ALLOWED:
+            self.assertFalse(guardrails.scroll_class_violations(source, allowed))
+
+    def test_the_allowlist_names_files_that_exist_and_still_need_it(self):
+        for allowed in guardrails.SCROLL_CLASS_ALLOWED:
+            text = (guardrails.ROOT/allowed).read_text()
+            self.assertTrue(guardrails.SCROLL_CLASS.search(text), allowed)
+
+
+class BareTextareaGuardrailTest(unittest.TestCase):
+    FILE = 'web/src/owner/Notes.tsx'
+
+    def test_a_bare_textarea_is_rejected(self):
+        for source in ('<textarea value={note} />', '  <textarea\n', 'return <textarea rows={3}/>;'):
+            self.assertTrue(guardrails.bare_textarea_violations(source, self.FILE), source)
+
+    def test_the_kit_component_and_other_names_are_allowed(self):
+        for source in ('<TextArea label="Note" />', 'const textareaRef = useRef(null);', '<textareas>'):
+            self.assertFalse(guardrails.bare_textarea_violations(source, self.FILE), source)
+
+    def test_the_two_modules_that_draw_a_bar_may_use_one(self):
+        for allowed in guardrails.TEXTAREA_ALLOWED:
+            self.assertFalse(guardrails.bare_textarea_violations('<textarea />', allowed))
+            self.assertTrue((guardrails.ROOT/allowed).exists(), allowed)
+
+
 class FlakeGuardrailTest(unittest.TestCase):
     SPEC = 'web/tests/moves.spec.ts'
     AUTH = 'auth/tests/gateway.test.ts'

@@ -125,6 +125,13 @@ test.describe("desktop", () => {
         "What is missing?",
       ])
         await expect(form.getByLabel(field)).toBeVisible();
+      // #399: the note box draws its own overlay scroll bar once its text outgrows it, as typing, not only layout, changes it.
+      const rail = form.locator("[data-overlay-scrollbar='region']");
+      await expect(rail).toBeHidden();
+      await form.getByLabel("What is missing?").fill("line\n".repeat(40));
+      await expect(rail).toBeVisible();
+      await form.getByLabel("What is missing?").fill("");
+      await expect(rail).toBeHidden();
       await expectPageChecks(
         page,
         "Missing cards, Report a card, Missing Printing (desktop)"

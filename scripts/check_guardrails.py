@@ -318,6 +318,42 @@ def arbitrary_colour_violations(source):
     return found
 
 
+# Scrolling regions (#399): the browser's scroll bar is hidden on desktop, so a region that scrolls must be a
+# ScrollArea (web/src/ui/ScrollArea.tsx, the one file that sets overflow-auto itself) or carry an
+# OverlayScrollbarFor, which draws the replacement bar. An overflow-auto/-scroll class elsewhere makes a region
+# with no visible bar.
+SCROLL_CLASS = re.compile(r'(?<![\w-])overflow-(?:[xy]-)?(?:auto|scroll)(?![\w-])')
+SCROLL_AREA_MODULE = 'web/src/ui/ScrollArea.tsx'
+# Files that may name the class, each with why. A native <pre> or <textarea> that styles itself from a parent's
+# class list can scroll by itself, with OverlayScrollbarFor drawing its bar.
+SCROLL_CLASS_ALLOWED = {
+    'web/src/decks/ExportDialog.tsx': 'the export <pre> and <textarea> scroll themselves; ExportOutput gives them an OverlayScrollbarFor',
+}
+
+
+def scroll_class_violations(source, filename):
+    """Lines that set overflow-auto, overflow-scroll or their -x/-y forms outside ScrollArea and the allowlist."""
+    if filename == SCROLL_AREA_MODULE or filename in SCROLL_CLASS_ALLOWED:
+        return []
+    return [(number, 'Scroll inside a ScrollArea (web/src/ui/ScrollArea.tsx), not with an overflow-auto class: the browser '
+                     'scroll bar is hidden on desktop and ScrollArea draws the replacement')
+            for number, line in enumerate(source.splitlines(), 1) if SCROLL_CLASS.search(line)]
+
+
+# A bare <textarea> scrolls with no overlay bar (its browser bar is hidden on desktop). The kit's TextArea
+# (web/src/ui/TextField.tsx) draws one, and so does ExportOutput's read-only copy of an export.
+BARE_TEXTAREA = re.compile(r'<textarea\b')
+TEXTAREA_ALLOWED = ('web/src/ui/TextField.tsx', 'web/src/ExportOutput.tsx')
+
+
+def bare_textarea_violations(source, filename):
+    """Lines that open a <textarea> outside the two modules that pair it with an OverlayScrollbarFor."""
+    if filename in TEXTAREA_ALLOWED:
+        return []
+    return [(number, 'Use the kit TextArea (web/src/ui/TextField.tsx): a bare <textarea> has no overlay scroll bar')
+            for number, line in enumerate(source.splitlines(), 1) if BARE_TEXTAREA.search(line)]
+
+
 def colour_scope_files():
     for entry in COLOUR_SCOPE:
         path = ROOT/entry
@@ -369,6 +405,14 @@ def main():
     for path in colour_scope_files():
         relative = path.relative_to(ROOT).as_posix()
         for line, reason in arbitrary_colour_violations(path.read_text()):
+            print(f'{relative}:{line}: {reason}')
+            failed = True
+    for path in web_source_files():
+        relative = path.relative_to(ROOT).as_posix()
+        for line, reason in scroll_class_violations(path.read_text(), relative):
+            print(f'{relative}:{line}: {reason}')
+            failed = True
+        for line, reason in bare_textarea_violations(path.read_text(), relative):
             print(f'{relative}:{line}: {reason}')
             failed = True
     return int(failed)

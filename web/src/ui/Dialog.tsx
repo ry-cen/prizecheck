@@ -2,6 +2,7 @@ import React, { useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { focusableIn } from "./focusable";
 import { Icon } from "./Icon";
+import { ScrollArea } from "./ScrollArea";
 
 type Props = {
   /** Shown as a modal while true. The parent owns this state and sets it false in onClose. */
@@ -185,12 +186,15 @@ export function Dialog({
             </button>
           </div>
         </div>
-        <div
-          ref={bodyRef}
-          className={`min-h-0 flex-1 overflow-auto p-4${bodyClassName ? ` ${bodyClassName}` : ""}`}
+        {/* The overlay scroll bar's rail sits inside the <dialog> (it is in the top layer), beside the body that scrolls. */}
+        <ScrollArea
+          className="flex-1"
+          bothAxes
+          viewportRef={bodyRef}
+          viewportClassName={`p-4${bodyClassName ? ` ${bodyClassName}` : ""}`}
         >
           {children}
-        </div>
+        </ScrollArea>
       </div>
     </dialog>
   );

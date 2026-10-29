@@ -25,6 +25,20 @@
     line-height: normal;
   }
 
+  /* No browser scroll bar on desktop (#399): none takes width from the content, so a screen lays out the same
+     whether or not it scrolls. ScrollArea and DocumentScrollbar draw an overlay bar in its place. The media query
+     is OVERLAY_SCROLLBAR_QUERY (ui/overlayScrollPolicy.ts, checked by its test): a mouse or trackpad, at any
+     window width. Touch devices keep their own overlay scrolling. Scrolling still works by wheel, touch, keyboard
+     and find-in-page. */
+  @media (hover: hover) and (pointer: fine) {
+    * {
+      scrollbar-width: none;
+    }
+    *::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
   :focus-visible {
     outline: var(--focus-width) solid var(--color-focus);
     outline-offset: var(--focus-offset);

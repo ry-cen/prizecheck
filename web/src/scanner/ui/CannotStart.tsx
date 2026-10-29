@@ -1,6 +1,7 @@
 import { CameraOff } from "lucide-react";
 import { Button } from "../../ui/Button";
 import { Icon } from "../../ui/Icon";
+import { ScrollArea } from "../../ui/ScrollArea";
 import {
   CANNOT_START,
   CAUSE_DENIED,
@@ -43,7 +44,10 @@ export function CannotStart({
   onReviewTray: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 overflow-y-auto px-5 py-6 text-center">
+    <ScrollArea
+      className="absolute inset-0 z-10"
+      viewportClassName="flex flex-col items-center justify-center gap-3 px-5 py-6 text-center"
+    >
       <Icon icon={CameraOff} size={28} className="text-text-muted" />
       <h2 className="m-0 text-heading font-semibold text-text">
         {CANNOT_START}
@@ -78,6 +82,6 @@ export function CannotStart({
           <Button onClick={onReviewTray}>{REVIEW_TRAY}</Button>
         </div>
       )}
-    </div>
+    </ScrollArea>
   );
 }

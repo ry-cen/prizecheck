@@ -23,6 +23,7 @@ import { EditionPrice } from "../EditionPrice";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { EditionTile } from "../ui/EditionTile";
+import { ScrollArea } from "../ui/ScrollArea";
 import { SearchField } from "../ui/SearchField";
 import { Segmented } from "../ui/Segmented";
 import { variantLabel } from "../ui/variantLabel";
@@ -101,7 +102,7 @@ export function DeckLibrary({
     null
   );
   const opener = useRef<HTMLElement | null>(null);
-  const scroller = useRef<HTMLElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const countId = useId();
   const closeId = useId();
@@ -155,154 +156,161 @@ export function DeckLibrary({
   const close = first?.search.mode === "fuzzy" ? first.search.text : null;
   return (
     <aside
-      ref={scroller}
       aria-labelledby={headingId}
       data-deck-drop="library"
-      className={`box-border flex min-w-0 flex-col gap-3 self-start rounded-panel border border-border bg-surface p-4 ${
+      className={`box-border flex min-w-0 flex-col self-start rounded-panel border border-border bg-surface ${
         ownScroll
-          ? "sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] max-h-[calc(100dvh-var(--space-8)-var(--layout-sticky-top))] overflow-y-auto overscroll-contain"
+          ? "sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] max-h-[calc(100dvh-var(--space-8)-var(--layout-sticky-top))]"
           : "w-full"
       }${dropClass}`}
     >
-      <h2 id={headingId} className="m-0 text-heading font-semibold">
-        Library
-      </h2>
-      <SearchField
-        label="Search the library"
-        placeholder="Card name, or set code and number"
-        value={text}
-        maxLength={120}
-        aria-describedby={close === null ? countId : `${closeId} ${countId}`}
-        onChange={(event) => setText(event.target.value)}
-      />
-      {/* A scroll container (Segmented) has no automatic minimum height, so keep it from shrinking in the Library column. */}
-      <div className="shrink-0">
-        <Segmented
-          mode="choice"
-          label="Library cards"
-          options={SHOWN}
-          value={shown}
-          onChange={setShown}
-        />
-      </div>
-      {/* Formats, then card types, each on its own row: the panel is too narrow for one row, and a divider would
-          land at the end or the start of a wrapped line. */}
-      <div
-        role="group"
-        aria-label="Library filters"
-        className="flex min-w-0 flex-col gap-1.5"
+      {/* The aside keeps the sticky position, the height cap and the frame; the ScrollArea inside scrolls. */}
+      <ScrollArea
+        className="flex-1"
+        scroll={ownScroll}
+        viewportRef={scroller}
+        viewportClassName={`flex flex-col gap-3 p-4${ownScroll ? " overscroll-contain" : ""}`}
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <Chip selected={format === null} onChange={() => setFormat(null)}>
-            Any format
-          </Chip>
-          {FORMATS.map((option) => (
-            <Chip
-              key={option.value}
-              selected={format === option.value}
-              onChange={(on) => setFormat(on ? option.value : null)}
-            >
-              {option.label}
-            </Chip>
-          ))}
+        <h2 id={headingId} className="m-0 text-heading font-semibold">
+          Library
+        </h2>
+        <SearchField
+          label="Search the library"
+          placeholder="Card name, or set code and number"
+          value={text}
+          maxLength={120}
+          aria-describedby={close === null ? countId : `${closeId} ${countId}`}
+          onChange={(event) => setText(event.target.value)}
+        />
+        {/* A scroll container (Segmented) has no automatic minimum height, so keep it from shrinking in the Library column. */}
+        <div className="shrink-0">
+          <Segmented
+            mode="choice"
+            label="Library cards"
+            options={SHOWN}
+            value={shown}
+            onChange={setShown}
+          />
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          {KINDS.map((option) => (
-            <Chip
-              key={option.value}
-              selected={kind === option.value}
-              onChange={(on) => setKind(on ? option.value : null)}
-            >
-              {option.label}
-            </Chip>
-          ))}
-        </div>
-      </div>
-      <div role="status" className="flex flex-col gap-0.5 text-meta">
-        {browse.notice && (
-          <p className="m-0 font-medium text-text">{browse.notice}</p>
-        )}
-        {close !== null && (
-          <p id={closeId} className="m-0 text-text-muted">
-            {closeSpellings(close)}
-          </p>
-        )}
-        <p id={countId} className="m-0 text-text-subtle">
-          {first && !first.available
-            ? "The catalog is unavailable until its first import."
-            : !first
-              ? browse.loading
-                ? "Loading the library…"
-                : ""
-              : rows.length === 0
-                ? shown === "owned" && !q && !format && !kind
-                  ? "You don't own any cards yet. Choose All to plan cards you don't own."
-                  : "No cards match."
-                : `Showing ${rows.length.toLocaleString()} of ${(first.matches ?? rows.length).toLocaleString()} cards`}
-        </p>
-      </div>
-      {browse.error && (
+        {/* Formats, then card types, each on its own row: the panel is too narrow for one row, and a divider would
+          land at the end or the start of a wrapped line. */}
         <div
-          role="alert"
-          className="flex flex-wrap items-center gap-3 text-body text-danger"
+          role="group"
+          aria-label="Library filters"
+          className="flex min-w-0 flex-col gap-1.5"
         >
-          <p className="m-0">{browse.error}</p>
-          <Button onClick={browse.retry}>Retry</Button>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Chip selected={format === null} onChange={() => setFormat(null)}>
+              Any format
+            </Chip>
+            {FORMATS.map((option) => (
+              <Chip
+                key={option.value}
+                selected={format === option.value}
+                onChange={(on) => setFormat(on ? option.value : null)}
+              >
+                {option.label}
+              </Chip>
+            ))}
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {KINDS.map((option) => (
+              <Chip
+                key={option.value}
+                selected={kind === option.value}
+                onChange={(on) => setKind(on ? option.value : null)}
+              >
+                {option.label}
+              </Chip>
+            ))}
+          </div>
         </div>
-      )}
-      {rows.length > 0 && (
-        <ul
-          aria-label="Library results"
-          aria-busy={browse.loading}
-          className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-small),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0"
-        >
-          {rows.map((edition, position) => (
-            <li
-              key={edition.edition_id}
-              className="min-w-0"
-              // A keyboard path past the loaded rows: focus reaching the last tile loads the next page.
-              onFocus={
-                position === rows.length - 1 && canLoad ? loadMore : undefined
-              }
-            >
-              <LibraryTile
-                edition={edition}
-                format={format}
-                onDragStart={onDragStart}
-                onOpen={(element) => {
-                  opener.current = element;
-                  setOpen({
-                    editionId: edition.edition_id,
-                    since: feedback?.id ?? 0,
-                  });
-                }}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-      {canLoad && <div ref={sentinel} aria-hidden="true" className="h-px" />}
-      <p aria-live="polite" className="m-0 text-meta text-text-subtle">
-        {browse.loadingMore ? "Loading more cards…" : ""}
-      </p>
-      <LibraryCardPopup
-        row={row}
-        onClose={() => setOpen(null)}
-        position={
-          index >= 0 && first?.matches != null
-            ? { index, total: Math.max(first.matches, rows.length) }
-            : null
-        }
-        canPrevious={index > 0}
-        canNext={index >= 0 && index < rows.length - 1}
-        onPrevious={onPrevious}
-        onNext={onNext}
-        quantity={row ? quantityOf(row.edition_id) : 0n}
-        onChange={(delta) => row && onChange(row, delta)}
-        feedback={feedback}
-        since={open?.since ?? 0}
-        returnFocus={opener}
-      />
+        <div role="status" className="flex flex-col gap-0.5 text-meta">
+          {browse.notice && (
+            <p className="m-0 font-medium text-text">{browse.notice}</p>
+          )}
+          {close !== null && (
+            <p id={closeId} className="m-0 text-text-muted">
+              {closeSpellings(close)}
+            </p>
+          )}
+          <p id={countId} className="m-0 text-text-subtle">
+            {first && !first.available
+              ? "The catalog is unavailable until its first import."
+              : !first
+                ? browse.loading
+                  ? "Loading the library…"
+                  : ""
+                : rows.length === 0
+                  ? shown === "owned" && !q && !format && !kind
+                    ? "You don't own any cards yet. Choose All to plan cards you don't own."
+                    : "No cards match."
+                  : `Showing ${rows.length.toLocaleString()} of ${(first.matches ?? rows.length).toLocaleString()} cards`}
+          </p>
+        </div>
+        {browse.error && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-3 text-body text-danger"
+          >
+            <p className="m-0">{browse.error}</p>
+            <Button onClick={browse.retry}>Retry</Button>
+          </div>
+        )}
+        {rows.length > 0 && (
+          <ul
+            aria-label="Library results"
+            aria-busy={browse.loading}
+            className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-small),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0"
+          >
+            {rows.map((edition, position) => (
+              <li
+                key={edition.edition_id}
+                className="min-w-0"
+                // A keyboard path past the loaded rows: focus reaching the last tile loads the next page.
+                onFocus={
+                  position === rows.length - 1 && canLoad ? loadMore : undefined
+                }
+              >
+                <LibraryTile
+                  edition={edition}
+                  format={format}
+                  onDragStart={onDragStart}
+                  onOpen={(element) => {
+                    opener.current = element;
+                    setOpen({
+                      editionId: edition.edition_id,
+                      since: feedback?.id ?? 0,
+                    });
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        {canLoad && <div ref={sentinel} aria-hidden="true" className="h-px" />}
+        <p aria-live="polite" className="m-0 text-meta text-text-subtle">
+          {browse.loadingMore ? "Loading more cards…" : ""}
+        </p>
+        <LibraryCardPopup
+          row={row}
+          onClose={() => setOpen(null)}
+          position={
+            index >= 0 && first?.matches != null
+              ? { index, total: Math.max(first.matches, rows.length) }
+              : null
+          }
+          canPrevious={index > 0}
+          canNext={index >= 0 && index < rows.length - 1}
+          onPrevious={onPrevious}
+          onNext={onNext}
+          quantity={row ? quantityOf(row.edition_id) : 0n}
+          onChange={(delta) => row && onChange(row, delta)}
+          feedback={feedback}
+          since={open?.since ?? 0}
+          returnFocus={opener}
+        />
+      </ScrollArea>
     </aside>
   );
 }

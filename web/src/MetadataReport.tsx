@@ -7,6 +7,7 @@ import {
   type MetadataReportView,
 } from "./metadata_generated";
 import { SelectBox } from "./ui/Select";
+import { TextArea } from "./ui/TextField";
 
 export type ReportableEdition = { id: string; label: string };
 
@@ -228,14 +229,12 @@ export function MetadataReport({
             onChange={(event) => setEvidence(event.target.value)}
           />
         </label>
-        <label>
-          Note{" "}
-          <textarea
-            value={note}
-            maxLength={2000}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </label>
+        <TextArea
+          label="Note"
+          value={note}
+          maxLength={2000}
+          onChange={(event) => setNote(event.target.value)}
+        />
         <button type="submit" disabled={busy}>
           Send report
         </button>
@@ -293,18 +292,16 @@ export function MyMetadataReports({ refreshKey = 0 }: { refreshKey?: number }) {
               )}
               {report.status === "needs_info" && (
                 <div>
-                  <label>
-                    Additional information{" "}
-                    <textarea
-                      value={answers[report.id] || ""}
-                      onChange={(event) =>
-                        setAnswers((previous) => ({
-                          ...previous,
-                          [report.id]: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
+                  <TextArea
+                    label="Additional information"
+                    value={answers[report.id] || ""}
+                    onChange={(event) =>
+                      setAnswers((previous) => ({
+                        ...previous,
+                        [report.id]: event.target.value,
+                      }))
+                    }
+                  />
                   <button
                     type="button"
                     disabled={!answers[report.id]?.trim()}

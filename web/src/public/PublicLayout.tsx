@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, type ReactNode } from "react";
 import { Wordmark } from "../shell/Shell";
 import { PriceCredit } from "../ui/PriceCredit";
 import { PRIMARY, QUIET } from "./controls";
@@ -18,6 +18,13 @@ type Props = {
  */
 export function PublicLayout({ current, onNavigate, children }: Props) {
   const follow = followLink(onNavigate);
+  // The page's overlay scroll bar (DocumentScrollbar) starts below this sticky header.
+  useLayoutEffect(() => {
+    document.documentElement.dataset.publicShell = "";
+    return () => {
+      delete document.documentElement.dataset.publicShell;
+    };
+  }, []);
   return (
     <div className="flex min-h-dvh flex-col bg-bg font-sans text-text scheme-dark">
       <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header shrink-0 items-center gap-4 border-b border-border bg-bg px-7 compact:px-5 phone:gap-2 phone:px-3">
