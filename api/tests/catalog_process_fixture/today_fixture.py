@@ -6,6 +6,10 @@ and ``app.format_standing``). With ``$CATALOG_PROCESS_FIXTURE_DIR`` set, those t
 modules are imported by one that reads ``$CATALOG_PROCESS_FIXTURE_DIR/today`` (an ISO date; a browser spec writes the
 file) on every call and answers the real date when the file is missing. A bad date fails the call loudly.
 
+``sitecustomize`` imports ``app.catalog`` before this fixture is installed, and that already imports
+``app.format_standing``, so a target module that is already loaded is patched in place; the others are patched as they
+are imported.
+
 Importing this module has no side effects; ``install()`` is called once from ``sitecustomize``.
 """
 from datetime import date
@@ -40,4 +44,8 @@ def install(environ=None):
     import sys
     from price_fixture import _PatchOnImport
     patch = patch_module(directory)
-    sys.meta_path.insert(0, _PatchOnImport({'app.deck_format_checks': patch, 'app.format_standing': patch}, {}))
+    targets = {'app.deck_format_checks': patch, 'app.format_standing': patch}
+    for name in [name for name in targets if name in sys.modules]:
+        patch(sys.modules[name])
+        del targets[name]
+    sys.meta_path.insert(0, _PatchOnImport(targets, {}))
