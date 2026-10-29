@@ -11,13 +11,13 @@ const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 test("a page whose code fails to load offers a reload, and the rest of the app keeps working", async ({
   page,
 }) => {
-  await signInAsOwner(page, "/collection");
-  const heading = page.getByRole("heading", { level: 1 });
-  await expect(heading).toHaveText("All owned");
-
+  // Before sign-in: the signed-in shell preloads the other pages' code in the background.
   const isTradesCode = (url: URL) =>
     url.pathname === "/src/trades/TradesPage.tsx";
   await page.route(isTradesCode, (route) => route.abort());
+  await signInAsOwner(page, "/collection");
+  const heading = page.getByRole("heading", { level: 1 });
+  await expect(heading).toHaveText("All owned");
 
   const tabs = page.getByRole("navigation", { name: "Main views" });
   // The tab may be named "Trades, N need you", since the owner is shared across specs.
@@ -113,12 +113,10 @@ test.describe("on a phone", () => {
   test("while Collection's code is slow to load, the shell's phone header shows with the placeholder", async ({
     page,
   }) => {
-    await signInAsOwner(page, "/decks");
     const heading = page.getByRole("heading", { level: 1 });
     const banner = page.getByRole("banner");
     const tabs = page.getByRole("navigation", { name: "Main views" });
-    await expect(heading).toHaveText("Decks");
-
+    // Before sign-in: the signed-in shell preloads Collection's code in the background, so the hold must catch that.
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
     await page.route(isWorkspaceCode, async (route) => {
@@ -126,6 +124,8 @@ test.describe("on a phone", () => {
       await route.continue();
     });
     try {
+      await signInAsOwner(page, "/decks");
+      await expect(heading).toHaveText("Decks");
       const collectionTab = tabs.getByRole("button", {
         name: "Collection",
         exact: true,
