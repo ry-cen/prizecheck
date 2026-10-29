@@ -14,6 +14,8 @@ import { WantListCountingSection } from "./WantListCountingSection";
  * the switch and the collector's own zip code (Trading #297), then a Sign-ins section with
  * the Sign-ins page's content (the account sheet's Sign-ins opens it at #sign-ins).
  */
+// A section here that loads data and so changes the page's height must report through useSettingsSectionSettled and
+// be listed in SETTINGS_LOADING_SECTIONS (settingsNavigation.ts), or "open Sign-ins" can land before it has grown.
 export function SettingsPage({ email }: { email: string | null }) {
   return (
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-8 px-7 py-7 phone:px-4 phone:py-5 [&>*]:max-w-3xl">

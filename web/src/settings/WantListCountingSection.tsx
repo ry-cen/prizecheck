@@ -7,6 +7,7 @@ import {
   type WantListCounting,
 } from "../settings_generated";
 import { COUNTING_OPTIONS, countingLabel } from "./wantListCounting";
+import { useSettingsSectionSettled } from "./settingsNavigation";
 
 type Load =
   | { kind: "loading" }
@@ -22,6 +23,7 @@ type Load =
  */
 export function WantListCountingSection() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  useSettingsSectionSettled("want-list-counting", load.kind !== "loading");
   const [pending, setPending] = useState<WantListCounting | null>(null);
   const [notice, setNotice] = useState("");
   const [saved, setSaved] = useState("");
