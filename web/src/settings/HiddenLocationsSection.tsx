@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { getLocationTree, type TreeLocation } from "../location_generated";
 import { indexLocations } from "../workspace/locationTree";
+import { useSettingsSectionSettled } from "./settingsNavigation";
 
 type Load =
   { kind: "loading" } | { kind: "ready"; paths: string[] } | { kind: "failed" };
@@ -12,6 +13,7 @@ type Load =
  */
 export function HiddenLocationsSection() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  useSettingsSectionSettled("hidden-locations", load.kind !== "loading");
   const headingId = `${useId()}-heading`;
   useEffect(() => {
     let live = true;

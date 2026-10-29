@@ -17,6 +17,7 @@ import {
   type BlockedCollector,
 } from "../social_generated";
 import { Button } from "../ui/Button";
+import { useSettingsSectionSettled } from "./settingsNavigation";
 
 type Load =
   | { kind: "loading" }
@@ -31,6 +32,7 @@ type Load =
  */
 export function BlockedSection() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  useSettingsSectionSettled("blocked", load.kind !== "loading");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
