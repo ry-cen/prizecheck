@@ -53,6 +53,8 @@ const row = (panel: Locator, path: string) =>
   panel.getByRole("group", { name: path, exact: true });
 const button = (scope: Locator, name: string) =>
   scope.getByRole("button", { name, exact: true });
+const checkbox = (scope: Locator, name: string) =>
+  scope.getByRole("checkbox", { name, exact: true });
 const gear = (scope: Locator, path: string) =>
   scope.getByRole("button", { name: `Settings for ${path}`, exact: true });
 const settingsOf = (page: Page, path: string) =>
@@ -73,16 +75,19 @@ test("hiding a parent marks everything inside it, and a Location inside can't be
   const nav = page.getByRole("navigation", { name: "Locations" }).first();
   const storageSettings = settingsOf(page, "Storage");
   await gear(nav, "Storage").click();
-  await button(storageSettings, "Hide Storage from Friends").click();
+  await checkbox(storageSettings, "Hide Storage from Friends").click();
   await expect(storageSettings.getByRole("status")).toHaveText(
     "Storage and everything in it are hidden from Friends."
   );
   await expect(
-    button(storageSettings, "Show Storage to Friends")
+    checkbox(storageSettings, "Hide Storage from Friends")
+  ).toBeChecked();
+  await expect(
+    checkbox(storageSettings, "Hide Storage from Friends")
   ).toBeEnabled();
   // Focus stays on the control that was used.
   await expect(
-    button(storageSettings, "Show Storage to Friends")
+    checkbox(storageSettings, "Hide Storage from Friends")
   ).toBeFocused();
   await expect(storageSettings).toContainText("Folder · Hidden from Friends");
   await page.keyboard.press("Escape");
@@ -112,15 +117,19 @@ test("hiding a parent marks everything inside it, and a Location inside can't be
   const binderPath = "Storage / Binders / Binder 1";
   const binderSettings = settingsOf(page, binderPath);
   await gear(nav, binderPath).click();
-  const hideBinder = button(binderSettings, `Hide ${binderPath} from Friends`);
+  const hideBinder = checkbox(
+    binderSettings,
+    `Hide ${binderPath} from Friends`
+  );
   await expect(hideBinder).toBeDisabled();
+  await expect(hideBinder).toBeChecked();
+  await expect(binderSettings).toContainText(
+    "Hidden because Storage is hidden"
+  );
   await expect(hideBinder).toHaveAccessibleDescription(
     "Hidden because Storage is hidden"
   );
-  await expect(hideBinder).toHaveAttribute(
-    "title",
-    "Hidden because Storage is hidden"
-  );
+  await expect(hideBinder).not.toHaveAttribute("title");
   await page.keyboard.press("Escape");
   await expect(binderSettings).toBeHidden();
 
@@ -136,34 +145,38 @@ test("hiding a parent marks everything inside it, and a Location inside can't be
 
   // A Location hidden on its own stays hidden when its parent is shown again.
   await gear(nav, "Storage").click();
-  await button(storageSettings, "Show Storage to Friends").click();
+  await checkbox(storageSettings, "Hide Storage from Friends").click();
   await expect(storageSettings).not.toContainText("Hidden");
   await page.keyboard.press("Escape");
   await expect(storageSettings).toBeHidden();
   await gear(nav, binderPath).click();
   await expect(binderSettings).not.toContainText("Hidden");
-  await button(binderSettings, `Hide ${binderPath} from Friends`).click();
+  await checkbox(binderSettings, `Hide ${binderPath} from Friends`).click();
   await expect(binderSettings).toContainText("Hidden from Friends");
   await page.keyboard.press("Escape");
   await expect(binderSettings).toBeHidden();
   await gear(nav, "Storage").click();
-  await button(storageSettings, "Hide Storage from Friends").click();
+  await checkbox(storageSettings, "Hide Storage from Friends").click();
   await expect(
-    button(storageSettings, "Show Storage to Friends")
-  ).toBeEnabled();
+    checkbox(storageSettings, "Hide Storage from Friends")
+  ).toBeChecked();
   await page.keyboard.press("Escape");
   await expect(storageSettings).toBeHidden();
   await gear(nav, binderPath).click();
   await expect(binderSettings).toContainText(
-    "Hidden because Storage is hidden"
+    "Hidden because Storage is hidden. It's also hidden on its own."
+  );
+  // The caption leaves out the parent's reason: it is in the row's note.
+  await expect(binderSettings.locator("p.tabular-nums")).not.toContainText(
+    "Hidden because"
   );
   await page.keyboard.press("Escape");
   await expect(binderSettings).toBeHidden();
   await gear(nav, "Storage").click();
-  await button(storageSettings, "Show Storage to Friends").click();
+  await checkbox(storageSettings, "Hide Storage from Friends").click();
   await expect(
-    button(storageSettings, "Hide Storage from Friends")
-  ).toBeEnabled();
+    checkbox(storageSettings, "Hide Storage from Friends")
+  ).not.toBeChecked();
   await page.keyboard.press("Escape");
   await expect(storageSettings).toBeHidden();
   await gear(nav, binderPath).click();
