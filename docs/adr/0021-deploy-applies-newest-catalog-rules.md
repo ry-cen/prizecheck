@@ -24,6 +24,15 @@ On dev, `MARKETPLACE_MATCHING=automatic` already applies the newest matching ver
   collection write waits for at most one batch.
 - A digest that differs from the recorded digest for the same version is an integrity failure. It is reported, never
   applied.
+- The rollout's `editions` phase first refreshes the candidate inputs the newest rule reads and only a catalog import used to
+  write, so a release does not wait for the next pull ([#395](https://github.com/ry-cen/prizecheck/issues/395)). Today that
+  is `mapping_candidate.card_tcgplayer` (read by rule v5 and later): each batch of unverified Editions gets the key rebuilt
+  from the Printing's stored `source_record.thirdParty.tcgplayer`, by the same function the import uses
+  (`catalog_targets.card_tcgplayer_candidate`), and is then evaluated. The lookup (`candidate`) cannot be rebuilt, because
+  stored records have no `pricing`, and is not touched. Gaining the key is enrichment: the mapping revision does not move,
+  and a verified Edition keeps its state (the phase reaches only unverified Editions; a verified one gains the key on its
+  next import). The refresh adds the key only where it is missing, so a rerun or a resumed batch changes nothing more. A
+  later rule version that reads a new import-derived key must add its refresh there too. The refresh runs only inside a matching rollout, so a host whose newest matching version was applied before the refresh existed (dev and prod for v5 and v6) still needed one catalog pull.
 - Rolling back to an older release restores, for each kind, the activation that was current before the newer one, so the
   older code never runs against a version it does not know.
 

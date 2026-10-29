@@ -912,6 +912,43 @@ def set_path_facts(conn, rule, row):
     return facts
 
 
+def card_tcgplayer_candidate(record, lookup):
+    """The card-level TCGplayer ID an Edition's candidate keeps (``mapping_candidate.card_tcgplayer``), or None.
+
+    Kept only when the Edition's own lookup names no TCGdex ID. The catalog import and the rule rollout's candidate refresh
+    (``add_card_tcgplayer``) both call this, so the two cannot disagree.
+    """
+    third_party = record.get("thirdParty") if isinstance(record, dict) else None
+    card_product = third_party.get("tcgplayer") if isinstance(third_party, dict) else None
+    return card_product if card_product is not None and not MatchingRulesV4.has_tcgdex_id(lookup) else None
+
+
+def add_card_tcgplayer(conn, edition_ids):
+    """Give candidates stored before the import kept ``card_tcgplayer`` the key, rebuilt from the Printing's stored record.
+
+    ``catalog_printing_metadata.source_record`` keeps ``thirdParty``, so the card-level ID can be rebuilt; the lookup itself
+    cannot (quotes are stripped), but the stored candidate already holds it. Only a candidate without the key is touched, so a
+    rerun changes nothing. This is enrichment (``catalog.inputs_moved``): the mapping state and revision never change here.
+    The rows are locked in id order, as ``refresh_editions`` reads them next. Returns how many candidates gained the key.
+    """
+    if not edition_ids:
+        return 0
+    rows = conn.execute("""SELECT em.edition_id,em.mapping_candidate,pm.source_record FROM catalog_edition_metadata em
+      JOIN catalog_edition e ON e.id=em.edition_id LEFT JOIN catalog_printing_metadata pm ON pm.printing_id=e.printing_id
+      WHERE em.edition_id=ANY(%s) AND em.mapping_candidate<>'{}'::jsonb AND NOT em.mapping_candidate ? 'card_tcgplayer'
+      ORDER BY em.edition_id FOR UPDATE OF em""", (list(edition_ids),)).fetchall()
+    gained = 0
+    for row in rows:
+        candidate = row["mapping_candidate"]
+        product = card_tcgplayer_candidate(row["source_record"] or {}, candidate.get("candidate") or {})
+        if product is None:
+            continue
+        conn.execute("UPDATE catalog_edition_metadata SET mapping_candidate=%s::jsonb, updated_at=now() WHERE edition_id=%s",
+                     (json.dumps({**candidate, "card_tcgplayer": product}), row["edition_id"]))
+        gained += 1
+    return gained
+
+
 def refresh_editions(conn, context, edition_ids, complete=False):
     """Re-evaluate marketplace state for Editions whose candidate changed or whose rule changed.
 
