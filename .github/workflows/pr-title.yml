@@ -1,0 +1,23 @@
+name: PR title
+on:
+  # A squash merge makes the pull request's title the commit on its base branch, and the commit-msg hook never sees
+  # it, so the title gets the hook's check here.
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+permissions:
+  contents: read
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # The title comes in through the environment, never interpolated into the script.
+      - name: Check the title's type prefix
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$TITLE" > "$RUNNER_TEMP/title"
+          python3 scripts/check_commit_msg.py "$RUNNER_TEMP/title"

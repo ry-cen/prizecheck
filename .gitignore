@@ -40,6 +40,8 @@ playwright/.cache/
 # Claude Code local state
 .claude/worktrees/
 .claude/settings.local.json
+.claude/launch.json
+.claude/*-handoff.md
 
 # Editor and OS files
 .DS_Store
