@@ -1,0 +1,1 @@
+.venv/bin/python scripts/check_commit_msg.py "$1"
