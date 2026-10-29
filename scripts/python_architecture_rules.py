@@ -185,7 +185,7 @@ RULES = {
     'set-codes-importers': {
         'imported': 'app.games.pokemon.catalog.set_codes',
         'importers': {'app.games.pokemon.catalog.catalog_browse', 'app.games.pokemon.imports.collection_import_matcher', 'app.games.pokemon.imports.deck_import',
-                      'app.games.pokemon.imports.import_aliases', 'app.games.pokemon.imports.import_matching', 'app.import_publication', 'app.games.pokemon.scanner.scanner'}},
+                      'app.games.pokemon.imports.import_aliases', 'app.games.pokemon.imports.import_matching', 'app.games.pokemon.imports.import_publication', 'app.games.pokemon.scanner.scanner'}},
     # test_set_codes reads the data file beside format_evaluator; this pins that layout fact.
     'format-rules-beside-evaluator': {'module': 'app.games.pokemon.formats.format_evaluator', 'file': 'format_rules/imported_sets.txt'},
     # The alias table feeds the import reviews alone: import_matching runs its step, deck_import fills the Missing cards

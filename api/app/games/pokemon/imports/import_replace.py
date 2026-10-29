@@ -21,9 +21,9 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from .deck_list_display import read_line_display
-from .deck_ownership import SurplusHolding, beyond_list, surplus_holdings
-from .location_tree import error
+from app.deck_list_display import read_line_display
+from app.deck_ownership import SurplusHolding, beyond_list, surplus_holdings
+from app.location_tree import error
 
 
 class ReplaceLine(BaseModel):

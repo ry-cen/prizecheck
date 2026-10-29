@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
 from app.games.pokemon.catalog.card_identity import card_identity_key
-from .db import connect
-from .identity import require_owner, verified_user
+from app.db import connect
+from app.identity import require_owner, verified_user
 from app.games.pokemon.catalog.public_catalog import publish_catalog_best_effort
 
 router = APIRouter()

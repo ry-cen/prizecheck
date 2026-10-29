@@ -69,7 +69,7 @@ from ..catalog.set_codes import sets_for_code
 from ..prices.catalog_targets import is_unspecified
 from .collection_import_reader import DRAGON_SHIELD, LOOSE, PASTE, SORTED
 from .import_energy_matching import basic_energy_printings, energy_type
-from app.import_match_core import at_code_and_number
+from app.games.pokemon.imports.import_match_core import at_code_and_number
 from .import_name_matching import named_printings
 
 MAX_QUANTITY = 2**63 - 1

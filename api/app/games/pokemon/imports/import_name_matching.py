@@ -27,7 +27,7 @@ suffix. ``NAME_SUFFIXES`` holds no code of either code table (``api/tests/test_i
 from uuid import UUID
 
 from .decklist_text import CardLine
-from app.import_match_core import ACTIVE, NEWEST_COLUMNS, RELEASE_JOINS, Match, newest_first, release_params
+from app.games.pokemon.imports.import_match_core import ACTIVE, NEWEST_COLUMNS, RELEASE_JOINS, Match, newest_first, release_params
 
 # Capitalised words that end Pokémon names and fit the set token's grammar (two to eight capitals or digits).
 NAME_SUFFIXES = frozenset({'EX', 'GX', 'VMAX', 'VSTAR', 'VUNION', 'BREAK', 'LEGEND', 'PRIME', 'FB', 'GL'})

@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field
 from . import import_aliases
 from ..prices import prices
 from ..catalog import set_codes
-from app import import_publication
+from app.games.pokemon.imports import import_publication
 from app.copy_allocation import Availability
 from app.core.prices.cost import summarize
 from .decklist_text import MAX_CARD_LINES, CardLine, TooLong, TooManyLines, read
@@ -45,10 +45,10 @@ from ..formats.deck_format_checks import TargetFormat
 from app.decks import MAX_DECK_LIST_CHANGES, DeckListCommandResult, advance_deck_list, keep_response, replayed
 from ..formats.format_evaluator import FORMATS
 from app.holdings import parse_quantity
-from app.import_allocation import ChosenBy, OwnedCards, Part, Resolved, Source, merged, parts_for
+from app.games.pokemon.imports.import_allocation import ChosenBy, OwnedCards, Part, Resolved, Source, merged, parts_for
 from .import_matching import Match, match_lines
-from app.import_owned import capture_owned, groups
-from app.import_replace import ImportReplace, replacement
+from app.games.pokemon.imports.import_owned import capture_owned, groups
+from app.games.pokemon.imports.import_replace import ImportReplace, replacement
 from app.location_tree import TreeNode, check_name, cleaned_name, error, node_model, owner_and_rows, replay
 from app.db import connect
 from app.identity import verified_user

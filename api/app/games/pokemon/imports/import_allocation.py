@@ -27,8 +27,8 @@ from typing import Literal
 from uuid import UUID
 
 from app.core.decks.printing import choose_edition
-from .copy_allocation import Available
-from .core.prices.quote_contract import parse_amount
+from app.copy_allocation import Available
+from app.core.prices.quote_contract import parse_amount
 
 Source = Literal['in_deck', 'elsewhere', 'new']
 # published: Copy to my Decks under Exact printings kept the snapshot's Edition (#216).

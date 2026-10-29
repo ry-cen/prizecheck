@@ -12,7 +12,6 @@ app.borrowed_copies core
 app.bounded_work core
 app.card_accepts core
 app.collection mixed
-app.collection_import mixed
 app.copy_allocation core
 app.copy_picks core
 app.db core
@@ -27,17 +26,11 @@ app.holdings mixed
 app.host_readiness mixed
 app.idempotency core
 app.identity core
-app.import_allocation mixed
-app.import_match_core mixed
-app.import_owned mixed
-app.import_publication mixed
-app.import_replace mixed
 app.inventory_core core
 app.loan_inventory core
 app.loan_picks core
 app.location_tree core
 app.locations core
-app.missing_cards mixed
 app.moves core
 app.operation_counts core
 app.operations core
@@ -51,7 +44,6 @@ app.public_projection core
 app.public_records core
 app.publications mixed
 app.quote_contract root
-app.scanner_save mixed
 app.settings core
 app.social core
 app.social.conversations core
@@ -80,3 +72,13 @@ app.catalog_refresh root
 app.catalog_targets root
 app.public_catalog root
 app.public_prices root
+app.core.imports core
+app.core.imports.collection_draft core
+app.games.pokemon.imports.collection_import pokemon
+app.games.pokemon.imports.import_match_core pokemon
+app.games.pokemon.imports.import_owned pokemon
+app.games.pokemon.imports.import_allocation pokemon
+app.games.pokemon.imports.import_publication pokemon
+app.games.pokemon.imports.import_replace pokemon
+app.games.pokemon.scanner.scanner_save pokemon
+app.games.pokemon.catalog.missing_cards pokemon

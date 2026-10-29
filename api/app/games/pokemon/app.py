@@ -7,7 +7,7 @@ from app.games.pokemon.catalog.catalog_reconciliation import router as catalog_r
 from app.games.pokemon.catalog.catalog_search import router as catalog_search_router
 from app.games.pokemon.catalog.catalog_status import router as catalog_status_router
 from app.collection import router as collection_router
-from app.collection_import import router as collection_import_router
+from app.games.pokemon.imports.collection_import import router as collection_import_router
 from app.games.pokemon.decks.cost import router as deck_cost_router
 from app.deck_deletion import router as deck_deletion_router
 from app.games.pokemon.formats.deck_format_checks import router as deck_format_checks_router
@@ -24,7 +24,7 @@ from app.loan_inventory import router as loan_inventory_router
 from app.location_tree import router as location_tree_router
 from app.locations import router as locations_router
 from app.games.pokemon.prices.metadata_reviews import router as metadata_reviews_router
-from app.missing_cards import router as missing_cards_router
+from app.games.pokemon.catalog.missing_cards import router as missing_cards_router
 from app.moves import router as moves_router
 from app.operations import router as operations_router
 from app.games.pokemon.prices.prices import router as prices_router
@@ -36,7 +36,7 @@ from app.games.pokemon.exports.published_mass_entry import router as published_m
 from app.games.pokemon.catalog.reprint_group_reviews import router as reprint_group_reviews_router
 from app.games.pokemon.catalog.rule_rollout import start_on_startup as start_rule_rollout
 from app.games.pokemon.scanner.scanner import router as scanner_router
-from app.scanner_save import router as scanner_save_router
+from app.games.pokemon.scanner.scanner_save import router as scanner_save_router
 from app.settings import router as settings_router
 from app.social.conversations import router as conversations_router, traders_router as conversation_traders_router
 from app.social.discovery import router as open_discovery_router

@@ -17,7 +17,7 @@ from ..catalog import set_codes
 from .decklist_text import CardLine
 from .import_aliases import by_alias
 from .import_energy_matching import by_basic_energy
-from app.import_match_core import Match, MatchStatus, Matcher, at_code_and_number
+from app.games.pokemon.imports.import_match_core import Match, MatchStatus, Matcher, at_code_and_number
 from .import_name_matching import by_name
 
 __all__ = ['Match', 'MatchStatus', 'Matcher', 'MATCHERS', 'by_code_and_number', 'match_lines']

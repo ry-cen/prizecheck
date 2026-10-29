@@ -15,13 +15,13 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .collection_import import storage_leaf
-from .api_errors import api_error
-from .holdings import MAX_BATCH_EDITIONS
-from .db import connect
-from .identity import verified_user
-from .idempotency import expire
-from .inventory_core import MAX_QUANTITY, REPLAY, lock_owner
+from app.core.imports.collection_draft import storage_leaf
+from app.api_errors import api_error
+from app.holdings import MAX_BATCH_EDITIONS
+from app.db import connect
+from app.identity import verified_user
+from app.idempotency import expire
+from app.inventory_core import MAX_QUANTITY, REPLAY, lock_owner
 
 router = APIRouter(prefix="/api/scanner")
 MAX_SCAN_SAVE_EDITIONS = MAX_BATCH_EDITIONS

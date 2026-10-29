@@ -59,33 +59,30 @@ import csv
 import hashlib
 import io
 import json
-from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 import psycopg
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
 
 from app.games.pokemon.imports import collection_import_finish as finishes
 from app.games.pokemon.imports import collection_import_matcher as matcher
 from app.games.pokemon.imports import collection_import_reader as reader
-from .db import connect
-from .identity import verified_user
-from .moves import lock_owner
-from .moves import fail as refuse
+from app.db import connect
+from app.identity import verified_user
+from app.moves import lock_owner
+from app.moves import fail as refuse
+
+from app.core.imports.collection_draft import (
+    CollectionImportCounts, CollectionImportGroup, CollectionImportSummary, CollectionImportCard,
+    CollectionImportEdition, CollectionImportRow, CollectionImportRowsPage, SaveCollectionImport,
+    CollectionImportPick, CollectionImportChange, ChangeCollectionImport, CollectionImportChangeResult,
+    CollectionImportChanges, PasteCollectionImport, CollectionImportSaveResult, PAGE_SIZE, SPLIT_MESSAGES,
+    PASTE_MESSAGES, MAX_STARTS_PER_DAY, RATE_LIMITED_MESSAGE, STARTS_TODAY, OPEN_DRAFT, READY_ROW,
+    NEEDS_YOU_ROW, FINISH_UNKNOWN_ROW, SKIPPED_ROW, LEFT_OUT_ROW, INCLUDED_ROW, BY_NAME_ROW, RowFilter,
+    GROUPS, HELD, storage_leaf, source_of, left_out, sweep_expired,
+)
 
 router = APIRouter(prefix="/api/collection-imports", tags=["collection-imports"])
-PAGE_SIZE = 100
-SPLIT_MESSAGES = {
-    "IMPORT_TOO_LARGE": "This file is larger than 5 MB. Split it into two files and import each one.",
-    "IMPORT_TOO_MANY_ROWS": "This file has more than 10,000 rows. Split it into two files and import each one.",
-}
-# A paste's refusals (#234) say "list", not "file".
-PASTE_MESSAGES = {
-    "IMPORT_TOO_LARGE": "This list is larger than 5 MB. Split it into two lists and import each one.",
-    "IMPORT_TOO_MANY_ROWS": "This list has more than 10,000 rows. Split it into two lists and import each one.",
-    "IMPORT_UNREADABLE": "PrizeCheck can't read this list. Paste it as plain text.",
-}
 # A start refusal's message, by code. IMPORT_UNREADABLE lists the trackers whose exports are read (the web shows its own
 # copy and opens its export steps instead).
 REFUSAL_MESSAGES = {
@@ -95,238 +92,12 @@ REFUSAL_MESSAGES = {
                          "card's set and its number or name.",
     "IMPORT_BAD_ZIP": "PrizeCheck can't read this zip file. It must hold one CSV, TSV or TXT file, with no password.",
 }
-# A collector starts at most this many import drafts in any 24 hours (#233); the 21st start is refused 429.
-MAX_STARTS_PER_DAY = 20
-RATE_LIMITED_MESSAGE = "You can start 20 imports a day. Try again tomorrow."
-# This collector's import starts in the last 24 hours (collection_import_start, migration 051).
-STARTS_TODAY = """SELECT count(*) AS n FROM collection_import_start
-  WHERE owner_id=%s AND started_at>now()-interval '24 hours'"""
-# A draft the collector can still review: open and not expired (#233). For alias ci.
-OPEN_DRAFT = "ci.status='open' AND ci.expires_at>now()"
-# Each sweep deletes at most this many expired drafts (with their rows), any collector's, oldest first.
-SWEEP_LIMIT = 20
-READY_ROW = matcher.READY_ROW.format(r="r")
-NEEDS_YOU_ROW = matcher.NEEDS_YOU_ROW.format(r="r")
-FINISH_UNKNOWN_ROW = matcher.FINISH_UNKNOWN_ROW.format(r="r")
-SKIPPED_ROW = matcher.SKIPPED_ROW.format(r="r")
-LEFT_OUT_ROW = matcher.LEFT_OUT_ROW.format(r="r")
-INCLUDED_ROW = matcher.INCLUDED_ROW.format(r="r")
-BY_NAME_ROW = matcher.BY_NAME_ROW.format(r="r")
 # Each row's candidate cards in the active generation, for one page: (printing id, name, set name, number).
 CANDIDATE_CARDS = """SELECT gp.printing_id,gp.display_name,gp.set_name,gp.collector_number
   FROM catalog_generation_printing gp
   WHERE gp.generation_id=%s AND gp.printing_id=ANY(%s::uuid[]) AND NOT gp.tombstoned
     AND EXISTS (SELECT 1 FROM catalog_generation_edition ge
       WHERE ge.generation_id=gp.generation_id AND ge.printing_id=gp.printing_id AND ge.active)"""
-RowFilter = Literal["needs", "finish", "name", "all", "skipped"]
-# collection_import_matcher.LEFT_OUT_REASONS.
-LeftOutReason = Literal["watchlist", "other_game", "not_english", "sealed"]
-# How many left-out rows of each reason the summary shows, for View.
-LEFT_OUT_EXAMPLES = 3
-# The left-out rows' examples: the first LEFT_OUT_EXAMPLES of each reason in file order, with each reason's count.
-LEFT_OUT = f"""SELECT reason,n,parsed FROM (
-    SELECT r.left_out_reason AS reason,r.parsed,count(*) OVER (PARTITION BY r.left_out_reason) AS n,
-      row_number() OVER (PARTITION BY r.left_out_reason ORDER BY r.row_number) AS k
-    FROM collection_import_row r WHERE r.import_id=%s AND {LEFT_OUT_ROW}) found
-  WHERE k<=%s ORDER BY reason,k"""
-# The file's groups in file order (#232): the rows of each that weren't left out, and whether it is included. A group
-# whose rows were all left out is not listed.
-GROUPS = """SELECT r.group_name AS name,count(*) FILTER (WHERE r.left_out_reason IS NULL) AS n,
-    NOT (ci.excluded_groups @> jsonb_build_array(r.group_name)) AS included
-  FROM collection_import_row r JOIN collection_import ci ON ci.id=r.import_id
-  WHERE r.import_id=%s AND r.group_name IS NOT NULL
-  GROUP BY r.group_name,ci.excluded_groups HAVING count(*) FILTER (WHERE r.left_out_reason IS NULL)>0
-  ORDER BY min(r.row_number)"""
-# The copies of each of these Card Editions in the collector's Collection, every Location and Deck (as catalog search
-# counts a card's owned copies, catalog_browse).
-HELD = """SELECT edition_id,sum(quantity) AS held FROM holding WHERE owner_id=%s AND edition_id=ANY(%s::uuid[])
-  GROUP BY edition_id"""
-# One changes request holds at most MAX_CHANGES changes, and a change names at most MAX_CHANGE_ROWS rows by number: the
-# gateway's 64 KiB body limit for this route binds first. It fits every row of a 10,000-row file named one by one
-# (about 49 KB). Select all sends its filter instead.
-MAX_CHANGES = 100
-MAX_CHANGE_ROWS = 1000
-
-
-class CollectionImportCounts(BaseModel):
-    # Every row in the file, left-out rows and rows in groups left out included.
-    rows: int
-    needs_you: int
-    ready: int
-    # Ready rows on the card's Unspecified Variant (part of `ready`).
-    finish_unknown: int
-    # Ready rows whose card came from their name within their set, whatever their finish (part of `ready`).
-    by_name: int
-    # Neither ready nor needing the collector. needs_you + ready is the All filter's count.
-    skipped: int
-
-
-class CollectionImportSource(BaseModel):
-    """What the collector's file said, from the columns PrizeCheck reads; "" for a blank cell."""
-    quantity: str
-    name: str
-    set_name: str
-    number: str
-    finish: str
-
-
-class CollectionImportLeftOut(BaseModel):
-    """The rows the filters left out for one reason (#231): never listed, counted or saved."""
-    reason: LeftOutReason
-    rows: int
-    # The first LEFT_OUT_EXAMPLES of them, in file order, as the file wrote them.
-    examples: list[CollectionImportSource]
-
-
-class CollectionImportGroup(BaseModel):
-    """One of the file's groups (#232): a portfolio, folder or list, never a Location."""
-    name: str
-    # Its rows that weren't left out (#231), whether or not it is included.
-    rows: int
-    # False once the collector leaves it out: its rows are then in no count, filter, download or save.
-    included: bool
-
-
-class CollectionImportSummary(BaseModel):
-    id: UUID
-    draft_revision: int
-    location_id: UUID
-    # The landing Location's own name, or None when it is gone.
-    location_name: str | None
-    counts: CollectionImportCounts
-    # The copies the ready rows add, as text so no JSON reader rounds it.
-    cards_to_add: str
-    expires_at: str
-    # The left-out rows (#231), one entry per reason that has any, in LEFT_OUT_REASONS order. counts.rows includes
-    # them; no other count does. Rows in a group left out (#232) aren't counted.
-    left_out: list[CollectionImportLeftOut]
-    # The file's groups in file order (#232); [] for a file without groups. Rows with no group are always included.
-    groups: list[CollectionImportGroup]
-    # Of cards_to_add, the copies whose Card Edition the Collection already holds (#232): importing adds to them.
-    already_held: str
-    # The draft is a pasted list read line by line (#234): its rows are lines, and its downloads are text.
-    lines: bool
-
-
-class CollectionImportCard(BaseModel):
-    printing_id: UUID
-    name: str
-    set_name: str
-    collector_number: str
-
-
-class CollectionImportEdition(BaseModel):
-    edition_id: UUID
-    # The Variant Descriptor's physical keys (collection_import_finish.public_descriptor). Send it back as a change's
-    # `finish` to choose this Edition.
-    descriptor: dict
-
-
-class CollectionImportRow(BaseModel):
-    row_number: int
-    status: Literal["matched", "finish_unknown", "by_name", "ambiguous", "not_found", "unreadable"]
-    needs_you: bool
-    # None when the row's quantity can't be read.
-    quantity: str | None
-    source: CollectionImportSource
-    skipped: bool
-    # The matched Printing, when there is exactly one.
-    card: CollectionImportCard | None
-    edition: CollectionImportEdition | None
-    # The card's active Editions in catalog order, for the finish picker; [] without a card.
-    editions: list[CollectionImportEdition]
-    # The cards the row could be, for Pick one (an ambiguous row without a card) and Change (a Basic Energy's other
-    # Printings, the matched one first); [] for most rows. Only cards still in the catalog are listed.
-    candidates: list[CollectionImportCard]
-    # The collector chose this row's card (a pick), so Change can choose another.
-    picked: bool
-    # The row's card came from its name within its set, whatever its finish; a pick clears it.
-    by_name: bool
-    # The row's portfolio, folder or list in the file (#232), or None.
-    group: str | None
-    # The copies of the row's Card Edition already in the Collection, every Location and Deck (#232); "0" without one.
-    held: str
-
-
-class CollectionImportRowsPage(BaseModel):
-    rows: list[CollectionImportRow]
-    # Pass as `cursor` for the next page; None on the last page.
-    next_cursor: str | None
-    draft_revision: int
-
-
-class SaveCollectionImport(BaseModel):
-    draft_revision: int = Field(ge=1)
-    idempotency_key: UUID
-
-
-class CollectionImportPick(BaseModel):
-    """The card a row is: exactly one of a Printing (the row's finish then chooses its Edition, as matching does) or one
-    of its active Editions."""
-    model_config = ConfigDict(extra="forbid")
-    printing_id: UUID | None = None
-    edition_id: UUID | None = None
-
-
-class CollectionImportChange(BaseModel):
-    """One change, with exactly one action. `pick`, `finish`, `skip` and `restore` apply to rows: by `rows` (row
-    numbers) or `filter` (the rows route's filter, as it stands when this change applies), exactly one of them.
-    `group` with `include` (#232) leaves one of the file's groups out (false) or brings it back (true), and
-    `location_id` (#232) moves the landing Storage Leaf; neither names rows. Unknown fields are refused, so an older
-    API never ignores a newer change."""
-    model_config = ConfigDict(extra="forbid")
-    rows: list[Annotated[int, Field(ge=1, le=reader.MAX_IMPORT_ROWS)]] | None = Field(
-        default=None, min_length=1, max_length=MAX_CHANGE_ROWS)
-    filter: RowFilter | None = None
-    pick: CollectionImportPick | None = None
-    # A Variant Descriptor: one of the row's `editions[].descriptor`, or a finish such as {"type": "reverse"}. It
-    # applies to a row whose card has exactly one active Edition that fits it.
-    finish: dict | None = None
-    skip: bool = False
-    restore: bool = False
-    # One of the summary's groups' names, with `include`.
-    group: str | None = Field(default=None, min_length=1)
-    include: bool | None = None
-    # The collector's Storage Leaf to land in instead.
-    location_id: UUID | None = None
-
-
-class ChangeCollectionImport(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    draft_revision: int = Field(ge=1)
-    changes: list[CollectionImportChange] = Field(max_length=MAX_CHANGES)
-
-
-class CollectionImportChangeResult(BaseModel):
-    # How many of the change's rows it applied to; for a group, the group's rows that weren't left out when its
-    # inclusion changed, else 0; for a Location, 0.
-    applied: int
-    # The row numbers it couldn't apply to, in file order: for a pick, skipped rows and rows whose quantity can't be
-    # read; for a finish, rows without a card, skipped rows and rows whose card has no Edition that fits; for skip and
-    # restore, rows already so. Left-out rows (#231) and rows in a group left out (#232) are never applied to. Always []
-    # for a group or a Location.
-    not_applied: list[int]
-
-
-class CollectionImportChanges(BaseModel):
-    # The draft after every change, at its new draft_revision.
-    summary: CollectionImportSummary
-    # One result per change, in order.
-    results: list[CollectionImportChangeResult]
-
-
-class PasteCollectionImport(BaseModel):
-    """A paste's start body (#234)."""
-    model_config = ConfigDict(extra="forbid", strict=True)
-    text: str
-
-
-class CollectionImportSaveResult(BaseModel):
-    import_id: UUID
-    location_id: UUID
-    edition_count: int
-    copy_count: str
-    owner_revision: int
 
 
 def is_paste(request: Request) -> bool:
@@ -363,40 +134,10 @@ def read_source(request: Request, body: bytes) -> reader.SourceFile:
         refuse(422, refused.code, message=messages.get(refused.code))
 
 
-def sweep_expired(conn) -> int:
-    """Deletes up to SWEEP_LIMIT expired drafts, any collector's, oldest first, with their rows (the foreign key
-    cascades); how many it deleted. Drafts another request holds are skipped, never waited for. There is no scheduler,
-    so the start and current routes run it (#233)."""
-    return len(conn.execute("""DELETE FROM collection_import WHERE id IN (
-        SELECT id FROM collection_import WHERE expires_at<=now() ORDER BY expires_at,id LIMIT %s FOR UPDATE SKIP LOCKED)
-      RETURNING id""", (SWEEP_LIMIT,)).fetchall())
-
-
 def rate_limited(conn, user_id: str) -> None:
     """IMPORT_RATE_LIMITED (429) once this collector has started MAX_STARTS_PER_DAY drafts in the last 24 hours."""
     if conn.execute(STARTS_TODAY, (user_id,)).fetchone()["n"] >= MAX_STARTS_PER_DAY:
         refuse(429, "IMPORT_RATE_LIMITED", message=RATE_LIMITED_MESSAGE)
-
-
-def storage_leaf(conn, user_id: str, location_id: UUID):
-    """This collector's Storage Leaf (not a Deck, no children), or None."""
-    return conn.execute("""SELECT l.id,l.name FROM location l WHERE l.owner_id=%s AND l.id=%s AND l.kind='storage_leaf'
-      AND NOT EXISTS (SELECT 1 FROM location child WHERE child.parent_id=l.id)""", (user_id, location_id)).fetchone()
-
-
-def source_of(parsed: dict) -> CollectionImportSource:
-    """What the row said; its set is the set name, else the set code (a pasted line's "PAL", #234)."""
-    fields = {field: parsed.get(field, "") for field in ("quantity", "name", "number", "finish")}
-    return CollectionImportSource(**fields, set_name=parsed.get("set_name") or parsed.get("set_code", ""))
-
-
-def left_out(conn, import_id: UUID) -> list[CollectionImportLeftOut]:
-    found: dict[str, CollectionImportLeftOut] = {}
-    for row in conn.execute(LEFT_OUT, (import_id, LEFT_OUT_EXAMPLES)):
-        entry = found.setdefault(row["reason"], CollectionImportLeftOut(reason=row["reason"], rows=row["n"],
-                                                                         examples=[]))
-        entry.examples.append(source_of(row["parsed"]))
-    return [found[reason] for reason in matcher.LEFT_OUT_REASONS if reason in found]
 
 
 def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
@@ -425,7 +166,7 @@ def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
                                       finish_unknown=row["finish_unknown"], by_name=row["by_name"],
                                       skipped=row["skipped"]),
         cards_to_add=str(int(row["cards"])), expires_at=row["expires_at"].isoformat(),
-        left_out=left_out(conn, import_id),
+        left_out=left_out(conn, import_id, reasons=matcher.LEFT_OUT_REASONS),
         groups=[CollectionImportGroup(name=group["name"], rows=group["n"], included=group["included"])
                 for group in conn.execute(GROUPS, (import_id,))],
         already_held=str(int(row["already_held"])), lines=row["source"] == reader.PASTE)

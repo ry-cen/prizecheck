@@ -3,9 +3,6 @@
 # Regenerate (only to record a removal) with: .venv/bin/python scripts/check_python_boundaries.py --write-baseline
 
 [edges]
-app.collection_import -> app.games.pokemon.imports.collection_import_finish
-app.collection_import -> app.games.pokemon.imports.collection_import_matcher
-app.collection_import -> app.games.pokemon.imports.collection_import_reader
 app.decks -> app.games.pokemon.art.route
 app.decks -> app.games.pokemon.formats.construction_checks
 app.decks -> app.games.pokemon.formats.deck_format_checks
@@ -18,13 +15,6 @@ app.discovery -> app.games.pokemon.catalog.public_catalog
 app.discovery -> app.games.pokemon.formats.published_format_checks
 app.discovery -> app.games.pokemon.publications.published_cost
 app.host_readiness -> app.games.pokemon.prices.catalog_targets
-app.import_match_core -> app.games.pokemon.catalog.catalog_browse
-app.import_match_core -> app.games.pokemon.imports.decklist_text
-app.import_owned -> app.games.pokemon.imports.import_energy_matching
-app.import_publication -> app.games.pokemon.imports.decklist_text
-app.import_publication -> app.games.pokemon.catalog.set_codes
-app.missing_cards -> app.games.pokemon.catalog.card_identity
-app.missing_cards -> app.games.pokemon.catalog.public_catalog
 app.publications -> app.games.pokemon.art.urls
 app.publications -> app.games.pokemon.formats.construction_checks
 app.publications -> app.games.pokemon.formats.deck_format_checks

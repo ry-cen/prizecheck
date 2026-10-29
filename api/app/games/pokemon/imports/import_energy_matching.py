@@ -22,7 +22,7 @@ import re
 from uuid import UUID
 
 from .decklist_text import CardLine
-from app.import_match_core import ACTIVE, NEWEST_COLUMNS, RELEASE_JOINS, Match, newest_first, release_params
+from app.games.pokemon.imports.import_match_core import ACTIVE, NEWEST_COLUMNS, RELEASE_JOINS, Match, newest_first, release_params
 
 # TCG Live's Energy symbols.
 SYMBOLS = {'G': 'Grass', 'R': 'Fire', 'W': 'Water', 'L': 'Lightning', 'P': 'Psychic', 'F': 'Fighting', 'D': 'Darkness',

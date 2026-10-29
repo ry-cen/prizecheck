@@ -51,7 +51,7 @@ from . import decklist_text
 # One import holds at most 5 MiB and 10,000 source rows (ADR 0014), counted after unzipping. 5 MiB is the start
 # route's limit in the gateway (auth/src/server.ts IMPORT_ROUTES) and nginx's "5m" (deploy/docker/nginx.conf).
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
-MAX_IMPORT_ROWS = 10_000
+from app.core.imports.collection_draft import MAX_IMPORT_ROWS
 
 # The detected source, stored as collection_import.source. Never shown and never in a response.
 TCGPLAYER_APP = "tcgplayer_app"

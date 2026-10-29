@@ -27,7 +27,7 @@ from uuid import UUID
 
 from ..catalog import set_codes
 from .decklist_text import CardLine
-from app.import_match_core import Match, at_code_and_number
+from app.games.pokemon.imports.import_match_core import Match, at_code_and_number
 
 PATH = Path(__file__).with_name('import_aliases.tsv')
 # A pasted set token (decklist_text's grammar, without the Energy pseudo-set).
