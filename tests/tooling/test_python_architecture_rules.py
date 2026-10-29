@@ -31,6 +31,8 @@ def run(rule, files, **data):
     """The failures of one rule on a fixture checkout from {repository path: source}."""
     with tempfile.TemporaryDirectory() as directory:
         for relative, source in {'api/app/__init__.py': '', **files}.items():
+            if source is None:
+                continue
             path = Path(directory) / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(source)
@@ -62,6 +64,11 @@ class ImportersTest(unittest.TestCase):
             files = {**self.CLEAN, 'api/app/export.py': source}
             self.assertEqual(run('set-codes-importers', files, **self.DATA),
                              ['set-codes-importers: unexpected app.export'], source)
+
+    def test_an_import_of_a_submodule_counts_once_the_target_is_a_package(self):
+        files = {**self.CLEAN, 'api/app/set_codes.py': None, 'api/app/set_codes/__init__.py': 'from . import table',
+                 'api/app/set_codes/table.py': '', 'api/app/export.py': 'from .set_codes import table'}
+        self.assertEqual(run('set-codes-importers', files, **self.DATA), ['set-codes-importers: unexpected app.export'])
 
     def test_a_missing_importer_fails_because_the_list_is_exact(self):
         files = {**self.CLEAN, 'api/app/display.py': ''}
@@ -398,6 +405,15 @@ class EngineTest(unittest.TestCase):
             failures = boundaries.architecture(directory, rules(invented={}))[1]
         self.assertIn('invented: no such rule in the checker', failures)
         self.assertIn('set-codes-importers: the rule is not configured in python_architecture_rules.py', failures)
+
+    def test_a_module_file_beside_a_package_of_the_same_name_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / 'api/app'
+            (app / 'x').mkdir(parents=True)
+            for path in ('__init__.py', 'x.py', 'x/__init__.py'):
+                (app / path).write_text('')
+            failures = boundaries.architecture(directory, rules())[1]
+        self.assertIn('modules: two files name module app.x', failures)
 
     def test_main_prints_a_failure_as_failed_rule_detail(self):
         original = boundaries.architecture

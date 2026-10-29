@@ -270,6 +270,10 @@ class Tree:
         self.root = Path(root)
         self.app = self.root / 'api/app'
         self.names = modules(self.app)
+        # x.py beside x/__init__.py both name app.x; `names` keeps one, so the rules would not see the other's text.
+        self.duplicates = sorted(name for name in self.names
+                                 if (self.app.parent.joinpath(*name.split('.')).with_suffix('.py')).is_file()
+                                 and (self.app.parent.joinpath(*name.split('.')) / '__init__.py').is_file())
         self.text = {name: path.read_text(encoding='utf-8') for name, (path, _) in self.names.items()}
         self._imports = {}
 
@@ -277,9 +281,11 @@ class Tree:
         """The modules with an import that resolves to `target` (or a name under it)."""
         found = set()
         for name, (path, package) in self.names.items():
+            if name == target or name.startswith(f'{target}.'):
+                continue
             if name not in self._imports:
                 self._imports[name] = imports(name, path, package, self.names)
-            if any(module == target for _, module in self._imports[name]):
+            if any(module == target or module.startswith(f'{target}.') for _, module in self._imports[name]):
                 found.add(name)
         return found
 
@@ -436,6 +442,7 @@ def architecture(root, rules):
     for name in sorted(set(rules.RULES) - set(ARCHITECTURE_RULES)):
         failures.append(f'{name}: no such rule in the checker')
     tree = Tree(root)
+    failures.extend(f'modules: two files name module {name}' for name in tree.duplicates)
     for name in ARCHITECTURE_RULES:
         if name not in rules.RULES:
             failures.append(f'{name}: the rule is not configured in {ARCHITECTURE.name}')
