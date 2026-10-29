@@ -56,10 +56,10 @@ Backoff schedule: failure k waits `min(60 * 2^(k-1), 900)` s times a jitter in 0
 
 `api/tests/catalog_process_fixture/price_fixture.py`, loaded from `sitecustomize`:
 
-- `PRICE_FIXTURE_SOURCE_ORIGIN` redirects `app.price_source.ORIGIN` to a loopback origin.
+- `PRICE_FIXTURE_SOURCE_ORIGIN` redirects `app.games.pokemon.prices.price_source.ORIGIN` to a loopback origin.
 - `PRICE_FIXTURE_LAUNCHER=record|fail` (with `PRICE_FIXTURE_LAUNCH_LOG`) replaces `price_launcher.spawn`.
 - A process that asks to import `app.price_runner` while `PRICE_RUNNER_LOCK_DIR` is set refuses non-loopback connects.
-- Launched runners never see `PRICE_FIXTURE_*` (the launcher's allowlist drops them), so a test writes the loopback origin to `$PRICE_RUNNER_LOCK_DIR/fixture-source-origin`. The fixture reads it when `app.price_source` is imported; the environment variable wins, and a non-loopback value fails the import. Runner requests then carry `x-fixture-slot`, `x-fixture-pid` and `x-fixture-pgid`.
+- Launched runners never see `PRICE_FIXTURE_*` (the launcher's allowlist drops them), so a test writes the loopback origin to `$PRICE_RUNNER_LOCK_DIR/fixture-source-origin`. The fixture reads it when `app.games.pokemon.prices.price_source` is imported; the environment variable wins, and a non-loopback value fails the import. Runner requests then carry `x-fixture-slot`, `x-fixture-pid` and `x-fixture-pgid`.
 - In a runner process the fixture also logs every connect destination to `connects.log` and registers `runner-pids/<pid>` (`supervisor`, and `worker` for each fork). Tests count, stop and kill only those pids; nothing searches the host's process table.
 - `api/tests/test_price_runner.py` adds a test-only time scale: its sitecustomize reads `scaled_contract` from `$PRICE_RUNNER_LOCK_DIR/fake-source.json` and overrides `HARD_STOP_MS`, `LEASE_TTL_MS` or `LEASE_RENEW_MS` in `app.quote_contract` for the runners that test launches. The hard-stop scenario uses an 8 s stop and the SIGSTOP scenario a 2 s lease renewed every 0.5 s; both assert that the production constants are still 65 s, 10 s and 3 s. `IDLE_S` is a default argument and is not scaled.
 
@@ -94,7 +94,7 @@ Runner lifecycle, source client and recovery table. See the ticket plans.
 
 ## Runner (ticket 08-B)
 
-Code: `api/app/price_runner.py` (supervisor and worker), `api/app/price_launcher.py` (spawn, reclaim, shared cleanup), `scripts/price_runners.py` (operator). Design rationale: [ADR 0008](adr/0008-price-runner-liveness.md). The runner never imports psycopg, `app.main`, `app.prices` or `app.public_catalog`, and its environment never contains `DATABASE_URL`, `INTERNAL_AUTH_SECRET` or `BETTER_AUTH_SECRET`.
+Code: `api/app/price_runner.py` (supervisor and worker), `api/app/price_launcher.py` (spawn, reclaim, shared cleanup), `scripts/price_runners.py` (operator). Design rationale: [ADR 0008](adr/0008-price-runner-liveness.md). The runner never imports psycopg, `app.main`, `app.games.pokemon.prices.prices` or `app.games.pokemon.catalog.public_catalog`, and its environment never contains `DATABASE_URL`, `INTERNAL_AUTH_SECRET` or `BETTER_AUTH_SECRET`.
 
 ### Launch
 
@@ -138,7 +138,7 @@ Follow-up (re-review note 5, not changed): while a slot stays `uncertain`, every
 
 ### Source seam
 
-The worker imports `app.price_source` and `app.tcgdex_record` lazily. It calls `price_source.fetch(card, may_retry)` (`may_retry` spends a bucket token in a small scheduler CAS) and maps `Fetched.status` 429, or 503 with a valid `retry_after`, to a source-wide backoff; every failure also writes the per-Edition backoff. `tcgdex_record.select_quote(record, descriptor, lookup, product_id)` returns `Quote`, `Absent` or `Failure(reason)`, each mapped to the per-Edition write above. The catalog `product_id` is an integer and the `work:` copy is text; they are compared as text.
+The worker imports `app.games.pokemon.prices.price_source` and `app.games.pokemon.prices.tcgdex_record` lazily. It calls `price_source.fetch(card, may_retry)` (`may_retry` spends a bucket token in a small scheduler CAS) and maps `Fetched.status` 429, or 503 with a valid `retry_after`, to a source-wide backoff; every failure also writes the per-Edition backoff. `tcgdex_record.select_quote(record, descriptor, lookup, product_id)` returns `Quote`, `Absent` or `Failure(reason)`, each mapped to the per-Edition write above. The catalog `product_id` is an integer and the `work:` copy is text; they are compared as text.
 
 ### Recovery table
 

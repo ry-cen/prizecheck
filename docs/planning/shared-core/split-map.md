@@ -1012,3 +1012,30 @@ and only they leave `api/tests`. Design-brief **WP-B3** does the port, right aft
 `FOR_TRADE_CALLERS`, `REACH_CALLERS` and `MESSAGE_CALLERS`, together with `DISCOVERY_CALLERS`. The owner did not name
 them, and no module they list moves Now (they are all `social/*` or `trade_list.py`). A Later step ports them, the
 same way as WP-B3, before `social/` and `trade_list` move.
+
+## 10. Notes as built (dated)
+
+These notes record where the work differs from, or settles, the map above. The sections above stay as written on
+2026-10-29.
+
+**2026-10-29**
+
+- **`art_url` stays in `games/pokemon/art/urls.py`.** Section 1A planned it for `core/art/urls.py`. The function embeds
+  the TCGdex source rule, so it is not game-free. The owner chose this (option A). The rest of `art_urls` goes to core
+  as planned, and the allowed hosts are passed in.
+- **The root `app.quote_contract` shim binds the Pokémon source and currency** (decision Q1), so a caller of the old
+  path gets `source='tcgdex'` and `'USD'` without passing them. Core's quote contract takes both as keyword-only
+  parameters with no default (D11 rule 3).
+- **`trade_value` lives in `games/pokemon/trading/`.** The whole file moves with its router, as section 1A says. The
+  `trading` folder is new in the layout of design-brief 3.4.
+- **`catalog_targets`, `public_catalog` and `public_prices` gained root alias shims** at `app.<name>`. The unedited
+  Playwright specs import them by their old names.
+- **Two temporary allow-list edges** stay in `scripts/python_boundary_allowlist.txt` until WP-D2 removes them:
+  `app.discovery -> published_cost` and `app.publications -> games/pokemon/art/urls`.
+- **Test-line edits.** The owner approved targeted edits to test lines for the WP-S2 art store and runner split. This
+  goes beyond the import-lines-only rule of section 6.
+- **FastAPI is pinned to 0.162.0** in `api/requirements.txt` on this branch until the merge (design-brief section 4,
+  "Before the branch merges to dev").
+- **Docs.** [ADR 0023](../../adr/0023-split-core-and-games-by-composition.md) records the split, and
+  `docs/agents/verification.md` describes the boundary checker. Prose elsewhere in `docs/` names the moved paths,
+  except for modules that WP-S3, WP-D1 and WP-D2 had not moved yet.

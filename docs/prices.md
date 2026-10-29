@@ -125,7 +125,7 @@ Age bands use `result.checked_at` and the module wall clock: under 1 h nothing h
 
 ## Deck cost (ticket 09)
 
-`GET /api/decks/{deck_id}/cost` (`app.deck_cost`) answers Estimated Deck Cost and Pricing Coverage for every copy of one private Deck. It is budgeted like the Edition route (same gateway signing, same three seconds from receipt) and takes no body and no options; query parameters and cache headers change nothing.
+`GET /api/decks/{deck_id}/cost` (`app.games.pokemon.decks.cost`) answers Estimated Deck Cost and Pricing Coverage for every copy of one private Deck. It is budgeted like the Edition route (same gateway signing, same three seconds from receipt) and takes no body and no options; query parameters and cache headers change nothing.
 
 One access:
 
@@ -164,7 +164,7 @@ The client (`web/src/DeckCost.tsx`) asks once per Deck and inventory revision, g
 
 ## Want List cost and Buy on TCGplayer (decklist import #210)
 
-`GET /api/want-list/cost` (`app.want_list_cost`, optional `deck=<id>`) prices what `GET /api/want-list` shows for the same scope. It is a separate request so the page draws before prices arrive, and it is budgeted like Deck cost (same gateway signing, same three seconds from receipt). The budget signs the path, not the query: `deck` is the caller's own scope, and a Deck that isn't one of theirs (or isn't a Deck) is 404 `DECK_NOT_FOUND` once the capture runs.
+`GET /api/want-list/cost` (`app.games.pokemon.decks.want_list_cost`, optional `deck=<id>`) prices what `GET /api/want-list` shows for the same scope. It is a separate request so the page draws before prices arrive, and it is budgeted like Deck cost (same gateway signing, same three seconds from receipt). The budget signs the path, not the query: `deck` is the caller's own scope, and a Deck that isn't one of theirs (or isn't a Deck) is 404 `DECK_NOT_FOUND` once the capture runs.
 
 One access:
 
@@ -174,13 +174,13 @@ One access:
 
 The answer names `want_list_counting`, `settings_revision`, `owner_revision` and `deck_lists_digest`, exactly as `GET /api/want-list` does (each section also carries its `deck_list_revision`). `deck_lists_digest` covers every Deck's id and Deck List revision, whatever the scope, because a Deck List edit moves neither other revision and an older Deck's list changes a newer Deck's need under Every Deck built at once. The client shows a cost only for the Want List answer with the same scope and those four values; when nothing was captured (an exhausted budget or a failed capture), all four are null, `total` is `incomplete` with the reason, and `sections` and `combined` are empty.
 
-`GET /api/want-list/exports/tcgplayer` (`app.want_list_mass_entry`, optional `deck=<id>`) is the TCGplayer Mass Entry export of the same copies: the combined total with no `deck`, that Deck's needs with one. It reuses the private Deck export's rows, formatter and view (`deck_mass_entry.input_rows`, `formatted`, `view_fields`), so the link, text, coverage reason and less-specific rows are the Deck export's, and a scoped export equals that Deck's Buy missing. It names the same four values as the cost. `.../tcgplayer.txt` takes the required pins `owner_revision` (409 `INVENTORY_CHANGED`), `deck_lists` (the digest, 409 `DECK_LIST_CHANGED`) and `settings_revision` (409 `SETTINGS_CHANGED`), and answers 422 `NOTHING_NOT_OWNED` when nothing is needed. Neither export route reads a price or carries a budget, so a download is never cut at three seconds.
+`GET /api/want-list/exports/tcgplayer` (`app.games.pokemon.exports.want_list_mass_entry`, optional `deck=<id>`) is the TCGplayer Mass Entry export of the same copies: the combined total with no `deck`, that Deck's needs with one. It reuses the private Deck export's rows, formatter and view (`deck_mass_entry.input_rows`, `formatted`, `view_fields`), so the link, text, coverage reason and less-specific rows are the Deck export's, and a scoped export equals that Deck's Buy missing. It names the same four values as the cost. `.../tcgplayer.txt` takes the required pins `owner_revision` (409 `INVENTORY_CHANGED`), `deck_lists` (the digest, 409 `DECK_LIST_CHANGED`) and `settings_revision` (409 `SETTINGS_CHANGED`), and answers 422 `NOTHING_NOT_OWNED` when nothing is needed. Neither export route reads a price or carries a budget, so a download is never cut at three seconds.
 
 The Decks index reads no Want List: each Deck card shows its own cost read (`cost_to_complete`), and the Deck page's "Want List" button opens the Want List scoped to that Deck.
 
 ## Trade value (trading #277)
 
-`POST /api/trades/value` (`app.trade_value`) estimates each side of a Trade Proposal while it is built in the proposal builder, and of a received proposal still waiting for an answer. The body is `{lines: [{side: 'you_give'|'you_get', edition_id, quantity}]}`, read as a declared request model with extra fields refused (so cash can never be sent to it). It is budgeted like Deck cost (same gateway signing, same three seconds from receipt), and the caller check and `trusted_budget` answer 401 before the body is validated or any price is read. The gateway's 16 KiB budgeted-body limit bounds the size.
+`POST /api/trades/value` (`app.games.pokemon.trading.trade_value`) estimates each side of a Trade Proposal while it is built in the proposal builder, and of a received proposal still waiting for an answer. The body is `{lines: [{side: 'you_give'|'you_get', edition_id, quantity}]}`, read as a declared request model with extra fields refused (so cash can never be sent to it). It is budgeted like Deck cost (same gateway signing, same three seconds from receipt), and the caller check and `trusted_budget` answer 401 before the body is validated or any price is read. The gateway's 16 KiB budgeted-body limit bounds the size.
 
 Refusals, in order: 422 `INVALID_QUANTITY`, 422 `DUPLICATE_EDITION` for a repeat on one side, 422 `TOO_MANY_LINES` for more than 100 lines in all. One Edition on both sides is allowed and read once: a single `private_edition_quotes` call covers every distinct Edition, and each side is folded with `deck_cost.summarize`.
 
@@ -188,7 +188,7 @@ Each side answers only `status` (`priced`, `empty`, `no_quotes`, `incomplete`), 
 
 ## Published Deck cost (ticket 12)
 
-`GET /api/public/decks/{token}/versions/{version}/cost` (`app.published_cost`) answers Estimated Deck Cost and Pricing Coverage for the active frozen snapshot of one Published Deck. It is budgeted (same gateway signing and three seconds from receipt) and anonymous: the gateway classifies every `/api/public/` path as anonymous, never looks up a session for it and signs the budget with `anon:<keyed digest>`. The API refuses any other caller (a `user:` caller or a malformed `anon:` caller is 401).
+`GET /api/public/decks/{token}/versions/{version}/cost` (`app.games.pokemon.publications.published_cost`) answers Estimated Deck Cost and Pricing Coverage for the active frozen snapshot of one Published Deck. It is budgeted (same gateway signing and three seconds from receipt) and anonymous: the gateway classifies every `/api/public/` path as anonymous, never looks up a session for it and signs the budget with `anon:<keyed digest>`. The API refuses any other caller (a `user:` caller or a malformed `anon:` caller is 401).
 
 The only inputs are the token and the version in the path. The version sits in the path because the budget signature binds the path and not the query. Any query string, any non-zero `content-length` and any `transfer-encoding` header is 422 `INVALID_REQUEST`; the token must match the publication token syntax and the version `[1-9][0-9]{0,17}`, otherwise 404. Rows, references and quantities are derived server-side from the snapshot (`app.public_deck`); the request cannot name an Edition or a quantity.
 
@@ -226,7 +226,7 @@ Launch gate. Published Deck prices are behind the same physical Edition and quot
 
 ## Stored reads on write paths (Deck Lists 06)
 
-`prices.stored_edition_quotes` reads what the cache holds now, for a write that chooses by price but displays none: adding a card to a Deck List by its Card Printing (`POST /api/decks/{deck_id}/deck-list/printings`, `app.deck_list_printing`). It labels and validates rows exactly as the Edition route does, but it never admits a refresh, waits for a runner or writes a record, whatever a row's check age: ADR 0006 counts only displayed prices and complete Deck costs as accesses. The route carries no gateway budget. The read bounds its own PostgreSQL and store work to `STORED_READ_SECONDS` (1 s) and runs before the command takes the owner lock, so no inventory lock is held while the store is read. It returns `None` when the reviewed state or the store could not be read; the command then answers 503 `PRICES_UNAVAILABLE` and writes nothing.
+`prices.stored_edition_quotes` reads what the cache holds now, for a write that chooses by price but displays none: adding a card to a Deck List by its Card Printing (`POST /api/decks/{deck_id}/deck-list/printings`, `app.games.pokemon.decks.printing`). It labels and validates rows exactly as the Edition route does, but it never admits a refresh, waits for a runner or writes a record, whatever a row's check age: ADR 0006 counts only displayed prices and complete Deck costs as accesses. The route carries no gateway budget. The read bounds its own PostgreSQL and store work to `STORED_READ_SECONDS` (1 s) and runs before the command takes the owner lock, so no inventory lock is held while the store is read. It returns `None` when the reviewed state or the store could not be read; the command then answers 503 `PRICES_UNAVAILABLE` and writes nothing.
 
 Every `status: quote` row is a price, whatever its provider or check age; everything else is unpriced. The command chooses the lowest amount (exact decimal comparison; ties go to catalog order, `descriptor_key, id`), or the first Edition in catalog order when none is priced, and says which in `chosen_by` (`cheapest_price` or `catalog_order`). The line stores only the Edition.
 

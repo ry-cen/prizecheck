@@ -163,7 +163,7 @@ Back up the `records` directory with the rest of the projection directory. A cop
 
 ## Public catalog records: reviewed state, outbox and delivery
 
-`api/app/public_catalog.py` is the only writer of the `catalog:printing:<ref>`, `catalog:format:<ref>`, `catalog:edition:<ref>` and `quarantine:edition:<ref>` records. PostgreSQL is authoritative; the store is a derived, rebuildable copy. Values are exact allowlists. No internal UUID, source ID, owner, reviewer, evidence URL, free-text reason, report, reporter, rejected fingerprint, source candidate or quote amount is ever published.
+`api/app/games/pokemon/catalog/public_catalog.py` is the only writer of the `catalog:printing:<ref>`, `catalog:format:<ref>`, `catalog:edition:<ref>` and `quarantine:edition:<ref>` records. PostgreSQL is authoritative; the store is a derived, rebuildable copy. Values are exact allowlists. No internal UUID, source ID, owner, reviewer, evidence URL, free-text reason, report, reporter, rejected fingerprint, source candidate or quote amount is ever published.
 
 ```
 catalog:printing:<ref>   {printing_ref, name, set_id, set_name, collector_number, image_url,
