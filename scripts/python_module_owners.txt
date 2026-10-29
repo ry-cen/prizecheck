@@ -62,7 +62,6 @@ app.social.reports core
 app.social.trade_matches mixed
 app.social.trades core
 app.swap_hints mixed
-app.trade_inventory core
 app.trade_list core
 app.trade_picks core
 app.trade_wants mixed
@@ -82,3 +81,4 @@ app.games.pokemon.imports.import_publication pokemon
 app.games.pokemon.imports.import_replace pokemon
 app.games.pokemon.scanner.scanner_save pokemon
 app.games.pokemon.catalog.missing_cards pokemon
+app.games.pokemon.trading.trade_inventory pokemon

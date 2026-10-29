@@ -76,24 +76,24 @@ import psycopg
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from .deck_deletion import unsorted_leaf
-from .decks import advance_deck_list, write_deck_list
-from .location_tree import error, refuse
-from .db import connect
-from .identity import verified_user
-from .inventory_core import add_in, is_deck, leaf, quantity, take_out
-from .social.conversations import new_conversation_lock, open_conversation
-from .social.discovery import reach_one, require_not_suspended, trader_user
-from .social.friend_reads import card_facts
-from .social.friend_copies import friend_trade_copies
-from .social.owners import NOW, advance_revision, begin_owner_command, lock_owners
-from .social.trades import (TRADES, TradeStep, TradeView, allowed, close_trade, other_side, record_trade_update, role_of,
+from app.deck_deletion import unsorted_leaf
+from app.decks import advance_deck_list, write_deck_list
+from app.location_tree import error, refuse
+from app.db import connect
+from app.identity import verified_user
+from app.inventory_core import add_in, is_deck, leaf, quantity, take_out
+from app.social.conversations import new_conversation_lock, open_conversation
+from app.social.discovery import reach_one, require_not_suspended, trader_user
+from app.social.friend_reads import card_facts
+from app.social.friend_copies import friend_trade_copies
+from app.social.owners import NOW, advance_revision, begin_owner_command, lock_owners
+from app.social.trades import (TRADES, TradeStep, TradeView, allowed, close_trade, other_side, record_trade_update, role_of,
                             run_trade_step, side_gives, store_trade, write_trade)
-from .trade_list import own_trade_copies
-from .trade_picks import (insert_trade_picks, make_trade_picks, replacement_trade_picks, stale_pick_trades,
+from app.trade_list import own_trade_copies
+from app.trade_picks import (insert_trade_picks, make_trade_picks, replacement_trade_picks, stale_pick_trades,
                           trade_pick_shortfalls)
-from .trade_wants import lower_trade_wants
-from .want_list import DeckSwitch, deck_switch_candidates, edition_needs
+from app.trade_wants import lower_trade_wants
+from app.want_list import DeckSwitch, deck_switch_candidates, edition_needs
 
 router = APIRouter(prefix='/api/trades', tags=['trades'])
 

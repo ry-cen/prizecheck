@@ -133,7 +133,7 @@ ALLOWED_IMPORTS = {
         ('app.social.trades', 'TRADES'), ('app.social.trades', 'TradeView'), ('app.social.trades', 'trade_facts'), ('app.social.trades', 'trade_views'),
         ('app.social.trades', 'waiting_trade_step'), ('app.social.trades', 'trade_waiting_since')},
     # Trade Proposals and Trades both sides read (trading #270), as the Loans read theirs: card facts, the owner lock and
-    # the Loans' revision helper. Steps that touch a collector's own inventory are in app.trade_inventory. Which of the
+    # the Loans' revision helper. Steps that touch a collector's own inventory are in app.games.pokemon.trading.trade_inventory. Which of the
     # reader's Trades have a pick out of date, so Needs you and the inbox list them (``trade_picks.stale_pick_trades``,
     # #273): a set of Trade ids from the reader's own Holdings, never a Location; the read stays in app.trade_picks. The
     # Friends set is allowed ahead of Counter (#278), as the resolution lists it; ending a friendship's Trades (#274)
@@ -220,6 +220,6 @@ RULES = {
     # Only the choke point may write a read of several collectors' inventory in one statement (ADR 0015). A subset.
     'several-owners-readers': {'readers': {'app.social.friend_copies'}},
     # The trade steps no longer ask the Friends set: they take the ids they are given.
-    'trade-steps-no-friend-ids': {'module': 'app.trade_inventory', 'name': 'friend_ids'},
+    'trade-steps-no-friend-ids': {'module': 'app.games.pokemon.trading.trade_inventory', 'name': 'friend_ids'},
     'social-area-complete': {'directory': 'social'},
 }

@@ -48,7 +48,7 @@ from app.social.profile import router as profile_router, public_router as public
 from app.social.reports import router as reports_router, admin_router as trade_reports_admin_router
 from app.social.trade_matches import router as trade_matches_router
 from app.social.trades import router as trades_router, settings_router as trade_settings_router
-from app.trade_inventory import router as trade_inventory_router
+from app.games.pokemon.trading.trade_inventory import router as trade_inventory_router
 from app.trade_list import router as trade_list_router
 from app.games.pokemon.trading.trade_value import router as trade_value_router
 from app.trade_wants import router as trade_wants_router
