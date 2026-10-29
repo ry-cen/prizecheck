@@ -555,7 +555,7 @@ test.describe("desktop", () => {
     await expect(bar(page)).toContainText("1 copy selected");
   });
 
-  test("the inspector keeps its space while idle, previews on hover only without a selection, and shows the last clicked selected card", async ({
+  test("hover art leaves the inspector idle, and selection shows the last clicked selected card", async ({
     page,
   }) => {
     promoteCatalog({ "card-1": "Insp Pikachu", "card-2": "Insp Zubat" });
@@ -574,14 +574,13 @@ test.describe("desktop", () => {
     // Order: Pikachu·Binder 2 ×2, Pikachu·Box, Zubat·Box.
     await expect(tiles(page)).toHaveCount(4);
     const panel = inspector(page);
-    const pikachuReads: string[] = [];
+    const distributionReads: string[] = [];
     page.on("request", (request) => {
       if (
         request.method() === "GET" &&
-        new URL(request.url()).pathname ===
-          `/api/collection/editions/${pikachu}`
+        new URL(request.url()).pathname.startsWith("/api/collection/editions/")
       )
-        pikachuReads.push(request.url());
+        distributionReads.push(request.url());
     });
 
     // Idle: the column is there, at the reserved width, with only its placeholder.
@@ -589,65 +588,13 @@ test.describe("desktop", () => {
     expect((await box(panel)).width).toBeCloseTo(310, 0);
     await expect(panel).toHaveText("Select a card to see its details.");
 
-    // Hover previews while nothing is selected.
+    // Mouse hover previews art without inspecting the card or asking for its distribution.
     await tiles(page).nth(3).hover();
-    await expect(
-      panel.getByRole("heading", { name: "Insp Zubat" })
-    ).toBeVisible();
-    await expect(panel).toContainText("fixture · 2");
-    await expect(panel).toContainText(`${shelf} / Box`);
-    await expect(panel).toContainText("1 copy here");
-    await expect(panel).toContainText("1 copy owned");
-    await tiles(page).nth(0).hover();
-    await expect(
-      panel.getByRole("heading", { name: "Insp Pikachu" })
-    ).toBeVisible();
-    await expect(panel).toContainText(`${shelf} / Binder 2`);
-    await expect(panel).toContainText("2 copies here");
-    await expect(panel).toContainText("3 copies owned");
-    await page.mouse.move(5, 5);
+    await expect(page.locator("[data-hover-art]")).toBeVisible();
     await expect(panel).toHaveText("Select a card to see its details.");
-
-    // Totals already read are kept while the inspector empties between tiles: coming back to a
-    // card shows its total at once and asks the server nothing more.
-    expect(pikachuReads).toHaveLength(1);
-    await tiles(page).nth(0).hover();
-    await expect(panel).toContainText("3 copies owned");
-    await tiles(page).nth(3).hover();
-    await expect(panel).toContainText("1 copy owned");
-    // From here, record whether "Counting copies owned…" ever appears in the inspector.
-    await panel.evaluate((element) => {
-      const win = window as unknown as { sawCounting: boolean };
-      win.sawCounting = false;
-      const seen = (text?: string | null) => {
-        if (text?.includes("Counting copies owned")) win.sawCounting = true;
-      };
-      new MutationObserver((records) => {
-        for (const record of records) {
-          seen(record.oldValue);
-          record.addedNodes.forEach((node) => seen(node.textContent));
-        }
-        seen(element.textContent);
-      }).observe(element, {
-        subtree: true,
-        childList: true,
-        characterData: true,
-        characterDataOldValue: true,
-      });
-    });
-    await tiles(page).nth(0).hover();
-    await expect(
-      panel.getByRole("heading", { name: "Insp Pikachu" })
-    ).toBeVisible();
-    await expect(panel).toContainText("3 copies owned");
-    expect(
-      await page.evaluate(
-        () => (window as unknown as { sawCounting: boolean }).sawCounting
-      )
-    ).toBe(false);
-    expect(pikachuReads).toHaveLength(1);
     await page.mouse.move(5, 5);
-    await expect(panel).toHaveText("Select a card to see its details.");
+    await expect(page.locator("[data-hover-art]")).toHaveCount(0);
+    expect(distributionReads).toHaveLength(0);
 
     // A selection takes precedence over hover and shows the last clicked selected card.
     await tiles(page).nth(2).click();
@@ -684,7 +631,7 @@ test.describe("desktop", () => {
     await nav.getByRole("button", { name: "Binder 2", exact: true }).click();
     await expect(tiles(page)).toHaveCount(2);
     await expect(panel).toHaveText("Select a card to see its details.");
-    await tiles(page).nth(1).hover();
+    await tiles(page).nth(1).click();
     await expect(panel).toContainText("2 copies here");
     await expect(panel).toContainText("3 copies owned");
   });

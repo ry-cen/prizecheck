@@ -44,7 +44,7 @@ type Options = {
 export type SelectionState = {
   selected: Selection;
   summary: SelectionSummary;
-  /** The inspector's card: with a selection, the last clicked selected Holding; otherwise the hovered one. */
+  /** The inspector's card: the last clicked selected Holding, or nothing without a selection. */
   inspected: Inspected | null;
   /** The mobile details sheet's card, or null while it is closed. */
   details: Inspected | null;
@@ -52,7 +52,6 @@ export type SelectionState = {
   setSelectMode: (on: boolean) => void;
   clear: () => void;
   activate: (tile: TileRef, gesture: TileGesture) => void;
-  hover: (tile: TileRef | null) => void;
   marquee: (event: MarqueeEvent) => void;
   /** Opens the details sheet for the inspected card (the mobile strip's Details). */
   openDetails: () => void;
@@ -72,7 +71,6 @@ export function useSelection({
   const [selected, setSelected] = useState<Selection>(EMPTY_SELECTION);
   // The last clicked Holding that is still selected.
   const [focus, setFocus] = useState<Inspected | null>(null);
-  const [hovered, setHovered] = useState<Inspected | null>(null);
   const [details, setDetails] = useState<Inspected | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   // Shift-click ranges start here. A Holding key and ordinal, never a display index, so a sort keeps it valid.
@@ -173,14 +171,9 @@ export function useSelection({
     [commit]
   );
 
-  const hover = useCallback((tile: TileRef | null) => {
-    setHovered(tile ? { holding: tile.holding, ordinal: tile.ordinal } : null);
-  }, []);
-
   // Changing what the gallery lists (Location, search, filters) clears the selection; sorting doesn't.
   useEffect(() => {
     clear();
-    setHovered(null);
     setDetails(null);
   }, [scope, clear]);
 
@@ -227,13 +220,12 @@ export function useSelection({
   return {
     selected,
     summary,
-    inspected: fresh(selected.size ? focus : hovered),
+    inspected: fresh(selected.size ? focus : null),
     details: fresh(details),
     selectMode,
     setSelectMode,
     clear,
     activate,
-    hover,
     marquee,
     openDetails,
     closeDetails,

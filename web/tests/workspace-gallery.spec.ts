@@ -209,9 +209,66 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
   await expect(copy).not.toContainText("Fixture Set");
   await expect(copy).toHaveAccessibleName(/Fixture Set 2/);
 
-  // The inspector's preview shows the same code and number, with no set name.
-  await copy.hover();
+  // Once the tile price settles, selection reuses it synchronously: the inspector never shows the checking
+  // label and asks for no price.
+  const priced: string[][] = [];
+  await page.route("**/api/prices/editions", async (route) => {
+    const ids: string[] = route.request().postDataJSON().edition_ids;
+    priced.push(ids);
+    await route.fulfill({
+      json: {
+        withheld: false,
+        prices: ids.map((edition_id) => ({
+          edition_id,
+          status: "quote",
+          reason: null,
+          amount: "1.23",
+          display_amount: "$1.23",
+          currency: "USD",
+          provider_updated_at: null,
+          checked_at: null,
+          age: "known",
+          stale: false,
+          refresh: null,
+          refresh_failed_at: null,
+        })),
+      },
+    });
+  });
+  const prices = page.getByRole("button", { name: "Prices", exact: true });
+  await prices.click();
+  await expect(copy.locator(".edition-price")).toHaveText("$1.23");
+  const askedBeforeClick = priced.flat();
+  expect(askedBeforeClick).toContain(pikachu);
+  await page.evaluate(() => {
+    const seen = window as unknown as { sawChecking: boolean };
+    seen.sawChecking = false;
+    const check = () => {
+      if (
+        document.querySelector(
+          '[aria-label="Card details"] .edition-price[data-price-status="checking"]'
+        )
+      )
+        seen.sawChecking = true;
+    };
+    new MutationObserver(check).observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["data-price-status"],
+    });
+  });
+  // The selected card's inspector shows the same code and number, with no set name.
+  await copy.click();
   const details = page.getByRole("complementary", { name: "Card details" });
+  await expect(details.locator(".edition-price")).toHaveText("$1.23");
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { sawChecking: boolean }).sawChecking
+    )
+  ).toBe(false);
+  expect(priced.flat()).toEqual(askedBeforeClick);
+  await page.unroute("**/api/prices/editions");
   await expect(details).toContainText("fixture · 2");
   await expect(details).not.toContainText("Fixture Set");
   await expect(copy).toContainText("Binder 2");

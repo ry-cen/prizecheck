@@ -8,6 +8,8 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { HoverArt } from "./HoverArt";
+import { MOBILE_QUERY } from "./media";
 import { EditionPrice } from "../EditionPrice";
 import { Button } from "../ui/Button";
 import { CopyTile } from "../ui/CopyTile";
@@ -50,7 +52,6 @@ type Props = {
   selected: Selection;
   selectMode: boolean;
   onTile: (tile: TileRef, gesture: TileGesture) => void;
-  onHover: (tile: TileRef | null) => void;
   onMarquee: (event: MarqueeEvent) => void;
   /** Ticket 107: a press on a tile that may become a drag (see useTileDrag). Must be stable. */
   onTilePointerDown?: (
@@ -87,7 +88,6 @@ export function Gallery({
   selected,
   selectMode,
   onTile,
-  onHover,
   onMarquee,
   onTilePointerDown,
 }: Props) {
@@ -96,6 +96,31 @@ export function Gallery({
   const [width, setWidth] = useState(0);
   const [metrics, setMetrics] = useState<TileMetrics | null>(null);
   const [rows, setRows] = useState({ first: 0, last: -1 });
+
+  const [preview, setPreview] = useState<{
+    small: string;
+    box: DOMRect;
+  } | null>(null);
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoveredTile = useRef<Element | null>(null);
+  const clearPreview = useCallback(() => {
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    previewTimer.current = null;
+    hoveredTile.current = null;
+    setPreview(null);
+  }, []);
+  useEffect(() => {
+    clearPreview();
+    window.addEventListener("scroll", clearPreview, true);
+    window.addEventListener("pointerdown", clearPreview, true);
+    window.addEventListener("resize", clearPreview);
+    return () => {
+      if (previewTimer.current) clearTimeout(previewTimer.current);
+      window.removeEventListener("scroll", clearPreview, true);
+      window.removeEventListener("pointerdown", clearPreview, true);
+      window.removeEventListener("resize", clearPreview);
+    };
+  }, [data.holdings, clearPreview]);
 
   // The grid is always rendered, so its width and the CSS tile variables can be measured.
   useLayoutEffect(() => {
@@ -349,9 +374,8 @@ export function Gallery({
   useEffect(() => {
     if (focused && !focusRenderable) {
       setFocused(null);
-      onHover(null);
     }
-  }, [focused, focusRenderable, onHover]);
+  }, [focused, focusRenderable]);
 
   const renderCell = (index: number, layout: GridLayout) => {
     const rect = tileRect(layout, index);
@@ -381,7 +405,6 @@ export function Gallery({
         index={index}
         selected={isTileSelected(selected, tile.holding.key, tile.ordinal)}
         onTile={onTile}
-        onHover={onHover}
         onPointerDown={onTilePointerDown}
         onFocusTile={focusTile}
         onBlurTile={blurTile}
@@ -422,6 +445,33 @@ export function Gallery({
       className="mt-6 min-h-12 select-none"
       aria-label="Cards"
       aria-busy={loading}
+      onPointerOver={(event) => {
+        if (
+          event.pointerType !== "mouse" ||
+          event.buttons ||
+          window.matchMedia(MOBILE_QUERY).matches
+        )
+          return;
+        const tile = (event.target as Element).closest("[data-gallery-tile]");
+        if (tile === hoveredTile.current) return;
+        clearPreview();
+        if (!tile) return;
+        const image = tile.querySelector("img");
+        if (!image?.src) return;
+        hoveredTile.current = tile;
+        previewTimer.current = setTimeout(() => {
+          previewTimer.current = null;
+          if (tile.isConnected)
+            setPreview({
+              small: image.getAttribute("src")!,
+              box: tile.getBoundingClientRect(),
+            });
+        }, 250);
+      }}
+      onPointerOut={(event) => {
+        if (!hoveredTile.current?.contains(event.relatedTarget as Node | null))
+          clearPreview();
+      }}
       onPointerDown={startMarquee}
       onPointerMove={(event) => {
         const active = marquee.current;
@@ -434,6 +484,7 @@ export function Gallery({
       onPointerCancel={endMarquee}
       onLostPointerCapture={endMarquee}
     >
+      {preview && <HoverArt key={preview.small} {...preview} />}
       {data.error && (
         <div
           className="flex flex-col items-center gap-3 px-3 py-10 text-center text-text-muted"
@@ -499,7 +550,6 @@ type TileProps = {
   index: number;
   selected: boolean;
   onTile: (tile: TileRef, gesture: TileGesture) => void;
-  onHover: (tile: TileRef | null) => void;
   onPointerDown?: (
     tile: TileRef,
     event: React.PointerEvent<HTMLElement>
@@ -528,7 +578,6 @@ const Tile = memo(function Tile({
   index,
   selected,
   onTile,
-  onHover,
   onPointerDown,
   onFocusTile,
   onBlurTile,
@@ -591,19 +640,11 @@ const Tile = memo(function Tile({
         if (event.key === " ") event.preventDefault();
       }}
       onPointerDown={(event) => onPointerDown?.(ref(), event)}
-      onPointerEnter={(event) => {
-        if (event.pointerType === "mouse") onHover(ref());
-      }}
-      onPointerLeave={(event) => {
-        if (event.pointerType === "mouse") onHover(null);
-      }}
       onFocus={() => {
         onFocusTile(index, entry.key);
-        onHover(ref());
       }}
       onBlur={() => {
         onBlurTile(index);
-        onHover(null);
       }}
     />
   );

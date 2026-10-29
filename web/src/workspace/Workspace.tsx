@@ -765,7 +765,6 @@ export function Workspace({
               selected={selection.selected}
               selectMode={selection.selectMode}
               onTile={selection.activate}
-              onHover={selection.hover}
               onMarquee={selection.marquee}
               onTilePointerDown={drag.start}
             />
