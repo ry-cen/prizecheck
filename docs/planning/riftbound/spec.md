@@ -154,10 +154,8 @@ TypeScript.
 The Riftbound catalog and rules below come from secondary sources gathered on 2026-10-29. Each needs confirming against
 the official rules and the chosen data source before it is built.
 
-- **Catalog:**
-  - Sets so far: Origins, Proving Grounds, Spiritforged, Unleashed, Vendetta and Radiance, plus promos.
-  - Cards carry a set code and a collector number. Alternate art, overnumbered and signature cards are distinct
-    printings or Editions, and foil handling is unconfirmed.
+- **Catalog:** see [Catalog from tcgcsv](#catalog-from-tcgcsv). Sets so far: Origins, Proving Grounds, Spiritforged,
+  Unleashed, Vendetta and Radiance, plus promos and bundles.
 - **Deck shape:**
   - 1 Legend and 1 Chosen Champion that shares a tag with the Legend.
   - A 40-card main deck that includes the Champion, with at most 3 copies of a card.
@@ -165,10 +163,43 @@ the official rules and the chosen data source before it is built.
   - A sideboard of 8 or 10 cards (unconfirmed).
   - Main and rune cards must match the Legend's domains.
 - **Formats:** Standard Constructed and 2v2 Constructed, each with a ban list. No rotation is planned before 2028.
-- **Prices:** tcgcsv carries Riftbound as TCGplayer category 89. Alternate art is its own product.
 - **Terms:**
   - `CONTEXT.md` gains Riftbound meanings for Card Identity, Format and Deck List parts before Phase 7.
   - The Pokémon-only terms (Trainer Type, Reprint Group) stay Pokémon's.
+
+### Catalog from tcgcsv
+
+The owner chose tcgcsv as the only Riftbound source for both the catalog and prices (2026-10-29). Riftbound is TCGplayer
+category 89. The checks below were run on the Origins group (`/tcgplayer/89/24344`, 365 products) on 2026-10-29. Phase 5
+repeats them on every group before the importer is built.
+
+- **Cards versus sealed products.** In Origins a card is a product with a `Number` extended-data field, and a sealed
+  product has none. The sealed products are boosters, displays, cases, Champion Decks, promo packs and art bundles, and
+  none of them carries `Number`, `Rarity` or `Card Type`. Tokens are the one exception: `Buff` has a `Card Type` of
+  `Token` but no `Number`, and two `Recruit // Buff` products have a `Number` but no `Card Type`. The importer takes
+  products with a `Number`. It classifies tokens by `Card Type` or by the ` // ` in the name, and leaves the rule for
+  tokens with no number to Phase 5.
+- **Printings.** Each product is one Card Printing. Numbers are `038/298`, `007a/298` for alternate art, and
+  `299*/298` for overnumbered and signature cards. No number repeats within the set. The names carry `(Alternate Art)`,
+  `(Overnumbered)` or `(Signature)`, which are stripped for the card name.
+- **Foils are a price subtype, not a product.** tcgcsv prices each product under the subtype `Normal`, `Foil` or both.
+  In Origins:
+  - Common and Uncommon cards have both.
+  - Rare, Epic and Showcase cards are Foil only.
+  - Twelve products with no rarity, and nine Commons, are Normal only.
+
+  So a Card Edition is a product and a finish, one Edition for each subtype the product is priced in. This matches how
+  the Pokémon side binds subtypes to Editions, and it means foils need no Unspecified Variant.
+- **Card facts in `extendedData`:** `Card Type` (Unit, Champion Unit, Legend, Spell, Signature Spell, Gear,
+  Battlefield, Rune, Token), `Domain`, `Tag` (`;`-separated), `Energy Cost`, `Power Cost`, `Might`, `Rarity`,
+  `Description` and `Flavor Text`. That is enough for the deck shape: Legend, Champion tag, domains and Battlefields.
+- **Images** are TCGplayer CDN URLs (`tcgplayer-cdn.tcgplayer.com/product/<id>_200w.jpg`). Whether to cache them in the
+  art store, and at what size, is a Phase 5 decision.
+- **Not checked yet:**
+  - groups other than Origins
+  - promo and bundle groups whose cards may share numbers with a main set
+  - multi-domain cards (does `Domain` use `;`?)
+  - the `Legacy` group dated 2027-01-29
 
 ## Phases
 
@@ -176,7 +207,7 @@ Each phase leaves both sides working. Phases 1 to 4 change no collector-facing b
 
 | # | Phase | Main work | Done when |
 |---|---|---|---|
-| 0 | Decisions | Answer the open questions: data source, image use, the Riftbound side's name, private fixture storage. | Each answered in this spec. |
+| 0 | Decisions | Answer the data source, name, private fixture storage and foil questions. | Done 2026-10-29 (see [Answered](#answered)). |
 | 1 | Auth database | Move the sign-in tables, the sign-up and rate-limit tables and `owner_binding` to their own database. Decide how the owner check reaches backends. | Sign-in, sign-up gate, owner screens and account deletion pass against the split databases on dev. |
 | 2 | Backend core/game split | Move Pokémon code behind the interfaces into `games/pokemon`. Add `GAME`, import boundary checks, and the migration tracks with a core baseline. | The full API and Playwright suites pass unchanged. The boundary check passes. A core-only database migrates from empty. |
 | 3 | Web core/game split | Move Pokémon-specific web code into `games/pokemon`. Add per-game client base paths, game-first routing and the switcher behind a flag. | The full web suite passes. The bundle check proves no game leaks into core. |
@@ -207,21 +238,28 @@ Rough sizes for one developer with agents:
 - Boundary checks run in `scripts/ci.sh` for Python imports, TypeScript imports and the web bundles.
 - A Playwright journey covers: sign in once, switch sides, open a Riftbound page, switch Riftbound off, and see the 410
   and unavailable notice while the Pokémon side still works.
-- Riftbound tests use fixtures fetched from private storage or generated stand-ins, never committed card images or
-  data.
+- Riftbound tests use fixtures from the private fixtures repository or generated stand-ins, never committed card images
+  or data.
 
 ## Open Questions
 
-1. **Catalog source.** Riftcodex (an unofficial API that carries TCGplayer ids), TCGplayer products from tcgcsv category
-   89, or both? Which one supplies images, and on what terms?
-2. **Name.** Is the Riftbound side also called PrizeCheck, or does it get its own name?
-3. **Private fixtures.** Where do Riftbound test fixtures and scanner references live, so CI can reach them and the
-   public repo never holds them?
-4. **Foils.** How does tcgcsv represent Riftbound foils? This decides the Edition and price binding model.
-5. **Sideboard.** Is the sideboard 8 or 10 cards under the current official rules?
-6. **Handles.** Should a Handle be reserved on both sides when it is claimed on one?
-7. **Owner check.** How do backends learn the caller is the owner once `owner_binding` leaves their database: a signed
+1. **Sideboard.** Is the sideboard 8 or 10 cards under the current official rules?
+2. **Handles.** Should a Handle be reserved on both sides when it is claimed on one?
+3. **Owner check.** How do backends learn the caller is the owner once `owner_binding` leaves their database: a signed
    claim from the gateway, or a read the gateway answers?
+4. **Tokens.** Are tokens tracked as cards, and if so, how are tokens with no number identified?
+
+### Answered
+
+The owner answered these on 2026-10-29:
+
+- **Catalog source:** tcgcsv only, provided cards can be told apart from sealed products. They can, as
+  [Catalog from tcgcsv](#catalog-from-tcgcsv) shows. Riftcodex is not used.
+- **Name:** the Riftbound side is also PrizeCheck, with a game switcher.
+- **Private fixtures:** Riftbound test fixtures and scanner reference images live in a separate private GitHub
+  repository that CI checks out. Nothing from it is committed here.
+- **Foils:** check the data before deciding. The check showed foils are a price subtype, so a Card Edition is a product
+  and a finish (see [Catalog from tcgcsv](#catalog-from-tcgcsv)).
 
 ## Out of Scope
 
