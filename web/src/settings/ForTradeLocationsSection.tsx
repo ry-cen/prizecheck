@@ -5,7 +5,8 @@ import {
   FOR_TRADE_BEYOND_FRIENDS,
   FOR_TRADE_CHANGE_HINT,
 } from "../trades/nearYouMessages";
-import { useVisibleBeyondFriends } from "./useVisibleBeyondFriends";
+import { useDiscoveryVisibility } from "./useVisibleBeyondFriends";
+import { useSettingsSectionSettled } from "./settingsNavigation";
 
 type Load =
   { kind: "loading" } | { kind: "ready"; paths: string[] } | { kind: "failed" };
@@ -17,8 +18,13 @@ type Load =
  */
 export function ForTradeLocationsSection() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  // The wording below also depends on the discovery read, so the section is settled once both have answered.
+  const { beyond, settled: discoverySettled } = useDiscoveryVisibility();
+  useSettingsSectionSettled(
+    "for-trade-locations",
+    load.kind !== "loading" && discoverySettled
+  );
   const headingId = `${useId()}-heading`;
-  const beyond = useVisibleBeyondFriends();
   useEffect(() => {
     let live = true;
     getLocationTree()
