@@ -10,8 +10,9 @@ const fr = (
   top: string[] | null,
   thumb = SAME,
   eligible = true,
-  textBacked = true
-): VoteFrame => ({ t, thumb, top, eligible, textBacked });
+  textBacked = true,
+  numberIds: string[] = []
+): VoteFrame => ({ t, thumb, top, eligible, textBacked, numberIds });
 const lockOf = (e: VoteEvent | null | "needFrame") => {
   if (e === null || e === "needFrame" || e.kind !== "lock")
     throw new Error(`expected lock, got ${JSON.stringify(e)}`);
@@ -319,16 +320,43 @@ describe("Voter", () => {
     for (let t = 800; t < 1500; t += 100)
       expect(v.onFrame(fr(t, null, ABSENT)).absentLockId, `t=${t}`).toBeNull();
   });
-  it("absent_is_only_for_suggestions", () => {
+  it("absent_fires_once_for_any_pending_lock", () => {
+    const once = (v: Voter, lockId: number, from: number) => {
+      const fired: (number | null)[] = [];
+      for (let t = from; t < from + 800; t += 100)
+        fired.push(v.onFrame(fr(t, null, ABSENT)).absentLockId);
+      expect(fired.filter((x) => x !== null)).toEqual([lockId]);
+    };
     const v = new Voter();
-    lockAuto(v);
-    for (let t = 300; t < 1000; t += 100)
-      expect(v.onFrame(fr(t, null, ABSENT)).absentLockId).toBeNull();
+    once(v, lockAuto(v).lockId, 300);
     const w = new Voter();
     w.onFrame(fr(0, ["A"]));
-    expect(lockOf(w.onShutter(50)).via).toBe("shutter");
-    for (let t = 100; t < 800; t += 100)
-      expect(w.onFrame(fr(t, null, ABSENT)).absentLockId).toBeNull();
+    const shutter = lockOf(w.onShutter(50));
+    expect(shutter.via).toBe("shutter");
+    once(w, shutter.lockId, 100);
+  });
+  it("auto_lock_carries_the_number_ids_of_its_backing_frames", () => {
+    const v = new Voter();
+    v.onFrame(fr(0, ["A"], SAME, true, true, ["A", "X"]));
+    v.onFrame(fr(100, ["A"], SAME, true, false, []));
+    const e = lockOf(
+      v.onFrame(fr(150, ["A"], SAME, true, true, ["A", "Y"])).event
+    );
+    expect(e.via).toBe("auto");
+    expect(e.numberIds).toEqual(["A", "X", "Y"]);
+  });
+  it("suggest_and_shutter_locks_carry_null_number_ids", () => {
+    const v = new Voter();
+    v.onFrame(fr(0, ["A"], SAME, true, false, ["A"]));
+    v.onFrame(fr(100, ["A"], SAME, true, false, ["A"]));
+    const e = lockOf(v.onFrame(fr(200, ["A"], SAME, true, false, ["A"])).event);
+    expect(e.via).toBe("suggest");
+    expect(e.numberIds).toBeNull();
+    const w = new Voter();
+    w.onFrame(fr(0, ["A"], SAME, true, true, ["A"]));
+    const s = lockOf(w.onShutter(50));
+    expect(s.via).toBe("shutter");
+    expect(s.numberIds).toBeNull();
   });
   it("absent_fires_again_for_the_next_suggestion", () => {
     const v = new Voter();

@@ -11,6 +11,12 @@ export const COMBINE: CombineConfig = {
   imageSure: 0.85,
 };
 
+/** Look-alike Printings (plumbing resolution, D15): the other Printings of one Reprint Group whose int8 cosine to the locked
+ *  Printing is at least `minCosine`, closest first, at most `max`. PROVISIONAL: measured on the spike index (0.85 keeps about
+ *  97% of Base Set 2 twins; the Reprint Group gate removes different cards that share a name). The owner chose to err toward
+ *  asking (2026-10-28), so extra versions in the prompt are accepted. */
+export const LOOKALIKE = { minCosine: 0.85, max: 7 } as const;
+
 /** scanspike/g0_parity.py TOP_K (index.search k). */
 export const SEARCH_TOP_K = 50;
 

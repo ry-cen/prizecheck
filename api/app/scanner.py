@@ -6,12 +6,15 @@ build is kept in memory; the fingerprint file is catalog data that scripts/scann
 ``scanner_index``. Both are answered as attachments with no Content-Encoding, so the gateway streams them unchanged
 (auth/src/server.ts) and nothing inflates them on the way: the device decompresses the number table itself.
 The table (format 2) carries an ``art`` column, the 8-hex art version of each Printing's small picture or null; the device
-builds ``/api/art/{id}/small?v={art}`` from it (#359), so it never holds a raw TCGdex URL.
+builds ``/api/art/{id}/small?v={art}`` from it (#359), so it never holds a raw TCGdex URL. A ``group`` column holds each
+Printing's Reprint Group ordinal (null unless the group has two or more Printings in the table); the device uses it to find
+look-alike Printings, and the cards key covers Reprint Group membership so a review reaches devices at the next manifest read.
 """
 import gzip
 import hashlib
 import json
 import threading
+from collections import Counter
 from typing import Literal
 from uuid import UUID
 
@@ -104,10 +107,18 @@ _cards_lock = threading.Lock()
 _cards_cache: tuple[str, bytes] | None = None
 
 
-def cards_key(state) -> str:
-    """First 16 hex of the sha256 over the table's inputs (D5). Set counts are left out on purpose."""
+def groups_digest(conn) -> str:
+    """md5 over every (Printing, Reprint Group) membership row. Membership can change without a catalog revision (owner
+    Reprint Group reviews), and more than one API process may serve the table, so the key must cover it."""
+    return conn.execute("""SELECT md5(coalesce(string_agg(printing_id::text || ':' || group_id::text, ',' ORDER BY printing_id),
+      '')) AS d FROM catalog_reprint_group_member""").fetchone()["d"]
+
+
+def cards_key(state, groups: str) -> str:
+    """First 16 hex of the sha256 over the table's inputs (D5). Set counts are left out on purpose. `groups` is the
+    Reprint Group membership digest; `gcol` marks the table that carries the group column."""
     inputs = {"f": CARDS_FORMAT, "rev": state["revision"], "gen": str(state["active_generation"]),
-              "codes": set_codes.DIGEST}
+              "codes": set_codes.DIGEST, "groups": groups, "gcol": 1}
     return hashlib.sha256(json.dumps(inputs, separators=(",", ":"), sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -124,24 +135,32 @@ def build_cards(conn, state, key: str) -> bytes:
     sets = [{"id": row["set_id"], "code": set_codes.CODES.get(row["set_id"]), "official": row["official"],
              "total": row["total"], "released": row["release_date"].isoformat() if row["release_date"] else None}
             for row in set_rows]
-    printings = conn.execute("""SELECT printing_id, set_id, collector_number, display_name, image_url
-      FROM catalog_generation_printing WHERE generation_id=%s AND NOT tombstoned ORDER BY printing_id""",
-                             (generation,)).fetchall()
+    printings = conn.execute("""SELECT gp.printing_id, gp.set_id, gp.collector_number, gp.display_name, gp.image_url,
+      m.group_id FROM catalog_generation_printing gp
+      LEFT JOIN catalog_reprint_group_member m ON m.printing_id=gp.printing_id
+      WHERE gp.generation_id=%s AND NOT gp.tombstoned ORDER BY gp.printing_id""", (generation,)).fetchall()
+    # The group column: an ordinal (in first-seen order) for every Printing whose group has two or more Printings here.
+    counts = Counter(row["group_id"] for row in printings if row["group_id"] is not None)
+    ordinal: dict = {}
+    group = [None if row["group_id"] is None or counts[row["group_id"]] < 2
+             else ordinal.setdefault(row["group_id"], len(ordinal)) for row in printings]
     table = {"format": CARDS_FORMAT, "key": key, "catalog_revision": state["revision"], "sets": sets,
              "printings": {"id": [str(row["printing_id"]) for row in printings],
                            "set": [index[row["set_id"]] for row in printings],
                            "number": [row["collector_number"] for row in printings],
                            "name": [row["display_name"] for row in printings],
                            "art": [art_version(src) if (src := tcgdex_source(row["image_url"], "small")) else None
-                                   for row in printings]}}
+                                   for row in printings],
+                           "group": group}}
     raw = json.dumps(table, ensure_ascii=False, separators=(",", ":")).encode()
     return gzip.compress(raw, compresslevel=6, mtime=0)
 
 
-def current_cards(conn, state) -> tuple[str, bytes]:
-    """(key, gzip bytes) for the state's key, from memory when the last build has it."""
+def current_cards(conn, state, key: str | None = None) -> tuple[str, bytes]:
+    """(key, gzip bytes) for the state's key, from memory when the last build has it. A caller that has the key passes it."""
     global _cards_cache
-    key = cards_key(state)
+    if key is None:
+        key = cards_key(state, groups_digest(conn))
     with _cards_lock:
         if _cards_cache is None or _cards_cache[0] != key:
             _cards_cache = (key, build_cards(conn, state, key))
@@ -185,9 +204,10 @@ def cards(key: str = Path(max_length=64), user_id: str = Depends(verified_user))
     with connect() as conn, conn.transaction():
         _snapshot(conn)
         state = _state(conn)
-        if not state["active_generation"] or cards_key(state) != key:
+        current = cards_key(state, groups_digest(conn)) if state["active_generation"] else None
+        if current != key:
             raise HTTPException(404, {"code": "CARDS_NOT_CURRENT", "message": "The card table has changed."})
-        return _attachment(current_cards(conn, state)[1], "cards.json.gz")
+        return _attachment(current_cards(conn, state, current)[1], "cards.json.gz")
 
 
 @router.get("/fingerprints/{sha256}", response_class=Response, responses={200: {"content": {OCTET_STREAM: {}}}})

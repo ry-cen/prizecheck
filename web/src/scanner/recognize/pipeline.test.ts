@@ -258,6 +258,7 @@ describe("voteInput (eligibility and text backing)", () => {
       top: null,
       eligible: false,
       textBacked: false,
+      numberIds: [],
     });
   });
   it("neither corners nor an OCR candidate: not eligible", () => {
@@ -285,5 +286,18 @@ describe("voteInput (eligibility and text backing)", () => {
     expect(
       voteInput(frame(full({ ocrCands: [cand("A")], ranked: [] })), 0)
     ).toMatchObject({ textBacked: false });
+  });
+  it("numberIds are the OCR candidates at least as strong as the pick, none when the pick is not among them", () => {
+    const tier = (id: string, t: number) => ({ ...cand(id), tier: t });
+    const cands = [tier("A", 2), tier("X", 3), tier("Y", 1), tier("Z", 2)];
+    expect(voteInput(frame(full({ ocrCands: cands })), 0).numberIds).toEqual([
+      "A",
+      "X",
+      "Z",
+    ]);
+    expect(
+      voteInput(frame(full({ ocrCands: [tier("B", 3)], ranked: ["A"] })), 0)
+        .numberIds
+    ).toEqual([]);
   });
 });

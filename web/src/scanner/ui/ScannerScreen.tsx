@@ -26,11 +26,13 @@ import { readCardFaces, type CardFace } from "./offlineCards";
 import { rowView, type RowView } from "./rowView";
 import { playLockCue, readLockSound, writeLockSound } from "./sound";
 import {
+  ChoiceSlot,
   onAbsent,
-  onSuggest,
-  SuggestionSlot,
-  useSuggestionOpen,
-} from "./suggestions";
+  resetChoices,
+  onLock,
+  useChoiceOpen,
+  type ChoiceHost,
+} from "./choices";
 import { ClearDialog, DestinationDialog, FullPrompt } from "./TrayDialogs";
 import { TrayOpen, type OpenModel } from "./TrayOpen";
 import { TrayPeek } from "./TrayPeek";
@@ -127,36 +129,40 @@ export function ScannerScreen({ store }: { store: TrayStore }) {
     [showHint, openSheet]
   );
   const handleLock = useCallback(
-    async (lock: { lockId: number; printingIds: string[]; via: LockVia }) => {
+    (lock: {
+      lockId: number;
+      printingIds: string[];
+      lookalikes: string[];
+      via: LockVia;
+    }) => {
       // The lock is answered through the session it came from, even if Try again has replaced it since.
       const from = controls.current;
-      if (lock.via === "suggest") {
-        onSuggest(lock, {
-          answer: (id, added, reason) => from?.answer(id, added, reason),
-          pick: async (id, others) =>
-            (await answerSafely(() => store.applyPick(id, others), "suggest"))
-              .result,
-          // A picked suggestion is answered like an automatic lock; its row shows no lock cue of its own.
-          settle: (id, result) => settleLock(id, result, "suggest", from),
-          openSearch: () => {
-            returnRef.current = shutterRef.current;
-            setSearch({ mode: "add" });
-          },
-        });
-        return;
-      }
-      const { result, via } = await answerSafely(
-        () => store.applyLock(lock.printingIds),
-        lock.via
-      );
-      settleLock(lock.lockId, result, via, from);
+      let via = lock.via;
+      const host: ChoiceHost = {
+        resolve: (ids) => store.lookupPrintings(ids),
+        add: async (printingId, editionId, candidates) => {
+          const r = await answerSafely(
+            () => store.applyChoice({ printingId, editionId, candidates }),
+            lock.via
+          );
+          via = r.via;
+          return r.result;
+        },
+        answer: (id, added, reason) => from?.answer(id, added, reason),
+        settle: (id, result) => settleLock(id, result, via, from),
+        openSearch: () => {
+          returnRef.current = shutterRef.current;
+          setSearch({ mode: "add" });
+        },
+      };
+      onLock(lock, host);
     },
     [store, settleLock]
   );
   const session = useScannerSession(
     video,
     {
-      onLock: (lock) => void handleLock(lock),
+      onLock: handleLock,
       onAbsent: onAbsent,
       onMiss: () =>
         setSearch((current) => {
@@ -171,8 +177,14 @@ export function ScannerScreen({ store }: { store: TrayStore }) {
   );
   controls.current = session;
   const phase = session.phase;
+  // A prompt or lookup belongs to the session that made it: end it when the session restarts, cannot start or goes.
+  useEffect(() => resetChoices, [attempt]);
+  const cannotStart = phase.kind === "cannot-start";
+  useEffect(() => {
+    if (cannotStart) resetChoices();
+  }, [cannotStart]);
   const running = phase.kind === "running";
-  const suggesting = useSuggestionOpen();
+  const suggesting = useChoiceOpen();
 
   const paused =
     sheetOpen || search !== null || fullPrompt || dialog !== null || hidden;
@@ -388,7 +400,7 @@ export function ScannerScreen({ store }: { store: TrayStore }) {
               onReviewTray={openSheet}
             />
           )}
-          <SuggestionSlot returnTo={shutterRef} />
+          <ChoiceSlot returnTo={shutterRef} />
         </CameraStage>
         {running && (
           <Shutter

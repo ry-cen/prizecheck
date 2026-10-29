@@ -98,7 +98,31 @@ export function parseCardTable(json: unknown): CardDb {
       art[i] = null;
     }
   }
-  return { key: json.key, ids, rowOf, setOfRow, numbers, names, art, sets };
+  // `group` is optional (a table cached before the column existed has none): every card is then in no group.
+  const groups: (number | null)[] = new Array<number | null>(n).fill(null);
+  if (p.group !== undefined && p.group !== null) {
+    const col = p.group;
+    if (!Array.isArray(col) || col.length !== n)
+      bad(`printings.group is not an array of length ${n}`);
+    for (let i = 0; i < n; i++) {
+      const g: unknown = col[i];
+      if (g === null) continue;
+      if (typeof g !== "number" || !Number.isInteger(g) || g < 0)
+        bad(`printings.group[${i}]`);
+      groups[i] = g;
+    }
+  }
+  return {
+    key: json.key,
+    ids,
+    rowOf,
+    setOfRow,
+    numbers,
+    names,
+    art,
+    groups,
+    sets,
+  };
 }
 
 export function releaseOf(db: CardDb, row: number): string {

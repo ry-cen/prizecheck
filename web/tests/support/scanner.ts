@@ -221,6 +221,20 @@ export const imageOnly = (ids: string[], frames = 4): ScannedTestFrame[] =>
 export const suggestionCard = (page: Page): Locator =>
   page.getByRole("group", { name: "Is it one of these?" });
 
+/** The Scan Choice prompt (any of its headings: "Is it one of these?", "Which version?", "Which finish?"). */
+export const choiceCard = (page: Page): Locator =>
+  page.getByTestId("scan-suggestion");
+
+/** Taps a finish chip in the Scan Choice prompt (the scanner never preselects one). With several versions open, name
+ * the version by its card name: `pickFinish(page, "Reverse Holo", "Bulbasaur")`. Look-alikes share a name, so add the set line
+ * (the group's accessible name is "Finish of <name>, <set> <number>"): `pickFinish(page, "Normal", "Bulbasaur, Mega Evolution 001")`. */
+export async function pickFinish(page: Page, label: string, card?: string) {
+  const scope = card
+    ? choiceCard(page).getByRole("group", { name: `Finish of ${card}` })
+    : choiceCard(page);
+  await scope.getByRole("button", { name: label, exact: true }).click();
+}
+
 /** Waits until the scripted source has handed out `n` more frames, counted from now. */
 export async function framesPlayed(page: Page, n: number) {
   const start = await page.evaluate(

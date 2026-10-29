@@ -1,15 +1,15 @@
 # Spec — Card Scan: adding cards with the phone camera
 
-**Status:** drafted 2026-10-25; the owner answered every open question the same day. It restates decisions the owner has made or plumbing the owner delegated.
+**Status:** drafted 2026-10-25; the owner answered every open question the same day. Amended 2026-10-28 for look-alike Printings and the Scan Choice (see [Scan Choice rules](#scan-choice-rules)). It restates decisions the owner has made or plumbing the owner delegated.
 
 **Decision map:** [Card scanner — decision map](wayfinder/map.md). Tickets 1 to 4 are closed. This spec is ticket 5; the ADR is ticket 6. Each section below names the decision it comes from:
 
 - [Recognition spike findings](wayfinder/research/recognition-spike-findings.md)
-- [Decide scanner plumbing](wayfinder/resolutions/decide-scanner-plumbing.md) (the **resolution**; D1 to D14, the contracts, the test strategy and the ship blockers)
+- [Decide scanner plumbing](wayfinder/resolutions/decide-scanner-plumbing.md) (the **resolution**; D1 to D15, the contracts, the test strategy and the ship blockers)
 - [Scan tray prototype and owner verdict](wayfinder/prototypes/scan-tray/README.md)
 - [Phone measurement gate results](wayfinder/research/phone-gate-results.md)
 - [ADR 0007: Edition and marketplace metadata boundary](../../adr/0007-edition-marketplace-metadata-boundary.md)
-- The terms **Card Scan**, **Scan Tray** and **Scan Suggestion** in [`CONTEXT.md`](../../../CONTEXT.md)
+- The terms **Card Scan**, **Scan Tray**, **Scan Suggestion**, **Scan Choice** and **Look-alike Printings** in [`CONTEXT.md`](../../../CONTEXT.md)
 
 Sibling spec: [Collection import](../collection-import/spec.md). The scanner takes its review shape and save promise from it.
 
@@ -28,6 +28,10 @@ Where the sources disagree, the newest dated owner decision wins. These items in
 | Map and resolution "scan session". | The term is dropped. Use **Card Scan** for the act and **Scan Tray** for the unconfirmed list. |
 | Spike findings: the guide's copy asks the collector to line up the card, not its case. | The owner chose no standing note on the outline (prototype P3). Only camera hints, lock outcomes and offline show. |
 | Resolution `lock` message: `via: "auto" \| "shutter"` and `lockOutcome.reason` of `unresolved \| offline \| full`. | The spike's port adds `via: "suggest"` and the outcome reason `dismissed`. The contract below carries both, plus an `absent` message (see Recognition module). |
+| Owner answer Q5 (resolution, 2026-10-22; map "Repeat lock"; story 16): a repeat lock adds its copy to the newest row of that Printing. | Superseded 2026-10-28: a row is one Card Printing and one Card Edition, and a repeat copy goes to the newest row with both (or a new row). See [Scan Choice rules](#scan-choice-rules). |
+| Finish rule and story 30: a row starts on a finish chosen by a plain rule, shown selected. | From 2026-10-28 the rule applies only to a **direct add** (one active Edition and no look-alikes). Every card that needs a choice asks, and the scanner preselects no finish. |
+| Contract amendment: the worker tracks absence only while a `suggest` lock is pending. | From 2026-10-28 it tracks absence for every pending lock, whatever its `via`. |
+| Stories 22 to 26 and the Solution: a card whose printed number agrees enters the tray without a question. | It enters without asking *which card*, but asks for the finish when it has more than one active Edition, and shows the version choice when it has look-alikes. |
 
 ## Problem Statement
 
@@ -45,9 +49,9 @@ A **Card Scan** lets a collector add cards by holding them up to the phone's cam
 
 - **Where it starts:** **Scan cards** beside Collection's other add actions, a camera button in the phone header, and a **Camera** choice in Collection Import. All three open the same scanner.
 - **Recognising a card:** it runs on the phone. The scanner reads the card's printed number and compares its artwork with the catalog. No photo leaves the device or is kept.
-- **Locking:** when several frames agree on a Card Printing and the printed number backs the pick, the card locks into the **Scan Tray** with a cue.
-- **Suggesting:** when frames agree on a Card Printing only by its artwork, the scanner does not lock it. It shows a **Scan Suggestion** with up to three candidates (normally three). The collector picks one, or chooses **None of these** to search. If the collector takes the card out without answering, the suggestion closes and the card is skipped: nothing is added, and the scanner moves on (owner, 2026-10-25). The suggestion is a card above the tray peek showing each candidate's artwork, set and collector number, so reprints can be told apart (primary's default, offered to the owner on 2026-10-25). A suggestion gets no lock cue: no guide flash, vibration or sound when it appears, and a pick adds its row with the usual row-added motion but no vibration or sound (owner, 2026-10-25).
-- **The Scan Tray:** a bottom sheet over the full-screen camera. Each row is a Card Edition with a count, one-tap finish chips, **Change card** and catalog search. The tray is kept on the device, per account, until it is confirmed or cleared.
+- **Locking:** when several frames agree on a Card Printing and the printed number backs the pick, the card locks into the **Scan Tray** with a cue. A card with exactly one active Card Edition and no **Look-alike Printings** is added directly. Any other card first asks the collector, in a **Scan Choice**, which version and which finish it is (see [Scan Choice rules](#scan-choice-rules)).
+- **Suggesting:** when frames agree on a Card Printing only by its artwork, the scanner does not lock it. It shows a **Scan Suggestion** with up to 8 versions (the top match, its look-alikes, then the other candidates). The collector picks one, or chooses **None of these** to search. If the collector takes the card out without answering, the suggestion closes and the card is skipped: nothing is added, and the scanner moves on (owner, 2026-10-25). The suggestion is a card above the tray peek showing each candidate's artwork, set and collector number, so reprints can be told apart (primary's default, offered to the owner on 2026-10-25). A suggestion gets no lock cue: no guide flash, vibration or sound when it appears, and a pick adds its row with the usual row-added motion but no vibration or sound (owner, 2026-10-25).
+- **The Scan Tray:** a bottom sheet over the full-screen camera. Each row is one Card Printing and one Card Edition with a count, one-tap finish chips, **Change card** and catalog search. The tray is kept on the device, per account, until it is confirmed or cleared.
 - **Confirming:** **Add N cards to <Location>** adds every row in one step to one Storage Leaf (not a Deck), Unsorted by default, and lands on that Location.
 
 A Card Scan only adds Holdings. It never changes or removes what is already there, and there is no undo, because the tray is the safety net. A Scan Tray is not a Collection Import draft: starting a Card Scan never creates or replaces one.
@@ -76,7 +80,7 @@ The scanner ships into the app now, ahead of the speed and accuracy work the pho
 13. As a collector, I want a lock cue: the guide flashes and the tray row appears, with a short vibration where my phone supports it, so that I know the card was taken.
 14. As a collector, I want a short lock sound that is off by default behind one setting, so that a quiet room stays quiet. On an iPhone the lock is silent and still unless the sound is on.
 15. As a collector, I want the same card staying in the frame to lock once, and taking it away and putting it back to count as a second copy, so that counts follow what I do with my hands.
-16. As a collector, I want a second lock of the same Card Printing to add one copy to its newest tray row, so that I can move it with the counts and chips if it was another finish.
+16. As a collector, I want a second lock of the same Card Printing and Card Edition to add one copy to its newest tray row, so that counts follow my cards. (Changed 2026-10-28: a second lock of another finish of that Printing is a row of its own; see stories 68 to 75.)
 17. As a collector, I want a shutter button as a fallback, so that I can take a card the scanner will not lock by itself.
 18. As a collector who presses the shutter on a card the scanner cannot recognise, I want catalog search to open at once, so that I can still add the card.
 19. As a collector, I want the shutter to work even when the card has not left the frame, so that I can deliberately add a second copy.
@@ -85,18 +89,18 @@ The scanner ships into the app now, ahead of the speed and accuracy work the pho
 
 ### Scan Suggestions
 
-22. As a collector whose card the scanner matched only by its artwork, I want a Scan Suggestion with up to three candidates (normally three) instead of an automatic lock, so that a wrong guess is not added without my say.
-23. As a collector, I want to pick one of up to three candidates, so that the card enters the tray as that Card Printing with its starting Card Edition.
+22. As a collector whose card the scanner matched only by its artwork, I want a Scan Suggestion with up to 8 versions (the top match, its look-alikes, then the other candidates) instead of an automatic lock, so that a wrong guess is not added without my say.
+23. As a collector, I want to pick one of up to 8 versions, so that the card enters the tray as that Card Printing. (Changed 2026-10-28: I also pick its finish when it has more than one; see stories 68 to 75.)
 24. As a collector, I want **None of these** to open catalog search, so that I can find the right card.
 25. As a collector who turned a suggestion down, I want the same card not to be suggested again until I take it out of the guide and put it back, so that I am not asked twice about one placement.
-26. As a collector, I want a card whose printed number agrees to enter the tray without a question, so that clear cards stay fast.
+26. As a collector, I want a card whose printed number agrees, with one finish and no look-alikes, to enter the tray without a question, so that clear cards stay fast. (Narrowed 2026-10-28: a card with several finishes or look-alikes asks.)
 
 ### The Scan Tray
 
 27. As a collector, I want the tray as a bottom sheet over the camera, showing its total, a **Review** button and the last card I touched, so that I see progress while scanning.
 28. As a collector, I want to swipe the sheet up (or press **Review**) to a full tray that pauses scanning, and return with **Keep scanning** or a tap on the camera strip, so that I can review without the camera locking more cards.
 29. As a collector, I want each tray row to show the card, its set and number, a count and one-tap chips for the card's other finishes, so that I can fix a row without leaving the tray.
-30. As a collector, I want a row to start on a finish I did not choose only by a plain rule, shown selected and one tap to change, so that confirming never waits on a finish and the finish is never guessed from the photo.
+30. As a collector, I want a row I added without being asked (a card with one active finish) to carry that finish, and a row from a card with several finishes to carry the one I tapped, so that confirming never waits on a finish and the finish is never guessed from the photo. (Changed 2026-10-28: the scanner no longer starts a multi-finish row on a default finish.)
 31. As a collector, I want to raise or lower a row's count, with the minus becoming a bin at a count of 1 that removes the row, so that I can correct counts and drop mistakes.
 32. As a collector, I want **Change card** and catalog search on every row, so that I can replace a wrong match with the right card and finish.
 33. As a collector, I want to choose a Storage Leaf for the cards, Unsorted by default, and to be unable to choose a Deck, so that I know where the cards land.
@@ -150,11 +154,24 @@ The scanner ships into the app now, ahead of the speed and accuracy work the pho
 66. As the owner, I want a scan to start no catalog pull and no price refresh, so that pulls stay owner-only and prices keep their own path (ADR 0006, ADR 0013).
 67. As the owner, I want the recognition code behind one narrow interface, so that a faster port, a retuned gate, WebGPU or a native plugin can replace it later without touching the tray or the save path.
 
+### Scan Choices
+
+Added 2026-10-28 (owner answers, [D15](wayfinder/resolutions/decide-scanner-plumbing.md#d15-look-alike-printings-and-the-choice-prompt-2026-10-28)).
+
+68. As a collector who scans a card with more than one active finish, I want to be asked which finish it is, so that a Normal and a Reverse Holo do not land on the wrong row.
+69. As a collector who scans a card that has Look-alike Printings, I want to be asked which version it is, with each version's artwork, name, set and number, so that I add the one in my hand.
+70. As a collector, I want each version in the question to show its finish chips with none selected, and a version with only one finish to be a single button that names that finish, so that one tap adds the copy.
+71. As a collector, I want **None of these** in every question, so that I can search when the right card is not shown.
+72. As a collector, I want a copy to go to the tray row with the same Card Printing and Card Edition (count plus one), or to a new row, so that each row is one version in one finish.
+73. As a collector, I want a card I take out of the guide while the question is open to be skipped, and to have to leave the guide before the scanner asks again, so that I am not asked twice about one placement.
+74. As a collector who changes a row's finish chip to a finish another row of that card already has, I want the two rows to merge into the row I tapped with their counts added, so that no two rows hold one version in one finish. To move a single copy I step the count down and scan it again.
+75. As a collector with a tray from before this change, I want it to open with every row as it was, so that nothing is lost; duplicate rows merge when I confirm or change a chip.
+
 ## Implementation Decisions
 
 ### Terms
 
-- **Card Scan, Scan Tray and Scan Suggestion** are in `CONTEXT.md`. Use them exactly. Never write "scan session". A Card Scan is a sibling of Collection Import, not a kind of it.
+- **Card Scan, Scan Tray, Scan Suggestion, Scan Choice and Look-alike Printings** are in `CONTEXT.md`. Use them exactly. A Scan Choice is the question the scanner asks when a card needs a version or finish; a Scan Suggestion is a Scan Choice for a card matched by artwork alone. (Scan Choice and Look-alike Printings are new on 2026-10-28.) Never write "scan session". A Card Scan is a sibling of Collection Import, not a kind of it.
 - **Lock** is the implementation word for an automatic or shutter `lock` message that writes a tray row. A Scan Suggestion also travels as a `lock` message (`via: "suggest"`) but writes a row only when the collector picks a candidate, so it is not a lock in the collector's sense.
 - The fingerprint index, number table, gate and voting are implementation terms and are not in the glossary.
 - Card Printing, Card Edition, Unspecified Variant, Holding, Storage Leaf, Unsorted and Deck mean what `CONTEXT.md` says.
@@ -171,6 +188,8 @@ A scan only suggests a Card Edition and never reads a finish from the photo (ADR
 
 The chosen chip shows selected and is one tap to change. Confirming never waits on a finish. This amends the closed Finish decision for Printings without an Unspecified Variant (owner, 2026-10-22).
 
+**Amended 2026-10-28.** This starting-Edition rule now applies only to a **direct add**: a card with exactly one active Edition and no Look-alike Printings, where rule 2 gives that single Edition. A card with more than one active Edition, or with Look-alike Printings, opens a Scan Choice, and the collector picks the Edition. The scanner never preselects or highlights a finish in a Scan Choice (ADR 0007).
+
 ### Recognition module
 
 - **Boundary.** The main thread grabs camera frames, draws, and owns the tray. All recognition runs in a module Web Worker behind the message contract in the [resolution](wayfinder/resolutions/decide-scanner-plumbing.md#worker-message-contract): the gate, corner finding, warp, OCR, embedding, search, combining and voting. No frame or image data ever travels from the worker back to the main thread. A replacement recognizer must speak this contract and nothing else; the tray and the save path know nothing about how a Printing was recognised.
@@ -179,6 +198,7 @@ The chosen chip shows selected and is one tap to change. Confirming never waits 
   - `lockOutcome.reason` gains `"dismissed"`: `{added: false, reason: "dismissed"}` follows **None of these** or a closed suggestion. It behaves like `added: true` for capture: the card must leave the guide before the next lock or suggestion. It does not pause for 2 s (unlike `unresolved` and `offline`).
   - New `FromWorker` message `{t: "absent"; lockId}`. While a `suggest` lock is pending, the worker keeps tracking absence (the same thumbnail rule as after a lock) and posts `absent` for that `lockId` once, when the card has left the guide. After a `dismissed` outcome the voter is in the locked state and needs a fresh absence before it re-arms (as in the spike's `vote.ts`). On `absent` the main thread closes the suggestion and sends `lockOutcome` `dismissed` (owner, 2026-10-25: a card taken out unanswered is skipped); without it, a pending lock would block all further recognition. The main thread always ends a suggestion with a `lockOutcome`.
   - A picked suggestion is answered like a lock: `lockOutcome {added: true}` or `{added: false, reason: "full"}` (see Misses and offline).
+  - Amended 2026-10-28: `lock` also carries `lookalikes: string[]`, up to 7 Printing ids that look like the first id, closest first (see [Scan Choice rules](#scan-choice-rules)). The worker posts `absent` once for **every** pending lock, whatever its `via`, not only `suggest`; the main thread decides what `absent` means (see the same section).
 - **Harness-only fields.** The spike's `ready.info` and `error.detail` exist for the measurement harness and are not part of the shipped contract, with `diag`, `resources`, `HarnessInit` and `force`.
 - **Where the code comes from.** The app port starts from the spike repository `~/dev/prizecheck-scan-spike`, commit `4e3d827` (unpublished, no remote): `web/src/scanner/vision/`, `web/src/scanner/recognize/` (including `vote.ts` with the eligibility and suggestion rule), `web/src/scanner/worker/recognizer.worker.ts` and `messages.ts`, and the Python exporter `web_export.py`. The [pipeline parity table](wayfinder/resolutions/decide-scanner-plumbing.md#pipeline-parity-table) lists each step's contract and its spike source. The spec does not copy code.
 - **Not ported.** The spike's gate harness, its `harness:` message extensions (`diag`, `resources`, `HarnessInit`, `force`, `ready.info`, `error.detail`) and its report tooling are measurement tools and are not shipped. A dev-only timing message may stay behind a flag.
@@ -198,18 +218,33 @@ Starting values are the [resolution's rule](wayfinder/resolutions/decide-scanner
   - if any agreeing frame has that Printing itself among its OCR number candidates, it is an automatic lock (an OCR candidate for a different Printing does not back the pick);
   - otherwise it is image-only and becomes a Scan Suggestion.
   - Evidence: across two phone Lock runs (31 locks), number-backed locks were right 22 of 22 and image-only 3 of 9. No score or lead over the second Printing separated right from wrong, so the rule is on the number, not on a score.
-- **One placement, one prompt.** After a lock, a suggestion picked, or a suggestion dismissed, no new lock or suggestion comes until the card has left the guide: at least 2 consecutive analysed frames whose 32x32 grey guide thumbnail differs from the lock frame's thumbnail by a mean absolute difference over 24/255.
-- **Shutter.** Unchanged: it locks the leader of the current window (or the current frame's top candidate) as a row, ignores the absence rule, and posts `miss` with no candidate. On an image-only match it still adds the top candidate as a row, because the collector chose to take it. While a Scan Suggestion shows, the shutter is shown disabled (greyed out, announced as unavailable): the suggestion is the choice (owner, 2026-10-25).
+- **One placement, one prompt.** After a lock, a Scan Choice answered or skipped, a suggestion picked, or a suggestion dismissed, no new lock or suggestion comes until the card has left the guide: at least 2 consecutive analysed frames whose 32x32 grey guide thumbnail differs from the lock frame's thumbnail by a mean absolute difference over 24/255.
+- **Shutter.** Unchanged: it locks the leader of the current window (or the current frame's top candidate) as a row, ignores the absence rule, and posts `miss` with no candidate. On an image-only match it still adds the top candidate as a row, because the collector chose to take it. While a Scan Suggestion shows, the shutter is shown disabled (greyed out, announced as unavailable): the suggestion is the choice (owner, 2026-10-25). The same holds while any Scan Choice shows (2026-10-28), and a shutter lock follows the rules of an automatic lock for what it asks.
 - **Gate hints.** The worker's `gate.reason` values map to hints: `dark` to the dark hint, `bright` to the bright hint, `clipped` to the glare hint, and `soft` to the blurry hint, which cannot appear until sharpness is turned back on.
 
 ### Misses and offline ([D8](wayfinder/resolutions/decide-scanner-plumbing.md#d8-candidates-resolve-to-editions-live-through-one-batch-route))
 
 - A lock's candidates, up to three Printing ids, are resolved live through `POST /api/scanner/printings`, with a 5 s timeout. The row takes the first candidate that is in the answer with an active Edition. No row is ever written without an Edition.
-- A Scan Suggestion calls the same route for its up to three candidates and shows the ones that resolve (one or two if the others have no active Edition, which are left out silently). If none resolves, the outcome is the same as for a lock.
-- **A pick behaves as a lock of the chosen Printing:** its starting Edition by the finish rule; the repeat-lock rule (one copy to the newest row of that Printing, else a new row); the picked Printing first in the row's candidates, then the other resolvable candidates; the capacity check (`trayEditAllowed`); then `lockOutcome {added: true}`, or `{added: false, reason: "full"}` when the tray is full.
+- A Scan Choice calls the same route for the lock's candidates and look-alikes. A Scan Suggestion calls it for its candidates and look-alikes and shows the ones that resolve (one or two if the others have no active Edition, which are left out silently). If none resolves, the outcome is the same as for a lock.
+- **A pick behaves as a lock of the chosen Printing and Edition** (changed 2026-10-28; the Edition is the one the collector tapped, and the starting-Edition rule applies only to a direct add): the repeat-lock rule (one copy to the newest row with that Printing and Edition, else a new row); the picked Printing first in the row's candidates, at most three; the capacity check (`trayEditAllowed`); then `lockOutcome {added: true}`, or `{added: false, reason: "full"}` when the tray is full.
 - **None of these** opens catalog search and sends `lockOutcome {added: false, reason: "dismissed"}`. A search pick takes the explicit Edition the collector chooses (the Misses decision; a Printing with no active Edition cannot be picked), not the starting Edition.
 - Technical gap, resolved consistently with D8: when the route fails for a suggestion, the scanner shows the offline hint and sends `lockOutcome {added: false, reason: "offline"}` rather than suggesting from the cached card table. A pick must resolve an Edition anyway, so showing candidates that cannot be added would be worse than saying so.
 - Offline, rows in an opened tray render from the cached number table; chips and confirm are disabled; the printings call retries on `online` and whenever the tray reopens. A row is marked as needing a finish only by a successful answer, never by an outage.
+
+### Scan Choice rules ([D15](wayfinder/resolutions/decide-scanner-plumbing.md#d15-look-alike-printings-and-the-choice-prompt-2026-10-28))
+
+Added 2026-10-28 from the owner's answers. The recorded measurements and the technical choices are in D15.
+
+- **When it asks.** A lock whose card has exactly one active Edition and no Look-alike Printings is a **direct add**: one copy, no question. A lock whose card has more than one active Edition, or at least one look-alike that resolves, opens a Scan Choice. Every `suggest` lock opens one too, as the Scan Suggestion did.
+- **Look-alike Printings.** The other Printings in the same Reprint Group as the locked one that have a fingerprint and whose int8 cosine to it is at least 0.85, closest first, at most 7. The device computes them from the fingerprints it already holds and an optional `group` column in the number table; no server change beyond that column. For an automatic lock a look-alike is kept only if the printed number supports it at least as strongly as it supports the locked card, so a number that separates two reprints shows one, and a bare number shows both. The owner accepted extra versions at 0.85 (see D15).
+- **The prompt is the Scan Suggestion's surface.** It is the card above the tray peek. It lists versions, each with artwork, name, and set with number. A version with two or more active Editions shows finish chips with none selected; a version with one active Edition is a single button and names its finish after the set and number (for example "Base Set 2 30/130 · Holo"). **None of these** is always shown, and it opens search. The prompt shows no scores, sources or prices.
+- **Order.** For a `suggest` lock: the first candidate, its look-alikes, then the other candidates. For an automatic or shutter lock: the first candidate, then its look-alikes. At most 8 versions. A version that does not resolve or has no active Edition is left out; if the first candidate drops out of an automatic or shutter lock, the first other candidate that resolves shows alone.
+- **One tap adds one copy** of the tapped Printing and Edition: to the newest row with both that is not marked as needing a finish (count plus one), or to a new row at the top. A search pick in add mode stacks the same way.
+- **Skip rule.** If the card leaves the guide while the prompt is open, or before an automatic or shutter lock has resolved into a prompt, the card is skipped (`dismissed`), and it must leave the guide before the next lock. A card that leaves while a direct add is resolving is still added.
+- **Shutter and recognition pause.** While the prompt is open the shutter is disabled and the worker makes no new lock.
+- **Merging.** Changing a row's finish chip, or **Change card** choosing another Printing and Edition, merges the row into another row with the same Printing and Edition if there is one. The tapped row keeps its id and position and takes the summed count; the other row goes. A sum over 999 is refused as a full row and nothing changes. To move one copy, the collector steps the count down and scans again.
+- **Storage.** The tray stays version 1 under the same key. A tray stored before this change opens with every row, duplicates included; they merge at Confirm. `mergeItems`, the save route and Confirm are unchanged.
+- **Number table.** It gains an optional `group` column, an integer for every Printing whose Reprint Group has two or more Printings in the table, otherwise null. The cards key covers group membership, so a Reprint Group review reaches devices at their next manifest read. An older client ignores the column.
 
 ### Device storage and the Scan Tray ([D9](wayfinder/resolutions/decide-scanner-plumbing.md#d9-device-storage-cache-storage-for-blobs-localstorage-for-the-tray), [D10](wayfinder/resolutions/decide-scanner-plumbing.md#d10-tray-identity-versioning-and-accounts))
 
@@ -280,7 +315,7 @@ A separate job image builds the int8 fingerprint file from the catalog's referen
 
 ### Copy
 
-All wording below is final: the owner approved the strings the resolution (D8, D12, D14) left for the spec and those drafted here on 2026-10-25.
+All wording below is final: the owner approved the strings the resolution (D8, D12, D14) left for the spec and those drafted here on 2026-10-25, and the Scan Choice headings on 2026-10-28.
 
 | Where | Text | Status |
 |---|---|---|
@@ -298,6 +333,10 @@ All wording below is final: the owner approved the strings the resolution (D8, D
 | Glare hint (`clipped`) | Tilt to avoid glare | Final (owner, 2026-10-25) |
 | Full tray | The tray is full. Add these cards to your Collection before scanning more. | Final (owner, 2026-10-25) |
 | Suggestion heading | Is it one of these? | Final (owner, 2026-10-25) |
+| Scan Choice heading, several versions | Which version? | Approved (owner, 2026-10-28); `copy.ts` "New" |
+| Scan Choice heading, one version with several finishes | Which finish? | Approved (owner, 2026-10-28); `copy.ts` "New" |
+| Version with one active finish | set name · number · finish name, for example "Base Set 2 30/130 · Holo" | Owner decision 8 (2026-10-28) for the finish name; the layout reuses the tray row's pattern |
+| Finish chip group label in a Scan Choice | Finish of <name> | Reused from the tray row; no new string |
 | Warm open | "Getting the scanner ready" with no progress bar | Final (owner, 2026-10-25) |
 | Cannot start | heading "The scanner can't start", then, only for a camera or browser cause, the reason and how to allow the camera; the actions in story 7 | Final (owner, 2026-10-25) |
 | Confirm toast | Added N cards to <Location> | Final (owner, 2026-10-25) |
@@ -330,7 +369,8 @@ No Pokémon card artwork is committed anywhere in the repository, including fixt
 - **Recognition module interface:** a stub recognizer that satisfies the message contract drives the tray and save path end to end, so the tray tests do not depend on the real models. A test pins that nothing but `worker/ort.ts` imports the runtime.
 - **Tray and settings (vitest):** the lock sound is off by default.
 - **Collection Import's Camera choice** opens the scanner by full navigation and never calls `POST /api/collection-imports` (browser test with a request spy).
-- **API (pytest):** the save, printings, cards, manifest, fingerprints, set-count and index-job tests in the resolution. They add nothing for suggestions: a suggestion is entirely a client matter, and its pick uses the printings and save routes.
+- **API (pytest):** the save, printings, cards, manifest, fingerprints, set-count and index-job tests in the resolution. They add nothing for suggestions: a suggestion is entirely a client matter, and its pick uses the printings and save routes. Added 2026-10-28 for the `group` column: it numbers Reprint Groups with two or more Printings and leaves a singleton null, and the cards key changes when group membership changes, after which the old key answers `CARDS_NOT_CURRENT`.
+- **Look-alikes, voting and the tray store (vitest), 2026-10-28:** same group at or above 0.85 and closest first, with other groups, null groups, members below it and members with no fingerprint left out; `absent` once for any pending lock; an automatic lock carries its backing frames' number ids and narrowing runs before the cap of 7; a copy goes to the newest row with the same Printing and Edition and never to a row marked as needing a finish; a chip change merges, the tapped row keeps its id and position, and a merge over 999 writes nothing; a stored tray with two rows of one Printing and Edition parses with both, and Confirm sends one summed item.
 - **Browser (Playwright, frame injection):** extend `scanner-tray.spec.ts` with:
   - a scripted image-only sequence shows a Scan Suggestion with three candidates, adds no row until one is picked, and the picked card enters the tray with its starting finish selected;
   - **None of these** opens search, and the same card is not suggested again until a scripted absence;
@@ -339,6 +379,7 @@ No Pokémon card artwork is committed anywhere in the repository, including fixt
   - the cannot-start screen: denied camera and an unsupported browser name their cause; a failed asset load, a hash mismatch and no index built show the generic screen, which does not contain the words index, download or asset;
   - the scanner is opened through **Scan cards** (a full navigation) and then `crossOriginIsolated` is true, its images load, and no COEP console errors appear; Close and the return after Confirm are full navigations;
   - the stub script's frames gain `eligible?: boolean` (default true) and `ocr?: string[]` (the frame's OCR number candidates, Printing ids). `textBacked` derives from `ocr` containing `top[0]`. The stub otherwise keeps the resolution's shape (`url`, `gate`, `top`);
+  - Scan Choices (2026-10-28; the full list is in D15, and new specs are `scanner-choice.spec.ts` plus updates to the tray, suggestion and save specs): a number-backed card with two finishes opens the finish prompt and a tap adds that finish; scanning it again and tapping another finish makes a second row, and a third scan of the first finish counts ×2 on the first row; a card with one finish is added with no prompt; look-alikes open the version prompt with each version's finish chips; a card taken away with the prompt open is skipped and must leave before the next lock; changing a row's chip to a finish another row has merges the two rows. The stub script gains `lookalikes` (Printing id to look-alike ids);
   - the rest of the plan is as in the resolution (second placement, shutter `miss`, unreachable printings route, persistence across reload, a second collector, no image bytes in any request body, save, `EDITIONS_CHANGED`, `DESTINATION_CHANGED`, replay, frozen tray, fallback screens, fake-camera smoke test).
 - **Phone width and accessibility:** no horizontal scroll, 44 px controls, announced hints, suggestion, chips and disabled confirm, and focus moving into and out of the tray, suggestion and search.
 - **Tooling:** the bundle-boundary, proxy-config (`.mjs`, gzip, `/scanner/m/`), guardrail and `fetch-scanner-models.mjs --check` tests in the resolution. Changes: the bundle-boundary test covers both entries' graphs (main must not reach the runtime); add proxy-config tests that the scanner location sends COOP `same-origin` and COEP `require-corp`, that no HTML document other than the scanner's gets COOP or COEP, and that `/assets/` and its nested `.mjs` location send COEP `require-corp`; add a check that the Vite dev server serves the scanner entry at `/collection/scan` with the same header scope.
@@ -353,7 +394,7 @@ These run once on the deployed dev site and are recorded in the launch checklist
 
 ## Open Questions
 
-None. The owner answered the four collector-facing questions on 2026-10-25: a card taken out with its Scan Suggestion unanswered is skipped; a suggestion gets no lock cue; the shutter adds an image-only match but is greyed out while a suggestion shows; and every drafted string in the Copy table is approved.
+None. The owner answered the four collector-facing questions on 2026-10-25: a card taken out with its Scan Suggestion unanswered is skipped; a suggestion gets no lock cue; the shutter adds an image-only match but is greyed out while a suggestion shows; and every drafted string in the Copy table is approved. On 2026-10-28 the owner answered the look-alike questions (see Scan Choice rules); the glossary terms **Scan Choice** and **Look-alike Printings** were decided by Claude in the second round and stay open to the owner's override.
 
 ## Out of Scope
 
@@ -381,7 +422,7 @@ The owner decided on 2026-10-24 to ship the scanner now and improve recognition 
 - **G9 voting:** double counts, missed second copies, wrong-Printing locks and false absences. Unmeasured, and the harness did not advance placements by itself.
 - **Slower phones and Android.** Only one fast iPhone (iPhone 17 Pro Max, iOS 27.0.1) was measured. The first release is not verified on a slower iPhone or any Android phone.
 - **G10 on the full 30 cards** through the phone pipeline.
-- **Accuracy levers from the spike,** in order: read the number strip from the full-resolution frame; corner finding that tolerates protector rims; link reprints in the catalog so twins appear together.
+- **Accuracy levers from the spike,** in order: read the number strip from the full-resolution frame; corner finding that tolerates protector rims; link reprints in the catalog so twins appear together. (Partly done on 2026-10-28: Look-alike Printings in a Reprint Group are shown together in a Scan Choice. Shared-art Printings in different Reprint Groups still are not.)
 
 ### Ship blockers
 
@@ -404,7 +445,7 @@ Resolution blocker 2 (the gate passing or ending in a recorded fallback) is repl
 
 ### Owner answers this spec rests on
 
-Dated, in the map's "Decisions so far": review tray; on-device only; accuracy bar (measured on the full pipeline later, not claimed met); English only; automatic capture with a shutter fallback; guide outline; finish default; one Storage Leaf destination and no Deck; unfinished tray kept on the device, per account; entry points; no prices; misses to search; lock feedback; repeat lock; no undo; tray cap; iOS eviction accepted; first download; stale save note; no index built; image-only matches as a Scan Suggestion with the top three and **None of these** to search (2026-10-23 and 2026-10-24); a card taken out with its suggestion unanswered is skipped, and a suggestion gets no lock cue, and the shutter adds an image-only match but is greyed out while a suggestion shows (2026-10-25); ship first, improve later (2026-10-24); fingerprint rights; the tray prototype's eight answers (2026-10-22).
+Dated, in the map's "Decisions so far": review tray; on-device only; accuracy bar (measured on the full pipeline later, not claimed met); English only; automatic capture with a shutter fallback; guide outline; finish default; one Storage Leaf destination and no Deck; unfinished tray kept on the device, per account; entry points; no prices; misses to search; lock feedback; repeat lock; no undo; tray cap; iOS eviction accepted; first download; stale save note; no index built; image-only matches as a Scan Suggestion with the top three and **None of these** to search (2026-10-23 and 2026-10-24); a card taken out with its suggestion unanswered is skipped, and a suggestion gets no lock cue, and the shutter adds an image-only match but is greyed out while a suggestion shows (2026-10-25); ship first, improve later (2026-10-24); fingerprint rights; the tray prototype's eight answers (2026-10-22); and, on 2026-10-28, a row is one Card Printing and one Card Edition, a card that needs a choice asks which version and which finish, a chip change merges rows, the look-alike threshold of 0.85 with extra versions accepted, the wording "Which version?" and "Which finish?", and the finish name on a single-finish version ([D15](wayfinder/resolutions/decide-scanner-plumbing.md#d15-look-alike-printings-and-the-choice-prompt-2026-10-28)). These replace the 2026-10-22 repeat-lock answer.
 
 The accuracy bar (the right card in the top three at least 9 in 10 and first at least 7 in 10) was not met by the spike on Mac figures (20/30 first, 25/30 in the top three) and was not re-measured on the owner's cards on phones. The owner accepted this on 2026-10-22 and 2026-10-24.
 
@@ -438,4 +479,6 @@ The ADR "On-device recognition assets and the scanner index job" (map ticket 6, 
 - **The shipped gate setting was never run on a phone.** Every phone run bypassed the whole gate. The shipped setting (sharpness off, dark, bright and clipped on) is new code, and its luma floor (40) sits close to the luma of a card on a dim table (49 or more was measured). It could reject real frames in dim light or flag foils as clipped. The deployed-site check covers dim light and foils.
 - **The isolated scanner page is a new delivery shape** (its own HTML entry, full navigations, COEP on every image). It is the likeliest source of surprises on the deployed site and is covered by the browser and deployed checks.
 - **Suggestions may be common.** Image-only agreement is how many real cards will match until the gate and speed work land. The Scan Suggestion presentation matters more than the lock cue for how the scanner feels.
+- **Scan speed.** By the owner's 2026-10-28 answer, most modern cards (Normal and Reverse Holo) now ask for the finish on every scan, which changes how fast scanning feels. Watch for owner feedback after release.
+- **Extra versions.** At 0.85 a Scan Choice can list a different-art version of the same card, mostly after image-only locks (D15).
 - **Rights.** See ship blocker 1.
