@@ -85,3 +85,5 @@ app.want_list_cost mixed
 app.catalog_import root
 app.catalog_refresh root
 app.catalog_targets root
+app.public_catalog root
+app.public_prices root
