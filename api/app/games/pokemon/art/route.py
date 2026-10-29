@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import Response
 
 from app.core.art import store
-from app.games.pokemon.art.hosts import ALLOWED_HOST, LINKED_ART
+from app.games.pokemon.art.hosts import ALLOWED_HOST, KEY_PREFIX, LINKED_ART
 from app.identity import verified_user
 
 _fetcher: store.ArtFetcher | None = None
@@ -28,4 +28,4 @@ router = APIRouter(prefix="/api/art")
 async def art(printing_id: str = Path(max_length=64), size: str = Path(max_length=16),
               v: str | None = Query(None, max_length=16), user_id: str = Depends(verified_user)):
     return await store.serve_admitted(printing_id, size, v, allowed_host=ALLOWED_HOST, linked_art=LINKED_ART,
-                                      fetcher=fetcher)
+                                      fetcher=fetcher, key_prefix=KEY_PREFIX)

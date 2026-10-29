@@ -273,7 +273,7 @@ def _stored(conn, printing_id: UUID, size: str, source: str, obj, fresh: bool, c
 
 
 def serve(printing_id: str, size: str, v: str | None, count: bool = True, *, allowed_host: str,
-          linked_art: re.Pattern, fetcher) -> Response:
+          linked_art: re.Pattern, fetcher, key_prefix: str) -> Response:
     """The art response. ``count=False`` (the warm-up) stores the image without adding to ``art_hit``, which counts views.
     ``fetcher`` is a callable returning the game's ``ArtFetcher``."""
     try:
@@ -322,7 +322,7 @@ def serve(printing_id: str, size: str, v: str | None, count: bool = True, *, all
                                        (pid, size, source, failed.reason)).fetchone()
             return _unavailable(backoff_seconds(row["failures"]))
         digest = hashlib.sha256(data).hexdigest()
-        key = f"tcgdex/{size}/{str(pid)[:2]}/{pid}-{hashlib.sha256(source.encode()).hexdigest()[:16]}"
+        key = f"{key_prefix}/{size}/{str(pid)[:2]}/{pid}-{hashlib.sha256(source.encode()).hexdigest()[:16]}"
         try:
             storage().put(key, data)
         except OSError as error:
@@ -382,14 +382,15 @@ def _warm_executor() -> ThreadPoolExecutor:
         return _warm_pool
 
 
-def _warm(printing_ids: list[UUID], allowed_host: str, linked_art: re.Pattern, fetcher) -> None:
+def _warm(printing_ids: list[UUID], allowed_host: str, linked_art: re.Pattern, fetcher, *, key_prefix: str) -> None:
     for index, pid in enumerate(printing_ids):
         if _warm_stop.is_set():
             with _warm_lock:
                 _warm_pending.difference_update(printing_ids[index:])
             return
         try:
-            serve(str(pid), "small", None, count=False, allowed_host=allowed_host, linked_art=linked_art, fetcher=fetcher)
+            serve(str(pid), "small", None, count=False, allowed_host=allowed_host, linked_art=linked_art, fetcher=fetcher,
+                  key_prefix=key_prefix)
         except Exception as error:  # a warm-up is only a head start: nothing here may reach a caller
             log.warning("Art warm-up failed: %s", type(error).__name__)
         finally:
@@ -412,7 +413,8 @@ def start_warmups() -> None:
     _warm_stop.clear()
 
 
-def warm_deck(conn, owner_id: str, deck_id: UUID, *, allowed_host: str, linked_art: re.Pattern, fetcher) -> None:
+def warm_deck(conn, owner_id: str, deck_id: UUID, *, allowed_host: str, linked_art: re.Pattern, fetcher,
+              key_prefix: str) -> None:
     """Queue background stores of the small art of a Deck's Printings that has none stored (#396). Called by the Deck List
     commands inside their transaction, so it reads the lines just written; it needs only ids, so the job never depends on
     the commit. Only a source on the game's allowed host is stored (linked fallback art needs nothing). Bounded to
@@ -439,7 +441,7 @@ def warm_deck(conn, owner_id: str, deck_id: UUID, *, allowed_host: str, linked_a
             _warm_pending.update(fresh)
         if fresh:
             try:
-                future = _warm_executor().submit(_warm, fresh, allowed_host, linked_art, fetcher)
+                future = _warm_executor().submit(_warm, fresh, allowed_host, linked_art, fetcher, key_prefix=key_prefix)
             except BaseException:
                 with _warm_lock:
                     _warm_pending.difference_update(fresh)
@@ -462,7 +464,7 @@ def join_warmups() -> None:
 
 
 async def serve_admitted(printing_id: str, size: str, v: str | None, *, allowed_host: str, linked_art: re.Pattern,
-                         fetcher) -> Response:
+                         fetcher, key_prefix: str) -> Response:
     """The route body: admit at most ``MAX_ADMITTED`` requests, then serve on the dedicated pool."""
     global _admitted
     with _admit_lock:
@@ -472,7 +474,7 @@ async def serve_admitted(printing_id: str, size: str, v: str | None, *, allowed_
     try:
         return await asyncio.get_running_loop().run_in_executor(
             _executor(), partial(serve, printing_id, size, v, allowed_host=allowed_host, linked_art=linked_art,
-                                 fetcher=fetcher))
+                                 fetcher=fetcher, key_prefix=key_prefix))
     finally:
         with _admit_lock:
             _admitted -= 1
