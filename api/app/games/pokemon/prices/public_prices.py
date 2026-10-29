@@ -17,7 +17,7 @@ from psycopg.pq import TransactionStatus
 from .price_binding import PRICE_LOCK
 from app.public_projection import public_record_store
 from app.public_records import MAX_BATCH, price_key
-from app.quote_contract import parse_amount
+from app.core.prices.quote_contract import parse_amount
 
 log = logging.getLogger(__name__)
 CHUNK = MAX_BATCH           # Keys per compare-and-swap.

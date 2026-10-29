@@ -38,7 +38,7 @@ from app.db import connect
 from app.public_projection import ProjectionUnavailable, public_record_store
 from app.price_reads import price_reads_enabled
 from app.public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, price_key, quarantine_key)
-from app.quote_contract import parse_amount
+from app.core.prices.quote_contract import parse_amount
 
 log = logging.getLogger(__name__)
 LOCK = 914706               # Session advisory lock: one drainer at a time. Correctness never depends on it.

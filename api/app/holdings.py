@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .api_errors import api_error
-from .art_urls import route_address
+from .core.art.urls import route_address
 from .db import connect
 from .identity import verified_user
 from .idempotency import expire

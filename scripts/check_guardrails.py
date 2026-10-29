@@ -225,17 +225,17 @@ def onnxruntime_import_violations(source, filename):
 
 # Card art (ADR 0020, #354, #360): a Printing's art comes from one place, the `catalog_printing_art` view, and the
 # signed-in app shows it through the art route. TCGdex's `/low.webp` and `/high.webp` file names are built only by the
-# art-URL module (`api/app/art_urls.py`, the scanner's TCGdex-only rule) and the scanner's own query; the web build
+# art-URL module (`api/app/games/pokemon/art/urls.py`, the scanner's TCGdex-only rule) and the scanner's own query; the web build
 # never spells them, so a client cannot derive a size by editing an address.
 WEBP_SUFFIX = re.compile(r'/(?:low|high)\.webp')
-WEBP_SUFFIX_MODULES = ('api/app/games/pokemon/scanner/scanner.py', 'api/app/art_urls.py')
+WEBP_SUFFIX_MODULES = ('api/app/games/pokemon/scanner/scanner.py', 'api/app/games/pokemon/art/urls.py')
 
 
 def webp_suffix_violations(source, filename):
     """No `/low.webp` or `/high.webp` outside the modules that own the TCGdex file names."""
     if filename in WEBP_SUFFIX_MODULES:
         return []
-    return [(number, 'Build card art addresses through the art route (api/app/art_urls.py, catalog_printing_art), '
+    return [(number, 'Build card art addresses through the art route (api/app/games/pokemon/art/urls.py, catalog_printing_art), '
                      'not with a /low.webp or /high.webp suffix')
             for number, line in enumerate(source.splitlines(), 1)
             if WEBP_SUFFIX.search(line) and not line.lstrip().startswith(('#', '//', '*', '/*'))]

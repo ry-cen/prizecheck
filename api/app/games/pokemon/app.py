@@ -1,5 +1,6 @@
 """The Pokemon app: the routers FastAPI mounts, in route order, and the startup and shutdown hooks (design D12)."""
-from app.art_store import router as art_router, start_warmups, stop_warmups
+from app.core.art.store import start_warmups, stop_warmups
+from app.games.pokemon.art.route import router as art_router
 from app.games.pokemon.catalog.attribute_corrections import router as attribute_corrections_router
 from app.games.pokemon.catalog.catalog_browse import router as catalog_browse_router
 from app.games.pokemon.catalog.catalog_reconciliation import router as catalog_reconciliation_router

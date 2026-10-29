@@ -25,7 +25,8 @@ import socket
 import time
 from uuid import uuid4
 
-from . import price_launcher, quote_contract as qc
+from . import price_launcher
+from .core.prices import quote_contract as qc
 from .public_projection import ProjectionUnavailable
 from .public_records import OperationConflict, public_record_store, quote_states, result_key
 

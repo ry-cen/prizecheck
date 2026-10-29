@@ -6,6 +6,7 @@
 app.collection_import -> app.games.pokemon.imports.collection_import_finish
 app.collection_import -> app.games.pokemon.imports.collection_import_matcher
 app.collection_import -> app.games.pokemon.imports.collection_import_reader
+app.decks -> app.games.pokemon.art.route
 app.decks -> app.games.pokemon.formats.construction_checks
 app.decks -> app.games.pokemon.formats.deck_format_checks
 app.decks -> app.games.pokemon.formats.format_evaluator
@@ -24,8 +25,7 @@ app.import_publication -> app.games.pokemon.imports.decklist_text
 app.import_publication -> app.games.pokemon.catalog.set_codes
 app.missing_cards -> app.games.pokemon.catalog.card_identity
 app.missing_cards -> app.games.pokemon.catalog.public_catalog
-app.price_runner -> app.games.pokemon.prices.price_source
-app.price_runner -> app.games.pokemon.prices.tcgdex_record
+app.publications -> app.games.pokemon.art.urls
 app.publications -> app.games.pokemon.formats.construction_checks
 app.publications -> app.games.pokemon.formats.deck_format_checks
 

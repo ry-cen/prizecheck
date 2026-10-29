@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Literal
 import base64, hashlib, hmac, json, os
 from pydantic import BaseModel
-from .art_urls import route_address
+from .core.art.urls import route_address
 from .db import connect
 from .identity import verified_user
 from .holdings import HoldingView, fail

@@ -2,7 +2,7 @@
 
 ``GET /api/art/{printing_id}/{size}`` is signed-in only and keyed by catalog Printing, never by a source URL: the source
 comes from catalog data (``resolve``) and must pass the exact-host check (``host_allowed``) before every hop, so the route
-cannot act as an open proxy. On a miss the image is fetched once from ``https://assets.tcgdex.net``, checked (type, magic
+cannot act as an open proxy. On a miss the image is fetched once from the game's allowed host, checked (type, magic
 bytes, 2 MiB cap), saved through ``art_storage`` and recorded in ``art_object``; later requests are served from the store
 with no upstream request. Upstream failures are written to ``art_fetch_failure`` and backed off. Every served request
 adds to ``art_hit`` (the signal for #361's upgrade job).
@@ -15,6 +15,9 @@ answers 404 ART_NOT_FOUND.
 
 Warm-up (#396): ``warm_deck`` stores the small art of a saved deck's printings in the background through ``serve``, so the
 first view finds them stored.
+
+Game-free (design D11): the allowed host, the linked-art pattern and the fetcher come from the game's route module
+(``app.games.pokemon.art.route``) as keyword parameters.
 """
 import asyncio
 import hashlib
@@ -25,23 +28,18 @@ import threading
 import time
 import urllib.parse
 from concurrent.futures import CancelledError, ThreadPoolExecutor
+from functools import partial
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from .art_storage import storage
-from .art_urls import SIZES
-from .db import connect
-from .identity import verified_user
+from app.art_storage import storage
+from app.core.art.urls import SIZES
+from app.db import connect
 
 log = logging.getLogger(__name__)
 
-ALLOWED_HOST = "assets.tcgdex.net"
-# Fallback art (ADR 0019, #354): linked, never copied. The route answers a redirect to this exact URL shape, which
-# the view builds from an integer product id.
-LINKED_ART = re.compile(r"https://tcgplayer-cdn\.tcgplayer\.com/product/[0-9]{1,9}_(?:200|400)w\.jpg")
 RATE = 5
 MAX_BYTES = 2 * 1024 * 1024
 CONNECT_TIMEOUT = 3.0
@@ -69,8 +67,8 @@ IMMUTABLE = "private, max-age=31536000, immutable"
 REVALIDATE = "private, no-cache"
 
 
-def host_allowed(url: str) -> bool:
-    """Exactly https://assets.tcgdex.net: port absent or 443, no userinfo, no query or fragment."""
+def host_allowed(url: str, *, allowed_host: str) -> bool:
+    """Exactly https://<allowed_host>: port absent or 443, no userinfo, no query or fragment."""
     if any(ord(char) <= 0x20 or ord(char) >= 0x7F for char in url):
         return False  # urlsplit drops tabs and newlines and httpx does not: they must agree on the host
     try:
@@ -79,9 +77,9 @@ def host_allowed(url: str) -> bool:
         client = httpx.URL(url)
     except (ValueError, httpx.InvalidURL):
         return False
-    if client.scheme != "https" or client.host != ALLOWED_HOST:
+    if client.scheme != "https" or client.host != allowed_host:
         return False
-    return (parts.scheme == "https" and (parts.hostname or "").lower() == ALLOWED_HOST and "@" not in parts.netloc
+    return (parts.scheme == "https" and (parts.hostname or "").lower() == allowed_host and "@" not in parts.netloc
             and port in (None, 443) and not parts.query and not parts.fragment)
 
 
@@ -137,7 +135,8 @@ class Busy(Exception):
 
 
 class ArtFetcher:
-    def __init__(self, transport=None, limiter=None, clock=time.monotonic):
+    def __init__(self, *, allowed_host, transport=None, limiter=None, clock=time.monotonic):
+        self.allowed_host = allowed_host
         contact = os.environ.get("ART_FETCH_CONTACT")
         agent = f"PrizeCheck-art/1 (+{contact})" if contact else "PrizeCheck-art/1"
         self.clock = clock
@@ -155,7 +154,7 @@ class ArtFetcher:
         deadline = self.clock() + DEADLINE
         url = source_url
         for _ in range(MAX_REDIRECTS + 1):
-            if not host_allowed(url):
+            if not host_allowed(url, allowed_host=self.allowed_host):
                 raise FetchFailed("redirect")
             if self.clock() > deadline:
                 raise FetchFailed("timeout")
@@ -201,29 +200,17 @@ class ArtFetcher:
         raise FetchFailed("redirect")
 
 
-_fetcher: ArtFetcher | None = None
-_fetcher_lock = threading.Lock()
-
-
-def fetcher() -> ArtFetcher:
-    global _fetcher
-    with _fetcher_lock:
-        if _fetcher is None:
-            _fetcher = ArtFetcher()
-        return _fetcher
-
-
-def resolve(conn, printing_id: UUID, size: str):
+def resolve(conn, printing_id: UUID, size: str, *, allowed_host: str, linked_art: re.Pattern):
     """(source, version) for a (Printing, size): what ``catalog_printing_art`` chooses (TCGdex first, else the fallback),
     the one place a Printing's art comes from, and the version ``?v=`` must equal for the immutable cache header (the
     Printing's small-source version). (None, None) when the Printing has no art or the URL is not one the route may
-    use: a TCGdex file on the exact host (fetched and stored) or a linked fallback (redirected, never fetched)."""
+    use: a file on the game's exact host (fetched and stored) or a linked fallback (redirected, never fetched)."""
     column = "low_image_url" if size == "small" else "high_image_url"
     row = conn.execute(f"SELECT {column} AS source, art_version FROM catalog_printing_art WHERE printing_id = %s",
                        (printing_id,)).fetchone()
     source = row["source"] if row else None
     # art_object.source_url holds at most 2048 characters: a longer source could be fetched but never stored.
-    if source and len(source) <= 2048 and (host_allowed(source) or LINKED_ART.fullmatch(source)):
+    if source and len(source) <= 2048 and (host_allowed(source, allowed_host=allowed_host) or linked_art.fullmatch(source)):
         return source, row["art_version"]
     return None, None
 
@@ -253,10 +240,10 @@ def _linked(source: str, fresh: bool) -> Response:
         "Cache-Control": IMMUTABLE if fresh else REVALIDATE})
 
 
-def _read(conn, printing_id: UUID, size: str):
+def _read(conn, printing_id: UUID, size: str, *, allowed_host: str, linked_art: re.Pattern):
     """(source, object row, ledger row, version) for a (Printing, size); the ledger row carries its age in database seconds.
     The version is the one ``?v=`` must equal for the immutable cache header (the Printing's small-source version)."""
-    source, version = resolve(conn, printing_id, size)
+    source, version = resolve(conn, printing_id, size, allowed_host=allowed_host, linked_art=linked_art)
     if source is None:
         return None, None, None, None
     obj = conn.execute("SELECT * FROM art_object WHERE printing_id=%s AND size=%s", (printing_id, size)).fetchone()
@@ -285,8 +272,10 @@ def _stored(conn, printing_id: UUID, size: str, source: str, obj, fresh: bool, c
     return _image(data, obj["content_type"], IMMUTABLE if fresh else REVALIDATE)
 
 
-def serve(printing_id: str, size: str, v: str | None, count: bool = True) -> Response:
-    """The art response. ``count=False`` (the warm-up) stores the image without adding to ``art_hit``, which counts views."""
+def serve(printing_id: str, size: str, v: str | None, count: bool = True, *, allowed_host: str,
+          linked_art: re.Pattern, fetcher) -> Response:
+    """The art response. ``count=False`` (the warm-up) stores the image without adding to ``art_hit``, which counts views.
+    ``fetcher`` is a callable returning the game's ``ArtFetcher``."""
     try:
         pid = UUID(printing_id)
     except ValueError:
@@ -294,10 +283,10 @@ def serve(printing_id: str, size: str, v: str | None, count: bool = True) -> Res
     if size not in SIZES:
         return _missing("ART_NOT_FOUND")
     with connect() as conn:
-        source, obj, _, version = _read(conn, pid, size)
+        source, obj, _, version = _read(conn, pid, size, allowed_host=allowed_host, linked_art=linked_art)
         if source is None:
             return _missing("ART_NOT_FOUND")
-        if LINKED_ART.fullmatch(source):
+        if linked_art.fullmatch(source):
             return _linked(source, v == version)
         answer = _stored(conn, pid, size, source, obj, v == version, count)
     if answer:
@@ -307,10 +296,10 @@ def serve(printing_id: str, size: str, v: str | None, count: bool = True) -> Res
         return _unavailable(RETRY_CONTENDED)
     try:
         with connect() as conn:
-            source, obj, failure, version = _read(conn, pid, size)
+            source, obj, failure, version = _read(conn, pid, size, allowed_host=allowed_host, linked_art=linked_art)
             if source is None:
                 return _missing("ART_NOT_FOUND")
-            if LINKED_ART.fullmatch(source):
+            if linked_art.fullmatch(source):
                 return _linked(source, v == version)
             answer = _stored(conn, pid, size, source, obj, v == version, count)
         if answer:
@@ -393,14 +382,14 @@ def _warm_executor() -> ThreadPoolExecutor:
         return _warm_pool
 
 
-def _warm(printing_ids: list[UUID]) -> None:
+def _warm(printing_ids: list[UUID], allowed_host: str, linked_art: re.Pattern, fetcher) -> None:
     for index, pid in enumerate(printing_ids):
         if _warm_stop.is_set():
             with _warm_lock:
                 _warm_pending.difference_update(printing_ids[index:])
             return
         try:
-            serve(str(pid), "small", None, count=False)
+            serve(str(pid), "small", None, count=False, allowed_host=allowed_host, linked_art=linked_art, fetcher=fetcher)
         except Exception as error:  # a warm-up is only a head start: nothing here may reach a caller
             log.warning("Art warm-up failed: %s", type(error).__name__)
         finally:
@@ -423,11 +412,11 @@ def start_warmups() -> None:
     _warm_stop.clear()
 
 
-def warm_deck(conn, owner_id: str, deck_id: UUID) -> None:
+def warm_deck(conn, owner_id: str, deck_id: UUID, *, allowed_host: str, linked_art: re.Pattern, fetcher) -> None:
     """Queue background stores of the small art of a Deck's Printings that has none stored (#396). Called by the Deck List
     commands inside their transaction, so it reads the lines just written; it needs only ids, so the job never depends on
-    the commit. Only a TCGdex source is stored (linked fallback art needs nothing). Bounded to ``WARM_LIMIT`` Printings
-    a call, and a Printing already queued is not queued twice. Never raises: a failed read is rolled back to its
+    the commit. Only a source on the game's allowed host is stored (linked fallback art needs nothing). Bounded to
+    ``WARM_LIMIT`` Printings a call, and a Printing already queued is not queued twice. Never raises: a failed read is rolled back to its
     savepoint, and the save goes on."""
     if os.environ.get("ART_WARM_UP", "1") == "0":
         return
@@ -435,22 +424,22 @@ def warm_deck(conn, owner_id: str, deck_id: UUID) -> None:
         with conn.transaction():
             # The Printing comes through catalog_edition, as the lines' display does (deck_list_display): a line whose
             # Edition left the active generation still shows its picture, so it is warmed too.
-            rows = conn.execute("""SELECT DISTINCT art.printing_id AS id, art.low_image_url AS source
+            rows = conn.execute("""SELECT DISTINCT pa.printing_id AS id, pa.low_image_url AS source
                 FROM deck_list_line line
                 JOIN catalog_edition edition ON edition.id=line.edition_id
-                JOIN catalog_printing_art art ON art.printing_id=edition.printing_id
-                WHERE line.owner_id=%s AND line.deck_id=%s AND art.low_image_url LIKE 'https://assets.tcgdex.net/%%'
-                  AND NOT EXISTS (SELECT 1 FROM art_object stored WHERE stored.printing_id=art.printing_id
-                    AND stored.size='small' AND stored.source_url=art.low_image_url)
-                ORDER BY art.printing_id
-                LIMIT %s""", (owner_id, deck_id, WARM_LIMIT)).fetchall()
-        usable = [row["id"] for row in rows if len(row["source"]) <= 2048 and host_allowed(row["source"])]
+                JOIN catalog_printing_art pa ON pa.printing_id=edition.printing_id
+                WHERE line.owner_id=%s AND line.deck_id=%s AND pa.low_image_url LIKE %s
+                  AND NOT EXISTS (SELECT 1 FROM art_object stored WHERE stored.printing_id=pa.printing_id
+                    AND stored.size='small' AND stored.source_url=pa.low_image_url)
+                ORDER BY pa.printing_id
+                LIMIT %s""", (owner_id, deck_id, f"https://{allowed_host}/%", WARM_LIMIT)).fetchall()
+        usable = [row["id"] for row in rows if len(row["source"]) <= 2048 and host_allowed(row["source"], allowed_host=allowed_host)]
         with _warm_lock:
             fresh = [pid for pid in usable if pid not in _warm_pending]
             _warm_pending.update(fresh)
         if fresh:
             try:
-                future = _warm_executor().submit(_warm, fresh)
+                future = _warm_executor().submit(_warm, fresh, allowed_host, linked_art, fetcher)
             except BaseException:
                 with _warm_lock:
                     _warm_pending.difference_update(fresh)
@@ -472,19 +461,18 @@ def join_warmups() -> None:
             pass
 
 
-router = APIRouter(prefix="/api/art")
-
-
-@router.get("/{printing_id}/{size}", response_class=Response, responses={200: {"content": {"image/webp": {}}}})
-async def art(printing_id: str = Path(max_length=64), size: str = Path(max_length=16),
-              v: str | None = Query(None, max_length=16), user_id: str = Depends(verified_user)):
+async def serve_admitted(printing_id: str, size: str, v: str | None, *, allowed_host: str, linked_art: re.Pattern,
+                         fetcher) -> Response:
+    """The route body: admit at most ``MAX_ADMITTED`` requests, then serve on the dedicated pool."""
     global _admitted
     with _admit_lock:
         if _admitted >= MAX_ADMITTED:
             return _unavailable(RETRY_CONTENDED)
         _admitted += 1
     try:
-        return await asyncio.get_running_loop().run_in_executor(_executor(), serve, printing_id, size, v)
+        return await asyncio.get_running_loop().run_in_executor(
+            _executor(), partial(serve, printing_id, size, v, allowed_host=allowed_host, linked_art=linked_art,
+                                 fetcher=fetcher))
     finally:
         with _admit_lock:
             _admitted -= 1

@@ -31,7 +31,7 @@ from app.price_budget import FINAL_MARGIN_MS, Budget, trusted_budget
 from app.games.pokemon.catalog.public_catalog import marketplace_states
 from app.public_projection import ProjectionUnavailable
 from app.public_records import public_record_store
-from app.quote_contract import parse_amount
+from app.core.prices.quote_contract import parse_amount
 
 router = APIRouter(tags=['prices'])
 ANON = re.compile(r'anon:[0-9a-f]{32}')

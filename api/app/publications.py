@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
 from .api_errors import api_error
-from .art_urls import large_direct_url
+from .games.pokemon.art.urls import large_direct_url
 from .db import connect
 from .identity import verified_user
 from app.games.pokemon.formats.construction_checks import DISCLAIMER, IdentityCount, evaluate_checks

@@ -8,7 +8,7 @@ import pytest
 from app.games.pokemon.prices import card_art
 
 from app.games.pokemon.prices import price_import
-from app.art_urls import art_version
+from app.core.art.urls import art_version
 from app.games.pokemon.prices.catalog_targets import MATCHING  # noqa: F401  (imported so the rule tables exist in the schema under test)
 from app.db import connect
 from app.games.pokemon.catalog.public_catalog import drain

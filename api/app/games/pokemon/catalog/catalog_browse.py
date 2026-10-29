@@ -66,7 +66,8 @@ from . import name_search, set_codes
 from ..formats import format_standing
 from app.collection import anchor_json, anchor_value, cursor_key, encode_cursor
 from app.holdings import fail
-from app.art_urls import art_url, route_address
+from app.core.art.urls import route_address
+from app.games.pokemon.art.urls import art_url
 from app.borrowed_copies import borrowed_in
 from app.db import connect
 from app.identity import verified_user

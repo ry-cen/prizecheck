@@ -118,7 +118,7 @@ def quiet_art_warm_up():
     tests turn them on, and none may outlive its test. A private MonkeyPatch, not the shared fixture: requesting
     ``monkeypatch`` here would make it outlive a test module's own fixtures, which then tear down with the test's
     patched environment still set (test_host_readiness's unreachable DATABASE_URL)."""
-    from app import art_store
+    from app.core.art import store as art_store
     art_store.start_warmups()
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv('ART_WARM_UP', '0')

@@ -49,7 +49,7 @@ from threading import Thread
 import time
 from uuid import uuid4
 
-from . import quote_contract as qc
+from .core.prices import quote_contract as qc
 from .public_projection import ProjectionUnavailable
 from .public_records import FilePublicRecords, OperationConflict
 

@@ -14,7 +14,8 @@ from uuid import uuid4
 import pytest
 
 from app.games.pokemon.catalog import public_catalog
-from app.art_urls import art_url, art_version, large_direct_url
+from app.core.art.urls import art_version
+from app.games.pokemon.art.urls import art_url, large_direct_url
 from app.main import app, connect
 from app.public_projection import public_projection_store, public_record_store
 from app.public_records import catalog_printing_key

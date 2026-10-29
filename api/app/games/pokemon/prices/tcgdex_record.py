@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .catalog_targets import MatchingRulesV2, MatchingRulesV3
-from app.quote_contract import parse_amount
+from app.core.prices.quote_contract import parse_amount
 
 
 def source_descriptor(variant: dict) -> dict:

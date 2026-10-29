@@ -9,9 +9,13 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app import art_storage, art_store
-from app.art_store import ArtFetcher, RateLimiter, backoff_seconds
-from app.art_urls import art_url, art_version
+from app import art_storage
+from app.core.art import store as art_store
+from app.core.art.store import ArtFetcher, RateLimiter, backoff_seconds
+from app.core.art.urls import art_version
+from app.games.pokemon.art import route as art_route
+from app.games.pokemon.art.hosts import ALLOWED_HOST
+from app.games.pokemon.art.urls import art_url
 from app.main import app, connect
 from test_catalog import headers
 from test_catalog_search import promote
@@ -55,8 +59,8 @@ class Upstream:
 def upstream(monkeypatch, tmp_path):
     monkeypatch.setenv("ART_STORE_DIR", str(tmp_path))
     stub = Upstream()
-    monkeypatch.setattr(art_store, "_fetcher",
-                        ArtFetcher(transport=httpx.MockTransport(stub.handler), limiter=RateLimiter(100000)))
+    monkeypatch.setattr(art_route, "_fetcher",
+                        ArtFetcher(allowed_host=ALLOWED_HOST, transport=httpx.MockTransport(stub.handler), limiter=RateLimiter(100000)))
     return stub
 
 
@@ -286,8 +290,8 @@ def test_requests_across_a_source_change_serialize(pids, upstream, monkeypatch):
     resolved = threading.Event()
     real = art_store.resolve
 
-    def spy(conn, printing_id, size):
-        found = real(conn, printing_id, size)
+    def spy(conn, printing_id, size, **hosts):
+        found = real(conn, printing_id, size, **hosts)
         resolved.set()
         return found
 
@@ -337,7 +341,7 @@ def test_rate_limiter_refuses_a_slot_beyond_the_wait():
 def test_a_busy_limiter_answers_unavailable_without_a_ledger_entry(pids, upstream, monkeypatch):
     limiter = RateLimiter(1, clock=lambda: 0.0, sleep=lambda seconds: None)
     limiter.next_slot = 60.0
-    monkeypatch.setattr(art_store, "_fetcher", ArtFetcher(transport=httpx.MockTransport(upstream.handler), limiter=limiter))
+    monkeypatch.setattr(art_route, "_fetcher", ArtFetcher(allowed_host=ALLOWED_HOST, transport=httpx.MockTransport(upstream.handler), limiter=limiter))
     assert_unavailable(get(pids["card-1"]), 5)
     assert upstream.count == 0 and ledger(pids["card-1"]) == []
 
@@ -356,7 +360,7 @@ def test_store_write_failure_serves_without_recording(pids, monkeypatch):
 def test_upstream_requests_carry_the_art_user_agent(pids, upstream, monkeypatch):
     monkeypatch.setenv("ART_FETCH_CONTACT", "owner@example.test")
     seen = []
-    fetcher = ArtFetcher(transport=httpx.MockTransport(lambda request: seen.append(request.headers) or upstream.responder(request)))
+    fetcher = ArtFetcher(allowed_host=ALLOWED_HOST, transport=httpx.MockTransport(lambda request: seen.append(request.headers) or upstream.responder(request)))
     fetcher.limiter = RateLimiter(100000)
     fetcher.fetch(SMALL)
     assert seen[0]["user-agent"] == "PrizeCheck-art/1 (+owner@example.test)" and seen[0]["accept-encoding"] == "identity"
@@ -371,7 +375,7 @@ def test_an_encoded_answer_is_refused(pids, upstream):
 
 def test_production_upstream_target_is_identity():
     assert art_store.upstream_target("https://assets.tcgdex.net/a") == "https://assets.tcgdex.net/a"
-    assert art_store.upstream_target.__module__ == "app.art_store"
+    assert art_store.upstream_target.__module__ == "app.core.art.store"
 
 
 def test_a_streamed_body_over_the_cap_is_too_large(pids, upstream):
@@ -404,8 +408,8 @@ def test_a_deadline_passing_mid_body_is_a_timeout(pids, upstream, monkeypatch):
         return httpx.Response(200, content=webp(8), headers={"content-type": "image/webp"})
 
     upstream.responder = slow
-    fetcher = ArtFetcher(transport=httpx.MockTransport(upstream.handler), limiter=RateLimiter(100000), clock=lambda: now[0])
-    monkeypatch.setattr(art_store, "_fetcher", fetcher)
+    fetcher = ArtFetcher(allowed_host=ALLOWED_HOST, transport=httpx.MockTransport(upstream.handler), limiter=RateLimiter(100000), clock=lambda: now[0])
+    monkeypatch.setattr(art_route, "_fetcher", fetcher)
     assert_unavailable(get(pids["card-1"]))
     assert ledger(pids["card-1"])[0]["reason"] == "timeout"
 
@@ -420,7 +424,7 @@ def test_a_deadline_spent_waiting_for_a_slot_writes_no_ledger_entry(pids, upstre
         return real(max_wait)
 
     limiter.try_wait = waited
-    monkeypatch.setattr(art_store, "_fetcher", ArtFetcher(transport=httpx.MockTransport(upstream.handler), limiter=limiter,
+    monkeypatch.setattr(art_route, "_fetcher", ArtFetcher(allowed_host=ALLOWED_HOST, transport=httpx.MockTransport(upstream.handler), limiter=limiter,
                                                            clock=lambda: now[0]))
     assert_unavailable(get(pids["card-1"]))
     assert upstream.count == 0 and ledger(pids["card-1"]) == []

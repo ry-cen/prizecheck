@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from app import quote_contract as qc
+from app.core.prices import quote_contract as core_qc
 from app.public_records import key_family
 
 REF = 'a' * 48
@@ -55,8 +56,8 @@ def test_ledger_shard_is_stable_and_in_range():
 
 
 def test_wall_clock_is_one_patchable_function(monkeypatch):
-    monkeypatch.setattr(qc, 'wall_ms', lambda: 42)
-    assert qc.wall_ms() == 42
+    monkeypatch.setattr(core_qc, 'wall_ms', lambda: 42)
+    assert core_qc.wall_ms() == 42
     assert qc.iso_from_ms(0) == '1970-01-01T00:00:00Z'
 
 

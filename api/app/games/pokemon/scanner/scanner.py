@@ -23,7 +23,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..catalog import set_codes
-from app.art_urls import art_url, art_version, tcgdex_source
+from app.core.art.urls import art_version
+from app.games.pokemon.art.urls import art_url, tcgdex_source
 from ..catalog.catalog_search import EditionView, PrintingView, _state, _views
 from ..imports.collection_import_finish import NORMAL, choose, facets, fits
 from app.db import connect

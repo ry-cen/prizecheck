@@ -21,11 +21,13 @@ from uuid import uuid4
 
 import pytest
 
-from app import price_launcher, price_refresh, price_runner
+from app import price_launcher, price_refresh
+from app.core.prices import runner as price_runner
 
 from app.games.pokemon.prices import price_source
 
 from app.games.pokemon.prices import tcgdex_record
+from app.games.pokemon.prices.quote_values import CURRENCY, SOURCE
 from app import quote_contract as qc
 from app.price_budget import Budget
 from app.public_projection import ProjectionUnavailable
@@ -192,16 +194,18 @@ def test_runner_maps_the_real_source_and_record_types():
     assert (failure.reason, failure.retry_after_s, failure.rate_limited) == ('http_status', 30.0, False)
     assert price_runner.fetch_failure(price_source.Fetched(False, reason='http_status', status=503, retry_after=30)).rate_limited
     lookup = {'source': 'tcgdex', 'card': 'c-1', 'variant': 'normal'}
-    quote = price_runner.decide(lambda *a: tcgdex_record.Quote('1.5', 'c-1', 'normal', '2026-10-01T00:00:00Z'), {}, {}, lookup, 5)
+    quote = price_runner.decide(lambda *a: tcgdex_record.Quote('1.5', 'c-1', 'normal', '2026-10-01T00:00:00Z'), {}, {}, lookup, 5,
+                                  source=SOURCE, currency=CURRENCY)
     assert (quote.kind, quote.amount) == ('quote', '1.5')
-    assert price_runner.decide(lambda *a: tcgdex_record.Absent(), {}, {}, lookup, 5).kind == 'absent'
-    assert price_runner.decide(lambda *a: tcgdex_record.Failure('ambiguous'), {}, {}, lookup, 5).reason == 'ambiguous'
+    assert price_runner.decide(lambda *a: tcgdex_record.Absent(), {}, {}, lookup, 5, source=SOURCE, currency=CURRENCY).kind == 'absent'
+    assert price_runner.decide(lambda *a: tcgdex_record.Failure('ambiguous'), {}, {}, lookup, 5,
+                              source=SOURCE, currency=CURRENCY).reason == 'ambiguous'
 
 
 def make_worker(env, owner, fetcher, *, slot=0, selector=select_by_record, idle_s=0.3, hard_stop=None):
     lease = env.get(qc.runner_lease_key(slot))
     return price_runner.Worker(env.store, slot, owner, hard_stop or lease['hard_stop_ms'], fetcher=fetcher, selector=selector,
-                               idle_s=idle_s, poll_s=0.02)
+                               idle_s=idle_s, poll_s=0.02, source=SOURCE, currency=CURRENCY)
 
 
 def run_worker(env, fetcher, specs, *, selector=select_by_record, **kwargs):
@@ -329,7 +333,7 @@ def test_unknown_commit_outcome_is_resolved_by_operation_status(env):
     seed(env, [{'index': 1, 'card': 'base1-1'}], lease=running_lease(owner))
     lossy = Lossy(env.store)
     worker = price_runner.Worker(lossy, 0, owner, env.get(qc.runner_lease_key(0))['hard_stop_ms'], fetcher=ok_fetcher(),
-                                 selector=select_by_record, idle_s=0.3, poll_s=0.02)
+                                 selector=select_by_record, idle_s=0.3, poll_s=0.02, source=SOURCE, currency=CURRENCY)
     assert worker.run() == 'idle' and lossy.lost == 1
     assert state_of(env, 1)['result']['attempt'] == 1
 
@@ -443,7 +447,8 @@ def test_concurrency_caps_hold_per_slot_and_per_caller(env):
 def test_idle_exit_follows_two_seconds_of_nothing(fs_env):
     owner = owner_nonce()
     seed(fs_env, [], lease=running_lease(owner))
-    worker = price_runner.Worker(fs_env.store, 0, owner, qc.wall_ms() + 60_000, fetcher=ok_fetcher(), selector=select_by_record)
+    worker = price_runner.Worker(fs_env.store, 0, owner, qc.wall_ms() + 60_000, fetcher=ok_fetcher(), selector=select_by_record,
+                                 source=SOURCE, currency=CURRENCY)
     start = time.monotonic()
     assert worker.run() == 'idle'
     assert 1.9 <= time.monotonic() - start <= 2.4
@@ -743,7 +748,7 @@ if os.path.exists(_fake):
     # Test-only time scaling for the runners this test launches; production constants are untouched.
     _scaled = json.load(open(_fake)).get("scaled_contract") or {{}}
     if _scaled:
-        import app.quote_contract as _contract
+        import app.core.prices.quote_contract as _contract
         for _name, _value in _scaled.items():
             if _name not in ("HARD_STOP_MS", "LEASE_TTL_MS", "LEASE_RENEW_MS"):
                 raise RuntimeError("unsupported scaled contract constant: " + _name)
@@ -1262,7 +1267,7 @@ def test_a_lost_claim_answer_does_not_strand_the_claim(env):
     seed(env, [{'index': 1, 'card': 'base1-1'}], lease=running_lease(owner))
     lossy = LostClaim(env.store)
     worker = price_runner.Worker(lossy, 0, owner, env.get(qc.runner_lease_key(0))['hard_stop_ms'], fetcher=ok_fetcher(),
-                                 selector=select_by_record, idle_s=0.3, poll_s=0.02)
+                                 selector=select_by_record, idle_s=0.3, poll_s=0.02, source=SOURCE, currency=CURRENCY)
     assert worker.run() == 'idle' and lossy.lost == 1
     assert state_of(env, 1)['result']['state'] == 'quote' and env.get(SCHEDULER)['jobs'] == {}
     assert env.get(SCHEDULER)['source'] == {}

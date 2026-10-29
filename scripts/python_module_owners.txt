@@ -8,8 +8,6 @@
 app core
 app.api_errors core
 app.art_storage core
-app.art_store mixed
-app.art_urls mixed
 app.borrowed_copies core
 app.bounded_work core
 app.card_accepts core
@@ -47,12 +45,12 @@ app.price_budget core
 app.price_launcher core
 app.price_reads core
 app.price_refresh core
-app.price_runner mixed
+app.price_runner root
 app.public_deck mixed
 app.public_projection core
 app.public_records core
 app.publications mixed
-app.quote_contract mixed
+app.quote_contract root
 app.scanner_save mixed
 app.settings core
 app.social core

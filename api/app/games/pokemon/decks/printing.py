@@ -26,7 +26,7 @@ from app.games.pokemon.prices import prices
 from app.holdings import parse_quantity
 from app.identity import verified_user
 from app.location_tree import error, owner_and_rows, replay
-from app.quote_contract import parse_amount
+from app.core.prices.quote_contract import parse_amount
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 

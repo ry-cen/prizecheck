@@ -8,7 +8,8 @@ from collections.abc import Mapping
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from .art_store import warm_deck
+from .core.art.store import warm_deck
+from .games.pokemon.art import route as art_route
 from .db import connect
 from .identity import verified_user
 from .holdings import parse_quantity
@@ -510,7 +511,8 @@ def advance_deck_list(conn, user_id: str, deck_id: UUID) -> dict:
     Deck List never counts toward the Collection."""
     conn.execute('UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s', (user_id, deck_id))
     deck_list = read_deck_list(conn, user_id, deck_id)
-    warm_deck(conn, user_id, deck_id)  # background; never blocks or fails the save (#396)
+    warm_deck(conn, user_id, deck_id, allowed_host=art_route.ALLOWED_HOST, linked_art=art_route.LINKED_ART,
+              fetcher=art_route.fetcher)  # background; never blocks or fails the save (#396)
     target_format = read_target_format(conn, user_id, deck_id)
     return {'deck_id': deck_id, 'deck_list': deck_list, 'target_format': target_format,
             'format_checks': command_format_checks(conn, user_id, deck_id, deck_list.revision, target_format)}
