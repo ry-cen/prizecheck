@@ -363,8 +363,25 @@ def colour_scope_files():
             yield from sorted(item for item in path.rglob('*') if item.is_file() and item.suffix in ('.ts', '.tsx', '.css', '.html'))
 
 
+def set_code_migration_violations(migrations, tsv_text):
+    """``migrations`` maps file name to text. The newest migration that opens with a set_codes.tsv digest line must carry
+    the digest of the TSV as it is now, or the TSV changed without its migration."""
+    import hashlib
+    for name in sorted(migrations, reverse=True):
+        found = re.match(r'-- set_codes\.tsv digest: ([0-9a-f]{16})(?:\n|$)', migrations[name])
+        if found:
+            if found.group(1) == hashlib.sha256(tsv_text.encode()).hexdigest()[:16]:
+                return []
+            return [(name, 'FAILED: set_codes.tsv changed; run scripts/set_code_migration.py <next number>')]
+    return [('migrations', 'FAILED: no migration carries a set_codes.tsv digest; run scripts/set_code_migration.py <next number>')]
+
+
 def main():
     failed = False
+    migrations = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
+    for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/set_codes.tsv').read_text(encoding='utf-8')):
+        print(f'{name}: {reason}')
+        failed = True
     for relative in ('scripts/release.py', 'scripts/release_runtime.py'):
         for line, reason in violations((ROOT/relative).read_text(), relative):
             print(f'{relative}:{line}: {reason}')
