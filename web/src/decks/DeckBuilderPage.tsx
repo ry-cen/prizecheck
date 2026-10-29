@@ -49,6 +49,8 @@ type Props = {
   onAllDecks: () => void;
   /** Replace list… (/decks/<id>/replace, #215). */
   onReplaceList: () => void;
+  /** Opens the Want List scoped to this Deck. */
+  onWantList: () => void;
 };
 
 type Load =
@@ -87,7 +89,12 @@ const VIEWS = [
  * useDeckActions). A Replace's Undo runs from a toast outside the builder and announces the change; the builder reads
  * again (deckListChanged).
  */
-export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
+export function DeckBuilderPage({
+  deckId,
+  onAllDecks,
+  onReplaceList,
+  onWantList,
+}: Props) {
   const phone = useMediaQuery(MOBILE_QUERY);
   const idBase = useId();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -493,6 +500,7 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
             Gather {toGather.toString()}
           </Button>
           {deckActions.buyMissing}
+          <Button onClick={onWantList}>Want List</Button>
         </div>
       </div>
       {/* Row 2: the Target Format control (#178), then the view switch. */}

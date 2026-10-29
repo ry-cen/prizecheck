@@ -144,7 +144,7 @@ Once they have several Decks, they can't see what they still need to buy across 
 65. As a collector, I want unpriced cards reported separately and never counted as $0, so that the total isn't misleadingly low.
 66. As a collector on desktop, I want a sticky combined total listing each card once with the Decks that need it, so that I can shop from one list.
 67. As a collector on a phone, I want the combined total as a collapsed row under the summary that opens the same list, so that it doesn't push the sections away.
-68. As a collector, I want each Deck card on My Decks to show "Want List: N cards · $X" and open the Want List scoped to that Deck, so that I can shop for one Deck.
+68. As a collector, I want the Deck page to have a "Want List" button that opens the Want List scoped to that Deck, so that I can shop for one Deck.
 69. As a collector, I want Deck chips to switch between All Decks and each Deck, so that I can change scope without leaving the page.
 70. As a collector, I want **Open Deck** on each section, so that I can go to the builder.
 71. As a collector, I want **Buy on TCGplayer** to export exactly what is showing (the combined total, or one Deck's needs) under my counting setting, with the existing coverage wording, so that the cart matches the page.
@@ -361,7 +361,7 @@ From [the Want List page](wayfinder/resolutions/prototype-want-list.md) and [the
 ### The Want List page
 
 - **Where it lives:** a **My Decks / Want List** switch on Decks; the tab bar doesn't change.
-- **Scoping:** a Deck card's "Want List: N cards · $X" button opens the view scoped to that Deck, and Deck chips switch the scope. The switch always opens All Decks.
+- **Scoping:** the Deck page's "Want List" button opens the view scoped to that Deck; Deck cards have no Want List button, and Deck chips switch the scope. The switch always opens All Decks.
 - **The summary:** cards to get, estimated cost, cards priced, **Buy on TCGplayer**, and the counting setting as text with a link to Settings.
 - **Sections:**
   - **Each line:** the Edition, "N of M", where the counted copies are, the line cost and the price each.
@@ -467,11 +467,11 @@ Prior art: `deck-builder.spec.ts`, `deck-editing.spec.ts`, `deck-surplus.spec.ts
 - **Copy to my Decks:** from a Published Deck, through the review, to a new Deck named after it with its Target Format.
 - **The Want List:**
   - My Decks / Want List switch, sections, summary and combined total;
-  - a Deck card opens the scoped view and chips change scope;
+  - the Deck page's "Want List" button opens the scoped view, Deck cards have no Want List button, and chips change scope;
   - Swap and Undo;
   - Buy on TCGplayer's dialog wording;
   - the counting text and its link.
-- **Settings:** the menus say Settings; the old Sign-ins address redirects; changing the counting setting changes the Want List, a Deck card and the builder's "to complete".
+- **Settings:** the menus say Settings; the old Sign-ins address redirects; changing the counting setting changes the Want List, a Deck card's "to complete" and the builder's "to complete".
 - **Phone width:** the review, the Want List and Settings have no horizontal scroll; the save bar sits above the tab bar; controls are 44 px.
 - **Accessibility:** flagged lines, filter chips and the disabled Save have names and states a screen reader announces, and focus moves to the resolver when Fix opens it.
 

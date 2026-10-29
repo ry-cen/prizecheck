@@ -25,7 +25,7 @@ const LINK =
  * The Decks page (/decks and /decks/want-list): the page header and a **My Decks / Want List** switch over the two
  * views (decklist import #209, spec "The Want List page"). The phone tab bar doesn't change. The switch stays mounted
  * across both addresses, so it keeps the focus when a view is chosen; choosing the Want List always opens All Decks,
- * and a Deck card's "Want List: N cards" opens it scoped to that Deck.
+ * and the Deck page's "Want List" button opens it scoped to that Deck.
  */
 export function DecksPage({ view, onOpenDeck, onNavigate, message }: Props) {
   const idBase = useId();
@@ -74,11 +74,7 @@ export function DecksPage({ view, onOpenDeck, onNavigate, message }: Props) {
         {view === "want-list" ? (
           <WantListView onOpenDeck={onOpenDeck} onNavigate={onNavigate} />
         ) : (
-          <DecksIndexPage
-            onOpenDeck={onOpenDeck}
-            onNavigate={onNavigate}
-            onWantList={(id) => onNavigate(wantListPath(id))}
-          />
+          <DecksIndexPage onOpenDeck={onOpenDeck} onNavigate={onNavigate} />
         )}
       </div>
       <p role="alert" className="m-0 text-body text-danger">

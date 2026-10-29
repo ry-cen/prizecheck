@@ -176,7 +176,7 @@ The answer names `want_list_counting`, `settings_revision`, `owner_revision` and
 
 `GET /api/want-list/exports/tcgplayer` (`app.want_list_mass_entry`, optional `deck=<id>`) is the TCGplayer Mass Entry export of the same copies: the combined total with no `deck`, that Deck's needs with one. It reuses the private Deck export's rows, formatter and view (`deck_mass_entry.input_rows`, `formatted`, `view_fields`), so the link, text, coverage reason and less-specific rows are the Deck export's, and a scoped export equals that Deck's Buy missing. It names the same four values as the cost. `.../tcgplayer.txt` takes the required pins `owner_revision` (409 `INVENTORY_CHANGED`), `deck_lists` (the digest, 409 `DECK_LIST_CHANGED`) and `settings_revision` (409 `SETTINGS_CHANGED`), and answers 422 `NOTHING_NOT_OWNED` when nothing is needed. Neither export route reads a price or carries a budget, so a download is never cut at three seconds.
 
-The Decks index's "Want List: N cards · $X" is each row's existing cost read (`cost_to_complete`, the same allocation): the index reads no Want List price.
+The Decks index reads no Want List: each Deck card shows its own cost read (`cost_to_complete`), and the Deck page's "Want List" button opens the Want List scoped to that Deck.
 
 ## Trade value (trading #277)
 

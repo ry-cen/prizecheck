@@ -171,12 +171,6 @@ const needs = (page: Page, name: string) =>
   page.getByRole("list", { name: `What ${name} needs` }).getByRole("listitem");
 const total = (page: Page) =>
   page.getByRole("complementary", { name: /^Combined total/ });
-const indexRow = (page: Page, name: string) =>
-  page
-    .getByRole("navigation", { name: "Deck index" })
-    .getByRole("listitem")
-    .filter({ has: page.getByRole("link", { name, exact: true }) });
-
 test.afterEach(async () => {
   // ui_world activates a matching rule that verifies new Editions' mappings; later specs on this stack seed their own.
   await pool.query("UPDATE catalog_rule_state SET activation_id=NULL");
@@ -243,22 +237,6 @@ test.describe("on a desktop", () => {
       total(page).getByRole("listitem").filter({ hasText: "No price" })
     ).toHaveCount(1);
     await expectPageChecks(page, "the Want List with its cost");
-
-    // A Deck card's Want List button carries the same cost as its section.
-    await page.unroute("**/api/want-list/cost**");
-    await page.goto(`${ORIGIN}/decks`);
-    await expect(
-      indexRow(page, names.charizard).getByRole("button", {
-        name: "Want List: 2 cards · $0.50",
-        exact: true,
-      })
-    ).toBeVisible();
-    await expect(
-      indexRow(page, names.gardevoir).getByRole("button", {
-        name: "Want List: 4 cards · $0.75 + 1 unpriced",
-        exact: true,
-      })
-    ).toBeVisible();
   });
 
   test("Buy on TCGplayer exports what the page shows and names the scope and the counting", async ({
@@ -348,18 +326,7 @@ test.describe("on a phone", () => {
 
   test("the cost and Buy on TCGplayer fit the phone", async ({ page }) => {
     await signIn(page);
-    const names = await world(page);
-    await page.goto(`${ORIGIN}/decks`);
-    const indexButton = indexRow(page, names.gardevoir).getByRole("button", {
-      name: "Want List: 4 cards · $0.75 + 1 unpriced",
-      exact: true,
-    });
-    await expect(indexButton).toBeVisible();
-    await expectTouchTarget(indexButton);
-    await expectPageChecks(
-      page,
-      "the Decks index with Want List costs on a phone"
-    );
+    await world(page);
     await page.goto(`${ORIGIN}/decks/want-list`);
     await expect(
       page.getByText("Combined total · 6 cards · $1.25 + 1 unpriced")
