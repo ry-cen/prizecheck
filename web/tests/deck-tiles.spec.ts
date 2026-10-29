@@ -129,9 +129,10 @@ test.describe("on a desktop", () => {
     await expect(tileA).toContainText("Standard · ✓ Legal");
     // The automatic cover is the line with the most copies; with no artwork its placeholder names the card.
     await expect(tileA).toContainText("Basic Grass Energy");
-    await expect(
-      tileA.getByRole("button", { name: /^Want List: \d+ cards/ })
-    ).toBeVisible();
+    await expect(tileA.getByRole("button", { name: /^Want List/ })).toHaveCount(
+      0
+    );
+    await expect(tileA).not.toContainText("Nothing to get");
     await expect(empty).toContainText("Empty: plan a list");
     await expect(empty.locator("img")).toHaveCount(0);
 
@@ -149,12 +150,8 @@ test.describe("on a desktop", () => {
     // A click on the cover opens the Deck.
     await tileA.click({ position: { x: 24, y: 24 } });
     await expect(page).toHaveURL(`${ORIGIN}/decks/${a.deckId}`);
-    await page.getByRole("link", { name: "All Decks" }).click();
-
-    // The Want List button works on its own.
-    await tile(page, a.deckName)
-      .getByRole("button", { name: /^Want List: \d+ cards/ })
-      .click();
+    // The Deck page opens its scoped Want List.
+    await page.getByRole("button", { name: "Want List", exact: true }).click();
     await expect(page).toHaveURL(`${ORIGIN}/decks/want-list?deck=${a.deckId}`);
   });
 
@@ -321,9 +318,18 @@ test.describe("on a phone", () => {
     await expectTouchTarget(
       mine.getByRole("link", { name: built.deckName, exact: true })
     );
-    await expectTouchTarget(
-      mine.getByRole("button", { name: /^Want List: \d+ cards/ })
-    );
     await expectPageChecks(page, "Decks index tiles, phone");
+    await mine.getByRole("link", { name: built.deckName, exact: true }).tap();
+    // A phone opens the deck builder on Library; the Want List button is on the Deck tab.
+    await page.getByRole("tab", { name: /^Deck / }).tap();
+    const wantList = page.getByRole("button", {
+      name: "Want List",
+      exact: true,
+    });
+    await expectTouchTarget(wantList);
+    await wantList.tap();
+    await expect(page).toHaveURL(
+      `${ORIGIN}/decks/want-list?deck=${built.deckId}`
+    );
   });
 });

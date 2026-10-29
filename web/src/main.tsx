@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { replacedDeckAt, replacePath } from "./decks/import/replaceList";
-import { WANT_LIST_SEGMENT } from "./decks/wantListModel";
+import { wantListPath, WANT_LIST_SEGMENT } from "./decks/wantListModel";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
 import { SettingsPage } from "./settings/SettingsPage";
 import {
@@ -346,6 +346,7 @@ function App() {
             deckId={deckId}
             onAllDecks={() => navigate(pageDef("decks").path)}
             onReplaceList={() => navigate(replacePath(deckId))}
+            onWantList={() => navigate(wantListPath(deckId))}
           />
         ) : (
           <DecksPage
