@@ -65,6 +65,7 @@
   --color-shadow: var(--color-shadow);
   --color-shadow-strong: var(--color-shadow-strong);
   --color-focus: var(--color-focus);
+  --color-scroll-thumb: var(--color-scroll-thumb);
   /* Provider brand colours (tokens.css --brand-*), for the sign-in provider buttons only. */
   --color-google: var(--brand-google);
   --color-google-stroke: var(--brand-google-stroke);

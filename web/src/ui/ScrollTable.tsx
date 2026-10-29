@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ScrollArea } from "./ScrollArea";
 
 type Props = {
   /** The accessible name of the scrolling region, for example "Health checks". Give each table on a page
@@ -18,21 +19,23 @@ type Props = {
  * that containment, put a ScrollTable in normal block flow or a flex column, never a flex row, where it
  * would shrink to nothing.
  *
+ * The overlay scroll bar (#399) replaces the browser's, which is hidden on desktop; its rail is a sibling of the box.
+ *
  * The box is `relative` so absolutely positioned descendants (sr-only header text, `Select labelHidden`)
  * stay inside the scroll box and can't widen the page.
  */
 export function ScrollTable({ label, children }: Props) {
   return (
-    <div
-      role="region"
-      aria-label={label}
-      tabIndex={0}
-      className="@container relative box-border max-w-full overflow-x-auto rounded-control border border-border"
+    <ScrollArea
+      orientation="x"
+      className="max-w-full"
+      viewportProps={{ role: "region", "aria-label": label, tabIndex: 0 }}
+      viewportClassName="@container relative box-border max-w-full rounded-control border border-border"
     >
       {/* Cells are box-content: 32 px plus their padding and rule, the 41 px rows they had before Preflight (#184). */}
       <table className="w-full border-collapse whitespace-nowrap text-meta text-text [:where(&)>tbody>tr>td]:box-content [:where(&)>tbody>tr>td]:h-8 [:where(&)>tbody>tr>td]:border-b [:where(&)>tbody>tr>td]:border-border [:where(&)>tbody>tr>td]:px-2.5 [:where(&)>tbody>tr>td]:py-1 [:where(&)>tbody>tr>td]:align-middle [:where(&)>thead>tr>th]:box-content [:where(&)>thead>tr>th]:h-8 [:where(&)>thead>tr>th]:border-b [:where(&)>thead>tr>th]:border-border [:where(&)>thead>tr>th]:bg-surface [:where(&)>thead>tr>th]:px-2.5 [:where(&)>thead>tr>th]:py-1 [:where(&)>thead>tr>th]:text-left [:where(&)>thead>tr>th]:font-medium [:where(&)>thead>tr>th]:text-text-muted [:where(&)>tbody>tr:last-child>td]:border-b-0">
         {children}
       </table>
-    </div>
+    </ScrollArea>
   );
 }

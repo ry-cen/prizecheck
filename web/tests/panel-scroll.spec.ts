@@ -83,6 +83,17 @@ test("a long panel scrolls its body on a desktop screen", async ({ page }) => {
   await expectBodyScrolls(page);
 });
 
+// #399: an overflowing Dialog body draws its own overlay rail, inside the dialog.
+test("a long panel shows its overlay scroll bar on a desktop screen", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const picker = await openSetPicker(page);
+  const rail = picker.locator("[data-overlay-scrollbar='region']");
+  await expect(rail).toBeVisible();
+  await expect(rail).toHaveAttribute("aria-hidden", "true");
+});
+
 test.describe("phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 

@@ -724,6 +724,31 @@ test.describe("on a phone", () => {
     await expectSwapListScrolls(page, await buildDeck(page, { "edit-1": 2 }));
   });
 
+  // #399: below the phone breakpoint the library does not scroll itself, so a swipe or wheel over it must reach the page
+  // (a scroller with overscroll-behavior: contain would stop it).
+  test("a wheel over the library scrolls the page", async ({ page }) => {
+    promoteCatalog();
+    await signIn(page);
+    const built = await buildDeck(page, { "edit-1": 1 });
+    await page.goto(`${ORIGIN}/decks/${built.deckId}`);
+    const charmander = library(page).getByRole("button", {
+      name: /^Charmander, set-a 4, /,
+    });
+    await expect(charmander).toBeVisible();
+    await page.evaluate(() => {
+      const filler = document.createElement("div");
+      filler.style.height = "4000px";
+      document.body.append(filler);
+    });
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    const box = (await charmander.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 600);
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBeGreaterThan(100);
+  });
+
   test("the Library tab lists the library, its card popup is a bottom sheet with ±1, and the Deck tab counts the copy", async ({
     page,
   }) => {

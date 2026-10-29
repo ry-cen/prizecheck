@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, type ReactNode } from "react";
+import { ScrollArea } from "./ScrollArea";
 
 export type SegmentedOption<T extends string> = {
   value: T;
@@ -100,16 +101,20 @@ export function Segmented<T extends string>(
   }
 
   return (
-    <div
-      ref={list}
-      role={choice ? "radiogroup" : "tablist"}
-      aria-label={labelledBy ? undefined : label}
-      aria-labelledby={labelledBy}
-      aria-describedby={describedBy}
-      onKeyDown={onKeyDown}
+    <ScrollArea
+      orientation="x"
       // p-1 leaves the focus ring room inside the scroll box; -mx-1 takes it back, so the first option lines up
       // with the text above it.
-      className="-mx-1 box-border flex max-w-[calc(100%+0.5rem)] items-center gap-1 overflow-x-auto p-1"
+      className="-mx-1 max-w-[calc(100%+0.5rem)]"
+      viewportRef={list}
+      viewportClassName="box-border flex items-center gap-1 p-1"
+      viewportProps={{
+        role: choice ? "radiogroup" : "tablist",
+        "aria-label": labelledBy ? undefined : label,
+        "aria-labelledby": labelledBy,
+        "aria-describedby": describedBy,
+        onKeyDown,
+      }}
     >
       {options.map((option) => {
         const selected = option.value === value;
@@ -142,6 +147,6 @@ export function Segmented<T extends string>(
           </button>
         );
       })}
-    </div>
+    </ScrollArea>
   );
 }

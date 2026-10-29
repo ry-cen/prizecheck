@@ -6,6 +6,7 @@ import {
   type ReportView,
 } from "./generated";
 import { SelectBox } from "./ui/Select";
+import { TextArea } from "./ui/TextField";
 
 type Kind = "printing" | "edition";
 
@@ -159,14 +160,12 @@ export function MissingCardReports({ printingId }: { printingId?: string }) {
             onChange={(event) => setEvidence(event.target.value)}
           />
         </label>
-        <label>
-          What is missing?{" "}
-          <textarea
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            maxLength={2000}
-          />
-        </label>
+        <TextArea
+          label="What is missing?"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          maxLength={2000}
+        />
         <button type="submit">Send private report</button>
       </form>
       <p role="status">{message}</p>
@@ -182,18 +181,16 @@ export function MissingCardReports({ printingId }: { printingId?: string }) {
               )}
               {report.status === "needs_info" && (
                 <div>
-                  <label>
-                    Additional information{" "}
-                    <textarea
-                      value={responses[report.id] || ""}
-                      onChange={(event) =>
-                        setResponses((previous) => ({
-                          ...previous,
-                          [report.id]: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
+                  <TextArea
+                    label="Additional information"
+                    value={responses[report.id] || ""}
+                    onChange={(event) =>
+                      setResponses((previous) => ({
+                        ...previous,
+                        [report.id]: event.target.value,
+                      }))
+                    }
+                  />
                   <button
                     type="button"
                     disabled={!responses[report.id]?.trim()}

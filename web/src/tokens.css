@@ -40,7 +40,7 @@
  *   artwork placeholder --color-art-start, --color-art-end (gradient stops)
  *   warning             --color-warning
  *   danger              --color-danger, --color-danger-border, --color-danger-fill
- *   (supporting)        --color-scrim, --color-shadow, --color-shadow-strong, --color-focus
+ *   (supporting)        --color-scrim, --color-shadow, --color-shadow-strong, --color-focus, --color-scroll-thumb
  */
 
 :root {
@@ -124,6 +124,9 @@
      desktop. Both are read by Tailwind's theme in tailwind.css (pb-tabbar, w-dialog). */
   --layout-tabbar-height: 56px;
   --layout-dialog-width: 480px;
+  /* The overlay scroll bar (#399): the rail that takes the pointer, and the gap that leaves the thumb 6 px wide in it. */
+  --scroll-rail-size: 12px;
+  --scroll-thumb-gap: 3px;
   /* What a sticky element clears at the top of the viewport: the shell's sticky desktop header; nothing on
      a phone, where the header scrolls away. */
   --layout-sticky-top: var(--layout-header-height);
@@ -199,6 +202,8 @@
   --color-shadow: #00000044;
   --color-shadow-strong: #00000088;
   --color-focus: var(--color-accent);
+  /* The overlay scroll bar's thumb (#399); ScrollArea draws it at 60% and at full strength while scrolling, hovered or dragged. */
+  --color-scroll-thumb: var(--color-text-muted);
 
   --layer-base: 0;
   --layer-sticky: 10;
@@ -211,4 +216,12 @@
   --layout-inspector-width: 310px;
   /* The inspector column from the compact breakpoint (max-width: 1100px) down to mobile. */
   --layout-inspector-width-compact: 220px;
+}
+
+/* Forced colours: the thumb is the system text colour, whatever the theme. */
+@media (forced-colors: active) {
+  :root,
+  :root[data-theme] {
+    --color-scroll-thumb: CanvasText;
+  }
 }

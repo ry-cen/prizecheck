@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { OverlayScrollbarFor } from "./ui/ScrollArea";
 
 export const INLINE_EXPORT_LIMIT_BYTES = 256 * 1024;
 
@@ -40,6 +41,8 @@ export function ExportOutput({
   copyLabel = "Copy",
   downloadLabel = "Download",
 }: ExportOutputProps) {
+  // The text box or <pre> that scrolls itself, for its overlay scroll bar.
+  const output = useRef<HTMLElement | null>(null);
   // A copy result belongs to the exact text it was attempted for, so a newer
   // export never inherits an earlier "Copied" or failure state.
   const [copyResult, setCopyResult] = useState<{
@@ -82,19 +85,36 @@ export function ExportOutput({
           <button type="button" onClick={() => void copy()}>
             {copyLabel}
           </button>
-          {copyFailed ? (
-            <textarea
-              readOnly
-              aria-label={`${label} text`}
-              value={text ?? ""}
-              rows={12}
-              onFocus={(event) => event.currentTarget.select()}
+          {/* The textarea or <pre> scrolls itself (ExportDialog's styles); the box gives its overlay bar a place. */}
+          <div className="relative">
+            {copyFailed ? (
+              <textarea
+                ref={(element) => {
+                  output.current = element;
+                }}
+                readOnly
+                aria-label={`${label} text`}
+                value={text ?? ""}
+                rows={12}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            ) : (
+              <pre
+                ref={(element) => {
+                  output.current = element;
+                }}
+                aria-label={`${label} text`}
+                tabIndex={0}
+              >
+                {text}
+              </pre>
+            )}
+            <OverlayScrollbarFor
+              key={copyFailed ? "area" : "pre"}
+              target={output}
+              clearGrip={copyFailed}
             />
-          ) : (
-            <pre aria-label={`${label} text`} tabIndex={0}>
-              {text}
-            </pre>
-          )}
+          </div>
         </>
       )}
       {!empty && !inline && downloadHref && (

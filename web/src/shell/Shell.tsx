@@ -134,6 +134,13 @@ function ShellFrame({
   other = null,
 }: Props) {
   const toast = useToast();
+  // The page's overlay scroll bar (DocumentScrollbar) clears the sticky header and the phone tab bar while the shell is up.
+  useLayoutEffect(() => {
+    document.documentElement.dataset.appShell = "";
+    return () => {
+      delete document.documentElement.dataset.appShell;
+    };
+  }, []);
   // Loans waiting on the collector: the Loans tab's badge (#259); Trades waiting on them: the Trades tab's (#273).
   const waiting = useInboxWaiting();
   const tradesWaiting = useInboxTradesWaiting();

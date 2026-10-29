@@ -18,6 +18,7 @@ import { Icon } from "../ui/Icon";
 import { SearchField } from "../ui/SearchField";
 import { FORMATS, KINDS } from "./catalogText";
 import { eraKeyOf, groupSetsByEra, hasEras, type SetEra } from "./setEras";
+import { ScrollArea } from "../ui/ScrollArea";
 
 type Props = {
   format: BrowseFormat | null;
@@ -70,11 +71,11 @@ export function CatalogFilters({
 
   return (
     <>
-      <div
-        ref={row}
-        role="group"
-        aria-label="Filters"
-        className={`box-border flex min-w-0 items-center gap-1.5 overflow-x-auto${more ? " mask-r-from-[calc(100%-var(--space-10))]" : ""}`}
+      <ScrollArea
+        orientation="x"
+        viewportRef={row}
+        viewportClassName={`box-border flex min-w-0 items-center gap-1.5${more ? " mask-r-from-[calc(100%-var(--space-10))]" : ""}`}
+        viewportProps={{ role: "group", "aria-label": "Filters" }}
       >
         <Chip selected={format === null} onChange={() => onFormat(null)}>
           Any format
@@ -109,7 +110,7 @@ export function CatalogFilters({
         <Chip selected={owned} onChange={onOwned}>
           Owned only
         </Chip>
-      </div>
+      </ScrollArea>
       <SetPicker
         open={picking}
         current={set}
