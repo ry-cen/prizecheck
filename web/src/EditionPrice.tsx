@@ -23,6 +23,9 @@ type Waiter = (settled: Settled) => void;
 
 const MAX_IN_FLIGHT = 2;
 
+const cache = new Map<string, PriceRow>();
+const pending = new Map<string, Set<Waiter>>();
+
 const waiting = new Map<string, Set<Waiter>>();
 const queue: Array<Map<string, Set<Waiter>>> = [];
 let inFlight = 0;
@@ -32,7 +35,11 @@ let scheduled: ReturnType<typeof setTimeout> | null = null;
 function pump() {
   while (inFlight < MAX_IN_FLIGHT && queue.length) {
     const batch = queue.shift()!;
-    for (const [id, set] of batch) if (!set.size) batch.delete(id); // unmounted while queued
+    for (const [id, set] of batch)
+      if (!set.size) {
+        batch.delete(id);
+        pending.delete(id);
+      } // unmounted while queued
     if (batch.size) send(batch);
   }
 }
@@ -40,8 +47,12 @@ function pump() {
 function send(waiters: Map<string, Set<Waiter>>) {
   const ids = [...waiters.keys()];
   const settle = (settled: (id: string) => Settled) => {
-    for (const [id, set] of waiters)
-      for (const waiter of set) waiter(settled(id));
+    for (const [id, set] of waiters) {
+      const result = settled(id);
+      if (result.kind === "row") cache.set(id, result.row);
+      pending.delete(id);
+      for (const waiter of set) waiter(result);
+    }
   };
   inFlight += 1;
   const controller = new AbortController();
@@ -69,7 +80,11 @@ function send(waiters: Map<string, Set<Waiter>>) {
 
 function flush() {
   scheduled = null;
-  for (const [id, set] of waiting) if (!set.size) waiting.delete(id); // unmounted before the batch left
+  for (const [id, set] of waiting)
+    if (!set.size) {
+      waiting.delete(id);
+      pending.delete(id);
+    } // unmounted before the batch left
   while (waiting.size) {
     const batch = new Map<string, Set<Waiter>>();
     for (const [id, set] of waiting) {
@@ -83,10 +98,19 @@ function flush() {
 }
 
 function request(editionId: string, waiter: Waiter) {
-  const set = waiting.get(editionId) ?? new Set<Waiter>();
+  const row = cache.get(editionId);
+  if (row) {
+    waiter({ kind: "row", row });
+    return () => {};
+  }
+  let set = pending.get(editionId);
+  if (!set) {
+    set = new Set<Waiter>();
+    pending.set(editionId, set);
+    waiting.set(editionId, set);
+    if (!scheduled) scheduled = setTimeout(flush, BATCH_DELAY_MS);
+  }
   set.add(waiter);
-  waiting.set(editionId, set);
-  if (!scheduled) scheduled = setTimeout(flush, BATCH_DELAY_MS);
   return () => {
     set.delete(waiter);
   };
@@ -150,36 +174,36 @@ export function useEditionPriceRow(
   editionId: string,
   slot: RefObject<Element | null>
 ): PriceSettled | null {
-  const [settled, setSettled] = useState<Settled | null>(null);
+  const cached = cache.get(editionId);
+  const [state, setState] = useState<{ id: string; value: Settled | null }>(
+    () => ({
+      id: editionId,
+      value: cached ? { kind: "row", row: cached } : null,
+    })
+  );
   useEffect(() => {
-    setSettled(null);
     let cancel = () => {};
     const stop = whenNear(slot.current, () => {
-      cancel = request(editionId, setSettled);
+      cancel = request(editionId, (value) =>
+        setState({ id: editionId, value })
+      );
     });
     return () => {
       stop();
       cancel();
     };
   }, [editionId]);
-  return settled;
+  return cached
+    ? { kind: "row", row: cached }
+    : state.id === editionId
+      ? state.value
+      : null;
 }
 
 /** The cached price of one Card Edition, requested through the shared batched queue. */
 export function EditionPrice({ editionId }: { editionId: string }) {
-  const [settled, setSettled] = useState<Settled | null>(null);
   const slot = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    setSettled(null);
-    let cancel = () => {};
-    const stop = whenNear(slot.current, () => {
-      cancel = request(editionId, setSettled);
-    });
-    return () => {
-      stop();
-      cancel();
-    };
-  }, [editionId]);
+  const settled = useEditionPriceRow(editionId, slot);
   return (
     <span
       ref={slot}

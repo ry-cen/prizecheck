@@ -14,9 +14,8 @@ import { variantLabel } from "../ui/variantLabel";
 import { CATEGORY_LABELS, TRAINER_TYPE_LABELS, plural } from "./galleryModel";
 import type { Inspected } from "./useSelection";
 
-/** Hover and selection change quickly; wait this long before asking for an Edition's copies or price. */
+/** Range and marquee selection can change focus rapidly; debounce distribution reads. */
 const TOTAL_DELAY_MS = 150;
-const PRICE_DELAY_MS = TOTAL_DELAY_MS;
 
 /** One Storage Leaf (or Deck) holding copies of the inspected Edition. */
 export type LeafCopies = {
@@ -221,24 +220,9 @@ export function CardDetails({
   );
 }
 
-/** The inspected Card Edition's price through the existing EditionPrice component (full labels: age, stale,
- * unavailable, refresh). Hover moves quickly, so the price is asked for only once the same Edition has stayed
- * inspected for PRICE_DELAY_MS; until then the slot shows the component's own checking label. */
+/** Selected prices use the shared session cache immediately. */
 function InspectorPrice({ editionId }: { editionId: string }) {
-  const [settledId, setSettledId] = useState<string | null>(null);
-  useEffect(() => {
-    const timer = window.setTimeout(
-      () => setSettledId(editionId),
-      PRICE_DELAY_MS
-    );
-    return () => window.clearTimeout(timer);
-  }, [editionId]);
-  if (settledId === editionId) return <EditionPrice editionId={editionId} />;
-  return (
-    <span className="edition-price" data-price-status="checking">
-      Checking prices…
-    </span>
-  );
+  return <EditionPrice editionId={editionId} />;
 }
 
 function DetailsArt({
@@ -277,7 +261,7 @@ type InspectorProps = Omit<DetailsProps, "card" | "sheet"> & {
   card: Inspected | null;
 };
 
-/** The desktop inspector column. Its space is reserved; while nothing is hovered or selected it holds a quiet
+/** The desktop inspector column. Its space is reserved; while nothing is selected it holds a quiet
  * card-shaped outline that says what goes there, so the column doesn't read as a gap.
  * It stays in view while the gallery scrolls, below the app shell's sticky header; when its content is
  * taller than the window (an Edition in many Leaves), it scrolls inside itself so nothing is cut off. */
