@@ -7,7 +7,7 @@ setting, then new copies. A Not found line carries the prefill of its Missing ca
 ticket #213). It is read-only and stateless: the review screen posts again, with the setting and the collector's fixes
 so far, whenever either changes. It is a POST only because the text is long, and it needs no idempotency key.
 
-Like adding a card by its Printing (``deck_list_printing``), the review chooses new copies' Editions from stored quotes
+Like adding a card by its Printing (``games.pokemon.decks.printing``), the review chooses new copies' Editions from stored quotes
 only and is not a price access (ADR 0006): it admits no refresh, waits for no runner and writes nothing to the record
 store. Its steps: one read-only snapshot of the catalog (the matches, every Printing the lines reach and their
 Editions); one capture of the owned copies under the owner row lock (``import_owned.capture_owned``), which never
@@ -39,7 +39,7 @@ from ..prices import prices
 from ..catalog import set_codes
 from app import import_publication
 from app.copy_allocation import Availability
-from app.deck_cost import summarize
+from app.core.prices.cost import summarize
 from .decklist_text import MAX_CARD_LINES, CardLine, TooLong, TooManyLines, read
 from ..formats.deck_format_checks import TargetFormat
 from app.decks import MAX_DECK_LIST_CHANGES, DeckListCommandResult, advance_deck_list, keep_response, replayed
@@ -278,7 +278,7 @@ def _printings(conn, generation, printing_ids) -> dict[UUID, ImportPrinting]:
 
 def _editions(conn, generation, printing_ids) -> dict[UUID, list[dict]]:
     """Each Printing's active Editions in catalog order (descriptor_key, id: the order catalog search shows). A
-    Printing with none is missing: it can't be on a Deck List (``deck_list_printing.AVAILABLE_EDITIONS``)."""
+    Printing with none is missing: it can't be on a Deck List (``decks.printing.AVAILABLE_EDITIONS``)."""
     if not printing_ids:
         return {}
     found: dict[UUID, list[dict]] = {}

@@ -6,8 +6,6 @@
 app.collection_import -> app.games.pokemon.imports.collection_import_finish
 app.collection_import -> app.games.pokemon.imports.collection_import_matcher
 app.collection_import -> app.games.pokemon.imports.collection_import_reader
-app.deck_cost -> app.games.pokemon.prices.prices
-app.deck_list_printing -> app.games.pokemon.prices.prices
 app.decks -> app.games.pokemon.formats.construction_checks
 app.decks -> app.games.pokemon.formats.deck_format_checks
 app.decks -> app.games.pokemon.formats.format_evaluator
@@ -17,6 +15,7 @@ app.discovery -> app.games.pokemon.formats.format_evaluator
 app.discovery -> app.games.pokemon.prices.prices
 app.discovery -> app.games.pokemon.catalog.public_catalog
 app.discovery -> app.games.pokemon.formats.published_format_checks
+app.discovery -> app.games.pokemon.publications.published_cost
 app.host_readiness -> app.games.pokemon.prices.catalog_targets
 app.import_match_core -> app.games.pokemon.catalog.catalog_browse
 app.import_match_core -> app.games.pokemon.imports.decklist_text
@@ -29,10 +28,6 @@ app.price_runner -> app.games.pokemon.prices.price_source
 app.price_runner -> app.games.pokemon.prices.tcgdex_record
 app.publications -> app.games.pokemon.formats.construction_checks
 app.publications -> app.games.pokemon.formats.deck_format_checks
-app.published_cost -> app.games.pokemon.prices.prices
-app.published_cost -> app.games.pokemon.catalog.public_catalog
-app.trade_value -> app.games.pokemon.prices.prices
-app.want_list_cost -> app.games.pokemon.prices.prices
 
 [sql]
 app.host_readiness: owner_binding

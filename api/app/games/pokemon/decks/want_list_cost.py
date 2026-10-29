@@ -10,7 +10,7 @@ capture (``want_list.capture_want_list`` under ``prices._bounded``, committed an
 row, admits refresh once (``price_refresh.evaluate_and_admit``), waits at most once and validates once, inside the one
 gateway budget of this request. Editions the Collection already covers are not read: only what is bought is priced.
 
-Every figure is ``deck_cost.summarize`` over its own copies, so the arithmetic, the statuses and the labels are Deck
+Every figure is ``core.prices.cost.summarize`` over its own copies, so the arithmetic, the statuses and the labels are Deck
 cost's: an unpriced copy is never $0, and a row that could not be read in time makes only the figures containing it
 ``incomplete``. The answer names the setting, the revisions and the Deck Lists digest it was captured at, exactly as the
 Want List does, so the page shows a cost only for the answer it drew. Nothing is stored.
@@ -26,11 +26,11 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from app.games.pokemon.prices import prices
-from .deck_cost import DeckCostFigures, summarize
-from .identity import verified_user
-from .price_budget import Budget, trusted_budget
-from .settings import WantListCounting
-from .want_list import capture_want_list, combined
+from app.core.prices.cost import DeckCostFigures, summarize
+from app.identity import verified_user
+from app.price_budget import Budget, trusted_budget
+from app.settings import WantListCounting
+from app.want_list import capture_want_list, combined
 
 router = APIRouter(prefix='/api/want-list', tags=['want-list'])
 

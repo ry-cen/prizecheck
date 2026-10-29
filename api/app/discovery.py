@@ -16,7 +16,7 @@ in time (store unavailable, deadline) is left out, never listed unchecked.
 
 Cost. Each summary carries ``cost: {amount, priced_copies, total_copies}`` from the public ``price:`` records alone, read at the same
 store generation as the facts with the Published Deck cost route's eligibility proof and price view (``published_cost._view``) and fold
-(``deck_cost.summarize``). Discover writes nothing: no record, no manifest byte, no discovery revision. No price age is sent.
+(``core.prices.cost.summarize``). Discover writes nothing: no record, no manifest byte, no discovery revision. No price age is sent.
 
 Contract: docs/public-projections.md ("Discover lists legal decks").
 """
@@ -48,12 +48,12 @@ from app.games.pokemon.catalog import public_catalog
 
 from app.games.pokemon.formats import published_format_checks
 from app.games.pokemon.formats import format_evaluator as evaluator
-from .deck_cost import summarize
+from app.core.prices.cost import summarize
 from app.games.pokemon.formats.deck_format_checks import TargetFormat, today
 from app.games.pokemon.catalog.public_catalog import marketplace_states
 from .public_projection import ProjectionUnavailable, public_projection_store
 from .public_records import public_record_store
-from .published_cost import _view
+from app.games.pokemon.publications.published_cost import _view
 from .publications import PublicModel, TOKEN, PUBLIC_HEADERS
 
 router = APIRouter(tags=['public discovery'])

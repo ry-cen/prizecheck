@@ -3,7 +3,7 @@
 ``POST /api/trades/value`` is a budgeted price access under ADR 0006, like the Deck and Want List cost routes: the
 gateway signs a three-second budget for it and the route reads prices through ``prices.private_edition_quotes`` without
 writing to PostgreSQL. The distinct Editions of both sides go through one quote read, and each side is folded with
-``deck_cost.summarize``, so its figures and labels match Deck cost. It is a POST so an unsent proposal can be valued.
+``core.prices.cost.summarize``, so its figures and labels match Deck cost. It is a POST so an unsent proposal can be valued.
 
 Cash is not part of it and nothing suggests a cash amount. Nothing is stored. The answer names no price source, check
 time, refresh state or reason. The body is bounded by the gateway's 16 KiB budgeted-body limit (about 9 KB at 100
@@ -18,11 +18,11 @@ from pydantic import BaseModel, ConfigDict
 from starlette.background import BackgroundTask
 
 from app.games.pokemon.prices import prices
-from .deck_cost import CostStatus, summarize
-from .location_tree import error
-from .identity import verified_user
-from .price_budget import Budget, trusted_budget
-from .trade_inventory import trade_quantity
+from app.core.prices.cost import CostStatus, summarize
+from app.location_tree import error
+from app.identity import verified_user
+from app.price_budget import Budget, trusted_budget
+from app.trade_inventory import trade_quantity
 
 router = APIRouter(prefix='/api/trades', tags=['trades'])
 

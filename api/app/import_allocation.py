@@ -14,7 +14,7 @@ Within a step the Edition with the most copies left goes first, then catalog ord
 Printing, then the others newest first) and the Edition's (``descriptor_key, id``). That keeps the Deck List to as few
 lines as it can.
 
-The rest of the line gets add-by-Printing's rule (``deck_list_printing.choose_edition``): the cheapest stored quote among
+The rest of the line gets add-by-Printing's rule (``core.decks.printing.choose_edition``): the cheapest stored quote among
 the named Printing's active Editions, else the first in catalog order, which is how a Printing with only the Unspecified
 Variant gets that Edition. ``PH`` changes nothing. An Edition the collector chose (an ``edition_id`` fix) is the rest's
 Edition; owned copies still come first. So is, under Exact printings, the Edition a Published Deck's row names when
@@ -26,8 +26,9 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
+from app.core.decks.printing import choose_edition
 from .copy_allocation import Available
-from .deck_list_printing import choose_edition
+from .quote_contract import parse_amount
 
 Source = Literal['in_deck', 'elsewhere', 'new']
 # published: Copy to my Decks under Exact printings kept the snapshot's Edition (#216).
@@ -91,7 +92,7 @@ def new_copies(quantity: int, editions: list[UUID], views: dict, chosen: UUID | 
     add-by-Printing's rule over ``editions`` (catalog order)."""
     if chosen is not None:
         return Part(chosen, quantity, 'new', chosen_by)
-    edition_id, rule = choose_edition(editions, views)
+    edition_id, rule = choose_edition(editions, views, parse_amount=parse_amount)
     return Part(edition_id, quantity, 'new', rule)
 
 

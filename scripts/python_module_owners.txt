@@ -18,11 +18,9 @@ app.collection_import mixed
 app.copy_allocation core
 app.copy_picks core
 app.db core
-app.deck_cost mixed
 app.deck_deletion core
 app.deck_list_capture core
 app.deck_list_display mixed
-app.deck_list_printing mixed
 app.deck_ownership mixed
 app.deck_pick_list core
 app.decks mixed
@@ -54,7 +52,6 @@ app.public_deck mixed
 app.public_projection core
 app.public_records core
 app.publications mixed
-app.published_cost mixed
 app.quote_contract mixed
 app.scanner_save mixed
 app.settings core
@@ -78,10 +75,8 @@ app.swap_hints mixed
 app.trade_inventory core
 app.trade_list core
 app.trade_picks core
-app.trade_value mixed
 app.trade_wants mixed
 app.want_list mixed
-app.want_list_cost mixed
 app.catalog_import root
 app.catalog_refresh root
 app.catalog_targets root

@@ -4,7 +4,7 @@ Anonymous and PostgreSQL-free. The only inputs are the token and the version in 
 references and quantities come from the active frozen snapshot; eligibility and price from the shared public records
 (``public_catalog.marketplace_states``: the catalog and quarantine records and the Edition's ``price:`` record, read at one
 generation). There is no admission and no wait: a row without a valid ``price:`` record is unpriced (``no_price``). The
-route does the private route's arithmetic (``deck_cost.summarize``). Before any figure is returned the snapshot is
+route does the private route's arithmetic (``core.prices.cost.summarize``). Before any figure is returned the snapshot is
 re-read (token, version, digest); otherwise the answer is 404 (revoked), 409 (republished or rewritten) or a withheld
 ``incomplete``. A quarantine delivered through the outbox unprices a row even while its ``price:`` record remains.
 With ``PRICE_READS=off`` no ``price:`` record is read and every row is unpriced.
@@ -23,15 +23,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import public_deck
+from app import public_deck
 
 from app.games.pokemon.prices import prices
-from .deck_cost import CostStatus, IncompleteReason, summarize
-from .price_budget import FINAL_MARGIN_MS, Budget, trusted_budget
+from app.core.prices.cost import CostStatus, IncompleteReason, summarize
+from app.price_budget import FINAL_MARGIN_MS, Budget, trusted_budget
 from app.games.pokemon.catalog.public_catalog import marketplace_states
-from .public_projection import ProjectionUnavailable
-from .public_records import public_record_store
-from .quote_contract import parse_amount
+from app.public_projection import ProjectionUnavailable
+from app.public_records import public_record_store
+from app.quote_contract import parse_amount
 
 router = APIRouter(tags=['prices'])
 ANON = re.compile(r'anon:[0-9a-f]{32}')

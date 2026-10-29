@@ -7,11 +7,11 @@ from app.games.pokemon.catalog.catalog_search import router as catalog_search_ro
 from app.games.pokemon.catalog.catalog_status import router as catalog_status_router
 from app.collection import router as collection_router
 from app.collection_import import router as collection_import_router
-from app.deck_cost import router as deck_cost_router
+from app.games.pokemon.decks.cost import router as deck_cost_router
 from app.deck_deletion import router as deck_deletion_router
 from app.games.pokemon.formats.deck_format_checks import router as deck_format_checks_router
 from app.games.pokemon.imports.deck_import import router as deck_import_router
-from app.deck_list_printing import router as deck_list_printing_router
+from app.games.pokemon.decks.printing import router as deck_list_printing_router
 from app.games.pokemon.exports.deck_live_export import router as deck_live_export_router
 from app.games.pokemon.exports.deck_mass_entry import router as deck_mass_entry_router
 from app.deck_pick_list import router as deck_pick_list_router
@@ -28,7 +28,7 @@ from app.moves import router as moves_router
 from app.operations import router as operations_router
 from app.games.pokemon.prices.prices import router as prices_router
 from app.publications import router as publications_router
-from app.published_cost import router as published_cost_router
+from app.games.pokemon.publications.published_cost import router as published_cost_router
 from app.games.pokemon.formats.published_format_checks import router as published_format_checks_router
 from app.games.pokemon.exports.published_live_export import router as published_live_export_router
 from app.games.pokemon.exports.published_mass_entry import router as published_mass_entry_router
@@ -49,10 +49,10 @@ from app.social.trade_matches import router as trade_matches_router
 from app.social.trades import router as trades_router, settings_router as trade_settings_router
 from app.trade_inventory import router as trade_inventory_router
 from app.trade_list import router as trade_list_router
-from app.trade_value import router as trade_value_router
+from app.games.pokemon.trading.trade_value import router as trade_value_router
 from app.trade_wants import router as trade_wants_router
 from app.want_list import router as want_list_router
-from app.want_list_cost import router as want_list_cost_router
+from app.games.pokemon.decks.want_list_cost import router as want_list_cost_router
 from app.games.pokemon.exports.want_list_mass_entry import router as want_list_mass_entry_router
 
 

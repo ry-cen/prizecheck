@@ -13,25 +13,22 @@ retry replays the same answer.
 Adding a card is not a price access (ADR 0006): the read never admits a refresh, waits for a runner or writes anything to
 the record store. No connection or lock is held while the store is read.
 """
-from decimal import Decimal
-from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.core.decks.printing import ChosenBy, choose_edition
+from app.db import connect
+from app.decks import (DeckListCommandResult, advance_deck_list, check_revision, keep_response, line_exists, replayed,
+                       require_deck)
 from app.games.pokemon.prices import prices
-from .decks import (DeckListCommandResult, advance_deck_list, check_revision, keep_response, line_exists, replayed,
-                    require_deck)
-from .holdings import parse_quantity
-from .location_tree import error, owner_and_rows, replay
-from .db import connect
-from .identity import verified_user
-from .quote_contract import parse_amount
+from app.holdings import parse_quantity
+from app.identity import verified_user
+from app.location_tree import error, owner_and_rows, replay
+from app.quote_contract import parse_amount
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
-
-ChosenBy = Literal['cheapest_price', 'catalog_order']
 
 # Editions a new line may name: active in the active catalog generation, of a Printing that is not tombstoned, in the
 # catalog order the search route shows (catalog_search._views).
@@ -53,26 +50,6 @@ class AddDeckListPrinting(BaseModel):
 class DeckListPrintingResult(DeckListCommandResult):
     edition_id: UUID      # The Edition the new line names.
     chosen_by: ChosenBy   # Which rule chose it; reported here only, never stored on the line.
-
-
-def choose_edition(editions: list[UUID], views: dict) -> tuple[UUID, ChosenBy]:
-    """The cheapest stored quote among ``editions`` (catalog order breaks ties), else the first in catalog order.
-
-    ``views`` maps Edition id to ``prices.QuoteView``; an Edition without a view, or whose view is not a quote, is
-    unpriced. Pure."""
-    cheapest: tuple[Decimal, UUID] | None = None
-    for edition_id in editions:
-        view = views.get(edition_id)
-        if view is None or view.status != 'quote':
-            continue
-        amount = parse_amount(view.amount)
-        if amount is None:
-            continue
-        if cheapest is None or amount < cheapest[0]:
-            cheapest = (amount, edition_id)
-    if cheapest is not None:
-        return cheapest[1], 'cheapest_price'
-    return editions[0], 'catalog_order'
 
 
 def available_editions(conn, printing_id: UUID) -> list[UUID]:
@@ -109,7 +86,7 @@ def add_deck_list_printing(deck_id: UUID, command: AddDeckListPrinting, user_id:
             error(422, 'PRINTING_UNAVAILABLE')
         if views is None:
             error(503, 'PRICES_UNAVAILABLE')
-        edition_id, chosen_by = choose_edition(editions, views)
+        edition_id, chosen_by = choose_edition(editions, views, parse_amount=parse_amount)
         if line_exists(conn, user_id, deck_id, edition_id):
             error(409, 'DECK_LIST_LINE_EXISTS')
         conn.execute('INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity) VALUES (%s,%s,%s,%s)',
