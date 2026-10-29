@@ -526,7 +526,7 @@ The identity packages below (WP-A, WP-C, WP-D, WP-E) and WP-H are kept as refere
 - a dispatched integration run, `gh workflow run verify.yml --ref refactor/shared-core -f integration=sharded`, passes,
   with its counts quoted, before the package is accepted.
 
-**Before the branch merges to dev:** one `integration=full` run.
+**Before the branch merges to dev:** one `integration=full` run, and restore `fastapi>=0.115,<1` in `api/requirements.txt` (pinned to 0.162.0 on this branch for the WP-B snapshots; owner decision 2026-10-29), checking the snapshots still match on the version CI then resolves.
 
 ### WP-A: migration tracks and the auth baseline
 - **Owned files:** `scripts/migrate.py`, `migrations/auth/001_baseline.sql` (new), `migrations/core/` (new, empty but for

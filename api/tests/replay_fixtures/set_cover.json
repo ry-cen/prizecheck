@@ -1,0 +1,14 @@
+{
+  "body": {
+    "edition_id": "3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+    "expected_edition_id": null
+  },
+  "digest": "c30c7ae88964eac31fca292672bca96780405dc6092d2c08be8bad6b986e7176",
+  "kind": "deck",
+  "method": "PUT",
+  "path": "/api/decks/efb0382e-7524-4c67-8e9a-2b63403f4014/cover",
+  "response": {
+    "cover_edition_id": "3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+    "deck_id": "efb0382e-7524-4c67-8e9a-2b63403f4014"
+  }
+}

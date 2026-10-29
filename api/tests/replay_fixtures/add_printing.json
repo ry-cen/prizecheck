@@ -1,0 +1,148 @@
+{
+  "body": {
+    "printing_id": "9fd5e10d-6d14-408c-8f56-d71e985082c9",
+    "quantity": "4",
+    "revision": 7
+  },
+  "digest": "0f78b3197333da363595739c33a410d3a7328f21416cd91102a54d53ab011d05",
+  "kind": "deck",
+  "method": "POST",
+  "path": "/api/decks/efb0382e-7524-4c67-8e9a-2b63403f4014/deck-list/printings",
+  "response": {
+    "chosen_by": "catalog_order",
+    "deck_id": "efb0382e-7524-4c67-8e9a-2b63403f4014",
+    "deck_list": {
+      "lines": [
+        {
+          "card_kind": "pokemon",
+          "collector_number": "1",
+          "descriptor": {
+            "size": "standard",
+            "type": "normal"
+          },
+          "edition_id": "3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+          "evolution_root": "Furret",
+          "evolution_stage": 0,
+          "evolves_from": null,
+          "identity_id": "74e3bee3-7192-4ff3-838e-6c410d13d395",
+          "identity_name": "Furret",
+          "image_url": null,
+          "in_deck": "0",
+          "name": "Furret",
+          "quantity": "1",
+          "set_id": "swsh3",
+          "set_name": "Darkness Ablaze",
+          "trainer_type": null
+        },
+        {
+          "card_kind": "pokemon",
+          "collector_number": "2",
+          "descriptor": {
+            "kind": "unspecified",
+            "label": "Unspecified Variant"
+          },
+          "edition_id": "ab552c23-646e-4a36-8e7c-676de42d4743",
+          "evolution_root": "Furret",
+          "evolution_stage": 0,
+          "evolves_from": null,
+          "identity_id": "74e3bee3-7192-4ff3-838e-6c410d13d395",
+          "identity_name": "Furret",
+          "image_url": null,
+          "in_deck": "0",
+          "name": "Furret",
+          "quantity": "4",
+          "set_id": "swsh3",
+          "set_name": "Darkness Ablaze",
+          "trainer_type": null
+        },
+        {
+          "card_kind": "pokemon",
+          "collector_number": "1",
+          "descriptor": {
+            "size": "standard",
+            "type": "reverse"
+          },
+          "edition_id": "e0b8fdde-3296-4511-b2b4-c6e0417a5411",
+          "evolution_root": "Furret",
+          "evolution_stage": 0,
+          "evolves_from": null,
+          "identity_id": "74e3bee3-7192-4ff3-838e-6c410d13d395",
+          "identity_name": "Furret",
+          "image_url": null,
+          "in_deck": "0",
+          "name": "Furret",
+          "quantity": "2",
+          "set_id": "swsh3",
+          "set_name": "Darkness Ablaze",
+          "trainer_type": null
+        }
+      ],
+      "revision": 8
+    },
+    "edition_id": "ab552c23-646e-4a36-8e7c-676de42d4743",
+    "format_checks": {
+      "attribute_revision": 3,
+      "catalog_revision": 1,
+      "deck_id": "efb0382e-7524-4c67-8e9a-2b63403f4014",
+      "deck_list_revision": 8,
+      "disclaimer": "Advisory format checks: a result is not a guarantee of tournament legality. Missing rules or card data makes a result unknown, never legal.",
+      "results": [
+        {
+          "computed_at": "2026-10-29T07:45:08.881537Z",
+          "evaluated_on": "2026-10-29",
+          "format": "expanded",
+          "issues": [
+            {
+              "code": "deck_size",
+              "effect": "not_legal",
+              "kind": "deck",
+              "lines": [
+                "3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+                "ab552c23-646e-4a36-8e7c-676de42d4743",
+                "e0b8fdde-3296-4511-b2b4-c6e0417a5411"
+              ],
+              "reason": "an Expanded deck has exactly 60 cards; this one has 7"
+            },
+            {
+              "code": "copy_limit",
+              "effect": "not_legal",
+              "kind": "card",
+              "lines": [
+                "3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+                "ab552c23-646e-4a36-8e7c-676de42d4743",
+                "e0b8fdde-3296-4511-b2b4-c6e0417a5411"
+              ],
+              "reason": "more than 4 copies of Furret (7)"
+            },
+            {
+              "code": "attribute_unknown",
+              "effect": "unknown",
+              "kind": "card",
+              "lines": [
+                "3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+                "ab552c23-646e-4a36-8e7c-676de42d4743",
+                "e0b8fdde-3296-4511-b2b4-c6e0417a5411"
+              ],
+              "reason": "Basic Pok\u00e9mon status unknown"
+            },
+            {
+              "code": "regulation_mark_not_recorded",
+              "effect": "unknown",
+              "kind": "card",
+              "lines": [
+                "3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+                "ab552c23-646e-4a36-8e7c-676de42d4743",
+                "e0b8fdde-3296-4511-b2b4-c6e0417a5411"
+              ],
+              "reason": "regulation mark not recorded"
+            }
+          ],
+          "notes": [],
+          "rules_version": "2 (2026-10-11)",
+          "status": "not_legal"
+        }
+      ]
+    },
+    "target_format": "expanded"
+  }
+}
