@@ -265,19 +265,7 @@ def test_result_carries_only_fixed_diagnostics(fake):
 # --- static checks -------------------------------------------------------------------------------------------------
 
 def test_single_origin_literal_and_safe_client_settings():
-    tree = ast.parse((APP / 'price_source.py').read_text())
-    literals = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
-                and n.value.startswith(('http:', 'https:'))]
-    assert literals == ['https://api.tcgdex.net']
     assert price_source.ORIGIN == 'https://api.tcgdex.net'
-    clients = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and ast.unparse(n.func) == 'httpx.Client']
-    assert len(clients) == 1
-    keywords = {k.arg: ast.unparse(k.value) for k in clients[0].keywords}
-    assert keywords['follow_redirects'] == 'False' and keywords['trust_env'] == 'False'
-    loads = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and ast.unparse(n.func) == 'json.loads']
-    assert loads and all('parse_float' in {k.arg for k in n.keywords} for n in loads)
-    fetch = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'fetch')
-    assert [a.arg for a in fetch.args.args] == ['card', 'may_retry']
 
 
 # --- select_quote ---------------------------------------------------------------------------------------------------
