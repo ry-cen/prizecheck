@@ -72,14 +72,22 @@ right backend. One setting turns the Riftbound side off.
 - **Services.** The edge serves the web app and sends `/api/*` to the auth gateway. The gateway signs the caller and
   forwards `/api/riftbound/*` to the Riftbound API and every other `/api/*` to the Pokémon API. Existing Pokémon paths
   don't change.
-- **Databases.** There are three: auth, Pokémon and Riftbound. The auth database holds the Better Auth tables (migration
-  002), the sign-up and rate-limit tables, and `owner_binding`. Each game database holds core tables plus its game's
+- **Databases.** There are three: auth, Pokémon and Riftbound. The auth database holds:
+  - the Better Auth tables (migration 002)
+  - the sign-up and rate-limit tables
+  - Handles and released Handles (from migration 100)
+  - an owner flag on the user, which replaces `owner_binding`
+ Each game database holds core tables plus its game's
   tables. No API table has a foreign key to the sign-in tables today (checked 2026-10-29), so moving them changes no
   foreign keys.
 - **Signature.** The gateway signs the path the backend receives. If it strips `/riftbound`, it signs the stripped path,
   and `api/app/identity.py` stays unchanged.
-- **Owner.** The owner binding moves to the auth database. Each backend asks the gateway-signed identity whether the
-  caller is the owner. How that reaches the backend (a signed claim or a gateway read) is decided in Phase 1.
+- **Owner.** The owner is a flag on the user in the auth database (owner, 2026-10-29). The gateway signs it into each
+  request beside the user id, and `require_owner` reads the signed flag instead of `owner_binding`.
+- **Handles.** A Handle belongs to the collector on both sides (owner, 2026-10-29). It lives in the auth database. A
+  claim, change or release made from either side goes through the gateway. Backends get Handles from the gateway for
+  Friend lookups and display. Phase 1 picks whether they come signed in the request or from a gateway read, and whether
+  Display Name moves with them.
 - **Account deletion.** The gateway deletes the account and calls each enabled backend's deletion route. A disabled
   backend's data is deleted when it is re-enabled or wiped.
 
@@ -160,7 +168,7 @@ the official rules and the chosen data source before it is built.
   - 1 Legend and 1 Chosen Champion that shares a tag with the Legend.
   - A 40-card main deck that includes the Champion, with at most 3 copies of a card.
   - A 12-card rune deck and 3 Battlefields.
-  - A sideboard of 8 or 10 cards (unconfirmed).
+  - A sideboard of 10 cards (owner, 2026-10-29).
   - Main and rune cards must match the Legend's domains.
 - **Formats:** Standard Constructed and 2v2 Constructed, each with a ban list. No rotation is planned before 2028.
 - **Terms:**
@@ -175,10 +183,10 @@ repeats them on every group before the importer is built.
 
 - **Cards versus sealed products.** In Origins a card is a product with a `Number` extended-data field, and a sealed
   product has none. The sealed products are boosters, displays, cases, Champion Decks, promo packs and art bundles, and
-  none of them carries `Number`, `Rarity` or `Card Type`. Tokens are the one exception: `Buff` has a `Card Type` of
-  `Token` but no `Number`, and two `Recruit // Buff` products have a `Number` but no `Card Type`. The importer takes
-  products with a `Number`. It classifies tokens by `Card Type` or by the ` // ` in the name, and leaves the rule for
-  tokens with no number to Phase 5.
+  none of them carries `Number`, `Rarity` or `Card Type`. Tokens are not cards (owner, 2026-10-29) and are skipped: `Buff`
+  has a `Card Type` of `Token` and no `Number`, and two `Recruit // Buff` products have a `Number` but no `Card Type`.
+  The importer takes products with a `Number` and a `Card Type`, and skips any whose `Card Type` includes `Token`.
+  Phase 5 confirms on every group that this keeps every card and no token.
 - **Printings.** Each product is one Card Printing. Numbers are `038/298`, `007a/298` for alternate art, and
   `299*/298` for overnumbered and signature cards. No number repeats within the set. The names carry `(Alternate Art)`,
   `(Overnumbered)` or `(Signature)`, which are stripped for the card name.
@@ -208,7 +216,7 @@ Each phase leaves both sides working. Phases 1 to 4 change no collector-facing b
 | # | Phase | Main work | Done when |
 |---|---|---|---|
 | 0 | Decisions | Answer the data source, name, private fixture storage and foil questions. | Done 2026-10-29 (see [Answered](#answered)). |
-| 1 | Auth database | Move the sign-in tables, the sign-up and rate-limit tables and `owner_binding` to their own database. Decide how the owner check reaches backends. | Sign-in, sign-up gate, owner screens and account deletion pass against the split databases on dev. |
+| 1 | Shared identity | Move the sign-in tables, the sign-up and rate-limit tables and Handles to the auth database. Replace `owner_binding` with an owner flag on the user, and sign the owner flag into requests. Decide how backends get Handles. | Sign-in, sign-up gate, owner screens and account deletion pass against the split databases on dev. |
 | 2 | Backend core/game split | Move Pokémon code behind the interfaces into `games/pokemon`. Add `GAME`, import boundary checks, and the migration tracks with a core baseline. | The full API and Playwright suites pass unchanged. The boundary check passes. A core-only database migrates from empty. |
 | 3 | Web core/game split | Move Pokémon-specific web code into `games/pokemon`. Add per-game client base paths, game-first routing and the switcher behind a flag. | The full web suite passes. The bundle check proves no game leaks into core. |
 | 4 | Second deploy and kill switch | Gateway routing, `RIFTBOUND_ENABLED`, the enabled-games read, compose services, backups and operations. A Riftbound API with core only and an empty catalog. | On dev, the switcher reaches an empty Riftbound side. Switching it off answers 410 and hides it. Pokémon is unaffected. |
@@ -222,7 +230,7 @@ Rough sizes for one developer with agents:
 
 | Phases | Estimate |
 |---|---|
-| 1 | Several days |
+| 1 | 1 to 2 weeks (Handles are read across social, Blocks and Trades) |
 | 2 and 3 | 2 to 3 weeks |
 | 4 | About a week |
 | 5 and 6 | 3 to 4 weeks |
@@ -243,11 +251,8 @@ Rough sizes for one developer with agents:
 
 ## Open Questions
 
-1. **Sideboard.** Is the sideboard 8 or 10 cards under the current official rules?
-2. **Handles.** Should a Handle be reserved on both sides when it is claimed on one?
-3. **Owner check.** How do backends learn the caller is the owner once `owner_binding` leaves their database: a signed
-   claim from the gateway, or a read the gateway answers?
-4. **Tokens.** Are tokens tracked as cards, and if so, how are tokens with no number identified?
+1. **Handles to backends.** Do backends get Handles signed in each request, or from a gateway read? Does Display Name
+   move to the auth database with the Handle? This is a Phase 1 design decision.
 
 ### Answered
 
@@ -260,11 +265,16 @@ The owner answered these on 2026-10-29:
   repository that CI checks out. Nothing from it is committed here.
 - **Foils:** check the data before deciding. The check showed foils are a price subtype, so a Card Edition is a product
   and a finish (see [Catalog from tcgcsv](#catalog-from-tcgcsv)).
+- **Sideboard:** 10 cards.
+- **Handles:** shared. A Handle claimed on one side is reserved on the other, and the whole identity (sign-in, Handle
+  and owner) lives in the shared auth service.
+- **Owner check:** an owner flag on the user, signed by the gateway.
+- **Tokens:** not cards. The importer skips them.
 
 ## Out of Scope
 
 - Cards from both games in one Location, Deck or Trade.
-- Friends, Handles, conversations or inboxes shared across sides.
+- Friends, Blocks, conversations or inboxes shared across sides.
 - Languages other than English.
 - A Riftbound scanner before Phase 9.
 - Separate repositories. ADR 0022 keeps the split possible but doesn't plan it.

@@ -1,7 +1,7 @@
 # Each game runs as its own backend and database, with one shared sign-in
 
-**Status:** proposed 2026-10-29. The owner chose the topology, one codebase, Friends per game, and a separate Location
-tree per game the same day. Spec: [Riftbound side](../planning/riftbound/spec.md). Builds on
+**Status:** proposed 2026-10-29. The owner chose the topology, one codebase, Friends per game, a separate Location tree
+per game, and one shared identity (sign-in, Handle and owner flag) the same day. Spec: [Riftbound side](../planning/riftbound/spec.md). Builds on
 [ADR 0001](0001-react-python-workers-auth-boundary.md) (the auth gateway signs the caller for the API). This ADR
 narrows `PRODUCT.md`'s "English Pokémon cards only" statement, which needs updating when this ADR is accepted.
 
@@ -22,11 +22,17 @@ has a foreign key to the sign-in tables, so user ids already cross the boundary 
 - **One backend and one database per game.** Each game is its own API container with its own PostgreSQL database,
   migrations, jobs, art store and backups. Neither backend reads the other's database. Within a backend there is no game
   column, because the whole database is one game.
-- **One shared sign-in.** The auth gateway gets its own database with the sign-in tables, the sign-up and rate-limit
-  tables, and the owner binding. It is the only service that knows sessions. It routes `/api/riftbound/*` to the
+- **One shared identity.** The auth gateway gets its own database. It holds:
+  - the sign-in tables
+  - the sign-up and rate-limit tables
+  - each collector's Handle and the rules for releasing one
+  - an owner flag on the user, which replaces the `owner_binding` singleton
+
+  A Handle claimed on either side is the collector's on both. The gateway is the only service that knows sessions. It
+  signs the user id and the owner flag on every request, and backends read neither from a table of their own. It routes `/api/riftbound/*` to the
   Riftbound backend and every other `/api/*` to the Pokémon backend, signing the user id as it does today. The signature
   covers the path the backend receives. Deleting an account in the gateway reaches every enabled backend.
-- **Friends, Handles, Blocks, conversations, Loans and Trades are per game.** Each backend keeps its own social tables.
+- **Friends, Blocks, conversations, Loans and Trades are per game.** Each backend keeps its own social tables.
   A collector who plays both games adds Friends on each side. The social module keeps its tables to itself, so it can
   later move into a shared service without changing the rest.
 - **One repository and one API image, split into core and game modules.** Core holds what both games share: Locations,
@@ -55,17 +61,19 @@ has a foreign key to the sign-in tables, so user ids already cross the boundary 
   are shared and change often. A published core package would turn each change into a release plus two upgrades. The
   checked boundaries keep a later split to a move of files.
 - **A full fork.** Every fix to the shared code would be made twice, and the copies would drift.
-- **Shared Friends and Handles now.** Moving the social graph into the gateway is a sizeable extraction, and nothing in
-  the first release needs it.
+- **Shared Friends now.** Moving the social graph into the gateway is a sizeable extraction, and nothing in the first
+  release needs it.
+- **Handles per game.** Two different collectors could then hold the same Handle on the two sides, and a Handle would
+  not reliably name one person.
 
 **Consequences.**
 
-- Moving the sign-in tables and the owner binding out of the Pokémon database is a one-time migration of live data, and
-  it ships before any Riftbound work.
+- Moving the sign-in tables, Handles and the owner binding out of the Pokémon database is a one-time migration of live
+  data, and it ships before any Riftbound work.
+- Backends still need Handles for Friend lookups and display. They get them from the gateway, either signed into the
+  request or answered by a gateway read. Phase 1 picks which.
 - Splitting the existing code into core and the Pokémon module must not change behaviour. The current test suites are
   the check that it hasn't.
 - Each game gets its own deploy units: a container, a database, backups, price and catalog jobs, and health checks. The
   operations panel has to show each one.
-- A Handle is unique only within one game, so two different collectors can hold the same Handle on different sides.
-  Reserving a Handle across games is possible later and is not decided here.
 - Published Deck URLs and generated web clients carry the game in their path. Existing Pokémon URLs stay as they are.
