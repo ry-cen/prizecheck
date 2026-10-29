@@ -2,8 +2,9 @@
 
 No production configuration enables this, and the API image copies only ``api/app``, so this file never ships. A Deck's
 format check and the format standings both take their date from a module-level ``today()`` (``app.deck_format_checks``
-and ``app.format_standing``). With ``$CATALOG_PROCESS_FIXTURE_DIR`` set, those two functions are replaced when their
-modules are imported by one that reads ``$CATALOG_PROCESS_FIXTURE_DIR/today`` (an ISO date; a browser spec writes the
+and ``app.format_standing``). With ``$CATALOG_PROCESS_FIXTURE_DIR`` set, those two functions are replaced, at once
+for a module ``sitecustomize`` has already imported (its ``app.catalog`` import loads ``app.format_standing``) and on
+import for the other, by one that reads ``$CATALOG_PROCESS_FIXTURE_DIR/today`` (an ISO date; a browser spec writes the
 file) on every call and answers the real date when the file is missing. A bad date fails the call loudly.
 
 Importing this module has no side effects; ``install()`` is called once from ``sitecustomize``.
@@ -40,4 +41,10 @@ def install(environ=None):
     import sys
     from price_fixture import _PatchOnImport
     patch = patch_module(directory)
-    sys.meta_path.insert(0, _PatchOnImport({'app.deck_format_checks': patch, 'app.format_standing': patch}, {}))
+    patches = {}
+    for name in ('app.deck_format_checks', 'app.format_standing'):
+        if name in sys.modules:
+            patch(sys.modules[name])
+        else:
+            patches[name] = patch
+    sys.meta_path.insert(0, _PatchOnImport(patches, {}))
