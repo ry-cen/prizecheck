@@ -192,6 +192,17 @@ export function preload(path: string): void {
 '''
         self.assertEqual(boundary.lazy_pages(source), {'A': 'src/a/APage', 'B': 'src/b/BPage'})
 
+    def test_lazy_page_helper_pages_are_parsed_in_both_forms(self):
+        source = '''export const loadA = () => import("../a/APage");
+export const A = lazyPage(loadA, (m) => m.A);
+export const B = lazyPage(
+  () => import("../b/BPage"),
+  (m) => m.B
+);
+export const C = lazyPage(missing, (m) => m.C);
+'''
+        self.assertEqual(boundary.lazy_pages(source), {'A': 'src/a/APage', 'B': 'src/b/BPage', 'C': None})
+
     def test_a_lazy_page_without_an_import_is_reported(self):
         source = 'export const X = lazy(() => missing().then((m) => ({ default: m.X })));'
         self.assertEqual(boundary.lazy_pages(source), {'X': None})

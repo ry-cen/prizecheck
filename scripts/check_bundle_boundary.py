@@ -55,20 +55,22 @@ INEFFECTIVE = 'dynamic import will not move module into another chunk'
 def lazy_pages(source):
     """{component name: module path relative to web/ without extension, or None} for each lazy component in lazyPages.ts."""
     parts = [part for part in re.split(r'(?m)^(?=export\s)', source) if re.match(r'export const (\w+)\s*=', part)]
+    # A lazy component is made by lazy() or the file's lazyPage() helper.
+    lazy_call = re.compile(r'\blazy(?:Page)?\(')
     loaders = {}
     for part in parts:
         name, spec = re.match(r'export const (\w+)\s*=', part)[1], re.search(r'\bimport\(\s*"([^"]+)"\s*\)', part)
-        if 'lazy(' not in part and spec:
+        if not lazy_call.search(part) and spec:
             loaders[name] = spec[1]
     pages = {}
     for part in parts:
-        if 'lazy(' not in part:
+        if not lazy_call.search(part):
             continue
         name, spec = re.match(r'export const (\w+)\s*=', part)[1], re.search(r'\bimport\(\s*"([^"]+)"\s*\)', part)
         if spec:
             target = spec[1]
         else:
-            loader = re.search(r'\blazy\(\s*\(\)\s*=>\s*(\w+)\(\)', part)
+            loader = re.search(r'\blazy\(\s*\(\)\s*=>\s*(\w+)\(\)', part) or re.search(r'\blazyPage\(\s*(\w+)\s*,', part)
             target = loaders.get(loader[1]) if loader else None
         pages[name] = posixpath.normpath(posixpath.join('src/shell', target)) if target else None
     return pages
