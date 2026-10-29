@@ -79,8 +79,16 @@ from app.core.imports.collection_draft import (
     CollectionImportChanges, PasteCollectionImport, CollectionImportSaveResult, PAGE_SIZE, SPLIT_MESSAGES,
     PASTE_MESSAGES, MAX_STARTS_PER_DAY, RATE_LIMITED_MESSAGE, STARTS_TODAY, OPEN_DRAFT, READY_ROW,
     NEEDS_YOU_ROW, FINISH_UNKNOWN_ROW, SKIPPED_ROW, LEFT_OUT_ROW, INCLUDED_ROW, BY_NAME_ROW, RowFilter,
-    GROUPS, HELD, storage_leaf, source_of, left_out, sweep_expired,
+    GROUPS, HELD, storage_leaf, source_of, left_out, sweep_expired, _set_skipped, set_group,
 )
+
+INCLUDED_ROW = INCLUDED_ROW.format(r="r")
+READY_ROW = READY_ROW.format(r="r")
+NEEDS_YOU_ROW = NEEDS_YOU_ROW.format(r="r")
+FINISH_UNKNOWN_ROW = FINISH_UNKNOWN_ROW.format(r="r")
+SKIPPED_ROW = SKIPPED_ROW.format(r="r")
+LEFT_OUT_ROW = LEFT_OUT_ROW.format(r="r")
+BY_NAME_ROW = BY_NAME_ROW.format(r="r")
 
 router = APIRouter(prefix="/api/collection-imports", tags=["collection-imports"])
 # A start refusal's message, by code. IMPORT_UNREADABLE lists the trackers whose exports are read (the web shows its own
@@ -423,32 +431,11 @@ def _pick(conn, import_id: UUID, generation, source: str, targets: list,
                                                      if row["row_number"] not in done])
 
 
-def _set_skipped(conn, import_id: UUID, targets: list, skipped: bool) -> CollectionImportChangeResult:
-    eligible = [row["row_number"] for row in targets if row["left_out_reason"] is None and row["included"]]
-    changed: set[int] = set()
-    if eligible:
-        # Only rows whose flag differs count as changed; the rest are reported in not_applied.
-        changed = {row["row_number"] for row in conn.execute(
-            """UPDATE collection_import_row SET skipped=%s WHERE import_id=%s AND row_number=ANY(%s::int[])
-               AND skipped IS DISTINCT FROM %s RETURNING row_number""",
-            (skipped, import_id, eligible, skipped)).fetchall()}
-    return CollectionImportChangeResult(applied=len(changed),
-                                        not_applied=[row["row_number"] for row in targets
-                                                     if row["row_number"] not in changed])
-
-
 def _set_group(conn, import_id: UUID, group: str, include: bool) -> CollectionImportChangeResult:
-    """Leaves the file's group out of the import (include false) or brings it back, keeping each of its rows as it
-    was. GROUP_NOT_FOUND for a name no row of the draft has."""
-    rows = conn.execute("""SELECT count(*) AS n,count(*) FILTER (WHERE left_out_reason IS NULL) AS kept
-      FROM collection_import_row WHERE import_id=%s AND group_name=%s""", (import_id, group)).fetchone()
-    if not rows["n"]:
+    result = set_group(conn, import_id, group, include)
+    if result is None:
         refuse(422, "GROUP_NOT_FOUND")
-    changed = conn.execute("""UPDATE collection_import SET excluded_groups=CASE WHEN %s THEN excluded_groups-%s::text
-        ELSE excluded_groups||jsonb_build_array(%s::text) END
-      WHERE id=%s AND (excluded_groups @> jsonb_build_array(%s::text))=%s RETURNING id""",
-                           (include, group, group, import_id, group, include)).fetchone()
-    return CollectionImportChangeResult(applied=rows["kept"] if changed else 0, not_applied=[])
+    return result
 
 
 def _set_location(conn, user_id: str, import_id: UUID, location_id: UUID) -> CollectionImportChangeResult:

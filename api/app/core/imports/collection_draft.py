@@ -44,32 +44,29 @@ OPEN_DRAFT = "ci.status='open' AND ci.expires_at>now()"
 SWEEP_LIMIT = 20
 
 
-INCLUDED_ROW = ("(r.group_name IS NULL OR NOT EXISTS (SELECT 1 FROM collection_import draft "
-                "WHERE draft.id=r.import_id AND draft.excluded_groups @> jsonb_build_array(r.group_name)))")
-
-
-READY_ROW = ("r.status IN ('matched','finish_unknown','by_name') AND NOT r.skipped "
-             "AND r.left_out_reason IS NULL AND " + INCLUDED_ROW)
-
-
-NEEDS_YOU_ROW = ("r.status IN ('ambiguous','not_found','unreadable') AND NOT r.skipped "
-                 "AND r.left_out_reason IS NULL AND " + INCLUDED_ROW)
-
-
-FINISH_UNKNOWN_ROW = ("r.status='finish_unknown' AND NOT r.skipped AND r.left_out_reason IS NULL AND "
+# Row predicates over collection_import_row, for an alias: READY_ROW.format(r="r"). A skipped or left-out row (#231)
+# is neither ready nor needs the collector, and a row in a group the collector left out (#232) is in none of them.
+# A row is in no group, or in one that isn't among its draft's collection_import.excluded_groups (#232).
+INCLUDED_ROW = ("({r}.group_name IS NULL OR NOT EXISTS (SELECT 1 FROM collection_import draft "
+                "WHERE draft.id={r}.import_id AND draft.excluded_groups @> jsonb_build_array({r}.group_name)))")
+READY_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND NOT {r}.skipped "
+             "AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
+NEEDS_YOU_ROW = ("{r}.status IN ('ambiguous','not_found','unreadable') AND NOT {r}.skipped "
+                 "AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
+FINISH_UNKNOWN_ROW = ("{r}.status='finish_unknown' AND NOT {r}.skipped AND {r}.left_out_reason IS NULL AND "
                       + INCLUDED_ROW)
-
-
-SKIPPED_ROW = "r.skipped AND r.left_out_reason IS NULL AND " + INCLUDED_ROW
-
-
-LEFT_OUT_ROW = "r.left_out_reason IS NOT NULL AND " + INCLUDED_ROW
-
-
-
-
-BY_NAME_ROW = ("r.status IN ('matched','finish_unknown','by_name') AND r.parsed->>'matched_by_name'='1' "
-               "AND NOT r.skipped AND r.left_out_reason IS NULL AND " + INCLUDED_ROW)
+# Every row the review lists under All: ready or needing the collector.
+LISTED_ROW = "NOT {r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW
+SKIPPED_ROW = "{r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW
+# A row the filters left out (#231), whatever else it is, unless its group is left out too.
+LEFT_OUT_ROW = "{r}.left_out_reason IS NOT NULL AND " + INCLUDED_ROW
+# The row's card came from step 4 (parsed holds BY_NAME_KEY, whatever its finish says); a collector's pick clears it.
+BY_NAME_KEY = "matched_by_name"
+BY_NAME_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND {r}.parsed->>'matched_by_name'='1' "
+               "AND NOT {r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
+# The rows route's filters, which a change's `filter` selects by too.
+FILTER_ROWS = {"needs": NEEDS_YOU_ROW, "finish": FINISH_UNKNOWN_ROW, "name": BY_NAME_ROW, "all": LISTED_ROW,
+               "skipped": SKIPPED_ROW}
 
 
 RowFilter = Literal["needs", "finish", "name", "all", "skipped"]
@@ -87,7 +84,7 @@ LEFT_OUT_EXAMPLES = 3
 LEFT_OUT = f"""SELECT reason,n,parsed FROM (
     SELECT r.left_out_reason AS reason,r.parsed,count(*) OVER (PARTITION BY r.left_out_reason) AS n,
       row_number() OVER (PARTITION BY r.left_out_reason ORDER BY r.row_number) AS k
-    FROM collection_import_row r WHERE r.import_id=%s AND {LEFT_OUT_ROW}) found
+    FROM collection_import_row r WHERE r.import_id=%s AND {LEFT_OUT_ROW.format(r="r")}) found
   WHERE k<=%s ORDER BY reason,k"""
 
 
@@ -325,3 +322,31 @@ def left_out(conn, import_id: UUID, *, reasons: tuple[str, ...]) -> list[Collect
                                                                          examples=[]))
         entry.examples.append(source_of(row["parsed"]))
     return [found[reason] for reason in reasons if reason in found]
+
+
+def _set_skipped(conn, import_id: UUID, targets: list, skipped: bool) -> CollectionImportChangeResult:
+    eligible = [row["row_number"] for row in targets if row["left_out_reason"] is None and row["included"]]
+    changed: set[int] = set()
+    if eligible:
+        # Only rows whose flag differs count as changed; the rest are reported in not_applied.
+        changed = {row["row_number"] for row in conn.execute(
+            """UPDATE collection_import_row SET skipped=%s WHERE import_id=%s AND row_number=ANY(%s::int[])
+               AND skipped IS DISTINCT FROM %s RETURNING row_number""",
+            (skipped, import_id, eligible, skipped)).fetchall()}
+    return CollectionImportChangeResult(applied=len(changed),
+                                        not_applied=[row["row_number"] for row in targets
+                                                     if row["row_number"] not in changed])
+
+
+def set_group(conn, import_id: UUID, group: str, include: bool) -> CollectionImportChangeResult | None:
+    """Leaves the file's group out of the import (include false) or brings it back, keeping each of its rows as it
+    was. Returns None for a name no row of the draft has."""
+    rows = conn.execute("""SELECT count(*) AS n,count(*) FILTER (WHERE left_out_reason IS NULL) AS kept
+      FROM collection_import_row WHERE import_id=%s AND group_name=%s""", (import_id, group)).fetchone()
+    if not rows["n"]:
+        return None
+    changed = conn.execute("""UPDATE collection_import SET excluded_groups=CASE WHEN %s THEN excluded_groups-%s::text
+        ELSE excluded_groups||jsonb_build_array(%s::text) END
+      WHERE id=%s AND (excluded_groups @> jsonb_build_array(%s::text))=%s RETURNING id""",
+                           (include, group, group, import_id, group, include)).fetchone()
+    return CollectionImportChangeResult(applied=rows["kept"] if changed else 0, not_applied=[])

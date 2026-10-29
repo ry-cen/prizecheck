@@ -62,6 +62,11 @@ import unicodedata
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from app.core.imports.collection_draft import (
+    INCLUDED_ROW, READY_ROW, NEEDS_YOU_ROW, FINISH_UNKNOWN_ROW, LISTED_ROW,
+    SKIPPED_ROW, LEFT_OUT_ROW, BY_NAME_KEY, BY_NAME_ROW, FILTER_ROWS,
+)
+
 from . import collection_import_aliases as aliases
 from . import collection_import_finish as finishes
 from . import import_aliases
@@ -78,29 +83,6 @@ MAX_CANDIDATES = 20
 READY = ("matched", "finish_unknown", "by_name")
 NEEDS_YOU = ("ambiguous", "not_found", "unreadable")
 STATUSES = READY + NEEDS_YOU
-# Row predicates over collection_import_row, for an alias: READY_ROW.format(r="r"). A skipped or left-out row (#231)
-# is neither ready nor needs the collector, and a row in a group the collector left out (#232) is in none of them.
-# A row is in no group, or in one that isn't among its draft's collection_import.excluded_groups (#232).
-INCLUDED_ROW = ("({r}.group_name IS NULL OR NOT EXISTS (SELECT 1 FROM collection_import draft "
-                "WHERE draft.id={r}.import_id AND draft.excluded_groups @> jsonb_build_array({r}.group_name)))")
-READY_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND NOT {r}.skipped "
-             "AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
-NEEDS_YOU_ROW = ("{r}.status IN ('ambiguous','not_found','unreadable') AND NOT {r}.skipped "
-                 "AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
-FINISH_UNKNOWN_ROW = ("{r}.status='finish_unknown' AND NOT {r}.skipped AND {r}.left_out_reason IS NULL AND "
-                      + INCLUDED_ROW)
-# Every row the review lists under All: ready or needing the collector.
-LISTED_ROW = "NOT {r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW
-SKIPPED_ROW = "{r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW
-# A row the filters left out (#231), whatever else it is, unless its group is left out too.
-LEFT_OUT_ROW = "{r}.left_out_reason IS NOT NULL AND " + INCLUDED_ROW
-# The row's card came from step 4 (parsed holds BY_NAME_KEY, whatever its finish says); a collector's pick clears it.
-BY_NAME_KEY = "matched_by_name"
-BY_NAME_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND {r}.parsed->>'matched_by_name'='1' "
-               "AND NOT {r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
-# The rows route's filters, which a change's `filter` selects by too.
-FILTER_ROWS = {"needs": NEEDS_YOU_ROW, "finish": FINISH_UNKNOWN_ROW, "name": BY_NAME_ROW, "all": LISTED_ROW,
-               "skipped": SKIPPED_ROW}
 PRODUCT_ID = re.compile(r"[1-9][0-9]{0,17}")
 
 # The filters' reasons (#231), in the order they are tried: a row gets the first that applies.
