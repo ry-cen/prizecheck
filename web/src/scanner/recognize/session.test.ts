@@ -10,13 +10,15 @@ const fr = (
   top: string[] | null,
   thumb = SAME,
   eligible = true,
-  textBacked = true
+  textBacked = true,
+  numberIds: string[] = []
 ): VoteFrame => ({
   t,
   thumb,
   top,
   eligible,
   textBacked,
+  numberIds,
 });
 const types = (m: FromWorker[]) => m.map((x) => x.t);
 
@@ -30,7 +32,13 @@ describe("VoteSession messages", () => {
   it("an image-only agreement posts one suggest lock with up to three ids", () => {
     const s = new VoteSession();
     expect(suggest(s)).toEqual([
-      { t: "lock", lockId: 1, printingIds: ["A", "B", "C"], via: "suggest" },
+      {
+        t: "lock",
+        lockId: 1,
+        printingIds: ["A", "B", "C"],
+        via: "suggest",
+        lookalikes: [],
+      },
     ]);
   });
 
@@ -39,7 +47,7 @@ describe("VoteSession messages", () => {
     s.frame(fr(0, ["A"]), false);
     s.frame(fr(100, ["A"]), false);
     expect(s.frame(fr(200, ["A"]), false)).toEqual([
-      { t: "lock", lockId: 1, printingIds: ["A"], via: "auto" },
+      { t: "lock", lockId: 1, printingIds: ["A"], via: "auto", lookalikes: [] },
     ]);
   });
 
@@ -85,7 +93,13 @@ describe("VoteSession messages", () => {
     const s = new VoteSession();
     s.frame(fr(0, ["A", "B"]), false);
     expect(s.shutter(100)).toEqual([
-      { t: "lock", lockId: 1, printingIds: ["A", "B"], via: "shutter" },
+      {
+        t: "lock",
+        lockId: 1,
+        printingIds: ["A", "B"],
+        via: "shutter",
+        lookalikes: [],
+      },
     ]);
     const m = new VoteSession();
     expect(m.shutter(100)).toEqual([]); // needs a frame
@@ -102,5 +116,43 @@ describe("VoteSession messages", () => {
       300
     );
     expect(s.state).toBe("cooldown");
+  });
+
+  describe("look-alikes", () => {
+    const ten = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10"];
+    const alike = (id: string) => (id === "A" ? ["A", ...ten] : []);
+    const lockOfSession = (s: VoteSession, ocr: string[], backed: boolean) => {
+      s.frame(fr(0, ["A", "B", "C"], SAME, true, backed, ocr), false);
+      s.frame(fr(100, ["A", "B", "C"], SAME, true, backed, ocr), false);
+      const out = s.frame(
+        fr(200, ["A", "B", "C"], SAME, true, backed, ocr),
+        false
+      );
+      const m = out[0];
+      if (m.t !== "lock") throw new Error("expected a lock");
+      return m;
+    };
+
+    it("a lock carries the look-alikes of its first id, capped at 7", () => {
+      const m = lockOfSession(new VoteSession(alike), [], false);
+      expect(m.lookalikes).toEqual(ten.slice(0, 7));
+    });
+
+    it("an auto lock keeps only the look-alikes its printed number supports", () => {
+      const m = lockOfSession(new VoteSession(alike), ["A", "L3", "L5"], true);
+      expect(m.via).toBe("auto");
+      expect(m.lookalikes).toEqual(["L3", "L5"]);
+    });
+
+    it("narrowing runs before the cap: an 8th-closest supported look-alike survives when the 7 closer ones are unsupported", () => {
+      const m = lockOfSession(new VoteSession(alike), ["A", "L8"], true);
+      expect(m.lookalikes).toEqual(["L8"]);
+    });
+
+    it("a suggest lock keeps all look-alikes", () => {
+      const m = lockOfSession(new VoteSession(alike), ["L3"], false);
+      expect(m.via).toBe("suggest");
+      expect(m.lookalikes).toEqual(ten.slice(0, 7));
+    });
   });
 });

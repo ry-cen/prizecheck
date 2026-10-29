@@ -22,7 +22,7 @@ These are collector-facing. The full list of 12 answers is under "Owner answers"
 
 ## Delegated decisions
 
-Settled here, in this order: runtime (D1), image work (D2), model delivery (D3), the index build and its storage (D4), the number table (D5), set totals (D6), index format and staleness (D7), live Edition lookup (D8), device storage (D9), tray identity (D10), stale Editions (D11), the save route (D12), bundle and code boundaries (D13), UI copy (D14).
+Settled here, in this order: runtime (D1), image work (D2), model delivery (D3), the index build and its storage (D4), the number table (D5), set totals (D6), index format and staleness (D7), live Edition lookup (D8), device storage (D9), tray identity (D10), stale Editions (D11), the save route (D12), bundle and code boundaries (D13), UI copy (D14). D15 (2026-10-28) was added later: look-alike Printings and the choice prompt. It supersedes owner answer 5 (Q5) and amends D5, D8 and the tray schema note.
 
 ## Established inputs, assumptions and open points
 
@@ -147,7 +147,7 @@ Rejected:
 - `GET /api/scanner/cards/{key}` answers gzipped JSON with `Content-Type: application/octet-stream` and `Content-Disposition: attachment; filename="cards.json.gz"` (so the gateway streams it unchanged) and **no `Content-Encoding`**, so neither the gateway's `fetch` nor the browser inflates it. The client does `new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).json()`; the Cache Storage entry holds the gzip bytes as received. About 21k printings, 2.3 MB raw, about 0.6 MB gzipped (estimated).
 - **Deterministic bytes.** `gzip.compress(json_bytes, compresslevel=6, mtime=0)` over `json.dumps(..., ensure_ascii=False, separators=(",", ":"))`, with `sets` sorted by set id and `printings` columns in printing id order. The same key always builds the same bytes.
 - **The key ignores set counts on purpose.** Set counts change only inside an import's promotion transaction, where the generation id in the key changes, or through the one-time backfill. So the backfill must run for the active generation **before the scanner routes are reachable** in an environment (ship blocker 6). The backfill is `ON CONFLICT DO NOTHING`, so a rerun changes no bytes and the key stays valid.
-- `key` is the first 16 hex of sha256 over `{"f":1, "rev": catalog_state.revision, "gen": active_generation, "codes": set_codes.DIGEST}`. The same inputs build the same bytes, so no content hash. A non-current key answers 404 `CARDS_NOT_CURRENT` and the client re-reads the manifest.
+- `key` is the first 16 hex of sha256 over `{"f":1, "rev": catalog_state.revision, "gen": active_generation, "codes": set_codes.DIGEST}`. (Amended 2026-10-28 by D15: the inputs also carry a Reprint Group membership digest and a column marker, so the key changes whenever group membership changes.) The same inputs build the same bytes, so no content hash. A non-current key answers 404 `CARDS_NOT_CURRENT` and the client re-reads the manifest.
 - The API keeps the last `(key, bytes)` in memory; a miss rebuilds in one query.
 - It is cheap SQL, so a new set is recognizable by number the moment the import commits, with no job lag.
 
@@ -179,7 +179,7 @@ Rejected:
 ### D8. Candidates resolve to Editions live, through one batch route
 
 - `POST /api/scanner/printings` takes `{printing_ids: [at most 100 UUIDs]}` and answers `{catalog_revision, printings: ScannerPrinting[], missing: UUID[]}`, reusing `catalog_search._views` (`api/app/catalog_search.py:111-135`) with the `NOT gp.tombstoned` filter of `printing_detail` (`:169-182`). `ScannerPrinting` is `PrintingView` plus `default_edition_id: UUID | None`.
-- **At lock.** See "A lock whose Edition cannot be resolved" below. The main thread calls this route for the lock's candidates and writes the row with the first candidate that has a `default_edition_id`.
+- **At lock.** See "A lock whose Edition cannot be resolved" below. The main thread calls this route for the lock's candidates (and, since D15, its look-alikes). A card that needs no choice is added at once with the first candidate that has a `default_edition_id`; any other card opens the choice prompt (D15), and the row is written with the Printing and Edition the collector taps.
 - **On tray open** (reload, resume) the UI calls it for every row's printing, in chunks of 100. That gives fresh names and art and pre-flags stale rows (D11).
 
 **The finish rule** (owner decision, amended 2026-10-22; it amends the closed Finish decision for Printings without an Unspecified Variant). The server computes the default Edition, so the tray holds no port of the descriptor logic. `api/app/scanner.py` gets `default_edition(editions: list[EditionView]) -> UUID | None`, "the tray's starting Edition for a Printing; None when it has no active Edition; never from the photo". Over the Printing's **active** Editions in the order `catalog_search._views` returns them (`ORDER BY e.descriptor_key, e.id`, `api/app/catalog_search.py:119`), it picks, in order:
@@ -191,17 +191,19 @@ Rejected:
 
 The chosen chip shows as selected and is one tap to change. The rule is a default the collector confirms, never inferred from the photo, so it stays inside ADR 0007's rule that a scan only suggests ([ADR 0007](../../../../adr/0007-edition-marketplace-metadata-boundary.md)). **Every row always has an Edition and Confirm never waits on a finish.**
 
+*Amended 2026-10-28 (D15):* the starting Edition now applies only to a **direct add**, that is, a card with exactly one active Edition and no look-alikes (rule 2 above, so the start is that single Edition). A card with more than one active Edition, or with look-alikes, opens the choice prompt, where the collector picks the finish and the scanner preselects none. Rules 3 to 5 therefore no longer decide a row the scanner adds; the route still returns `default_edition_id` unchanged, and no API change was made.
+
 **A lock whose Edition cannot be resolved.** Recognition runs offline from cached assets, but adding a row needs the printings route. No row is ever written without an Edition.
-- After `lock`, the main thread calls the route for the lock's up to 3 printing ids, with a 5 s timeout. The row's Printing is the first candidate, in the worker's order, that is in `printings` with a non-null `default_edition_id`; its `candidates` are up to 3 printing ids: that Printing first, then the other resolvable ids, best first. A skipped first candidate (no active Edition, or in `missing`) is skipped silently.
+- After `lock`, the main thread calls the route for the lock's up to 3 printing ids and its look-alikes (D15), with a 5 s timeout. A direct add (D15) writes a row for the first candidate, in the worker's order, that is in `printings` with a non-null `default_edition_id`; its `candidates` are up to 3 printing ids: that Printing first, then the other resolvable ids, best first. A skipped first candidate (no active Edition, or in `missing`) is skipped silently. When the card needs a choice, the same answer feeds the choice prompt instead, and the row is written for the Printing and Edition the collector taps.
 - Outcomes:
 
 | Outcome | What happens | What the collector sees |
 |---|---|---|
-| A candidate resolves | Write the row, or add to the newest row of that Printing (Q5). Send `lockOutcome {added: true}`. | the lock cue and the row slides in |
+| A candidate resolves | Write the row, or add one copy to the newest row with the same Printing and Edition (Q5 was superseded on 2026-10-28; see D15). Send `lockOutcome {added: true}`. | the lock cue and the row slides in |
 | The route answers, but no candidate resolves | Auto lock: no row, `lockOutcome {added: false}`. Shutter: open search, the same as `miss`. | auto: the hint "Couldn't add this card. Tap the shutter to search." (final wording for the spec). Shutter: search opens |
 | The route fails (offline, timeout, 5xx) | No row; `lockOutcome {added: false}`. | the hint "Can't reach PrizeCheck. Check your connection and scan again." Final wording is for the spec |
 
-- **Voting.** While a lookup is pending the worker makes no new lock. On `added: false` it empties the window and re-arms without requiring an absence, and makes no lock for the next 2 s, so a failing route is called at most every 2 s (the pause does not apply to `reason: "full"`, which follows the next rule). On `added: true` the absence rule applies as before. On `reason: "full"` the card must also leave the frame before the next lock, as for `added: true`, so a full tray cannot re-prompt for the same card; and while the full-tray prompt is open the main thread sends `pause`, then `resume` when it closes. If a lock would add a copy to an existing row, the main thread also checks capacity (`trayEditAllowed`) before the route call, so the full or limit answer comes without a network wait.
+- **Voting.** While a lookup is pending the worker makes no new lock. On `added: false` it empties the window and re-arms without requiring an absence, and makes no lock for the next 2 s, so a failing route is called at most every 2 s (the pause does not apply to `reason: "full"`, which follows the next rule). On `added: true` the absence rule applies as before. On `reason: "full"` the card must also leave the frame before the next lock, as for `added: true`, so a full tray cannot re-prompt for the same card; and while the full-tray prompt is open the main thread sends `pause`, then `resume` when it closes. Since D15 the row and Edition are not known before the route answers, so the capacity check (`trayEditAllowed`) runs when the copy is added, after the route call (or after the collector's tap), not before it.
 - **Offline cost.** Scanning therefore needs a connection to add rows even though recognition does not.
 - **Offline tray display.** If the route fails when the tray opens, rows render from the cached card table (name, printed code or set id, number, art); finish chips and Confirm are disabled; a plain line asks the collector to reconnect. The printings call is retried on the browser's `online` event and whenever the tray is reopened. No row is marked `needs_pick` from an outage; only a successful answer marks stale rows.
 
@@ -282,6 +284,82 @@ No alternatives were weighed for D13.
 
 The scanner never shows similarity or OCR scores, tiers, model, runtime or source names, index or model versions, hashes, catalog revisions, or download state beyond plain progress. First-download progress reads "Getting the scanner ready" with a bar (Q10). Its total is the lock file's `bytes` for each model file (generated into `models.ts`) plus `manifest.fingerprints.bytes` plus `manifest.cards.bytes`, leaving out entries already cached and verified. Progress counts decoded body bytes: `fetch` decodes the `/scanner/m/` gzip, so decoded model bytes equal the lock file's; the card table counts its received gzip bytes, which equal `manifest.cards.bytes`. The runtime wasm goes through the HTTP cache and is not counted, so the bar finishes only when the wasm has loaded too. Gate hints may say "Hold steady" or "More light" with no numbers; exact copy is for the spec. The owner operations panel may show the index's age and count (owner review screens are exempt). No alternatives were weighed.
 
+### D15. Look-alike Printings and the choice prompt (2026-10-28)
+
+**Status.** Added after the first release work. The owner's collector-facing answers are under "Owner answers (2026-10-28)" below. The technical choices were delegated and are Claude's. This section supersedes owner answer 5 (Q5) and amends D5, D8 and the tray schema note. The tray's storage version stays `v: 1`.
+
+**Why.** Two cases made a lock a guess. Reprints share artwork, so a Printing scanned from a photo may be a sibling the collector owns (Nidoking in Base Set and in Base Set 2). And a Printing with several active Editions (Normal and Reverse Holo) was added on a starting finish, with the chip as the only correction. The owner wants the scanner to ask in both cases.
+
+**The rule.** A tray row is one Printing and one Edition. A lock whose card has exactly one active Edition and no look-alikes is added directly. Any other lock opens the choice prompt: one entry per version (a Printing), each with its finish chips, and **None of these**. Every `suggest` lock opens it as well.
+
+**The signal: look-alike Printings.** The look-alikes of Printing P are the other Printings that:
+- are in the same Reprint Group as P (a group never spans Card Identities);
+- have a fingerprint; and
+- have int8 cosine to P of at least `LOOKALIKE.minCosine`, **0.85**.
+
+They are ordered closest first (ties by newer release, then id) and capped at 7. The device computes the cosine from the fingerprints it already holds, between members of one group, at lock time: at most a few dozen 384-long dot products. Nothing new is stored on the server and the job, the PCFP format and the migrations are unchanged.
+
+*Measurements that led here.* On the spike index (same model sha `c179f8f7…`, int8 like the job):
+- Same-name Printings with different art reach 0.865 to 0.876 (Illumise sm7-18 against xy1-9 at 0.865, Eevee sv03-166 against svp-043 at 0.872, both checked by eye). A name-only threshold below about 0.90 groups different cards.
+- True shared-art reprints have a median of 0.935 (Base Set 2 against Base Set, Jungle and Fossil, n=130) and 0.944 for Legendary Collection. About 4% fall below 0.86 and 10% below 0.88. Nidoking base1-11 against base4-11 is 0.901; Professor Oak base1-88 against base4-116 is 0.873.
+- Name-only at 0.86 gave stars of up to 15 members (30th Pikachu, basic energies). So the Reprint Group (identical rules text) removes different cards that share a name, and the cosine removes same-text alternate arts. The cap of 7 bounds what is left.
+
+*Dev-database check (owner round 2, 2026-10-28; model of the newest `scanner_index`).* There is no clean cut-off. Shared-art reprints sit at 0.88 to 0.92 (Nidoking base1/base2 0.90, Bulbasaur 0.904, Squirtle lc/base1 0.889). Different-art pairs of one card, such as a regular and a full-art or gold version, sit alongside them (Mewtwo VSTAR swsh10.5 086/031 at 0.869). At 0.85 there are 1,197 pairs and 1,870 Printings with look-alikes, the largest star is 7 and the 99th percentile is 4. **The owner accepted 0.85 and the extra versions it adds to the prompt** (owner answer 6). They come mostly from image-only locks; number narrowing drops them when the printed number is read. This replaces the earlier release criteria for the threshold. `LOOKALIKE.minCosine` is one constant in `web/src/scanner/recognize/constants.ts` and can be retuned without a contract change.
+
+*Known blind spot, accepted.* Shared-art Printings in different Reprint Groups (the text changed between prints) are never look-alikes.
+
+**The `group` column.** The number table (format 2) gains an optional `group` column (see "Number table" under Contracts). `CARDS_FORMAT` stays 2. The cards key now covers a digest of `catalog_reprint_group_member` (an `md5` over the sorted `printing_id:group_id` pairs) and a column marker, because membership can change without a catalog revision (owner Reprint Group reviews) and more than one API process may serve the table. **A Reprint Group review therefore reaches devices at their next manifest read,** and two processes never serve different bytes under one key. The cost is one aggregate over about 20k rows per manifest and cards request. The membership is already public in public records, ADR 0017 is untouched (the index stays private and the table stays signed-in only), and **no ADR is needed.**
+
+**The `lookalikes` lock field.** The worker's `lock` message gains `lookalikes: string[]` (see the contract). It is computed in the worker from the voter's first id, so the main thread needs no group data.
+
+**Number narrowing for automatic locks.** An `auto` lock keeps a look-alike only if the printed number supports it at least as strongly as it supports the locked card. The voter unions the number-candidate ids of the frames that backed the lock, and the session filters the look-alikes by that union **before** applying the cap of 7. A scan whose set code or denominator separates two look-alikes therefore shows only the matching one; a bare number shows both. The union errs toward showing the choice: an early, weaker reading can keep a look-alike a later, stronger one excluded. `suggest` and shutter locks keep every look-alike.
+
+**Absence for every pending lock.** The worker now tracks absence and posts `absent` for every pending lock, not only `suggest` (D8 and the spec had it for suggestions). The main thread uses it as follows:
+- A direct add is never skipped by absence: the controller ignores `absent` until a prompt is decided.
+- If the card leaves while a prompt is shown, or before an `auto` or `shutter` lock resolves into a prompt, the card is skipped: `lockOutcome {added: false, reason: "dismissed"}`. The card must leave the guide before the next lock, through the voter's existing re-arming after an outcome.
+- A card that leaves while a direct add is resolving is still added, as before.
+- While the prompt is open the shutter is disabled and the worker makes no new lock, as for a Scan Suggestion.
+
+**The prompt.** Versions are ordered: for `suggest`, the first candidate, its look-alikes, then the other candidates; for `auto` and `shutter`, the first candidate, then its look-alikes. At most 8 versions show. A version that does not resolve or has no active Edition is left out; if the first candidate has no version on an `auto` or `shutter` lock, the first resolvable other candidate shows alone (today's fallback). A version with two or more active Editions shows finish chips with none selected; a version with one active Edition is a single button, and it shows the finish name after its set and number (owner answer 8). One tap adds one copy. The prompt shows no scores, sources or prices. The words are in the spec's Copy table.
+
+**Adding a copy and merging.**
+- *Add.* A copy goes to the newest row with the same Printing and Edition that is not `needs_pick` (count + 1), or to a new row at the top. The row's `candidates` keep the chosen Printing first and at most 3 ids (`withinCaps` makes a longer list unparseable). The capacity check runs at this step.
+- *Chip change.* Changing a row's chip merges the row into another row with the same Printing and Edition, if one exists and is not `needs_pick`. The tapped row keeps its id and position and takes the summed count; the other row is removed (owner answer 5; the survivor is Claude's choice). A sum over 999 is refused with `full` and nothing is written. To move one copy, the collector steps the count down and rescans.
+- *Change card and search.* **Change card** choosing another Printing and Edition merges in the same way. A search pick in add mode stacks onto a matching row like any other add.
+
+**Storage.** The tray stays `v: 1` under the same key. D10's v2 is not needed because the shape is unchanged: a row was always a Printing, an Edition and a count. A tray stored before this change parses and keeps every row, duplicates included, and they merge at Confirm and on the next chip change. There is no migration, by design. `mergeItems`, `confirm`, the save route and `scanner_save.py` are unchanged.
+
+**Owner answers (2026-10-28).** Asked in the planning round; the full text is in the feature brief's `decisions.md`.
+1. A tray row is one Printing + one Edition; rows are no longer keyed by Printing alone. This supersedes Q5.
+2. After the collector picks a version and finish, the copy goes to the row with that Printing and Edition (count + 1), or a new row.
+3. The prompt appears for every scan whose card needs a choice: a look-alike group, or a single card with more than one active Edition. A card with one active Edition and no look-alikes is added directly.
+4. The prompt shows versions, each with finish chips, one tap to add; "None of these" stays.
+5. Changing a row's finish chip moves the whole row and merges with an existing row of that Printing and Edition.
+6. The threshold errs toward asking: `LOOKALIKE.minCosine` stays 0.85 with the dev-check evidence above.
+7. Headings are "Which version?" and "Which finish?"; "Is it one of these?" stays for suggestions.
+8. A version with one active Edition shows its finish name after set and number.
+
+*Decided by Claude, owner may override:* a card taken out of the guide with the prompt unanswered is skipped (the 2026-10-25 suggestion rule); the Scan Suggestion and the new prompt are one surface; no finish is preselected (ADR 0007); the shutter follows the rules of an automatic lock; the glossary terms **Look-alike Printings** and **Scan Choice** (accepted in round 2); the tapped row survives a merge.
+
+**Tests.** The cases that pin these rules:
+- API: the `group` column numbers a Reprint Group with 2 or more Printings and leaves a singleton null; the cards key changes when membership changes and the old key answers `CARDS_NOT_CURRENT`.
+- Card table: a table without `group` parses with null groups; a malformed `group` column is `CARD_TABLE_INVALID`.
+- Look-alikes: same group at or above the threshold, closest first; other groups, null groups, members below the threshold and members with no fingerprint are left out; ties by newer release, then id.
+- Voter and session: `absent` fires once for any pending lock; an auto lock carries the number ids of its backing frames; narrowing runs before the cap.
+- Tray store: the copy goes to the newest row with the same Printing and Edition, never one with another Edition and never a `needs_pick` row; a chip change and a replacing search pick merge, the tapped row keeps its id and position; a merge over 999 is `full` and writes nothing; a stored tray with two rows of one Printing and Edition parses with both and Confirm sends one summed item.
+- Browser: a two-finish card opens the finish prompt and a tap adds that finish; a second scan of another finish makes a second row; a one-finish card adds with no prompt; look-alikes open the version prompt; a card taken away with the prompt open is skipped; a chip change to a finish another row has merges the two rows.
+
+**Risks.**
+- *Scan speed.* By owner answer 3, most modern cards (Normal and Reverse Holo) prompt on every scan. This was decided deliberately and changes scan speed noticeably. Watch for owner feedback after release.
+- *Session restart.* The choice controller is a module singleton and lock ids restart per worker session; a late lookup from the old session must never show a prompt in the new one.
+- *Extra versions.* At 0.85 the prompt can list a different-art version of the same card, mostly on image-only locks.
+
+Rejected:
+- a name-only cosine threshold (groups different cards below about 0.90);
+- storing look-alike pairs on the server (a new table and job change for data the device can compute);
+- tray storage v2 (the shape is unchanged);
+- preselecting a finish in the prompt (ADR 0007).
+
 ## Contracts
 
 ### Routes (signed-in, owner-scoped, none under `/api/public/`)
@@ -361,18 +439,21 @@ Little-endian, sections 4-byte aligned.
 - **Size.** 44 + 404 x 19,659 is about 7.94 MB.
 - **Server tables.** `scanner_fingerprint(printing_id uuid REFERENCES catalog_printing(id), model_id text, image_url text NOT NULL, scale real NOT NULL, vector bytea NOT NULL CHECK (length(vector)=384), computed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (printing_id, model_id))` and `scanner_index(sha256 text PRIMARY KEY CHECK (sha256 ~ '^[0-9a-f]{64}$'), model_id text NOT NULL, catalog_revision bigint NOT NULL, inputs_digest text NOT NULL, count integer NOT NULL, inputs_count integer NOT NULL, bytes bytea NOT NULL, created_at timestamptz NOT NULL DEFAULT now())` with an index on `(model_id, created_at DESC)`; `count` is the number embedded and `count < inputs_count` means some printings are missing. The failure ledger, in the same migration, is `scanner_fingerprint_failure(printing_id uuid REFERENCES catalog_printing(id), model_id text, image_url text NOT NULL, failures integer NOT NULL CHECK (failures >= 1), last_failed_at timestamptz NOT NULL, PRIMARY KEY (printing_id, model_id))`.
 
-### Number table (card table v1)
+### Number table (card table, format 2)
+
+*Updated 2026-10-28.* This section described format 1 (an `image` column of raw URLs). The shipped table is **format 2**: `art` replaces `image` (#359), and D15 adds the optional `group` column. The device still parses format 1 (`image`) and format 2 (`art`), and `group` is optional, so an older client ignores it. `CARDS_FORMAT` stays 2 because an old tab rejects any format other than 1 or 2.
 
 gzip of compact column-oriented JSON:
 
 ```json
-{"format":1,"key":"<16 hex>","catalog_revision":412,
+{"format":2,"key":"<16 hex>","catalog_revision":412,
  "sets":[{"id":"sv01","code":"SVI","official":198,"total":258,"released":"2023-03-31"}],
  "printings":{"id":["<uuid>"],"set":[0],"number":["025"],"name":["Sprigatito"],
-              "image":["https://assets.tcgdex.net/en/sv/sv01/025"]}}
+              "art":["<8 hex>"],"group":[null]}}
 ```
 
-- `code`, `official`, `total` and `released` may be `null`. `set` indexes `sets`. `number` is `catalog_generation_printing.collector_number`. `image` is the stored base without `/low.webp` and may be `null`.
+- `code`, `official`, `total` and `released` may be `null`. `set` indexes `sets`. `number` is `catalog_generation_printing.collector_number`. `art` is the 8-hex version of the Printing's TCGdex small artwork, or `null` when it has none.
+- `group` (D15) is an integer Reprint Group ordinal for every Printing whose Reprint Group has 2 or more Printings in the table, and `null` otherwise. Ordinals are assigned in first-seen order down the id-sorted columns and mean nothing outside this table. The key covers group membership.
 - Rows are active-generation printings with `NOT tombstoned`, manual printings included. No Editions (D5).
 - On the device it builds the spike's `NumberIndex` (spike repo: `scanspike/numbers.py:38-61`): printed denominator from `official`, per-prefix denominators as the maximum number per prefix within a set, set codes from `code`, release from `released`.
 
@@ -399,7 +480,7 @@ type TrayRow = {
 ```
 
 - No names, images, prices, scores or photos are stored. Display data is fetched on open (D8).
-- Several rows may share a Printing (a Normal and a Reverse Holo are two rows). A repeat lock adds exactly one copy to the **newest row of that Printing** (Q5); the collector moves it with counts and chips. The tray holds at most 200 distinct Editions, 400 rows, 999 copies a row and 9999 copies per Edition (Q9, D12); at the cap, adding another asks the collector to confirm first, and every edit is checked inside the Web Lock.
+- A row is one Printing and one Edition (D15, 2026-10-28; this replaces Q5's "newest row of that Printing"). A Normal and a Reverse Holo of one Printing are two rows. A repeat copy of a Printing and Edition adds exactly one copy to the **newest row with both** that is not `needs_pick`, or makes a new row at the top. Changing a row's chip merges it into another row with the same Printing and Edition if there is one (D15). Trays stored before this change may hold several rows with one Printing and Edition; they parse unchanged and merge at Confirm. The tray holds at most 200 distinct Editions, 400 rows, 999 copies a row and 9999 copies per Edition (Q9, D12); at the cap, adding another asks the collector to confirm first, and every edit is checked inside the Web Lock.
 - Rows resolving to one Edition merge into one save item at Confirm, with the total capped at 9999 (D12).
 
 ### Frame voting and capture (starting rule; ticket 3 tunes it)
@@ -453,6 +534,7 @@ Rules:
 - `swap` never mixes two asset versions within one frame.
 - No message ever carries a frame or any image data from the worker to the main thread.
 - `gate.reason` feeds a plain hint such as "Hold steady" or "More light"; it never shows numbers.
+- *Amended 2026-10-28 (D15):* `lock` also carries `lookalikes: string[]`, up to 7 Printing ids that look like `printingIds[0]`, closest first, never `printingIds[0]` itself, `[]` when none. The worker posts `absent` once for **every** pending lock, whatever its `via`, when the card has left the guide.
 
 ### Pipeline parity table
 
@@ -533,7 +615,7 @@ If G7 fails alone: keep one frame in flight, never dequantize the index, release
   - Tray store: v1 round-trip; garbage left in place; per-user keys isolated; Web Locks serialise two writers; `pending_save` freezes edits; a 29-day-old key is dropped.
   - **Tray cap** (`web/src/scanner/tray/store.test.ts`, on `trayEditAllowed`): `rejects_201st_distinct_edition_on_lock`; `rejects_chip_change_that_adds_201st_edition`; `allows_chip_change_that_keeps_count`; `rejects_search_pick_over_cap`; `rejects_401st_row`; `rejects_count_over_999_and_edition_total_over_9999`.
   - **Row from the default:** a row built from `default_edition_id` always has an Edition with its chip selected, and Confirm is enabled. No test asserts a row without a finish blocking Confirm. A lock whose candidates all lack a `default_edition_id` writes no row.
-  - Repeat lock adds one copy to the newest row of that Printing.
+  - Repeat lock adds one copy to the newest row with that Printing and Edition (changed 2026-10-28, D15). The D15 tests are listed there.
   - Voting: lock at 3 of 4; no relock without an absence; relock after one; shutter Borda; shutter `miss`.
   - Model-dependent parity (real ONNX models) in `*.models.test.ts` via `npm run test:scanner-models`: embedding cosine at least 0.995 to the spike's, OCR text equal on 10 strips, top-3 ids equal on a 200-row slice of the real index. Local only, never CI; ticket 3 and the gate run it.
 - **Browser (Playwright).**
@@ -613,7 +695,7 @@ All asked one at a time on 2026-10-22.
 2. **Finish with several Editions and no Unspecified Variant.** The owner chose to default to the first finish, not the planner's no-finish default. Plumbing detail: Normal when the Printing has it, else the first active Edition in descriptor order; the chip shows selected and one tap changes it. Every row has an Edition; Confirm never waits on a finish; never inferred from the photo. This amends the closed Finish decision for Printings without an Unspecified Variant.
 3. **Tray loss on iOS Safari.** Accepted: 7-day and storage-pressure eviction, no UI note.
 4. **Lock feedback.** Accepted: visual cue everywhere, vibration where supported, a short sound off by default behind one setting. An iPhone is silent and still unless sound is on. This settles the map's lock-sound item.
-5. **Repeat lock.** Accepted: the copy goes to the newest row of that Printing.
+5. **Repeat lock.** Accepted: the copy goes to the newest row of that Printing. Superseded 2026-10-28: a row is one Printing + one Edition; a repeat copy goes to the newest row with both; the owner answers are recorded under [D15](#d15-look-alike-printings-and-the-choice-prompt-2026-10-28).
 6. **Deck as destination.** Accepted: no, Storage Leaves only.
 7. **Undo after Confirm.** Accepted: none.
 8. **Tray on sign-out or another account.** Accepted: kept per account, hidden from others, restored on that account's sign-in.

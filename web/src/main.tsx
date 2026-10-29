@@ -22,6 +22,7 @@ import {
 } from "./shell/lazyPages";
 import { PageFrame } from "./shell/PageFrame";
 import { Shell } from "./shell/Shell";
+import { DocumentScrollbar } from "./ui/ScrollArea";
 import {
   canonicalPath,
   DEFAULT_PATH,
@@ -478,4 +479,9 @@ if (canonicalPath(location.pathname) !== location.pathname)
 // Starts the first page's code alongside the session read.
 preloadInitialPage(location.pathname);
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <>
+    <App />
+    <DocumentScrollbar />
+  </>
+);

@@ -11,6 +11,7 @@ import {
   installScript,
   locationIds,
   openScanner,
+  pickFinish,
   placements,
   printingIds,
   retireBulbasaurNormal,
@@ -62,6 +63,7 @@ for (const size of SIZES) {
         frames: placements(ids["Bulbasaur"], ids["Switch"], ids["Switch"]),
       });
       await openScanner(page);
+      await pickFinish(page, "Normal");
       await expect(trayPeek(page)).toContainText("3 cards");
       await reviewTray(page);
       await expect(
@@ -134,6 +136,7 @@ for (const size of SIZES) {
         frames: placements(ids["Bulbasaur"], ids["Switch"]),
       });
       await openScanner(page);
+      await pickFinish(page, "Normal");
       await expect(trayPeek(page)).toContainText("2 cards");
       // Opening the tray reads the printings once; the finish is withdrawn after that, so only the save finds out.
       const read = page.waitForResponse("**/api/scanner/printings");

@@ -23,6 +23,7 @@ import {
   ZIP_SAVE,
   ZIP_SAVED,
 } from "./discoveryMessages";
+import { useSettingsSectionSettled } from "./settingsNavigation";
 
 type Load =
   | { kind: "loading" }
@@ -39,6 +40,7 @@ export function OpenDiscoverySection() {
   const headingId = useId();
   const helpId = useId();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  useSettingsSectionSettled("open-discovery", load.kind !== "loading");
   const [attempt, setAttempt] = useState(0);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);

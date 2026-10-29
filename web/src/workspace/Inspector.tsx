@@ -9,6 +9,7 @@ import type { HoldingView } from "../holdings_generated";
 import { metadataReportHref } from "../metadataReportLink";
 import { Dialog } from "../ui/Dialog";
 import { useLargeArt } from "../ui/largeArt";
+import { ScrollArea } from "../ui/ScrollArea";
 import { variantLabel } from "../ui/variantLabel";
 import { CATEGORY_LABELS, TRAINER_TYPE_LABELS, plural } from "./galleryModel";
 import type { Inspected } from "./useSelection";
@@ -283,16 +284,22 @@ type InspectorProps = Omit<DetailsProps, "card" | "sheet"> & {
 export function Inspector({ card, ...rest }: InspectorProps) {
   return (
     <aside
-      className="sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] mt-6 box-border max-h-[calc(100dvh-var(--space-4)-var(--layout-sticky-top))] min-w-0 self-start overflow-y-auto overscroll-contain pb-1 phone:hidden"
+      className="sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] mt-6 box-border flex max-h-[calc(100dvh-var(--space-4)-var(--layout-sticky-top))] min-w-0 flex-col self-start phone:hidden"
       aria-label="Card details"
     >
-      {card ? (
-        <CardDetails card={card} {...rest} />
-      ) : (
-        <p className="m-0 box-border flex aspect-(--tile-aspect) w-full items-center justify-center rounded-card border border-dashed border-border p-6 text-center text-meta text-text-subtle">
-          Select a card to see its details.
-        </p>
-      )}
+      {/* The aside keeps the sticky position and the height cap; the ScrollArea inside scrolls. */}
+      <ScrollArea
+        className="flex-1"
+        viewportClassName="overscroll-contain pb-1"
+      >
+        {card ? (
+          <CardDetails card={card} {...rest} />
+        ) : (
+          <p className="m-0 box-border flex aspect-(--tile-aspect) w-full items-center justify-center rounded-card border border-dashed border-border p-6 text-center text-meta text-text-subtle">
+            Select a card to see its details.
+          </p>
+        )}
+      </ScrollArea>
     </aside>
   );
 }

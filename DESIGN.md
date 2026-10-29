@@ -297,6 +297,17 @@ Compact, flat and plainly labelled, with an optional leading icon.
 - **Disabled:** 45% opacity; a busy button shows 60% opacity and a progress cursor.
 - **Focus:** the global 2 px Prize Gold outline with a 2 px offset.
 
+### Checkboxes
+
+- **Style:** the native checkbox, 16 px, drawn in Prize Gold, inside a tap area of 30 px on desktop and 44 px on a phone. It has no visible text of its own; its setting's name sits in a Setting row, and its accessible name says what it does.
+- **State:** checked shows the setting is on. A saving checkbox shows the value just asked for and carries `aria-busy`; a refused save shows the saved value again. Disabled is 45% opacity.
+
+### Setting rows
+
+- **Layout:** a name in Body text (500) with a one-line Meta note in Parchment beneath it, left-aligned; the control (Checkbox, Select or Button) right-aligned. Rows are separated by Stitch dividers with 12 px of padding above and below.
+- **Wrapping:** the note keeps at least 12 rem; the control wraps under it only when it no longer fits beside it, at any width. Long names break instead of overflowing.
+- **Notes:** say what the setting does for the collector, or why it can't change now (a disabled control puts its reason here, not in a tooltip).
+
 ### Chips
 
 - **Style:** fully round, 24 px drawn height (30 px on a phone, inside a 44 px tap box), Meta text, a Stitch border and Parchment text.
@@ -324,6 +335,10 @@ Compact, flat and plainly labelled, with an optional leading icon.
 
 - **Style:** Felt, Stitch border, 14 px corners, 480 px wide on desktop, over a 60% black scrim. A header row holds a Heading title and a quiet close button above a Seam divider.
 - **Variants:** left and right drawers take the full height with square corners; on a phone, a centred dialog becomes a bottom sheet.
+
+### Scroll bars
+
+With a mouse or trackpad (`(hover: hover) and (pointer: fine)`, at any window width) the browser's scroll bar is hidden everywhere, so a screen lays out the same whether or not it scrolls. An overlay bar replaces it: a 6 px rounded thumb in `--color-scroll-thumb` (Parchment, the system text colour in forced-colors mode) on a 12 px rail that takes no layout space and no clicks except on the thumb. It shows only while the region can scroll, fades in while the pointer is over the region or it scrolls, and can be dragged. Every scrolling region is a `ScrollArea` (or, for a textarea or `<pre>` that scrolls itself, carries an `OverlayScrollbarFor`); `check_guardrails.py` rejects `overflow-auto` classes elsewhere. Touch devices keep their own overlay bars and get no rail. The page's bar is `DocumentScrollbar`, below the sticky header and above the phone tab bar.
 
 ### Toast
 

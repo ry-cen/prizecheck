@@ -6,12 +6,14 @@ import { test, expect, type Page } from "@playwright/test";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
 import {
+  choiceCard,
   empty,
   hintPill,
   holding,
   imageOnly,
   installScript,
   openScanner,
+  pickFinish,
   printingIds,
   reviewTray,
   seedPopup,
@@ -50,13 +52,23 @@ for (const size of SIZES) {
       const card = suggestionCard(page);
       await expect(card).toBeVisible();
       await expect(card.getByRole("heading")).toHaveText("Is it one of these?");
-      const candidates = card
-        .getByRole("button")
-        .filter({ hasNotText: /None/ });
+      // Three versions: Bulbasaur has two finishes (chips, none selected); Rare Candy and Switch have one (a button).
+      const candidates = card.getByRole("listitem");
       await expect(candidates).toHaveCount(3);
       await expect(candidates.nth(0)).toContainText("Bulbasaur");
       await expect(candidates.nth(1)).toContainText("Rare Candy");
       await expect(candidates.nth(2)).toContainText("Switch");
+      await expect(
+        candidates.nth(0).getByRole("button", { pressed: true })
+      ).toHaveCount(0);
+      await expect(
+        candidates.nth(0).getByRole("button", { name: "Normal", exact: true })
+      ).toBeVisible();
+      await expect(
+        candidates
+          .nth(0)
+          .getByRole("button", { name: "Reverse Holo", exact: true })
+      ).toBeVisible();
       await expect(
         card.getByRole("button", { name: "None of these" })
       ).toBeVisible();
@@ -71,8 +83,10 @@ for (const size of SIZES) {
         )
       ).toBe(0);
 
-      // Focus is in the suggestion; the shutter is greyed out and announced as unavailable.
-      await expect(candidates.nth(0)).toBeFocused();
+      // Focus is in the suggestion, on its first control; the shutter is greyed out and announced as unavailable.
+      await expect(
+        candidates.nth(0).getByRole("button", { name: "Normal", exact: true })
+      ).toBeFocused();
       await expect(shutter(page)).toBeDisabled();
       // No lock cue: the guide does not flash, and nothing is in the tray.
       await expect(page.getByTestId("scanner-guide")).not.toHaveAttribute(
@@ -80,15 +94,17 @@ for (const size of SIZES) {
       );
       await expect(trayPeek(page)).toContainText("Empty");
       if (size.phone) {
-        await expectTouchTarget(candidates.nth(0));
-        await expectTouchTarget(candidates.nth(2));
+        await expectTouchTarget(
+          candidates.nth(0).getByRole("button", { name: "Normal", exact: true })
+        );
+        await expectTouchTarget(candidates.nth(2).getByRole("button"));
         await expectTouchTarget(
           card.getByRole("button", { name: "None of these" })
         );
       }
       await expectPageChecks(page, `${size.name} scanner, suggestion`);
 
-      await candidates.nth(1).click();
+      await candidates.nth(1).getByRole("button").click();
       await expect(card).toBeHidden();
       await expect(trayPeek(page)).toContainText("Rare Candy");
       await expect(trayPeek(page)).toContainText("×1");
@@ -105,9 +121,7 @@ for (const size of SIZES) {
       await expect(trayOpen(page)).not.toContainText("Bulbasaur");
     });
 
-    test("the starting finish of the picked card is selected", async ({
-      page,
-    }) => {
+    test("the picked finish is the row's finish", async ({ page }) => {
       await signInFresh(page);
       const ids = await printingIds(page);
       await installScript(page, {
@@ -115,19 +129,23 @@ for (const size of SIZES) {
       });
       await openScanner(page);
       const card = suggestionCard(page);
-      // Two candidates resolve.
+      // Two candidates resolve: Bulbasaur offers its finishes, Switch is one button.
       await expect(
-        card.getByRole("button", { name: /^Bulbasaur/ })
+        card.getByRole("group", { name: "Finish of Bulbasaur" })
       ).toBeVisible();
       await expect(card.getByRole("button", { name: /^Switch/ })).toBeVisible();
-      await card.getByRole("button", { name: /^Bulbasaur/ }).click();
+      await pickFinish(page, "Reverse Holo", "Bulbasaur");
       await expect(trayPeek(page)).toContainText("Bulbasaur");
       await reviewTray(page);
+      const finishes = trayOpen(page).getByRole("group", {
+        name: "Finish of Bulbasaur",
+      });
       await expect(
-        trayOpen(page)
-          .getByRole("group", { name: "Finish of Bulbasaur" })
-          .getByRole("button", { name: "Normal", exact: true })
+        finishes.getByRole("button", { name: "Reverse Holo", exact: true })
       ).toHaveAttribute("aria-pressed", "true");
+      await expect(
+        finishes.getByRole("button", { name: "Normal", exact: true })
+      ).toHaveAttribute("aria-pressed", "false");
     });
 
     test("None of these opens search, and the card is not suggested again until it leaves the guide", async ({
@@ -215,6 +233,7 @@ for (const size of SIZES) {
           ...empty(30),
           ...imageOnly(ranking, 4),
         ],
+        walkAway: true,
       });
       await openScanner(page);
       const card = suggestionCard(page);
@@ -229,14 +248,14 @@ for (const size of SIZES) {
       await expect(trayPeek(page)).toContainText("Empty");
     });
 
-    test("a number-backed match adds a row with no question", async ({
+    test("a number-backed match of a one-finish card adds a row with no question", async ({
       page,
     }) => {
       await signInFresh(page);
       const ids = await printingIds(page);
-      await installScript(page, { frames: holding(ids["Bulbasaur"]) });
+      await installScript(page, { frames: holding(ids["Switch"]) });
       await openScanner(page);
-      await expect(trayPeek(page)).toContainText("Bulbasaur");
+      await expect(trayPeek(page)).toContainText("Switch");
       await expect(trayPeek(page)).toContainText("×1");
       await expect(suggestionCard(page)).toHaveCount(0);
       await expect(shutter(page)).toBeEnabled();
@@ -268,8 +287,11 @@ for (const size of SIZES) {
       await openScanner(page);
       await expect(shutter(page)).toBeEnabled();
       await shutter(page).click();
-      await expect(trayPeek(page)).toContainText("Bulbasaur");
+      // The top candidate has two finishes, so the shutter asks which (not "Is it one of these?").
       await expect(suggestionCard(page)).toHaveCount(0);
+      await expect(choiceCard(page)).toContainText("Bulbasaur");
+      await pickFinish(page, "Normal");
+      await expect(trayPeek(page)).toContainText("Bulbasaur");
     });
 
     test("when none of the candidates can be added, it says so as a lock does", async ({

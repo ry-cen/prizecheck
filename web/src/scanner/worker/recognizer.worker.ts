@@ -4,6 +4,7 @@ import { createModels } from "../recognize/models";
 import type { Models } from "../recognize/models";
 import { analyseFrame, loadData, voteInput } from "../recognize/pipeline";
 import type { FrameAnalysis, RecognizerData } from "../recognize/pipeline";
+import { lookalikesOf } from "../recognize/lookalike";
 import { parsePcfp } from "../recognize/pcfp";
 import { rowIndex } from "../recognize/search";
 import { VoteSession } from "../recognize/session";
@@ -23,7 +24,8 @@ let debugTiming = false;
 let data: RecognizerData | null = null;
 let models: Models | null = null;
 let dictText = "";
-const session = new VoteSession();
+// `data` is replaced on a swap; the closure reads the current value.
+const session = new VoteSession((id) => (data ? lookalikesOf(id, data) : []));
 let swapPending: { cards?: string; fingerprints?: string } | null = null;
 let canvas: OffscreenCanvas | null = null;
 let ctx2d: OffscreenCanvasRenderingContext2D | null = null;

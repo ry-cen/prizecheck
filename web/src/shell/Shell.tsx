@@ -35,6 +35,10 @@ import {
   useUnreadConversations,
   useInboxWaiting,
 } from "../inbox/Inbox";
+import {
+  SettingsNavigationScope,
+  useSettingsNavigation,
+} from "../settings/settingsNavigation";
 import { AccountSheetProvider, Avatar } from "./AccountSheet";
 import { PhoneHeaderActions } from "./HeaderActions";
 import { PageStandInContext, type PageStandIn } from "./PageFrame";
@@ -134,6 +138,13 @@ function ShellFrame({
   other = null,
 }: Props) {
   const toast = useToast();
+  // The page's overlay scroll bar (DocumentScrollbar) clears the sticky header and the phone tab bar while the shell is up.
+  useLayoutEffect(() => {
+    document.documentElement.dataset.appShell = "";
+    return () => {
+      delete document.documentElement.dataset.appShell;
+    };
+  }, []);
   // Loans waiting on the collector: the Loans tab's badge (#259); Trades waiting on them: the Trades tab's (#273).
   const waiting = useInboxWaiting();
   const tradesWaiting = useInboxTradesWaiting();
@@ -159,8 +170,8 @@ function ShellFrame({
   // The page whose tab is current: none while another page is shown.
   const showing = other ? null : page;
   const otherKey = other?.key ?? null;
-  // Sign-ins in the account sheet opens Settings at its Sign-ins section (#246): the section's id, until it is shown.
-  const [anchor, setAnchor] = useState<string | null>(null);
+  // Sign-ins in the account sheet opens Settings at its Sign-ins section (#246, #326).
+  const settingsNavigation = useSettingsNavigation(showing === "settings");
   // What Collection's page area shows instead of Collection (PageFrame): its code loading late, or failed to load.
   const [collectionStandIns, setCollectionStandIns] = useState<
     ReadonlySet<PageStandIn>
@@ -213,19 +224,8 @@ function ShellFrame({
     window.scrollTo(0, returning ? scrollFor(current.path) : 0);
   }, [page, otherKey]);
 
-  // After the page's own scroll reset (the layout effect above), bring the anchored section into view.
-  useEffect(() => {
-    if (!anchor || showing !== "settings") return;
-    const target = document.getElementById(anchor);
-    if (!target) return;
-    target.scrollIntoView({ block: "start" });
-    target
-      .querySelector<HTMLElement>("h2[tabindex]")
-      ?.focus({ preventScroll: true });
-    setAnchor(null);
-  }, [anchor, showing]);
-
   function go(next: PageId) {
+    if (next !== "settings") settingsNavigation.cancel();
     // A page with item addresses (Decks: /decks/<id>) goes back to its own address when its tab is pressed
     // again; App ignores a press that would not change the address.
     if (next !== showing || pageDef(next).param) onNavigate(next);
@@ -262,153 +262,158 @@ function ShellFrame({
   );
 
   return (
-    <AccountSheetProvider
-      email={email}
-      name={name}
-      image={image}
-      owner={owner}
-      onSettings={() => go("settings")}
-      onSignIns={() => {
-        setAnchor("sign-ins");
-        go("settings");
-      }}
-      onOwner={() => go("owner")}
-      onReports={() => go("reports")}
-      current={showing}
-      onSignOut={() => void signOut()}
-    >
-      <div
-        data-app-shell=""
-        className="min-h-dvh bg-bg font-sans text-text scheme-dark"
+    <SettingsNavigationScope value={settingsNavigation.scope}>
+      <AccountSheetProvider
+        email={email}
+        name={name}
+        image={image}
+        owner={owner}
+        onSettings={() => {
+          settingsNavigation.cancel();
+          go("settings");
+        }}
+        onSignIns={() => {
+          settingsNavigation.request("sign-ins");
+          go("settings");
+        }}
+        onOwner={() => go("owner")}
+        onReports={() => go("reports")}
+        current={showing}
+        onSignOut={() => void signOut()}
       >
-        <a
-          href="#main-content"
-          onClick={skipToContent}
-          className="fixed left-2 top-2 z-(--layer-modal) inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline focus:translate-y-0"
+        <div
+          data-app-shell=""
+          className="min-h-dvh bg-bg font-sans text-text scheme-dark"
         >
-          Skip to main content
-        </a>
+          <a
+            href="#main-content"
+            onClick={skipToContent}
+            className="fixed left-2 top-2 z-(--layer-modal) inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline focus:translate-y-0"
+          >
+            Skip to main content
+          </a>
 
-        {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. At compact widths the gaps and
+          {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. At compact widths the gaps and
           the tabs' padding tighten so six tabs, two-digit Loans and Trades badges and the header actions fit down to 761 px
           (Trading #269 added Trades, #273 its badge). */}
-        <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:gap-3 compact:px-4 phone:hidden">
-          <Wordmark />
+          <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:gap-3 compact:px-4 phone:hidden">
+            <Wordmark />
+            <nav
+              aria-label="Main views"
+              className="flex items-center gap-1 compact:gap-0.5"
+            >
+              {DESKTOP_TABS.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-current={showing === id ? "page" : undefined}
+                  aria-label={tabName(id)}
+                  onClick={() => go(id)}
+                  className="inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text compact:gap-1.5 compact:px-1.5 aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
+                >
+                  {pageDef(id).label}
+                  {tabCount(id) > 0 && (
+                    <span
+                      aria-hidden="true"
+                      className="box-border inline-block h-4.5 min-w-4.5 rounded-round bg-accent px-1 text-center text-micro leading-4.5 font-bold text-on-accent tabular-nums"
+                    >
+                      {tabCount(id)}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </nav>
+            <div className="ml-auto flex items-center gap-2 compact:gap-1.5">
+              <InboxButton />
+              <FriendsButton />
+              <Menu
+                label="Account"
+                triggerClassName="inline-flex size-8 cursor-pointer items-center justify-center rounded-round border border-accent-border bg-accent-fill p-0 text-control font-semibold text-accent-strong"
+                trigger={<Avatar email={email} image={image} />}
+                header={
+                  (name || email) && (
+                    <div className="m-0 border-b border-border px-3 pb-2 pt-1 text-meta">
+                      {name && (
+                        <p className="m-0 font-semibold text-text">{name}</p>
+                      )}
+                      {email && <p className="m-0 text-text-muted">{email}</p>}
+                    </div>
+                  )
+                }
+                items={accountItems}
+              />
+            </div>
+          </header>
+
+          {/* Phone header for pages that don't draw their own (Collection draws its own: ☰, title, Search,
+          Filters & display and the same header actions, except while its page area shows a stand-in, its code loading
+          past the placeholder delay or failed to load; then the shell draws this one so the wordmark, bell and account
+          stay in reach): the wordmark, then the header actions (the account avatar,
+          #246, and the bell, #259). The page's own heading sits right under it and the tab bar marks the section, so a title here would
+          only repeat them. */}
+          {(showing !== "collection" || collectionStandIns.size > 0) && (
+            <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
+              <Wordmark />
+              <div className="ml-auto">
+                <PhoneHeaderActions />
+              </div>
+            </header>
+          )}
+
+          {mounted.map((def) => (
+            <div
+              key={def.id}
+              id={def.id === showing ? "main-content" : undefined}
+              hidden={def.id !== showing}
+              ref={(element) => {
+                if (element) containers.current.set(def.id, element);
+                else containers.current.delete(def.id);
+              }}
+            >
+              <PageStandInContext.Provider
+                value={def.id === "collection" ? reportCollectionStandIn : null}
+              >
+                {renderPage(def.id, def.id === showing)}
+              </PageStandInContext.Provider>
+            </div>
+          ))}
+          {other && (
+            <div key={other.key} id="main-content" ref={otherContainer}>
+              {other.content}
+            </div>
+          )}
+
+          {/* The price credit ends the page area on every shell page; on a phone the padding keeps it, and the last of
+          the page, clear of the fixed tab bar. */}
+          <div className="phone:pb-tabbar">
+            <PriceCredit />
+          </div>
+
+          {/* Phone bottom tab bar. */}
           <nav
             aria-label="Main views"
-            className="flex items-center gap-1 compact:gap-0.5"
+            className="fixed inset-x-0 bottom-0 z-(--layer-sticky) hidden h-tabbar border-t border-border bg-surface phone:flex"
           >
-            {DESKTOP_TABS.map((id) => (
+            {PHONE_TABS.map((id) => (
               <button
                 key={id}
                 type="button"
                 aria-current={showing === id ? "page" : undefined}
                 aria-label={tabName(id)}
                 onClick={() => go(id)}
-                className="inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text compact:gap-1.5 compact:px-1.5 aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
+                className={TAB_BAR_BUTTON}
               >
+                <span className="relative inline-flex px-2">
+                  <Icon icon={ICONS[id]} size={20} />
+                  <Badge count={tabCount(id)} />
+                </span>
                 {pageDef(id).label}
-                {tabCount(id) > 0 && (
-                  <span
-                    aria-hidden="true"
-                    className="box-border inline-block h-4.5 min-w-4.5 rounded-round bg-accent px-1 text-center text-micro leading-4.5 font-bold text-on-accent tabular-nums"
-                  >
-                    {tabCount(id)}
-                  </span>
-                )}
               </button>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2 compact:gap-1.5">
-            <InboxButton />
-            <FriendsButton />
-            <Menu
-              label="Account"
-              triggerClassName="inline-flex size-8 cursor-pointer items-center justify-center rounded-round border border-accent-border bg-accent-fill p-0 text-control font-semibold text-accent-strong"
-              trigger={<Avatar email={email} image={image} />}
-              header={
-                (name || email) && (
-                  <div className="m-0 border-b border-border px-3 pb-2 pt-1 text-meta">
-                    {name && (
-                      <p className="m-0 font-semibold text-text">{name}</p>
-                    )}
-                    {email && <p className="m-0 text-text-muted">{email}</p>}
-                  </div>
-                )
-              }
-              items={accountItems}
-            />
-          </div>
-        </header>
-
-        {/* Phone header for pages that don't draw their own (Collection draws its own: ☰, title, Search,
-          Filters & display and the same header actions, except while its page area shows a stand-in, its code loading
-          past the placeholder delay or failed to load; then the shell draws this one so the wordmark, bell and account
-          stay in reach): the wordmark, then the header actions (the account avatar,
-          #246, and the bell, #259). The page's own heading sits right under it and the tab bar marks the section, so a title here would
-          only repeat them. */}
-        {(showing !== "collection" || collectionStandIns.size > 0) && (
-          <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
-            <Wordmark />
-            <div className="ml-auto">
-              <PhoneHeaderActions />
-            </div>
-          </header>
-        )}
-
-        {mounted.map((def) => (
-          <div
-            key={def.id}
-            id={def.id === showing ? "main-content" : undefined}
-            hidden={def.id !== showing}
-            ref={(element) => {
-              if (element) containers.current.set(def.id, element);
-              else containers.current.delete(def.id);
-            }}
-          >
-            <PageStandInContext.Provider
-              value={def.id === "collection" ? reportCollectionStandIn : null}
-            >
-              {renderPage(def.id, def.id === showing)}
-            </PageStandInContext.Provider>
-          </div>
-        ))}
-        {other && (
-          <div key={other.key} id="main-content" ref={otherContainer}>
-            {other.content}
-          </div>
-        )}
-
-        {/* The price credit ends the page area on every shell page; on a phone the padding keeps it, and the last of
-          the page, clear of the fixed tab bar. */}
-        <div className="phone:pb-tabbar">
-          <PriceCredit />
         </div>
-
-        {/* Phone bottom tab bar. */}
-        <nav
-          aria-label="Main views"
-          className="fixed inset-x-0 bottom-0 z-(--layer-sticky) hidden h-tabbar border-t border-border bg-surface phone:flex"
-        >
-          {PHONE_TABS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              aria-current={showing === id ? "page" : undefined}
-              aria-label={tabName(id)}
-              onClick={() => go(id)}
-              className={TAB_BAR_BUTTON}
-            >
-              <span className="relative inline-flex px-2">
-                <Icon icon={ICONS[id]} size={20} />
-                <Badge count={tabCount(id)} />
-              </span>
-              {pageDef(id).label}
-            </button>
-          ))}
-        </nav>
-      </div>
-    </AccountSheetProvider>
+      </AccountSheetProvider>
+    </SettingsNavigationScope>
   );
 }
 

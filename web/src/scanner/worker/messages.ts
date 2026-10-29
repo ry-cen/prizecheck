@@ -37,8 +37,16 @@ export type FromWorker =
   | { t: "ready"; imageMatching: boolean }
   | { t: "frameDone"; id: number } // the next frame may be sent
   | { t: "gate"; id: number; ok: boolean; reason?: GateReason } // plain UI hint only
-  | { t: "lock"; lockId: number; printingIds: string[]; via: LockVia } // up to 3, best first; suggest needs the collector's yes
-  | { t: "absent"; lockId: number } // once per pending suggest lock, when the card has left the guide
+  | {
+      t: "lock";
+      lockId: number;
+      printingIds: string[]; // up to 3, best first
+      via: LockVia;
+      // Up to 7 Printings that look like printingIds[0] (same Reprint Group, close fingerprint), closest first, never
+      // printingIds[0]; may repeat ids from printingIds; [] when none. An automatic lock keeps only those its printed number supports.
+      lookalikes: string[];
+    }
+  | { t: "absent"; lockId: number } // once per pending lock (any via), when the card has left the guide
   | { t: "miss" } // shutter with no candidate: open search
   | { t: "timing"; id: number; ms: Record<string, number> } // only when init.debugTiming
   | { t: "error"; code: "INIT_FAILED" | "ASSET_INVALID" };

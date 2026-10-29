@@ -15,6 +15,7 @@ import {
   trayKey,
   type TrayDeps,
   type TrayRow,
+  type TrayStore,
   type TrayV1,
 } from "./store";
 
@@ -92,6 +93,10 @@ const trayOf = (rows: TrayRow[], over: Partial<TrayV1> = {}): TrayV1 => ({
 const manyRows = (n: number, count = 1) =>
   Array.from({ length: n }, (_, i) => row({ id: `r${i}`, count }));
 
+/** One copy of a Printing at its default Edition `ed-<id>`, as the choice prompt adds it. */
+const choose = (store: Pick<TrayStore, "applyChoice">, id: string) =>
+  store.applyChoice({ printingId: id, editionId: `ed-${id}` });
+
 function setup(extra: Partial<TrayDeps> = {}) {
   const storage = memStorage();
   const locks = fakeLocks();
@@ -134,7 +139,7 @@ describe("storage", () => {
   it("round-trips TrayV1 under the per-user key with v: 1", async () => {
     const t = setup();
     const store = await t.open();
-    await store.applyLock(["a"]);
+    await choose(store, "a");
     const raw = JSON.parse(t.storage.mem.get(trayKey("u1"))!);
     expect(trayKey("u1")).toBe("prizecheck:scanner:tray:v1:u1");
     expect(raw.v).toBe(1);
@@ -156,7 +161,7 @@ describe("storage", () => {
   it("holds ids and counts only", async () => {
     const t = setup();
     const store = await t.open();
-    await store.applyLock(["a"]);
+    await choose(store, "a");
     const raw = t.storage.mem.get(trayKey("u1"))!;
     expect(raw).not.toMatch(/name|image|price|score/);
   });
@@ -175,7 +180,7 @@ describe("storage", () => {
       const store = await t.open();
       expect(store.getState().tray.rows).toEqual([]);
       expect(t.storage.mem.get(trayKey("u1"))).toBe(garbage);
-      await store.applyLock(["a"]);
+      await choose(store, "a");
       expect(JSON.parse(t.storage.mem.get(trayKey("u1"))!).v).toBe(1);
     }
   );
@@ -183,10 +188,10 @@ describe("storage", () => {
   it("keeps each account's tray separate and does not clear it when another opens", async () => {
     const t = setup();
     const a = await t.open("alice");
-    await a.applyLock(["a"]);
+    await choose(a, "a");
     const b = await t.open("bob");
     expect(b.getState().tray.rows).toEqual([]);
-    await b.applyLock(["b"]);
+    await choose(b, "b");
     expect(
       (await t.open("alice")).getState().tray.rows.map((r) => r.printing_id)
     ).toEqual(["a"]);
@@ -257,10 +262,10 @@ describe("storage", () => {
     tracking = true;
     request.mockClear();
     await Promise.all([
-      a.applyLock(["a"]),
-      b.applyLock(["b"]),
-      a.applyLock(["c"]),
-      b.applyLock(["d"]),
+      choose(a, "a"),
+      choose(b, "b"),
+      choose(a, "c"),
+      choose(b, "d"),
     ]);
     expect(outside).toEqual([]);
     expect(maxHeld).toBe(1);
@@ -278,8 +283,8 @@ describe("storage", () => {
     const onFirstRowAdded = vi.fn();
     const t = setup({ onFirstRowAdded });
     const store = await t.open();
-    await store.applyLock(["a"]);
-    await store.applyLock(["b"]);
+    await choose(store, "a");
+    await choose(store, "b");
     expect(onFirstRowAdded).toHaveBeenCalledTimes(1);
   });
 });
@@ -384,29 +389,13 @@ describe("trayEditAllowed", () => {
     t.storage.mem.set(trayKey("u1"), JSON.stringify(full));
     const store = await t.open();
     const before = t.storage.mem.get(trayKey("u1"));
-    const result = await store.applyLock(["fresh"]);
+    const result = await choose(store, "fresh");
     expect(result).toMatchObject({
       added: false,
       reason: "full",
       verdict: "full",
     });
     expect(t.storage.mem.get(trayKey("u1"))).toBe(before);
-  });
-
-  it("checks capacity for a copy to an existing row before the network call", async () => {
-    const t = setup();
-    t.storage.mem.set(
-      trayKey("u1"),
-      JSON.stringify(trayOf([row({ id: "a", printing_id: "pa", count: 999 })]))
-    );
-    const store = await t.open();
-    const result = await store.applyLock(["pa"]);
-    expect(result).toMatchObject({
-      added: false,
-      reason: "full",
-      verdict: "full",
-    });
-    expect(t.resolvePrintings).not.toHaveBeenCalled();
   });
 
   it("applies the caps to count changes and chip changes through the store", async () => {
@@ -424,87 +413,38 @@ describe("trayEditAllowed", () => {
   });
 });
 
-describe("locks and picks", () => {
-  it("adds a repeat lock as one copy to the newest row of that Printing", async () => {
+describe("choices and search picks", () => {
+  it("a copy goes to the newest row with the same Printing and Edition, never to a row of the same Printing with another Edition", async () => {
     const t = setup();
     const store = await t.open();
-    const first = await store.applyLock(["a"]);
+    const first = await choose(store, "a"); // ed-a
     await store.setEdition(first.row!.id, "ed-other"); // a Reverse Holo chip
     await store.applySearchPick({ printingId: "a", editionId: "ed-a" }); // the newer row, same Printing
     const newest = store.getState().tray.rows[0]!;
     expect(newest.edition_id).toBe("ed-a");
-    const again = await store.applyLock(["a"]);
+    const again = await choose(store, "a");
     expect(again.added).toBe(true);
     const rows = store.getState().tray.rows;
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ id: newest.id, count: 2 });
-    expect(rows[1]!.count).toBe(1);
+    expect(rows[1]).toMatchObject({ edition_id: "ed-other", count: 1 });
+    await store.applyChoice({ printingId: "a", editionId: "ed-other" });
+    expect(store.getState().tray.rows.map((r) => r.count)).toEqual([2, 2]);
   });
 
-  it("writes the row with the first candidate that has a default_edition_id, candidates in order", async () => {
-    const t = setup();
-    t.resolvePrintings.mockResolvedValue(
-      answer(
-        [printing("b", null), printing("c", "ed-c"), printing("d", "ed-d")],
-        ["a"]
-      )
-    );
-    const store = await t.open();
-    const result = await store.applyLock(["a", "c", "d"]);
-    expect(result.added).toBe(true);
-    expect(result.row).toMatchObject({
-      printing_id: "c",
-      edition_id: "ed-c",
-      candidates: ["c", "d"],
-    });
-    expect(t.resolvePrintings).toHaveBeenCalledWith(["a", "c", "d"]);
-  });
-
-  it("a row built from default_edition_id always has an Edition, and no row is written when none resolves", async () => {
-    const t = setup();
-    t.resolvePrintings.mockResolvedValue(
-      answer([printing("a", null), printing("b", null)], ["c"])
-    );
-    const store = await t.open();
-    const result = await store.applyLock(["a", "b", "c"]);
-    expect(result).toEqual({ added: false, reason: "unresolved" });
-    expect(store.getState().tray.rows).toEqual([]);
-    expect(t.storage.mem.has(trayKey("u1"))).toBe(false); // nothing written
-    await store.applyLock(["x"]);
-    for (const r of store.getState().tray.rows)
-      expect(r.edition_id).toBeTruthy();
-  });
-
-  it("a pick must resolve the picked Printing itself", async () => {
-    const t = setup();
-    t.resolvePrintings.mockResolvedValue(
-      answer([printing("a", null), printing("b", "ed-b")])
-    );
-    const store = await t.open();
-    expect(await store.applyPick("a", ["b"])).toEqual({
-      added: false,
-      reason: "unresolved",
-    });
-    t.resolvePrintings.mockResolvedValue(
-      answer([printing("a", "ed-a"), printing("b", "ed-b")])
-    );
-    const ok = await store.applyPick("a", ["b"]);
-    expect(ok.row).toMatchObject({ printing_id: "a", candidates: ["a", "b"] });
-  });
-
-  it("times out the printings call after 5 s and writes no row", async () => {
+  it("times out the printings lookup after 5 s and writes no row", async () => {
     vi.useFakeTimers();
     const t = setup();
     t.resolvePrintings.mockImplementation(() => new Promise(() => {}));
     const store = await t.open();
-    const pending = store.applyLock(["a"]);
+    const pending = store.lookupPrintings(["a"]);
     await vi.advanceTimersByTimeAsync(4999);
     let settled = false;
     void pending.then(() => (settled = true));
     await vi.advanceTimersByTimeAsync(0);
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    expect(await pending).toEqual({ added: false, reason: "offline" });
+    expect(await pending).toBeNull();
     expect(store.getState().tray.rows).toEqual([]);
     expect(store.getState().offline).toBe(true);
   });
@@ -513,10 +453,8 @@ describe("locks and picks", () => {
     const t = setup();
     t.resolvePrintings.mockRejectedValue(new ScannerError(503, "X"));
     const store = await t.open();
-    expect(await store.applyLock(["a"])).toEqual({
-      added: false,
-      reason: "offline",
-    });
+    expect(await store.lookupPrintings(["a"])).toBeNull();
+    expect(store.getState().offline).toBe(true);
   });
 
   it("a search pick replaces a row's Printing and Edition, clears needs_pick and keeps the count", async () => {
@@ -541,6 +479,248 @@ describe("locks and picks", () => {
       needs_pick: false,
       candidates: ["pn"],
     });
+  });
+
+  it("applyChoice adds a new row for a new Edition of a Printing already in the tray", async () => {
+    const t = setup();
+    const store = await t.open();
+    await store.applyChoice({ printingId: "a", editionId: "ed-1" });
+    const r = await store.applyChoice({ printingId: "a", editionId: "ed-2" });
+    expect(r.added).toBe(true);
+    expect(store.getState().tray.rows).toHaveLength(2);
+    expect(store.getState().tray.rows[0]).toMatchObject({
+      printing_id: "a",
+      edition_id: "ed-2",
+      count: 1,
+    });
+    expect(t.resolvePrintings).not.toHaveBeenCalled();
+  });
+
+  it("applyChoice never stacks onto a needs_pick row", async () => {
+    const t = setup();
+    t.storage.mem.set(
+      trayKey("u1"),
+      JSON.stringify(
+        trayOf([
+          row({
+            id: "a",
+            printing_id: "p",
+            edition_id: "e",
+            count: 4,
+            needs_pick: true,
+          }),
+        ])
+      )
+    );
+    const store = await t.open();
+    await store.applyChoice({ printingId: "p", editionId: "e" });
+    const rows = store.getState().tray.rows;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ count: 1, needs_pick: false });
+    expect(rows[1]).toMatchObject({ id: "a", count: 4, needs_pick: true });
+  });
+
+  it("applyChoice is refused when frozen, at 999 on the row (full), at a 201st Edition (full), and at 9999 for one Edition (edition_limit)", async () => {
+    const t = setup();
+    const pending = {
+      key: "k",
+      location_id: "L",
+      items: [] as [string, string][],
+      started_at: new Date().toISOString(),
+    };
+    t.storage.mem.set(
+      trayKey("u1"),
+      JSON.stringify(trayOf([row({ id: "a" })], { pending_save: pending }))
+    );
+    const frozen = await t.open();
+    expect(
+      await frozen.applyChoice({ printingId: "p-a", editionId: "e-a" })
+    ).toMatchObject({ added: false, reason: "full", verdict: "frozen" });
+    frozen.dispose();
+
+    const t2 = setup();
+    t2.storage.mem.set(
+      trayKey("u1"),
+      JSON.stringify(
+        trayOf([
+          row({ id: "a", printing_id: "p", edition_id: "e", count: 999 }),
+        ])
+      )
+    );
+    const atRow = await t2.open();
+    expect(
+      await atRow.applyChoice({ printingId: "p", editionId: "e" })
+    ).toMatchObject({ added: false, reason: "full", verdict: "full" });
+    expect(atRow.getState().tray.rows[0]!.count).toBe(999);
+
+    const t3 = setup();
+    t3.storage.mem.set(trayKey("u1"), JSON.stringify(trayOf(manyRows(200))));
+    const distinct = await t3.open();
+    expect(
+      await distinct.applyChoice({ printingId: "new", editionId: "e-new" })
+    ).toMatchObject({ added: false, verdict: "full" });
+    expect(distinct.getState().tray.rows).toHaveLength(200);
+
+    const t4 = setup();
+    // Eleven rows of one Edition: ten full ones and the stacking target at 9 make exactly 9999 copies.
+    const full = Array.from({ length: 10 }, (_, i) =>
+      row({ id: `f${i}`, printing_id: `q${i}`, edition_id: "e", count: 999 })
+    );
+    t4.storage.mem.set(
+      trayKey("u1"),
+      JSON.stringify(
+        trayOf([
+          row({ id: "t", printing_id: "p", edition_id: "e", count: 9 }),
+          ...full,
+        ])
+      )
+    );
+    const atEdition = await t4.open();
+    expect(
+      await atEdition.applyChoice({ printingId: "p", editionId: "e" })
+    ).toMatchObject({ added: false, verdict: "edition_limit" });
+  });
+
+  it("applyChoice writes at most 3 candidates, the chosen Printing first", async () => {
+    const t = setup();
+    const store = await t.open();
+    const r = await store.applyChoice({
+      printingId: "a",
+      editionId: "ed-a",
+      candidates: ["b", "a", "c", "d", "e"],
+    });
+    expect(r.row!.candidates).toEqual(["a", "b", "c"]);
+    expect(store.getState().tray.rows[0]!.candidates).toEqual(["a", "b", "c"]);
+  });
+
+  it("setEdition merges into the other row with that Printing and Edition: the tapped row keeps its id and position, the counts add, the other row is gone", async () => {
+    const t = setup();
+    t.storage.mem.set(
+      trayKey("u1"),
+      JSON.stringify(
+        trayOf([
+          row({ id: "x", printing_id: "q", edition_id: "e-x" }),
+          row({ id: "a", printing_id: "p", edition_id: "e1", count: 2 }),
+          row({ id: "b", printing_id: "p", edition_id: "e2", count: 3 }),
+        ])
+      )
+    );
+    const store = await t.open();
+    expect(await store.setEdition("a", "e2")).toBe("ok");
+    const rows = store.getState().tray.rows;
+    expect(rows.map((r) => r.id)).toEqual(["x", "a"]);
+    expect(rows[1]).toMatchObject({
+      printing_id: "p",
+      edition_id: "e2",
+      count: 5,
+      needs_pick: false,
+    });
+  });
+
+  it("setEdition merge over 999 is full and writes nothing", async () => {
+    const t = setup();
+    const stored = JSON.stringify(
+      trayOf([
+        row({ id: "a", printing_id: "p", edition_id: "e1", count: 500 }),
+        row({ id: "b", printing_id: "p", edition_id: "e2", count: 500 }),
+      ])
+    );
+    t.storage.mem.set(trayKey("u1"), stored);
+    const store = await t.open();
+    expect(await store.setEdition("a", "e2")).toBe("full");
+    expect(t.storage.mem.get(trayKey("u1"))).toBe(stored);
+    expect(store.getState().tray.rows).toHaveLength(2);
+  });
+
+  it("setEdition with no matching row behaves as before", async () => {
+    const t = setup();
+    t.storage.mem.set(
+      trayKey("u1"),
+      JSON.stringify(
+        trayOf([
+          row({ id: "a", printing_id: "p", edition_id: "e1", count: 2 }),
+          // same Edition, other Printing; and a needs_pick row of the pair: neither is a merge target
+          row({ id: "b", printing_id: "other", edition_id: "e2" }),
+          row({
+            id: "c",
+            printing_id: "p",
+            edition_id: "e2",
+            needs_pick: true,
+          }),
+        ])
+      )
+    );
+    const store = await t.open();
+    expect(await store.setEdition("a", "e2")).toBe("ok");
+    const rows = store.getState().tray.rows;
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({ id: "a", edition_id: "e2", count: 2 });
+    expect(await store.setEdition("nope", "e2")).toBe("no_row");
+  });
+
+  it("a search pick in add mode stacks onto the matching row", async () => {
+    const t = setup();
+    const store = await t.open();
+    expect(
+      await store.applySearchPick({ printingId: "a", editionId: "ed-1" })
+    ).toBe("ok");
+    expect(
+      await store.applySearchPick({ printingId: "a", editionId: "ed-1" })
+    ).toBe("ok");
+    const rows = store.getState().tray.rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ count: 2, candidates: ["a"] });
+  });
+
+  it("a search pick replacing a row merges into a matching row", async () => {
+    const t = setup();
+    t.storage.mem.set(
+      trayKey("u1"),
+      JSON.stringify(
+        trayOf([
+          row({ id: "a", count: 2, needs_pick: true }),
+          row({ id: "b", printing_id: "pn", edition_id: "en", count: 4 }),
+        ])
+      )
+    );
+    const store = await t.open();
+    expect(
+      await store.applySearchPick({
+        printingId: "pn",
+        editionId: "en",
+        replaceRowId: "a",
+      })
+    ).toBe("ok");
+    const rows = store.getState().tray.rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: "a",
+      printing_id: "pn",
+      edition_id: "en",
+      count: 6,
+      needs_pick: false,
+      candidates: ["pn"],
+    });
+  });
+
+  it("a stored v1 tray with two rows of one Printing and Edition still parses with both rows, and Confirm sends one summed item", async () => {
+    const t = setup();
+    t.storage.mem.set(
+      trayKey("u1"),
+      JSON.stringify(
+        trayOf([
+          row({ id: "a", printing_id: "p", edition_id: "e", count: 2 }),
+          row({ id: "b", printing_id: "p", edition_id: "e", count: 3 }),
+        ])
+      )
+    );
+    const store = await t.open();
+    expect(store.getState().tray.rows).toHaveLength(2);
+    await store.confirm("L");
+    expect(t.save).toHaveBeenCalledTimes(1);
+    expect(t.save.mock.calls[0]![0].items).toEqual([
+      { edition_id: "e", quantity: "5" },
+    ]);
   });
 
   it("removes rows and resolves needs_pick with a chip", async () => {
@@ -616,7 +796,7 @@ describe("parseTray caps and hygiene", () => {
     const t = setup();
     const store = await t.open();
     const before = store.getState().printings;
-    await store.applyLock(["a"]);
+    await store.lookupPrintings(["a"]);
     const after = store.getState().printings;
     expect(after).not.toBe(before);
     expect(before.size).toBe(0);
@@ -644,7 +824,7 @@ describe("refreshStale", () => {
     const { t, release } = held();
     const store = await t.open();
     const refresh = store.refreshStale();
-    await store.applyLock(["fresh"]); // not in the held answer
+    await choose(store, "fresh"); // not in the held answer
     release(answer([printing("p-old", "e-old", ["e-old"])]));
     expect(await refresh).toBe("ok");
     const rows = store.getState().tray.rows;
@@ -827,7 +1007,7 @@ describe("pending_save and confirm", () => {
     expect(
       await store.applySearchPick({ printingId: "p", editionId: "E" })
     ).toBe("frozen");
-    expect(await store.applyLock(["z"])).toMatchObject({
+    expect(await choose(store, "z")).toMatchObject({
       added: false,
       reason: "full",
       verdict: "frozen",

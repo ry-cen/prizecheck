@@ -6,6 +6,7 @@ import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
 import { EditionTile } from "../ui/EditionTile";
 import { Pill } from "../ui/Pill";
+import { ScrollArea } from "../ui/ScrollArea";
 import { SearchField } from "../ui/SearchField";
 import { Segmented } from "../ui/Segmented";
 import { variantLabel } from "../ui/variantLabel";
@@ -135,165 +136,177 @@ export function ProposalLibrary({
   return (
     <aside
       aria-labelledby={headingId}
-      className={`box-border flex min-w-0 flex-col gap-3 self-start rounded-panel border border-border bg-surface p-4 ${
+      className={`box-border flex min-w-0 flex-col self-start rounded-panel border border-border bg-surface ${
         ownScroll
-          ? "sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] max-h-[calc(100dvh-var(--space-8)-var(--layout-sticky-top))] overflow-y-auto overscroll-contain"
+          ? "sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] max-h-[calc(100dvh-var(--space-8)-var(--layout-sticky-top))]"
           : "w-full"
       }`}
     >
-      <h2 id={headingId} className="m-0 text-heading font-semibold">
-        Cards
-      </h2>
-      <div className="shrink-0">
-        <Segmented
-          mode="choice"
-          label="Cards from"
-          options={[
-            { value: "theirs", label: "Their Trade List" },
-            { value: "mine", label: "My Trade List" },
-          ]}
-          value={choice}
-          onChange={setChoice}
-        />
-      </div>
-      {choice === "theirs" ? (
-        <SearchField
-          key="theirs"
-          label={`Search ${friendName}'s Trade List`}
-          placeholder="Card name"
-          maxLength={100}
-          value={theirText}
-          onChange={(event) => setTheirText(event.target.value)}
-        />
-      ) : (
-        <SearchField
-          key="mine"
-          label="Search your Trade List"
-          placeholder="Card name"
-          maxLength={100}
-          value={mineText}
-          onChange={(event) => setMineText(event.target.value)}
-        />
-      )}
-      <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
-        {announce}
-      </p>
-      {match.kind === "failed" && (
-        <div className="flex flex-wrap items-center gap-3">
-          <p role="alert" className="m-0 text-meta text-danger">
-            Matches with {friendName} couldn't be loaded.
-          </p>
-          <Button onClick={() => onRetry("match")}>Retry matches</Button>
+      {/* The aside keeps the sticky position, the height cap and the frame; the ScrollArea inside scrolls. */}
+      <ScrollArea
+        className="flex-1"
+        scroll={ownScroll}
+        viewportClassName={`flex flex-col gap-3 p-4${ownScroll ? " overscroll-contain" : ""}`}
+      >
+        <h2 id={headingId} className="m-0 text-heading font-semibold">
+          Cards
+        </h2>
+        <div className="shrink-0">
+          <Segmented
+            mode="choice"
+            label="Cards from"
+            options={[
+              { value: "theirs", label: "Their Trade List" },
+              { value: "mine", label: "My Trade List" },
+            ]}
+            value={choice}
+            onChange={setChoice}
+          />
         </div>
-      )}
-      {read.kind === "failed" && (
-        <div className="flex flex-wrap items-center gap-3">
-          <p role="alert" className="m-0 text-meta text-danger">
-            These cards couldn't be loaded.
-          </p>
-          <Button onClick={() => onRetry(choice)}>Retry</Button>
-        </div>
-      )}
-      {(read.kind === "loading" ||
-        (read.kind === "ready" && match.kind === "loading")) && (
-        <p className="m-0 text-body text-text-muted">Loading cards…</p>
-      )}
-      {showing && cards.length === 0 && (
-        <p className="m-0 text-body text-text-muted">
-          {searching && (choice === "mine" || !nothingListed)
-            ? "No cards match that name."
-            : choice === "theirs"
-              ? `${friendName} has nothing on their Trade List.`
-              : "Your Trade List is empty. Mark a Location For trade in Collection, and its cards show here."}
+        {choice === "theirs" ? (
+          <SearchField
+            key="theirs"
+            label={`Search ${friendName}'s Trade List`}
+            placeholder="Card name"
+            maxLength={100}
+            value={theirText}
+            onChange={(event) => setTheirText(event.target.value)}
+          />
+        ) : (
+          <SearchField
+            key="mine"
+            label="Search your Trade List"
+            placeholder="Card name"
+            maxLength={100}
+            value={mineText}
+            onChange={(event) => setMineText(event.target.value)}
+          />
+        )}
+        <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
+          {announce}
         </p>
-      )}
-      {showing && cards.length > 0 && (
-        <ul
-          id={listId}
-          aria-label={
-            choice === "theirs"
-              ? `${friendName}'s Trade List`
-              : "Your Trade List"
-          }
-          aria-busy={busy}
-          className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-small),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0"
-        >
-          {cards.map((libraryCard) => {
-            const { card, want } = libraryCard;
-            const held = quantityIn(proposal, side, card.edition_id);
-            const onOther =
-              quantityIn(proposal, otherSide(side), card.edition_id) > 0;
-            const copies = Number(card.copies);
-            return (
-              <li key={card.edition_id} className="flex min-w-0 flex-col gap-1">
-                <EditionTile
-                  action={`Add to ${SIDE_LABEL[side]}`}
-                  name={card.name}
-                  setName={card.set_name}
-                  setCode={card.set_code}
-                  collectorNumber={card.collector_number}
-                  variant={variantLabel(card.descriptor)}
-                  imageUrl={card.image_url}
-                  owned={onOther ? 0 : copies}
-                  badge={held > 0 ? `${held}/${copies}` : undefined}
-                  ownedText={
-                    onOther
-                      ? `in ${SIDE_LABEL[otherSide(side)]}`
-                      : held > 0
-                        ? `${held} of ${copies} in ${SIDE_LABEL[side]}`
-                        : `${copies} available`
-                  }
-                  flag={
-                    want
-                      ? {
-                          text:
-                            side === "get" ? "You want" : `${friendName} wants`,
-                          label: wantText(want),
-                        }
-                      : null
-                  }
-                  aria-disabled={onOther || held >= copies || undefined}
-                  onClick={() => onAdd(side, libraryCard)}
-                />
-                <Button
-                  variant="quiet"
-                  aria-label={`Details for ${tradeCardName(card)}`}
-                  onClick={(event) => {
-                    opener.current = event.currentTarget;
-                    setDetails({ card: libraryCard, side });
-                  }}
-                >
-                  Details
-                </Button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {choice === "theirs" &&
-        theirs.kind === "ready" &&
-        theirs.nextPage !== null && (
+        {match.kind === "failed" && (
           <div className="flex flex-wrap items-center gap-3">
-            <Button
-              aria-controls={listId}
-              aria-disabled={theirs.more === "loading" || undefined}
-              onClick={onShowMore}
-            >
-              Show more cards
-            </Button>
-            {theirs.more === "failed" && (
-              <p role="alert" className="m-0 text-meta text-danger">
-                More cards couldn't be loaded. Please retry.
-              </p>
-            )}
+            <p role="alert" className="m-0 text-meta text-danger">
+              Matches with {friendName} couldn't be loaded.
+            </p>
+            <Button onClick={() => onRetry("match")}>Retry matches</Button>
           </div>
         )}
-      <DetailsPopup
-        details={details}
-        proposal={proposal}
-        opener={opener}
-        onClose={() => setDetails(null)}
-      />
+        {read.kind === "failed" && (
+          <div className="flex flex-wrap items-center gap-3">
+            <p role="alert" className="m-0 text-meta text-danger">
+              These cards couldn't be loaded.
+            </p>
+            <Button onClick={() => onRetry(choice)}>Retry</Button>
+          </div>
+        )}
+        {(read.kind === "loading" ||
+          (read.kind === "ready" && match.kind === "loading")) && (
+          <p className="m-0 text-body text-text-muted">Loading cards…</p>
+        )}
+        {showing && cards.length === 0 && (
+          <p className="m-0 text-body text-text-muted">
+            {searching && (choice === "mine" || !nothingListed)
+              ? "No cards match that name."
+              : choice === "theirs"
+                ? `${friendName} has nothing on their Trade List.`
+                : "Your Trade List is empty. Mark a Location For trade in Collection, and its cards show here."}
+          </p>
+        )}
+        {showing && cards.length > 0 && (
+          <ul
+            id={listId}
+            aria-label={
+              choice === "theirs"
+                ? `${friendName}'s Trade List`
+                : "Your Trade List"
+            }
+            aria-busy={busy}
+            className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-small),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0"
+          >
+            {cards.map((libraryCard) => {
+              const { card, want } = libraryCard;
+              const held = quantityIn(proposal, side, card.edition_id);
+              const onOther =
+                quantityIn(proposal, otherSide(side), card.edition_id) > 0;
+              const copies = Number(card.copies);
+              return (
+                <li
+                  key={card.edition_id}
+                  className="flex min-w-0 flex-col gap-1"
+                >
+                  <EditionTile
+                    action={`Add to ${SIDE_LABEL[side]}`}
+                    name={card.name}
+                    setName={card.set_name}
+                    setCode={card.set_code}
+                    collectorNumber={card.collector_number}
+                    variant={variantLabel(card.descriptor)}
+                    imageUrl={card.image_url}
+                    owned={onOther ? 0 : copies}
+                    badge={held > 0 ? `${held}/${copies}` : undefined}
+                    ownedText={
+                      onOther
+                        ? `in ${SIDE_LABEL[otherSide(side)]}`
+                        : held > 0
+                          ? `${held} of ${copies} in ${SIDE_LABEL[side]}`
+                          : `${copies} available`
+                    }
+                    flag={
+                      want
+                        ? {
+                            text:
+                              side === "get"
+                                ? "You want"
+                                : `${friendName} wants`,
+                            label: wantText(want),
+                          }
+                        : null
+                    }
+                    aria-disabled={onOther || held >= copies || undefined}
+                    onClick={() => onAdd(side, libraryCard)}
+                  />
+                  <Button
+                    variant="quiet"
+                    aria-label={`Details for ${tradeCardName(card)}`}
+                    onClick={(event) => {
+                      opener.current = event.currentTarget;
+                      setDetails({ card: libraryCard, side });
+                    }}
+                  >
+                    Details
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {choice === "theirs" &&
+          theirs.kind === "ready" &&
+          theirs.nextPage !== null && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                aria-controls={listId}
+                aria-disabled={theirs.more === "loading" || undefined}
+                onClick={onShowMore}
+              >
+                Show more cards
+              </Button>
+              {theirs.more === "failed" && (
+                <p role="alert" className="m-0 text-meta text-danger">
+                  More cards couldn't be loaded. Please retry.
+                </p>
+              )}
+            </div>
+          )}
+        <DetailsPopup
+          details={details}
+          proposal={proposal}
+          opener={opener}
+          onClose={() => setDetails(null)}
+        />
+      </ScrollArea>
     </aside>
   );
 }

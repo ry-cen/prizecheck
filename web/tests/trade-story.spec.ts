@@ -226,7 +226,7 @@ async function story(
     exact: true,
   });
   await settings
-    .getByRole("button", {
+    .getByRole("checkbox", {
       name: `Mark ${ashPlace} Binder For trade`,
       exact: true,
     })
@@ -235,8 +235,8 @@ async function story(
     `${ashPlace} Binder and everything in it, apart from Decks, are For trade.`
   );
   await expect(
-    settings.getByRole("button", {
-      name: `Mark ${ashPlace} Binder Not for trade`,
+    settings.getByRole("checkbox", {
+      name: `Mark ${ashPlace} Binder For trade`,
       exact: true,
     })
   ).toBeFocused();

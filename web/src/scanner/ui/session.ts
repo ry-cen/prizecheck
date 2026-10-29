@@ -39,7 +39,12 @@ export type SessionEvents = {
   onRunning(): void;
   onCannotStart(cause: StartCause): void;
   onGate(ok: boolean, reason: GateReason | undefined): void;
-  onLock(lock: { lockId: number; printingIds: string[]; via: LockVia }): void;
+  onLock(lock: {
+    lockId: number;
+    printingIds: string[];
+    via: LockVia;
+    lookalikes: string[];
+  }): void;
   onAbsent(lockId: number): void;
   onMiss(): void;
 };
@@ -159,6 +164,7 @@ export class ScannerSession {
           lockId: m.lockId,
           printingIds: m.printingIds,
           via: m.via,
+          lookalikes: m.lookalikes,
         });
         break;
       case "absent":

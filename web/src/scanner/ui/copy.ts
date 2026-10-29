@@ -102,3 +102,7 @@ export const SEARCH_FIELD = "Search the catalog";
 // Spec "Copy" table: the Scan Suggestion (owner-approved 2026-10-24 and 2026-10-25).
 export const SUGGESTION_HEADING = "Is it one of these?";
 export const NONE_OF_THESE = "None of these";
+
+// New: the Scan Choice (lookalike-tray, 2026-10-28). Wording approved by the owner 2026-10-28 (round 2).
+export const CHOICE_VERSION_HEADING = "Which version?";
+export const CHOICE_FINISH_HEADING = "Which finish?";

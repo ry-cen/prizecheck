@@ -18,12 +18,13 @@ export type StubScript = {
   loop?: boolean; // repeat the frames; default false (past the end the last frame repeats)
   shutter?: "leader" | "miss"; // what a shutter press yields; default "leader"
   imageMatching?: boolean; // ready.imageMatching; default true
+  lookalikes?: Record<string, string[]>; // Printing id to the look-alikes its lock carries (narrowed by `ocr` for an automatic lock, capped at 7)
 };
 
 /** Frame i of the script answers the i-th `frame` message, so a scripted source must hand frames over in order. A frame the
  *  stub drops while paused still uses up its entry. */
 export class StubRecognizer {
-  private readonly session = new VoteSession();
+  private readonly session: VoteSession;
   private next = 0;
   private paused = false;
 
@@ -32,7 +33,9 @@ export class StubRecognizer {
     private readonly post: (m: FromWorker) => void,
     private readonly read: (bitmap: ImageBitmap) => Img,
     private readonly now: () => number = () => performance.now()
-  ) {}
+  ) {
+    this.session = new VoteSession((id) => script.lookalikes?.[id] ?? []);
+  }
 
   private scripted(): StubFrame {
     const n = this.script.frames.length;
@@ -92,13 +95,15 @@ export class StubRecognizer {
     const gate = f.gate ?? "ok";
     const ran = gate === "ok";
     const top = ran ? (f.top ?? []) : null;
+    const textBacked =
+      top !== null && top.length > 0 && (f.ocr ?? []).includes(top[0]);
     const vf: VoteFrame = {
       t: this.now(),
       thumb,
       top,
       eligible: ran && (f.eligible ?? true) && top !== null && top.length > 0,
-      textBacked:
-        top !== null && top.length > 0 && (f.ocr ?? []).includes(top[0]),
+      textBacked,
+      numberIds: textBacked ? (f.ocr ?? []) : [],
     };
     this.post(
       gate === "ok"

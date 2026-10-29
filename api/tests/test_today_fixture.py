@@ -30,8 +30,8 @@ def test_without_the_fixture_directory_the_date_is_real(tmp_path):
 
 
 def test_the_file_sets_every_check_date_and_removing_it_restores_the_real_one(tmp_path):
-    (tmp_path / 'today').write_text('2020-01-02\n')
-    assert run(tmp_path, CATALOG_PROCESS_FIXTURE_DIR=str(tmp_path))[:3] == ['2020-01-02'] * 3
+    (tmp_path / 'today').write_text('2020-02-29\n')  # never the real date, so a module the fixture misses shows
+    assert run(tmp_path, CATALOG_PROCESS_FIXTURE_DIR=str(tmp_path))[:3] == ['2020-02-29'] * 3
     (tmp_path / 'today').unlink()
     first, second, third, real = run(tmp_path, CATALOG_PROCESS_FIXTURE_DIR=str(tmp_path))
     assert first == second == third == real

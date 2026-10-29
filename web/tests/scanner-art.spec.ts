@@ -14,6 +14,7 @@ import {
   imageOnly,
   installScript,
   openScanner,
+  pickFinish,
   printingIds,
   reviewTray,
   seedPopup,
@@ -68,6 +69,7 @@ test("card pictures load through our origin while the art host sends a doubled C
     ],
   });
   await openScanner(page);
+  await pickFinish(page, "Normal");
 
   // The tray peek and, once opened, the tray row show Bulbasaur's picture.
   await expect(trayPeek(page)).toContainText("Bulbasaur");

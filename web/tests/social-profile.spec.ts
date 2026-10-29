@@ -2,7 +2,7 @@
 // Settings › Privacy edits the names and the Invite Link; the signed-out Invite Link page shows only the Display Name;
 // the phone header's avatar opens the account sheet. Every test starts as a new owner, because a Handle can change
 // only once in 30 days.
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 import { randomInt } from "node:crypto";
 import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
@@ -166,6 +166,96 @@ test("the Invite Link page shows only the Display Name signed out, and a new lin
   }
 });
 
+// #326: the sections above Sign-ins grow when their data arrives. The collector's request for Sign-ins waits for them,
+// so a cold entry with slow Settings and profile requests still ends on the Sign-ins heading, focused, and stays there.
+const delayed = (delayMs: number) => async (route: Route) => {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  await route.continue();
+};
+
+async function openSignInsFromAccountSheet(page: Page) {
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Account" })
+    .getByRole("button", { name: "Sign-ins" })
+    .click();
+  await expect(page).toHaveURL(`${ORIGIN}/settings`);
+}
+
+const signInsHeading = (page: Page) =>
+  page.getByRole("heading", { name: "Sign-ins", level: 2 });
+
+test("on a phone Sign-ins still lands on its heading when Settings and the profile load slowly", async ({
+  page,
+}) => {
+  await page.setViewportSize(PHONE);
+  await signIn(page, "/collection");
+  await page.route("**/api/settings", delayed(500));
+  await page.route("**/api/profile", delayed(1500));
+  await page.route("**/api/social/blocks", delayed(1000));
+  await page.route("**/api/social/discovery", delayed(2500));
+  await page.route("**/api/location-tree", delayed(2000));
+  await openSignInsFromAccountSheet(page);
+
+  const heading = signInsHeading(page);
+  await expect(heading).toBeFocused();
+  await expect(heading).toBeInViewport();
+  const top = async () => (await heading.boundingBox())?.y;
+  const landedAt = await top();
+  // Every section above has loaded by now, and the heading did not move, leave the view or lose focus.
+  await expect(page.getByText("Loading…")).toHaveCount(0);
+  await expect(privacy(page).getByLabel("Display Name")).toBeVisible();
+  await expect.poll(top).toBe(landedAt);
+  await expect(heading).toBeInViewport({ ratio: 1 });
+  await expect(heading).toBeFocused();
+});
+
+// @slow (wall-clock): waits out the real 5 s SETTINGS_SECTION_DEADLINE_MS, a production constant with no test seam.
+test(
+  "on a phone Sign-ins is still shown and focused when one Settings request never answers",
+  { tag: "@slow" },
+  async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await signIn(page, "/collection");
+    const release = Promise.withResolvers<void>();
+    await page.route("**/api/location-tree", async (route) => {
+      await release.promise;
+      await route.continue();
+    });
+    try {
+      await openSignInsFromAccountSheet(page);
+      // The deadline (5 s) passes, then the section is shown although the Locations never loaded.
+      await expect(signInsHeading(page)).toBeFocused({ timeout: 15_000 });
+      await expect(signInsHeading(page)).toBeInViewport();
+    } finally {
+      release.resolve();
+    }
+  }
+);
+
+test("on a phone the collector's own tap on Settings cancels the jump to Sign-ins", async ({
+  page,
+}) => {
+  await page.setViewportSize(PHONE);
+  await signIn(page, "/collection");
+  const release = Promise.withResolvers<void>();
+  await page.route("**/api/profile", async (route) => {
+    await release.promise;
+    await route.continue();
+  });
+  try {
+    await openSignInsFromAccountSheet(page);
+    await page.getByRole("heading", { name: "Settings", level: 1 }).click();
+    release.resolve();
+    await expect(page.getByText("Loading…")).toHaveCount(0);
+    await expect(privacy(page).getByLabel("Display Name")).toBeVisible();
+    await expect(signInsHeading(page)).not.toBeFocused();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  } finally {
+    release.resolve();
+  }
+});
+
 test("on a phone the header avatar opens Settings, Sign-ins, Missing cards, Owner controls for the owner, and Sign out", async ({
   page,
 }) => {
@@ -185,9 +275,9 @@ test("on a phone the header avatar opens Settings, Sign-ins, Missing cards, Owne
   ]);
   await sheet.getByRole("button", { name: "Sign-ins" }).click();
   await expect(page).toHaveURL(`${ORIGIN}/settings`);
-  await expect(
-    page.getByRole("heading", { name: "Sign-ins", level: 2 })
-  ).toBeInViewport();
+  const heading = signInsHeading(page);
+  await expect(heading).toBeInViewport();
+  await expect(heading).toBeFocused();
 
   // The owner also gets Owner controls.
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });

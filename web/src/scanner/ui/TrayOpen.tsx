@@ -24,6 +24,7 @@ import {
   staleFooter,
   TRAY,
 } from "./copy";
+import { ScrollArea } from "../../ui/ScrollArea";
 import type { RowView } from "./rowView";
 import { swipeHandlers } from "./TrayPeek";
 import { TrayRowItem, type RowActions } from "./TrayRowItem";
@@ -143,7 +144,10 @@ export function TrayOpen({
           </span>
         </button>
       </div>
-      <div className="flex min-h-0 grow flex-col gap-3 overflow-y-auto px-4 pb-3">
+      <ScrollArea
+        className="grow"
+        viewportClassName="flex flex-col gap-3 px-4 pb-3"
+      >
         {model.staleSave && (
           <div className="flex flex-wrap items-center gap-2 rounded-panel border border-warning p-3 text-control text-text">
             <span className="grow basis-48">{STALE_SAVE_NOTE}</span>
@@ -196,7 +200,7 @@ export function TrayOpen({
             </Button>
           </div>
         )}
-      </div>
+      </ScrollArea>
       <footer className="flex flex-col gap-2 border-t border-border bg-surface px-4 py-3">
         {lines.map((line) => (
           <p

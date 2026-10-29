@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/TextField";
 import { profileDate, profileMessage, retryable } from "./profileMessages";
+import { useSettingsSectionSettled } from "./settingsNavigation";
 
 type Load =
   | { kind: "loading" }
@@ -38,6 +39,7 @@ export function PrivacySection({
   children?: ReactNode;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  useSettingsSectionSettled("privacy", load.kind !== "loading");
   const [name, setName] = useState("");
   const [handle, setHandleText] = useState("");
   const [busy, setBusy] = useState(false);
