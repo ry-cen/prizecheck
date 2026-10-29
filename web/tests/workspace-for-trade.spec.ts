@@ -79,6 +79,8 @@ const row = (panel: Locator, path: string) =>
   panel.getByRole("group", { name: path, exact: true });
 const button = (scope: Locator, name: string) =>
   scope.getByRole("button", { name, exact: true });
+const checkbox = (scope: Locator, name: string) =>
+  scope.getByRole("checkbox", { name, exact: true });
 const gear = (scope: Locator, path: string) =>
   scope.getByRole("button", { name: `Settings for ${path}`, exact: true });
 const settingsOf = (page: Page, path: string) =>
@@ -110,15 +112,18 @@ async function markAndCheck(page: Page, ui: Ui) {
   // Mark the box: everything inside it is For trade, apart from the Deck.
   const storageSettings = settingsOf(page, "Storage");
   await gear(tree, "Storage").click();
-  await button(storageSettings, "Mark Storage For trade").click();
+  await checkbox(storageSettings, "Mark Storage For trade").click();
   await expect(storageSettings.getByRole("status")).toHaveText(
     "Storage and everything in it, apart from Decks, are For trade."
   );
   await expect(storageSettings).toContainText("Folder · For trade");
   // Focus stays on the control that was used.
   await expect(
-    button(storageSettings, "Mark Storage Not for trade")
+    checkbox(storageSettings, "Mark Storage For trade")
   ).toBeFocused();
+  await expect(
+    checkbox(storageSettings, "Mark Storage For trade")
+  ).toBeChecked();
   await page.keyboard.press("Escape");
   await expect(storageSettings).toBeHidden();
 
@@ -137,25 +142,27 @@ async function markAndCheck(page: Page, ui: Ui) {
   tree = await ui.tree();
   const shelfSettings = settingsOf(page, "Shelf");
   await gear(tree, "Shelf").click();
-  await expect(button(shelfSettings, "Mark Shelf For trade")).toBeEnabled();
+  await expect(checkbox(shelfSettings, "Mark Shelf For trade")).toBeEnabled();
+  await expect(
+    checkbox(shelfSettings, "Mark Shelf For trade")
+  ).not.toBeChecked();
   await page.keyboard.press("Escape");
   await expect(shelfSettings).toBeHidden();
 
   // A Location inside the marked one can't be un-marked on its own: the control is off and says why.
   const binderSettings = settingsOf(page, "Storage / Binder 1");
   await gear(tree, "Storage / Binder 1").click();
-  const inherited = button(
+  const inherited = checkbox(
     binderSettings,
-    "Mark Storage / Binder 1 Not for trade"
+    "Mark Storage / Binder 1 For trade"
   );
   await expect(inherited).toBeDisabled();
+  await expect(inherited).toBeChecked();
+  await expect(binderSettings).toContainText("For trade because Storage is.");
   await expect(inherited).toHaveAccessibleDescription(
     "For trade because Storage is."
   );
-  await expect(inherited).toHaveAttribute(
-    "title",
-    "For trade because Storage is."
-  );
+  await expect(inherited).not.toHaveAttribute("title");
   await page.keyboard.press("Escape");
   await expect(binderSettings).toBeHidden();
   // The server refuses it too, naming the marked Location.
@@ -201,7 +208,7 @@ async function markAndCheck(page: Page, ui: Ui) {
   tree = await ui.tree();
   await button(tree, "Storage").click();
   await gear(tree, "Storage").click();
-  await button(storageSettings, "Hide Storage from Friends").click();
+  await checkbox(storageSettings, "Hide Storage from Friends").click();
   await expect(storageSettings.getByRole("status")).toHaveText(
     "Storage and everything in it are hidden from Friends."
   );
@@ -224,7 +231,7 @@ async function markAndCheck(page: Page, ui: Ui) {
   // Un-marking the box leaves it hidden, and the line goes.
   tree = await ui.tree();
   await gear(tree, "Storage").click();
-  await button(storageSettings, "Mark Storage Not for trade").click();
+  await checkbox(storageSettings, "Mark Storage For trade").click();
   await expect(storageSettings.getByRole("status")).toHaveText(
     "Storage is no longer For trade."
   );
@@ -234,7 +241,7 @@ async function markAndCheck(page: Page, ui: Ui) {
   await expect(storageSettings).toBeHidden();
   await gear(tree, "Storage / Binder 1").click();
   await expect(
-    button(binderSettings, "Mark Storage / Binder 1 For trade")
+    checkbox(binderSettings, "Mark Storage / Binder 1 For trade")
   ).toBeEnabled();
   await page.keyboard.press("Escape");
   await expect(binderSettings).toBeHidden();
@@ -292,7 +299,7 @@ test.describe("mobile", () => {
     hasTouch: true,
   });
 
-  test("the same at 375 px, with touch-sized For trade buttons", async ({
+  test("the same at 375 px, with a touch-sized For trade checkbox", async ({
     page,
   }) => {
     const ui = mobileUi(page);
@@ -300,9 +307,12 @@ test.describe("mobile", () => {
     const tree = await ui.tree();
     await gear(tree, "Storage").click();
     const settings = settingsOf(page, "Storage");
-    await expectTouchTarget(button(settings, "Mark Storage For trade"), [
-      "height",
-    ]);
+    // The checkbox's tap area is the label around it.
+    await expectTouchTarget(
+      checkbox(settings, "Mark Storage For trade").locator(
+        "xpath=ancestor::label"
+      )
+    );
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth)
     ).toBeLessThanOrEqual(375);
@@ -385,7 +395,7 @@ async function sidebarMarks(
 
   // Un-marking in the Location's settings clears the marks without a reload.
   let settings = await openSettings("Storage");
-  await button(settings, "Mark Storage Not for trade").click();
+  await checkbox(settings, "Mark Storage For trade").click();
   await expect(settings.getByRole("status")).toHaveText(
     "Storage is no longer For trade."
   );
@@ -399,7 +409,7 @@ async function sidebarMarks(
 
   // Marking again in the Location's settings brings the marks back without a reload.
   settings = await openSettings("Storage");
-  await button(settings, "Mark Storage For trade").click();
+  await checkbox(settings, "Mark Storage For trade").click();
   await expect(settings.getByRole("status")).toContainText("For trade");
   await button(settings, "Close settings").click();
   await expect(settings).toBeHidden();

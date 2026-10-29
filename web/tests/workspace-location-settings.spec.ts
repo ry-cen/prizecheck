@@ -136,12 +136,34 @@ promote({'card-1': 'Pikachu'})`,
   return { tree, node, create, deck, deckIn, stock, rename };
 }
 
+/** One Location's rows: the Hide from Friends note ends before its checkbox on the same row, and the Rename
+ * button shares the checkbox's right edge. */
+async function expectRowLayout(
+  dialog: Locator,
+  checkboxName: string,
+  path: string
+) {
+  const hide = (await checkbox(dialog, checkboxName).boundingBox())!;
+  const rename = (await button(dialog, `Rename ${path}`).boundingBox())!;
+  const note = (await dialog
+    .getByText("Friends can't see this Location")
+    .boundingBox())!;
+  expect(note.x + note.width).toBeLessThanOrEqual(hide.x);
+  expect(hide.y).toBeGreaterThanOrEqual(note.y - 20);
+  expect(hide.y).toBeLessThanOrEqual(note.y + note.height + 20);
+  expect(
+    Math.abs(rename.x + rename.width - (hide.x + hide.width))
+  ).toBeLessThanOrEqual(30);
+}
+
 const sidebarNav = (page: Page) =>
   page
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" });
 const button = (scope: Locator, name: string) =>
   scope.getByRole("button", { name, exact: true });
+const checkbox = (scope: Locator, name: string) =>
+  scope.getByRole("checkbox", { name, exact: true });
 const gear = (scope: Locator, path: string) =>
   button(scope, `Settings for ${path}`);
 /** A Location's settings dialog, by its full path (its title). A Rename or Move changes the name. */
@@ -189,13 +211,16 @@ test.describe("desktop", () => {
     for (const name of [
       `Rename ${binder}`,
       `Move ${binder}`,
-      `Hide ${binder} from Friends`,
-      `Mark ${binder} For trade`,
       `Delete ${binder}`,
     ])
       await expect(button(dialog, name)).toBeVisible();
+    for (const name of [
+      `Hide ${binder} from Friends`,
+      `Mark ${binder} For trade`,
+    ])
+      await expect(checkbox(dialog, name)).toBeVisible();
     await expect(
-      dialog.getByRole("link", { name: "Open in Decks" })
+      dialog.getByRole("link", { name: /^Open .* in Decks$/ })
     ).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
@@ -221,12 +246,15 @@ test.describe("desktop", () => {
     await expect(button(deckDialog, `Rename ${deckName}`)).toBeVisible();
     await expect(button(deckDialog, `Move ${deckName}`)).toBeVisible();
     await expect(
-      button(deckDialog, `Hide ${deckName} from Friends`)
+      checkbox(deckDialog, `Hide ${deckName} from Friends`)
     ).toBeVisible();
     await expect(
-      deckDialog.getByRole("button", { name: /^Mark |^Delete / })
+      deckDialog.getByRole("button", { name: /^Delete / })
     ).toHaveCount(0);
-    const link = deckDialog.getByRole("link", { name: "Open in Decks" });
+    await expect(deckDialog.getByRole("checkbox")).toHaveCount(1);
+    const link = deckDialog.getByRole("link", {
+      name: `Open ${deckName} in Decks`,
+    });
     await expect(link).toHaveAttribute(
       "href",
       `/decks/${encodeURIComponent(deckId)}`
@@ -321,16 +349,22 @@ test.describe("desktop", () => {
 
     await gear(nav, "Storage").click();
     const storage = settingsOf(page, "Storage");
-    await button(storage, "Hide Storage from Friends").click();
+    const hideStorage = checkbox(storage, "Hide Storage from Friends");
+    await expect(hideStorage).not.toBeChecked();
+    await hideStorage.click();
     await expect(storage.getByRole("status")).toHaveText(
       "Storage and everything in it are hidden from Friends."
     );
-    await expect(button(storage, "Show Storage to Friends")).toBeFocused();
-    await button(storage, "Mark Storage For trade").click();
+    await expect(hideStorage).toBeChecked();
+    await expect(hideStorage).toBeFocused();
+    const tradeStorage = checkbox(storage, "Mark Storage For trade");
+    await expect(tradeStorage).not.toBeChecked();
+    await tradeStorage.click();
     await expect(storage.getByRole("status")).toHaveText(
       "Storage and everything in it, apart from Decks, are For trade."
     );
-    await expect(button(storage, "Mark Storage Not for trade")).toBeFocused();
+    await expect(tradeStorage).toBeChecked();
+    await expect(tradeStorage).toBeFocused();
     await expect(storage).toContainText(
       "Folder · Hidden from Friends · For trade"
     );
@@ -343,13 +377,18 @@ test.describe("desktop", () => {
 
     await gear(nav, "Storage / Binder 1").click();
     const binder = settingsOf(page, "Storage / Binder 1");
-    const hide = button(binder, "Hide Storage / Binder 1 from Friends");
+    const hide = checkbox(binder, "Hide Storage / Binder 1 from Friends");
     await expect(hide).toBeDisabled();
+    await expect(hide).toBeChecked();
+    await expect(hide).not.toHaveAttribute("title");
+    await expect(binder).toContainText("Hidden because Storage is hidden");
     await expect(hide).toHaveAccessibleDescription(
       "Hidden because Storage is hidden"
     );
-    const trade = button(binder, "Mark Storage / Binder 1 Not for trade");
+    const trade = checkbox(binder, "Mark Storage / Binder 1 For trade");
     await expect(trade).toBeDisabled();
+    await expect(trade).toBeChecked();
+    await expect(binder).toContainText("For trade because Storage is.");
     await expect(trade).toHaveAccessibleDescription(
       "For trade because Storage is."
     );
@@ -358,12 +397,65 @@ test.describe("desktop", () => {
 
     await gear(nav, "Storage / Lugia Deck").click();
     const lugia = settingsOf(page, "Storage / Lugia Deck");
-    const deckHide = button(lugia, "Hide Storage / Lugia Deck from Friends");
+    const deckHide = checkbox(lugia, "Hide Storage / Lugia Deck from Friends");
     await expect(deckHide).toBeDisabled();
+    await expect(deckHide).toBeChecked();
     await expect(deckHide).toHaveAccessibleDescription(
       "Hidden because Storage is hidden"
     );
-    await expect(lugia.getByRole("button", { name: /^Mark / })).toHaveCount(0);
+    await expect(lugia.getByRole("checkbox", { name: /^Mark / })).toHaveCount(
+      0
+    );
+  });
+
+  test("each setting is a row with its note on the left and its control on the right", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const client = api(page);
+    const storageId = await client.create("Storage", null);
+    await client.create("Binder 1", storageId);
+    await page.reload();
+    const nav = sidebarNav(page);
+    await button(nav, "Storage").click();
+    await gear(nav, "Storage").click();
+    const storage = settingsOf(page, "Storage");
+    await expect(storage).toContainText(
+      "Friends can't see this Location or anything in it."
+    );
+    await expect(storage).toContainText(
+      "Offer the cards here, apart from Decks, in trades."
+    );
+    await expect(button(storage, "Delete Storage")).toBeDisabled();
+    await expect(storage).toContainText(
+      "Only an empty Location with no children can be deleted."
+    );
+
+    await expectRowLayout(storage, "Hide Storage from Friends", "Storage");
+  });
+
+  test("a checkbox saved against a stale version says nothing was changed and keeps focus", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const client = api(page);
+    const storageId = await client.create("Storage", null);
+    await page.reload();
+    const nav = sidebarNav(page);
+    await button(nav, "Storage").click();
+    await gear(nav, "Storage").click();
+    const storage = settingsOf(page, "Storage");
+    const trade = checkbox(storage, "Mark Storage For trade");
+    await expect(trade).not.toBeChecked();
+    // Another tab adds a child, which bumps Storage's version after this dialog read it.
+    await client.create("Binder 1", storageId);
+    await trade.click();
+    await expect(storage.getByRole("alert")).toContainText(
+      "nothing was changed"
+    );
+    await expect(trade).not.toBeChecked();
+    await expect(trade).toBeFocused();
+    expect((await client.node(storageId))!.for_trade).toBeFalsy();
   });
 
   test("Delete needs an empty Location without children, and deleting the open Location opens its parent", async ({
@@ -547,14 +639,14 @@ test.describe("mobile", () => {
     expect(frame.width).toBe(375);
     expect(Math.round(frame.y + frame.height)).toBe(812);
     await expect(drawer).toBeVisible();
-    for (const name of [
-      `Rename ${path}`,
-      `Move ${path}`,
-      `Hide ${path} from Friends`,
-      `Mark ${path} For trade`,
-      `Delete ${path}`,
-    ])
+    for (const name of [`Rename ${path}`, `Move ${path}`, `Delete ${path}`])
       await expectTouchTarget(button(sheet, name), ["height"]);
+    await expectRowLayout(sheet, `Hide ${path} from Friends`, path);
+    // A checkbox's tap area is the label around it.
+    for (const name of [`Hide ${path} from Friends`, `Mark ${path} For trade`])
+      await expectTouchTarget(
+        checkbox(sheet, name).locator("xpath=ancestor::label")
+      );
 
     await button(sheet, `Rename ${path}`).click();
     await sheet.getByLabel("New name").fill("Binder 1a");

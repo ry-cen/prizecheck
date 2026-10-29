@@ -297,6 +297,17 @@ Compact, flat and plainly labelled, with an optional leading icon.
 - **Disabled:** 45% opacity; a busy button shows 60% opacity and a progress cursor.
 - **Focus:** the global 2 px Prize Gold outline with a 2 px offset.
 
+### Checkboxes
+
+- **Style:** the native checkbox, 16 px, drawn in Prize Gold, inside a tap area of 30 px on desktop and 44 px on a phone. It has no visible text of its own; its setting's name sits in a Setting row, and its accessible name says what it does.
+- **State:** checked shows the setting is on. A saving checkbox shows the value just asked for and carries `aria-busy`; a refused save shows the saved value again. Disabled is 45% opacity.
+
+### Setting rows
+
+- **Layout:** a name in Body text (500) with a one-line Meta note in Parchment beneath it, left-aligned; the control (Checkbox, Select or Button) right-aligned. Rows are separated by Stitch dividers with 12 px of padding above and below.
+- **Wrapping:** the note keeps at least 12 rem; the control wraps under it only when it no longer fits beside it, at any width. Long names break instead of overflowing.
+- **Notes:** say what the setting does for the collector, or why it can't change now (a disabled control puts its reason here, not in a tooltip).
+
 ### Chips
 
 - **Style:** fully round, 24 px drawn height (30 px on a phone, inside a 44 px tap box), Meta text, a Stitch border and Parchment text.
