@@ -17,6 +17,7 @@ import { parseCardTable } from "./cardTable";
 import { combine } from "./combine";
 import { COMBINE, OCR_CROPS_FOUR, SEARCH_TOP_K } from "./constants";
 import { ctcDecode, loadClasses } from "./ctc";
+import { groupMembers } from "./lookalike";
 import type { Models } from "./models";
 import { buildNumberIndex, lookup, parseNumberText } from "./numbers";
 import { parsePcfp } from "./pcfp";
@@ -38,6 +39,8 @@ export type RecognizerData = {
   release: Map<string, string>;
   fp: Pcfp | null;
   fpRows: Map<string, number> | null;
+  /** Reprint Group ordinal to its card ids (groups of two or more), for the look-alikes. */
+  groups: Map<number, string[]>;
   classes: string[];
 };
 
@@ -56,6 +59,7 @@ export function loadData(
     release: nidx.release,
     fp,
     fpRows: fp ? rowIndex(fp) : null,
+    groups: groupMembers(db),
     classes: loadClasses(dictText),
   };
 }
@@ -124,7 +128,21 @@ export function voteInput(a: FrameAnalysis, t: number): VoteFrame {
     f !== null &&
     f.ranked.length > 0 &&
     f.ocrCands.some((c) => c.id === f.ranked[0]);
-  return { t, thumb: a.thumb, top: f ? f.ranked : null, eligible, textBacked };
+  // The OCR candidates that read the printed number at least as strongly as the pick: a look-alike the number does not
+  // support is dropped from an automatic lock.
+  const own = f ? f.ocrCands.find((c) => c.id === f.ranked[0]) : undefined;
+  const numberIds =
+    f && own
+      ? f.ocrCands.filter((c) => c.tier >= own.tier).map((c) => c.id)
+      : [];
+  return {
+    t,
+    thumb: a.thumb,
+    top: f ? f.ranked : null,
+    eligible,
+    textBacked,
+    numberIds,
+  };
 }
 
 export async function analyseFrame(

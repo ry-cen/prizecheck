@@ -137,7 +137,13 @@ describe("ScannerSession", () => {
     await h.session.start();
     const say = (data: FromWorker) =>
       h.worker.onmessage?.({ data } as MessageEvent<FromWorker>);
-    say({ t: "lock", lockId: 3, printingIds: ["a"], via: "suggest" });
+    say({
+      t: "lock",
+      lockId: 3,
+      printingIds: ["a"],
+      via: "suggest",
+      lookalikes: ["b", "c"],
+    });
     say({ t: "absent", lockId: 3 });
     say({ t: "miss" });
     say({ t: "gate", id: 1, ok: false, reason: "dark" });
@@ -145,6 +151,7 @@ describe("ScannerSession", () => {
       lockId: 3,
       printingIds: ["a"],
       via: "suggest",
+      lookalikes: ["b", "c"],
     });
     expect(h.events.onAbsent).toHaveBeenCalledWith(3);
     expect(h.events.onMiss).toHaveBeenCalledOnce();

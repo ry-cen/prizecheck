@@ -50,7 +50,13 @@ describe("StubRecognizer", () => {
     });
     for (let i = 0; i < 3; i++) r.frame();
     expect(r.sent("lock")).toEqual([
-      { t: "lock", lockId: 1, printingIds: ["A", "B"], via: "auto" },
+      {
+        t: "lock",
+        lockId: 1,
+        printingIds: ["A", "B"],
+        via: "auto",
+        lookalikes: [],
+      },
     ]);
     r.send({ t: "lockOutcome", lockId: 1, added: true });
     r.frame(TABLE);
@@ -64,7 +70,13 @@ describe("StubRecognizer", () => {
     const r = rig({ frames: [f, f, f, {}, {}, {}, {}, f, f, f] });
     for (let i = 0; i < 3; i++) r.frame();
     expect(r.sent("lock")).toEqual([
-      { t: "lock", lockId: 1, printingIds: ["A", "B", "C"], via: "suggest" },
+      {
+        t: "lock",
+        lockId: 1,
+        printingIds: ["A", "B", "C"],
+        via: "suggest",
+        lookalikes: [],
+      },
     ]);
     r.frame(TABLE);
     r.frame(TABLE);
@@ -104,7 +116,13 @@ describe("StubRecognizer", () => {
     r.frame();
     r.send({ t: "shutter" });
     expect(r.sent("lock")).toEqual([
-      { t: "lock", lockId: 1, printingIds: ["A", "B"], via: "shutter" },
+      {
+        t: "lock",
+        lockId: 1,
+        printingIds: ["A", "B"],
+        via: "shutter",
+        lookalikes: [],
+      },
     ]);
     r.send({ t: "lockOutcome", lockId: 1, added: true });
     const m = rig({ frames: [{}] });
@@ -136,5 +154,24 @@ describe("StubRecognizer", () => {
     r.send({ t: "resume" });
     for (let i = 0; i < 3; i++) r.frame();
     expect(r.sent("lock")).toHaveLength(1);
+  });
+
+  it("scripted lookalikes reach the lock message", () => {
+    const f = { top: ["A", "B"], ocr: ["A", "L2"] };
+    const r = rig({
+      frames: [f, f, f],
+      lookalikes: { A: ["L1", "L2"], B: ["L9"] },
+    });
+    for (let i = 0; i < 3; i++) r.frame();
+    // An automatic lock keeps only what the scripted OCR numbers support.
+    expect(r.sent("lock")).toEqual([
+      {
+        t: "lock",
+        lockId: 1,
+        printingIds: ["A", "B"],
+        via: "auto",
+        lookalikes: ["L2"],
+      },
+    ]);
   });
 });

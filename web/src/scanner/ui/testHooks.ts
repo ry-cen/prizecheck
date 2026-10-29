@@ -24,6 +24,9 @@ export type ScannerTestScript = Omit<StubScript, "frames"> & {
   /** `camera`: the frames come from the real `CameraFrameSource` (Chromium's fake device), not from `frames`' pictures. The
    * stub recognizer still answers from `frames`. */
   source?: "camera";
+  /** Frames keep coming while a choice prompt is open, so the script can take the card out of the guide with the prompt
+   * showing. Without it the source waits for every lock's `lockOutcome`, so a tap can come before the script moves on. */
+  walkAway?: boolean;
 };
 export type ScannerTestHook = {
   script: ScannerTestScript;
@@ -126,8 +129,8 @@ class CountingCamera implements FrameSource {
   stop = () => this.camera.stop();
 }
 
-/** Wraps the stub worker to see which locks still wait for their `lockOutcome`. A suggestion is not held: its frames must
- * keep coming so the card can leave the guide. */
+/** Wraps the stub worker to see which locks still wait for their `lockOutcome` (see `createSource` for when the
+ * frames are held). */
 function watched(
   real: Worker,
   waiting: Set<number>,
@@ -153,7 +156,7 @@ function watched(
               return;
             }
             if (m.t === "frameDone") hook.delivered = ++delivered;
-            if (m.t === "lock" && m.via !== "suggest") waiting.add(m.lockId);
+            if (m.t === "lock") waiting.add(m.lockId);
             handler(event);
           }
         : null;
@@ -209,7 +212,13 @@ export function stubDeps(raw: unknown): SessionDeps {
           })
         : new ScriptedFrameSource(
             script,
-            () => waiting.size > 0,
+            // With `walkAway`, an open prompt does not hold the frames: the card can be taken out of the guide.
+            () =>
+              waiting.size > 0 &&
+              !(
+                script.walkAway &&
+                document.querySelector('[data-testid="scan-suggestion"]')
+              ),
             (n) => {
               hook.played = n;
             }

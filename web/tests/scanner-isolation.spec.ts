@@ -6,6 +6,7 @@ import { test, expect } from "@playwright/test";
 import {
   holding,
   installScript,
+  pickFinish,
   printingIds,
   seedPopup,
   signInFresh,
@@ -81,6 +82,7 @@ test("opened through Scan cards, the page and the recognizer worker are cross-or
   ).toBe(true);
 
   // A lock puts a card in the tray, whose row draws a picture from another origin.
+  await pickFinish(page, "Normal");
   await expect(trayPeek(page)).toContainText("Bulbasaur");
   await expect
     .poll(() =>

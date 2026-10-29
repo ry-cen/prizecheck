@@ -1,6 +1,7 @@
 """Scanner manifest, number table and fingerprint file routes (#310; plumbing D4, D5, D7)."""
 import gzip
 import json
+from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.main import app, connect
@@ -75,7 +76,8 @@ def test_cards_gzip_has_the_documented_shape_and_set_counts_come_from_the_table(
     assert data["format"] == 2 and data["key"] == body["cards"]["key"] and data["catalog_revision"] == 1
     assert data["sets"] == [{"id": "fixture", "code": None, "official": 25, "total": 30, "released": "2023-03-31"}]
     columns = data["printings"]
-    assert set(columns) == {"id", "set", "number", "name", "art"}
+    assert set(columns) == {"id", "set", "number", "name", "art", "group"}
+    assert columns["group"] == [None, None]  # No Reprint Group has two Printings here.
     assert columns["id"] == sorted(columns["id"]) and len(columns["id"]) == 2
     assert sorted(columns["name"]) == ["Pikachu", "Raichu"] and columns["set"] == [0, 0]
     assert sorted(columns["number"], key=str) == ["1", "2"]
@@ -107,7 +109,7 @@ def test_two_builds_at_one_key_are_byte_equal():
     seed()
     with connect() as conn:
         state = conn.execute("SELECT active_generation, revision FROM catalog_state").fetchone()
-        key = scanner.cards_key(state)
+        key = scanner.cards_key(state, scanner.groups_digest(conn))
         first = scanner.build_cards(conn, state, key)
     with connect() as conn:
         second = scanner.build_cards(conn, state, key)
@@ -141,9 +143,10 @@ def test_the_format_is_in_the_key(monkeypatch):
     seed()
     with connect() as conn:
         state = conn.execute("SELECT active_generation, revision FROM catalog_state").fetchone()
-    current = scanner.cards_key(state)
+        digest = scanner.groups_digest(conn)
+    current = scanner.cards_key(state, digest)
     monkeypatch.setattr(scanner, "CARDS_FORMAT", 1)
-    assert scanner.cards_key(state) != current
+    assert scanner.cards_key(state, digest) != current
 
 
 def test_the_last_build_is_kept_in_memory(monkeypatch):
@@ -200,3 +203,46 @@ def test_fingerprints_stream_the_stored_bytes_and_a_pruned_sha_is_404():
     assert gone.status_code == 404 and gone.json()["detail"]["code"] == "FINGERPRINTS_NOT_FOUND"
     assert get("/api/scanner/fingerprints/" + "g" * 64).status_code == 422
     assert get("/api/scanner/fingerprints/" + "a" * 63).status_code == 422
+
+
+def put_in_group(group, *printing_ids):
+    with connect() as conn:
+        for printing_id in printing_ids:
+            conn.execute("INSERT INTO catalog_reprint_group_membership(printing_id, group_id) VALUES (%s, %s)\n"
+                         "ON CONFLICT (printing_id) DO UPDATE SET group_id=EXCLUDED.group_id", (printing_id, group))
+
+
+def test_group_column_numbers_reprint_groups_with_two_or_more_printings():
+    seed({"card-1": "Pikachu", "card-2": "Pikachu", "card-3": "Raichu", "card-4": "Eevee"})
+    columns = table()["printings"]
+    by_number = dict(zip(columns["number"], columns["id"]))
+    first, second, alone = by_number["1"], by_number["2"], by_number["3"]
+    put_in_group(uuid4(), first, second)
+    put_in_group(uuid4(), alone)  # A group of one Printing is not numbered.
+    scanner._cards_cache = None
+    columns = table()["printings"]
+    group = dict(zip(columns["id"], columns["group"]))
+    assert group[first] is not None and group[first] == group[second]
+    assert group[alone] is None and group[by_number["4"]] is None
+    # Ordinals count up from 0 in Printing id order, and a second group gets the next one.
+    put_in_group(uuid4(), alone, by_number["4"])
+    scanner._cards_cache = None
+    columns = table()["printings"]
+    group = dict(zip(columns["id"], columns["group"]))
+    assert sorted({value for value in group.values() if value is not None}) == [0, 1]
+    assert group[alone] == group[by_number["4"]] != group[first] == group[second]
+
+
+def test_cards_key_changes_when_reprint_group_membership_changes():
+    seed({"card-1": "Pikachu", "card-2": "Pikachu"})
+    first, second = table()["printings"]["id"]
+    old = manifest().json()["cards"]
+    put_in_group(uuid4(), first, second)
+    new = manifest().json()["cards"]
+    assert new["key"] != old["key"]
+    stale = get(old["url"])
+    assert stale.status_code == 404 and stale.json()["detail"]["code"] == "CARDS_NOT_CURRENT"
+    assert get(new["url"]).status_code == 200
+    # Moving one Printing to another group changes the key again.
+    put_in_group(uuid4(), second)
+    assert manifest().json()["cards"]["key"] not in (old["key"], new["key"])

@@ -125,8 +125,15 @@ The Card Editions and counts a Card Scan has gathered and the collector has not 
 _Avoid_: Scan session, import draft, cart
 
 **Scan Suggestion**:
-A card the scanner matched by its artwork alone, offered as up to three candidates; it enters the Scan Tray only when the collector picks one or finds the card by search. A card whose printed number agrees enters the Scan Tray without asking.
+A card the scanner matched by its artwork alone, offered as up to 8 versions (the top match, its look-alikes, then the other candidates); it enters the Scan Tray only when the collector picks one or finds the card by search. A card whose printed number agrees enters the Scan Tray without asking which card; it still asks for the finish when it has more than one.
 _Avoid_: Guess, unconfirmed lock
+
+**Look-alike Printings**:
+Card Printings in one Reprint Group whose artwork the scanner cannot tell apart; the collector picks among them when one is scanned.
+_Avoid_: Twins, shared-art group
+
+**Scan Choice**:
+The scanner's question when a scanned card needs the collector to pick its version or finish; a Scan Suggestion is a Scan Choice for a card matched by artwork alone.
 
 **Inventory Removal**:
 An explicit decrease that takes selected copies out of the tracked Collection without moving them to another Location.

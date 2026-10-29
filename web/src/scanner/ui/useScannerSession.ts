@@ -17,7 +17,12 @@ export type Phase =
   | { kind: "running" }
   | { kind: "cannot-start"; cause: StartCause };
 
-export type LockEvent = { lockId: number; printingIds: string[]; via: LockVia };
+export type LockEvent = {
+  lockId: number;
+  printingIds: string[];
+  via: LockVia;
+  lookalikes: string[];
+};
 
 export type ScannerHandlers = {
   onLock(lock: LockEvent): void;

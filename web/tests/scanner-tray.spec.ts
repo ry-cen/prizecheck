@@ -1,5 +1,6 @@
-// Ticket #318: the scanner screen and its tray, driven by the stub recognizer (frame injection). A lock adds a row with its
-// default finish selected; a second placement counts it; a shutter with no candidate opens search; an unreachable printings
+// Ticket #318: the scanner screen and its tray, driven by the stub recognizer (frame injection). A lock of a card with
+// several finishes asks which (the scan choice, scanner-choice.spec.ts); a card with one finish adds a row with its
+// chosen finish selected; a second placement counts it; a shutter with no candidate opens search; an unreachable printings
 // route adds no row and says so; the tray survives a reload and belongs to its account; no image bytes leave the page.
 // Every state runs the shared page check (axe, no horizontal scroll, 44 px targets on a phone) at 1280×800 and 375×812.
 import { test, expect, type Page } from "@playwright/test";
@@ -12,9 +13,11 @@ import {
   empty,
   framesPlayed,
   hintPill,
+  choiceCard,
   holding,
   installScript,
   openScanner,
+  pickFinish,
   placements,
   printingIds,
   retireBulbasaurNormal,
@@ -41,7 +44,7 @@ for (const size of SIZES) {
     });
     test.beforeEach(() => seedPopup());
 
-    test("a lock adds a row with its default finish selected, and a second placement counts it", async ({
+    test("a lock asks which finish, adds a row with it selected, and a second placement of that finish counts it", async ({
       page,
     }) => {
       const bodies: { type: string | undefined; size: number }[] = [];
@@ -65,6 +68,14 @@ for (const size of SIZES) {
       await expect(page.getByRole("navigation")).toHaveCount(0);
       await expect(hintPill(page)).toHaveText("");
 
+      // Bulbasaur has two finishes: each placement asks, and nothing is selected for the collector.
+      await expect(choiceCard(page)).toBeVisible();
+      await expect(
+        choiceCard(page).getByRole("button", { pressed: true })
+      ).toHaveCount(0);
+      await pickFinish(page, "Normal");
+      await expect(trayPeek(page)).toContainText("×1");
+      await pickFinish(page, "Normal");
       const peek = trayPeek(page);
       await expect(peek).toContainText("Bulbasaur");
       await expect(peek).toContainText("×2");
@@ -246,6 +257,7 @@ for (const size of SIZES) {
       const ids = await printingIds(page);
       await installScript(page, { frames: placements(ids["Bulbasaur"]) });
       await openScanner(page);
+      await pickFinish(page, "Normal");
       await expect(trayPeek(page)).toContainText("Bulbasaur");
 
       await page.route("**/api/scanner/printings", (route) => route.abort());
@@ -283,6 +295,7 @@ for (const size of SIZES) {
       const ids = await printingIds(page);
       await installScript(page, { frames: placements(ids["Bulbasaur"]) });
       await openScanner(page);
+      await pickFinish(page, "Normal");
       await expect(trayPeek(page)).toContainText("Bulbasaur");
       // The catalog withdraws Normal, and another card in the tray no longer exists at all.
       await retireBulbasaurNormal();
@@ -355,6 +368,8 @@ for (const size of SIZES) {
         frames: placements(ids["Bulbasaur"], ids["Bulbasaur"], ids["Switch"]),
       });
       await openScanner(page);
+      await pickFinish(page, "Normal");
+      await pickFinish(page, "Normal");
       await expect(trayPeek(page)).toContainText("3 cards");
       await reviewTray(page);
       const tray = trayOpen(page);

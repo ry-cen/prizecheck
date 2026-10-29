@@ -1,6 +1,9 @@
 // The Scan Tray's data layer (D8, D10, D11, D12): a per-account tray in localStorage that survives reloads, enforces
 // its caps on every edit, marks stale rows and confirms through the save route with a retry-safe key. There is no
 // screen here. The tray holds Printing ids, Edition ids and counts only: never photos, names, images, prices or scores.
+// A row is one Printing + one Edition. A copy goes to the newest row with both, or starts a new row; changing a row's
+// Edition (or Printing) merges it into another row with the same pair. Duplicate rows from older trays are allowed
+// and merge at Confirm (`mergeItems`) or the next change of one of them.
 import {
   ScannerError,
   resolveScannerPrintings,
@@ -15,6 +18,7 @@ import type { OutcomeReason } from "../worker/messages";
 // ---------------------------------------------------------------------------------------------------------------
 // Schema and limits
 
+/** One Printing + one Edition. Older trays may hold several rows of one pair; they merge at Confirm. */
 export type TrayRow = {
   id: string; // row identity for the UI
   printing_id: string;
@@ -282,18 +286,25 @@ export type TrayStore = {
   reload(): Promise<void>;
   dispose(): void;
 
-  /** A recognizer lock or Scan Suggestion yes: up to 3 printing ids, best first. */
-  applyLock(printingIds: string[]): Promise<LockResult>;
-  /** A Scan Suggestion pick: `printingId` must itself resolve; `others` fill the row's candidates. */
-  applyPick(printingId: string, others?: string[]): Promise<LockResult>;
-  /** A catalog search pick: the explicit Edition the collector chose. With `replaceRowId` it replaces that row's
-   * Printing and Edition and clears needs_pick, keeping its count. */
+  /** The collector's or the scanner's chosen Printing and Edition: one copy to the newest row with both, or a new row.
+   * Makes no network call. `candidates` fill the new row's candidates (at most 3 in all, the Printing first). */
+  applyChoice(pick: {
+    printingId: string;
+    editionId: string;
+    candidates?: string[];
+  }): Promise<LockResult>;
+  /** Resolves display data for Printing ids (5 s timeout, caches it in `printings`, sets `offline` on failure). */
+  lookupPrintings(ids: string[]): Promise<ScannerPrinting[] | null>;
+  /** A catalog search pick: the explicit Edition the collector chose. Without `replaceRowId` it stacks like
+   * `applyChoice`. With `replaceRowId` it replaces that row's Printing and Edition and clears needs_pick, keeping its
+   * count, and merges into another row with the same Printing and Edition if there is one. */
   applySearchPick(pick: {
     printingId: string;
     editionId: string;
     replaceRowId?: string;
   }): Promise<EditResult>;
-  /** Chip change; also resolves a needs_pick row. */
+  /** Chip change; also resolves a needs_pick row. Merges into another row with the same Printing and Edition: this
+   * row keeps its id and place and gets the summed count ("full" past 999). */
   setEdition(rowId: string, editionId: string): Promise<EditResult>;
   /** Sets a row's count (1..999). A count of 0 is "invalid": call removeRow. */
   setCount(rowId: string, count: number): Promise<EditResult>;
@@ -443,79 +454,99 @@ export async function openTray(
     }
   };
 
-  async function lock(
-    ids: string[],
-    strictFirst: boolean
-  ): Promise<LockResult> {
-    const wanted = [...new Set(ids)].slice(0, MAX_CANDIDATES);
-    if (wanted.length === 0) return { added: false, reason: "unresolved" };
-    const current = state.tray;
-    if (isFrozen(current)) return refuse("frozen");
-    // A copy to an existing row is checked before the network wait. This guesses that the first candidate is the
-    // Printing that will resolve; if it does not, the check inside the lock after the answer is the real one, so a
-    // wrong guess only costs an early "full" for a card that would have gone to a different, resolvable Printing.
-    const existing = current.rows.find((r) => r.printing_id === wanted[0]);
-    if (existing) {
-      const v = trayEditAllowed(current, {
-        type: "set_count",
-        row_id: existing.id,
-        count: existing.count + 1,
-      });
-      if (v !== "ok") return refuse(v);
-    }
-    const found = await lookup(wanted);
-    if (found === null) return { added: false, reason: "offline" };
-    const byId = new Map(found.map((p) => [p.id, p]));
-    const resolvable = wanted.filter((id) => byId.get(id)?.default_edition_id);
-    const chosenId = strictFirst
-      ? resolvable[0] === wanted[0]
-        ? wanted[0]
-        : undefined
-      : resolvable[0];
-    if (chosenId === undefined) return { added: false, reason: "unresolved" };
-    const editionId = byId.get(chosenId)!.default_edition_id!;
-    const candidates = [
-      chosenId,
-      ...resolvable.filter((id) => id !== chosenId),
-    ].slice(0, MAX_CANDIDATES);
-    return mutate<LockResult>((tray) => {
-      if (isFrozen(tray)) return { tray: null, value: refuse("frozen") };
-      const newest = tray.rows.find((r) => r.printing_id === chosenId);
-      if (newest) {
-        const v = trayEditAllowed(tray, {
-          type: "set_count",
-          row_id: newest.id,
-          count: newest.count + 1,
-        });
-        if (v !== "ok") return { tray: null, value: refuse(v) };
-        const row = { ...newest, count: newest.count + 1 };
-        return {
-          tray: {
-            ...tray,
-            rows: tray.rows.map((r) => (r.id === row.id ? row : r)),
-          },
-          value: { added: true, row },
-        };
-      }
+  /** One copy of a Printing + Edition: to the newest matching row that is not needs_pick, else a new row on top. */
+  const addCopy = (
+    tray: TrayV1,
+    printingId: string,
+    editionId: string,
+    candidates: string[]
+  ): { tray: TrayV1 | null; value: LockResult } => {
+    if (isFrozen(tray)) return { tray: null, value: refuse("frozen") };
+    // Rows are newest first, so the first match is the newest.
+    const target = tray.rows.find(
+      (r) =>
+        r.printing_id === printingId &&
+        r.edition_id === editionId &&
+        !r.needs_pick
+    );
+    if (target) {
       const v = trayEditAllowed(tray, {
-        type: "add_row",
-        edition_id: editionId,
+        type: "set_count",
+        row_id: target.id,
+        count: target.count + 1,
       });
       if (v !== "ok") return { tray: null, value: refuse(v) };
-      const row: TrayRow = {
-        id: uuid(),
-        printing_id: chosenId,
-        edition_id: editionId,
-        count: 1,
-        candidates,
-        needs_pick: false,
-      };
+      const row = { ...target, count: target.count + 1 };
       return {
-        tray: { ...tray, rows: [row, ...tray.rows] },
+        tray: {
+          ...tray,
+          rows: tray.rows.map((r) => (r.id === row.id ? row : r)),
+        },
         value: { added: true, row },
       };
+    }
+    const v = trayEditAllowed(tray, { type: "add_row", edition_id: editionId });
+    if (v !== "ok") return { tray: null, value: refuse(v) };
+    const row: TrayRow = {
+      id: uuid(),
+      printing_id: printingId,
+      edition_id: editionId,
+      count: 1,
+      candidates: [...new Set([printingId, ...candidates])].slice(
+        0,
+        MAX_CANDIDATES
+      ),
+      needs_pick: false,
+    };
+    return {
+      tray: { ...tray, rows: [row, ...tray.rows] },
+      value: { added: true, row },
+    };
+  };
+
+  /**
+   * Gives a row a Printing and Edition (a chip change or a search pick that replaces it). If another row, not
+   * needs_pick, already has that pair, the two merge: the changed row keeps its id and place and gets the summed
+   * count, and the other row goes. A sum over 999 is "full". `candidates` null keeps the row's own.
+   */
+  const moveRow = (
+    tray: TrayV1,
+    rowId: string,
+    printingId: string,
+    editionId: string,
+    candidates: string[] | null
+  ): { tray: TrayV1 | null; value: EditResult } => {
+    if (isFrozen(tray)) return { tray: null, value: "frozen" };
+    const row = tray.rows.find((r) => r.id === rowId);
+    if (!row) return { tray: null, value: "no_row" };
+    const other = tray.rows.find(
+      (r) =>
+        r.id !== rowId &&
+        r.printing_id === printingId &&
+        r.edition_id === editionId &&
+        !r.needs_pick
+    );
+    if (other && row.count + other.count > MAX_ROW_COUNT)
+      return { tray: null, value: "full" };
+    const v = trayEditAllowed(tray, {
+      type: "set_edition",
+      row_id: rowId,
+      edition_id: editionId,
     });
-  }
+    if (v !== "ok") return { tray: null, value: v };
+    const moved: TrayRow = {
+      ...row,
+      printing_id: printingId,
+      edition_id: editionId,
+      candidates: candidates ?? row.candidates,
+      count: other ? row.count + other.count : row.count,
+      needs_pick: false,
+    };
+    const rows = tray.rows
+      .filter((r) => r.id !== other?.id)
+      .map((r) => (r.id === rowId ? moved : r));
+    return { tray: { ...tray, rows }, value: "ok" };
+  };
 
   const onStorage = (event: Event) => {
     const k = (event as StorageEvent).key;
@@ -550,64 +581,32 @@ export async function openTray(
       listeners.clear();
     },
 
-    applyLock: (ids) => lock(ids, false),
-    applyPick: (printingId, others = []) => lock([printingId, ...others], true),
+    applyChoice: ({ printingId, editionId, candidates = [] }) =>
+      mutate<LockResult>((tray) =>
+        addCopy(tray, printingId, editionId, candidates)
+      ),
+    lookupPrintings: (ids) => lookup(ids),
 
     async applySearchPick({ printingId, editionId, replaceRowId }) {
       return mutate<EditResult>((tray) => {
-        if (isFrozen(tray)) return { tray: null, value: "frozen" };
         if (replaceRowId === undefined) {
-          const v = trayEditAllowed(tray, {
-            type: "add_row",
-            edition_id: editionId,
-          });
-          if (v !== "ok") return { tray: null, value: v };
-          const row: TrayRow = {
-            id: uuid(),
-            printing_id: printingId,
-            edition_id: editionId,
-            count: 1,
-            candidates: [printingId],
-            needs_pick: false,
+          const out = addCopy(tray, printingId, editionId, []);
+          return {
+            tray: out.tray,
+            value: out.value.added ? "ok" : (out.value.verdict ?? "full"),
           };
-          return { tray: { ...tray, rows: [row, ...tray.rows] }, value: "ok" };
         }
-        const target = tray.rows.find((r) => r.id === replaceRowId);
-        if (!target) return { tray: null, value: "no_row" };
-        const v = trayEditAllowed(tray, {
-          type: "set_edition",
-          row_id: replaceRowId,
-          edition_id: editionId,
-        });
-        if (v !== "ok") return { tray: null, value: v };
-        const row: TrayRow = {
-          ...target,
-          printing_id: printingId,
-          edition_id: editionId,
-          candidates: [printingId],
-          needs_pick: false,
-        };
-        return {
-          tray: {
-            ...tray,
-            rows: tray.rows.map((r) => (r.id === row.id ? row : r)),
-          },
-          value: "ok",
-        };
+        return moveRow(tray, replaceRowId, printingId, editionId, [printingId]);
       });
     },
 
     setEdition: (rowId, editionId) =>
-      editRow(
-        rowId,
-        (row) => ({ ...row, edition_id: editionId, needs_pick: false }),
-        (tray) =>
-          trayEditAllowed(tray, {
-            type: "set_edition",
-            row_id: rowId,
-            edition_id: editionId,
-          })
-      ),
+      mutate<EditResult>((tray) => {
+        const row = tray.rows.find((r) => r.id === rowId);
+        if (!row)
+          return { tray: null, value: isFrozen(tray) ? "frozen" : "no_row" };
+        return moveRow(tray, rowId, row.printing_id, editionId, null);
+      }),
 
     async setCount(rowId, count) {
       if (!Number.isInteger(count) || count < 1) return "invalid";

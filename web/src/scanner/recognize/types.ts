@@ -38,6 +38,8 @@ export type CardDb = {
   names: string[];
   /** The 8-hex art version of each card's small picture, or null (a v1 table has none). */
   art: (string | null)[];
+  /** The Reprint Group ordinal of each card, or null when its group has no other card in the table (absent in a hand-built db and in an old table). */
+  groups?: (number | null)[];
   sets: CardSet[];
 };
 

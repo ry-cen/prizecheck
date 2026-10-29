@@ -49,7 +49,7 @@ export function capReaction(
 }
 
 /**
- * Runs a store call that answers a lock (`applyLock`, `applyPick`). It can throw (storage over quota, a refused Web Lock);
+ * Runs a store call that answers a lock (`applyChoice`). It can throw (storage over quota, a refused Web Lock);
  * the recognizer must still get its `lockOutcome` or its voter waits for one forever. A throw is an unresolved lock that
  * shows the hint, even for a shutter (search would find the same failure).
  */

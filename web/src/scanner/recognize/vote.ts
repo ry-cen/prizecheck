@@ -14,11 +14,20 @@ export type VoteFrame = {
   top: readonly string[] | null;
   eligible: boolean;
   textBacked: boolean;
+  /** The ids whose printed-number reading supports them at least as strongly as top[0] (empty unless textBacked). */
+  numberIds: readonly string[];
 };
 // top null: the full pipeline did not run. eligible: a card is evidently present (quad found or OCR candidates), so the frame may count toward an automatic lock.
 // textBacked: top[0] is one of the frame's OCR catalog candidates (the printed number agrees), not an image-only pick.
 export type VoteEvent =
-  | { kind: "lock"; lockId: number; printingIds: string[]; via: LockVia }
+  | {
+      kind: "lock";
+      lockId: number;
+      printingIds: string[];
+      via: LockVia;
+      /** Automatic locks: the union of the backing frames' number ids; the look-alikes are narrowed to these. null: no narrowing. */
+      numberIds: string[] | null;
+    }
   | { kind: "miss" };
 
 /** Mean |a - b| in 0..255 units. */
@@ -50,7 +59,12 @@ export function bordaOrder(
 // LockVia. auto: frames agree and the printed number backs the pick. suggest: frames agree on the image alone, so the collector
 // confirms it (owner, 2026-10-23: image-only auto locks were wrong 6 of 9 times on the phone). shutter: the collector pressed the shutter.
 
-type Entry = { t: number; top: readonly string[]; textBacked: boolean };
+type Entry = {
+  t: number;
+  top: readonly string[];
+  textBacked: boolean;
+  numberIds: readonly string[];
+};
 
 export class Voter {
   private readonly cfg: VoteConfig;
@@ -59,7 +73,6 @@ export class Voter {
   private lockId = 0;
   private lockThumb: Uint8Array | null = null;
   private lastThumb: Uint8Array | null = null;
-  private lockVia: LockVia = "auto";
   private absentRun = 0;
   private absentPosted = false;
   private noLockUntil = -Infinity;
@@ -81,18 +94,24 @@ export class Voter {
   private lock(
     ids: string[],
     thumb: Uint8Array | null,
-    via: LockVia
+    via: LockVia,
+    numberIds: string[] | null = null
   ): VoteEvent {
     this.lockId += 1;
     this.lockThumb = thumb;
-    this.lockVia = via;
     this.absentRun = 0;
     this.absentPosted = false;
     this.st = "pending";
-    return { kind: "lock", lockId: this.lockId, printingIds: ids, via };
+    return {
+      kind: "lock",
+      lockId: this.lockId,
+      printingIds: ids,
+      via,
+      numberIds,
+    };
   }
 
-  /** `absence`: a locked voter re-armed. `absentLockId`: the card left the guide while a suggest lock waits for its outcome (once per lock). */
+  /** `absence`: a locked voter re-armed. `absentLockId`: the card left the guide while a lock waits for its outcome (once per lock, whatever its `via`). */
   onFrame(f: VoteFrame): {
     event: VoteEvent | null;
     absence: boolean;
@@ -102,8 +121,8 @@ export class Voter {
     this.seen(f.t);
     this.lastThumb = f.thumb;
     if (this.st === "pending") {
-      // A pending suggestion keeps tracking absence (same thumbnail rule as after a lock) so the main thread can close it unanswered.
-      if (this.lockVia !== "suggest" || this.absentPosted)
+      // A pending lock keeps tracking absence (same thumbnail rule as after a lock) so the main thread can skip a choice the card left.
+      if (this.absentPosted)
         return { event: null, absence: false, mad: null, absentLockId: null };
       const mad = this.lockThumb ? thumbMad(f.thumb, this.lockThumb) : 0;
       if (mad > this.cfg.absenceMad) this.absentRun += 1;
@@ -128,7 +147,12 @@ export class Voter {
     // armed (cooldown included)
     this.window = this.window.filter((w) => w.t >= f.t - this.cfg.windowMs);
     if (f.top !== null && f.eligible) {
-      this.window.push({ t: f.t, top: f.top, textBacked: f.textBacked });
+      this.window.push({
+        t: f.t,
+        top: f.top,
+        textBacked: f.textBacked,
+        numberIds: f.numberIds,
+      });
       if (this.window.length > this.cfg.windowFrames)
         this.window = this.window.slice(-this.cfg.windowFrames);
     }
@@ -143,14 +167,19 @@ export class Voter {
           const rest = bordaOrder(this.window)
             .filter((x) => x !== id)
             .slice(0, 2);
-          const backed = this.window.some(
+          const backing = this.window.filter(
             (w) => w.textBacked && w.top[0] === id
           );
+          const backed = backing.length > 0;
+          const numberIds = backed
+            ? [...new Set(backing.flatMap((w) => w.numberIds))]
+            : null;
           return {
             event: this.lock(
               [id, ...rest],
               f.thumb,
-              backed ? "auto" : "suggest"
+              backed ? "auto" : "suggest",
+              numberIds
             ),
             absence: false,
             mad: null,

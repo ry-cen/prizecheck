@@ -75,6 +75,32 @@ describe("card table", () => {
   it("parses format 2 and keeps the art versions", () => {
     expect(parseCardTable(tiny2).art).toEqual([null, "0a1b2c3d"]);
   });
+  it("a table without group parses with null groups", () => {
+    expect(parseCardTable(tiny2).groups).toEqual([null, null]);
+    expect(parseCardTable(tiny).groups).toEqual([null, null]);
+  });
+  it("keeps the group column", () => {
+    const t = {
+      ...tiny2,
+      printings: { ...tiny2.printings, group: [0, null] },
+    };
+    expect(parseCardTable(t).groups).toEqual([0, null]);
+  });
+  it("a group column of the wrong length or with a negative or fractional entry is CARD_TABLE_INVALID", () => {
+    for (const group of [[0], [0, 1, 2], [-1, null], [0.5, null], ["0", null]])
+      expect(() =>
+        parseCardTable({
+          ...tiny2,
+          printings: { ...tiny2.printings, group },
+        })
+      ).toThrow(/CARD_TABLE_INVALID/);
+    expect(() =>
+      parseCardTable({
+        ...tiny2,
+        printings: { ...tiny2.printings, group: "x" },
+      })
+    ).toThrow(/CARD_TABLE_INVALID/);
+  });
   it("rejects a format 2 art value that is not an 8-hex version", () => {
     for (const art of [["https://x"], ["0A1B2C3D"], [7]])
       expect(() =>
