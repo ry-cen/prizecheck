@@ -27,21 +27,16 @@ import { Button } from "../ui/Button";
 import { CopyArt } from "../ui/CopyTile";
 import { Pill } from "../ui/Pill";
 import { TextField } from "../ui/TextField";
-import { getWantList } from "../want_list_generated";
 import { figureText } from "./DeckCostLine";
 import { visibilityText } from "./publication";
 import { RevokeControl } from "./RevokeControl";
 import { formatLabel, statusOf } from "./targetFormat";
-import { cards } from "./wantListModel";
-import { costText } from "./WantListCost";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
   onOpenDeck: (id: string) => void;
   /** Goes to another address in the app (Import a list). */
   onNavigate: (to: string) => void;
-  /** Opens the Want List scoped to one Deck (/decks/want-list?deck=<id>). */
-  onWantList: (id: string) => void;
 };
 
 /** What a tile reads on its own: the Target Format result and the cost to complete. */
@@ -64,21 +59,17 @@ const LINK =
  * Deck as a tile led by its cover card (the collector's pick in the deck builder, or else the line with the most
  * copies) with how many of its Deck List's copies it holds ("41/60 in Deck"), its cost to complete and one Target
  * Format Pill. Each tile reads its result and its cost on its own (the Deck's format-checks and cost routes), two
- * tiles at a time. Each tile also has "Want List: N cards", which opens the Want List scoped to that Deck, or "Nothing
- * to get"; N comes from one Want List read for the whole page (#209), the same allocation as the cost to complete, and
- * a tile shows neither until that read answers. Below, **Published Decks** lists every publication, those whose Deck was
+ * tiles at a time. Below, **Published Decks** lists every publication, those whose Deck was
  * deleted included, with Make Listed or Unlisted and Revoke. Import a list, beside Create Deck, opens /decks/import
  * (#212). Opening a Deck shows the deck builder at /decks/<id> (#176).
  */
-export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
+export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
   const idBase = useId();
   const [decks, setDecks] = useState<DeckIndexEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
   const [facts, setFacts] = useState<Record<string, Facts>>({});
-  // Each Deck's need, by Deck id, from one Want List read; null until it answers, and for good if it fails.
-  const [needs, setNeeds] = useState<Map<string, string> | null>(null);
   const queued = useRef(new Set<string>());
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -99,20 +90,6 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
   }
   useEffect(() => {
     void loadIndex().catch(() => setNotice(UNAVAILABLE));
-  }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-    getWantList(null, controller.signal)
-      .then((list) =>
-        setNeeds(
-          new Map(
-            list.sections.map((section) => [section.deck_id, section.to_get])
-          )
-        )
-      )
-      // Without it the tiles still show; only the Want List buttons are missing.
-      .catch(() => {});
-    return () => controller.abort();
   }, []);
 
   async function moreDecks() {
@@ -255,9 +232,7 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
                   key={deck.id}
                   deck={deck}
                   facts={facts[deck.id] ?? {}}
-                  need={needs?.get(deck.id)}
                   onOpen={() => onOpenDeck(deck.id)}
-                  onWantList={() => onWantList(deck.id)}
                 />
               ))}
             </ul>
@@ -282,24 +257,21 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
 function DeckTile({
   deck,
   facts,
-  need,
   onOpen,
-  onWantList,
 }: {
   deck: DeckIndexEntry;
   facts: Facts;
-  /** The Deck's need on the Want List, or undefined before (or without) the Want List read. */
-  need: string | undefined;
   onOpen: () => void;
-  onWantList: () => void;
 }) {
   const format = formatLabel(deck.target_format);
   const cover = deck.cover ?? null;
   const result = facts.result;
   const status =
     result && result !== "unavailable" ? statusOf(result.status) : null;
+  const factsId = useId();
   return (
-    <li className="relative flex min-w-0 flex-col gap-2 rounded-card border border-border bg-surface p-3 hover:border-control-outline phone:p-2">
+    // One 12 px step for the tile's inset and between its parts.
+    <li className="relative flex min-w-0 flex-col gap-3 rounded-card border border-border bg-surface p-3 hover:border-control-outline">
       <CopyArt name={cover?.name ?? ""} imageUrl={cover?.image_url ?? null} />
       <a
         href={`/decks/${encodeURIComponent(deck.id)}`}
@@ -308,28 +280,37 @@ function DeckTile({
           event.preventDefault();
           onOpen();
         }}
-        // The whole tile is the link's tap area, the cover included (decorative); its accessible name stays the Deck's name.
-        className="inline-flex min-h-control min-w-0 items-center text-body font-semibold text-text no-underline wrap-anywhere after:absolute after:inset-0 after:rounded-card hover:text-accent-strong phone:min-h-tap"
+        aria-describedby={factsId}
+        // The whole tile is the link's tap area, the cover included (decorative). The facts sit inside the link so its
+        // phone tap height spans the name and the facts rather than padding the name alone; its accessible name stays
+        // the Deck's name and the facts are its description.
+        className="group flex min-w-0 flex-col gap-1 no-underline after:absolute after:inset-0 after:rounded-card phone:min-h-tap"
       >
-        {deck.name}
+        <span className="text-body font-semibold text-text wrap-anywhere group-hover:text-accent-strong">
+          {deck.name}
+        </span>
+        <span
+          id={factsId}
+          aria-hidden="true"
+          className="flex flex-wrap gap-x-2 gap-y-0.5 text-meta tabular-nums text-text-muted"
+        >
+          <span>
+            {deck.deck_list_total === "0"
+              ? "Empty: plan a list"
+              : `${deck.in_deck}/${deck.deck_list_total} in Deck`}
+          </span>
+          <span>
+            {facts.toComplete === undefined
+              ? "Checking prices…"
+              : figureText(
+                  facts.toComplete === "unavailable"
+                    ? undefined
+                    : facts.toComplete,
+                  "to complete"
+                )}
+          </span>
+        </span>
       </a>
-      <span className="flex flex-wrap gap-x-2 gap-y-0.5 text-meta tabular-nums text-text-muted">
-        <span>
-          {deck.deck_list_total === "0"
-            ? "Empty: plan a list"
-            : `${deck.in_deck}/${deck.deck_list_total} in Deck`}
-        </span>
-        <span>
-          {facts.toComplete === undefined
-            ? "Checking prices…"
-            : figureText(
-                facts.toComplete === "unavailable"
-                  ? undefined
-                  : facts.toComplete,
-                "to complete"
-              )}
-        </span>
-      </span>
       <span className="flex min-w-0">
         <Pill tone={status ? status.tone : "neutral"}>
           {status ? (
@@ -344,35 +325,8 @@ function DeckTile({
           )}
         </Pill>
       </span>
-      {need === "0" ? (
-        <span className="text-meta text-text-muted">
-          <span aria-hidden="true">✓ </span>Nothing to get
-        </span>
-      ) : need !== undefined ? (
-        // Above the tile link's full-tile tap area.
-        <Button
-          className="relative h-auto min-h-control max-w-full self-start phone:min-h-tap"
-          onClick={onWantList}
-        >
-          {/* The kit's button never wraps; a tile is narrow, so its label does (the name stays the same). */}
-          <span className="min-w-0 whitespace-normal text-left leading-tight">
-            {`Want List: ${cards(need)}${wantListCost(facts.toComplete, need)}`}
-          </span>
-        </Button>
-      ) : null}
     </li>
   );
-}
-
-/**
- * " · $X" for a Deck card's Want List button (#210): the tile's own cost to complete, which is the Deck's Want List section
- * under the same counting (one allocation), so the index reads no other price. Shown only when it counts the same copies
- * as the button and has a price; an unpriced copy reads " + N unpriced", never $0.
- */
-function wantListCost(figure: Facts["toComplete"], need: string): string {
-  if (!figure || figure === "unavailable" || figure.status !== "priced")
-    return "";
-  return figure.total_copies === need ? ` · ${costText(figure)}` : "";
 }
 
 type PublishedLoad =

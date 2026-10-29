@@ -179,13 +179,13 @@ test.afterAll(async () => {
 test.describe("on a desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("the switch shows every Deck's section and the combined total, and a Deck card or a chip scopes it to one Deck", async ({
+  test("the switch shows every Deck's section and the combined total, and a Deck page or a chip scopes it to one Deck", async ({
     page,
   }) => {
     await signIn(page);
     const { names, ids } = await world(page);
 
-    // My Decks: each card's Want List count is its cost to complete's copies.
+    // My Decks shows the cost to complete.
     await page.goto(`${ORIGIN}/decks`);
     await expect(
       views(page).getByRole("tab", { name: "My Decks" })
@@ -193,25 +193,30 @@ test.describe("on a desktop", () => {
     await expect(indexRow(page, names.charizard)).toContainText(
       "$0.50 to complete (2/2 priced)"
     );
-    await expect(
-      indexRow(page, names.charizard).getByRole("button", {
-        name: "Want List: 2 cards",
-      })
-    ).toBeVisible();
     await expect(indexRow(page, names.gardevoir)).toContainText(
       "$0.75 to complete (3/3 priced)"
     );
-    await expect(
-      indexRow(page, names.gardevoir).getByRole("button", {
-        name: "Want List: 3 cards",
-      })
-    ).toBeVisible();
-    await expect(indexRow(page, names.miraidon)).toContainText(
+    await expect(indexRow(page, names.miraidon)).not.toContainText(
       "Nothing to get"
     );
     await expect(
       indexRow(page, names.miraidon).getByRole("button", { name: /^Want List/ })
     ).toHaveCount(0);
+
+    await indexRow(page, names.miraidon)
+      .getByRole("link", { name: names.miraidon, exact: true })
+      .click();
+    const wantList = page.getByRole("button", {
+      name: "Want List",
+      exact: true,
+    });
+    await expect(wantList).toBeEnabled();
+    await wantList.click();
+    await expect(page).toHaveURL(
+      `${ORIGIN}/decks/want-list?deck=${ids.miraidon}`
+    );
+    await expect(page.getByText("Nothing to get")).toBeVisible();
+    await views(page).getByRole("tab", { name: "My Decks" }).click();
 
     // The switch opens All Decks: a section per Deck, oldest first, and the combined total.
     await views(page).getByRole("tab", { name: "Want List" }).click();
@@ -294,12 +299,13 @@ test.describe("on a desktop", () => {
     await expect(page).toHaveURL(`${ORIGIN}/decks/want-list`);
     await expect(total(page)).toBeVisible();
 
-    // A Deck card opens its scoped view; the switch always opens All Decks.
+    // A Deck page opens its scoped view; the switch always opens All Decks.
     await views(page).getByRole("tab", { name: "My Decks" }).click();
     await expect(page).toHaveURL(`${ORIGIN}/decks`);
     await indexRow(page, names.gardevoir)
-      .getByRole("button", { name: "Want List: 3 cards" })
+      .getByRole("link", { name: names.gardevoir, exact: true })
       .click();
+    await page.getByRole("button", { name: "Want List", exact: true }).click();
     await expect(page).toHaveURL(
       `${ORIGIN}/decks/want-list?deck=${ids.gardevoir}`
     );
@@ -359,16 +365,11 @@ test.describe("on a desktop", () => {
       `${names.charizard} 2 · ${names.gardevoir} 1`
     );
 
-    // The Deck card and the row's to complete say the same.
+    // The Deck card shows the updated cost to complete.
     await views(page).getByRole("tab", { name: "My Decks" }).click();
     await expect(indexRow(page, names.gardevoir)).toContainText(
       "$0.25 to complete (1/1 priced)"
     );
-    await expect(
-      indexRow(page, names.gardevoir).getByRole("button", {
-        name: "Want List: 1 card",
-      })
-    ).toBeVisible();
 
     // An address scoped to a Deck that isn't one of yours falls back to All Decks.
     await page.goto(`${ORIGIN}/decks/want-list?deck=${randomUUID()}`);
@@ -403,14 +404,10 @@ test.describe("on a phone", () => {
     await signIn(page);
     const { names } = await world(page);
     await page.goto(`${ORIGIN}/decks`);
-    await expect(
-      indexRow(page, names.gardevoir).getByRole("button", {
-        name: "Want List: 3 cards",
-      })
-    ).toBeVisible();
     await expectTouchTarget(
-      indexRow(page, names.gardevoir).getByRole("button", {
-        name: "Want List: 3 cards",
+      indexRow(page, names.gardevoir).getByRole("link", {
+        name: names.gardevoir,
+        exact: true,
       })
     );
     await expectPageChecks(page, "My Decks on a phone");
