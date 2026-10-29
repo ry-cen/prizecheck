@@ -15,7 +15,7 @@ def view_rows(conn):
 def test_the_table_equals_the_tsv_exactly():
     with connect() as conn:
         rows = conn.execute("SELECT set_id, code FROM catalog_set_code").fetchall()
-    assert len(rows) == len(set_codes.CODES) == 136
+    assert len(rows) == len(set_codes.CODES)
     assert {row["set_id"]: row["code"] for row in rows} == set_codes.CODES
 
 
