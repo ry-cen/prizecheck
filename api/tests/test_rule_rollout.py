@@ -18,7 +18,8 @@ from app.main import app, connect
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret, owner
 from test_catalog_reconciliation import run
-from test_catalog_targets import InjectedLive, card
+from test_catalog_targets import (InjectedLive, activate, card, strip_card_field, states, tcgplayer_products,  # noqa: F401
+                                  xy11_116)
 from test_metadata_reviews import price_store, published, spawned  # noqa: F401 (autouse fixtures)
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -664,3 +665,77 @@ def test_price_import_job_resumes_the_rollout_first():
     text = (ROOT / "scripts" / "price_import_job.py").read_text()
     entry = text[text.index("if __name__ == '__main__':"):]
     assert entry.index("resume()") < entry.index("sys.exit(main())")
+
+
+# ------------------------------------------------------------------ candidates stored before the import kept a key (#395)
+
+
+def stored_candidate(source_id):
+    with connect() as conn:
+        return conn.execute("""SELECT m.mapping_candidate,m.mapping_revision,m.accepted_fingerprint FROM catalog_edition_metadata m
+          JOIN catalog_edition e ON e.id=m.edition_id JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id=%s""",
+                            (source_id,)).fetchone()
+
+
+def deploy(monkeypatch):
+    monkeypatch.setenv("RELEASE_COMMIT", new_commit())
+    with TestClient(app):
+        rule_rollout.join_startup()
+
+
+def test_a_rollout_gives_a_pre_v5_candidate_its_card_level_id_and_verifies_it_without_a_pull(monkeypatch, tcgplayer_products):
+    reset_rules()
+    reset_catalog()
+    owner()
+    run(Records(xy11_116()))
+    strip_card_field("xy11-116")  # the candidate the pre-v5 importer stored
+    before = stored_candidate("xy11-116")
+    assert "card_tcgplayer" not in before["mapping_candidate"]
+    assert states("xy11-116") == [("unverified", "no_matching_rule", None, None)]
+    deploy(monkeypatch)
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+    after = stored_candidate("xy11-116")
+    assert after["mapping_candidate"] == {**before["mapping_candidate"], "card_tcgplayer": 121240}
+    assert after["mapping_revision"] == before["mapping_revision"] + 1  # the verification, not the key, moved it
+
+
+def test_the_candidate_refresh_is_enrichment_idempotent_and_leaves_other_candidates_alone(monkeypatch, tcgplayer_products):
+    from app.catalog_targets import add_card_tcgplayer
+    reset_rules()
+    reset_catalog()
+    owner()
+    named = xy11_116("named-1", "1", 500)
+    named["variants_detailed"] = [{"type": "normal", "size": "standard", "thirdParty": {"tcgplayer": 77}}]  # its own lookup names an id
+    run(Records(xy11_116("plain-2", "2", 501), named, xy11_116("none-3", "3", 502)))
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_printing_metadata SET source_record=source_record-'thirdParty' WHERE printing_id IN
+          (SELECT id FROM catalog_printing WHERE source_id='none-3')""")
+    for source in ("plain-2", "named-1", "none-3"):
+        strip_card_field(source)
+    before = {source: stored_candidate(source) for source in ("plain-2", "named-1", "none-3")}
+    with connect() as conn:
+        ids = [row["id"] for row in conn.execute("SELECT id FROM catalog_edition")]
+        assert add_card_tcgplayer(conn, ids) == 1
+        assert add_card_tcgplayer(conn, ids) == 0  # a rerun changes nothing
+    after = {source: stored_candidate(source) for source in before}
+    assert after["plain-2"]["mapping_candidate"]["card_tcgplayer"] == 501
+    for source in ("named-1", "none-3"):
+        assert after[source] == before[source]
+    assert {source: value["mapping_revision"] for source, value in after.items()} == \
+        {source: value["mapping_revision"] for source, value in before.items()}
+    assert states("plain-2") == [("unverified", "no_matching_rule", None, None)]
+
+
+def test_a_rollout_does_not_quarantine_a_verified_edition_that_lacks_the_key(monkeypatch, tcgplayer_products):
+    reset_rules()
+    reset_catalog()
+    run(Records(xy11_116()))
+    activate(MATCHING, 5)  # verified under v5 from a fresh candidate
+    strip_card_field("xy11-116")
+    before = stored_candidate("xy11-116")
+    deploy(monkeypatch)  # applies the newest rule; a verified Edition is not in the editions phase
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+    assert stored_candidate("xy11-116")["mapping_revision"] == before["mapping_revision"]
+    run(Records(xy11_116()))  # the next pull writes the key back as enrichment
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+    assert stored_candidate("xy11-116")["mapping_revision"] == before["mapping_revision"]

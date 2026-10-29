@@ -22,7 +22,7 @@ from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
 from .format_standing import rebuild_stale_best_effort
 from .evolution_roots import refresh_evolution_roots
-from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, MatchingRulesV4, TargetContext, refresh_editions, rule_projection,
+from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, card_tcgplayer_candidate, refresh_editions, rule_projection,
                               refresh_printing)
 from .price_binding import rebind_best_effort
 from .public_catalog import publish_catalog_best_effort
@@ -330,8 +330,8 @@ def edition_metadata(record, descriptor, physical_conflict):
     if isinstance(record.get("set"), dict):
         evidence["physical_evidence"]["set"] = {key: record["set"][key] for key in ("id", "name") if key in record["set"]}
     mapping_candidate = {"candidate": lookup, "correspondence": correspondence}
-    card_product = record.get("thirdParty", {}).get("tcgplayer") if isinstance(record.get("thirdParty"), dict) else None
-    if card_product is not None and not MatchingRulesV4.has_tcgdex_id(lookup):
+    card_product = card_tcgplayer_candidate(record, lookup)
+    if card_product is not None:
         mapping_candidate["card_tcgplayer"] = card_product  # matching rule v5 reads it, so a change must re-evaluate the Edition
     return {
         "mapping_candidate": mapping_candidate,
