@@ -16,6 +16,7 @@ import {
   MissingCardsPage,
   OwnerControlsPage,
   preloadInitialPage,
+  preloadShellPages,
   ReplaceListPage,
   TradesPage,
   Workspace,
@@ -155,6 +156,11 @@ function App() {
     page,
     navigate,
   ]);
+  // Signed in, the other tabs' code loads in the background, so opening one never waits on a download.
+  const owner = ownerCatalog !== null;
+  useEffect(() => {
+    if (signedIn) return preloadShellPages(owner);
+  }, [signedIn, owner]);
   // A failure code in the address belongs to the sign-in page: signed in, it is never shown, only removed. The
   // Settings page's Sign-ins section reads and removes its own.
   useEffect(() => {
