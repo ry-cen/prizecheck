@@ -3,7 +3,6 @@
 # Regenerate (only to record a removal) with: .venv/bin/python scripts/check_python_boundaries.py --write-baseline
 
 [edges]
-app.collection -> app.set_codes
 app.collection_import -> app.collection_import_finish
 app.collection_import -> app.collection_import_matcher
 app.collection_import -> app.collection_import_reader
@@ -18,7 +17,6 @@ app.discovery -> app.format_evaluator
 app.discovery -> app.prices
 app.discovery -> app.public_catalog
 app.discovery -> app.published_format_checks
-app.holdings -> app.set_codes
 app.host_readiness -> app.catalog_targets
 app.import_match_core -> app.catalog_browse
 app.import_match_core -> app.decklist_text
@@ -33,8 +31,6 @@ app.publications -> app.construction_checks
 app.publications -> app.deck_format_checks
 app.published_cost -> app.prices
 app.published_cost -> app.public_catalog
-app.social.friend_reads -> app.set_codes
-app.swap_hints -> app.set_codes
 app.trade_value -> app.prices
 app.want_list_cost -> app.prices
 

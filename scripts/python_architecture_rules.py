@@ -184,9 +184,8 @@ RULES = {
     # social package.
     'set-codes-importers': {
         'imported': 'app.set_codes',
-        'importers': {'app.catalog_browse', 'app.collection', 'app.collection_import_matcher', 'app.deck_import',
-                      'app.holdings', 'app.import_aliases', 'app.import_matching', 'app.import_publication',
-                      'app.scanner', 'app.swap_hints', 'app.social.friend_reads'}},
+        'importers': {'app.catalog_browse', 'app.collection_import_matcher', 'app.deck_import',
+                      'app.import_aliases', 'app.import_matching', 'app.import_publication', 'app.scanner'}},
     # test_set_codes reads the data file beside format_evaluator; this pins that layout fact.
     'format-rules-beside-evaluator': {'module': 'app.format_evaluator', 'file': 'format_rules/imported_sets.txt'},
     # The alias table feeds the import reviews alone: import_matching runs its step, deck_import fills the Missing cards

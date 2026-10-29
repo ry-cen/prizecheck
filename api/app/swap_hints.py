@@ -55,7 +55,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from . import set_codes
 from .card_accepts import accepts
 from .copy_allocation import Allocation, LineCount, allocate
 from .settings import WantListCounting
@@ -68,7 +67,7 @@ GROUPS = """SELECT DISTINCT g.group_id FROM catalog_edition e
 # Every Edition of the given groups, with what the hint shows and the page's card order needs, and whether it may start
 # a new Deck List line (deck_list_printing.AVAILABLE_EDITIONS's rule).
 MEMBERS = """SELECT e.id AS edition_id,g.group_id,coalesce(pd.display_name,ci.display_name) AS name,
-  coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
+  coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
   coalesce(pd.collector_number,'') AS collector_number,e.descriptor,
   EXISTS (SELECT 1 FROM catalog_state s
     JOIN catalog_generation_edition ge ON ge.generation_id=s.active_generation AND ge.edition_id=e.id AND ge.active
@@ -77,6 +76,7 @@ MEMBERS = """SELECT e.id AS edition_id,g.group_id,coalesce(pd.display_name,ci.di
   FROM catalog_reprint_group_member g
   JOIN catalog_printing p ON p.id=g.printing_id
   JOIN catalog_identity ci ON ci.id=p.identity_id
+  JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
   JOIN catalog_edition e ON e.printing_id=p.id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
   WHERE g.group_id=ANY(%s)"""
@@ -89,7 +89,7 @@ ANY_RULE = 'SELECT EXISTS (SELECT 1 FROM trade_accept WHERE owner_id=%s) AS foun
 
 # MEMBERS' facts for Editions read by id, for a line's Edition or an accepted Edition outside the groups read.
 FACTS = """SELECT e.id AS edition_id,NULL::uuid AS group_id,coalesce(pd.display_name,ci.display_name) AS name,
-  coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
+  coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
   coalesce(pd.collector_number,'') AS collector_number,e.descriptor,
   EXISTS (SELECT 1 FROM catalog_state s
     JOIN catalog_generation_edition ge ON ge.generation_id=s.active_generation AND ge.edition_id=e.id AND ge.active
@@ -98,6 +98,7 @@ FACTS = """SELECT e.id AS edition_id,NULL::uuid AS group_id,coalesce(pd.display_
   FROM catalog_edition e
   JOIN catalog_printing p ON p.id=e.printing_id
   JOIN catalog_identity ci ON ci.id=p.identity_id
+  JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
   WHERE e.id=ANY(%s)"""
 
@@ -105,7 +106,7 @@ FACTS = """SELECT e.id AS edition_id,NULL::uuid AS group_id,coalesce(pd.display_
 class SwapHint(BaseModel):
     """A Want List line's Swap hint: "↻ You own a playable version (PAL 254) × 1"."""
     edition_id: UUID        # The owned Edition, in the line's Reprint Group.
-    set_code: str           # Its printed set code ("PAL"), or its TCGdex set ID when the set has none (set_codes).
+    set_code: str           # Its printed set code ("PAL"), or its TCGdex set ID when the set has none (catalog_printing_set_code).
     collector_number: str
     descriptor: dict        # Its Variant Descriptor.
     count: str              # The copies Swap moves (× N): the lesser of the line's need and the copies available.
@@ -118,6 +119,7 @@ class GroupEdition:
     group_id: UUID | None   # None: read by id (FACTS), outside every group this capture read.
     name: str
     set_id: str
+    set_code: str
     set_name: str
     collector_number: str
     descriptor: dict
@@ -240,6 +242,6 @@ def swap_hint(hint: Hint | None, capture: SwapCapture) -> SwapHint | None:
     if hint is None:
         return None
     edition = capture.editions[hint.edition_id]
-    return SwapHint(edition_id=hint.edition_id, set_code=set_codes.code_for(edition.set_id),
+    return SwapHint(edition_id=hint.edition_id, set_code=edition.set_code,
                     collector_number=edition.collector_number, descriptor=edition.descriptor,
                     count=str(hint.count), listed=str(hint.listed))
