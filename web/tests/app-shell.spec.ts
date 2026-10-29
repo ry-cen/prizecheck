@@ -42,7 +42,16 @@ async function signIn(page: Page, path = "/collection") {
   // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
   (await artUpstream()).reset();
   await page.goto(`${ORIGIN}${path}`);
-  await expect(page).toHaveURL(/\/collection$/);
+  if (path === "/") {
+    await expect(page).toHaveURL(`${ORIGIN}/`);
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Sign in", exact: true })
+      .click();
+    await expect(page).toHaveURL(`${ORIGIN}/sign-in`);
+  } else {
+    await expect(page).toHaveURL(/\/collection$/);
+  }
   await signInWithButton(page);
   await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
@@ -233,6 +242,12 @@ test.describe("desktop", () => {
     const s = randomUUID().slice(0, 8);
     const leaf = await createLocation(page, `Linked ${s}`);
     await page.goto(`${ORIGIN}/workspace?location=${leaf}`);
+    await expect(heading(page)).toHaveText(`Linked ${s}`);
+    await expect(page).toHaveURL(/\/collection$/);
+    // So does the bare origin, which signed out is the landing page.
+    await page.goto(`${ORIGIN}/`);
+    await expect(heading(page)).toHaveText("All owned");
+    await page.goto(`${ORIGIN}/?location=${leaf}`);
     await expect(heading(page)).toHaveText(`Linked ${s}`);
     await expect(page).toHaveURL(/\/collection$/);
     // An address that is no page lands on Collection.

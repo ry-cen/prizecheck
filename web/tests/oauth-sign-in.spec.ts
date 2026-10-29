@@ -52,8 +52,8 @@ test("sends no next without a destination and passes an explicit next through", 
   page,
 }) => {
   await methods(page, { providers: [GOOGLE], emailSignIn: true });
-  // The bare origin is Collection (the app rewrites it), so the link asks to return there.
-  await page.goto(`${ORIGIN}/`);
+  // A protected Collection address asks sign-in to return there.
+  await page.goto(`${ORIGIN}/collection`);
   await expect(
     page.getByRole("link", { name: "Continue with Google" })
   ).toHaveAttribute("href", "/auth/sign-in/google?next=%2Fcollection");
