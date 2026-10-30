@@ -84,6 +84,22 @@ class Versions(unittest.TestCase):
 
 
 class Ports(unittest.TestCase):
+    def assert_busy_while_listening(self, address):
+        with socket.socket() as server:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind((address, 0))
+            server.listen()
+            self.assertFalse(db.port_free(server.getsockname()[1]))
+
+    def test_loopback_listener_is_busy(self):
+        self.assert_busy_while_listening('127.0.0.1')
+
+    def test_wildcard_listener_is_busy(self):
+        self.assert_busy_while_listening('0.0.0.0')
+
+    def test_closed_port_is_free(self):
+        self.assertTrue(db.port_free(db.free_port()))
+
     def test_port_left_in_time_wait_counts_as_free(self):
         with socket.socket() as server:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
