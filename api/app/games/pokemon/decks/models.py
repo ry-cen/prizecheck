@@ -143,4 +143,3 @@ class DeckDetail(BaseModel):
     loans: list[DeckLoanLine]
     # #291: the collector's picked cover card (always a line on the Deck List), or None while the cover is automatic.
     cover_edition_id: UUID | None
-

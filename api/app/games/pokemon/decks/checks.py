@@ -30,4 +30,3 @@ def basic_checks(conn, generation_id, user_id: str, deck_id: UUID, source: str) 
                   for g,status in zip(groups,evaluated.identity_statuses)]
     return DeckChecks(total=str(evaluated.total),shortage=str(evaluated.shortage),excess=str(evaluated.excess),
                       size_status=evaluated.size_status,identities=identities)
-

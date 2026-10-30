@@ -56,4 +56,3 @@ def replayed(conn, response: dict) -> dict:
 def store_deck_list_result(conn, user_id: str, deck_id: UUID, key: UUID, digest: str) -> dict:
     """Advance the Deck List revision and keep the response for replay."""
     return keep_response(conn, user_id, key, digest, DeckListCommandResult(**advance_deck_list(conn, user_id, deck_id)))
-

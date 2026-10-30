@@ -110,4 +110,3 @@ def set_will_accept(edition_id: UUID, command: SetWillAccept, user_id: str = Dep
               ON CONFLICT (owner_id, edition_id) DO UPDATE SET rule = excluded.rule""",
                          (user_id, edition_id, command.rule))
         return read_trade_wants(conn, user_id)
-

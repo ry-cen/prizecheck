@@ -78,4 +78,3 @@ def lower_trade_wants(conn, user_id: str, received: Iterable[tuple[UUID, int]], 
                      (user_id, edition, left))
         conn.execute('UPDATE trade_want SET quantity = quantity - %s WHERE owner_id = %s AND edition_id = %s',
                      (left, user_id, edition))
-

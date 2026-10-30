@@ -704,7 +704,7 @@ def test_a_rollout_gives_a_pre_v5_candidate_its_card_level_id_and_verifies_it_wi
 
 
 def test_the_candidate_refresh_is_enrichment_idempotent_and_leaves_other_candidates_alone(monkeypatch, tcgplayer_products):
-    from app.catalog_targets import add_card_tcgplayer
+    from app.games.pokemon.prices.catalog_targets import add_card_tcgplayer
     reset_rules()
     reset_catalog()
     owner()

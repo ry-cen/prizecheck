@@ -283,4 +283,3 @@ def change_deck_list(deck_id: UUID, command: ChangeDeckList, user_id: str = Depe
 @router.get('/{deck_id}/contents', response_model=DeckContents)
 def deck_contents(deck_id: UUID, user_id: str = Depends(verified_user)):
     return capture_deck_contents(deck_id, user_id)
-

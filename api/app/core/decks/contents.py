@@ -53,4 +53,3 @@ def capture_deck_contents(deck_id: UUID, user_id: str, timeout_ms: int | None = 
             owner_revision=revision, catalog_revision=catalog_revision)
     # Both transaction locks and the connection are released before callers can wait.
     return contents
-

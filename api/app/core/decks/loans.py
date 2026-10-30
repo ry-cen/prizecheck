@@ -43,4 +43,3 @@ def read_deck_loans(conn, user_id: str, deck_id: UUID, held: dict) -> list[DeckL
     return [DeckLoanLine(edition_id=edition, **{
         state: [LoanLabel(name=name, copies=str(copies)) for name, copies in found[edition][state].items()]
         for state in ('reserved', 'lent', 'borrowed')}) for edition in sorted(found)]
-
