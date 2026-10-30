@@ -1,16 +1,11 @@
 import type { DiscoverCost, DiscoverFormat } from "../discovery_generated";
+import { FORMAT_SHORT_NAMES, POKEMON_FORMATS } from "../games/pokemon/formats";
 
 /** The format chips after Any, in the spec's order, and each Target Format's short name on a deck card. */
-export const FORMAT_CHIPS: readonly DiscoverFormat[] = [
-  "standard",
-  "expanded",
-  "glc",
-];
-export const FORMAT_LABELS: Record<DiscoverFormat, string> = {
-  standard: "Standard",
-  expanded: "Expanded",
-  glc: "GLC",
-};
+export const FORMAT_CHIPS: readonly DiscoverFormat[] = POKEMON_FORMATS.map(
+  ({ value }) => value
+);
+export const FORMAT_LABELS: Record<DiscoverFormat, string> = FORMAT_SHORT_NAMES;
 
 export type CostText = {
   /** "$142", "$118+" or "Price on page". */

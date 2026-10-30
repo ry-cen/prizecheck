@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
-import { FORMAT_NAMES, FORMATS, STANDING_WORDS } from "./catalogText";
+import {
+  FORMAT_NAMES,
+  FORMATS,
+  STANDING_TONES,
+  STANDING_WORDS,
+} from "./catalogText";
 import { formatLabel, statusOf, TARGET_FORMATS } from "../decks/targetFormat";
 import { FORMAT_CHIPS, FORMAT_LABELS } from "../discover/discoverText";
 import { legalityText } from "../owner/reprintValues";
@@ -28,6 +33,14 @@ test("a legality pill's standing words", () => {
     legal: "Legal",
     not_legal: "Not legal",
     unknown: "Unknown",
+  });
+});
+
+test("a legality pill's tone, shared by the Catalog and deck builder card popups", () => {
+  expect(STANDING_TONES).toEqual({
+    legal: "ok",
+    not_legal: "bad",
+    unknown: "unverified",
   });
 });
 
