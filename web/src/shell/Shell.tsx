@@ -371,9 +371,11 @@ function ShellFrame({
           past the placeholder delay or failed to load; then the shell draws this one so the wordmark, bell and account
           stay in reach): the wordmark, then the header actions (the account avatar,
           #246, and the bell, #259). The page's own heading sits right under it and the tab bar marks the section, so a title here would
-          only repeat them. */}
+          only repeat them. Where the wordmark and the actions can't share one row (a 320 px phone with text at 200%), the
+          actions wrap onto a second row, still at the end, as the public header's links do; the header scrolls away on a
+          phone, so nothing sticky depends on its height. */}
           {(showing !== "collection" || collectionStandIns.size > 0) && (
-            <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
+            <header className="box-border hidden min-h-header flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2 phone:flex">
               <Wordmark />
               <div className="ml-auto">
                 <PhoneHeaderActions />

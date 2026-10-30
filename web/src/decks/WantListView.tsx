@@ -401,53 +401,81 @@ function DeckSection({
           <span aria-hidden="true">✓ </span>Nothing to get
         </p>
       ) : (
-        <ul
-          aria-label={`What ${section.name} needs`}
-          className="m-0 list-none border-t border-border p-0"
-        >
-          {section.lines.map((line) => (
-            <NeededLine
-              key={line.edition_id}
-              deckId={section.deck_id}
-              line={line}
-              deckName={deckName}
-              accept={<WillAcceptSelect line={line} api={trade} />}
-            >
-              <SwapHint
-                section={section}
-                line={line}
-                swap={swap}
-                rule={
-                  trade.state.kind === "ready"
-                    ? trade.state.rules.get(line.edition_id)
-                    : undefined
-                }
-              />
-              <FriendChips
-                name={line.name}
-                edition={editionText(line)}
-                wanted={line.edition_id}
-                copies={byCard.get(line.edition_id)}
-                chip={(copy, text) => (
-                  <AskChip
-                    friend={copy}
-                    card={copyCard(
-                      copy,
-                      copy.edition_id === line.edition_id
-                        ? line.image_url
-                        : null
-                    )}
-                    cap={copyCap(copy)}
-                    lendable={lendableText(copy)}
-                    text={text}
-                  />
-                )}
-              />
-            </NeededLine>
-          ))}
-        </ul>
+        <NeededLines
+          section={section}
+          deckName={deckName}
+          swap={swap}
+          byCard={byCard}
+          trade={trade}
+        />
       )}
     </section>
+  );
+}
+
+/**
+ * A section's lines that still need copies (#209), each with its Will accept select (#275), Swap hint (#211) and Friend
+ * chips with Ask (#251). The Want List's Deck sections and the deck builder's Ways to get missing cards panel draw them.
+ */
+export function NeededLines({
+  section,
+  deckName,
+  swap,
+  byCard,
+  trade,
+}: {
+  section: WantListSection;
+  deckName: (id: string) => string;
+  swap: WantListSwap;
+  /** Friends' copies by the card they match (#251). */
+  byCard: Map<string, FriendCopy[]>;
+  /** The collector's Will accept choices (#275). */
+  trade: TradeWantsApi;
+}) {
+  return (
+    <ul
+      aria-label={`What ${section.name} needs`}
+      className="m-0 list-none border-t border-border p-0"
+    >
+      {section.lines.map((line) => (
+        <NeededLine
+          key={line.edition_id}
+          deckId={section.deck_id}
+          line={line}
+          deckName={deckName}
+          accept={<WillAcceptSelect line={line} api={trade} />}
+        >
+          <SwapHint
+            section={section}
+            line={line}
+            swap={swap}
+            rule={
+              trade.state.kind === "ready"
+                ? trade.state.rules.get(line.edition_id)
+                : undefined
+            }
+          />
+          <FriendChips
+            name={line.name}
+            edition={editionText(line)}
+            wanted={line.edition_id}
+            copies={byCard.get(line.edition_id)}
+            chip={(copy, text) => (
+              <AskChip
+                friend={copy}
+                card={copyCard(
+                  copy,
+                  copy.edition_id === line.edition_id ? line.image_url : null
+                )}
+                cap={copyCap(copy)}
+                lendable={lendableText(copy)}
+                text={text}
+              />
+            )}
+          />
+        </NeededLine>
+      ))}
+    </ul>
   );
 }
 
