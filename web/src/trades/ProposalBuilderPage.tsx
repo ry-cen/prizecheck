@@ -888,7 +888,7 @@ function ProposalSideSection({
             return (
               <li
                 key={line.edition_id}
-                className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                className="grid grid-cols-[3.5rem_minmax(0,1fr)] phone:grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
               >
                 <CardImage url={line.image_url} />
                 <span className="flex min-w-0 flex-wrap items-center justify-between gap-2">

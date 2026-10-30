@@ -271,9 +271,13 @@ function ConversationRow({
               <Pill tone="warn">{needsYouText(row.waiting_on_you)}</Pill>
             )}
             {meta}
+            {/* On a phone the time joins this line, so the name keeps the row's width; only one copy is ever shown. */}
+            <span className="hidden tabular-nums phone:inline">
+              {inboxTime(row.last_activity_at, Date.now())}
+            </span>
           </span>
         </span>
-        <span className="shrink-0 self-start text-right text-meta text-text-muted tabular-nums phone:max-w-16">
+        <span className="shrink-0 self-start text-right text-meta text-text-muted tabular-nums phone:hidden">
           {inboxTime(row.last_activity_at, Date.now())}
         </span>
       </a>

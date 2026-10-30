@@ -280,7 +280,7 @@ export function MatchSide({
 function MatchCard({ card }: { card: TradeMatchCard }) {
   const accepts = acceptsText(card);
   return (
-    <li className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
+    <li className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] phone:grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
       <CardImage url={card.image_url} />
       <span className="flex min-w-0 flex-col gap-1">
         <span className="text-body font-semibold wrap-anywhere">

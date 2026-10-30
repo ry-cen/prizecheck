@@ -159,7 +159,7 @@ export function CardSearch({
       {picked ? (
         <>
           <div ref={pickedBox} className="flex flex-wrap items-center gap-3">
-            <div className="grid w-full max-w-sm grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3">
+            <div className="grid w-full max-w-sm grid-cols-[3.5rem_minmax(0,1fr)] phone:grid-cols-[3rem_minmax(0,1fr)] items-center gap-3">
               <CardImage url={picked.low_image_url} />
               <span className="flex min-w-0 flex-col gap-1">
                 <span className="text-body font-semibold wrap-anywhere">
@@ -231,7 +231,7 @@ export function CardSearch({
                     type="button"
                     aria-label={`${printing.name}, ${printing.set_name} ${printing.collector_number}`}
                     onClick={() => pick(printing)}
-                    className="box-border grid min-h-tap w-full cursor-pointer grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-panel border border-border bg-surface px-3 py-2 text-left font-sans text-text hover:bg-surface-raised"
+                    className="box-border grid min-h-tap w-full cursor-pointer grid-cols-[3.5rem_minmax(0,1fr)] phone:grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 rounded-panel border border-border bg-surface px-3 py-2 text-left font-sans text-text hover:bg-surface-raised"
                   >
                     <CardImage url={printing.low_image_url} />
                     <span className="flex min-w-0 flex-col gap-1">
