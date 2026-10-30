@@ -180,53 +180,58 @@ export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
   const names = new Map(decks.map((deck) => [deck.id, deck.name]));
   return (
     <>
-      <form
-        onSubmit={create}
-        className="flex flex-wrap items-end gap-2 border-b border-border pb-4"
-        aria-label="New Deck"
-      >
-        <div className="w-60 max-w-full phone:w-full">
-          <TextField
-            label="Deck name"
-            required
-            maxLength={120}
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value);
-              pending.current = null;
-            }}
-          />
-        </div>
-        <Button
-          type="submit"
-          variant="primary"
-          aria-disabled={busy || undefined}
-        >
-          Create Deck
-        </Button>
-        <Button onClick={() => onNavigate("/decks/import")}>
-          Import a list
-        </Button>
-        {formMessage && (
-          <p role="status" className="m-0 basis-full text-body text-warning">
-            {formMessage}
-          </p>
-        )}
-      </form>
       <section
         aria-labelledby={`${idBase}-decks`}
-        className="flex flex-col gap-3"
+        className="flex flex-col gap-4"
       >
-        <h2 id={`${idBase}-decks`} className="m-0 text-heading font-semibold">
-          Your Decks
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id={`${idBase}-decks`} className="m-0 text-heading font-semibold">
+            Your Decks
+          </h2>
+          <form
+            onSubmit={create}
+            className="flex min-w-0 flex-wrap items-center gap-2"
+            aria-label="New Deck"
+          >
+            <div className="w-64 max-w-full phone:w-full [&>label]:flex-row [&>label]:items-center [&>label>span]:shrink-0 [&_input]:min-w-0 [&_input]:flex-1">
+              <TextField
+                label="Deck name"
+                required
+                maxLength={120}
+                value={name}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  pending.current = null;
+                }}
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="primary"
+              aria-disabled={busy || undefined}
+            >
+              Create Deck
+            </Button>
+            <Button onClick={() => onNavigate("/decks/import")}>
+              Import a list
+            </Button>
+            {formMessage && (
+              <p
+                role="status"
+                className="m-0 basis-full text-body text-warning"
+              >
+                {formMessage}
+              </p>
+            )}
+          </form>
+        </div>
         {loaded && decks.length === 0 ? (
           <p className="m-0 text-body text-text-muted">
             No Decks yet. Name one above to start its Deck List.
           </p>
         ) : (
           <nav aria-label="Deck index">
-            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-5 p-0 phone:grid-cols-2">
+            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-4 p-0 phone:grid-cols-2 phone:gap-3">
               {decks.map((deck) => (
                 <DeckTile
                   key={deck.id}
@@ -322,7 +327,7 @@ function DeckTile({
           }}
         />
       </span>
-      <span className="flex min-w-0">
+      <span className="flex min-w-0 [&>span]:h-auto [&>span]:min-h-6 [&>span]:whitespace-normal [&>span>span]:overflow-visible [&>span>span]:whitespace-normal [&>span>span]:text-clip">
         <Pill tone={status?.tone === "ok" ? "ok" : "neutral"}>
           {status ? (
             <>

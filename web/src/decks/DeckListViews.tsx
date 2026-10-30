@@ -152,10 +152,8 @@ export function DeckListBody({
                 return (
                   <li
                     key={line.line.edition_id}
-                    className={`relative flex flex-wrap gap-1 rounded-card${
-                      issue
-                        ? " outline-1 outline-offset-2 outline-danger-border"
-                        : ""
+                    className={`relative flex flex-wrap gap-1 rounded-card border${
+                      issue ? " border-danger-border" : " border-transparent"
                     }`}
                   >
                     {issue && <IssueMark />}

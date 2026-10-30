@@ -70,16 +70,16 @@ export function useDeckActions({
 
   const actions: ReactNode = detail && (
     <div className="flex min-w-0 flex-col items-end gap-1 phone:w-full phone:items-start">
-      <div className="flex flex-wrap items-center gap-2 phone:flex-nowrap phone:gap-0 phone:[&>button]:px-2">
+      <div className="flex flex-wrap items-center gap-2 phone:flex-nowrap phone:gap-1 phone:[&>button]:px-2">
         <Button
-          variant="quiet"
+          variant="secondary"
           className="phone:flex-1"
           onClick={onReplaceList}
         >
           Replace list…
         </Button>
         <Button
-          variant="quiet"
+          variant="secondary"
           className="phone:flex-1"
           onClick={(event) => {
             exportOpener.current = event.currentTarget;
@@ -90,7 +90,7 @@ export function useDeckActions({
         </Button>
         <Button
           ref={publishButton}
-          variant={!published && blocked ? "secondary" : "primary"}
+          variant="primary"
           disabled={!published && blocked !== null}
           aria-describedby={!published && blocked ? reasonId : undefined}
           onClick={() => setPublishing(true)}
@@ -100,7 +100,7 @@ export function useDeckActions({
         <Button
           ref={deleteButton}
           variant="quiet"
-          className="text-danger phone:flex-1"
+          className="!text-danger phone:flex-1"
           aria-label="Delete Deck"
           onClick={() => setDeleting(true)}
         >
