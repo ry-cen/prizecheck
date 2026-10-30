@@ -75,7 +75,7 @@ user-facing request, and a thank-you link is appreciated. The owner decided on 2
   record against the Edition's public marketplace record.
 - **Fallback art.** A Printing that has no TCGdex image in either the active generation or its established display shows
   TCGplayer's CDN image of a verified Edition's product (`_200w` for tiles, `_400w` for detail). The images are linked, not
-  copied. A TCGdex image always wins, including one added later. The scanner page and its index stay TCGdex-only: the
+  copied (superseded by [ADR 0024](0024-store-tcgplayer-art-copies.md): the largest image is stored when it is sharper). A TCGdex image always wins, including one added later. The scanner page and its index stay TCGdex-only: the
   scanner page is cross-origin isolated, and TCGplayer's CDN sends no CORS header.
 - **Retired.** These go once production has priced from TCGCSV for a week:
   - the price runner, launcher, admission, refresh and seeding modules;
