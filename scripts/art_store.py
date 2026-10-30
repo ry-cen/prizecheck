@@ -13,6 +13,39 @@ from app.games.pokemon.art.hosts import TCGPLAYER_LARGE  # noqa: E402
 from app.games.pokemon.art.route import tcgplayer_source_enabled  # noqa: E402
 
 
+def current_object(conn, row):
+    return conn.execute('SELECT a.*,p.public_ref FROM art_object a JOIN catalog_printing p ON p.id=a.printing_id WHERE a.printing_id=%s AND a.size=%s',
+                        (row['printing_id'], row['size'])).fetchone()
+
+
+def excluded(row):
+    return row['storage_key'].split('/')[0] == 'tcgplayer' and not tcgplayer_source_enabled()
+
+
+def delete_and_repair_pointer(row):
+    """Delete stale metadata, then restore any valid replacement committed by the API.
+
+    The API's pointer write follows its commit, so a row lock cannot protect this cleanup.
+    The read must follow the delete: a concurrent API pointer is then restored or wins later.
+    """
+    try:
+        delete_pointer(row['public_ref'], row['size'])
+    except (OSError, ValueError):
+        pass
+    with connect() as conn:
+        current = current_object(conn, row)
+    if current is not None and not excluded(current):
+        try:
+            data = storage().get(current['storage_key'])
+            if data is not None and hashlib.sha256(data).hexdigest() == current['sha256']:
+                write_pointer(current['public_ref'], current['size'], storage_key=current['storage_key'],
+                              sha256=current['sha256'], content_type=current['content_type'])
+                return True
+        except (OSError, ValueError):
+            pass
+    return False
+
+
 def purge_tcgplayer():
     if tcgplayer_source_enabled():
         print('Set ART_TCGPLAYER_SOURCE=off before purging TCGplayer art.', file=sys.stderr)
@@ -35,7 +68,7 @@ def purge_tcgplayer():
     deleted = 0
     for row in rows:
         try:
-            delete_pointer(row['public_ref'], row['size'])
+            delete_and_repair_pointer(row)
             storage().delete(row['storage_key'])
             deleted += 1
         except (OSError, ValueError):
@@ -48,31 +81,35 @@ def pointers():
     written = deleted = skipped = 0
     with connect() as conn:
         rows = conn.execute('SELECT a.*,p.public_ref FROM art_object a JOIN catalog_printing p ON p.id=a.printing_id').fetchall()
-        for row in rows:
+        for selected in rows:
+            # The up-front scan is only a list of identities; its object may already be gone.
+            row = current_object(conn, selected)
+            if row is None:
+                written += delete_and_repair_pointer(selected)
+                deleted += 1
             while row is not None:
-                if row['storage_key'].split('/')[0] == 'tcgplayer' and not tcgplayer_source_enabled():
+                if excluded(row):
                     skipped += 1
                     break
                 try:
                     data = storage().get(row['storage_key'])
                     if data is None or hashlib.sha256(data).hexdigest() != row['sha256']:
-                        delete_pointer(row['public_ref'], row['size'])
+                        written += delete_and_repair_pointer(row)
                         deleted += 1
                         break
                     write_pointer(row['public_ref'], row['size'], storage_key=row['storage_key'],
                                   sha256=row['sha256'], content_type=row['content_type'])
                     written += 1
-                    current = conn.execute('SELECT a.*,p.public_ref FROM art_object a JOIN catalog_printing p ON p.id=a.printing_id WHERE a.printing_id=%s AND a.size=%s',
-                                           (row['printing_id'], row['size'])).fetchone()
+                    current = current_object(conn, row)
                     if current is None:
-                        delete_pointer(row['public_ref'], row['size'])
+                        written += delete_and_repair_pointer(row)
                         deleted += 1
                         break
                     if current['sha256'] == row['sha256']:
                         break
                     row = current
                 except (OSError, ValueError):
-                    delete_pointer(row['public_ref'], row['size'])
+                    written += delete_and_repair_pointer(row)
                     deleted += 1
                     break
     print(f'Pointers: {written} written, {deleted} deleted, {skipped} skipped.')

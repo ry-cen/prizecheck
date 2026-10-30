@@ -651,3 +651,62 @@ def test_purge_keeps_a_concurrently_replaced_base_row_and_pointer(pids, candidat
     with connect() as conn:
         ref = conn.execute('SELECT public_ref FROM catalog_printing WHERE id=%s', (pid,)).fetchone()['public_ref']
     assert read_pointer(ref, 'large')['key'] == replaced[0]['storage_key']
+
+
+def test_purge_repairs_pointer_replaced_after_commit(pids, candidate, monkeypatch):
+    import runpy
+    from pathlib import Path
+    from app.core.art.public import delete_pointer, read_pointer
+    pid = pids['card-1']
+    assert get(pid, 'large').status_code == 200
+    monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
+    tool = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts' / 'art_store.py'))
+    purge = tool['purge_tcgplayer']
+    replacements = []
+
+    def interleaved_delete(ref, size):
+        if not replacements:
+            # The conditional deletion has committed before file/pointer cleanup.
+            assert objects(pid) == []
+            assert get(pid, 'large').content == webp(64)
+            replacements.extend(objects(pid))
+        delete_pointer(ref, size)
+
+    monkeypatch.setitem(purge.__globals__, 'delete_pointer', interleaved_delete)
+    assert purge() == 0
+    with connect() as conn:
+        ref = conn.execute('SELECT public_ref FROM catalog_printing WHERE id=%s', (pid,)).fetchone()['public_ref']
+    assert read_pointer(ref, 'large')['key'] == replacements[0]['storage_key']
+    assert art_storage.storage().get(replacements[0]['storage_key']) == webp(64)
+
+
+def test_pointers_repairs_replacement_when_old_file_disappears(pids, candidate, monkeypatch):
+    import runpy
+    from pathlib import Path
+    from app.core.art.public import read_pointer
+    pid = pids['card-1']
+    assert get(pid, 'large').status_code == 200
+    old = objects(pid)[0]
+    tool = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts' / 'art_store.py'))
+    pointers = tool['pointers']
+    original_get = art_storage.DiskArtStorage.get
+    replacements = []
+
+    def interleaved_get(self, key):
+        if key == old['storage_key'] and not replacements:
+            # Replacing the object also writes its pointer and removes the old file.
+            monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
+            # Avoid intercepting the signed-in request's own reads.
+            with monkeypatch.context() as patch:
+                patch.setattr(art_storage.DiskArtStorage, 'get', original_get)
+                assert get(pid, 'large').content == webp(64)
+            replacements.extend(objects(pid))
+            assert original_get(self, old['storage_key']) is None
+        return original_get(self, key)
+
+    monkeypatch.setattr(art_storage.DiskArtStorage, 'get', interleaved_get)
+    assert pointers() == 0
+    assert replacements
+    with connect() as conn:
+        ref = conn.execute('SELECT public_ref FROM catalog_printing WHERE id=%s', (pid,)).fetchone()['public_ref']
+    assert read_pointer(ref, 'large')['key'] == replacements[0]['storage_key']
