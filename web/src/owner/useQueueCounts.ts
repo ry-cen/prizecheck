@@ -4,6 +4,7 @@ import { getOwnerTradeReports } from "../social_generated";
 import {
   getAttributeQueue,
   getCardIdentityQueue,
+  getLikelyReprints,
   getMetadataQueue,
 } from "../metadata_generated";
 import type { OwnerSection } from "./sections";
@@ -42,9 +43,9 @@ export function useQueueCounts(section: OwnerSection) {
       read("attributes", () => getAttributeQueue().then(paged)),
       // The Reprints table lists Card Identities, each with one or more queued Printings (#171).
       read("reprints", () =>
-        getCardIdentityQueue().then(
-          (page) =>
-            `${new Set(page.items.map((item) => item.identity_id)).size}${page.next_cursor ? "+" : ""}`
+        Promise.all([getCardIdentityQueue(), getLikelyReprints()]).then(
+          ([page, likely]) =>
+            `${new Set(page.items.map((item) => item.identity_id)).size + likely.items.length}${page.next_cursor || likely.next_cursor ? "+" : ""}`
         )
       ),
       read("missing", () =>

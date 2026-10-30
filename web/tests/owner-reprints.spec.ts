@@ -575,3 +575,221 @@ test.describe("phone", () => {
     );
   });
 });
+
+// #437: structural candidates open the existing review card and can be dismissed.
+test("likely reprints can be reviewed and dismissed", async ({ page }) => {
+  seedLikelyReprints();
+  await signInAsOwner(page);
+  await openReprints(page);
+  const likely = page.getByRole("region", { name: "Likely reprints" });
+  await expect(likely.getByRole("heading", { name: "Psyduck" })).toBeVisible();
+  const review = likely.getByRole("button", { name: /^Review Psyduck,/ });
+  await expect(review).toHaveAttribute("aria-expanded", "false");
+  await review.click();
+  await expect(review).toHaveAttribute("aria-expanded", "true");
+  await likely.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(review).toBeFocused();
+  await review.click();
+  await expect(likely.getByLabel("Review reason")).toBeVisible();
+  await likely.getByRole("button", { name: "Not reprints" }).click();
+  await expect(likely.getByRole("heading", { name: "Psyduck" })).toHaveCount(0);
+  await expect(
+    likely.getByRole("heading", { name: "Likely reprints", exact: true })
+  ).toBeFocused();
+  await likely.getByRole("button", { name: "Undo dismissal" }).click();
+  await expect(likely.getByRole("heading", { name: "Psyduck" })).toBeVisible();
+  await expect(review).toBeFocused();
+  await review.click();
+  await likely
+    .getByRole("combobox", { name: /^Decision/ })
+    .selectOption("merge_groups");
+  await likely
+    .getByRole("combobox", { name: /^Group to merge/ })
+    .selectOption({ index: 1 });
+  await likely
+    .getByRole("combobox", { name: /^Into group/ })
+    .selectOption({ index: 2 });
+  await likely.getByLabel("Review reason").fill("Same card with reworded text");
+  await likely
+    .getByLabel("Review evidence URL")
+    .fill("https://example.org/reprints");
+  await likely.getByRole("button", { name: "Confirm decision" }).click();
+  await expect(likely.getByRole("heading", { name: "Psyduck" })).toHaveCount(0);
+  await expect(
+    likely.getByRole("heading", { name: "Likely reprints", exact: true })
+  ).toBeFocused();
+});
+
+function seedLikelyReprints() {
+  execFileSync(
+    ".venv/bin/python",
+    [
+      "-c",
+      `from test_catalog import reset_catalog
+from test_catalog_metadata import Records
+from test_catalog_reconciliation import run
+from test_likely_reprints import records
+from app.main import connect
+with connect() as conn:
+    conn.execute("TRUNCATE catalog_likely_reprint_decision")
+reset_catalog()
+run(Records(*records()))`,
+    ],
+    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+  );
+}
+
+test("a dismissal refresh wins over an in-flight next page", async ({
+  page,
+}) => {
+  seedLikelyReprints();
+  await signInAsOwner(page);
+  const endpoint = "**/api/admin/card-identities/likely-reprints";
+  await page.route(endpoint, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({
+      response,
+      json: { ...body, next_cursor: body.items.length ? "delayed" : null },
+    });
+  });
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started!: () => void;
+  const requested = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  await page.route(`${endpoint}?cursor=delayed`, async (route) => {
+    started();
+    await delayed;
+    await route.fulfill({ json: { items: [], next_cursor: null } });
+  });
+  await openReprints(page);
+  const likely = page.getByRole("region", { name: "Likely reprints" });
+  await likely
+    .getByRole("button", { name: "Load more likely reprints" })
+    .click();
+  await requested;
+  try {
+    await likely.getByRole("button", { name: "Not reprints" }).click();
+    await expect(likely.getByRole("heading", { name: "Psyduck" })).toHaveCount(
+      0
+    );
+  } finally {
+    release();
+  }
+  await expect(
+    likely.getByRole("button", { name: "Load more likely reprints" })
+  ).toHaveCount(0);
+  await expect(likely.getByRole("heading", { name: "Psyduck" })).toHaveCount(0);
+  await page.unrouteAll({ behavior: "wait" });
+});
+
+for (const action of ["dismiss", "undo"] as const) {
+  test(`a ${action} conflict refreshes evidence and discards Undo`, async ({
+    page,
+  }) => {
+    seedLikelyReprints();
+    await signInAsOwner(page);
+    await openReprints(page);
+    const likely = page.getByRole("region", { name: "Likely reprints" });
+    await expect(
+      likely.getByRole("heading", { name: "Psyduck" })
+    ).toBeVisible();
+    // Change the next list response so the test proves a new row/evidence was read.
+    await page.route(
+      "**/api/admin/card-identities/likely-reprints",
+      async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        await route.fulfill({
+          response,
+          json: {
+            ...body,
+            items: body.items.map((pair: Record<string, unknown>) => ({
+              ...pair,
+              identity_name: "Changed Psyduck",
+              evidence_digest: "changed",
+            })),
+          },
+        });
+      }
+    );
+    if (action === "undo") {
+      // Keep the real candidate available to represent a superseding decision.
+      await page.route(
+        "**/api/admin/card-identities/likely-reprints/dismiss",
+        (route) => route.fulfill({ json: { id: "superseded" } })
+      );
+      await likely.getByRole("button", { name: "Not reprints" }).click();
+      await expect(
+        likely.getByRole("button", { name: "Undo dismissal" })
+      ).toBeVisible();
+    }
+    await page.route(
+      action === "dismiss"
+        ? "**/api/admin/card-identities/likely-reprints/dismiss"
+        : "**/api/admin/card-identities/likely-reprints/*/undo",
+      (route) =>
+        route.fulfill({ status: 409, json: { detail: { code: "STALE" } } })
+    );
+    await likely
+      .getByRole("button", {
+        name: action === "dismiss" ? "Not reprints" : "Undo dismissal",
+      })
+      .click();
+    await expect(likely.getByRole("status")).toHaveText(
+      "The cards changed. Review them again."
+    );
+    await expect(
+      likely.getByRole("heading", { name: "Changed Psyduck" })
+    ).toBeVisible();
+    await expect(
+      likely.getByRole("button", { name: "Undo dismissal" })
+    ).toHaveCount(0);
+    await expect(likely.getByRole("article")).toHaveCount(0);
+    await page.unrouteAll({ behavior: "wait" });
+  });
+}
+
+test("a conflict whose refresh fails hides the stale rows until Try again reads the list", async ({
+  page,
+}) => {
+  seedLikelyReprints();
+  await signInAsOwner(page);
+  await openReprints(page);
+  const likely = page.getByRole("region", { name: "Likely reprints" });
+  await expect(likely.getByRole("heading", { name: "Psyduck" })).toBeVisible();
+  let failList = true;
+  await page.route(
+    "**/api/admin/card-identities/likely-reprints",
+    async (route) => {
+      if (failList) await route.fulfill({ status: 500, json: {} });
+      else await route.fallback();
+    }
+  );
+  await page.route(
+    "**/api/admin/card-identities/likely-reprints/dismiss",
+    (route) =>
+      route.fulfill({ status: 409, json: { detail: { code: "STALE" } } })
+  );
+  await likely.getByRole("button", { name: "Not reprints" }).click();
+  await expect(likely.getByRole("status")).toHaveText(
+    "Unable to load likely reprints."
+  );
+  await expect(likely.getByRole("heading", { name: "Psyduck" })).toHaveCount(0);
+  await expect(
+    likely.getByRole("button", { name: "Not reprints" })
+  ).toHaveCount(0);
+  await expect(likely.getByText("No likely reprints.")).toHaveCount(0);
+  failList = false;
+  await likely.getByRole("button", { name: "Try again" }).click();
+  await expect(likely.getByRole("heading", { name: "Psyduck" })).toBeVisible();
+  await expect(likely.getByRole("button", { name: "Try again" })).toHaveCount(
+    0
+  );
+  await expect(likely.getByRole("status")).toHaveCount(0);
+  await page.unrouteAll({ behavior: "wait" });
+});
