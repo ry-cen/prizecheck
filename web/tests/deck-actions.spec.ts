@@ -488,6 +488,10 @@ test.describe("on a phone", () => {
       .tap();
     await expect(header(page).publish).toHaveText("Published · v1");
     await expectPageChecks(page, "phone deck builder header");
+    // Narrower than the reference phone: wrapping must not depend on the host's font metrics.
+    await page.setViewportSize({ width: 320, height: 812 });
+    await expectPageChecks(page, "320 px published deck builder header");
+    await page.setViewportSize({ width: 375, height: 812 });
 
     await header(page).exportButton.tap();
     await expect(exportDialog(page)).toBeVisible();

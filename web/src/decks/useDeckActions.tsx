@@ -70,7 +70,7 @@ export function useDeckActions({
 
   const actions: ReactNode = detail && (
     <div className="flex min-w-0 flex-col items-end gap-1 phone:w-full phone:items-start">
-      <div className="flex flex-wrap items-center gap-2 phone:flex-nowrap phone:gap-1 phone:[&>button]:px-2">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 phone:w-full phone:gap-1 phone:[&>button]:min-w-0 phone:[&>button]:max-w-full phone:[&>button]:whitespace-normal phone:[&>button]:wrap-anywhere phone:[&>button]:px-2">
         <Button
           variant="secondary"
           className="phone:flex-1"
