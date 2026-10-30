@@ -1031,11 +1031,64 @@ These notes record where the work differs from, or settles, the map above. The s
 - **`catalog_targets`, `public_catalog` and `public_prices` gained root alias shims** at `app.<name>`. The unedited
   Playwright specs import them by their old names.
 - **Two temporary allow-list edges** stay in `scripts/python_boundary_allowlist.txt` until WP-D2 removes them:
-  `app.discovery -> published_cost` and `app.publications -> games/pokemon/art/urls`.
+  `app.discovery -> published_cost` and `app.publications -> games/pokemon/art/urls`. (Both are gone; the final
+  allow-list is in the 2026-10-30 entry.)
 - **Test-line edits.** The owner approved targeted edits to test lines for the WP-S2 art store and runner split. This
   goes beyond the import-lines-only rule of section 6.
 - **FastAPI is pinned to 0.162.0** in `api/requirements.txt` on this branch until the merge (design-brief section 4,
-  "Before the branch merges to dev").
+  "Before the branch merges to dev"). (Unpinned again on 2026-10-30; see below.)
 - **Docs.** [ADR 0023](../../adr/0023-split-core-and-games-by-composition.md) records the split, and
   `docs/agents/verification.md` describes the boundary checker. Prose elsewhere in `docs/` names the moved paths,
-  except for modules that WP-S3, WP-D1 and WP-D2 had not moved yet.
+  except for modules that WP-S3, WP-D1 and WP-D2 had not moved yet. (WP-K finished the rest on 2026-10-30.)
+
+**2026-10-30**
+
+WP-S2, WP-S3, WP-T, WP-D1 and WP-D2 have landed, and WP-K has pointed the docs at the final locations. The entry
+below says where each group ended up; the module map in section 1 stays the plan.
+
+- **WP-S2: art and the price runner.**
+  - The art store and the game-free art URL helpers are in `core/art/{store,urls}.py`. The Pokémon art route, allowed
+    hosts and `art_url` are in `games/pokemon/art/{route,hosts,urls}.py`. `card_art` moved whole to
+    `games/pokemon/prices/card_art.py`.
+  - The price runner is `core/prices/runner.py` and the quote contract is `core/prices/quote_contract.py`. Both take
+    the Pokémon source, record rules and quote values as arguments. `games/pokemon/prices/runner_entry.py` binds them,
+    and `games/pokemon/prices/quote_values.py` holds `SOURCE` and `CURRENCY`.
+  - `python -m app.price_runner` still works: the root `price_runner.py` is a shim that runs the entry. The CI connect
+    guard arms on that module name.
+- **WP-S3: collection import and the deck-import group.** `collection_import` split into
+  `core/imports/collection_draft.py` (row-state SQL constants, limits and messages) and
+  `games/pokemon/imports/collection_import.py` (router and the reader, matcher and finish calls). The `import_*`
+  helpers, `deck_import` and `decklist_text` moved whole to `games/pokemon/imports/`, `scanner_save` to
+  `games/pokemon/scanner/`, and `missing_cards` to `games/pokemon/catalog/`.
+- **WP-T: trade inventory.** `trade_inventory` moved whole to `games/pokemon/trading/trade_inventory.py`, beside
+  `trade_value`.
+- **WP-D1: deck routes.**
+  - The Deck store, index, ownership, loans, contents and printing logic is in `core/decks/`. `trade_wants` split: the
+    game-free reads and rules (`want_quantity`, `own_wants`, `own_rules`, `lower_trade_wants`) are in
+    `core/trading/trade_wants.py`; the Pokémon routes and models are in `games/pokemon/trading/trade_wants.py`.
+  - The Deck routes are `games/pokemon/decks/routes.py`, with `models.py`, `checks.py`, `commands.py` and `cost.py`
+    beside them. `deck_list_display` is now `games/pokemon/decks/line_display.py`.
+- **WP-D2: publications and discovery.**
+  - Publishing, snapshot storage, mutate and drain, and listing and paging are in
+    `core/publications/{publish,discovery}.py`.
+  - The Pokémon half is `games/pokemon/publications/`: `publications.py` (routes and the snapshot builder),
+    `models.py`, `discovery.py` (Format filter, featured Decks and cost), `public_deck.py` (moved whole) and
+    `published_cost.py`.
+- **Root names that still resolve.** `catalog_import`, `catalog_refresh`, `catalog_targets`, `public_catalog`,
+  `public_prices`, `price_runner` and `quote_contract` remain at `api/app/` as compatibility shims, for
+  `python -m` entry points and for the unedited Playwright specs. The real modules are under `games/pokemon/` and
+  `core/`; docs name those.
+- **Final boundary allow-list.** `scripts/python_boundary_allowlist.txt` ends with exactly two `[edges]` entries:
+  `app.host_readiness -> app.games.pokemon.prices.catalog_targets` and
+  `app.want_list -> app.games.pokemon.decks.line_display`. Both importers are root modules that did not move Now.
+  It also holds seven `[sql]` lines, the identity-table reads that wait for the auth-database work:
+  `app.host_readiness` (`owner_binding`, `user`), `app.identity` (`owner_binding`), `app.operations`
+  (`auth_rate_event`, `auth_send_event`), `app.games.pokemon.catalog.rule_rollout` (`owner_binding`) and
+  `app.social.profile` (`released_handle`).
+- **Rebased onto dev 32b7d5c.** The branch was rebased onto dev at `32b7d5c`. That carried dev's #395 change
+  (`card_tcgplayer_candidate` and `add_card_tcgplayer`) into its new homes, `games/pokemon/prices/catalog_targets.py`
+  and `games/pokemon/catalog/rule_rollout.py`.
+- **FastAPI is unpinned.** `api/requirements.txt` is back to `fastapi>=0.115,<1`; the temporary 0.162.0 pin is gone.
+- **Docs.** `docs/prices.md`, `docs/price-refresh.md` and `docs/public-projections.md` name the final module paths,
+  and ADR 0020's guardrail line names the two moved modules it allows. Otherwise dated records (ADRs 0001 to 0022,
+  release notes and the planning docs) still name the paths of their day.

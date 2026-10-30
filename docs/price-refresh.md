@@ -1,6 +1,6 @@
 # Price refresh: record contract (tickets 07 and 08)
 
-Skeleton written in Slice 0. Admission (07) and the runners (08) fill in behaviour; the shapes and invariants below are the contract both sides code against. The code for every shape is `api/app/quote_contract.py` (builders and strict validators). The 06 quote/result contract stays in `docs/prices.md`.
+Skeleton written in Slice 0. Admission (07) and the runners (08) fill in behaviour; the shapes and invariants below are the contract both sides code against. The code for every shape is `api/app/core/prices/quote_contract.py` (builders and strict validators; the Pokémon `source` and `currency` come from `api/app/games/pokemon/prices/quote_values.py`, and the root `app.quote_contract` still resolves as a shim that binds them). The 06 quote/result contract stays in `docs/prices.md`.
 
 Times are integer epoch milliseconds unless noted. `<ref>` is a Edition `public_ref`, `<rev>` its `mapping_revision`, and a job is identified by `<ref>:<rev>`. Every key below passes `key_family` and every coordination record is protected from eviction.
 
@@ -61,7 +61,7 @@ Backoff schedule: failure k waits `min(60 * 2^(k-1), 900)` s times a jitter in 0
 - A process that asks to import `app.price_runner` while `PRICE_RUNNER_LOCK_DIR` is set refuses non-loopback connects.
 - Launched runners never see `PRICE_FIXTURE_*` (the launcher's allowlist drops them), so a test writes the loopback origin to `$PRICE_RUNNER_LOCK_DIR/fixture-source-origin`. The fixture reads it when `app.games.pokemon.prices.price_source` is imported; the environment variable wins, and a non-loopback value fails the import. Runner requests then carry `x-fixture-slot`, `x-fixture-pid` and `x-fixture-pgid`.
 - In a runner process the fixture also logs every connect destination to `connects.log` and registers `runner-pids/<pid>` (`supervisor`, and `worker` for each fork). Tests count, stop and kill only those pids; nothing searches the host's process table.
-- `api/tests/test_price_runner.py` adds a test-only time scale: its sitecustomize reads `scaled_contract` from `$PRICE_RUNNER_LOCK_DIR/fake-source.json` and overrides `HARD_STOP_MS`, `LEASE_TTL_MS` or `LEASE_RENEW_MS` in `app.quote_contract` for the runners that test launches. The hard-stop scenario uses an 8 s stop and the SIGSTOP scenario a 2 s lease renewed every 0.5 s; both assert that the production constants are still 65 s, 10 s and 3 s. `IDLE_S` is a default argument and is not scaled.
+- `api/tests/test_price_runner.py` adds a test-only time scale: its sitecustomize reads `scaled_contract` from `$PRICE_RUNNER_LOCK_DIR/fake-source.json` and overrides `HARD_STOP_MS`, `LEASE_TTL_MS` or `LEASE_RENEW_MS` in `app.core.prices.quote_contract` for the runners that test launches. The hard-stop scenario uses an 8 s stop and the SIGSTOP scenario a 2 s lease renewed every 0.5 s; both assert that the production constants are still 65 s, 10 s and 3 s. `IDLE_S` is a default argument and is not scaled.
 
 Real-process boundary scenarios (ticket 08-C) live in `auth/tests/price-runners.test.ts` (two gateways, two APIs, the HTTP relay, a fake TCGdex server and a fake PostgreSQL port) and `web/tests/price-refresh.spec.ts` (the live stack's runners against a hanging source). Their timing margins are appended to `price-runners-metrics.log` in `TEST_LOG_DIR`. A hanging source shows `failed` when the runner's 2 s source deadline ends inside the 2.5 s wait window, and `timeout` when it ends after it. Both are labelled fallbacks that keep the cached quote.
 
@@ -94,7 +94,7 @@ Runner lifecycle, source client and recovery table. See the ticket plans.
 
 ## Runner (ticket 08-B)
 
-Code: `api/app/price_runner.py` (supervisor and worker), `api/app/price_launcher.py` (spawn, reclaim, shared cleanup), `scripts/price_runners.py` (operator). Design rationale: [ADR 0008](adr/0008-price-runner-liveness.md). The runner never imports psycopg, `app.main`, `app.games.pokemon.prices.prices` or `app.games.pokemon.catalog.public_catalog`, and its environment never contains `DATABASE_URL`, `INTERNAL_AUTH_SECRET` or `BETTER_AUTH_SECRET`.
+Code: `api/app/core/prices/runner.py` (supervisor and worker), `api/app/games/pokemon/prices/runner_entry.py` (binds the Pokémon card source, record rules and quote values; `python -m app.price_runner` reaches it through the root shim `api/app/price_runner.py`), `api/app/price_launcher.py` (spawn, reclaim, shared cleanup), `scripts/price_runners.py` (operator). Design rationale: [ADR 0008](adr/0008-price-runner-liveness.md). The runner never imports psycopg, `app.main`, `app.games.pokemon.prices.prices` or `app.games.pokemon.catalog.public_catalog`, and its environment never contains `DATABASE_URL`, `INTERNAL_AUTH_SECRET` or `BETTER_AUTH_SECRET`.
 
 ### Launch
 
