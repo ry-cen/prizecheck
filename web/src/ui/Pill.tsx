@@ -29,7 +29,8 @@ export function Pill({
       className={`box-border inline-flex h-chip max-w-full items-center whitespace-nowrap rounded-round border px-2 text-caption font-medium leading-none ${TONES[tone]}`}
     >
       {/* One inline run, so the spaces around a mark ("Standard · ✕ Not legal") aren't dropped at flex item edges. */}
-      <span className="min-w-0 truncate">{children}</span>
+      {/* leading-4 gives the clipping box room for descenders (g, y), which leading-none's truncate cut off. */}
+      <span className="min-w-0 truncate leading-4">{children}</span>
     </span>
   );
 }

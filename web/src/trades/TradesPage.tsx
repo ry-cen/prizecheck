@@ -98,7 +98,7 @@ export function TradesPage({ section, onNavigate }: Props) {
   return (
     <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
       {/* The switch sits right under the title, closer than the page's sections are to each other. */}
-      <div className="flex min-w-0 flex-col gap-6 border-b border-border pb-4">
+      <div className="flex min-w-0 flex-col gap-1 border-b border-border pb-4">
         <PageHeader title="Trades" />
         <Segmented
           label="Trades view"
