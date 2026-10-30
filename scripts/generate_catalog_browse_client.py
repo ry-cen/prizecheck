@@ -15,7 +15,7 @@ export type BrowseKind = 'pokemon' | 'supporter' | 'item' | 'tool' | 'stadium' |
 export type BrowseFormat = 'standard' | 'expanded' | 'glc';
 export type BrowseQuery = { q?: string; kind?: BrowseKind | null; format?: BrowseFormat | null; set_id?: string | null;
                             owned?: boolean; deck_id?: string | null; printing_id?: string | null;
-                            identity_id?: string | null };
+                            identity_id?: string | null; reprints_of?: string | null };
 
 %(error)s
 
@@ -36,6 +36,7 @@ export function browseEditions(query: BrowseQuery, cursor?: string | null, signa
   if (query.deck_id) params.set('deck_id', query.deck_id);
   if (query.printing_id) params.set('printing_id', query.printing_id);
   if (query.identity_id) params.set('identity_id', query.identity_id);
+  if (query.reprints_of) params.set('reprints_of', query.reprints_of);
   if (cursor) params.set('cursor', cursor);
   const suffix = params.toString() ? '?' + params.toString() : '';
   return browseRequest<BrowsePage>(`/api/catalog/editions${suffix}`, signal);

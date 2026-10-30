@@ -9,7 +9,7 @@ import { startAsNewOwner } from "./support/owner";
 import { artUpstream } from "./support/art-upstream";
 
 // The deck builder's Deck List (#176): opening a Deck on the Decks page shows every copy, its ownership state and the
-// cost, in Spread, Stacked and List, grouped by evolution line, Trainer Type and Energy.
+// cost, in Spread, Stacked and List, grouped by card type.
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
@@ -348,10 +348,9 @@ test.describe("on a desktop", () => {
       page.getByRole("complementary", { name: "Library" })
     ).toBeVisible();
 
-    // Groups: the evolution line, Other Pokémon, then Trainer Types and Energy.
+    // Groups: Pokémon, then Trainer Types and Energy.
     await expect(deckList.getByRole("heading", { level: 3 })).toHaveText([
-      "Charizard ex line, 6 cards",
-      "Other Pokémon, 1 card",
+      "Pokémon, 7 cards",
       "Supporters, 4 cards",
       "Items, 2 cards",
       "Energy, 10 cards",
@@ -461,7 +460,7 @@ test.describe("on a desktop", () => {
     await expect(page).toHaveURL(`${ORIGIN}/decks`);
   });
 
-  test("an evolution line forms across a skipped stage, and a two-word line keeps its name", async ({
+  test("Pokémon share one group sorted by copies then name", async ({
     page,
   }) => {
     promoteCatalog();
@@ -494,21 +493,16 @@ test.describe("on a desktop", () => {
     await page.goto(`${ORIGIN}/decks/${deckId}`);
     const deckList = page.getByRole("region", { name: "Deck List" });
     await expect(deckList.getByRole("heading", { level: 3 })).toHaveText([
-      "Charizard ex line, 3 cards",
-      "Hisuian Arcanine line, 2 cards",
+      "Pokémon, 5 cards",
     ]);
-    // Charmander is the root (stage 0), so it comes first; Charizard ex is two steps on and names the line.
-    const line = page.getByRole("region", { name: /^Charizard ex line/ });
-    await expect(line.getByRole("button")).toHaveCount(3);
+    const line = page.getByRole("region", { name: /^Pokémon, 5 cards/ });
+    await expect(line.getByRole("button")).toHaveCount(5);
     await expect(line.getByRole("button").first()).toHaveAccessibleName(
       /^Charmander, /
     );
     await expect(line.getByRole("button").last()).toHaveAccessibleName(
-      /^Charizard ex, /
+      /^Hisuian Growlithe, /
     );
-    await expect(
-      page.getByRole("region", { name: /Hisuian Arcanine line/ })
-    ).toBeVisible();
   });
 
   test("an address for no Deck shows Deck not found, with a way back to every Deck", async ({
