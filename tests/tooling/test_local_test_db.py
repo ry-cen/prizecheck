@@ -226,6 +226,22 @@ class Destroy(unittest.TestCase):
                     db.command_destroy(None)
             self.assertTrue((data / 'postmaster.pid').exists())
 
+    def test_destroy_with_a_record_refuses_a_live_postmaster_without_pg_version(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tools = make_tools(root / 'pg' / '16' / 'bin')  # stand-ins: never run, PG_VERSION is missing
+            instance = db.Instance(root)
+            instance.data.mkdir(parents=True)
+            (instance.data / 'postmaster.pid').write_text(f'{os.getpid()}\n')  # a live process
+            instance.save({'id': db.instance_id(root), 'root': str(root.resolve()), 'backend': 'native', 'port': 1,
+                           'bin_dir': str(tools), 'major': 16})
+            with mock.patch.object(db, 'ROOT', root), mock.patch('builtins.print'), \
+                    mock.patch.object(db.subprocess, 'run', side_effect=AssertionError('no process may run')):
+                with self.assertRaises(db.Failure):
+                    db.command_destroy(None)
+            self.assertTrue((instance.data / 'postmaster.pid').exists())
+            self.assertTrue(instance.record_file.exists())
+
     def test_destroy_waits_for_the_state_lock(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

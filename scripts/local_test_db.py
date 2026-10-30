@@ -495,8 +495,10 @@ def destroy_locked():
     record = instance.record()
     if record:
         stop_locked()
-    elif instance.pid_alive():
-        raise Failure(f'{STATE_NAME} has no owner.json, but data/postmaster.pid names a running process; stop that '
+    # Last check before deleting, whatever the record said: a postmaster still alive (no record, or a stop that could
+    # not see the cluster, such as a data directory without PG_VERSION) keeps its directory.
+    if instance.pid_alive():
+        raise Failure(f'data/postmaster.pid in {STATE_NAME} names a running process that was not stopped; stop that '
                       'server with pg_ctl first. Nothing was removed.')
     if instance.dir.exists():
         resolved = instance.dir.resolve()
