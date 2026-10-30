@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -6,7 +6,7 @@ import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { listCards } from "./support/deck-list";
 import { startAsNewOwner } from "./support/owner";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 // The deck builder's Deck List (#176): opening a Deck on the Decks page shows every copy, its ownership state and the
 // cost, in Spread, Stacked and List, grouped by card type.

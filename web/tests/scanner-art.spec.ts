@@ -3,9 +3,9 @@
 // browser rejects. Every scanner <img> therefore points at /api/art, whose fetcher reads the stub of
 // support/art-upstream.ts (the API's only upstream here, with the doubled header). A card with no picture shows the plain
 // placeholder and asks the route once.
-import { test, expect, type Locator } from "@playwright/test";
+import { expect, type Locator } from "@playwright/test";
 import { Pool } from "pg";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 import {
   holding,
   placements,

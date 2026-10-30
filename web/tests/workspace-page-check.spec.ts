@@ -1,11 +1,11 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 // #166: Collection's sidebar and Location tree, toolbar, filters and display settings, the stale banner, the
 // Reviewed Edition corrections, the Deck heading, Add cards, Manage locations and a Location's settings are on the kit. Each state

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -6,7 +6,7 @@ import { writeFileSync } from "node:fs";
 import { Pool } from "pg";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 // Ticket 111: the inspected Card Edition's price in the inspector, the opt-in Prices toggle that prices each
 // mounted tile, and the inspector's metadata report link. Prices are the existing EditionPrice component and

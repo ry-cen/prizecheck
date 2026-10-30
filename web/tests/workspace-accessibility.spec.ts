@@ -1,6 +1,6 @@
 // Ticket 114: the workspace's accessibility baseline (spec "Accessibility baseline", resolution 28).
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -19,7 +19,7 @@ import {
 import { animationsFinished } from "./support/motion";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 type TreeNode = { id: string; name: string; version: number };
 

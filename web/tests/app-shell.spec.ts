@@ -1,13 +1,13 @@
 // Ticket #162: the app shell (spec "The shell"). Tabs and the avatar menu on desktop; the bottom tab bar,
 // More sheet and ☰ drawer on a phone; client-side routing and redirects; Collection staying mounted
 // across tab switches (#121); the shared page check on the shell's states.
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { signInWithButton } from "./support/sign-in";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 type TreeNode = { id: string; name: string; version: number };
 

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -6,7 +6,7 @@ import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner } from "./support/sign-in";
 import { expectTouchTarget } from "./support/touch-target";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 // Owned cards in the import (#214). The review's side column holds the owned-cards setting: Use cards I own (the
 // default) also uses owned copies of other printings of a card, Exact printings only the printing each line names.
