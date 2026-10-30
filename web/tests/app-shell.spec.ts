@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { signInWithButton } from "./support/sign-in";
+import { expectTouchTarget } from "./support/touch-target";
 import { test, artUpstream } from "./support/art-upstream";
 
 type TreeNode = { id: string; name: string; version: number };
@@ -133,6 +134,34 @@ const tab = (page: Page, name: string) =>
   mainViews(page).getByRole("button", { name, exact: true });
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 const account = (page: Page) => page.getByRole("button", { name: "Account" });
+/** The shell's phone header: the banner holding the wordmark (the desktop header is hidden on a phone). */
+const phoneHeader = (page: Page) =>
+  page.getByRole("banner").filter({ visible: true });
+/** The phone header's actions, in order: the bell, Friends and Account. */
+const headerActions = (page: Page) => [
+  phoneHeader(page).getByRole("button", { name: /^Inbox/ }),
+  phoneHeader(page).getByRole("button", { name: /^Friends/ }),
+  phoneHeader(page).getByRole("button", { name: "Account", exact: true }),
+];
+
+/** Doubles every font-size token, as a reader's 200% text size setting does; fixed pixel sizes stay. */
+async function doubleText(page: Page) {
+  await page.addStyleTag({
+    content: `:root, :root * { ${[
+      ["2xs", 10],
+      ["xs", 11],
+      ["sm", 12],
+      ["control", 13],
+      ["md", 14],
+      ["lg", 18],
+      ["xl", 24],
+    ]
+      .map(
+        ([name, px]) => `--font-size-${name}: ${Number(px) * 2}px !important;`
+      )
+      .join(" ")} }`,
+  });
+}
 const cards = (page: Page) => page.getByRole("region", { name: "Cards" });
 const tiles = (page: Page) => cards(page).getByRole("button");
 const selectionBar = (page: Page) =>
@@ -823,6 +852,116 @@ test.describe("phone", () => {
     expect(await geometry(page)).toEqual(before);
     await expect(strip).toContainText("1 copy selected");
   });
+
+  test("at normal text size the phone header is one 64 px row: the wordmark, then the bell, Friends and Account at the end", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await page.goto(`${ORIGIN}/decks`);
+    await expect(heading(page)).toHaveText("Decks");
+    const header = phoneHeader(page);
+    expect((await header.boundingBox())!.height).toBeCloseTo(64, 0);
+    const wordmark = (await header.getByText("PrizeCheck").boundingBox())!;
+    for (const action of headerActions(page)) {
+      const box = await expectTouchTarget(action);
+      // Same row as the wordmark: their vertical centres line up.
+      expect(
+        Math.abs(box.y + box.height / 2 - (wordmark.y + wordmark.height / 2))
+      ).toBeLessThanOrEqual(1);
+    }
+  });
+
+  // Text at 200% (every font-size token doubled, as a reader's text size setting does; fixed sizes such as the 44 px
+  // targets stay). On a 320 px phone the wordmark and the actions can't share a row, so the actions wrap under it.
+  for (const width of [375, 320])
+    test(`with text at 200% on a ${width} px phone, every signed-in page's header keeps the wordmark, bell, Friends and Account inside the screen as 44 px targets`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 812 });
+      await signIn(page);
+      for (const [path, title] of [
+        ["/decks", "Decks"],
+        ["/catalog", null],
+        ["/loans", "Loans"],
+        ["/trades", null],
+        ["/reports", "Missing cards"],
+        ["/settings", "Settings"],
+      ] as const) {
+        await page.goto(`${ORIGIN}${path}`);
+        if (title) await expect(heading(page)).toHaveText(title);
+        else await expect(heading(page)).toBeVisible();
+        await doubleText(page);
+        const header = phoneHeader(page);
+        const wordmark = header.getByText("PrizeCheck");
+        await expect(wordmark, path).toBeVisible();
+        for (const part of [wordmark, ...headerActions(page)]) {
+          const box = (await part.boundingBox())!;
+          expect(box.x, `${path}: ${part}`).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width, `${path}: ${part}`).toBeLessThanOrEqual(
+            width + 0.5
+          );
+        }
+        for (const action of headerActions(page))
+          await expectTouchTarget(action);
+        // Nothing in the header reaches past the screen's edge, so the header adds no sideways scroll.
+        const past = await header.evaluate(
+          (element, width) =>
+            [element, ...element.querySelectorAll("*")]
+              .filter(
+                (each) => each.getBoundingClientRect().right > width + 0.5
+              )
+              .map((each) => each.outerHTML.slice(0, 80)),
+          width
+        );
+        expect(past, path).toEqual([]);
+        // The whole page is measured and recorded too: the document's and body's widths, and the innermost elements
+        // reaching past the screen (inside the header or not). Only the header is asserted here; a wider page from
+        // a page's own content or the tab bar is recorded for its owner, and the Deck page's whole-page check
+        // (deck-want-list-panel.spec.ts) asserts that page.
+        const whole = await page.evaluate(() => {
+          const reaches = (each: Element) =>
+            each.getBoundingClientRect().right > window.innerWidth + 0.5;
+          return {
+            documentWidth: document.documentElement.scrollWidth,
+            bodyWidth: document.body.scrollWidth,
+            offenders: [...document.querySelectorAll("body *")]
+              .filter(
+                (each) =>
+                  each.getBoundingClientRect().width > 0 &&
+                  reaches(each) &&
+                  ![...each.children].some(reaches)
+              )
+              .map(
+                (each) =>
+                  `${each.closest("header") ? "header " : each.closest("nav") ? "nav " : ""}${each.tagName.toLowerCase()} "${(each.textContent ?? "").trim().slice(0, 40)}" ${Math.round(each.getBoundingClientRect().right)} px`
+              ),
+          };
+        });
+        test.info().annotations.push({
+          type: `whole page at 200% text, ${width} px, ${path}`,
+          description: `document ${whole.documentWidth} px, body ${whole.bodyWidth} px; past the screen: ${whole.offenders.join("; ") || "none"}`,
+        });
+        expect(
+          whole.offenders.filter((each) => each.startsWith("header ")),
+          path
+        ).toEqual([]);
+        await page.screenshot({
+          path: test
+            .info()
+            .outputPath(`page-${width}-text-200${path.replace("/", "-")}.png`),
+          fullPage: true,
+        });
+      }
+      // The wrapped header still opens the account sheet from the keyboard, and focus returns to Account.
+      const avatar = headerActions(page)[2];
+      await avatar.focus();
+      await page.keyboard.press("Enter");
+      const sheet = page.getByRole("dialog", { name: "Account" });
+      await expect(sheet).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden();
+      await expect(avatar).toBeFocused();
+    });
 
   test("the shell passes the page check on a phone", async ({ page }) => {
     await signIn(page);

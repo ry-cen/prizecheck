@@ -379,7 +379,7 @@ for (const width of [375, 320]) {
       // The elements wider than the screen are recorded first, to tell this panel's parts from the rest of the builder;
       // then this panel's own parts must fit, and then the whole page must pass the page checks as at normal size.
       const wide = await page.evaluate(() =>
-        [...document.querySelectorAll("main *")]
+        [...document.querySelectorAll("body *")]
           .filter((element) => {
             const box = element.getBoundingClientRect();
             return box.width > 0 && box.right > window.innerWidth + 1;

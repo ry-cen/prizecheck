@@ -44,7 +44,8 @@ const PART =
  * that opens the results dialog. The menu lists the three Formats as menuitemradio items, the Deck's checked;
  * it opens on the checked one, and arrow keys, Home, End, Enter and Escape work as in every kit Menu. While a
  * change is in flight the menu still opens, but a choice is ignored until it settles. Both parts are 30 px tall
- * on desktop and 44 px on a phone, and so are the menu's items. The result's status is said in words; its mark
+ * on desktop and 44 px on a phone, and so are the menu's items; on a narrow phone or with larger text the result wraps
+ * under the Format inside the group rather than run off the screen. The result's status is said in words; its mark
  * and colour only repeat it.
  */
 export function TargetFormatControl({
@@ -62,7 +63,7 @@ export function TargetFormatControl({
       role="group"
       aria-label="Target Format and result"
       aria-busy={busy || undefined}
-      className="box-border inline-flex max-w-full items-center rounded-round border border-border-strong bg-surface-raised"
+      className="box-border inline-flex max-w-full flex-wrap items-center rounded-round border border-border-strong bg-surface-raised"
     >
       <Menu
         label={`Target Format: ${label}`}
