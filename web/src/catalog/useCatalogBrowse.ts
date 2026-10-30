@@ -84,6 +84,7 @@ export function useCatalogBrowse(
   );
   // Only the latest first-page read may set the rows; a page that arrives after a newer query is dropped.
   const latest = useRef(0);
+  const consumed = useRef(new Set<string>());
   const key = JSON.stringify(query);
   const current = useRef(query);
   current.current = query;
@@ -116,6 +117,7 @@ export function useCatalogBrowse(
 
   const load = useCallback(async (why = "", depth = 0) => {
     const mine = ++latest.current;
+    consumed.current.clear();
     // Own Adds counted before this read; ones that land while it runs stay counted.
     const ownAtStart = ownChanges.current;
     // No later page of the previous walk may be asked for while this first page is on its way.
@@ -161,7 +163,9 @@ export function useCatalogBrowse(
   // One page request at a time: the sentinel and the last tile's focus can both ask before a render.
   const inFlight = useRef(false);
   const loadMore = useCallback(async () => {
-    if (!nextCursor || inFlight.current) return;
+    if (!nextCursor || inFlight.current || consumed.current.has(nextCursor))
+      return;
+    consumed.current.add(nextCursor);
     inFlight.current = true;
     const mine = latest.current;
     setLoadingMore(true);
@@ -173,6 +177,7 @@ export function useCatalogBrowse(
       setError(null);
     } catch (cause) {
       if (mine !== latest.current) return;
+      consumed.current.delete(nextCursor);
       if (
         cause instanceof CatalogBrowseError &&
         (cause.status === 409 || cause.code === "INVALID_CURSOR")

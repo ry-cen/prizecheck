@@ -1,8 +1,9 @@
+import { test } from "./support/art-upstream";
 // Ticket #321: the scanner runs cross-origin isolated. Opened through Scan cards (a full navigation, so the document comes
 // with COOP and COEP), the page and the recognizer worker both report `crossOriginIsolated`, the card pictures load under
 // COEP, and the console shows no COEP error. Close and the return after Confirm are full navigations: scanner-save.spec.ts
 // ("Close leaves by a full navigation", and Confirm's "new document" check) proves both, so they are not repeated here.
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
 import {
   holding,
   installScript,

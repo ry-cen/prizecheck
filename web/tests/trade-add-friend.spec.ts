@@ -99,14 +99,14 @@ test("after both confirm a Trade, Ash adds Misty as a Friend and Misty accepts i
   await expect(
     page.getByRole("button", { name: "Withdraw request to Misty W" })
   ).toBeFocused();
-  await expect(page.locator("body")).not.toContainText(mistyHandle);
+  await expect(page.locator("#main-content")).not.toContainText(mistyHandle);
 
   // The conversation shows the same state.
   await page.goto(`${ORIGIN}/trades/with/${mistyTrader}`);
   await expect(
     timeline(page).getByText("You've sent Misty W a Friend Request.")
   ).toBeVisible();
-  await expect(page.locator("body")).not.toContainText(mistyHandle);
+  await expect(page.locator("#main-content")).not.toContainText(mistyHandle);
 
   // Misty accepts in the Friends drawer.
   await misty.reload();

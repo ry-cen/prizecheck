@@ -4,8 +4,8 @@
  * the session read, so landing on them waits no longer than before. A lazily loaded module must not also be
  * imported statically from an eager module: the bundler would then keep it in the entry and the split does nothing.
  *
- * Signed in, the shell's pages then load in the background once the browser is idle (preloadShellPages), so a tab
- * opened for the first time shows its page at once instead of an empty page area while its code downloads.
+ * Signed in, the shell's pages load in the background once the browser is idle (preloadShellPages). Each tab
+ * mounts hidden after its code arrives, so its first data read starts before the tab is opened.
  */
 import {
   createElement,
@@ -16,7 +16,7 @@ import {
 } from "react";
 import { COLLECTION_IMPORT_PATH } from "../collectionImport/route";
 import { publicPageAt } from "../public/publicRoutes";
-import { pageAt } from "./routes";
+import { pageAt, type PageId } from "./routes";
 
 type PreloadablePage<P> = ((props: P) => ReactElement) & {
   preload: () => Promise<unknown>;
@@ -123,36 +123,67 @@ export function preloadInitialPage(path: string): void {
 
 /** Shell pages, in the order they are likely opened, for preloadShellPages. */
 const SHELL_PAGES = [
-  Workspace,
-  DecksPage,
-  CatalogPage,
-  LoansPage,
-  TradesPage,
-  MissingCardsPage,
-  DeckBuilderPage,
-];
+  ["collection", Workspace],
+  ["decks", DecksPage],
+  ["catalog", CatalogPage],
+  ["loans", LoansPage],
+  ["trades", TradesPage],
+  ["reports", MissingCardsPage],
+] as const;
 
-/**
- * Starts the signed-in shell's page code once the browser is idle, one page after another so the shown page's own
- * reads go first. Owner controls loads only for the owner. A failed preload is left for the page's own boundary.
- */
-export function preloadShellPages(owner: boolean): () => void {
-  const pages = owner ? [...SHELL_PAGES, OwnerControlsPage] : SHELL_PAGES;
+/** Load code, idle, mount one root, and wait for its first read before warming the next root. */
+export function preloadShellPages(
+  owner: boolean,
+  onReady: (id: PageId) => Promise<void>
+): () => void {
+  if (
+    (navigator as Navigator & { connection?: { saveData?: boolean } })
+      .connection?.saveData
+  )
+    return () => {};
   let cancelled = false;
-  const idle = (next: () => void) => {
-    if (typeof window.requestIdleCallback === "function")
-      window.requestIdleCallback(next, { timeout: 2000 });
-    else window.setTimeout(next, 200);
-  };
-  const step = (index: number) => {
-    if (cancelled || index >= pages.length) return;
-    pages[index]
-      .preload()
-      .catch(() => undefined)
-      .finally(() => idle(() => step(index + 1)));
-  };
-  idle(() => step(0));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let idleId: number | undefined;
+  let wake: (() => void) | undefined;
+  const idle = () =>
+    new Promise<void>((resolve) => {
+      wake = resolve;
+      if (typeof window.requestIdleCallback === "function")
+        idleId = window.requestIdleCallback(() => resolve());
+      else timer = setTimeout(resolve, 200);
+    });
+  void (async () => {
+    const pages: Array<
+      readonly [PageId, { preload: () => Promise<unknown> } | null]
+    > = [
+      ...SHELL_PAGES,
+      ["settings", null],
+      ...(owner ? [["owner", OwnerControlsPage] as const] : []),
+    ];
+    for (const [id, code] of pages) {
+      await idle();
+      if (cancelled) return;
+      await code?.preload().catch(() => undefined);
+      if (cancelled) return;
+      await idle();
+      if (cancelled) return;
+      await Promise.race([
+        onReady(id),
+        new Promise<void>((resolve) => {
+          wake = resolve;
+          timer = setTimeout(resolve, 5000);
+        }),
+      ]);
+      clearTimeout(timer);
+      if (cancelled) return;
+    }
+    await idle();
+    if (!cancelled) void DeckBuilderPage.preload().catch(() => undefined);
+  })();
   return () => {
     cancelled = true;
+    clearTimeout(timer);
+    if (idleId !== undefined) window.cancelIdleCallback(idleId);
+    wake?.();
   };
 }

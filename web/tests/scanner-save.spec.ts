@@ -1,8 +1,9 @@
+import { test } from "./support/art-upstream";
 // Ticket #318: Confirm in the scanner's tray. It adds the tray to one Storage Leaf in one step and lands on Collection with
 // the toast and no Undo (a full navigation); the server's EDITIONS_CHANGED marks exactly the rows whose finish is gone;
 // DESTINATION_CHANGED reopens the picker with the rows kept; a response lost on the way freezes the tray with Retry, and the
 // retry replays the same save, so the cards are added once; an unanswered save past 29 days is dropped with a note.
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { expectPageChecks } from "./support/page-check";
 import {
   createLeaf,

@@ -1,8 +1,9 @@
+import { test } from "./support/art-upstream";
 // Ticket #318: the scanner's first-open and cannot-start screens. "Getting the scanner ready" with a bar only while
 // something downloads; one screen for every reason the scanner cannot start, offering Search for cards, Import from another
 // tracker, Try again and (with cards in the tray) Review tray. Only no camera, a denied camera and an unsupported browser
 // name a cause; a failed load and no index built show the generic screen, which never says index, download or asset.
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
 import {

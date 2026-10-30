@@ -49,8 +49,10 @@ ALLOWED_IMPORTS = {
                                 ('app.copy_allocation', 'AllocationRows')},
     'app.social.friend_reads': {
         ('app.social', 'name_rules'), ('app', 'set_codes'), ('app.db', 'connect'), ('app.identity', 'verified_user'),
-        # Only the error helper of the Location readers; the Want List's capture and card order drive the wanted cards.
-        ('app.location_tree', 'error'), ('app.want_list', 'capture_want_list'), ('app.want_list', 'number_order'),
+        # Only the error helper of the Location readers; the Want List's capture drives the wanted cards, and the catalog's
+        # card facts and card order show them.
+        ('app.location_tree', 'error'), ('app.want_list', 'capture_want_list'),
+        ('app.core.catalog.card_facts', 'Card'), ('app.core.catalog.card_facts', 'card_facts'),
         ('app.social.friend_copies', 'friend_copies')},
     # A Friend's Trade List (trading #269): the Friend by Handle and the card facts as a Friend's Collection reads them,
     # and their listable copies from the choke point. Discovery and Ask to trade (trading #276): the viewer's own wants
@@ -60,7 +62,7 @@ ALLOWED_IMPORTS = {
     'app.social.trade_matches': {
         ('app.social', 'name_rules'), ('app.db', 'connect'), ('app.identity', 'verified_user'), ('app.location_tree', 'error'),
         ('app.social.friend_copies', 'friend_trade_copies'), ('app.social.friend_reads', 'FRIEND_BY_HANDLE'),
-        ('app.social.friend_reads', 'PAGE_IDENTITIES'), ('app.social.friend_reads', 'card_facts'), ('app.social.friend_reads', 'search_key'),
+        ('app.social.friend_reads', 'PAGE_IDENTITIES'), ('app.core.catalog.card_facts', 'card_facts'), ('app.social.friend_reads', 'search_key'),
         ('app.trade_list', 'own_trade_copies'), ('app.core.trading.trade_wants', 'own_wants'), ('app.core.trading.trade_wants', 'own_rules'),
         ('app.want_list', 'capture_want_list'), ('app.social.friend_copies', 'friend_wants'), ('app.card_accepts', 'accepts'),
         ('app.social.friends', 'friend_ids'),
@@ -104,7 +106,7 @@ ALLOWED_IMPORTS = {
         ('app.social.conversations', 'normalize_text'), ('app.social.conversations', 'pair_row'), ('app.social.conversations', 'account_changed'),
         ('app.social.conversations', 'encode_cursor'), ('app.social.conversations', 'decode_cursor'),
         ('app.social.trades', 'end_trades_between'), ('app.social.trades', 'unconfirmed_partners'),
-        ('app.social.friend_reads', 'card_facts')},
+        ('app.core.catalog.card_facts', 'card_facts')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
     # app.loan_inventory, outside this area.
@@ -116,7 +118,7 @@ ALLOWED_IMPORTS = {
         # (#259): a set of Loan ids from the lender's own Holdings, never a Location; the read stays in app.loan_picks.
         ('app.loan_picks', 'stale_pick_loans'),
         ('app.db', 'connect'), ('app.identity', 'verified_user'), ('app.location_tree', 'error'),
-        ('app.location_tree', 'record_response'), ('app.social.friend_reads', 'card_facts'), ('app.social.owners', 'NOW'),
+        ('app.location_tree', 'record_response'), ('app.core.catalog.card_facts', 'card_facts'), ('app.social.owners', 'NOW'),
         ('app.social.owners', 'advance_revision'), ('app.social.owners', 'begin_owner_command'), ('app.social.owners', 'lock_owners'),
         # Whether the lender is still the reader's Friend, so Edit and resend is offered only then (owner's decision,
         # 2026-10-16): the one definition of "are Friends", a set of account ids, never anything of their inventory.
@@ -141,7 +143,7 @@ ALLOWED_IMPORTS = {
     # app.social.friends imports this module (``end_trades_between``).
     'app.social.trades': {
         ('app.trade_picks', 'stale_pick_trades'), ('app.db', 'connect'), ('app.identity', 'verified_user'),
-        ('app.location_tree', 'error'), ('app.location_tree', 'record_response'), ('app.social.friend_reads', 'card_facts'),
+        ('app.location_tree', 'error'), ('app.location_tree', 'record_response'), ('app.core.catalog.card_facts', 'card_facts'),
         ('app.social.owners', 'ensure_owner'), ('app.social.owners', 'lock_owners'), ('app.social.owners', 'advance_revision'), ('app.social.owners', 'NOW'),
         ('app.social.owners', 'begin_owner_command'),
         ('app.social.friends', 'friend_ids'),

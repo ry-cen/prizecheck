@@ -1,5 +1,5 @@
 """Web boundary check for web/src (ADR 0023's composition, frontend follow-on): shared code imports no game, and no game
-imports another. Standard library only; reads the source as text.
+imports another. Standard library only; the imports come from the installed TypeScript parser (scripts/web_imports.mjs).
 
 Owners. A file under web/src/games/<g>/ belongs to game <g>; a file directly under web/src/games belongs to none and
 fails. Every other file under web/src is shared.
@@ -15,18 +15,22 @@ Pokémon Formats into the Catalog's chips, DeckBuilderPage.tsx passing Pokémon'
 scripts/web_boundary_allowlist.txt as `<importer> -> <imported>`, repository-relative. A line that matches no forbidden
 edge fails, so a module that stops composing leaves the list. See docs/planning/shared-core/frontend-composition.md.
 
-What counts as an import, with comments and the text of every string and template literal masked out first, so
-import-like text inside them is not code:
-- `import ... from "x"`, `import type ... from "x"`, `export ... from "x"`, `export * from "x"` and `export type
-  {...} from "x"`, across lines, starting a line or after a `;` or `}` on it;
-- `import "x"`, starting a line or after a `;` or `}`;
-- `import("x")` anywhere but after `.`, with a quoted or a backtick string without `${`, which covers
-  `typeof import("x")`.
-A `?query` suffix (`?worker`, `?url`) is dropped. Bare package specifiers are not web/src files and are skipped.
+What counts as a reference: scripts/web_imports.mjs parses every file with the installed TypeScript parser and lists
+`import`/`export ... from`, `import x = require("x")`, `import("x")`, `typeof import("x")`, `require("x")` and
+`new URL("x", import.meta.url)` (how Vite bundles a worker or an asset). Strings, comments, template literals and
+regular expressions are parsed as what they are, so text in them is not a reference and code in a `${...}` is.
+
+Fail closed. A reference whose module is not a string literal (`import(name)`, `import.meta.glob(...)`) fails, and so
+does a non-relative specifier that is neither a `node:` builtin nor a package package.json declares: the repository has
+no path aliases (no tsconfig `paths`, no Vite `resolve.alias`), so such a specifier could name a web/src file the check
+does not see. A `?query` suffix (`?worker`, `?url`) is dropped.
 """
 from pathlib import Path, PurePosixPath
+import json
 import posixpath
 import re
+import shutil
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,61 +38,31 @@ WEB = 'web/src'
 ALLOWLIST = ROOT / 'scripts/web_boundary_allowlist.txt'
 SOURCES = ('.ts', '.tsx')
 TESTS = ('.test.ts', '.test.tsx')
-# Each pattern ends at a string's opening quote; the string's text is read from its span. A statement starts a line or
-# follows a `;` or a `}` on the same line.
-START = r'''(?:^|(?<=[;}]))[ \t]*'''
-STATIC = re.compile(START + r'''(?:import|export)\b[^;'"`]*?\bfrom\s*(['"])''', re.M)
-SIDE_EFFECT = re.compile(START + r'''import\s*(['"])''', re.M)
-DYNAMIC = re.compile(r'''(?<![\w$.])import\s*\(\s*(['"`])''')
-CLOSE = re.compile(r'\s*[,)]')
+READER = ROOT / 'scripts/web_imports.mjs'
+PACKAGE = ROOT / 'package.json'
 
 
-def mask(text):
-    """(code, strings) for a TypeScript source: the code with comments and every string's and template literal's text
-    blanked (quotes and newlines kept, so offsets and line numbers hold), and {opening quote offset: (closing quote
-    offset, text)}. Import-like text inside a comment or a string is then not code. A quoted string ends at its line's
-    end, so a quote in a regular expression literal costs one line at most."""
-    out, strings, i, n = [], {}, 0, len(text)
-    while i < n:
-        char, pair = text[i], text[i:i + 2]
-        if pair == '//':
-            end = text.find('\n', i)
-            end = n if end == -1 else end
-            out.append(' ' * (end - i))
-            i = end
-        elif pair == '/*':
-            end = text.find('*/', i + 2)
-            end = n if end == -1 else end + 2
-            out.append(re.sub(r'[^\n]', ' ', text[i:end]))
-            i = end
-        elif char in '\'"`':
-            j = i + 1
-            while j < n and text[j] != char and (char == '`' or text[j] != '\n'):
-                j += 2 if text[j] == '\\' else 1
-            j = min(j, n)
-            strings[i] = (j, text[i + 1:j])
-            out.append(char + re.sub(r'[^\n]', ' ', text[i + 1:j]) + text[j:j + 1])
-            i = j + 1
-        else:
-            out.append(char)
-            i += 1
-    return ''.join(out), strings
+def references(files):
+    """{path: [(line, kind, specifier or None)]} for {path: text}, from scripts/web_imports.mjs."""
+    node = shutil.which('node')
+    if not node:
+        raise SystemExit('FAILED: node is not on PATH; the web boundary check reads imports with TypeScript')
+    result = subprocess.run([node, str(READER)], input=json.dumps(files), capture_output=True, text=True, cwd=ROOT)
+    if result.returncode:
+        raise SystemExit(f'FAILED: {READER.name} exited {result.returncode}: {result.stderr.strip()}')
+    return {path: [tuple(entry) for entry in found] for path, found in json.loads(result.stdout).items()}
 
 
-def specifiers(text):
-    """(line, specifier) for every import, re-export and literal dynamic import in a TypeScript source."""
-    code, strings = mask(text)
-    found = set()
-    for pattern in (STATIC, SIDE_EFFECT, DYNAMIC):
-        for match in pattern.finditer(code):
-            quote = match.start(1)
-            end, value = strings.get(quote, (None, ''))
-            if end is None or not value or '\n' in value:
-                continue
-            if pattern is DYNAMIC and ('${' in value or not CLOSE.match(code, end + 1)):
-                continue
-            found.add((code.count('\n', 0, quote) + 1, value))
-    return sorted(found)
+def packages(text):
+    """The package names a package.json declares."""
+    data = json.loads(text)
+    return {name for field in ('dependencies', 'devDependencies') for name in data.get(field, {})}
+
+
+def package_of(specifier):
+    """`react-dom` for `react-dom/client`, `@scope/name` for `@scope/name/x`."""
+    parts = specifier.split('/')
+    return '/'.join(parts[:2]) if specifier.startswith('@') else parts[0]
 
 
 def resolve(importer, specifier, files):
@@ -148,23 +122,32 @@ def read_allowlist(text, failures):
     return edges
 
 
-def scan(files):
-    """({`src -> dst`: reason}, [failures]) for {path: text}."""
+def scan(files, declared):
+    """({`src -> dst`: reason}, [failures]) for {path: text} and the declared package names."""
     edges, failures = {}, []
-    for path, text in files.items():
+    found = references(files)
+    for path in files:
         if owner_of(path) == ('games', None):
             failures.append(f'{path} is directly under {WEB}/games: put it in a game')
-        for line, specifier in specifiers(text):
+        for line, kind, specifier in found.get(path, []):
+            if specifier is None:
+                failures.append(f'{path} line {line}: a {kind} reference whose module is not a string literal')
+                continue
+            bare = specifier.partition('?')[0]
+            if not bare.startswith(('./', '../')):
+                if not (bare.startswith('node:') or package_of(bare) in declared):
+                    failures.append(f'{path} line {line}: {specifier} is neither relative nor a declared package')
+                continue
             target = resolve(path, specifier, files)
-            reason = target and forbidden(path, target)
+            reason = forbidden(path, target)
             if reason:
                 edges.setdefault(f'{path} -> {target}', f'{reason}, line {line}')
     return edges, failures
 
 
-def check(files, allow_text):
-    """The FAILED reasons for {path: text} and an allow-list's text."""
-    edges, failures = scan(files)
+def check(files, allow_text, declared):
+    """The FAILED reasons for {path: text}, an allow-list's text and the declared package names."""
+    edges, failures = scan(files, declared)
     allowed = read_allowlist(allow_text, failures)
     for edge, reason in sorted(edges.items()):
         if edge not in allowed:
@@ -175,7 +158,7 @@ def check(files, allow_text):
 
 
 def main():
-    failures = check(sources(ROOT), ALLOWLIST.read_text(encoding='utf-8'))
+    failures = check(sources(ROOT), ALLOWLIST.read_text(encoding='utf-8'), packages(PACKAGE.read_text(encoding='utf-8')))
     for reason in failures:
         print(f'FAILED: {reason}')
     return int(bool(failures))

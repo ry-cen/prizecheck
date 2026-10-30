@@ -180,6 +180,11 @@ npx playwright install chromium
 TEST_ADMIN_DATABASE_URL=postgresql://YOUR_TEST_ROLE@127.0.0.1:5432/postgres npm run verify
 ```
 
+Without a server of your own, `npm run verify:local` starts a disposable loopback
+one for this checkout from PostgreSQL server binaries, Docker or Podman already on
+the host; `python3 scripts/local_test_db.py doctor` says what is missing. See
+[local testing](docs/agents/local-testing.md).
+
 The runner creates disposable databases and services, tests the current working
 tree, and saves diagnostics under `.scratch/verification/`. It needs full Git
 history for historical runtime fixtures. See the [verification guide](docs/agents/verification.md)

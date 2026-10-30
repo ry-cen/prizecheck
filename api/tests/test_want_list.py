@@ -291,6 +291,7 @@ class CountingConnection:
 
 def test_the_read_is_bounded_by_deck_list_lines_not_the_collection(store, monkeypatch):
     from app import want_list as want_list_module
+    from app.games.pokemon.decks import want_list as want_list_route
     found = world(pagers=12)
     listed = found["normal"]
     seed(store, listed, "0.25")
@@ -304,8 +305,10 @@ def test_the_read_is_bounded_by_deck_list_lines_not_the_collection(store, monkey
     def rows_read():
         seen = []
         monkeypatch.setattr(want_list_module, "connect", lambda: CountingConnection(real(), seen))
+        monkeypatch.setattr(want_list_route, "connect", lambda: CountingConnection(real(), seen))
         body = want_list(owner)
         monkeypatch.setattr(want_list_module, "connect", real)
+        monkeypatch.setattr(want_list_route, "connect", real)
         return body, sum(seen)
 
     before, read_before = rows_read()
@@ -327,7 +330,7 @@ def test_the_read_is_not_a_price_access(store, launches):
 
 
 def test_lines_of_one_card_read_collector_numbers_the_way_catalog_search_compares_them():
-    from app.want_list import number_order
+    from app.core.catalog.card_facts import number_order
     numbers = ["10", "9", "TG05", "9a", "TG1", "097", "SV001", "100", "2", "sv10", "SV9"]
     assert sorted(numbers, key=number_order) == ["2", "9", "9a", "10", "097", "100", "SV001", "SV9", "sv10", "TG1", "TG05"]
     # Zeros after a number's letters don't count: 097 and 97 are one number, and the raw text then breaks the tie.

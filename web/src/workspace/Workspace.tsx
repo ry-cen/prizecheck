@@ -1,3 +1,4 @@
+import { useFirstReadSettled } from "../shell/keptRead";
 import React, {
   useCallback,
   useEffect,
@@ -208,6 +209,10 @@ export function Workspace({
     sort: prefs.sort,
   };
   const gallery = useGalleryData(galleryQuery, ownerRevision);
+  useFirstReadSettled(
+    treeState === "error" ||
+      (treeState === "ready" && gallery.status !== "loading")
+  );
   const galleryKey = JSON.stringify(queryToParams(galleryQuery));
   const sets = useOwnedSets(galleryView, gallery.ownerRevision);
   const narrowed =
@@ -323,26 +328,34 @@ export function Workspace({
   };
   // A new view, search, filter or sort starts at the top of its gallery.
   useEffect(() => {
-    window.scrollTo(0, 0);
+    if (active) window.scrollTo(0, 0);
   }, [galleryKey]);
 
   // A link from the Decks page (/workspace?location=<id>) opens that Storage Leaf or Deck once the tree
   // has loaded, with its folders expanded. The address is cleaned at once, so a reload opens All owned.
   // A missing id or a folder id leaves the workspace at All owned.
-  const [initialLink] = useState(readLinkedLocation);
-  const linked = useRef<string | null>(initialLink);
+  const linked = useRef<string | null>(null);
+  const linkReloaded = useRef<string | null>(null);
   useEffect(() => {
+    if (!active) return;
+    const id = readLinkedLocation();
+    if (id) linked.current = id;
     clearLinkedLocation();
-  }, []);
+  }, [active]);
   useEffect(() => {
     const id = linked.current;
-    if (!id || treeState !== "ready") return;
-    linked.current = null;
+    if (!active || !id || treeState !== "ready") return;
     const node = index.byId.get(id);
+    if (!node && linkReloaded.current !== id) {
+      linkReloaded.current = id;
+      void loadTree();
+      return;
+    }
+    linked.current = null;
     if (!node || node.kind === "organization") return;
     setExpanded((previous) => new Set([...previous, ...index.ancestors(id)]));
     setView(id);
-  }, [index, treeState]);
+  }, [active, index, treeState, loadTree]);
 
   function toggleFolder(id: string) {
     setExpanded((previous) => {

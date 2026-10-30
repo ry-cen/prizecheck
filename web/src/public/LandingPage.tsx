@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { PRIMARY, SECONDARY } from "./controls";
 import { DISCOVER_PATH, followLink, SIGN_IN_PATH } from "./publicRoutes";
 
@@ -34,6 +35,64 @@ const FEATURES = [
   },
 ];
 
+/**
+ * The two ways a collector starts: a decklist they want on the table, or the cards they already have. Each opens the
+ * real import page; signed out, that address shows the sign-in card in its place, and signing in opens it.
+ */
+const GOALS = [
+  {
+    title: "Import a deck",
+    description:
+      "Paste a decklist from Pokémon TCG Live or Limitless and check every line. Its Deck List then shows what you own, where it's stored and what's missing.",
+    // Decklist Import (#212), the page Decks' Import a list opens.
+    href: "/decks/import",
+  },
+  {
+    title: "Add my cards",
+    description:
+      "Upload another tracker's export or paste a list, choose where the cards go, and review them before anything is added.",
+    // Collection Import (#226), collectionImport/route.ts.
+    href: "/collection/import",
+  },
+];
+
+/**
+ * A goal card. Its title row is the link, named by the goal and described by the line under it; the link's ::after
+ * covers the card, so a click anywhere on it follows the link. Focus rings the title row alone, which always fits below
+ * the sticky header when focus scrolls it into view, however large the text.
+ */
+function GoalLink({
+  title,
+  description,
+  href,
+  onClick,
+}: (typeof GOALS)[number] & {
+  onClick: ReturnType<typeof followLink>;
+}) {
+  const id = useId();
+  return (
+    <div className="relative box-border flex h-full flex-col gap-2 rounded-panel border border-border-strong bg-surface p-5 has-[a:hover]:border-accent">
+      <a
+        href={href}
+        onClick={onClick}
+        aria-describedby={`${id}-description`}
+        className="flex min-h-control items-center justify-between gap-3 text-heading font-semibold text-text no-underline after:absolute after:inset-0 after:rounded-panel after:content-[''] phone:min-h-control-phone"
+      >
+        {title}
+        <span aria-hidden="true" className="text-accent-strong">
+          ›
+        </span>
+      </a>
+      <p
+        id={`${id}-description`}
+        className="m-0 text-body leading-normal text-text-muted"
+      >
+        {description}
+      </p>
+    </div>
+  );
+}
+
 export function LandingPage({
   onNavigate,
 }: {
@@ -51,6 +110,19 @@ export function LandingPage({
           each printing and finish, and the box, binder or deck it's in. Build
           decks from the cards you have, see what's still missing, and lend or
           trade with friends without losing track.
+        </p>
+        <ul
+          aria-label="Where to start"
+          className="m-0 grid w-full list-none grid-cols-2 gap-4 p-0 phone:grid-cols-1"
+        >
+          {GOALS.map((goal) => (
+            <li key={goal.href}>
+              <GoalLink {...goal} onClick={follow} />
+            </li>
+          ))}
+        </ul>
+        <p className="m-0 text-meta text-text-muted">
+          You&apos;ll sign in first, then carry on from there.
         </p>
         <div className="flex flex-wrap gap-3">
           <a href={SIGN_IN_PATH} onClick={follow} className={PRIMARY}>

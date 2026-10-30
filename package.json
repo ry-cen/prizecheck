@@ -17,6 +17,8 @@
     "typecheck": "npm run check",
     "guardrails": ".venv/bin/python scripts/check_guardrails.py && .venv/bin/python scripts/check_python_boundaries.py && .venv/bin/python scripts/check_web_boundaries.py && .venv/bin/python -m unittest discover -s tests/tooling -v",
     "verify": ".venv/bin/python scripts/verify.py",
+    "verify:local": "python3 scripts/local_test_db.py run -- npm run verify --",
+    "test:db": "python3 scripts/local_test_db.py",
     "test:fast": "npm run guardrails",
     "test:scanner-models": "vitest run web/src/scanner/recognize/pipeline.models.test.ts web/src/scanner/recognize/numbers.local.test.ts web/src/scanner/vision/vision.local.test.ts"
   },

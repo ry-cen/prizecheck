@@ -85,7 +85,7 @@ from app.identity import verified_user
 from app.inventory_core import add_in, is_deck, leaf, quantity, take_out
 from app.social.conversations import new_conversation_lock, open_conversation
 from app.social.discovery import reach_one, require_not_suspended, trader_user
-from app.social.friend_reads import card_facts
+from app.core.catalog.card_facts import card_facts
 from app.social.friend_copies import friend_trade_copies
 from app.social.owners import NOW, advance_revision, begin_owner_command, lock_owners
 from app.social.trades import (TRADES, TradeStep, TradeView, allowed, close_trade, other_side, record_trade_update, role_of,

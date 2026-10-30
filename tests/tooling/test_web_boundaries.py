@@ -13,10 +13,11 @@ GAME = {'web/src/games/pokemon/formats.ts': 'export const F = 1;\n',
         'web/src/games/riftbound/domains.ts': 'export const D = 1;\n',
         'web/src/ui/Pill.tsx': 'export const Pill = 1;\n'}
 TO_FORMATS = 'web/src/catalog/a.ts -> web/src/games/pokemon/formats.ts'
+DECLARED = {'react', 'react-dom', '@scope/kit'}
 
 
 def run(source, path='web/src/catalog/a.ts', allow=''):
-    return boundaries.check({**GAME, path: source}, allow)
+    return boundaries.check({**GAME, path: source}, allow, DECLARED)
 
 
 def shared_to_formats(line=1):
@@ -59,11 +60,46 @@ class WebBoundariesTest(unittest.TestCase):
                          ['forbidden import web/src/catalog/a.ts -> web/src/games/pokemon/index.ts '
                           '(shared to game pokemon, line 1)'])
 
-    def test_comments_and_template_dynamic_imports_are_not_imports(self):
+    def test_comments_are_not_imports(self):
         source = ('// import { F } from "../games/pokemon/formats";\n'
                   '/* export * from "../games/pokemon/formats";\n   import("../games/pokemon/formats") */\n'
-                  'const url = "https://example.test//x"; // import("../games/pokemon/formats")\n'
-                  'const m = import(`../games/${name}/formats`);\n')
+                  'const url = "https://example.test//x"; // import("../games/pokemon/formats")\n')
+        self.assertEqual(run(source), [])
+
+    def test_a_dynamic_import_inside_a_template_interpolation_counts(self):
+        for source in ('const s = `${await import("../games/pokemon/formats")}`;\n',
+                       'const s = `a ${`b ${(await import("../games/pokemon/formats")).F}`}`;\n'):
+            with self.subTest(source=source):
+                self.assertEqual(run(source), shared_to_formats())
+
+    def test_a_quote_in_a_regular_expression_does_not_hide_a_later_import(self):
+        for source in ('const r = /["\']/g; import { F } from "../games/pokemon/formats";\n',
+                       'const r = /`/; const m = import("../games/pokemon/formats");\n',
+                       'const r = /\\/\\//; import "../games/pokemon/formats";\n'):
+            with self.subTest(source=source):
+                self.assertEqual(run(source), shared_to_formats())
+
+    def test_require_and_import_meta_url_references_count(self):
+        for source in ('const m = require("../games/pokemon/formats");\n',
+                       'import m = require("../games/pokemon/formats");\n',
+                       'const w = new Worker(new URL("../games/pokemon/formats.ts", import.meta.url));\n'):
+            with self.subTest(source=source):
+                self.assertEqual(len(run(source)), 1)
+
+    def test_a_reference_that_is_not_a_literal_fails_closed(self):
+        for source, kind in (('const m = import(`../games/${name}/formats`);\n', 'dynamic'),
+                             ('const m = import(name);\n', 'dynamic'),
+                             ('const m = require(name);\n', 'require'),
+                             ('const all = import.meta.glob("../games/*/formats.ts");\n', 'glob'),
+                             ('const u = new URL(name, import.meta.url);\n', 'url')):
+            with self.subTest(source=source):
+                self.assertEqual(run(source),
+                                 [f'web/src/catalog/a.ts line 1: a {kind} reference whose module is not a string literal'])
+
+    def test_quoted_keys_and_property_calls_are_not_imports(self):
+        source = ('const o = { "import": "../games/pokemon/formats", from: "../games/pokemon/formats" };\n'
+                  'const p = { import: () => "../games/pokemon/formats" };\n'
+                  'type T = { "import"(x: "../games/pokemon/formats"): void };\n')
         self.assertEqual(run(source), [])
 
     def test_a_comment_marker_inside_a_string_does_not_hide_the_next_import(self):
@@ -90,8 +126,17 @@ class WebBoundariesTest(unittest.TestCase):
         source = 'const a = "import x from \'y\'"; import { F } from "../games/pokemon/formats";\n'
         self.assertEqual(run(source), shared_to_formats())
 
-    def test_a_bare_package_specifier_is_skipped(self):
-        self.assertEqual(run('import x from "games/pokemon/formats";\n'), [])
+    def test_declared_packages_and_node_builtins_pass(self):
+        source = ('import { useState } from "react";\nimport { createRoot } from "react-dom/client";\n'
+                  'import { k } from "@scope/kit/x";\nimport fs from "node:fs";\n')
+        self.assertEqual(run(source), [])
+
+    def test_a_non_relative_specifier_that_is_no_declared_package_fails_closed(self):
+        for specifier in ('games/pokemon/formats', '/src/games/pokemon/formats', '@/games/pokemon/formats',
+                          '~/games/pokemon/formats', '@scope/other'):
+            with self.subTest(specifier=specifier):
+                self.assertEqual(run(f'import x from "{specifier}";\n'),
+                                 [f'web/src/catalog/a.ts line 1: {specifier} is neither relative nor a declared package'])
 
     def test_a_game_may_import_shared_code_and_itself(self):
         source = 'import { Pill } from "../../ui/Pill";\nimport { I } from "./index";\n'
@@ -127,7 +172,9 @@ class WebBoundariesTest(unittest.TestCase):
             self.assertEqual(sorted(boundaries.sources(root)), ['web/src/a.ts', 'web/src/b/c.tsx'])
 
     def test_the_tree_matches_its_allow_list(self):
-        self.assertEqual(boundaries.check(boundaries.sources(ROOT), boundaries.ALLOWLIST.read_text(encoding='utf-8')), [])
+        declared = boundaries.packages(boundaries.PACKAGE.read_text(encoding='utf-8'))
+        self.assertEqual(boundaries.check(boundaries.sources(ROOT), boundaries.ALLOWLIST.read_text(encoding='utf-8'),
+                                          declared), [])
 
 
 if __name__ == '__main__':

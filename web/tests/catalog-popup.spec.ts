@@ -5,7 +5,7 @@
 // (Add N puts copies in a Location; there is no Deck List row), the report footer, and the
 // shared page check at 1280×800 and 375×812 with the popup open, including the phone's bottom sheet. The gallery
 // itself is in catalog-gallery.spec.ts.
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -13,7 +13,7 @@ import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 function python(code: string) {
