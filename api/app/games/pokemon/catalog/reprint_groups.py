@@ -20,6 +20,7 @@ Printing's group advances the shared attribute revision (``advance_attribute_rev
 import hashlib
 import inspect
 import json
+import re
 import unicodedata
 from uuid import UUID, uuid5
 
@@ -42,6 +43,11 @@ class ReprintTextRules:
       with the typographic characters TCGdex spells both ways folded: ‘ ’ ʼ to ', “ ” to ", − to - and × to x. For
       example Rare Candy bw10-105 says "can’t" where xy5-135 says "can't", and Ultra Ball sv01-196 breaks a line
       that swsh9-186 does not.
+    - **Energy spellings (v2)**: [G], [R], [W], [L], [P], [F], [D], [M], [Y], [N] and [C] become brace
+      symbols. TCGdex's ``<span class="energy-symbol <Type>" ...>...</span>`` becomes that type's brace symbol.
+      "Basic <Type> Energy" becomes "Basic {X} Energy" only after "Basic "; other spelled-out Energy stays printed.
+      The types are Grass, Fire, Water, Lightning, Psychic, Fighting, Darkness, Metal, Fairy, Dragon and Colorless.
+      ``<em>`` and ``</em>`` are removed while keeping all their inner text, including reminder text.
     - **Kept as printed**: letter case ("Basic" and "basic" are different text; capitalized words are game terms) and
       parenthetical reminder text (TCGdex does not tell reminder text from rules text). Reworded printings are merged
       by maintainer review, never here: Rare Candy sm1-129 ("to evolve it.") is not grouped with me01-125 ("to evolve
@@ -54,8 +60,11 @@ class ReprintTextRules:
       groups in the crawl, nearly all on missing data), the name (the Card Identity covers it), set, rarity and
       flavour text.
     """
-    VERSION = 1
+    VERSION = 2
     FOLD = {"\u2018": "'", "\u2019": "'", "\u02bc": "'", "\u201c": '"', "\u201d": '"', "\u2212": "-", "\u00d7": "x"}
+    ENERGY_SYMBOLS = dict(zip(
+        ("Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal", "Fairy", "Dragon", "Colorless"),
+        "GRWLPFDMYNC"))
     TEXT_CATEGORIES = ("Trainer", "Energy")
 
     @classmethod
@@ -68,7 +77,15 @@ class ReprintTextRules:
         if not isinstance(value, str):
             return None
         folded = unicodedata.normalize("NFC", value).translate(str.maketrans(cls.FOLD))
-        return " ".join(folded.split()) or None
+        types = "|".join(cls.ENERGY_SYMBOLS)
+        folded = re.sub(r"\[([GRWLPFDMYNC])\]", r"{\1}", folded)
+        folded = re.sub(r"""<span class=(["'])energy-symbol (""" + types + r""")\1(?:\s[^>]*)?>.*?</span>""",
+                        lambda match: "{" + cls.ENERGY_SYMBOLS[match[2]] + "}", folded, flags=re.DOTALL)
+        # Spelled-out Energy folds last, so a line break or <em> inside "Basic Fire Energy" folds the same way.
+        folded = " ".join(folded.replace("<em>", "").replace("</em>", "").split())
+        folded = re.sub(r"\bBasic (" + types + r") Energy\b",
+                        lambda match: "Basic {" + cls.ENERGY_SYMBOLS[match[1]] + "} Energy", folded)
+        return folded or None
 
     @classmethod
     def rules_text(cls, record):
