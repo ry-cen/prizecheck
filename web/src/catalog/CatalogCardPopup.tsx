@@ -8,7 +8,7 @@ import { MetadataReport } from "../MetadataReport";
 import { MissingCardReports } from "../MissingCardReports";
 import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
-import { Pill, type PillTone } from "../ui/Pill";
+import { Pill } from "../ui/Pill";
 import { Select } from "../ui/Select";
 import { AskControl, copyCap, copyCard } from "../loans/BorrowDrafts";
 import { lendableText } from "../social/friendCards";
@@ -27,6 +27,7 @@ import {
   earlierAddFinishedFor,
   FORMATS,
   MAX_ADD,
+  STANDING_TONES,
   STANDING_WORDS,
 } from "./catalogText";
 import {
@@ -78,11 +79,6 @@ type Props = {
   returnFocus?: RefObject<HTMLElement | null>;
 };
 
-const TONES: Record<keyof typeof STANDING_WORDS, PillTone> = {
-  legal: "ok",
-  not_legal: "bad",
-  unknown: "unverified",
-};
 const HEADING = "m-0 text-meta font-semibold text-text-muted";
 const META = "m-0 text-meta text-text-muted";
 const ROW = "flex flex-wrap items-center gap-2";
@@ -426,7 +422,7 @@ function Legality({
               const { status } = standing[format.value];
               return (
                 <li key={format.value}>
-                  <Pill tone={TONES[status]}>
+                  <Pill tone={STANDING_TONES[status]}>
                     {format.label}: {STANDING_WORDS[status]}
                   </Pill>
                 </li>

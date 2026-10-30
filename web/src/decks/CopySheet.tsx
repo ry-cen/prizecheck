@@ -3,12 +3,8 @@ import type { BrowseEdition } from "../catalog_browse_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { CopyArt } from "../ui/CopyTile";
-import {
-  copyStateText,
-  editionText,
-  kindText,
-  type DeckLine,
-} from "./deckListModel";
+import { kindText } from "../games/pokemon/deckGroups";
+import { copyStateText, editionText, type DeckLine } from "./deckListModel";
 import { DeckListStepper, EditFeedbackLine } from "./DeckListStepper";
 import { SwapList } from "./SwapList";
 import type { EditFeedback } from "./useDeckListEdits";

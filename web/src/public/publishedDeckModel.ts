@@ -8,6 +8,7 @@ import {
   type LineGroup,
 } from "../decks/deckListModel";
 import type { PublishedFormatCheck } from "../format_checks_generated";
+import { POKEMON_DECK_GROUPING } from "../games/pokemon/deckGroups";
 import type { PublishedDeckCost } from "../prices_generated";
 import type { PublicSnapshot } from "../publications_generated";
 
@@ -84,7 +85,7 @@ export function publishedLargeArt(
  * type unknown": it is one group, "Cards", instead.
  */
 export function publishedGroups(lines: readonly DeckLine[]): LineGroup[] {
-  const groups = groupLines(lines);
+  const groups = groupLines(lines, POKEMON_DECK_GROUPING);
   if (lines.length && lines.every((line) => line.line.card_kind === null))
     return groups.map((group) => ({ ...group, key: "cards", title: "Cards" }));
   return groups;
