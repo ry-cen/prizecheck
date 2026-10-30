@@ -78,7 +78,7 @@ from ..loan_picks import stale_pick_loans
 from ..location_tree import error, record_response
 from ..db import connect
 from ..identity import verified_user
-from .friend_reads import card_facts
+from ..core.catalog.card_facts import card_facts
 from .owners import NOW, advance_revision, begin_owner_command, lock_owners
 
 router = APIRouter(prefix='/api/social/loans', tags=['social'])

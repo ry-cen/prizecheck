@@ -64,7 +64,8 @@ one of:
 - **Touched Now:** 82 files and 23,685 lines. **Later:** 54 files and 15,651 lines.
 - **Import crossings:** 34 edges from non-Pokémon modules into Pokémon modules (section 2). After the Now work, 2
   allow-list lines remain: `host_readiness` → `catalog_targets`, and `want_list` → the Pokémon line display (section
-  1A). WP-C2 removes the 4 `set_codes` lines; WP-D1 and WP-D2 remove 11.
+  1A). WP-C2 removes the 4 `set_codes` lines; WP-D1 and WP-D2 remove 11. The composition follow-up (2026-10-30) removes
+  the last 2: no `[edges]` line remains.
 - **Entry points pinned by test assertions** stay as root shims at their old paths (design-brief D11 rule 5):
   `app.catalog_import`, `app.catalog_refresh`, `app.price_runner`, `app.host_readiness`.
 - **Tables and views:** 121 (section 3):
@@ -190,8 +191,8 @@ Lines are physical lines, including data files.
 | `format_rules/imported_sets.txt` | `games/pokemon/formats/format_rules/imported_sets.txt` | 211 | pokemon | **Now** (move) | Pokémon Format Rules data, read by `format_evaluator` |  |
 | `format_rules/standard.toml` | `games/pokemon/formats/format_rules/standard.toml` | 337 | pokemon | **Now** (move) | Pokémon Format Rules data, read by `format_evaluator` |  |
 | `format_standing.py` | `games/pokemon/formats/format_standing.py` | 301 | pokemon | **Now** (move) |  |  |
-| `holdings.py` | split → see 1A | 326 | mixed | **Later (Riftbound)** (split) | `set_codes` module (Storage Leaf rows) | CardDisplay |
-| `host_readiness.py` | split → see 1A | 234 | mixed | **Later (Riftbound)** (split) · identity edits Later | `catalog_targets` {LIVE, MATCHING, load_active}; loads `scripts/scanner_index_job.py` by path (47); operator text names `"user"`; reads `owner_binding` | CatalogReadiness (+ identity, Later) |
+| `holdings.py` | split → see 1A | 326 | core (since 2026-10-30) | **Later (Riftbound)** (move) | `set_codes` module (Storage Leaf rows) | CardDisplay |
+| `host_readiness.py` | split → see 1A | 234 | root (since 2026-10-30) | **Done** (split, 2026-10-30) · identity edits Later | `catalog_targets` {LIVE, MATCHING, load_active}; loads `scripts/scanner_index_job.py` by path (47); operator text names `"user"`; reads `owner_binding` | CatalogReadiness (+ identity, Later) |
 | `idempotency.py` | `core/inventory/idempotency.py` | 6 | core | **Later (Riftbound)** (move; owner may pull to Now) |  |  |
 | `identity.py` | `core/ops/identity.py` | 39 | core | **Later (Riftbound)** (move; owner may pull to Now) · identity edits Later |  |  |
 | `import_aliases.py` | `games/pokemon/imports/import_aliases.py` | 138 | pokemon | **Now** (move) |  |  |
@@ -322,7 +323,7 @@ sketches only. The 29 mixed files of the previous revision are joined by two mor
 | `publications` | DeckChecks | `TOKEN`, `PUBLIC_HEADERS`, `READ_ONLY`, `PublicModel`, the command and status models, `require_legal(*, checks)`, `mutate(…, *, snapshot, snapshot_model)`, `drain`, `authorized_writer`, `owned_*` | every route, `snapshot()`, `PublicSnapshot` and the `Public*` models, the check result | `core/publications/publish.py`; `games/pokemon/publications/{routes,models}.py` | **Now** (D2) |
 | `public_deck` | DeckChecks | nothing | the whole file (no router; it parses `PublicSnapshot` into Printing rows; every importer is Pokémon) | `games/pokemon/publications/public_deck.py` | **Now** (D2) |
 | `discovery` | DeckChecks | the cursor, `invalid_cursor`, `HEADERS`, `PAGE`, `listed_snapshots(*, parse)` | both routes, the legality cache, `CODE_SHA256`, `target_status`, `confirm`, `featured`, `cost`, `matches_query`, the models | `core/publications/discovery.py`; `games/pokemon/publications/discovery.py` | **Now** (D2) |
-| `host_readiness` | CatalogReadiness | `Report`, `age`, `check`, `owner`, `signup` | `rules`, `generation`, `prices`, `scanner` (`catalog_targets.LIVE`, `MATCHING`, `load_active`). `-m app.host_readiness` stays as a root shim (pinned) | `core/ops/readiness.py`; `games/pokemon/ops/readiness.py`; shim | **Later** |
+| `host_readiness` | CatalogReadiness | `Report`, `age`, `signup`, `run(*, owner, items)` | `rules`, `generation`, `prices`, `scanner`, `check` (`catalog_targets.LIVE`, `MATCHING`, `load_active`). `-m app.host_readiness` stays as a root shim (pinned) and keeps `owner` (the identity read) until the identity work | `core/ops/readiness.py`; `games/pokemon/ops/readiness.py`; shim | **Done** (2026-10-30) |
 
 **CardDisplay is Now through a table and one view (WP-C1, WP-C2).** The display reads join
 `catalog_printing_set_code` (one row per Printing; the only place that writes `coalesce(sc.code, pd.set_id, '')`)
@@ -338,9 +339,11 @@ core reads may select it, and no Riftbound filling is planned.
 models, and core owns the mechanics. `CardKind` and `TrainerType` stay Pokémon. `want_list` stays Later with
 ReprintRules, and until then it imports `read_line_display` from `games/pokemon/decks/line_display`.
 
-**Allow-list after the Now work: 2 lines.**
-- `host_readiness -> games.pokemon.catalog.catalog_targets` (CatalogReadiness, Later).
-- `want_list -> games.pokemon.decks.line_display` (`read_line_display`). WP-D1 creates it; ReprintRules removes it.
+**Allow-list after the Now work: 2 lines.** The composition follow-up (2026-10-30) removed both: the readiness split
+moved the `catalog_targets` reads to `games/pokemon/ops/readiness.py`, and `GET /api/want-list` moved to
+`games/pokemon/decks/want_list.py`.
+- `host_readiness -> games.pokemon.catalog.catalog_targets` (CatalogReadiness): removed.
+- `want_list -> games.pokemon.decks.line_display` (`read_line_display`). WP-D1 created it: removed.
 
 WP-D1 removes the 3 `decks` lines and never creates the `decks` → art hosts line from S2: the Pokémon routes pass the
 hosts to `warm_deck`. WP-D2 removes the 6 `discovery` lines and the 2 `publications` lines.
@@ -482,7 +485,7 @@ are the allowed direction and are not listed. Neither are `main.py` edges, which
 | `discovery` (mixed) | `public_catalog` | *module*, marketplace_states | DeckChecks + MarketplacePrices | yes, removed by WP-D2 |
 | `discovery` (mixed) | `published_format_checks` | *module* | DeckChecks + MarketplacePrices | yes, removed by WP-D2 |
 | `holdings` (mixed) | `set_codes` | *module* | CardDisplay | **removed by WP-C2** (reads `catalog_set_code`) |
-| `host_readiness` (mixed) | `catalog_targets` | LIVE, MATCHING, load_active | CatalogReadiness (+ identity, Later) | yes, until Later |
+| `host_readiness` (mixed) | `catalog_targets` | LIVE, MATCHING, load_active | CatalogReadiness (+ identity, Later) | **removed** (readiness split, 2026-10-30) |
 | `import_match_core` (mixed) | `catalog_browse` | NUMBER_KEY, _rules_release_dates | DecklistText + CatalogSearch | yes, removed by its Now package |
 | `import_match_core` (mixed) | `decklist_text` | CardLine | DecklistText + CatalogSearch | yes, removed by its Now package |
 | `import_owned` (mixed) | `import_energy_matching` | CATALOG_NAME | DecklistText (energy grouping) | yes, removed by its Now package |
@@ -1081,6 +1084,7 @@ below says where each group ended up; the module map in section 1 stays the plan
 - **Final boundary allow-list.** `scripts/python_boundary_allowlist.txt` ends with exactly two `[edges]` entries:
   `app.host_readiness -> app.games.pokemon.prices.catalog_targets` and
   `app.want_list -> app.games.pokemon.decks.line_display`. Both importers are root modules that did not move Now.
+  The composition follow-up (2026-10-30) removed both, so no `[edges]` entry remains; the `[sql]` lines are unchanged.
   It also holds seven `[sql]` lines, the identity-table reads that wait for the auth-database work:
   `app.host_readiness` (`owner_binding`, `user`), `app.identity` (`owner_binding`), `app.operations`
   (`auth_rate_event`, `auth_send_event`), `app.games.pokemon.catalog.rule_rollout` (`owner_binding`) and

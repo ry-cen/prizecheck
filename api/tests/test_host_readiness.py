@@ -7,6 +7,8 @@ from uuid import uuid4
 import pytest
 
 from app import host_readiness
+from app.core.ops import readiness as readiness_core
+from app.games.pokemon.ops import readiness as pokemon_readiness
 from app.games.pokemon.prices.catalog_targets import LIVE, MATCHING, activate_rule
 from app.db import connect
 
@@ -14,7 +16,7 @@ SCRIPT = "bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh"
 GUIDE = "docs/deployment-oracle.md"
 ENVIRONMENT = {"READINESS_SIGNUP_MODE": "owner-only", "READINESS_SCRIPT": SCRIPT, "READINESS_GUIDE": GUIDE}
 BASE = "https://assets.tcgdex.net/en/fx"
-MODEL = host_readiness.pinned_model_id()
+MODEL = pokemon_readiness.pinned_model_id()
 
 
 def clear():
@@ -200,7 +202,7 @@ def test_the_report_reads_in_a_read_only_session_with_statement_and_lock_timeout
         seen["conn"] = conn
         return conn
 
-    monkeypatch.setattr(host_readiness, "connect", spy)
+    monkeypatch.setattr(readiness_core, "connect", spy)
     report()
     assert seen["connect_timeout"] == 10
     assert "statement_timeout=15000" in seen["options"] and "lock_timeout=5000" in seen["options"]
@@ -209,7 +211,7 @@ def test_the_report_reads_in_a_read_only_session_with_statement_and_lock_timeout
 
 def test_a_table_locked_by_someone_else_times_out_into_one_warning(monkeypatch):
     prepare_ready_host()
-    monkeypatch.setattr(host_readiness, "connect",
+    monkeypatch.setattr(readiness_core, "connect",
                         lambda **options: connect(connect_timeout=10, options="-c lock_timeout=200"))
     with connect() as holder, holder.transaction():
         holder.execute("LOCK TABLE owner_binding IN ACCESS EXCLUSIVE MODE")
@@ -221,7 +223,7 @@ def test_a_table_locked_by_someone_else_times_out_into_one_warning(monkeypatch):
 
 def test_an_unreadable_scanner_job_or_lock_file_is_one_warning_not_a_failed_report(monkeypatch, tmp_path):
     prepare_ready_host()
-    monkeypatch.setattr(host_readiness, "JOB", tmp_path / "missing.py")
+    monkeypatch.setattr(pokemon_readiness, "JOB", tmp_path / "missing.py")
     code, text = report()
     assert code == 0
     assert "warning  The scanner index could not be checked: the pinned model id is unreadable" in text

@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from app.card_accepts import WillAcceptRule
 from app.games.pokemon.decks.line_display import read_line_display
-from app.want_list import DISPLAY_FIELDS, number_order
+from app.core.catalog.card_facts import number_order
+from app.want_list import DISPLAY_FIELDS
 from app.social.owners import ensure_owner, lock_owners
 from app.location_tree import error
 from app.db import connect
