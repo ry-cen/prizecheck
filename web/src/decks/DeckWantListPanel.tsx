@@ -47,7 +47,9 @@ export function DeckWantListPanel({
   const [opened, setOpened] = useState(false);
   if (!missing && !opened) return null;
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    // The toggle's label wraps rather than overflow on a narrow phone or with larger text: the kit's Button keeps one
+    // line at a fixed height, so its height becomes a minimum here (as the Decks index does for its pills).
+    <div className="flex min-w-0 flex-col gap-2 [&>button]:h-auto [&>button]:min-h-control [&>button]:max-w-full [&>button]:py-1 [&>button]:text-left [&>button]:whitespace-normal phone:[&>button]:min-h-control-phone">
       <Button
         className="self-start"
         aria-expanded={open}

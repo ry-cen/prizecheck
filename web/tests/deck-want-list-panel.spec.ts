@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+import { expectTouchTarget } from "./support/touch-target";
 
 // The deck builder's finish-deck flow. Under row 1's cost, four counts add up to the Deck List: In this Deck, Owned
 // elsewhere, Lent out and Not owned. While a copy is missing from the Deck, Ways to get missing cards opens the Deck's
@@ -15,7 +16,7 @@ import { signInAsOwner } from "./support/sign-in";
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-type Editions = { "PAL 185": string; "PAL 254": string };
+type Editions = Record<"PAL 185" | "PAL 254" | "SVE 5" | "SVE 13", string>;
 
 /** The Swap catalog through the real catalog import (it replaces the catalog); returns the Edition ids by key. */
 function seedCatalog(): Editions {
@@ -108,6 +109,66 @@ async function lastGap(page: Page, ids: Editions) {
   return { name, deck };
 }
 
+const hold = (
+  page: Page,
+  location: string,
+  edition: string,
+  quantity: number
+) =>
+  api(page, "POST", "/api/holdings", {
+    location_id: location,
+    edition_id: edition,
+    quantity: String(quantity),
+    idempotency_key: randomUUID(),
+  });
+
+async function shelf(page: Page) {
+  const created = await api(page, "POST", "/api/location-tree", {
+    name: `Shelf ${randomUUID().slice(0, 6)}`,
+    parent_id: null,
+    parent_version: null,
+    idempotency_key: randomUUID(),
+  });
+  return created.location.id as string;
+}
+
+async function newDeck(page: Page, prefix: string) {
+  const name = `${prefix} ${randomUUID().slice(0, 6)}`;
+  const created = await api(page, "POST", "/api/decks", {
+    name,
+    idempotency_key: randomUUID(),
+  });
+  return { name, deck: created.location.id as string };
+}
+
+/** Text at 200%: every font size token doubled, the rest of the layout as it is. */
+async function doubleText(page: Page) {
+  await page.addStyleTag({
+    content: `:root, :root * { ${[
+      ["2xs", 10],
+      ["xs", 11],
+      ["sm", 12],
+      ["control", 13],
+      ["md", 14],
+      ["lg", 18],
+      ["xl", 24],
+    ]
+      .map(
+        ([name, px]) => `--font-size-${name}: ${Number(px) * 2}px !important;`
+      )
+      .join(" ")} }`,
+  });
+}
+
+/** The element's text fits it: nothing is cut off sideways. */
+async function expectNoClipping(locator: ReturnType<Page["locator"]>) {
+  const { scroll, client } = await locator.evaluate((element) => ({
+    scroll: element.scrollWidth,
+    client: element.clientWidth,
+  }));
+  expect(scroll, "text cut off sideways").toBeLessThanOrEqual(client + 1);
+}
+
 const readiness = (page: Page) =>
   page.getByRole("group", { name: "Where this Deck's cards are" });
 const toggle = (page: Page) =>
@@ -193,4 +254,163 @@ test.describe("on a desktop", () => {
     await expect(needs).toContainText("1 of 1");
     await expect(swapButton(page)).toBeVisible();
   });
+
+  test("a failed read says so in the panel, and Retry reads again", async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    const { name, deck } = await lastGap(page, ids);
+    // The first read of this Deck's Want List fails; later ones go through.
+    let failures = 1;
+    await page.route(/\/api\/want-list\?deck=/, (route) => {
+      if (failures-- > 0) return route.fulfill({ status: 500, body: "{}" });
+      return route.continue();
+    });
+    await page.goto(`${ORIGIN}/decks/${deck}`);
+    await toggle(page).click();
+    await expect(panel(page)).toContainText(
+      "What this Deck needs couldn't be loaded."
+    );
+    // The rest of the builder is unaffected.
+    await expect(readiness(page)).toContainText("Not owned1");
+    await panel(page).getByRole("button", { name: "Retry" }).click();
+    await expect(
+      panel(page)
+        .getByRole("list", { name: `What ${name} needs` })
+        .getByRole("listitem")
+    ).toContainText("1 of 1");
+    await expect(panel(page)).not.toContainText("couldn't be loaded");
+  });
+
+  test("Will accept in the panel widens the Swap hint in place", async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    // Basic Psychic Energy SVE 13 and SVE 5 share a name and no Reprint Group.
+    const { name, deck } = await newDeck(page, "Gardevoir ex");
+    await setLine(page, deck, ids["SVE 13"], 4);
+    await hold(page, await shelf(page), ids["SVE 5"], 2);
+    await page.goto(`${ORIGIN}/decks/${deck}`);
+    await toggle(page).click();
+    const line = panel(page)
+      .getByRole("list", { name: `What ${name} needs` })
+      .getByRole("listitem");
+    await expect(line).toContainText("4 of 4");
+    await expect(line).not.toContainText("You own a card with the same name");
+
+    await panel(page)
+      .getByRole("combobox", {
+        name: /^Will accept for Basic Psychic Energy \(Scarlet & Violet Energies · 013 /,
+      })
+      .selectOption({ label: "Any card with the same name" });
+    await expect(line).toContainText(
+      "↻ You own a card with the same name (sve 005) × 2"
+    );
+    await expect(
+      panel(page).getByRole("button", {
+        name: "Swap 2 Basic Psychic Energy Scarlet & Violet Energies 013 for sve 005",
+      })
+    ).toBeVisible();
+    // Will accept changes no count.
+    await expect(line).toContainText("4 of 4");
+    await expect(readiness(page)).toContainText("Not owned4");
+  });
+
+  test("Gather moves a counted spare into the Deck, and the open panel follows the Deck's new read", async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    // 2 Iono PAL 185 listed, none in the Deck, one loose on a Shelf: the Want List counts it as a spare.
+    const { name, deck } = await newDeck(page, "Gather");
+    await setLine(page, deck, ids["PAL 185"], 2);
+    await hold(page, await shelf(page), ids["PAL 185"], 1);
+    await page.goto(`${ORIGIN}/decks/${deck}`);
+    await expect(readiness(page)).toContainText("Owned elsewhere1");
+    await toggle(page).click();
+    const line = panel(page)
+      .getByRole("list", { name: `What ${name} needs` })
+      .getByRole("listitem");
+    await expect(line).toContainText("1 of 2");
+    await expect(line).toContainText("Have 1 spare");
+
+    // Gather changes the Holdings, not the Deck List: the panel reads again on the Deck read's owner revision.
+    await page.getByRole("button", { name: "Gather 1", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Gather cards you own" });
+    await dialog.getByRole("button", { name: "Confirm all" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(readiness(page)).toContainText("In this Deck1");
+    await expect(readiness(page)).toContainText("Owned elsewhere0");
+    await expect(line).toContainText("1 of 2");
+    await expect(line).toContainText("Have 1 in this Deck");
+  });
 });
+
+for (const width of [375, 320]) {
+  test.describe(`on a ${width} px phone`, () => {
+    test.use({ viewport: { width, height: 740 }, hasTouch: true });
+
+    test("the counts and the open panel fit without sideways scroll, also with text at 200%", async ({
+      page,
+    }) => {
+      const ids = seedCatalog();
+      await signIn(page);
+      const { deck } = await lastGap(page, ids);
+      await page.goto(`${ORIGIN}/decks/${deck}`);
+      // A phone opens the builder on its Library tab.
+      await page.getByRole("tab", { name: /^Deck / }).tap();
+      await expect(readiness(page)).toContainText("Not owned1");
+      await expectTouchTarget(toggle(page));
+      await toggle(page).tap();
+      await expect(swapButton(page)).toBeVisible();
+      await expectPageChecks(page, `the open panel on a ${width} px phone`);
+      await page.screenshot({
+        path: test.info().outputPath(`panel-${width}.png`),
+        fullPage: true,
+      });
+
+      await doubleText(page);
+      await page.screenshot({
+        path: test.info().outputPath(`panel-${width}-text-200.png`),
+        fullPage: true,
+      });
+      // The elements wider than the screen are recorded first, to tell this panel's parts from the rest of the builder;
+      // then this panel's own parts must fit, and then the whole page must pass the page checks as at normal size.
+      const wide = await page.evaluate(() =>
+        [...document.querySelectorAll("main *")]
+          .filter((element) => {
+            const box = element.getBoundingClientRect();
+            return box.width > 0 && box.right > window.innerWidth + 1;
+          })
+          .filter(
+            (element) =>
+              ![...element.children].some(
+                (child) =>
+                  child.getBoundingClientRect().right > window.innerWidth + 1
+              )
+          )
+          .map(
+            (element) =>
+              `${element.tagName.toLowerCase()} "${(element.textContent ?? "").trim().slice(0, 40)}" ${Math.round(element.getBoundingClientRect().right)} px`
+          )
+      );
+      test.info().annotations.push({
+        type: "wider than the screen at 200% text",
+        description: wide.join(" | ") || "none",
+      });
+      for (const part of [readiness(page), toggle(page), panel(page)]) {
+        const box = (await part.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+      }
+      await expectNoClipping(toggle(page));
+      await expectNoClipping(swapButton(page));
+      await expectPageChecks(
+        page,
+        `the open panel on a ${width} px phone with text at 200%`
+      );
+    });
+  });
+}
