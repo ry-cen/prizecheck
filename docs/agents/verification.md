@@ -98,6 +98,17 @@ A `FAILED:` line names the module, the chunk and the route it reached. Fix it by
 
 A `FAILED: <rule>: <detail>` line names the rule. `--show-pins` prints what each rule found on the tree.
 
+## Web boundaries
+
+`scripts/check_web_boundaries.py` guards the same split in `web/src` ([frontend composition](../planning/shared-core/frontend-composition.md)). `npm run guardrails` runs it, after the Python check. It reads each `.ts` and `.tsx` file as text, with comments removed: `import`, `import type`, `export … from` and side-effect imports starting a line, and `import("…")` with a literal anywhere. It fails when:
+
+- a shared file (anything outside `web/src/games/<game>/`) imports a game, unless the edge is a listed composition point in `scripts/web_boundary_allowlist.txt`; a `*.test.ts(x)` file outside the games may import one;
+- a game imports another game;
+- a file sits directly under `web/src/games`;
+- an allow-list line matches no import.
+
+Fixture tests are in `tests/tooling/test_web_boundaries.py`.
+
 Edges that exist today are listed in `scripts/python_boundary_allowlist.txt`. A stale line fails too, so the list only shrinks. Never add a line to get a change through: move the game value to the call site or split the module. `--write-baseline` rewrites the list only to record a removal.
 
 `api/tests/test_api_contract.py` compares the OpenAPI document and the route table, in match order, with the snapshots under `api/tests/api_contract/`. A move or split must leave both byte-identical. There is no regenerate flag: a change to a snapshot is a change to the API contract and needs the owner's approval.
