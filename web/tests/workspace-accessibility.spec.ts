@@ -248,6 +248,8 @@ test.describe("desktop", () => {
   test("the workspace has no WCAG 2.2 AA violations in its main states", async ({
     page,
   }) => {
+    // This walkthrough runs axe in many complete UI states; its budget includes every audit.
+    test.setTimeout(60_000);
     promoteCatalog({ "card-1": "Access Abra", "card-2": "Access Bulbasaur" });
     await signIn(page);
     const s = randomUUID().slice(0, 8);

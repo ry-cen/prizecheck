@@ -228,7 +228,7 @@ test("Block from a received request's row removes the request, and the blocker u
   await expect(drawer(misty.page).getByRole("alert")).toHaveText(
     "No collector has that Handle."
   );
-  await expect(misty.page.locator("body")).not.toContainText("Block");
+  await expect(drawer(misty.page)).not.toContainText("Block");
 
   // Ash opens Misty's Invite Link: he sees he blocked her, and Unblock gives way to Send Friend Request.
   await page.goto(`${ORIGIN}/invite/${mistyToken}`);
@@ -347,7 +347,7 @@ async function tradeStory(
     /Ash K cancelled this Trade/,
     /Ash K confirmed the swap/,
   ]);
-  await expect(misty.locator("body")).not.toContainText(/block/i);
+  await expect(misty.locator("#main-content")).not.toContainText(/block/i);
   await misty.getByRole("button", { name: /^Inbox/ }).click();
   const inbox = misty.getByRole("dialog", { name: "Inbox" });
   await expect(
@@ -381,7 +381,7 @@ async function tradeStory(
   await expect(main.getByRole("heading", { level: 1 })).toHaveText(
     "Swapped with Ash K"
   );
-  await expect(misty.locator("body")).not.toContainText(/block/i);
+  await expect(misty.locator("#main-content")).not.toContainText(/block/i);
   await page.goto(`${ORIGIN}/trades/${half}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
     "Swapped with Misty W"

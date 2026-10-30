@@ -1,3 +1,5 @@
+import { PageVisibility } from "./ui/PageVisibility";
+import { useContext } from "react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   getEditionPrices,
@@ -174,6 +176,7 @@ export function useEditionPriceRow(
   editionId: string,
   slot: RefObject<Element | null>
 ): PriceSettled | null {
+  const visible = useContext(PageVisibility);
   const cached = cache.get(editionId);
   const [state, setState] = useState<{ id: string; value: Settled | null }>(
     () => ({
@@ -182,6 +185,7 @@ export function useEditionPriceRow(
     })
   );
   useEffect(() => {
+    if (!visible) return;
     let cancel = () => {};
     const stop = whenNear(slot.current, () => {
       cancel = request(editionId, (value) =>
@@ -192,7 +196,7 @@ export function useEditionPriceRow(
       stop();
       cancel();
     };
-  }, [editionId]);
+  }, [editionId, visible]);
   return cached
     ? { kind: "row", row: cached }
     : state.id === editionId

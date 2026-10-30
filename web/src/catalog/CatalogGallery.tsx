@@ -1,3 +1,4 @@
+import { useFirstReadSettled } from "../shell/keptRead";
 import {
   useCallback,
   useEffect,
@@ -348,6 +349,7 @@ export function CatalogGallery({
     }
   }
 
+  useFirstReadSettled(browse.first !== null || !!browse.error);
   const first = browse.first;
   const unavailable = first !== null && !first.available;
   return (

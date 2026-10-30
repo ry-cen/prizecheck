@@ -139,7 +139,9 @@ test.describe("on a desktop", () => {
       "Meowth ex POR 62 could be 2 cards: pick the one on your list."
     );
     await meowth.getByRole("button", { name: "Fix" }).click();
-    await expect(page.getByLabel("Search the catalog")).toBeFocused();
+    await expect(
+      page.locator("#main-content").getByLabel("Search the catalog")
+    ).toBeFocused();
     const candidates = page.getByRole("list", {
       name: "Cards this line could mean",
     });
