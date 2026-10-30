@@ -57,7 +57,7 @@ def violations(source, filename):
 PROCESS_SEARCH = re.compile(r'\b(pkill|pgrep|killall)\b')
 PROCESS_SCOPE = ('api/tests', 'auth/tests', 'web/tests', 'tests/operations', 'scripts/ci.sh', 'scripts/verify.py',
                  'scripts/run_pytest.py', 'scripts/run_playwright.py', 'scripts/verify_resources.py', 'scripts/verify_report.py',
-                 'scripts/verify_reaper.py')
+                 'scripts/verify_reaper.py', 'scripts/local_test_db.py')
 TIER_CATEGORIES = ('process', 'wall-clock', 'capacity', 'sleep')
 
 
