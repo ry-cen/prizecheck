@@ -24,7 +24,7 @@ export function TradeCardLink({
         event.preventDefault();
         onOpenTrade(trade.id);
       }}
-      className="grid min-h-tap grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-3 px-4 py-3 text-text no-underline hover:bg-surface-raised"
+      className="grid min-h-tap grid-cols-[3.5rem_minmax(0,1fr)] phone:grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 px-4 py-3 text-text no-underline hover:bg-surface-raised"
     >
       <CardImage
         url={(trade.you_get[0] ?? trade.you_give[0])?.image_url ?? null}

@@ -146,7 +146,7 @@ export function TraderTradeListPage({
   }
 
   const frame = (title: string, children: ReactNode, actions?: ReactNode) => (
-    <main className="mx-auto box-border flex max-w-3xl flex-col gap-4 px-7 py-7 phone:px-4 phone:py-5">
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
       <PageHeader title={title} actions={actions} />
       {children}
     </main>

@@ -196,10 +196,13 @@ export function LendOfferDialog({
         <div className="flex flex-col gap-3">
           <ul
             aria-label="Cards to lend"
-            className="m-0 flex list-none flex-col gap-1 p-0"
+            className="m-0 flex list-none flex-col divide-y divide-border rounded-panel border border-border p-0"
           >
             {[...cards.entries()].map(([edition, { card, count }]) => (
-              <li key={edition} className="text-body wrap-anywhere">
+              <li
+                key={edition}
+                className="px-4 py-3 text-body tabular-nums wrap-anywhere"
+              >
                 {count} × {card}
               </li>
             ))}

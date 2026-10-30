@@ -1,4 +1,4 @@
-import { ChevronLeft } from "lucide-react";
+import { ArrowRight, ChevronLeft } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -729,6 +729,7 @@ export function ProposalBuilderPage({
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="primary"
+          className="disabled:opacity-45"
           disabled={empty || gone || unchanged}
           aria-disabled={busy || undefined}
           aria-describedby={reason ? reasonId : undefined}
@@ -877,14 +878,17 @@ function ProposalSideSection({
         className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0"
       >
         {lines.length === 0 ? (
-          <li className="px-4 py-3 text-body text-text-muted">Nothing yet</li>
+          <li className="flex min-h-36 items-center justify-center gap-3 px-4 py-6 text-body text-text-muted">
+            <Icon icon={ArrowRight} size={20} className="phone:rotate-90" />
+            Nothing yet
+          </li>
         ) : (
           lines.map((line) => {
             const cap = Number(line.copies);
             return (
               <li
                 key={line.edition_id}
-                className="grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                className="grid grid-cols-[3.5rem_minmax(0,1fr)] phone:grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
               >
                 <CardImage url={line.image_url} />
                 <span className="flex min-w-0 flex-wrap items-center justify-between gap-2">

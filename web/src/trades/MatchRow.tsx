@@ -1,3 +1,4 @@
+import { Avatar } from "../ui/Avatar";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   useEffect,
@@ -119,6 +120,7 @@ export function MatchRow({
           onClick={onToggle}
           className="box-border flex min-h-tap w-full cursor-pointer items-start gap-3 border-0 bg-transparent px-4 py-3 text-left font-sans text-text hover:bg-surface-raised"
         >
+          <Avatar name={name} size="md" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-body font-semibold wrap-anywhere">
@@ -278,7 +280,7 @@ export function MatchSide({
 function MatchCard({ card }: { card: TradeMatchCard }) {
   const accepts = acceptsText(card);
   return (
-    <li className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
+    <li className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] phone:grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
       <CardImage url={card.image_url} />
       <span className="flex min-w-0 flex-col gap-1">
         <span className="text-body font-semibold wrap-anywhere">

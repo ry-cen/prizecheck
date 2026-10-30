@@ -1,3 +1,5 @@
+import { Avatar } from "../ui/Avatar";
+import { Pill } from "../ui/Pill";
 import { useEffect, useState, type MouseEvent } from "react";
 import {
   usePollPulse,
@@ -99,7 +101,7 @@ export function ConversationList({
     setNotice(false);
   };
   const toggle = (
-    <Button onClick={switchList}>
+    <Button variant="quiet" onClick={switchList}>
       {archived ? HIDE_ARCHIVED : SHOW_ARCHIVED}
     </Button>
   );
@@ -228,11 +230,7 @@ function ConversationRow({
 }) {
   const href = conversationHref(row);
   const name = row.other.display_name;
-  const meta = [
-    needsYouText(row.waiting_on_you),
-    openTradesText(row.open_trades),
-    inboxTime(row.last_activity_at, Date.now()),
-  ]
+  const meta = [openTradesText(row.open_trades)]
     .filter((part) => part !== "")
     .join(" · ");
   return (
@@ -244,29 +242,50 @@ function ConversationRow({
           event.preventDefault();
           onNavigate(href);
         }}
-        className="flex min-h-tap min-w-0 flex-1 flex-col justify-center gap-0.5 px-4 py-3 text-text no-underline hover:bg-surface-raised"
+        className="flex min-h-tap min-w-0 flex-1 items-center gap-3 px-4 py-3 text-text no-underline hover:bg-surface-raised"
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="text-body font-semibold wrap-anywhere">{name}</span>
-          {row.unread && (
-            <>
-              <span className="sr-only">{UNREAD}</span>
-              <span
-                aria-hidden="true"
-                className="inline-block size-2 shrink-0 rounded-round bg-accent"
-              />
-            </>
-          )}
-        </span>
-        {row.last_message && (
-          <span className="truncate text-meta text-text-muted">
-            {row.last_message.from === "you" ? PREVIEW_YOU : ""}
-            {row.last_message.preview}
+        <Avatar name={name} size="md" />
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-body font-semibold wrap-anywhere">
+              {name}
+            </span>
+            {row.unread && (
+              <>
+                <span className="sr-only">{UNREAD}</span>
+                <span
+                  aria-hidden="true"
+                  className="inline-block size-2 shrink-0 rounded-round bg-accent"
+                />
+              </>
+            )}
           </span>
-        )}
-        <span className="text-meta text-text-muted">{meta}</span>
+          {row.last_message && (
+            <span className="truncate text-meta text-text-muted">
+              {row.last_message.from === "you" ? PREVIEW_YOU : ""}
+              {row.last_message.preview}
+            </span>
+          )}
+          <span className="flex flex-wrap items-center gap-2 text-meta text-text-muted">
+            {row.waiting_on_you > 0 && (
+              <Pill tone="warn">{needsYouText(row.waiting_on_you)}</Pill>
+            )}
+            {meta}
+            {/* On a phone the time joins this line, so the name keeps the row's width; only one copy is ever shown. */}
+            <span className="hidden tabular-nums phone:inline">
+              {inboxTime(row.last_activity_at, Date.now())}
+            </span>
+          </span>
+        </span>
+        <span className="shrink-0 self-start text-right text-meta text-text-muted tabular-nums phone:hidden">
+          {inboxTime(row.last_activity_at, Date.now())}
+        </span>
       </a>
-      <Button aria-label={archiveLabel(name, archived)} onClick={onChange}>
+      <Button
+        variant="quiet"
+        aria-label={archiveLabel(name, archived)}
+        onClick={onChange}
+      >
         {archived ? UNARCHIVE : ARCHIVE}
       </Button>
     </li>
