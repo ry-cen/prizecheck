@@ -74,7 +74,7 @@ function IssueMark() {
   return (
     <span
       aria-hidden="true"
-      className="absolute -left-1.5 -top-1.5 z-1 box-border flex h-4 w-4 items-center justify-center rounded-round border border-danger-border bg-surface text-caption font-bold leading-none text-danger"
+      className="absolute -left-1.5 -top-1.5 z-1 box-border flex h-4 w-4 items-center justify-center rounded-round border border-border-strong bg-surface text-caption font-bold leading-none text-text-muted"
     >
       !
     </span>
@@ -153,7 +153,9 @@ export function DeckListBody({
                   <li
                     key={line.line.edition_id}
                     className={`relative flex flex-wrap gap-1 rounded-card${
-                      issue ? " outline-2 outline-offset-2 outline-danger" : ""
+                      issue
+                        ? " outline-1 outline-offset-2 outline-danger-border"
+                        : ""
                     }`}
                   >
                     {issue && <IssueMark />}
@@ -282,7 +284,7 @@ function ListRow({
     >
       <span className="text-right text-control font-semibold tabular-nums">
         {issueId && (
-          <span aria-hidden="true" className="mr-1 font-bold text-danger">
+          <span aria-hidden="true" className="mr-1 font-bold text-text-muted">
             !
           </span>
         )}

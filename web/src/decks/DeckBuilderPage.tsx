@@ -438,7 +438,7 @@ export function DeckBuilderPage({
 
   if (!detail || !model)
     return (
-      <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
+      <main className="mx-auto box-border flex w-full min-w-0 max-w-7xl flex-col gap-4 px-7 py-6 phone:gap-2 phone:px-4 phone:py-2">
         {back}
         {load.kind === "missing" ? (
           <>
@@ -481,46 +481,50 @@ export function DeckBuilderPage({
       <h2 id={`${idBase}-deck-list`} className="sr-only">
         Deck List
       </h2>
-      {/* Row 1: the count, the cost, Gather N and Buy missing (#181). */}
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <p className="m-0 tabular-nums">
-          <strong className="text-display font-semibold">{model.total}</strong>
-          <span className="text-body text-text-muted">/60</span>
-          <span className="sr-only"> cards</span>
-        </p>
-        <DeckCostLine settled={cost} />
-        <div className="ml-auto flex flex-wrap items-center gap-2 self-center">
-          <Button
-            disabled={toGather === 0n}
-            onClick={(event) => {
-              gatherOpener.current = event.currentTarget;
-              setGather({ edition: null });
-            }}
-          >
-            Gather {toGather.toString()}
-          </Button>
-          {deckActions.buyMissing}
-          <Button onClick={onWantList}>Want List</Button>
+      <div className="flex flex-col gap-3 rounded-panel border border-border bg-surface p-3 phone:gap-2">
+        {/* Row 1: the count, the cost, Gather N and Buy missing (#181). */}
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <p className="m-0 tabular-nums">
+            <strong className="text-display font-semibold">
+              {model.total}
+            </strong>
+            <span className="text-body text-text-muted">/60</span>
+            <span className="sr-only"> cards</span>
+          </p>
+          <DeckCostLine settled={cost} />
+          <div className="ml-auto flex flex-wrap items-center gap-2 self-center">
+            <Button
+              disabled={toGather === 0n}
+              onClick={(event) => {
+                gatherOpener.current = event.currentTarget;
+                setGather({ edition: null });
+              }}
+            >
+              Gather {toGather.toString()}
+            </Button>
+            {deckActions.buyMissing}
+            <Button onClick={onWantList}>Want List</Button>
+          </div>
         </div>
-      </div>
-      {/* Row 2: the Target Format control (#178), then the view switch. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <TargetFormatControl
-          value={changing ?? detail.target_format}
-          result={changing ? null : targetResult}
-          busy={changing !== null || edits.busy}
-          onChange={(target) => void changeTarget(target)}
-          onOpenResult={() => setResultsOpen(true)}
-          resultRef={resultButton}
-        />
-        <div className="ml-auto">
-          <Segmented
-            mode="choice"
-            label="Deck List view"
-            options={VIEWS}
-            value={view}
-            onChange={setView}
+        {/* Row 2: the Target Format control (#178), then the view switch. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <TargetFormatControl
+            value={changing ?? detail.target_format}
+            result={changing ? null : targetResult}
+            busy={changing !== null || edits.busy}
+            onChange={(target) => void changeTarget(target)}
+            onOpenResult={() => setResultsOpen(true)}
+            resultRef={resultButton}
           />
+          <div className="ml-auto">
+            <Segmented
+              mode="choice"
+              label="Deck List view"
+              options={VIEWS}
+              value={view}
+              onChange={setView}
+            />
+          </div>
         </div>
       </div>
       <DeckListBody
@@ -580,14 +584,16 @@ export function DeckBuilderPage({
   );
 
   return (
-    <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-7xl flex-col gap-4 px-7 py-6 phone:gap-2 phone:px-4 phone:py-2">
       {back}
-      <PageHeader
-        title={detail.deck.name}
-        actions={deckActions.actions}
-        titleAction={rename.action}
-        titleEditor={rename.editor}
-      />
+      <div className="[&>div]:mb-0 phone:[&>div]:gap-2">
+        <PageHeader
+          title={detail.deck.name}
+          actions={deckActions.actions}
+          titleAction={rename.action}
+          titleEditor={rename.editor}
+        />
+      </div>
       {rename.status}
       {notice && (
         <p role="status" className="m-0 text-body text-warning">

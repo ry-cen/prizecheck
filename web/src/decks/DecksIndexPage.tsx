@@ -182,10 +182,10 @@ export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
     <>
       <form
         onSubmit={create}
-        className="flex flex-wrap items-end gap-2"
+        className="flex flex-wrap items-end gap-2 border-b border-border pb-4"
         aria-label="New Deck"
       >
-        <div className="w-80 max-w-full">
+        <div className="w-60 max-w-full phone:w-full">
           <TextField
             label="Deck name"
             required
@@ -226,7 +226,7 @@ export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
           </p>
         ) : (
           <nav aria-label="Deck index">
-            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] gap-4 p-0 phone:grid-cols-2">
+            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-5 p-0 phone:grid-cols-2">
               {decks.map((deck) => (
                 <DeckTile
                   key={deck.id}
@@ -311,8 +311,19 @@ function DeckTile({
           </span>
         </span>
       </a>
+      <span
+        aria-hidden="true"
+        className="h-1 overflow-hidden rounded-round bg-border"
+      >
+        <span
+          className="block h-full bg-accent"
+          style={{
+            width: `${Math.min(100, (Number(deck.in_deck) / Math.max(1, Number(deck.deck_list_total))) * 100)}%`,
+          }}
+        />
+      </span>
       <span className="flex min-w-0">
-        <Pill tone={status ? status.tone : "neutral"}>
+        <Pill tone={status?.tone === "ok" ? "ok" : "neutral"}>
           {status ? (
             <>
               {format} · <span aria-hidden="true">{status.mark}</span>{" "}
@@ -443,7 +454,7 @@ function PublishedDecks({
           <Button onClick={() => void read()}>Retry</Button>
         </div>
       ) : load.publications.length === 0 ? (
-        <p className="m-0 text-body text-text-muted">
+        <p className="m-0 rounded-panel border border-border bg-surface px-5 py-6 text-body text-text-muted">
           Nothing published yet. Publish a Deck from its page once its Target
           Format result is legal.
         </p>
