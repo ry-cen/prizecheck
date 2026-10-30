@@ -532,7 +532,7 @@ test("following a link does not prefetch prices for unrendered cards", async ({
   expect(seen.flat()).toEqual([ids.normal]);
   // The shell's skip link is parked off screen until it has focus; it cannot be hovered. Every other link can.
   for (const link of await page
-    .locator("a[href]")
+    .locator("a[href]:visible")
     .filter({ hasNotText: "Skip to main content" })
     .all())
     await link.hover();

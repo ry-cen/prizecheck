@@ -9,6 +9,7 @@ import {
   promoteLegalCatalog,
   type LegalDeck,
 } from "./support/legal-deck";
+import { expectTouchTarget } from "./support/touch-target";
 import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
 
@@ -488,6 +489,49 @@ test.describe("on a phone", () => {
       .tap();
     await expect(header(page).publish).toHaveText("Published · v1");
     await expectPageChecks(page, "phone deck builder header");
+    // Narrower than the reference phone: wrapping must not depend on the host's font metrics.
+    await page.setViewportSize({ width: 320, height: 812 });
+    await expectPageChecks(page, "320 px published deck builder header");
+    const actions = [
+      page.getByRole("button", { name: "Replace list…", exact: true }),
+      header(page).exportButton,
+      header(page).publish,
+      header(page).remove,
+    ];
+    for (const fontSize of [18, 26]) {
+      for (const action of actions) {
+        await action.evaluate((button, size) => {
+          button.style.fontSize = `${size}px`;
+        }, fontSize);
+      }
+      for (const action of actions) {
+        await expectTouchTarget(action);
+        const dimensions = await action.evaluate((button) => {
+          const box = button.getBoundingClientRect();
+          const text = document.createRange();
+          text.selectNodeContents(button);
+          const label = text.getBoundingClientRect();
+          return {
+            labelInside:
+              label.left >= box.left &&
+              label.right <= box.right &&
+              label.top >= box.top &&
+              label.bottom <= box.bottom,
+          };
+        });
+        expect(dimensions.labelInside).toBe(true);
+      }
+      const viewport = await page.evaluate(() => ({
+        content: document.documentElement.scrollWidth,
+        width: document.documentElement.clientWidth,
+      }));
+      expect(viewport.content).toBeLessThanOrEqual(viewport.width);
+    }
+    for (const action of actions)
+      await action.evaluate((button) => {
+        button.style.removeProperty("font-size");
+      });
+    await page.setViewportSize({ width: 375, height: 812 });
 
     await header(page).exportButton.tap();
     await expect(exportDialog(page)).toBeVisible();

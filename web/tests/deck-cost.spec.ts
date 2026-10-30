@@ -141,6 +141,14 @@ test("three $0.25 copies, two stale $0.43 copies and one unpriced copy show $1.6
 test("a Deck spread over several Holding pages is priced in full before More cards is pressed", async ({
   page,
 }) => {
+  // Count only this visible page's price reads. Save-Data explicitly opts out of background tab warming;
+  // kept-pages.spec.ts covers warming separately, with background reads enabled.
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, "connection", {
+      configurable: true,
+      value: { saveData: true },
+    })
+  );
   const ids = seed(52);
   sixCopies(ids);
   await signIn(page);
@@ -274,6 +282,14 @@ test(
 test("a cost for an older inventory revision is discarded and a concurrent change is priced from the new revision", async ({
   page,
 }) => {
+  // Count only this visible page's price reads. Save-Data explicitly opts out of background tab warming;
+  // kept-pages.spec.ts covers warming separately, with background reads enabled.
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, "connection", {
+      configurable: true,
+      value: { saveData: true },
+    })
+  );
   const ids = seed();
   sixCopies(ids);
   await signIn(page);

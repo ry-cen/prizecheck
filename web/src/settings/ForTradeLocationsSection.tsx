@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from "react";
+import { useReadOnShow } from "../shell/keptRead";
+import { useEffect, useId, useRef, useState } from "react";
 import { getLocationTree, type TreeLocation } from "../location_generated";
 import { indexLocations } from "../workspace/locationTree";
 import {
@@ -16,20 +17,21 @@ type Load =
  * path, topmost marks only. Everything inside each one, apart from Decks, is offered too. Marking happens in each
  * Location's settings in Collection (#292); this only lists them. Rendered inside the Privacy section beside Hidden Locations.
  */
-export function ForTradeLocationsSection() {
+export function ForTradeLocationsSection({ active }: { active: boolean }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   // The wording below also depends on the discovery read, so the section is settled once both have answered.
-  const { beyond, settled: discoverySettled } = useDiscoveryVisibility();
+  const { beyond, settled: discoverySettled } = useDiscoveryVisibility(active);
   useSettingsSectionSettled(
     "for-trade-locations",
     load.kind !== "loading" && discoverySettled
   );
   const headingId = `${useId()}-heading`;
-  useEffect(() => {
-    let live = true;
-    getLocationTree()
+  const generation = useRef(0);
+  function read() {
+    const mine = ++generation.current;
+    return getLocationTree()
       .then(({ locations }) => {
-        if (!live) return;
+        if (mine !== generation.current) return;
         const index = indexLocations(locations);
         const paths = locations
           .filter(
@@ -46,12 +48,19 @@ export function ForTradeLocationsSection() {
         setLoad({ kind: "ready", paths });
       })
       .catch(() => {
-        if (live) setLoad({ kind: "failed" });
+        if (mine !== generation.current) return;
+        setLoad((current) =>
+          current.kind === "ready" ? current : { kind: "failed" }
+        );
       });
+  }
+  useEffect(() => {
+    void read();
     return () => {
-      live = false;
+      generation.current++;
     };
   }, []);
+  useReadOnShow(active, load.kind === "failed", () => void read());
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
       <h3 id={headingId} className="m-0 text-body font-semibold">

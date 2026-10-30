@@ -1,11 +1,7 @@
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { timedRead } from "./timedRead";
+import { getSettings } from "../settings_generated";
+import { useFirstReadSettled, useReadOnShow } from "../shell/keptRead";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   createDeck,
   DeckError,
@@ -33,6 +29,7 @@ import { RevokeControl } from "./RevokeControl";
 import { formatLabel, statusOf } from "./targetFormat";
 
 type Props = {
+  active: boolean;
   /** Opens a Deck in the deck builder (/decks/<id>). */
   onOpenDeck: (id: string) => void;
   /** Goes to another address in the app (Import a list). */
@@ -45,10 +42,9 @@ type Facts = {
   toComplete?: DeckCostFigures | "unavailable";
 };
 
-// The cost route is a price access with an interactive cap of two per caller (docs/price-refresh.md), so tiles read
-// their facts two at a time, top first.
+// Tiles read their facts AT_ONCE Decks at a time, top first, one request at a
+// time per Deck. Each request has its own deadline from when it is sent (timedRead).
 const AT_ONCE = 2;
-const COST_TIMEOUT_MS = 3_500;
 
 const UNAVAILABLE = "Decks are temporarily unavailable. Please retry.";
 const LINK =
@@ -63,7 +59,7 @@ const LINK =
  * deleted included, with Make Listed or Unlisted and Revoke. Import a list, beside Create Deck, opens /decks/import
  * (#212). Opening a Deck shows the deck builder at /decks/<id> (#176).
  */
-export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
+export function DecksIndexPage({ active, onOpenDeck, onNavigate }: Props) {
   const idBase = useId();
   const [decks, setDecks] = useState<DeckIndexEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -71,31 +67,141 @@ export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
   const [notice, setNotice] = useState("");
   const [facts, setFacts] = useState<Record<string, Facts>>({});
   const queued = useRef(new Set<string>());
+  const quietFacts = useRef(new Set<string>());
+  const costRevisions = useRef(
+    new Map<
+      string,
+      { list: number | null; owner: number | null; settings: number | null }
+    >()
+  );
+  const failedCosts = useRef(new Set<string>());
+  const inFlight = useRef(new Set<string>());
+  const listRevisions = useRef(new Map<string, number>());
+  const inputs = useRef<{ owner: number | null; settings: number | null }>({
+    owner: null,
+    settings: null,
+  });
+  const mounted = useRef(true);
+  const refresh = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+      refresh.current?.abort();
+    },
+    []
+  );
+  const factGenerations = useRef(new Map<string, number>());
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [formMessage, setFormMessage] = useState("");
   const pending = useRef<{ name: string; key: string } | null>(null);
 
-  // Back from a Deck's builder (/decks/<id>), the index starts at the top: the shell keeps one page's scroll position
-  // across its own addresses.
-  useLayoutEffect(() => {
-    window.scrollTo(0, 0);
-  }, []);
-
-  async function loadIndex() {
-    const index = await getDecks();
-    setDecks(index.decks);
-    setCursor(index.next_cursor);
-    setLoaded(true);
+  const generation = useRef(0);
+  const paged = useRef(false);
+  async function loadIndex(quiet = false) {
+    refresh.current?.abort();
+    const controller = new AbortController();
+    refresh.current = controller;
+    const mine = ++generation.current;
+    try {
+      const [index, settings] = await Promise.all([
+        getDecks(),
+        quiet ? getSettings() : Promise.resolve(null),
+      ]);
+      if (mine !== generation.current || controller.signal.aborted) return;
+      inputs.current = {
+        owner: index.owner_revision,
+        settings: settings?.revision ?? inputs.current.settings,
+      };
+      if (quiet) {
+        const waiting = [...index.decks];
+        async function check() {
+          for (let deck = waiting.shift(); deck; deck = waiting.shift()) {
+            try {
+              const checks = await timedRead(
+                (signal) => getDeckFormatChecks(deck.id, {}, signal),
+                controller.signal
+              );
+              if (mine !== generation.current || controller.signal.aborted)
+                return;
+              listRevisions.current.set(
+                deck.id,
+                Math.max(
+                  listRevisions.current.get(deck.id) ?? 0,
+                  checks.deck_list_revision
+                )
+              );
+              const result =
+                checks.results.find(
+                  (result) => result.format === deck.target_format
+                ) ?? "unavailable";
+              setFacts((previous) => ({
+                ...previous,
+                [deck.id]: { ...previous[deck.id], result },
+              }));
+            } catch {
+              /* A quiet check leaves the previous facts intact. */
+            }
+            if (mine !== generation.current || controller.signal.aborted)
+              return;
+            const previous = costRevisions.current.get(deck.id);
+            const changed =
+              previous &&
+              (previous.list !== listRevisions.current.get(deck.id) ||
+                previous.owner !== index.owner_revision ||
+                previous.settings !== settings?.revision);
+            if (
+              !inFlight.current.has(deck.id) &&
+              (failedCosts.current.has(deck.id) || changed)
+            ) {
+              queued.current.delete(deck.id);
+              quietFacts.current.add(deck.id);
+              factGenerations.current.set(
+                deck.id,
+                (factGenerations.current.get(deck.id) ?? 0) + 1
+              );
+            }
+          }
+        }
+        await Promise.all(Array.from({ length: AT_ONCE }, check));
+        if (mine !== generation.current || controller.signal.aborted) return;
+      }
+      setDecks(index.decks);
+      setCursor(index.next_cursor);
+      setLoaded(true);
+      setNotice("");
+    } catch {
+      if (!quiet && mine === generation.current) setNotice(UNAVAILABLE);
+    }
   }
   useEffect(() => {
-    void loadIndex().catch(() => setNotice(UNAVAILABLE));
+    void loadIndex();
   }, []);
+  useFirstReadSettled(loaded || notice === UNAVAILABLE);
+  useReadOnShow(
+    active,
+    !loaded && notice === UNAVAILABLE,
+    (quiet) => void loadIndex(quiet),
+    paged.current
+  );
+
+  // A failed warm tile is independent of the successful index read. First activation retries just those tiles.
+  useEffect(() => {
+    if (!active || failedCosts.current.size === 0) return;
+    for (const id of failedCosts.current) {
+      queued.current.delete(id);
+      quietFacts.current.add(id);
+    }
+    setDecks((previous) => [...previous]);
+  }, [active]);
 
   async function moreDecks() {
     if (!cursor) return;
+    paged.current = true;
+    const mine = ++generation.current;
     try {
       const index = await getDecks(cursor);
+      if (mine !== generation.current) return;
       setDecks((previous) => [...previous, ...index.decks]);
       setCursor(index.next_cursor);
     } catch (cause) {
@@ -106,35 +212,114 @@ export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
     }
   }
 
-  // Each Deck's result and cost to complete, read once per Deck, AT_ONCE Decks at a time in list order.
+  // Cache successful costs by list, inventory and settings revisions; retry failed reads on activation.
   useEffect(() => {
     let live = true;
     const waiting = decks.filter((deck) => !queued.current.has(deck.id));
     for (const deck of waiting) queued.current.add(deck.id);
-    // A read already started always lands, even after this run is replaced (More Decks): its Deck is never queued again.
-    const put = (id: string, next: Facts) =>
+    // A running read can finish across pagination; a newer facts read supersedes it.
+    const put = (id: string, token: number, next: Facts) => {
+      if (
+        factGenerations.current.get(id) !== token ||
+        refresh.current?.signal.aborted
+      )
+        return;
       setFacts((previous) => ({
         ...previous,
         [id]: { ...previous[id], ...next },
       }));
+    };
     async function readOne(deck: DeckIndexEntry) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), COST_TIMEOUT_MS);
-      await Promise.all([
-        getDeckFormatChecks(deck.id, {}, controller.signal)
-          .then((checks) =>
-            put(deck.id, {
+      failedCosts.current.delete(deck.id);
+      inFlight.current.add(deck.id);
+      let stale = false;
+      const quiet = quietFacts.current.delete(deck.id);
+      const token = (factGenerations.current.get(deck.id) ?? 0) + 1;
+      factGenerations.current.set(deck.id, token);
+      const activation = refresh.current?.signal;
+      try {
+        await timedRead(
+          (signal) => getDeckFormatChecks(deck.id, {}, signal),
+          activation
+        )
+          .then((checks) => {
+            if (factGenerations.current.get(deck.id) !== token) return;
+            listRevisions.current.set(
+              deck.id,
+              Math.max(
+                listRevisions.current.get(deck.id) ?? 0,
+                checks.deck_list_revision
+              )
+            );
+            put(deck.id, token, {
               result:
                 checks.results.find(
                   (result) => result.format === deck.target_format
                 ) ?? "unavailable",
-            })
-          )
-          .catch(() => put(deck.id, { result: "unavailable" })),
-        getDeckCost(deck.id, controller.signal)
-          .then((cost) => put(deck.id, { toComplete: cost.cost_to_complete }))
-          .catch(() => put(deck.id, { toComplete: "unavailable" })),
-      ]).finally(() => clearTimeout(timer));
+            });
+          })
+          .catch(() => {
+            if (!activation?.aborted && !quiet)
+              put(deck.id, token, { result: "unavailable" });
+          });
+        // A format timeout belongs to that request; only supersession or unmount skips the cost.
+        if (activation?.aborted) return;
+        await timedRead((signal) => getDeckCost(deck.id, signal), activation)
+          .then((cost) => {
+            if (
+              factGenerations.current.get(deck.id) !== token ||
+              activation?.aborted
+            )
+              return;
+            if (cost.reason !== null || cost.cost_to_complete.reason !== null) {
+              failedCosts.current.add(deck.id);
+              if (!quiet)
+                put(deck.id, token, { toComplete: cost.cost_to_complete });
+              return;
+            }
+            // Null revisions are permitted by the cost contract. They cannot prove an answer stale;
+            // the next activation's input comparison will refresh an unversioned answer once.
+            stale =
+              (typeof cost.deck_list_revision === "number" &&
+                cost.deck_list_revision <
+                  (listRevisions.current.get(deck.id) ?? 0)) ||
+              (typeof cost.owner_revision === "number" &&
+                inputs.current.owner !== null &&
+                cost.owner_revision < inputs.current.owner) ||
+              (typeof cost.settings_revision === "number" &&
+                inputs.current.settings !== null &&
+                cost.settings_revision < inputs.current.settings);
+            if (stale) return;
+            failedCosts.current.delete(deck.id);
+            costRevisions.current.set(deck.id, {
+              list: cost.deck_list_revision,
+              owner: cost.owner_revision,
+              settings: cost.settings_revision,
+            });
+            put(deck.id, token, { toComplete: cost.cost_to_complete });
+          })
+          .catch(() => {
+            if (
+              factGenerations.current.get(deck.id) !== token ||
+              activation?.aborted
+            )
+              return;
+            failedCosts.current.add(deck.id);
+            if (!quiet) put(deck.id, token, { toComplete: "unavailable" });
+          });
+      } finally {
+        if (factGenerations.current.get(deck.id) !== token) return;
+        inFlight.current.delete(deck.id);
+        if (activation?.aborted && mounted.current) {
+          queued.current.delete(deck.id);
+          failedCosts.current.add(deck.id);
+        }
+        if (stale && mounted.current) {
+          queued.current.delete(deck.id);
+          quietFacts.current.add(deck.id);
+          setDecks((previous) => [...previous]);
+        }
+      }
     }
     async function worker() {
       for (let next = waiting.shift(); next && live; next = waiting.shift())
@@ -150,6 +335,7 @@ export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
 
   async function create(event: FormEvent) {
     event.preventDefault();
+    generation.current++;
     setBusy(true);
     setFormMessage("");
     const attempt = pending.current ?? { name, key: crypto.randomUUID() };
@@ -254,7 +440,11 @@ export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
           </p>
         )}
       </section>
-      <PublishedDecks deckNames={names} onOpenDeck={onOpenDeck} />
+      <PublishedDecks
+        active={active}
+        deckNames={names}
+        onOpenDeck={onOpenDeck}
+      />
     </>
   );
 }
@@ -354,8 +544,10 @@ type PublishedLoad =
  * (token routes, which work whether or not the Deck exists). */
 function PublishedDecks({
   deckNames,
+  active,
   onOpenDeck,
 }: {
+  active: boolean;
   deckNames: Map<string, string>;
   onOpenDeck: (id: string) => void;
 }) {
@@ -367,14 +559,20 @@ function PublishedDecks({
     null
   );
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const shown = useRef(active);
+  shown.current = active;
 
+  const generation = useRef(0);
   async function read() {
+    const mine = ++generation.current;
     try {
       const owned = await getOwnedPublications();
       // An answer without the list is no answer: the section offers Retry.
       if (!Array.isArray(owned.publications)) throw new Error("no list");
+      if (mine !== generation.current) return;
       setLoad({ kind: "ready", publications: owned.publications });
     } catch {
+      if (mine !== generation.current) return;
       setLoad((previous) =>
         previous.kind === "ready" ? previous : { kind: "failed" }
       );
@@ -384,11 +582,14 @@ function PublishedDecks({
     void read();
   }, []);
 
+  useReadOnShow(active, load.kind === "failed", () => void read());
+
   async function act(
     publication: OwnedPublication,
     action: "listed" | "unlisted" | "revoke"
   ) {
     if (busy) return;
+    generation.current++;
     setBusy(publication.token);
     setMessage("");
     const previous = pending.current;
@@ -412,7 +613,7 @@ function PublishedDecks({
       pending.current = null;
       await read();
       // A revoked row unmounts with the focus on it: land on the section heading instead of <body>.
-      if (action === "revoke") headingRef.current?.focus();
+      if (shown.current && action === "revoke") headingRef.current?.focus();
       setMessage(
         action === "revoke"
           ? `${publication.title}: public link revoked permanently.`

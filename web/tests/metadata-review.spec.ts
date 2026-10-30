@@ -219,12 +219,32 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
   await item.getByLabel("Quote variant", { exact: true }).fill("normal");
   await item.getByLabel("Review evidence URL").fill(EVIDENCE);
   await item.getByLabel("Review reason").fill("Product page matches the card");
+  const decided = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().includes("catalog-metadata/decisions")
+  );
   await item.getByRole("button", { name: "Confirm decision" }).click();
   // A confirmed decision removes the row and says what happened in a toast (#168).
   await expect(notifications(page)).toContainText(
     "Decision recorded: verified"
   );
-  await expect(notifications(page)).toContainText("Public delivery: delivered");
+  const decision = await (await decided).json();
+  // Publication is best effort within a two-second request budget. The toast must report the actual result,
+  // and the detached delivery must still finish; a pending response is not a different decision.
+  await expect(notifications(page)).toContainText(
+    `Public delivery: ${decision.public_delivery}`
+  );
+  await expect
+    .poll(
+      async () =>
+        (
+          await pool.query(
+            "SELECT count(*)::int AS n FROM catalog_public_outbox WHERE delivered_at IS NULL"
+          )
+        ).rows[0].n
+    )
+    .toBe(0);
   await expect(item).toHaveCount(0);
 
   const after = await normal();

@@ -1,3 +1,7 @@
+import { PageVisibility } from "../ui/PageVisibility";
+import { mountedPages } from "./keptPages";
+import { preloadShellPages } from "./lazyPages";
+import { FirstReadContext } from "./keptRead";
 import React, {
   useCallback,
   useEffect,
@@ -45,7 +49,6 @@ import { PageStandInContext, type PageStandIn } from "./PageFrame";
 import {
   ACCOUNT_PAGES,
   DESKTOP_TABS,
-  PAGES,
   PHONE_TABS,
   pageDef,
   type PageId,
@@ -65,6 +68,7 @@ const ICONS: Record<PageId, LucideIcon> = {
 type Props = {
   /** The page to show. App has already sent addresses that are no page to Collection. */
   page: PageId;
+  path: string;
   /** The signed-in email, when the session gave one. */
   email: string | null;
   /** The name from the latest provider sign-in, shown above the email in the avatar menu. */
@@ -100,7 +104,7 @@ type Props = {
  * of Trades waiting on them, Trading #273), the Borrow Request
  * drafts tray (#252) and the page area. Switching pages swaps only the page area. A kept-mounted
  * page stays in the document, hidden, after its first visit, and is shown again with its scroll position;
- * other pages mount on each visit. A reload starts fresh.
+ * all tab roots also mount in the background after sign-in. Detail screens unmount when left. A reload starts fresh.
  */
 export function Shell(props: Props) {
   return (
@@ -127,6 +131,7 @@ export function Shell(props: Props) {
 
 function ShellFrame({
   page,
+  path,
   email,
   name = null,
   image = null,
@@ -163,6 +168,23 @@ function ShellFrame({
     () => new Set(other ? [] : [page])
   );
   if (!other && !visited.has(page)) setVisited(new Set([...visited, page]));
+  const [warm, setWarm] = useState<ReadonlySet<PageId>>(() => new Set());
+  const settled = useRef(new Set<PageId>());
+  const waiters = useRef(new Map<PageId, () => void>());
+  const firstRead = useCallback((id: PageId) => {
+    settled.current.add(id);
+    waiters.current.get(id)?.();
+    waiters.current.delete(id);
+  }, []);
+  useEffect(
+    () =>
+      preloadShellPages(owner, (id) => {
+        setWarm((previous) => new Set([...previous, id]));
+        if (settled.current.has(id)) return Promise.resolve();
+        return new Promise<void>((resolve) => waiters.current.set(id, resolve));
+      }),
+    [owner]
+  );
   const shown = useRef(new Set<PageId>());
   const containers = useRef(new Map<PageId, HTMLDivElement>());
   const otherContainer = useRef<HTMLDivElement>(null);
@@ -219,10 +241,11 @@ function ShellFrame({
       window.scrollTo(0, 0);
       return;
     }
-    const returning = current.keepMounted && shown.current.has(page);
-    shown.current.add(page);
+    const returning = path === current.path && shown.current.has(page);
+    if (path === current.path) shown.current.add(page);
+    else shown.current.delete(page);
     window.scrollTo(0, returning ? scrollFor(current.path) : 0);
-  }, [page, otherKey]);
+  }, [page, path, otherKey]);
 
   function go(next: PageId) {
     if (next !== "settings") settingsNavigation.cancel();
@@ -257,9 +280,7 @@ function ShellFrame({
     })),
     { label: "Sign out", icon: LogOut, onSelect: () => void signOut() },
   ];
-  const mounted = PAGES.filter(
-    (def) => def.id === showing || (def.keepMounted && visited.has(def.id))
-  );
+  const mounted = mountedPages(showing, visited, warm, owner);
 
   return (
     <SettingsNavigationScope value={settingsNavigation.scope}>
@@ -373,7 +394,11 @@ function ShellFrame({
               <PageStandInContext.Provider
                 value={def.id === "collection" ? reportCollectionStandIn : null}
               >
-                {renderPage(def.id, def.id === showing)}
+                <FirstReadContext.Provider value={() => firstRead(def.id)}>
+                  <PageVisibility.Provider value={def.id === showing}>
+                    {renderPage(def.id, def.id === showing)}
+                  </PageVisibility.Provider>
+                </FirstReadContext.Provider>
               </PageStandInContext.Provider>
             </div>
           ))}

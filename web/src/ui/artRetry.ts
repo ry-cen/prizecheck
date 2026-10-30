@@ -1,3 +1,5 @@
+import { PageVisibility } from "./PageVisibility";
+import { useContext } from "react";
 import { useEffect, useState } from "react";
 
 /** Waits before the delayed retries of a picture that failed to load. The art route answers a temporary failure (a busy
@@ -75,19 +77,20 @@ export function useArtRetry(
   attempt: number;
   onError: () => void;
 } {
+  const visible = useContext(PageVisibility);
   const [state, setState] = useState<ArtRetryState>(start(url));
   const view = artView(state, url, immediate);
   const { delay, attempt } = view;
   useEffect(() => {
-    if (delay === null) return;
+    if (!visible || delay === null) return;
     const timer = setTimeout(
       () => setState((previous) => artRetried(previous, url)),
       delay
     );
     return () => clearTimeout(timer);
-  }, [delay, url, attempt]);
+  }, [delay, url, attempt, visible]);
   return {
-    show: view.phase === "showing",
+    show: visible && view.phase === "showing",
     waiting: view.phase === "waiting",
     attempt,
     onError: () => setState((previous) => artFailed(previous, url)),

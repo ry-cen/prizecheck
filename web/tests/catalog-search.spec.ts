@@ -1,8 +1,8 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { Pool } from "pg";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 test("collector searches a promoted generation and chooses an exact Edition", async ({
   page,

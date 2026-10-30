@@ -1,6 +1,6 @@
 /** The workspace deep link, /collection?location=<id>, opens one Storage Leaf or Deck.
  * The Decks page links here; an old /workspace?location=<id> link is redirected here with its query.
- * The workspace reads the link once and then removes it from the address. */
+ * The workspace reads each link when shown and then removes it from the address. */
 const PARAM = "location";
 
 export function workspaceHref(locationId: string): string {

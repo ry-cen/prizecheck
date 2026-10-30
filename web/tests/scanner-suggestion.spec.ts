@@ -1,8 +1,9 @@
+import { test } from "./support/art-upstream";
 // Ticket #319: the Scan Suggestion. An image-only match is offered as up to three candidates instead of an automatic lock;
 // a card is added only when one is picked. None of these opens search and the same card is not suggested again until it
 // leaves the guide; a card taken out unanswered is skipped; the shutter is greyed out while a suggestion shows. Driven
 // by the stub recognizer (frame injection). Every state runs the shared page check at 1280×800 and 375×812.
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
 import {
