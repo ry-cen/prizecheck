@@ -3,10 +3,6 @@
 # Regenerate (only to record a removal) with: .venv/bin/python scripts/check_python_boundaries.py --write-baseline
 
 [edges]
-app.decks -> app.games.pokemon.art.route
-app.decks -> app.games.pokemon.formats.construction_checks
-app.decks -> app.games.pokemon.formats.deck_format_checks
-app.decks -> app.games.pokemon.formats.format_evaluator
 app.discovery -> app.games.pokemon.catalog.card_attributes
 app.discovery -> app.games.pokemon.formats.deck_format_checks
 app.discovery -> app.games.pokemon.formats.format_evaluator
@@ -18,6 +14,8 @@ app.host_readiness -> app.games.pokemon.prices.catalog_targets
 app.publications -> app.games.pokemon.art.urls
 app.publications -> app.games.pokemon.formats.construction_checks
 app.publications -> app.games.pokemon.formats.deck_format_checks
+app.publications -> app.games.pokemon.decks.line_display
+app.want_list -> app.games.pokemon.decks.line_display
 
 [sql]
 app.host_readiness: owner_binding

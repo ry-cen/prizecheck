@@ -18,7 +18,7 @@ from .db import connect
 from .identity import verified_user
 from app.games.pokemon.formats.construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
 from app.games.pokemon.formats.deck_format_checks import TargetFormat, held_format_checks
-from .deck_list_display import CardKind, TrainerType
+from app.games.pokemon.decks.line_display import CardKind, TrainerType
 from .public_projection import public_projection_store, ProjectionUnavailable
 
 router = APIRouter(tags=['publication'])

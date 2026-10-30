@@ -17,10 +17,7 @@ app.copy_picks core
 app.db core
 app.deck_deletion core
 app.deck_list_capture core
-app.deck_list_display mixed
-app.deck_ownership mixed
 app.deck_pick_list core
-app.decks mixed
 app.discovery mixed
 app.holdings mixed
 app.host_readiness mixed
@@ -64,7 +61,6 @@ app.social.trades core
 app.swap_hints mixed
 app.trade_list core
 app.trade_picks core
-app.trade_wants mixed
 app.want_list mixed
 app.catalog_import root
 app.catalog_refresh root
@@ -82,3 +78,15 @@ app.games.pokemon.imports.import_replace pokemon
 app.games.pokemon.scanner.scanner_save pokemon
 app.games.pokemon.catalog.missing_cards pokemon
 app.games.pokemon.trading.trade_inventory pokemon
+app.core.decks.store core
+app.core.decks.index core
+app.core.decks.ownership core
+app.core.decks.loans core
+app.core.decks.contents core
+app.core.trading.trade_wants core
+app.games.pokemon.decks.routes pokemon
+app.games.pokemon.decks.models pokemon
+app.games.pokemon.decks.line_display pokemon
+app.games.pokemon.decks.checks pokemon
+app.games.pokemon.decks.commands pokemon
+app.games.pokemon.trading.trade_wants pokemon

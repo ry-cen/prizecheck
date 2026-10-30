@@ -61,7 +61,7 @@ ALLOWED_IMPORTS = {
         ('app.social', 'name_rules'), ('app.db', 'connect'), ('app.identity', 'verified_user'), ('app.location_tree', 'error'),
         ('app.social.friend_copies', 'friend_trade_copies'), ('app.social.friend_reads', 'FRIEND_BY_HANDLE'),
         ('app.social.friend_reads', 'PAGE_IDENTITIES'), ('app.social.friend_reads', 'card_facts'), ('app.social.friend_reads', 'search_key'),
-        ('app.trade_list', 'own_trade_copies'), ('app.trade_wants', 'own_wants'), ('app.trade_wants', 'own_rules'),
+        ('app.trade_list', 'own_trade_copies'), ('app.core.trading.trade_wants', 'own_wants'), ('app.core.trading.trade_wants', 'own_rules'),
         ('app.want_list', 'capture_want_list'), ('app.social.friend_copies', 'friend_wants'), ('app.card_accepts', 'accepts'),
         ('app.social.friends', 'friend_ids'),
         # Each Friend's completed-Trade count on their row and Trade List (trading #298), one read for all of them.

@@ -16,7 +16,7 @@ from app.games.pokemon.decks.printing import router as deck_list_printing_router
 from app.games.pokemon.exports.deck_live_export import router as deck_live_export_router
 from app.games.pokemon.exports.deck_mass_entry import router as deck_mass_entry_router
 from app.deck_pick_list import router as deck_pick_list_router
-from app.decks import router as decks_router
+from app.games.pokemon.decks.routes import router as decks_router
 from app.discovery import router as discovery_router
 from app.games.pokemon.formats.format_standing import rebuild_on_startup as rebuild_format_standing, router as format_standing_router
 from app.holdings import router as holdings_router
@@ -51,7 +51,7 @@ from app.social.trades import router as trades_router, settings_router as trade_
 from app.games.pokemon.trading.trade_inventory import router as trade_inventory_router
 from app.trade_list import router as trade_list_router
 from app.games.pokemon.trading.trade_value import router as trade_value_router
-from app.trade_wants import router as trade_wants_router
+from app.games.pokemon.trading.trade_wants import router as trade_wants_router
 from app.want_list import router as want_list_router
 from app.games.pokemon.decks.want_list_cost import router as want_list_cost_router
 from app.games.pokemon.exports.want_list_mass_entry import router as want_list_mass_entry_router

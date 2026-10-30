@@ -21,8 +21,9 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.deck_list_display import read_line_display
-from app.deck_ownership import SurplusHolding, beyond_list, surplus_holdings
+from app.games.pokemon.decks.line_display import read_line_display
+from app.games.pokemon.decks.models import SurplusHolding
+from app.core.decks.ownership import beyond_list, surplus_holdings
 from app.location_tree import error
 
 
@@ -88,4 +89,4 @@ def replacement(replaced: ReplacedDeck, deck_list: list[tuple[UUID, int]]) -> Im
                  for edition, quantity in sorted(replaced.lines.items())],
         changes=[*(ReplaceLine(edition_id=edition, quantity=str(quantity)) for edition, quantity in deck_list),
                  *(ReplaceLine(edition_id=edition, quantity='0') for edition in removed)],
-        surplus=surplus_holdings(beyond, replaced.versions, replaced.display))
+        surplus=surplus_holdings(beyond, replaced.versions, display=replaced.display, holding=SurplusHolding))

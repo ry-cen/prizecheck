@@ -13,13 +13,10 @@ with an ordinary Move, which needs the version.
 """
 from dataclasses import dataclass
 from uuid import UUID
-
 from pydantic import BaseModel
-
-from .borrowed_copies import borrowed_at
-from .copy_allocation import held_for_line, spare_rule
-from .deck_list_display import CardKind, TrainerType, read_line_display
-from .social import counts
+from app.borrowed_copies import borrowed_at
+from app.copy_allocation import held_for_line, spare_rule
+from app.social import counts
 
 
 class ElsewhereLocation(BaseModel):
@@ -44,26 +41,12 @@ class LineOwnership(BaseModel):
     locations: list[ElsewhereLocation]
 
 
-class SurplusHolding(BaseModel):
+class SurplusHoldingBase(BaseModel):
     edition_id: UUID
     # Copies held in the Deck beyond its Deck List line (all of them when the Edition has no line).
     quantity: str
     # The Deck's Holding version: send it as ``expected_version`` in the Move that puts the copies away.
     version: int
-    # Display data, as on a Deck List line (``deck_list_display``).
-    name: str
-    set_id: str
-    set_name: str
-    collector_number: str
-    descriptor: dict
-    image_url: str | None
-    card_kind: CardKind | None
-    trainer_type: TrainerType | None
-    evolves_from: str | None
-    identity_id: UUID
-    identity_name: str
-    evolution_root: str | None
-    evolution_stage: int | None
 
 
 class CompetingDeck(BaseModel):
@@ -89,7 +72,7 @@ class CompetitionWarning(BaseModel):
 @dataclass(frozen=True)
 class DeckOwnership:
     lines: list[LineOwnership]
-    surplus: list[SurplusHolding]
+    surplus: list[SurplusHoldingBase]
     competition: list[CompetitionWarning]
 
 
@@ -117,9 +100,9 @@ def beyond_list(holdings: dict[UUID, int], listed: dict[UUID, int]) -> list[tupl
 
 
 def surplus_holdings(beyond: list[tuple[UUID, int]], versions: dict[UUID, int],
-                     display: dict[UUID, dict]) -> list[SurplusHolding]:
+                     *, display: dict[UUID, dict], holding) -> list:
     """``beyond_list``'s rows with the Deck's Holding versions and their display data (``read_line_display``)."""
-    return [SurplusHolding(edition_id=edition, quantity=str(quantity), version=versions[edition], **display[edition])
+    return [holding(edition_id=edition, quantity=str(quantity), version=versions[edition], **display[edition])
             for edition, quantity in beyond]
 
 
@@ -199,6 +182,5 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
         if counted > spare:
             competition.append(CompetitionWarning(edition_id=edition, spare=str(spare),
                                                   counted_elsewhere=str(counted), decks=decks))
-    # Display data for surplus Editions is one more read keyed by Edition id, as for Deck List lines.
-    display = read_line_display(conn, [edition for edition, _ in surplus])
-    return DeckOwnership(lines=owned, surplus=surplus_holdings(surplus, versions, display), competition=competition)
+    return DeckOwnership(lines=owned, surplus=[SurplusHoldingBase(edition_id=edition,
+        quantity=str(quantity), version=versions[edition]) for edition, quantity in surplus], competition=competition)
