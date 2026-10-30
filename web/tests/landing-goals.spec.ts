@@ -53,17 +53,7 @@ test.describe("landing goals", () => {
       await expect(
         main.getByRole("link", { name: "Discover decks" })
       ).toHaveAttribute("href", "/discover");
-      if (width >= 375)
-        await expectPageChecks(page, `the landing goals at ${width} px`);
-      // At 320 px the shared public header is wider than the page (its own issue), so only the landing's content is
-      // held to fit.
-      else
-        expect(
-          await page
-            .getByRole("main")
-            .evaluate((main) => main.scrollWidth - main.clientWidth),
-          "the landing content scrolls sideways at 320 px"
-        ).toBeLessThanOrEqual(0);
+      await expectPageChecks(page, `the landing goals at ${width} px`);
       // Kept for a visual check of the layout at each width, pass or fail.
       await page.screenshot({
         path: testInfo.outputPath(`landing-${width}.png`),
