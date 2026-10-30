@@ -120,3 +120,21 @@ Release control, runtime loopback forwarding, readiness and smoke HTTP requests 
 ## Reproducible regression fixtures
 
 The ordinary verification gate now builds disposable runtime fixtures itself and runs proxy/key/readiness regressions without a retained `/tmp` store. These synthetic fixture receipts prove runtime behavior only; they are not exact-commit CI attestations. The explicit full release drill above still requires actual gated artifacts and records their provenance separately.
+
+## Reprint text rules version 2 (#436)
+
+After deploying the release with ReprintTextRules version 2, refresh existing Printings from stored source records:
+
+```sh
+sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/derive_card_attributes.py
+```
+
+Use the corresponding dev host helper for dev. No migration or source fetch is needed. Retry exit 3 after the catalog
+import finishes. If public catalog delivery reports pending, run the same helper with
+`tool /app/scripts/backfill_public_catalog.py`.
+
+This refresh is required unless a catalog import has already run under version 2. ADR 0021's deploy rollout applies
+live derivation and marketplace matching rules; it does not refresh Reprint Groups. The daily catalog check only starts
+an import when source IDs change, so a release alone does not guarantee regrouping. The derivation refreshes groups,
+advances the attribute revision for changed membership, publishes changed public format facts and rebuilds stale Format
+Standing best effort. Run it in a quiet window: derivation holds the public catalog clock in one transaction.
