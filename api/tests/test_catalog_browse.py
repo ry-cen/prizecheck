@@ -903,7 +903,7 @@ def test_reprints_filter_ungrouped_printing_and_basic_energy():
 
 
 def test_reprints_cursor_is_bound_to_source_edition(monkeypatch):
-    import app.catalog_browse as module
+    import app.games.pokemon.catalog.catalog_browse as module
     monkeypatch.setattr(module, 'PAGE_SIZE', 1)
     seed(CANDY_ME, CANDY_SV)
     user = collector()

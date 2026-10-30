@@ -401,7 +401,7 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
     generation = state["active_generation"]
     reading = _search(conn, generation, text)
     # Import lazily: import matching reads this module's shared ordering helpers.
-    from .import_owned import groups as equivalent_printings
+    from ..imports.import_owned import groups as equivalent_printings
 
     alternatives = None
     if reprints_of is not None:

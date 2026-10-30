@@ -22446,6 +22446,23 @@
      },
      {
       "in": "query",
+      "name": "reprints_of",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Reprints Of"
+      }
+     },
+     {
+      "in": "query",
       "name": "cursor",
       "required": false,
       "schema": {
