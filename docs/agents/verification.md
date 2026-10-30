@@ -98,6 +98,18 @@ A `FAILED:` line names the module, the chunk and the route it reached. Fix it by
 
 A `FAILED: <rule>: <detail>` line names the rule. `--show-pins` prints what each rule found on the tree.
 
+## Web boundaries
+
+`scripts/check_web_boundaries.py` guards the same split in `web/src` ([frontend composition](../planning/shared-core/frontend-composition.md)). `npm run guardrails` runs it, after the Python check. `scripts/web_imports.mjs` reads each `.ts` and `.tsx` file with the installed TypeScript parser and lists its module references: `import`, `export … from`, `import x = require()`, `import()`, `typeof import()`, `require()` and `new URL("…", import.meta.url)`. Code inside a template's `${…}` counts; text in strings, comments and regular expressions does not. It fails when:
+
+- a shared file (anything outside `web/src/games/<game>/`) imports a game, unless the edge is a listed composition point in `scripts/web_boundary_allowlist.txt`; a `*.test.ts(x)` file outside the games may import one;
+- a game imports another game;
+- a reference's module is not a string literal (`import(name)`, `import.meta.glob(…)`), or a non-relative specifier is neither a `node:` builtin nor a package `package.json` declares. The repository has no path aliases, so either could reach a game unseen;
+- a file sits directly under `web/src/games`;
+- an allow-list line matches no import.
+
+Fixture tests are in `tests/tooling/test_web_boundaries.py`.
+
 Edges that exist today are listed in `scripts/python_boundary_allowlist.txt`. A stale line fails too, so the list only shrinks. Never add a line to get a change through: move the game value to the call site or split the module. `--write-baseline` rewrites the list only to record a removal.
 
 `api/tests/test_api_contract.py` compares the OpenAPI document and the route table, in match order, with the snapshots under `api/tests/api_contract/`. A move or split must leave both byte-identical. There is no regenerate flag: a change to a snapshot is a change to the API contract and needs the owner's approval.

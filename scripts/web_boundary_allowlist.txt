@@ -1,0 +1,15 @@
+# Mixed composition points in web/src: shared modules that pass a game's values into shared code, as found by
+# scripts/check_web_boundaries.py. Every other shared module imports no game.
+# Add a line only when a move into web/src/games/<game> makes a mixed module the place that composes it, and say so
+# in docs/planning/shared-core/frontend-composition.md. A line that matches no import fails.
+
+# The Pokémon Formats and legality words, re-exported for callers that import them from the old mixed paths.
+web/src/catalog/catalogText.ts -> web/src/games/pokemon/formats.ts
+web/src/decks/targetFormat.ts -> web/src/games/pokemon/formats.ts
+web/src/discover/discoverText.ts -> web/src/games/pokemon/formats.ts
+web/src/owner/reprintValues.ts -> web/src/games/pokemon/formats.ts
+
+# Pokémon's Deck List grouping, passed into the shared groupLines and deckListModel, and its card-type words.
+web/src/decks/CopySheet.tsx -> web/src/games/pokemon/deckGroups.ts
+web/src/decks/DeckBuilderPage.tsx -> web/src/games/pokemon/deckGroups.ts
+web/src/public/publishedDeckModel.ts -> web/src/games/pokemon/deckGroups.ts

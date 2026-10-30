@@ -3,20 +3,22 @@ import type {
   FormatCheck,
   FormatIssue,
 } from "../format_checks_generated";
+import {
+  POKEMON_FORMATS,
+  STANDING_TONES,
+  STANDING_WORDS,
+  type PokemonFormat,
+} from "../games/pokemon/formats";
 import type { PillTone } from "../ui/Pill";
 
 /**
  * The Deck's Target Format (#178, ADR 0011): the one Format its advisory check runs against, Standard unless the
  * collector chooses another, and whose `legal` result publishing needs.
  */
-export type TargetFormat = "standard" | "expanded" | "glc";
+export type TargetFormat = PokemonFormat;
 
 export const TARGET_FORMATS: readonly { value: TargetFormat; label: string }[] =
-  [
-    { value: "standard", label: "Standard" },
-    { value: "expanded", label: "Expanded" },
-    { value: "glc", label: "Gym Leader Challenge" },
-  ];
+  POKEMON_FORMATS.map(({ value, long }) => ({ value, label: long }));
 
 export function formatLabel(format: string): string {
   return (
@@ -36,9 +38,17 @@ const STATUS: Record<
   FormatCheck["status"],
   { mark: string; text: string; tone: PillTone }
 > = {
-  legal: { mark: "✓", text: "Legal", tone: "ok" },
-  not_legal: { mark: "✕", text: "Not legal", tone: "bad" },
-  unknown: { mark: "?", text: "Unknown", tone: "unverified" },
+  legal: { mark: "✓", text: STANDING_WORDS.legal, tone: STANDING_TONES.legal },
+  not_legal: {
+    mark: "✕",
+    text: STANDING_WORDS.not_legal,
+    tone: STANDING_TONES.not_legal,
+  },
+  unknown: {
+    mark: "?",
+    text: STANDING_WORDS.unknown,
+    tone: STANDING_TONES.unknown,
+  },
 };
 
 /** "✓" and "Legal", "✕" and "Not legal", or "?" and "Unknown", with the Pill tone that repeats it. */

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { ChevronLeft } from "lucide-react";
 import type { BrowseEdition } from "../catalog_browse_generated";
+import { POKEMON_DECK_GROUPING } from "../games/pokemon/deckGroups";
 import {
   DeckError,
   getDeck,
@@ -391,7 +392,7 @@ export function DeckBuilderPage({
     onChanged: () => void read(),
   });
   const model = useMemo(
-    () => (detail ? deckListModel(detail) : null),
+    () => (detail ? deckListModel(detail, POKEMON_DECK_GROUPING) : null),
     [detail]
   );
   const gathered = useGatherToast(detail?.deck.name ?? "", () => void read());

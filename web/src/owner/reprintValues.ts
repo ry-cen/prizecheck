@@ -5,6 +5,7 @@ import type {
   ReprintGroupDecisionInput,
   ReprintGroupPrinting,
 } from "../metadata_generated";
+import { FORMAT_SHORT_NAMES, STANDING_WORDS } from "../games/pokemon/formats";
 
 /** One Card Identity in the Reprints queue (#171): the queue route lists manual Printings in no Reprint
  * Group, and the table lists their Card Identities, so an identity with two such Printings is one row. */
@@ -62,16 +63,8 @@ export function groupNames(
   return names;
 }
 
-const FORMAT_NAMES: Record<string, string> = {
-  standard: "Standard",
-  expanded: "Expanded",
-  glc: "GLC",
-};
-const STATUS_NAMES: Record<GroupLegality["status"], string> = {
-  legal: "Legal",
-  not_legal: "Not legal",
-  unknown: "Unknown",
-};
+const FORMAT_NAMES: Record<string, string> = FORMAT_SHORT_NAMES;
+const STATUS_NAMES: Record<GroupLegality["status"], string> = STANDING_WORDS;
 
 /** A group's legality in words, every Format: "Standard: Legal · Expanded: Legal · GLC: Not legal". */
 export const legalityText = (legality: GroupLegality[]) =>

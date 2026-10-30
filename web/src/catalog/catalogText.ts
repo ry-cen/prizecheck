@@ -3,13 +3,13 @@ import type {
   BrowseKind,
   BrowseSearch,
 } from "../catalog_browse_generated";
+import { FORMAT_LONG_NAMES, POKEMON_FORMATS } from "../games/pokemon/formats";
+
+export { STANDING_TONES, STANDING_WORDS } from "../games/pokemon/formats";
 
 /** The format chips, Any first (spec "Catalog": a format chip hides only not_legal cards). */
-export const FORMATS: readonly { value: BrowseFormat; label: string }[] = [
-  { value: "standard", label: "Standard" },
-  { value: "expanded", label: "Expanded" },
-  { value: "glc", label: "GLC" },
-];
+export const FORMATS: readonly { value: BrowseFormat; label: string }[] =
+  POKEMON_FORMATS.map(({ value, short }) => ({ value, label: short }));
 
 /** The type chips. A Trainer whose Trainer Type is unknown matches none of them. */
 export const KINDS: readonly { value: BrowseKind; label: string }[] = [
@@ -21,11 +21,7 @@ export const KINDS: readonly { value: BrowseKind; label: string }[] = [
   { value: "energy", label: "Energy" },
 ];
 
-export const FORMAT_NAMES: Record<BrowseFormat, string> = {
-  standard: "Standard",
-  expanded: "Expanded",
-  glc: "Gym Leader Challenge",
-};
+export const FORMAT_NAMES: Record<BrowseFormat, string> = FORMAT_LONG_NAMES;
 
 /** What to type, before the first answer arrives. */
 export const SEARCH_EXAMPLE =
@@ -58,13 +54,6 @@ export const BROWSE_FAILED =
   "Catalog search is temporarily unavailable. Please retry.";
 
 // ---------------------------------------------------------------- CardPopup (#174)
-
-/** A legality Pill's words: the Format, then its standing. */
-export const STANDING_WORDS = {
-  legal: "Legal",
-  not_legal: "Not legal",
-  unknown: "Unknown",
-} as const;
 
 /** The largest stack the popup's − N + adds in one press. */
 export const MAX_ADD = 999;

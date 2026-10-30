@@ -70,20 +70,17 @@ export type DeckLine = {
   loans: string[];
 };
 
-export type GroupKind =
-  | "pokemon"
-  | "supporter"
-  | "item"
-  | "tool"
-  | "stadium"
-  | "trainer"
-  | "energy"
-  | "unknown";
+/** How a game sorts Deck List lines into card-type groups (ADR 0023: the game passes it in): its groups in order, each
+ * with its heading, and the group a line belongs to. Pokémon's is games/pokemon/deckGroups. */
+export type DeckGrouping = {
+  groups: readonly { kind: string; title: string }[];
+  kindOf: (line: DeckListLine) => string;
+};
 
 export type LineGroup = {
   /** Unique within the Deck List. */
   key: string;
-  kind: GroupKind;
+  kind: string;
   /** The group's heading, such as "Pokémon" or "Supporters". */
   title: string;
   lines: DeckLine[];
@@ -97,17 +94,6 @@ export type DeckListModel = {
   /** Copies on the Deck List (the basic checks' total, summed from the lines). */
   total: string;
 };
-
-const FIXED_GROUPS: { kind: GroupKind; title: string }[] = [
-  { kind: "pokemon", title: "Pokémon" },
-  { kind: "supporter", title: "Supporters" },
-  { kind: "item", title: "Items" },
-  { kind: "tool", title: "Tools" },
-  { kind: "stadium", title: "Stadiums" },
-  { kind: "trainer", title: "Other Trainers" },
-  { kind: "energy", title: "Energy" },
-  { kind: "unknown", title: "Card type unknown" },
-];
 
 const big = (value: string | undefined) => BigInt(value ?? "0");
 
@@ -253,42 +239,35 @@ const byCopies = (a: DeckLine, b: DeckLine) =>
 const sum = (lines: readonly DeckLine[]) =>
   lines.reduce((total, line) => total + line.quantity, 0n);
 
-function fixedKind(line: DeckListLine): GroupKind {
-  switch (line.card_kind) {
-    case "pokemon":
-      return "pokemon";
-    case "trainer":
-      return line.trainer_type ?? "trainer";
-    case "energy":
-      return "energy";
-    default:
-      return "unknown";
-  }
-}
-
-/** Fixed card-type groups, with most copies first, then by name. Empty groups are omitted. */
-export function groupLines(lines: readonly DeckLine[]): LineGroup[] {
+/** The grouping's groups in its order, with most copies first, then by name, in each. Empty groups are omitted. */
+export function groupLines(
+  lines: readonly DeckLine[],
+  grouping: DeckGrouping
+): LineGroup[] {
   const groups: LineGroup[] = [];
-  const fixed = new Map<GroupKind, DeckLine[]>();
+  const members = new Map<string, DeckLine[]>();
   for (const line of lines) {
-    const kind = fixedKind(line.line);
-    fixed.set(kind, [...(fixed.get(kind) ?? []), line]);
+    const kind = grouping.kindOf(line.line);
+    members.set(kind, [...(members.get(kind) ?? []), line]);
   }
-  for (const { kind, title } of FIXED_GROUPS) {
-    const members = fixed.get(kind);
-    if (!members?.length) continue;
+  for (const { kind, title } of grouping.groups) {
+    const group = members.get(kind);
+    if (!group?.length) continue;
     groups.push({
       key: kind,
       kind,
       title,
-      lines: [...members].sort(byCopies),
-      copies: sum(members),
+      lines: [...group].sort(byCopies),
+      copies: sum(group),
     });
   }
   return groups;
 }
 
-export function deckListModel(detail: DeckDetail): DeckListModel {
+export function deckListModel(
+  detail: DeckDetail,
+  grouping: DeckGrouping
+): DeckListModel {
   const ownership = new Map(
     detail.ownership.map((entry) => [entry.edition_id, entry])
   );
@@ -300,7 +279,7 @@ export function deckListModel(detail: DeckDetail): DeckListModel {
   );
   return {
     lines,
-    groups: groupLines(lines),
+    groups: groupLines(lines, grouping),
     // The basic checks' total is the sum of the lines; summing them keeps N/60 current after an edit (#177), whose
     // answer carries the lines but no checks.
     total: lines.reduce((sum, line) => sum + line.quantity, 0n).toString(),
@@ -367,24 +346,6 @@ export function copyStateText(copy: DeckCopy): string {
 /** A Spread tile's accessible name and hover title. */
 export function copyLabel(line: DeckLine, copy: DeckCopy): string {
   return `${line.line.name}, ${editionText(line)}, copy ${copy.ordinal} of ${line.quantity}: ${copyStateText(copy)}${loanSuffix(line)}`;
-}
-
-/** "Pokémon · evolves from Charmeleon", "Trainer · Supporter", "Energy" or "Card type unknown". */
-export function kindText(line: DeckListLine): string {
-  switch (line.card_kind) {
-    case "pokemon":
-      return line.evolves_from
-        ? `Pokémon · evolves from ${line.evolves_from}`
-        : "Pokémon";
-    case "trainer":
-      return line.trainer_type
-        ? `Trainer · ${line.trainer_type[0].toUpperCase()}${line.trainer_type.slice(1)}`
-        : "Trainer";
-    case "energy":
-      return "Energy";
-    default:
-      return "Card type unknown";
-  }
 }
 
 /**
