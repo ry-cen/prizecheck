@@ -231,7 +231,7 @@ export function DecksIndexPage({ onOpenDeck, onNavigate }: Props) {
           </p>
         ) : (
           <nav aria-label="Deck index">
-            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-4 p-0 phone:grid-cols-2 phone:gap-3">
+            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-4 p-0 phone:grid-cols-2">
               {decks.map((deck) => (
                 <DeckTile
                   key={deck.id}
