@@ -31,17 +31,17 @@ itself: Decklist Import's Basic Energy grouping doesn't apply, as for the Want L
 The viewer's Want List is read with ``want_list.capture_want_list`` in its own transaction, under the viewer's owner
 lock; the Friend read runs afterwards on its own connection, under no lock.
 """
-from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from ..core.catalog.card_facts import Card, card_facts
 from ..location_tree import error
 from ..db import connect
 from ..identity import verified_user
-from ..want_list import capture_want_list, number_order
+from ..want_list import capture_want_list
 from . import name_rules
 from .friend_copies import friend_copies
 
@@ -86,19 +86,6 @@ FRIEND_BY_HANDLE = """SELECT p.user_id AS collector_id, p.handle, p.display_name
   FROM friends_of(ARRAY[%(viewer)s]::text[]) f JOIN collector_profile p ON p.user_id = f.friend_id
   WHERE p.handle_key = %(key)s"""
 
-# What a card shows, its Printing and Card Identity, and its name as Catalog's name search compares it.
-CARD_FACTS = """SELECT e.id AS edition_id, e.printing_id, p.identity_id,
-  coalesce(pd.display_name, ci.display_name) AS name, psc.set_code AS set_code,
-  coalesce(pd.set_name, '') AS set_name, coalesce(pd.collector_number, '') AS collector_number, e.descriptor,
-  art.small_art_url AS image_url, replace(catalog_search_words(coalesce(pd.display_name, ci.display_name)), ' ', '') AS search_key
-  FROM catalog_edition e
-  JOIN catalog_printing p ON p.id = e.printing_id
-  JOIN catalog_identity ci ON ci.id = p.identity_id
-  JOIN catalog_printing_set_code psc ON psc.printing_id = p.id
-  LEFT JOIN catalog_printing_display pd ON pd.printing_id = p.id
-  LEFT JOIN catalog_printing_art art ON art.printing_id = p.id
-  WHERE e.id = ANY(%s)"""
-
 # Every Edition each wanted Edition reaches (see the module docstring), and whether it is of another Printing.
 REACH = """WITH wanted AS (
     SELECT e.id AS wanted_id, e.printing_id FROM catalog_edition e WHERE e.id = ANY(%(editions)s::uuid[])
@@ -112,37 +99,6 @@ REACH = """WITH wanted AS (
   )
   SELECT r.wanted_id, e.id AS edition_id, r.other_printing
   FROM reached r JOIN catalog_edition e ON e.printing_id = r.printing_id"""
-
-
-@dataclass(frozen=True)
-class Card:
-    """Catalog facts about one Card Edition (``CARD_FACTS``)."""
-    edition_id: UUID
-    printing_id: UUID
-    identity_id: UUID
-    name: str
-    set_code: str
-    set_name: str
-    collector_number: str
-    descriptor: dict
-    image_url: str | None
-    search_key: str
-
-    def order(self):
-        """Card order, as the Want List reads: name, set, collector number, then the Edition id."""
-        return self.name.casefold(), self.set_name, number_order(self.collector_number), self.edition_id
-
-
-def card_facts(conn, edition_ids) -> dict[UUID, Card]:
-    ids = sorted(set(edition_ids))
-    if not ids:
-        return {}
-    return {row['edition_id']: Card(
-        edition_id=row['edition_id'], printing_id=row['printing_id'], identity_id=row['identity_id'], name=row['name'],
-        set_code=row['set_code'], set_name=row['set_name'],
-        collector_number=row['collector_number'], descriptor=row['descriptor'],
-        image_url=row['image_url'], search_key=row['search_key'] or '')
-        for row in conn.execute(CARD_FACTS, (ids,))}
 
 
 def reach(conn, wanted_ids, printings: Printings) -> dict[UUID, dict[UUID, bool]]:

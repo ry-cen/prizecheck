@@ -277,6 +277,7 @@ def test_a_swap_or_undo_after_the_list_changed_is_refused_as_stale(store):
 
 def test_the_hint_reads_only_the_groups_of_lines_that_need_copies(store, monkeypatch):
     from app import want_list as want_list_module
+    from app.games.pokemon.decks import want_list as want_list_route
     ids = seed_swap_catalog()
     owner, unsorted = new_owner()
     wanting = deck(owner, "Wanting", 0)
@@ -287,8 +288,10 @@ def test_the_hint_reads_only_the_groups_of_lines_that_need_copies(store, monkeyp
     def rows_read():
         seen = []
         monkeypatch.setattr(want_list_module, "connect", lambda: CountingConnection(real(), seen))
+        monkeypatch.setattr(want_list_route, "connect", lambda: CountingConnection(real(), seen))
         body = want_list(owner)
         monkeypatch.setattr(want_list_module, "connect", real)
+        monkeypatch.setattr(want_list_route, "connect", real)
         return body, sum(seen)
 
     before, read_before = rows_read()

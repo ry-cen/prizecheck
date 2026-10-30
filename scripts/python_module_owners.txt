@@ -18,8 +18,8 @@ app.db core
 app.deck_deletion core
 app.deck_list_capture core
 app.deck_pick_list core
-app.holdings mixed
-app.host_readiness mixed
+app.holdings core
+app.host_readiness root
 app.idempotency core
 app.identity core
 app.inventory_core core
@@ -84,6 +84,7 @@ app.core.trading.trade_wants core
 app.games.pokemon.decks.routes pokemon
 app.games.pokemon.decks.models pokemon
 app.games.pokemon.decks.line_display pokemon
+app.games.pokemon.decks.want_list pokemon
 app.games.pokemon.decks.checks pokemon
 app.games.pokemon.decks.commands pokemon
 app.games.pokemon.trading.trade_wants pokemon
@@ -93,3 +94,6 @@ app.games.pokemon.publications.models pokemon
 app.games.pokemon.publications.public_deck pokemon
 app.games.pokemon.publications.publications pokemon
 app.games.pokemon.publications.discovery pokemon
+app.core.catalog.card_facts core
+app.core.ops.readiness core
+app.games.pokemon.ops.readiness pokemon

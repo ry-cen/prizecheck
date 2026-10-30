@@ -77,8 +77,8 @@ from ..location_tree import error, record_response
 from ..db import connect
 from ..identity import verified_user
 from ..trade_picks import stale_pick_trades
+from ..core.catalog.card_facts import card_facts
 from .discovery import reach
-from .friend_reads import card_facts
 from .owners import NOW, advance_revision, begin_owner_command, ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/social/trades', tags=['social'])
