@@ -42,6 +42,8 @@ import { editionText, type DeckLine } from "./deckListModel";
 import { DeckDragBadge, dropLook, useDeckDrag } from "./useDeckDrag";
 import { useDeckListEdits } from "./useDeckListEdits";
 import { useDeckListChanged } from "./deckListChanged";
+import { DeckReadiness } from "./DeckReadiness";
+import { DeckWantListPanel } from "./DeckWantListPanel";
 
 type Props = {
   /** The Deck's id, from the address /decks/<id>. */
@@ -79,6 +81,8 @@ const VIEWS = [
  * Every edit goes through the batch Deck List command, one at a time (useDeckListEdits), with an Undo toast.
  *
  * Row 1's Gather N opens the Pick List dialog (#179), as does the copy sheet's Gather on that card.
+ * Under row 1's cost, DeckReadiness counts the Deck List's copies in this Deck, owned elsewhere, lent out and not owned.
+ * While copies are missing from this Deck, Ways to get missing cards opens its Want List lines in place (DeckWantListPanel).
  *
  * Header row 2 holds the Target Format control (#178): its menu changes the Deck's Target Format through its Deck List
  * command, and the result opens the results dialog. A card-level issue in that result highlights its lines.
@@ -508,8 +512,9 @@ export function DeckBuilderPage({
             }}
           />
         </div>
-        <div className="col-start-1 row-start-2">
+        <div className="col-start-1 row-start-2 flex min-w-0 flex-col gap-1">
           <DeckCostLine settled={cost} />
+          <DeckReadiness lines={model.lines} />
         </div>
         <div className="col-start-2 row-span-2 row-start-1 flex flex-wrap items-center gap-2 phone:[&>button]:flex-1 phone:[&>button]:px-2">
           <Button
@@ -525,6 +530,11 @@ export function DeckBuilderPage({
           <Button onClick={onWantList}>Want List</Button>
         </div>
       </div>
+      <DeckWantListPanel
+        deckId={deckId}
+        pins={`${detail.deck_list.revision}:${detail.owner_revision}:${detail.settings_revision}`}
+        missing={model.lines.some((line) => line.here < line.quantity)}
+      />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2
           id={`${idBase}-deck-list`}
