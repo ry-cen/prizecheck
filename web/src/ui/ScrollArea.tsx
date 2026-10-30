@@ -169,7 +169,7 @@ export function DocumentScrollbar() {
       railRef={rail}
       thumbRef={thumb}
       orientation="y"
-      className="fixed top-0 right-0 bottom-0 z-(--layer-sticky) w-(--scroll-rail-size) in-data-[app-shell]:top-(--layout-sticky-top) in-data-[public-shell]:top-header in-data-[app-shell]:phone:bottom-tabbar"
+      className="fixed top-0 right-0 bottom-0 z-(--layer-sticky) w-(--scroll-rail-size) in-data-[app-shell]:top-(--layout-sticky-top) in-data-[public-shell]:top-[var(--public-header-height,var(--spacing-header))] in-data-[app-shell]:phone:bottom-tabbar"
     />
   );
 }
