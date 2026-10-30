@@ -33,7 +33,7 @@ def advance_deck_list(conn, user_id: str, deck_id: UUID) -> dict:
     deck_list = read_deck_list(conn, user_id, deck_id)
     # Background; never blocks or fails the save (#396).
     warm_deck(conn, user_id, deck_id, allowed_host=art_route.ALLOWED_HOST, linked_art=art_route.LINKED_ART,
-              fetcher=art_route.fetcher, key_prefix=art_route.KEY_PREFIX)
+              fetcher=art_route.fetcher, key_prefix=art_route.KEY_PREFIX, upgrade=art_route.upgrade())
     target_format = read_target_format(conn, user_id, deck_id)
     return {'deck_id': deck_id, 'deck_list': deck_list, 'target_format': target_format,
             'format_checks': command_format_checks(conn, user_id, deck_id, deck_list.revision, target_format)}

@@ -279,7 +279,9 @@ def bind_prices(conn):
 def refresh_art(conn):
     """Choose TCGplayer art for Printings without a TCGdex image; the table's row count, or None when it failed (logged)."""
     try:
-        return card_art.refresh_fallbacks(conn)
+        total = card_art.refresh_fallbacks(conn)
+        card_art.refresh_art_products(conn)
+        return total
     except Exception as error:
         log(f"the fallback art refresh failed ({type(error).__name__})")
         return None

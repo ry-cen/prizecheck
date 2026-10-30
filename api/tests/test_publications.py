@@ -296,3 +296,43 @@ def test_private_and_public_checks_share_rules_without_private_identity_serializ
         assert private['identities'][0]['status']==public['identities'][0]['status']==status
         assert set(public['identities'][0])=={'name','quantity','status'}
         assert private['identities'][0]['identity_id'] not in json.dumps(public)
+
+
+def test_public_snapshot_uses_public_art_for_stored_art(monkeypatch, tmp_path):
+    import psycopg
+    from app.core.art.public import write_pointer
+    from app.core.art.store import join_warmups
+    monkeypatch.setenv('ART_STORE_DIR', str(tmp_path / 'art'))
+    owner, _, _, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    list_cards(owner, deck, {edition: 3})
+    token = command(owner, deck).json()['token']
+    join_warmups()
+    from pathlib import Path
+    import json
+    path_to_store = Path(os.environ['PUBLIC_PROJECTION_DIR']) / 'current.json'
+    state = json.loads(path_to_store.read_text())
+    state['decks'][token]['snapshot']['identities'][0]['editions'][0]['image_url'] = 'https://example.test/card.jpg'
+    path_to_store.write_text(json.dumps(state))
+    path = f'/api/public/decks/{token}'
+    original = client.get(path).json()['identities'][0]['editions'][0]
+    ref = original['printing_ref']
+    for size in ('small', 'large'):
+        write_pointer(ref, size, storage_key=f'tcgdex/{size}/test', sha256='a'*64, content_type='image/webp')
+    def forbidden(*args, **kwargs):
+        raise AssertionError('public snapshot opened PostgreSQL')
+    with monkeypatch.context() as patch:
+        patch.setattr(psycopg, 'connect', forbidden)
+        patch.setenv('DATABASE_URL', 'postgresql://unreachable:1/private')
+        row = client.get(path).json()['identities'][0]['editions'][0]
+        for key in ('image_url', 'large_image_url'):
+            assert row[key].startswith('/api/public/art/')
+            assert 'assets.tcgdex.net' not in row[key] and 'tcgplayer-cdn' not in row[key]
+    from app.core.art.public import delete_pointer
+    for size in ('small', 'large'):
+        delete_pointer(ref, size)
+    assert client.get(path).json()['identities'][0]['editions'][0] == original
+    legacy_snapshot(token)
+    with monkeypatch.context() as patch:
+        patch.setattr(psycopg, 'connect', forbidden)
+        assert client.get(path).json()['identities'][0]['editions'][0]['image_url'] == original['image_url']

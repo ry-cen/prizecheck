@@ -275,6 +275,16 @@ class FlakeGuardrailTest(unittest.TestCase):
             for owner in ('api/app/games/pokemon/art/urls.py', 'api/app/games/pokemon/scanner/scanner.py'):
                 self.assertFalse(guardrails.webp_suffix_violations(source, owner), (source, owner))
 
+    def test_tcgplayer_cdn_is_owned_only_by_hosts(self):
+        for source in ('url = "https://tcgplayer-cdn.tcgplayer.com/product/1"',
+                       r'pattern = "tcgplayer-cdn\.tcgplayer\.com"'):
+            self.assertTrue(guardrails.tcgplayer_cdn_violations(source, 'api/app/collection.py'))
+            self.assertFalse(guardrails.tcgplayer_cdn_violations(source, 'api/app/games/pokemon/art/hosts.py'))
+        for source in ('# tcgplayer-cdn.tcgplayer.com', '// tcgplayer-cdn.tcgplayer.com', 'url = HOST'):
+            self.assertFalse(guardrails.tcgplayer_cdn_violations(source, 'web/src/art.ts'))
+        for path in guardrails.art_source_files():
+            self.assertFalse(guardrails.tcgplayer_cdn_violations(path.read_text(), str(path.relative_to(guardrails.ROOT))), str(path))
+
     def test_other_webp_mentions_are_allowed(self):
         other = 'api/app/collection.py'
         for source in ('# the art route replaced /low.webp swaps', '// TCGdex /high.webp is built by the server',

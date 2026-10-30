@@ -28,6 +28,8 @@ x-api-environment: &api-environment
   PUBLIC_PROJECTION_DIR: /var/lib/prizecheck/public
   PRICE_RUNNER_LOCK_DIR: /var/lib/prizecheck/price-runners
   # Collector price kill switch (api/app/price_reads.py): `off` answers every price row unavailable without a query.
+  # off disables storing and serving TCGplayer copies.
+  ART_TCGPLAYER_SOURCE: ${ART_TCGPLAYER_SOURCE:-on}
   PRICE_READS: ${PRICE_READS:-on}
   # Card art store (#358, ADR 0020): regenerable files, left out of backups.
   ART_STORE_DIR: /var/lib/prizecheck/art
@@ -181,6 +183,7 @@ services:
       # The price import names this contact in its User-Agent and refuses to run without one.
       PRICE_IMPORT_CONTACT: ${PRICE_IMPORT_CONTACT:-${OWNER_EMAIL}}
     volumes:
+      - ${PRIZECHECK_DATA_DIR}/art:/var/lib/prizecheck/art
       - ${PRIZECHECK_DATA_DIR}/public:/var/lib/prizecheck/public
       - ${PRIZECHECK_DATA_DIR}/price-runners:/var/lib/prizecheck/price-runners
     networks: [backend, egress]

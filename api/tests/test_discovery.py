@@ -96,3 +96,29 @@ def test_failed_visibility_object_write_is_atomic_and_idempotently_recoverable(m
     assert visibility(owner, deck, 'listed', key).status_code == 200
     assert len(client.get('/api/public/discovery').json()['decks']) == 1
     assert client.get(f'/api/public/decks/{token}').json()['version'] == 1
+
+
+def test_featured_image_uses_public_art(monkeypatch, tmp_path):
+    import psycopg
+    from app.core.art.public import write_pointer
+    from app.core.art.store import join_warmups
+    monkeypatch.setenv('ART_STORE_DIR', str(tmp_path / 'art'))
+    owner, _, _, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    list_cards(owner, deck, {edition: 1})
+    token = command(owner, deck).json()['token']
+    join_warmups()
+    from pathlib import Path
+    import json
+    path_to_store = Path(os.environ['PUBLIC_PROJECTION_DIR']) / 'current.json'
+    state = json.loads(path_to_store.read_text())
+    state['decks'][token]['snapshot']['identities'][0]['editions'][0]['image_url'] = 'https://example.test/card.jpg'
+    path_to_store.write_text(json.dumps(state))
+    ref = client.get(f'/api/public/decks/{token}').json()['identities'][0]['editions'][0]['printing_ref']
+    assert visibility(owner, deck, 'listed').status_code == 200
+    write_pointer(ref, 'small', storage_key='tcgdex/small/test', sha256='b'*64, content_type='image/webp')
+    def forbidden(*args, **kwargs):
+        raise AssertionError('discovery opened PostgreSQL')
+    monkeypatch.setattr(psycopg, 'connect', forbidden)
+    monkeypatch.setenv('DATABASE_URL', 'postgresql://unreachable:1/private')
+    assert client.get('/api/public/discovery').json()['decks'][0]['image_url'] == f'/api/public/art/{ref}/small?v=bbbbbbbb'

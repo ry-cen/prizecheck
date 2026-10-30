@@ -20,6 +20,9 @@ store generation as the facts with the Published Deck cost route's eligibility p
 
 Contract: docs/public-projections.md ("Discover lists legal decks").
 """
+from app.core.art.public import public_address
+from app.games.pokemon.art.route import excluded_prefixes
+
 import hashlib
 import json
 import os
@@ -138,7 +141,7 @@ def cost(active, states) -> DiscoverCost:
 
 
 def featured(active, facts):
-    """The featured card ``(image_url, name)``: the rule-box Pokémon (ex, V and the like) with the most copies, else the
+    """The featured card ``(image_url, name, printing_ref)``: the rule-box Pokémon (ex, V and the like) with the most copies, else the
     Pokémon with the most copies, else the first card with art; ties go to the snapshot's order. Only rows with art
     count, and a row's kind comes from its Printing's public format facts."""
     def attributes(row):
@@ -151,14 +154,15 @@ def featured(active, facts):
     for rows in (ruled, pokemon):
         if rows:
             best = max(rows, key=lambda row: row.quantity)  # max keeps the first of equal quantities
-            return best.image_url, best.name
-    return (pictured[0].image_url, pictured[0].name) if pictured else (None, None)
+            return best.image_url, best.name, best.printing_ref
+    return (pictured[0].image_url, pictured[0].name, pictured[0].printing_ref) if pictured else (None, None, None)
 
 
 def summary(token, active, facts, states) -> PublicDeckSummary:
     public = active.snapshot
     checks = public.checks
-    image_url, name = featured(active, facts)
+    image_url, name, ref = featured(active, facts)
+    image_url = public_address(ref, "small", excluded_prefixes=excluded_prefixes()) or image_url
     return PublicDeckSummary(url=f'/published/{token}', title=public.title, total=public.total, published_at=public.published_at,
         checks=PublicCheckSummary(size_status=checks.size_status, shortage=checks.shortage, excess=checks.excess,
              over_limit_groups=sum(item.status=='over_limit' for item in checks.identities),

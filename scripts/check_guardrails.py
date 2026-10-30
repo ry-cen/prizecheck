@@ -241,6 +241,18 @@ def webp_suffix_violations(source, filename):
             if WEBP_SUFFIX.search(line) and not line.lstrip().startswith(('#', '//', '*', '/*'))]
 
 
+TCGPLAYER_CDN = re.compile(r'tcgplayer-cdn\\?\.tcgplayer\\?\.com')
+
+
+def tcgplayer_cdn_violations(source, filename):
+    """The Pokémon host module owns the TCGplayer CDN spelling."""
+    if filename == 'api/app/games/pokemon/art/hosts.py':
+        return []
+    return [(number, 'Build TCGplayer art addresses from the art hosts module')
+            for number, line in enumerate(source.splitlines(), 1)
+            if TCGPLAYER_CDN.search(line) and not line.lstrip().startswith(('#', '//', '*', '/*'))]
+
+
 def art_source_files():
     yield from sorted((ROOT/'api/app').rglob('*.py'))
     yield from web_source_files()
@@ -403,7 +415,8 @@ def main():
             failed = True
     for path in art_source_files():
         relative = path.relative_to(ROOT).as_posix()
-        for line, reason in webp_suffix_violations(path.read_text(), relative):
+        for line, reason in (webp_suffix_violations(path.read_text(), relative)
+                             + tcgplayer_cdn_violations(path.read_text(), relative)):
             print(f'{relative}:{line}: {reason}')
             failed = True
     for line, reason in dockerignore_violations((ROOT/'.dockerignore').read_text()):
