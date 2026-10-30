@@ -71,8 +71,7 @@ export type DeckLine = {
 };
 
 export type GroupKind =
-  | "evolution"
-  | "other-pokemon"
+  | "pokemon"
   | "supporter"
   | "item"
   | "tool"
@@ -85,7 +84,7 @@ export type LineGroup = {
   /** Unique within the Deck List. */
   key: string;
   kind: GroupKind;
-  /** The group's heading, such as "Charizard ex line" or "Supporters". */
+  /** The group's heading, such as "Pokémon" or "Supporters". */
   title: string;
   lines: DeckLine[];
   /** Copies across the group's lines. */
@@ -99,17 +98,16 @@ export type DeckListModel = {
   total: string;
 };
 
-const FIXED_GROUPS: { kind: Exclude<GroupKind, "evolution">; title: string }[] =
-  [
-    { kind: "other-pokemon", title: "Other Pokémon" },
-    { kind: "supporter", title: "Supporters" },
-    { kind: "item", title: "Items" },
-    { kind: "tool", title: "Tools" },
-    { kind: "stadium", title: "Stadiums" },
-    { kind: "trainer", title: "Other Trainers" },
-    { kind: "energy", title: "Energy" },
-    { kind: "unknown", title: "Card type unknown" },
-  ];
+const FIXED_GROUPS: { kind: GroupKind; title: string }[] = [
+  { kind: "pokemon", title: "Pokémon" },
+  { kind: "supporter", title: "Supporters" },
+  { kind: "item", title: "Items" },
+  { kind: "tool", title: "Tools" },
+  { kind: "stadium", title: "Stadiums" },
+  { kind: "trainer", title: "Other Trainers" },
+  { kind: "energy", title: "Energy" },
+  { kind: "unknown", title: "Card type unknown" },
+];
 
 const big = (value: string | undefined) => BigInt(value ?? "0");
 
@@ -242,16 +240,6 @@ export function loanNotes(loans: DeckLoanLine | undefined): {
   };
 }
 
-/** A name as a grouping key: NFC, ASCII apostrophes, single spaces, case-folded. */
-export function nameKey(name: string): string {
-  return name
-    .normalize("NFC")
-    .replace(/[‘’ʼ]/g, "'")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLocaleLowerCase("en");
-}
-
 const byName = (a: DeckLine, b: DeckLine) =>
   a.line.name.localeCompare(b.line.name, "en") ||
   a.line.set_name.localeCompare(b.line.set_name, "en") ||
@@ -265,10 +253,10 @@ const byCopies = (a: DeckLine, b: DeckLine) =>
 const sum = (lines: readonly DeckLine[]) =>
   lines.reduce((total, line) => total + line.quantity, 0n);
 
-function fixedKind(line: DeckListLine): Exclude<GroupKind, "evolution"> {
+function fixedKind(line: DeckListLine): GroupKind {
   switch (line.card_kind) {
     case "pokemon":
-      return "other-pokemon";
+      return "pokemon";
     case "trainer":
       return line.trainer_type ?? "trainer";
     case "energy":
@@ -278,130 +266,11 @@ function fixedKind(line: DeckListLine): Exclude<GroupKind, "evolution"> {
   }
 }
 
-/**
- * Evolution lines among the Pokémon lines. Every Pokémon line's name is joined to its evolution root, the
- * first Pokémon of its line computed by the server through the whole catalog (`evolution_root`, migration
- * 043), so a deck that skips a stage still forms one line: Charmander and Charizard ex with no Charmeleon,
- * or Charmeleon and Charizard ex with no Charmander. Siblings share a root (Lucario and Mega Lucario ex from
- * Riolu). A line without a root (a Published Deck snapshot, or a catalog not yet derived) is joined to the
- * name it evolves from instead, including names that aren't on the list. A group with at least two
- * different Pokémon names becomes an evolution line; a lone Pokémon (one name, any number of Editions) goes
- * to Other Pokémon.
- *
- * A name's stage is its steps from the root (`evolution_stage`). Without one, it is one more than the stage
- * of the name it evolves from when that name is in the group, 1 when it evolves from a name that isn't, and
- * 0 when it evolves from nothing. Within a group, lines run from the lowest stage; equal stages go by name.
- * The group is titled after its highest-stage name ("Charizard ex line"); a tie goes to the name with more
- * copies, then the alphabetically first. Groups with more copies come first; equal ones go by title.
- */
-function evolutionGroups(pokemon: readonly DeckLine[]): {
-  groups: LineGroup[];
-  lone: DeckLine[];
-} {
-  const parent = new Map<string, string>();
-  const find = (key: string): string => {
-    let root = key;
-    while (parent.has(root) && parent.get(root) !== root)
-      root = parent.get(root)!;
-    return root;
-  };
-  const union = (a: string, b: string) => {
-    if (!parent.has(a)) parent.set(a, a);
-    if (!parent.has(b)) parent.set(b, b);
-    const ra = find(a);
-    const rb = find(b);
-    if (ra !== rb) parent.set(ra, rb);
-  };
-  for (const line of pokemon) {
-    const own = nameKey(line.line.name);
-    if (!parent.has(own)) parent.set(own, own);
-    const joined = line.line.evolution_root ?? line.line.evolves_from;
-    if (joined) union(own, nameKey(joined));
-  }
-  const components = new Map<string, DeckLine[]>();
-  for (const line of pokemon) {
-    const root = find(nameKey(line.line.name));
-    components.set(root, [...(components.get(root) ?? []), line]);
-  }
-  const groups: LineGroup[] = [];
-  const lone: DeckLine[] = [];
-  for (const [root, lines] of components) {
-    const names = new Map<string, DeckLine[]>();
-    for (const line of lines) {
-      const key = nameKey(line.line.name);
-      names.set(key, [...(names.get(key) ?? []), line]);
-    }
-    if (names.size < 2) {
-      lone.push(...lines);
-      continue;
-    }
-    const from = new Map<string, string | null>();
-    const stages = new Map<string, number>();
-    for (const [key, members] of names) {
-      const evolves = members.find((line) => line.line.evolves_from)?.line
-        .evolves_from;
-      from.set(key, evolves ? nameKey(evolves) : null);
-      const served = members.find((line) => line.line.evolution_stage !== null)
-        ?.line.evolution_stage;
-      if (served !== undefined && served !== null) stages.set(key, served);
-    }
-    const stageOf = (key: string, seen: Set<string> = new Set()): number => {
-      const known = stages.get(key);
-      if (known !== undefined) return known;
-      const previous = from.get(key);
-      const stage = !previous
-        ? 0
-        : names.has(previous) && !seen.has(previous)
-          ? stageOf(previous, new Set([...seen, key])) + 1
-          : 1;
-      stages.set(key, stage);
-      return stage;
-    };
-    for (const key of names.keys()) stageOf(key);
-    const ordered = [...lines].sort(
-      (a, b) =>
-        stages.get(nameKey(a.line.name))! - stages.get(nameKey(b.line.name))! ||
-        byName(a, b)
-    );
-    const titled = [...names.entries()].sort(([keyA, a], [keyB, b]) => {
-      const stage = stages.get(keyB)! - stages.get(keyA)!;
-      if (stage) return stage;
-      const copiesA = sum(a);
-      const copiesB = sum(b);
-      if (copiesA !== copiesB) return copiesA > copiesB ? -1 : 1;
-      return a[0].line.name.localeCompare(b[0].line.name, "en");
-    })[0][1][0].line.name;
-    groups.push({
-      key: `evolution:${root}`,
-      kind: "evolution",
-      title: `${titled} line`,
-      lines: ordered,
-      copies: sum(lines),
-    });
-  }
-  groups.sort((a, b) =>
-    a.copies === b.copies
-      ? a.title.localeCompare(b.title, "en")
-      : a.copies > b.copies
-        ? -1
-        : 1
-  );
-  return { groups, lone };
-}
-
-/**
- * Lines grouped as a decklist reads: evolution lines, then Other Pokémon, Supporters, Items, Tools,
- * Stadiums, Other Trainers (no Trainer Type), Energy and Card type unknown. Empty groups are left out. Lines
- * outside evolution groups run from most copies to fewest, then by name.
- */
+/** Fixed card-type groups, with most copies first, then by name. Empty groups are omitted. */
 export function groupLines(lines: readonly DeckLine[]): LineGroup[] {
-  const pokemon = lines.filter((line) => line.line.card_kind === "pokemon");
-  const { groups, lone } = evolutionGroups(pokemon);
+  const groups: LineGroup[] = [];
   const fixed = new Map<GroupKind, DeckLine[]>();
-  for (const line of [
-    ...lone,
-    ...lines.filter((line) => line.line.card_kind !== "pokemon"),
-  ]) {
+  for (const line of lines) {
     const kind = fixedKind(line.line);
     fixed.set(kind, [...(fixed.get(kind) ?? []), line]);
   }

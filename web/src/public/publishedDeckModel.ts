@@ -16,7 +16,7 @@ import type { PublicSnapshot } from "../publications_generated";
  * cost and its public format result, never from an owner's Collection.
  *
  * Each frozen row becomes a Deck List line so the deck builder's grouping (decks/deckListModel) groups it the same way:
- * evolution lines, Trainer Types and Energy, from the display facts frozen with the snapshot. Every copy is plain (all
+ * Pokémon, Trainer Types and Energy, from the display facts frozen with the snapshot. Every copy is plain (all
  * "in this Deck"), because a snapshot says nothing about ownership. A line's key is the one the public routes use: the
  * row's Edition reference, or `row:<n>` (its 0-based position among the snapshot's rows) for a legacy row without one,
  * so a format issue's lines and a price's `edition_ref` find their line.

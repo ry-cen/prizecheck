@@ -161,7 +161,7 @@ export function DeckListBody({
                       line.copies.map((copy) => (
                         <CopyTile
                           key={copy.ordinal}
-                          className="w-14 phone:w-12"
+                          className="w-20 phone:w-16"
                           label={copyLabel(line, copy)}
                           title={copyLabel(line, copy)}
                           name={line.line.name}
@@ -226,7 +226,7 @@ function Pile({
       title={label}
       {...editProps(line, editing)}
       onClick={(event) => onOpen(line, null, event.currentTarget)}
-      className="m-0 box-border flex w-16 cursor-pointer flex-col gap-1 rounded-card border-0 bg-transparent p-0 text-left font-sans text-text phone:w-14"
+      className="m-0 box-border flex w-24 cursor-pointer flex-col gap-1 rounded-card border-0 bg-transparent p-0 text-left font-sans text-text phone:w-20"
     >
       <span aria-hidden="true" className="relative block pb-2 pr-2">
         {line.quantity > 2n && (

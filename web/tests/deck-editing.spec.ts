@@ -24,7 +24,7 @@ type Card = {
   evolveFrom?: string;
 };
 
-/** Charmander in two sets (one Card Identity, so either copy swaps for the other), Pikachu, a Supporter, an Item and
+/** Charmander in two sets (functionally identical, so either copy swaps for the other), Pikachu, a Supporter, an Item and
  * an Energy. None of the sets is in the format rules, so every card's standing is unknown and shows "?". */
 const CARDS: Record<string, Card> = {
   "edit-1": {
@@ -91,6 +91,9 @@ class Attributed(search.SearchSource):
         for field in ("types", "trainerType", "evolveFrom"):
             if card.get(field):
                 record[field] = card[field]
+        if card["name"] == "Charmander":
+            record["hp"] = 70
+            record["attacks"] = [{"name": "Ember", "cost": ["Fire"], "damage": "30", "effect": ""}]
         if card["category"] == "Energy":
             record["energyType"] = "Normal"
         return record
@@ -318,7 +321,7 @@ async function manyVariants(page: Page, current: string) {
           String(100 + index)
         )
   );
-  await page.route("**/api/catalog/editions?*identity_id=*", (route) => {
+  await page.route("**/api/catalog/editions?*reprints_of=*", (route) => {
     const second_page = new URL(route.request().url()).searchParams.has(
       "cursor"
     );
@@ -620,7 +623,7 @@ test.describe("on a desktop", () => {
     await stepper.getByRole("button", { name: "−1" }).click();
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 2 });
 
-    // Swap this copy for: the other Editions of the same Card Identity.
+    // Swap this copy for: functionally identical Editions.
     const swaps = sheet.getByRole("region", { name: "Swap this copy for" });
     const gamma = swaps.getByRole("button", {
       name: "Charmander, Gamma Set · 9 · Normal, Not owned",
