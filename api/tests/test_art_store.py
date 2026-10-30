@@ -87,7 +87,7 @@ def get(pid, size="small", v="auto", user=USER, **params):
         v = art_version(SMALL)
     if v is not None:
         params["v"] = v
-    return client.get(path, params=params, headers=headers(user, "GET", path))
+    return client.get(path, params=params, headers=headers(user, "GET", path), follow_redirects=False)
 
 
 def sql(query, *args):
@@ -428,3 +428,145 @@ def test_a_deadline_spent_waiting_for_a_slot_writes_no_ledger_entry(pids, upstre
                                                            clock=lambda: now[0]))
     assert_unavailable(get(pids["card-1"]))
     assert upstream.count == 0 and ledger(pids["card-1"]) == []
+
+
+@pytest.fixture
+def candidate(pids, monkeypatch):
+    from app.games.pokemon.art.hosts import TCGPLAYER_HOST, TCGPLAYER_LARGE
+    monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'on')
+    stub = Upstream()
+    from test_art_dimensions import jpeg
+    stub.responder = lambda request: httpx.Response(200, content=jpeg(), headers={'content-type':'image/jpeg'})
+    monkeypatch.setattr(art_route, '_tcgplayer_fetcher', ArtFetcher(allowed_host=TCGPLAYER_HOST,
+        path_pattern=TCGPLAYER_LARGE, transport=httpx.MockTransport(stub.handler), limiter=RateLimiter(100000)))
+    with connect() as conn:
+        conn.execute('INSERT INTO catalog_printing_art_product(printing_id,product_id) VALUES (%s,123)', (pids['card-1'],))
+    return stub
+
+
+def comparison(pid):
+    with connect() as conn:
+        return conn.execute('SELECT * FROM art_large_upgrade WHERE printing_id=%s',(pid,)).fetchone()
+
+
+def test_sharper_tcgplayer_large_is_stored_and_served_after_one_view(pids, upstream, candidate):
+    pid = pids['card-1']
+    assert get(pid,'large').headers['content-type'] == 'image/jpeg'
+    assert get(pid,'large').status_code == 200
+    assert candidate.count == 1 and upstream.count == 0
+    with connect() as conn:
+        assert conn.execute("SELECT source_url FROM art_object WHERE printing_id=%s AND size='large'",(pid,)).fetchone()['source_url'] == candidate.urls[0]
+    assert comparison(pid)['outcome'] == 'won'
+
+
+def test_smaller_tcgplayer_large_keeps_tcgdex_and_is_not_refetched(pids, upstream, candidate):
+    from test_art_dimensions import jpeg
+    candidate.responder = lambda request: httpx.Response(200,content=jpeg(600,825),headers={'content-type':'image/jpeg'})
+    for _ in range(3):
+        assert get(pids['card-1'],'large').content == webp(64)
+    assert candidate.count == 1 and comparison(pids['card-1'])['outcome'] == 'lost'
+
+
+@pytest.mark.parametrize('width,height,status', [(600,825,200),(200,280,302)])
+def test_tcgplayer_only_large_is_stored_not_redirected(pids, candidate, width, height, status):
+    from test_art_dimensions import jpeg
+    pid = pids['card-2']
+    with connect() as conn:
+        conn.execute('INSERT INTO catalog_printing_fallback_art(printing_id,product_id) VALUES (%s,123)', (pid,))
+    candidate.responder = lambda request: httpx.Response(200,content=jpeg(width,height),headers={'content-type':'image/jpeg'})
+    answer = get(pid,'large')
+    assert answer.status_code == status
+    if status == 302:
+        assert answer.headers['location'].endswith('_400w.jpg')
+    else:
+        assert answer.headers['content-type'] == 'image/jpeg'
+
+
+@pytest.mark.parametrize('fallback', [False,True])
+def test_setting_off_behaves_as_today(pids, candidate, monkeypatch, fallback):
+    pid = pids['card-2' if fallback else 'card-1']
+    if fallback:
+        with connect() as conn:
+            conn.execute('INSERT INTO catalog_printing_fallback_art(printing_id,product_id) VALUES (%s,123)', (pid,))
+    assert get(pid,'large').status_code == 200
+    monkeypatch.setenv('ART_TCGPLAYER_SOURCE','off')
+    answer = get(pid,'large')
+    assert candidate.count == 1
+    assert answer.status_code == (302 if fallback else 200)
+    if not fallback:
+        assert answer.content == webp(64)
+        with connect() as conn:
+            assert conn.execute("SELECT source_url FROM art_object WHERE printing_id=%s AND size='large'",(pid,)).fetchone()['source_url'] == LARGE
+
+
+def test_version_changes_with_the_large_source(pids, candidate):
+    pid = pids['card-1']
+    with connect() as conn:
+        before = conn.execute('SELECT art_version FROM catalog_printing_art WHERE printing_id=%s',(pid,)).fetchone()['art_version']
+    get(pid,'large')
+    with connect() as conn:
+        after = conn.execute('SELECT art_version FROM catalog_printing_art WHERE printing_id=%s',(pid,)).fetchone()['art_version']
+    assert before != after
+    assert get(pid,'large',v=after).headers['cache-control'] == art_store.IMMUTABLE
+    assert get(pid,'large',v=before).headers['cache-control'] == art_store.REVALIDATE
+    for version in (before,after):
+        assert get(pid,'small',v=version).headers['cache-control'] == art_store.IMMUTABLE
+
+
+def test_candidate_failure_backs_off_and_falls_back_to_base(pids, candidate):
+    candidate.responder = lambda request: httpx.Response(500)
+    for _ in range(2):
+        assert get(pids['card-1'],'large').content == webp(64)
+    assert candidate.count == 1 and comparison(pids['card-1'])['outcome'] == 'failed'
+
+
+def test_tcgplayer_fetcher_refuses_other_paths():
+    from app.games.pokemon.art.hosts import TCGPLAYER_HOST, TCGPLAYER_LARGE
+    urls=[]
+    def handler(request):
+        urls.append(str(request.url))
+        return httpx.Response(302,headers={'location':'/product/124_400w.jpg'})
+    fetcher=ArtFetcher(allowed_host=TCGPLAYER_HOST,path_pattern=TCGPLAYER_LARGE,
+                       transport=httpx.MockTransport(handler),limiter=RateLimiter(100000))
+    for suffix in ('400w.jpg','1000x1000.jpg'):
+        with pytest.raises(art_store.FetchFailed,match='redirect'):
+            fetcher.fetch(f'https://{TCGPLAYER_HOST}/product/123_{suffix}')
+    assert urls == []
+    with pytest.raises(art_store.FetchFailed,match='redirect'):
+        fetcher.fetch(f'https://{TCGPLAYER_HOST}/product/123_in_1000x1000.jpg')
+    assert len(urls)==1
+
+
+def test_candidate_write_failure_does_not_record_a_win(pids, candidate, monkeypatch):
+    def broken(*args):
+        raise OSError('disk full')
+    monkeypatch.setattr(art_storage.DiskArtStorage, 'put', broken)
+    answer = get(pids['card-1'],'large')
+    assert answer.status_code == 200 and answer.headers['cache-control'] == art_store.REVALIDATE
+    assert comparison(pids['card-1']) is None
+
+
+def test_busy_candidate_falls_back_without_a_comparison(pids, candidate, monkeypatch):
+    def busy(*args):
+        raise art_store.Busy()
+    monkeypatch.setattr(art_route._tcgplayer_fetcher,'fetch',busy)
+    assert get(pids['card-1'],'large').content == webp(64)
+    assert comparison(pids['card-1']) is None
+
+
+def test_purge_tcgplayer_restores_version_and_keeps_base_objects(pids, candidate, monkeypatch):
+    import runpy
+    from pathlib import Path
+    pid = pids['card-1']
+    get(pid,'small')
+    get(pid,'large')
+    old_key = next(row['storage_key'] for row in objects(pid) if row['size'] == 'large')
+    tool = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts' / 'art_store.py'))
+    assert tool['purge_tcgplayer']() == 2
+    monkeypatch.setenv('ART_TCGPLAYER_SOURCE','off')
+    assert tool['purge_tcgplayer']() == 0
+    assert comparison(pid) is None
+    assert [row['size'] for row in objects(pid)] == ['small']
+    assert art_storage.storage().get(old_key) is None
+    with connect() as conn:
+        assert conn.execute('SELECT art_version FROM catalog_printing_art WHERE printing_id=%s',(pid,)).fetchone()['art_version'] == art_version(SMALL)

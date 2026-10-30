@@ -129,7 +129,8 @@ def test_every_signed_in_read_carries_route_addresses_and_no_art_host(swap_world
     assert by_edition[fallback].startswith(f"/api/art/{paf}/small?v=")
 
 
-def test_the_route_serves_fallback_art_as_a_link_and_a_bare_printing_has_none(swap_world):
+def test_the_route_serves_fallback_art_as_a_link_and_a_bare_printing_has_none(swap_world, monkeypatch):
+    monkeypatch.setenv("ART_TCGPLAYER_SOURCE", "off")
     ids, paf = swap_world
     with connect() as conn:
         bare = conn.execute("SELECT id FROM catalog_printing WHERE source_id='sve-013'").fetchone()["id"]
@@ -209,3 +210,10 @@ def test_only_the_anonymous_reads_the_art_route_and_the_paged_lists_select_the_s
     for name in paged:
         text = next(root.rglob(name)).read_text()
         assert "route_address(" in text and "art.small_art_url" not in text, name
+
+
+@pytest.mark.parametrize("upgrade", [None, "https://example.org/large.jpg"])
+def test_combined_version_sql_twin(upgrade):
+    from app.core.art.urls import art_version
+    with connect() as conn:
+        assert conn.execute("SELECT catalog_art_version(%s,%s) AS v", ("source", upgrade)).fetchone()["v"] == art_version("source", upgrade)

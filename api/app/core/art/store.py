@@ -29,13 +29,16 @@ import time
 import urllib.parse
 from concurrent.futures import CancelledError, ThreadPoolExecutor
 from functools import partial
+from dataclasses import dataclass
+from typing import Callable, NamedTuple
 from uuid import UUID
 
 import httpx
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from app.art_storage import storage
-from app.core.art.urls import SIZES
+from app.core.art.urls import SIZES, art_version
+from app.core.art.dimensions import image_size
 from app.db import connect
 
 log = logging.getLogger(__name__)
@@ -135,8 +138,9 @@ class Busy(Exception):
 
 
 class ArtFetcher:
-    def __init__(self, *, allowed_host, transport=None, limiter=None, clock=time.monotonic):
+    def __init__(self, *, allowed_host, path_pattern: re.Pattern | None = None, transport=None, limiter=None, clock=time.monotonic):
         self.allowed_host = allowed_host
+        self.path_pattern = path_pattern
         contact = os.environ.get("ART_FETCH_CONTACT")
         agent = f"PrizeCheck-art/1 (+{contact})" if contact else "PrizeCheck-art/1"
         self.clock = clock
@@ -154,7 +158,8 @@ class ArtFetcher:
         deadline = self.clock() + DEADLINE
         url = source_url
         for _ in range(MAX_REDIRECTS + 1):
-            if not host_allowed(url, allowed_host=self.allowed_host):
+            if (not host_allowed(url, allowed_host=self.allowed_host)
+                    or self.path_pattern is not None and not self.path_pattern.fullmatch(url)):
                 raise FetchFailed("redirect")
             if self.clock() > deadline:
                 raise FetchFailed("timeout")
@@ -200,19 +205,33 @@ class ArtFetcher:
         raise FetchFailed("redirect")
 
 
-def resolve(conn, printing_id: UUID, size: str, *, allowed_host: str, linked_art: re.Pattern):
-    """(source, version) for a (Printing, size): what ``catalog_printing_art`` chooses (TCGdex first, else the fallback),
-    the one place a Printing's art comes from, and the version ``?v=`` must equal for the immutable cache header (the
-    Printing's small-source version). (None, None) when the Printing has no art or the URL is not one the route may
-    use: a file on the game's exact host (fetched and stored) or a linked fallback (redirected, never fetched)."""
-    column = "low_image_url" if size == "small" else "high_image_url"
-    row = conn.execute(f"SELECT {column} AS source, art_version FROM catalog_printing_art WHERE printing_id = %s",
-                       (printing_id,)).fetchone()
-    source = row["source"] if row else None
-    # art_object.source_url holds at most 2048 characters: a longer source could be fetched but never stored.
-    if source and len(source) <= 2048 and (host_allowed(source, allowed_host=allowed_host) or linked_art.fullmatch(source)):
-        return source, row["art_version"]
-    return None, None
+@dataclass(frozen=True)
+class LargeUpgrade:
+    host: str
+    pattern: re.Pattern
+    fetcher: Callable[[], ArtFetcher]
+    key_prefix: str
+    beats: Callable[[str, int, int], bool]
+
+
+class Art(NamedTuple):
+    base: str
+    small: str
+    candidate: str | None
+    upgrade_row: dict | None
+    obj: dict | None
+    failure: dict | None
+    stored_upgrade: str | None
+
+
+def resolve(conn, printing_id, size, *, allowed_host, linked_art):
+    """Read the canonical sources; retained as a seam for the source-change concurrency test."""
+    row = conn.execute("""SELECT low_image_url, high_image_url, large_upgrade_url, stored_upgrade_url
+        FROM catalog_printing_art WHERE printing_id=%s""", (printing_id,)).fetchone()
+    base = row["low_image_url" if size == "small" else "high_image_url"] if row else None
+    if base and len(base) <= 2048 and (host_allowed(base, allowed_host=allowed_host) or linked_art.fullmatch(base)):
+        return row
+    return None
 
 
 def _missing(code: str) -> JSONResponse:
@@ -240,16 +259,53 @@ def _linked(source: str, fresh: bool) -> Response:
         "Cache-Control": IMMUTABLE if fresh else REVALIDATE})
 
 
-def _read(conn, printing_id: UUID, size: str, *, allowed_host: str, linked_art: re.Pattern):
-    """(source, object row, ledger row, version) for a (Printing, size); the ledger row carries its age in database seconds.
-    The version is the one ``?v=`` must equal for the immutable cache header (the Printing's small-source version)."""
-    source, version = resolve(conn, printing_id, size, allowed_host=allowed_host, linked_art=linked_art)
-    if source is None:
-        return None, None, None, None
+def _read(conn, printing_id, size, *, allowed_host, linked_art, upgrade) -> Art | None:
+    row = resolve(conn, printing_id, size, allowed_host=allowed_host, linked_art=linked_art)
+    if row is None:
+        return None
+    base = row["low_image_url" if size == "small" else "high_image_url"]
+    candidate = row["large_upgrade_url"] if size == "large" and upgrade is not None else None
+    if candidate and (len(candidate) > 2048 or not host_allowed(candidate, allowed_host=upgrade.host)
+                      or not upgrade.pattern.fullmatch(candidate)):
+        candidate = None
+    comparison = conn.execute("""SELECT *, EXTRACT(EPOCH FROM now()-checked_at) AS age
+        FROM art_large_upgrade WHERE printing_id=%s AND candidate_url=%s AND base_url=%s""",
+        (printing_id, candidate, base)).fetchone() if candidate else None
     obj = conn.execute("SELECT * FROM art_object WHERE printing_id=%s AND size=%s", (printing_id, size)).fetchone()
-    failure = conn.execute("""SELECT source_url, failures, EXTRACT(EPOCH FROM now() - last_failed_at) AS age
+    failure = conn.execute("""SELECT source_url, failures, EXTRACT(EPOCH FROM now()-last_failed_at) AS age
         FROM art_fetch_failure WHERE printing_id=%s AND size=%s""", (printing_id, size)).fetchone()
-    return source, obj, failure, version
+    return Art(base, row["low_image_url"], candidate, comparison, obj, failure,
+               row["stored_upgrade_url"] if upgrade is not None else None)
+
+
+def effective(art, upgrade):
+    if not art.candidate:
+        return art.base
+    row = art.upgrade_row
+    if row:
+        if row["outcome"] == "won" and upgrade.beats(art.base, row["width"], row["height"]):
+            return art.candidate
+        if row["outcome"] == "lost" or (row["outcome"] == "failed" and row["age"] < backoff_seconds(row["failures"])):
+            return art.base
+    return "measure"
+
+
+def _fresh(art, size, source, v):
+    versions = {art_version(art.small, art.candidate if source == art.candidate else None)}
+    if size == "small":
+        versions.add(art_version(art.small, art.stored_upgrade))
+    return v in versions
+
+
+def _comparison(conn, pid, art, outcome, dims=None, reason=None):
+    conn.execute("""INSERT INTO art_large_upgrade(printing_id,candidate_url,base_url,outcome,width,height,failures,reason)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (printing_id) DO UPDATE SET candidate_url=EXCLUDED.candidate_url, base_url=EXCLUDED.base_url,
+          outcome=EXCLUDED.outcome,width=EXCLUDED.width,height=EXCLUDED.height,reason=EXCLUDED.reason,checked_at=now(),
+          failures=CASE WHEN EXCLUDED.outcome='failed' AND art_large_upgrade.candidate_url=EXCLUDED.candidate_url
+            AND art_large_upgrade.base_url=EXCLUDED.base_url THEN art_large_upgrade.failures+1 ELSE EXCLUDED.failures END""",
+        (pid, art.candidate, art.base, outcome, dims[0] if dims else None, dims[1] if dims else None,
+         1 if reason else 0, reason))
 
 
 def _hit(conn, printing_id: UUID, size: str) -> None:
@@ -272,81 +328,115 @@ def _stored(conn, printing_id: UUID, size: str, source: str, obj, fresh: bool, c
     return _image(data, obj["content_type"], IMMUTABLE if fresh else REVALIDATE)
 
 
+def _store(pid, size, source, obj, data, content_type, fresh, count, key_prefix, extra=None):
+    digest = hashlib.sha256(data).hexdigest()
+    key = f"{key_prefix}/{size}/{str(pid)[:2]}/{pid}-{hashlib.sha256(source.encode()).hexdigest()[:16]}"
+    try:
+        storage().put(key, data)
+    except OSError as error:
+        log.warning("Art store write failed: %s", type(error).__name__)
+        if count:
+            with connect() as conn:
+                _hit(conn, pid, size)
+        return _image(data, content_type, REVALIDATE)
+    with connect() as conn, conn.transaction():
+        if extra is not None:
+            extra(conn)
+        conn.execute("""INSERT INTO art_object(printing_id,size,source_url,storage_key,sha256,content_type,byte_size)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (printing_id,size) DO UPDATE SET source_url=EXCLUDED.source_url,
+              storage_key=EXCLUDED.storage_key, sha256=EXCLUDED.sha256, content_type=EXCLUDED.content_type,
+              byte_size=EXCLUDED.byte_size, stored_at=now()""",
+                     (pid, size, source, key, digest, content_type, len(data)))
+        conn.execute("DELETE FROM art_fetch_failure WHERE printing_id=%s AND size=%s", (pid, size))
+        if count:
+            _hit(conn, pid, size)
+    if obj and obj["storage_key"] != key:
+        try:
+            storage().delete(obj["storage_key"])
+        except (ValueError, OSError):
+            pass
+    return _image(data, content_type, IMMUTABLE if fresh else REVALIDATE)
+
+
 def serve(printing_id: str, size: str, v: str | None, count: bool = True, *, allowed_host: str,
-          linked_art: re.Pattern, fetcher, key_prefix: str) -> Response:
-    """The art response. ``count=False`` (the warm-up) stores the image without adding to ``art_hit``, which counts views.
-    ``fetcher`` is a callable returning the game's ``ArtFetcher``."""
+          linked_art: re.Pattern, fetcher, key_prefix: str, upgrade: LargeUpgrade | None) -> Response:
     try:
         pid = UUID(printing_id)
     except ValueError:
         return _missing("ART_NOT_FOUND")
     if size not in SIZES:
         return _missing("ART_NOT_FOUND")
+    args = dict(allowed_host=allowed_host, linked_art=linked_art, upgrade=upgrade)
     with connect() as conn:
-        source, obj, _, version = _read(conn, pid, size, allowed_host=allowed_host, linked_art=linked_art)
-        if source is None:
+        art = _read(conn, pid, size, **args)
+        if art is None:
             return _missing("ART_NOT_FOUND")
-        if linked_art.fullmatch(source):
-            return _linked(source, v == version)
-        answer = _stored(conn, pid, size, source, obj, v == version, count)
-    if answer:
-        return answer
+        source = effective(art, upgrade)
+        if source != "measure":
+            fresh = _fresh(art, size, source, v)
+            if linked_art.fullmatch(source):
+                return _linked(source, fresh)
+            answer = _stored(conn, pid, size, source, art.obj, fresh, count)
+            if answer:
+                return answer
     lock = _lock_for(str(pid), size)
     if not lock.acquire(timeout=LOCK_WAIT):
         return _unavailable(RETRY_CONTENDED)
     try:
         with connect() as conn:
-            source, obj, failure, version = _read(conn, pid, size, allowed_host=allowed_host, linked_art=linked_art)
-            if source is None:
-                return _missing("ART_NOT_FOUND")
-            if linked_art.fullmatch(source):
-                return _linked(source, v == version)
-            answer = _stored(conn, pid, size, source, obj, v == version, count)
+            art = _read(conn, pid, size, **args)
+        if art is None:
+            return _missing("ART_NOT_FOUND")
+        source = effective(art, upgrade)
+        if source == "measure":
+            try:
+                data, kind = upgrade.fetcher().fetch(art.candidate)
+            except Busy:
+                source = art.base
+            except FetchFailed as failed:
+                with connect() as conn:
+                    _comparison(conn, pid, art, "failed", reason=failed.reason)
+                source = art.base
+            else:
+                dims = image_size(data, kind)
+                if dims and upgrade.beats(art.base, *dims):
+                    return _store(pid, size, art.candidate, art.obj, data, kind,
+                                  v == art_version(art.small, art.candidate), count, upgrade.key_prefix,
+                                  extra=lambda conn: _comparison(conn, pid, art, "won", dims))
+                with connect() as conn:
+                    _comparison(conn, pid, art, "lost", dims)
+                source = art.base
+        fresh = _fresh(art, size, source, v)
+        if linked_art.fullmatch(source):
+            return _linked(source, fresh)
+        with connect() as conn:
+            answer = _stored(conn, pid, size, source, art.obj, fresh, count)
         if answer:
             return answer
+        failure = art.failure
         if failure and failure["source_url"] == source and failure["age"] < backoff_seconds(failure["failures"]):
             return _unavailable(backoff_seconds(failure["failures"]) - failure["age"])
+        candidate = source == art.candidate
         try:
-            data, content_type = fetcher().fetch(source)
+            data, content_type = (upgrade.fetcher if candidate else fetcher)().fetch(source)
         except Busy:
             return _unavailable(RETRY_BUSY)
         except FetchFailed as failed:
             with connect() as conn:
+                if candidate:
+                    _comparison(conn, pid, art, "failed", reason=failed.reason)
+                    return _unavailable(RETRY_BUSY)
                 row = conn.execute("""INSERT INTO art_fetch_failure(printing_id,size,source_url,failures,last_failed_at,reason)
                     VALUES (%s,%s,%s,1,now(),%s)
                     ON CONFLICT (printing_id,size) DO UPDATE SET
-                      failures = CASE WHEN art_fetch_failure.source_url = EXCLUDED.source_url
-                                      THEN art_fetch_failure.failures + 1 ELSE 1 END,
-                      source_url = EXCLUDED.source_url, last_failed_at = now(), reason = EXCLUDED.reason
-                    RETURNING failures""",
-                                       (pid, size, source, failed.reason)).fetchone()
+                      failures=CASE WHEN art_fetch_failure.source_url=EXCLUDED.source_url
+                        THEN art_fetch_failure.failures+1 ELSE 1 END,
+                      source_url=EXCLUDED.source_url,last_failed_at=now(),reason=EXCLUDED.reason RETURNING failures""",
+                    (pid,size,source,failed.reason)).fetchone()
             return _unavailable(backoff_seconds(row["failures"]))
-        digest = hashlib.sha256(data).hexdigest()
-        key = f"{key_prefix}/{size}/{str(pid)[:2]}/{pid}-{hashlib.sha256(source.encode()).hexdigest()[:16]}"
-        try:
-            storage().put(key, data)
-        except OSError as error:
-            log.warning("Art store write failed: %s", type(error).__name__)
-            if count:
-                with connect() as conn:
-                    _hit(conn, pid, size)
-            return _image(data, content_type, REVALIDATE)
-        with connect() as conn, conn.transaction():
-            conn.execute("""INSERT INTO art_object(printing_id,size,source_url,storage_key,sha256,content_type,byte_size)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (printing_id,size) DO UPDATE SET source_url=EXCLUDED.source_url,
-                  storage_key=EXCLUDED.storage_key, sha256=EXCLUDED.sha256, content_type=EXCLUDED.content_type,
-                  byte_size=EXCLUDED.byte_size, stored_at=now()""",
-                         (pid, size, source, key, digest, content_type, len(data)))
-            conn.execute("DELETE FROM art_fetch_failure WHERE printing_id=%s AND size=%s", (pid, size))
-            if count:
-                _hit(conn, pid, size)
-        if obj and obj["storage_key"] != key:
-            try:
-                storage().delete(obj["storage_key"])
-            except (ValueError, OSError):
-                pass
-        return _image(data, content_type, IMMUTABLE if v == version else REVALIDATE)
+        return _store(pid, size, source, art.obj, data, content_type, fresh, count,
+                      upgrade.key_prefix if candidate else key_prefix)
     finally:
         lock.release()
 
@@ -382,7 +472,7 @@ def _warm_executor() -> ThreadPoolExecutor:
         return _warm_pool
 
 
-def _warm(printing_ids: list[UUID], allowed_host: str, linked_art: re.Pattern, fetcher, *, key_prefix: str) -> None:
+def _warm(printing_ids: list[UUID], allowed_host: str, linked_art: re.Pattern, fetcher, *, key_prefix: str, upgrade: LargeUpgrade | None) -> None:
     for index, pid in enumerate(printing_ids):
         if _warm_stop.is_set():
             with _warm_lock:
@@ -390,7 +480,7 @@ def _warm(printing_ids: list[UUID], allowed_host: str, linked_art: re.Pattern, f
             return
         try:
             serve(str(pid), "small", None, count=False, allowed_host=allowed_host, linked_art=linked_art, fetcher=fetcher,
-                  key_prefix=key_prefix)
+                  key_prefix=key_prefix, upgrade=upgrade)
         except Exception as error:  # a warm-up is only a head start: nothing here may reach a caller
             log.warning("Art warm-up failed: %s", type(error).__name__)
         finally:
@@ -414,7 +504,7 @@ def start_warmups() -> None:
 
 
 def warm_deck(conn, owner_id: str, deck_id: UUID, *, allowed_host: str, linked_art: re.Pattern, fetcher,
-              key_prefix: str) -> None:
+              key_prefix: str, upgrade: LargeUpgrade | None) -> None:
     """Queue background stores of the small art of a Deck's Printings that has none stored (#396). Called by the Deck List
     commands inside their transaction, so it reads the lines just written; it needs only ids, so the job never depends on
     the commit. Only a source on the game's allowed host is stored (linked fallback art needs nothing). Bounded to
@@ -441,7 +531,7 @@ def warm_deck(conn, owner_id: str, deck_id: UUID, *, allowed_host: str, linked_a
             _warm_pending.update(fresh)
         if fresh:
             try:
-                future = _warm_executor().submit(_warm, fresh, allowed_host, linked_art, fetcher, key_prefix=key_prefix)
+                future = _warm_executor().submit(_warm, fresh, allowed_host, linked_art, fetcher, key_prefix=key_prefix, upgrade=upgrade)
             except BaseException:
                 with _warm_lock:
                     _warm_pending.difference_update(fresh)
@@ -464,7 +554,7 @@ def join_warmups() -> None:
 
 
 async def serve_admitted(printing_id: str, size: str, v: str | None, *, allowed_host: str, linked_art: re.Pattern,
-                         fetcher, key_prefix: str) -> Response:
+                         fetcher, key_prefix: str, upgrade: LargeUpgrade | None) -> Response:
     """The route body: admit at most ``MAX_ADMITTED`` requests, then serve on the dedicated pool."""
     global _admitted
     with _admit_lock:
@@ -474,7 +564,7 @@ async def serve_admitted(printing_id: str, size: str, v: str | None, *, allowed_
     try:
         return await asyncio.get_running_loop().run_in_executor(
             _executor(), partial(serve, printing_id, size, v, allowed_host=allowed_host, linked_art=linked_art,
-                                 fetcher=fetcher, key_prefix=key_prefix))
+                                 fetcher=fetcher, key_prefix=key_prefix, upgrade=upgrade))
     finally:
         with _admit_lock:
             _admitted -= 1

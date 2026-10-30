@@ -320,6 +320,7 @@ class _Runner:
         except Exception as exc:  # The next price import publishes.
             log.warning("Public prices not published after the rule rollout (%s)", type(exc).__name__)
         card_art.refresh_fallbacks(conn)  # Must succeed.
+        card_art.refresh_art_products(conn)
         if not public_catalog.publish_catalog_best_effort(conn):
             public_catalog.spawn_background_drain()
         self._set_phase(activation, "deliver", cursor, "phase='done', finished_at=now(), error=NULL")

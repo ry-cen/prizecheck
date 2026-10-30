@@ -35,7 +35,7 @@ class Distribution(BaseModel):
 
 COLUMNS = """e.id AS edition_id,e.printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
  coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
- coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source"""
+ coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade"""
 JOINS = """JOIN catalog_edition e ON e.id=h.edition_id
  JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
  JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
@@ -46,8 +46,8 @@ JOINS = """JOIN catalog_edition e ON e.id=h.edition_id
 def views(rows, model=HoldingView):
     """The page's rows as views. Rows carry the art source, not the address: the route address (ADR 0020) is built here,
     for the page only, so a large Collection does not hash a version for every catalog row."""
-    return [model(**{**{key:value for key,value in row.items() if key!='art_source'},'quantity':str(row['quantity']),
-             'image_url':route_address(row['printing_id'],row['art_source'])}) for row in rows]
+    return [model(**{**{key:value for key,value in row.items() if key not in ('art_source','art_upgrade')},'quantity':str(row['quantity']),
+             'image_url':route_address(row['printing_id'],row['art_source'],upgrade=row['art_upgrade'])}) for row in rows]
 
 def encode_cursor(context, key):
     data=json.dumps({'context':context,'key':key},separators=(',',':')).encode()
@@ -123,7 +123,7 @@ def collection(name: str=Query(default='',max_length=120),set_id: str=Query(defa
         rows=conn.execute(f"""WITH totals AS (SELECT {COLUMNS},sum(h.quantity) AS quantity,
           coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name
           FROM holding h {JOINS} WHERE h.owner_id=%s {scope} {filters}
-          GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id,art.low_image_url,psc.set_code)
+          GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id,art.low_image_url,art.stored_upgrade_url,psc.set_code)
           SELECT * FROM totals {after} ORDER BY {order} LIMIT 31""",params).fetchall()
         page=rows[:30]
         next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>30 else None
@@ -156,7 +156,7 @@ HOLDING_PATHS = """WITH RECURSIVE paths AS (
 HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,coalesce(lp.path,l.name) AS location_path,h.quantity,h.version,
   p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
   coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
-  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,
+  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade,
   CASE ca.card_kind WHEN 'pokemon' THEN 'Pokemon' WHEN 'trainer' THEN 'Trainer' WHEN 'energy' THEN 'Energy' END AS category,
   coalesce(ca.types,'{}') AS elemental_types,ca.trainer_type,
   coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
