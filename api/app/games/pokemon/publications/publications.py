@@ -6,6 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import ValidationError
 
 from app.db import connect
+from app.core.art.public import public_address
+from app.core.art.store import warm_deck
+from app.games.pokemon.art import route as art_route
 from app.identity import verified_user
 from app.public_projection import public_projection_store, ProjectionUnavailable
 from app.core.publications.publish import (
@@ -94,7 +97,11 @@ def snapshot(conn, owner, deck_id, title, version, target_format):
 
 
 def frozen_snapshot(conn, owner, deck_id, title, version, target_format) -> dict:
-    return snapshot(conn, owner, deck_id, title, version, target_format).model_dump(mode='json', exclude=READ_ONLY)
+    result = snapshot(conn, owner, deck_id, title, version, target_format).model_dump(mode='json', exclude=READ_ONLY)
+    warm_deck(conn, owner, deck_id, sizes=('small', 'large'), allowed_host=art_route.ALLOWED_HOST,
+              linked_art=art_route.LINKED_ART, fetcher=art_route.fetcher, key_prefix=art_route.KEY_PREFIX,
+              upgrade=art_route.upgrade())
+    return result
 
 
 def _mutate(deck_id, command, owner, action, token=None):
@@ -173,7 +180,9 @@ def public_snapshot(token: str, response: Response):
         raise HTTPException(503, {'code': 'PUBLIC_PROJECTION_UNAVAILABLE'}, headers=PUBLIC_HEADERS) from None
     for identity in public.identities:
         for edition in identity.editions:
-            edition.large_image_url = large_direct_url(edition.image_url)
+            direct = edition.image_url
+            edition.image_url = public_address(edition.printing_ref, 'small', excluded_prefixes=art_route.excluded_prefixes()) or direct
+            edition.large_image_url = public_address(edition.printing_ref, 'large', excluded_prefixes=art_route.excluded_prefixes()) or large_direct_url(direct)
     if record['visibility'] == 'listed':
         response.headers['X-Robots-Tag'] = 'index, follow'
     return public

@@ -135,6 +135,7 @@
 [["GET"], "/api/scanner/fingerprints/{sha256}", "fingerprints"],
 [["POST"], "/api/scanner/printings", "printings"],
 [["GET"], "/api/art/{printing_id}/{size}", "art"],
+[["GET"], "/api/public/art/{printing_ref}/{size}", "public_art"],
 [["POST"], "/api/scanner/save", "save"],
 [["GET"], "/api/profile", "get_profile"],
 [["PUT"], "/api/profile/display-name", "set_display_name"],

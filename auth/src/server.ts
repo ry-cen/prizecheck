@@ -38,6 +38,8 @@ const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 const apiOrigin = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 const internalSecret = process.env.INTERNAL_AUTH_SECRET || "";
 const publicReadLimiter = new PublicReadLimiter();
+const PUBLIC_ART_PATH = /^\/api\/public\/art\/[^/]+\/[^/]+$/;
+const publicArtLimiter = new PublicReadLimiter(600);
 if (
   !ownerEmail ||
   !internalSecret ||
@@ -564,11 +566,11 @@ const server = createServer(async (request, response) => {
         return json(response, 405, { error: "Method not allowed" });
       }
       const publicRead = request.method === "GET" && publicPath;
-      if (publicRead && !publicReadLimiter.take(trustedClientIp(request))) {
-        response.setHeader(
-          "retry-after",
-          publicReadLimiter.retryAfter().toString()
-        );
+      const limiter = PUBLIC_ART_PATH.test(path)
+        ? publicArtLimiter
+        : publicReadLimiter;
+      if (publicRead && !limiter.take(trustedClientIp(request))) {
+        response.setHeader("retry-after", limiter.retryAfter().toString());
         return json(response, 429, {
           error: "Too many public requests. Retry shortly.",
         });
@@ -646,7 +648,10 @@ const server = createServer(async (request, response) => {
           headers,
           body: body.length > 0 ? body : undefined,
           signal: controller?.signal,
-          redirect: ART_PATH.test(path) ? "manual" : "follow",
+          redirect:
+            ART_PATH.test(path) || PUBLIC_ART_PATH.test(path)
+              ? "manual"
+              : "follow",
         });
         const link = upstream.headers.get("location");
         if (
@@ -691,7 +696,7 @@ const server = createServer(async (request, response) => {
         }
         const artType = upstream.headers.get("content-type") || "";
         if (
-          ART_PATH.test(path) &&
+          (ART_PATH.test(path) || PUBLIC_ART_PATH.test(path)) &&
           upstream.status === 200 &&
           upstream.body &&
           /^image\/(webp|png|jpeg)$/.test(artType)
