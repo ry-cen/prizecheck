@@ -136,7 +136,7 @@ for (const viewport of [
       await expect(
         deckList(page).getByRole("heading", { level: 3 })
       ).toHaveText([
-        "Other Pokémon, 1 card",
+        "Pokémon, 1 card",
         "Other Trainers, 8 cards",
         "Energy, 51 cards",
       ]);

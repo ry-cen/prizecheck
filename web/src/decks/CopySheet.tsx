@@ -29,7 +29,7 @@ type Props = {
     quantity: bigint;
     /** −1 or +1 on the line. */
     onChange: (delta: bigint) => void;
-    /** Swap this copy for another Edition of the same Card Identity. */
+    /** Swap this copy for a functionally identical Edition. */
     onSwap: (row: BrowseEdition) => void;
     feedback: EditFeedback | null;
     /** Feedback with this id or lower came before the sheet opened. */
@@ -47,8 +47,8 @@ type Props = {
 /**
  * What a copy is and where it is (#176): the card, its Edition and kind, and how its line's copies split
  * between this Deck, other Locations and not owned, with Gather (#179) while copies are owned elsewhere. Editing
- * (#177) adds −1 / N on Deck List / +1, the last edit's words with its Undo, and Swap this copy for another Edition
- * of the same Card Identity, and Set as cover (#291) makes the line the Deck's cover on My Decks.
+ * (#177) adds −1 / N on Deck List / +1, the last edit's words with its Undo, and Swap this copy for a functionally
+ * identical Edition, and Set as cover (#291) makes the line the Deck's cover on My Decks.
  */
 export function CopySheet({
   line,
@@ -187,9 +187,8 @@ export function CopySheet({
           )}
           {editing && (
             <SwapList
-              key={line.line.identity_id}
+              key={line.line.edition_id}
               deckId={editing.deckId}
-              identityId={line.line.identity_id}
               editionId={line.line.edition_id}
               currentName={line.line.name}
               currentEdition={editionText(line)}

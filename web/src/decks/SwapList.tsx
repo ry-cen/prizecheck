@@ -25,21 +25,19 @@ const ROW = `${BOX} cursor-pointer border-border-strong enabled:hover:border-con
 const CURRENT_ROW = `${BOX} border-control-outline`;
 
 /**
- * "Swap this copy for" in the copy sheet (#177): every other active Edition of the line's Card Identity, from the
- * browse route (identity_id, with the Deck's id for copies free of owned), newest set first. Choosing one swaps one
- * copy in one batch, so one Undo puts it back. A Card Identity can have hundreds of Editions (Basic Energy), so
+ * "Swap this copy for" in the copy sheet (#177): every functionally identical active Edition, from the
+ * browse route (reprints_of, with the Deck's id for copies free of owned), newest set first. Choosing one swaps one
+ * copy in one batch, so one Undo puts it back. Basic Energy can have hundreds of Editions, so
  * the list reads 60 at a time, with Show more.
  */
 export function SwapList({
   deckId,
-  identityId,
   editionId,
   currentName,
   currentEdition,
   onSwap,
 }: {
   deckId: string;
-  identityId: string;
   /** The copy's own Edition: shown first in the list, marked Current, and not offered as a swap. */
   editionId: string;
   /** The copy's card name and "Set · number · Variant" words, for the Current row (the Edition may be on a later page). */
@@ -54,7 +52,7 @@ export function SwapList({
   useEffect(() => {
     let live = true;
     setFound({ state: "loading" });
-    browseEditions({ identity_id: identityId, deck_id: deckId })
+    browseEditions({ reprints_of: editionId, deck_id: deckId })
       .then((page) => {
         if (live)
           setFound({
@@ -70,14 +68,14 @@ export function SwapList({
     return () => {
       live = false;
     };
-  }, [deckId, identityId, attempt]);
+  }, [deckId, editionId, attempt]);
 
   async function showMore() {
     if (found.state !== "ready" || !found.next || found.more) return;
     setFound({ ...found, more: true });
     try {
       const page = await browseEditions(
-        { identity_id: identityId, deck_id: deckId },
+        { reprints_of: editionId, deck_id: deckId },
         found.next
       );
       setFound({

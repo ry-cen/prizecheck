@@ -7,6 +7,10 @@ Standing in all three Formats (migration 042, ``format_standing``) and the calle
 carries the copies in that Deck and the copies free elsewhere (owned and not in that Deck). Only active Editions of
 Printings the active generation holds and has not withdrawn are listed.
 
+``reprints_of`` takes a source Edition (including an inactive one) and lists active Editions of its own Printing
+and its effective Reprint Group, or matching Basic Energy type using the import allocator's eligibility. Unknown
+source Editions list nothing. ``identity_id`` remains available for older clients.
+
 Search. ``q`` is the smart search. A first word that is a printed set code (``set_codes``, any case: "PAL 185") or else
 a TCGdex set ID in the active generation ("sv02 185"), followed by a collector number, lists that set and number; zeros
 after a number's letters don't count, so "MEG 1" finds "001" and "SHF SV1" finds "SV001". A printed code wins over a
@@ -24,8 +28,7 @@ reports the server's reading. Filters: ``kind`` (Pokémon, Supporter, Item, Tool
 Trainer Type is unknown matches no Trainer Type), ``format`` (hides ``not_legal`` only, so ``unknown`` stays),
 ``set_id`` and ``owned``. ``printing_id`` (#174) lists one Card Printing's active Editions, so the CardPopup reads every
 Edition's copies, the regulation mark and the Format Standing in one call, whether it opened from a tile or from the
-inspector's report link. ``identity_id`` (#177) lists every active Edition of one Card Identity, for the deck builder's
-"Swap this copy for".
+inspector's report link. ``identity_id`` (#177) retains the older filter for every active Edition of one Card Identity.
 
 Order (the owner's decision on #173). Newest set first: by the set's release date, latest first, then within a set by
 collector number in natural order (2 before 10, a letter suffix after its number, numbers with a letter prefix such as
@@ -319,6 +322,7 @@ def browse_editions(q: str = Query(default="", max_length=120),
                     deck_id: UUID | None = None,
                     printing_id: UUID | None = None,
                     identity_id: UUID | None = None,
+                    reprints_of: UUID | None = None,
                     cursor: str | None = Query(default=None, max_length=4096),
                     user_id: str = Depends(verified_user)):
     started = time.monotonic()
@@ -332,11 +336,11 @@ def browse_editions(q: str = Query(default="", max_length=120),
             keys = format_standing.current_keys(conn)
             if keys is not None:
                 return _page(conn, user_id, keys, _text(q), kind, format_name, set_id.strip(), owned, deck_id,
-                             printing_id, identity_id, cursor)
+                             printing_id, identity_id, reprints_of, cursor)
     fail(503, "FORMAT_STANDING_BUSY")
 
 
-def _listed(reading: Reading, generation, kind, format_name, set_id, owned, printing_id, identity_id,
+def _listed(reading: Reading, generation, kind, format_name, set_id, owned, printing_id, identity_id, reprints_of,
             user_id) -> tuple[str, list]:
     """The listing query for this search and these filters (every matching row, before paging) and its parameters."""
     joins, conditions, params = "", "", [*_rules_release_dates()]
@@ -367,6 +371,9 @@ def _listed(reading: Reading, generation, kind, format_name, set_id, owned, prin
     if identity_id:
         conditions += " AND ge.printing_id IN (SELECT id FROM catalog_printing WHERE identity_id=%s)"
         params.append(identity_id)
+    if reprints_of is not None:
+        conditions += " AND ge.printing_id=ANY(%s)"
+        params.append(reprints_of)
     if kind:
         column, value = KIND_FILTERS[kind]
         conditions += f" AND ca.{column}=%s"
@@ -380,7 +387,7 @@ def _listed(reading: Reading, generation, kind, format_name, set_id, owned, prin
     return f"{LISTED}{joins} WHERE ge.generation_id=%s AND ge.active AND NOT gp.tombstoned{conditions}", params
 
 
-def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, printing_id, identity_id,
+def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, printing_id, identity_id, reprints_of,
           cursor) -> BrowsePage:
     state = conn.execute("SELECT active_generation,revision,last_success FROM catalog_state WHERE singleton").fetchone()
     owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()
@@ -391,7 +398,17 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
             fail(404, "DECK_NOT_FOUND")
     generation = state["active_generation"]
     reading = _search(conn, generation, text)
-    listed, params = _listed(reading, generation, kind, format_name, set_id, owned, printing_id, identity_id, user_id)
+    # Import lazily: import matching reads this module's shared ordering helpers.
+    from .import_owned import groups as equivalent_printings
+
+    alternatives = None
+    if reprints_of is not None:
+        source = conn.execute("SELECT printing_id FROM catalog_edition WHERE id=%s", (reprints_of,)).fetchone()
+        alternatives = []
+        if source:
+            printing = source["printing_id"]
+            alternatives = [printing, *equivalent_printings(conn, generation, [printing]).get(printing, ())]
+    listed, params = _listed(reading, generation, kind, format_name, set_id, owned, printing_id, identity_id, alternatives, user_id)
     if reading.search.mode == "fuzzy" and not conn.execute(f"SELECT 1 FROM ({listed}) listed LIMIT 1",
                                                            params).fetchone():
         # Close spellings, but none passes these filters: the search reads as a name search, which lists nothing too.
@@ -401,7 +418,7 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
     # (a deploy that changes it can change what q means) and the search mode, so a walk never changes mode midway.
     context = ["catalog-editions", user_id, text, kind, format_name, set_id, owned,
                str(deck_id) if deck_id else None, str(printing_id) if printing_id else None,
-               str(identity_id) if identity_id else None, revision,
+               str(identity_id) if identity_id else None, str(reprints_of) if reprints_of else None, revision,
                [state["revision"], format_standing.standing_token(keys), set_codes.DIGEST, search.mode]]
     order = NUMBER_ORDER if set_id or search.mode == "set_number" else NAME_ORDER
     anchor = None

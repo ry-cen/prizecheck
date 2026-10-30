@@ -864,3 +864,52 @@ def test_migration_048_fills_the_search_columns_for_existing_and_new_printings_a
     finally:
         with psycopg.connect(admin, autocommit=True) as conn:
             conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+
+
+def test_reprints_filter_uses_effective_groups_and_inactive_source():
+    from test_reprint_groups import CANDY_SM
+    from test_reprint_group_reviews import seed as review_seed, evidence, groups, decide as review_decide
+    ids = review_seed(CANDY_ME, CANDY_SV, CANDY_SM)
+    user = collector()
+    source = edition_of(CANDY_ME['id'])
+    other = edition_of(CANDY_SV['id'])
+    different = edition_of(CANDY_SM['id'])
+    assert {row['edition_id'] for row in browse(user, reprints_of=source)['editions']} == {source, other}
+    with connect() as conn:
+        identity = str(conn.execute('SELECT identity_id FROM catalog_printing WHERE id=%s',
+                                   (ids[CANDY_ME['id']],)).fetchone()['identity_id'])
+    found = groups(evidence(identity))
+    response = review_decide(identity, 'merge', group=found[ids[CANDY_SM['id']]],
+                             target=found[ids[CANDY_ME['id']]])
+    assert response.status_code == 200, response.text
+    assert {row['edition_id'] for row in browse(user, reprints_of=source)['editions']} == {source, other, different}
+    with connect() as conn:
+        conn.execute('UPDATE catalog_generation_edition SET active=false WHERE edition_id=%s', (source,))
+    assert {row['edition_id'] for row in browse(user, reprints_of=source)['editions']} == {other, different}
+    assert browse(user, reprints_of=str(uuid4()))['editions'] == []
+
+
+def test_reprints_filter_ungrouped_printing_and_basic_energy():
+    from test_card_attributes import ENERGY_BW
+    seed_popup()
+    user = collector()
+    source = edition_of('me01-001')
+    own = browse(user, printing_id=browse(user, reprints_of=source)['editions'][0]['printing_id'])['editions']
+    assert len(own) == 2
+    assert browse(user, reprints_of=source)['editions'] == own
+    seed(ENERGY_SV, ENERGY_BW)
+    assert {row['edition_id'] for row in browse(user, reprints_of=edition_of(ENERGY_SV['id']))['editions']} == {
+        edition_of(ENERGY_SV['id']), edition_of(ENERGY_BW['id'])}
+
+
+def test_reprints_cursor_is_bound_to_source_edition(monkeypatch):
+    import app.catalog_browse as module
+    monkeypatch.setattr(module, 'PAGE_SIZE', 1)
+    seed(CANDY_ME, CANDY_SV)
+    user = collector()
+    first = edition_of(CANDY_ME['id'])
+    second = edition_of(CANDY_SV['id'])
+    cursor = browse(user, reprints_of=first)['next_cursor']
+    assert cursor
+    assert browse(user, reprints_of=first, cursor=cursor)['editions']
+    assert browse(user, expect=400, reprints_of=second, cursor=cursor)
