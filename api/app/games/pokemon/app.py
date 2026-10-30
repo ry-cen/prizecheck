@@ -1,6 +1,6 @@
 """The Pokemon app: the routers FastAPI mounts, in route order, and the startup and shutdown hooks (design D12)."""
 from app.core.art.store import start_warmups, stop_warmups
-from app.games.pokemon.art.route import router as art_router
+from app.games.pokemon.art.route import router as art_router, public_router as public_art_router
 from app.games.pokemon.catalog.attribute_corrections import router as attribute_corrections_router
 from app.games.pokemon.catalog.catalog_browse import router as catalog_browse_router
 from app.games.pokemon.catalog.catalog_reconciliation import router as catalog_reconciliation_router
@@ -74,7 +74,7 @@ ROUTERS = (
     want_list_router, want_list_cost_router, want_list_mass_entry_router, deck_format_checks_router,
     # published decks, format standing, imports, scanner
     published_cost_router, published_live_export_router, published_mass_entry_router, published_format_checks_router,
-    format_standing_router, collection_import_router, scanner_router, art_router, scanner_save_router,
+    format_standing_router, collection_import_router, scanner_router, art_router, public_art_router, scanner_save_router,
     # social and trading
     profile_router, public_invite_router, friends_router, friend_reads_router, trade_matches_router, loans_router,
     inbox_router, trades_router, trade_settings_router, open_discovery_router, conversations_router,

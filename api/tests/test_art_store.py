@@ -570,3 +570,84 @@ def test_purge_tcgplayer_restores_version_and_keeps_base_objects(pids, candidate
     assert art_storage.storage().get(old_key) is None
     with connect() as conn:
         assert conn.execute('SELECT art_version FROM catalog_printing_art WHERE printing_id=%s',(pid,)).fetchone()['art_version'] == art_version(SMALL)
+
+
+@pytest.mark.parametrize('replacement,outcome', [('win', 'won'), ('small', 'lost'), ('failure', 'failed')])
+@pytest.mark.parametrize('fallback', [False, True])
+def test_missing_winner_is_remeasured_and_falls_back(pids, candidate, upstream, replacement, outcome, fallback):
+    from test_art_dimensions import jpeg
+    pid = pids['card-2' if fallback else 'card-1']
+    if fallback:
+        with connect() as conn:
+            conn.execute('INSERT INTO catalog_printing_fallback_art(printing_id,product_id) VALUES (%s,123)', (pid,))
+    assert get(pid, 'large').status_code == 200
+    obj = next(row for row in objects(pid) if row['size'] == 'large')
+    art_storage.storage().delete(obj['storage_key'])
+    data = jpeg(800, 1100) if replacement == 'win' else jpeg(200, 280)
+    candidate.responder = lambda request: (httpx.Response(500) if replacement == 'failure' else
+        httpx.Response(200, content=data, headers={'content-type': 'image/jpeg'}))
+    answer = get(pid, 'large')
+    assert comparison(pid)['outcome'] == outcome
+    if replacement == 'win':
+        assert answer.status_code == 200 and answer.content == data
+        assert (comparison(pid)['width'], comparison(pid)['height']) == (800, 1100)
+    elif fallback:
+        assert answer.status_code == 302 and answer.headers['location'].endswith('_400w.jpg')
+    else:
+        assert answer.status_code == 200 and answer.content == webp(64)
+    assert candidate.count == 2
+    assert get(pid, 'large').status_code == answer.status_code
+    assert candidate.count == 2
+
+
+def test_off_on_recovery_remeasures_the_candidate(pids, candidate, monkeypatch):
+    from test_art_dimensions import jpeg
+    pid = pids['card-1']
+    assert get(pid, 'large').headers['content-type'] == 'image/jpeg'
+    monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
+    assert get(pid, 'large').content == webp(64)
+    monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'on')
+    candidate.responder = lambda request: httpx.Response(200, content=jpeg(200, 280), headers={'content-type': 'image/jpeg'})
+    assert get(pid, 'large').content == webp(64)
+    assert comparison(pid)['outcome'] == 'lost'
+    assert (comparison(pid)['width'], comparison(pid)['height']) == (200, 280)
+    assert candidate.count == 2
+
+
+def test_purge_keeps_a_concurrently_replaced_base_row_and_pointer(pids, candidate, monkeypatch):
+    import runpy
+    from contextlib import contextmanager
+    from pathlib import Path
+    from app.core.art.public import read_pointer
+    pid = pids['card-1']
+    assert get(pid, 'large').status_code == 200
+    monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
+    tool = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts' / 'art_store.py'))
+    purge = tool['purge_tcgplayer']
+    replaced = []
+
+    class Interleaved:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def transaction(self):
+            return self.conn.transaction()
+
+        def execute(self, sql, params=None):
+            if sql.startswith('DELETE FROM art_object') and not replaced:
+                assert get(pid, 'large').content == webp(64)
+                replaced.append(next(row for row in objects(pid) if row['size'] == 'large'))
+            return self.conn.execute(sql, params)
+
+    @contextmanager
+    def interleaved_connect():
+        with connect() as conn:
+            yield Interleaved(conn)
+
+    monkeypatch.setitem(purge.__globals__, 'connect', interleaved_connect)
+    assert purge() == 0
+    assert objects(pid) == replaced
+    assert art_storage.storage().get(replaced[0]['storage_key']) == webp(64)
+    with connect() as conn:
+        ref = conn.execute('SELECT public_ref FROM catalog_printing WHERE id=%s', (pid,)).fetchone()['public_ref']
+    assert read_pointer(ref, 'large')['key'] == replaced[0]['storage_key']

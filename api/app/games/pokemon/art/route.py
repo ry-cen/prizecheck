@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from app.core.art import store
 from app.games.pokemon.art.hosts import ALLOWED_HOST, KEY_PREFIX, LINKED_ART, TCGPLAYER_HOST, TCGPLAYER_LARGE, TCGPLAYER_KEY_PREFIX, tcgplayer_beats
 from app.identity import verified_user
+from app.core.art.public import serve_public
 
 _fetcher: store.ArtFetcher | None = None
 _fetcher_lock = threading.Lock()
@@ -50,3 +51,17 @@ async def art(printing_id: str = Path(max_length=64), size: str = Path(max_lengt
               v: str | None = Query(None, max_length=16), user_id: str = Depends(verified_user)):
     return await store.serve_admitted(printing_id, size, v, allowed_host=ALLOWED_HOST, linked_art=LINKED_ART,
                                       fetcher=fetcher, key_prefix=KEY_PREFIX, upgrade=upgrade())
+
+
+def excluded_prefixes() -> tuple:
+    return () if tcgplayer_source_enabled() else (TCGPLAYER_KEY_PREFIX,)
+
+
+public_router = APIRouter()
+
+
+@public_router.get("/api/public/art/{printing_ref}/{size}", response_class=Response,
+                   responses={200: {"content": {"image/webp": {}, "image/jpeg": {}}}})
+def public_art(printing_ref: str = Path(max_length=64), size: str = Path(max_length=16),
+               v: str | None = Query(None, max_length=16)):
+    return serve_public(printing_ref, size, v, excluded_prefixes=excluded_prefixes())
