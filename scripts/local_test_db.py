@@ -21,6 +21,7 @@ record names, after checking the container's label or the data directory's place
 test-only, kept in a 0600 file next to the record, and never printed. Standard library only: it runs before .venv exists.
 """
 import argparse
+from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
@@ -360,13 +361,20 @@ def resolve(requested):
     return choose_backend(requested, native_bin_dir(directories), runtimes)
 
 
-def start(args):
-    """Start (or reuse) this checkout's server and return (instance, record). A lock in .scratch keeps two commands
-    started at once in a fresh checkout from both creating it."""
+@contextmanager
+def state_lock():
+    """One command at a time on this checkout's server: start, stop and destroy each take it once (flock is held per
+    open file, so a nested take in the same process would wait on itself)."""
     lock_file = ROOT / '.scratch' / 'local-test-db.lock'
     lock_file.parent.mkdir(exist_ok=True)
     with lock_file.open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def start(args):
+    """Start (or reuse) this checkout's server and return (instance, record)."""
+    with state_lock():
         return start_locked(args)
 
 
@@ -454,6 +462,11 @@ def command_status(args):
 
 
 def command_stop(args):
+    with state_lock():
+        return stop_locked()
+
+
+def stop_locked():
     instance = Instance()
     record = instance.record()
     if not record:
@@ -473,10 +486,18 @@ def command_stop(args):
 
 
 def command_destroy(args):
+    with state_lock():
+        return destroy_locked()
+
+
+def destroy_locked():
     instance = Instance()
     record = instance.record()
     if record:
-        command_stop(args)
+        stop_locked()
+    elif instance.pid_alive():
+        raise Failure(f'{STATE_NAME} has no owner.json, but data/postmaster.pid names a running process; stop that '
+                      'server with pg_ctl first. Nothing was removed.')
     if instance.dir.exists():
         resolved = instance.dir.resolve()
         if resolved.parent != (ROOT / '.scratch').resolve() or resolved.name != STATE_NAME.name:
@@ -486,9 +507,17 @@ def command_destroy(args):
     return 0
 
 
+GIT_CONFIG_SOURCES = ('GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM')
+
+
+def git_environment(environ):
+    """environ without the GIT_* variables a git hook exports (GIT_DIR, GIT_INDEX_FILE, ...), so git finds the repository
+    from cwd. The config-source variables stay: they choose which config files git reads, never which repository."""
+    return {key: value for key, value in environ.items() if not key.startswith('GIT_') or key in GIT_CONFIG_SOURCES}
+
+
 def git(*args, root=None):
-    # A git hook exports GIT_DIR, GIT_INDEX_FILE and others; drop them so git finds the repository from cwd.
-    env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    env = git_environment(os.environ)
     result = subprocess.run(['git', *args], cwd=root or ROOT, capture_output=True, text=True, env=env)
     return result.stdout.strip() if result.returncode == 0 else None
 

@@ -2,11 +2,13 @@
 container command, ownership refusals, redaction and the doctor's tiers."""
 import importlib.util
 import json
+import fcntl
 import os
 import socket
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -18,8 +20,10 @@ spec.loader.exec_module(db)
 
 def git_free_environ():
     """os.environ without GIT_*: under a git hook GIT_DIR points at the real repository, and `git init` or
-    `git config` in a temporary directory would then write to it."""
-    return {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    `git config` in a temporary directory would then write to it. The user's global and system config are left out
+    too, so a core.hooksPath set there cannot change what the tests see."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    return dict(env, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
 
 
 def scratch_git(directory, *config):
@@ -211,6 +215,39 @@ class NativeStop(unittest.TestCase):
 
 
 class Destroy(unittest.TestCase):
+    def test_destroy_without_record_refuses_a_live_postmaster(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data = db.state_dir(root) / 'data'
+            data.mkdir(parents=True)
+            (data / 'postmaster.pid').write_text(f'{os.getpid()}\n')  # a live process, and no owner.json
+            with mock.patch.object(db, 'ROOT', root):
+                with self.assertRaises(db.Failure):
+                    db.command_destroy(None)
+            self.assertTrue((data / 'postmaster.pid').exists())
+
+    def test_destroy_waits_for_the_state_lock(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            db.state_dir(root).mkdir(parents=True)
+            finished = threading.Event()
+
+            def destroy():
+                with mock.patch('builtins.print'):
+                    db.command_destroy(None)
+                finished.set()
+
+            with mock.patch.object(db, 'ROOT', root):
+                with (root / '.scratch' / 'local-test-db.lock').open('w') as held:
+                    fcntl.flock(held, fcntl.LOCK_EX)
+                    worker = threading.Thread(target=destroy)
+                    worker.start()
+                    self.assertFalse(finished.wait(0.3))  # blocked behind the lock another command holds
+                    self.assertTrue(db.state_dir(root).exists())
+                worker.join(5)
+            self.assertTrue(finished.is_set())
+            self.assertFalse(db.state_dir(root).exists())
+
     def test_destroy_removes_only_this_checkouts_state(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -286,6 +323,22 @@ class Hooks(unittest.TestCase):
             self.assertEqual((root / '.git' / 'config').read_text(), config_before)
             self.assertTrue(os.access(root / '.husky' / '_' / 'pre-commit', os.X_OK))
             self.assertTrue(os.access(root / '.husky' / '_' / 'commit-msg', os.X_OK))
+
+    def test_global_config_cannot_supply_the_hooks_path(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as home:
+            Path(home, '.gitconfig').write_text('[core]\n\thooksPath = .husky/_\n')
+            scratch_git(temp)
+            with mock.patch.dict(os.environ, {'HOME': home}), mock.patch.object(db, 'ROOT', Path(temp)):
+                with self.assertRaises(db.Failure):
+                    db.command_hooks(None)
+
+    def test_script_git_ignores_a_hooks_git_dir_but_keeps_config_sources(self):
+        with tempfile.TemporaryDirectory() as temp:
+            scratch_git(temp)
+            hook_env = {'GIT_DIR': '/nonexistent/.git', 'GIT_INDEX_FILE': '/nonexistent/index', 'GIT_CONFIG_NOSYSTEM': '1'}
+            self.assertEqual(db.git_environment(hook_env), {'GIT_CONFIG_NOSYSTEM': '1'})
+            with mock.patch.dict(os.environ, hook_env):
+                self.assertEqual(Path(db.git('rev-parse', '--show-toplevel', root=Path(temp))).resolve(), Path(temp).resolve())
 
     def test_hooks_refuse_another_hooks_path(self):
         with tempfile.TemporaryDirectory() as temp:
