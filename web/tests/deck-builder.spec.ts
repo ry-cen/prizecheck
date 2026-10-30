@@ -495,7 +495,9 @@ test.describe("on a desktop", () => {
     await expect(deckList.getByRole("heading", { level: 3 })).toHaveText([
       "Pokémon, 5 cards",
     ]);
-    const line = page.getByRole("region", { name: /^Pokémon, 5 cards/ });
+    // The region's accessible name is "Pokémon , 5 cards": Chromium pads the hidden ", " span with a space, so match
+    // the group title only, as the heading check above covers the count.
+    const line = page.getByRole("region", { name: /^Pokémon\b/ });
     await expect(line.getByRole("button")).toHaveCount(5);
     await expect(line.getByRole("button").first()).toHaveAccessibleName(
       /^Charmander, /
