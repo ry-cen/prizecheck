@@ -1,4 +1,5 @@
 """Trusted DB-to-shared-records writer: public-safe catalog records for opaque references."""
+from timing_support import within_budget
 import json
 import os
 import time
@@ -248,6 +249,7 @@ def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_
     assert client.get('/api/public/discovery', params={'cursor': cursor}).status_code == 200
 
 
+@pytest.mark.timing
 @pytest.mark.slow(reason='capacity: a full-scale catalog')
 def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_deadline(monkeypatch):
     from app import public_catalog
@@ -268,7 +270,7 @@ def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_dea
         total = conn.execute("SELECT 2*(SELECT count(*) FROM catalog_printing)+2*(SELECT count(*) FROM catalog_edition) AS n").fetchone()['n']
     assert total >= 900 and sum(calls) == total and max(calls) <= 128
     assert public_catalog.backfill().written == 0
-    assert elapsed < 60
+    within_budget(elapsed, 60, 'test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_deadline', unit='s')
 
 
 # ------------------------------------------------------------------ fail-closed readers sharing one generation

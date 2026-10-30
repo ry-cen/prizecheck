@@ -39,6 +39,7 @@ _isolate_xdist_worker()
 
 
 def pytest_configure(config):
+    config.addinivalue_line('markers', 'timing: performance budget breaches warn without failing')
     shard_setting(os.environ.get('VERIFY_PYTEST_SHARD', ''))  # a malformed shard stops the run before collection
     config.addinivalue_line('markers', 'slow(reason): launches real processes, waits out real time, sleeps or builds '
                                        'capacity-sized data; left out by npm run verify -- --fast')

@@ -1,4 +1,5 @@
 """Price binding (ticket P3, ADR 0019 design 4.3): sub_type_for, rebind, its callers and its capacity."""
+from timing_support import within_budget
 import json
 import time
 from uuid import uuid4
@@ -295,6 +296,7 @@ def test_rebind_only_binds_without_fetching(world, monkeypatch):
 # --- capacity ----------------------------------------------------------------------------------------------------------
 
 
+@pytest.mark.timing
 @pytest.mark.slow(reason="capacity: 40,000 verified Editions")
 @pytest.mark.serial(reason="an upper bound on elapsed time")
 def test_rebind_over_40000_editions_finishes_inside_30_seconds(world):
@@ -319,7 +321,7 @@ def test_rebind_over_40000_editions_finishes_inside_30_seconds(world):
     do_rebind()
     print(f"rebind of {count} Editions: first {first:.2f}s, repeat {time.monotonic() - started:.2f}s")
     assert counts["verified"] == count and counts["bound"] == count and counts["priced"] == count
-    assert first < 30
+    within_budget(first, 30, 'test_rebind_over_40000_editions_finishes_inside_30_seconds', unit='s')
 
 
 # --- spawn_rebind: one coalescing worker -------------------------------------------------------------------------------

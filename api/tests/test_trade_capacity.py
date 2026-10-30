@@ -11,6 +11,7 @@ collector's Editions are drawn from the whole catalog by a hash of the collector
 about a tenth of them: every Friend matches both ways, with more cards than a row carries, and the Friends' Deck lines
 that could match the viewer's Trade List (about 90 each) are allocated for all 200 Friends.
 """
+from timing_support import within_budget
 import math
 import statistics
 import time
@@ -102,6 +103,7 @@ def seed_world():
     return viewer, friends
 
 
+@pytest.mark.timing
 @pytest.mark.slow(reason='capacity: seeds 201 collectors with 2,000 listable Editions and 60 Decks each')
 @pytest.mark.serial(reason='bounds the 95th percentile of the matches read, so it runs with nothing else')
 def test_trade_matches_answers_200_friends_within_the_design_target():
@@ -130,4 +132,4 @@ def test_trade_matches_answers_200_friends_within_the_design_target():
         samples.append(time.perf_counter() - started)
     p95 = sorted(samples)[math.ceil(len(samples) * 0.95) - 1]
     print(f'trade-matches p95 {p95:.3f}s median {statistics.median(samples):.3f}s', sorted(round(s, 3) for s in samples))
-    assert p95 <= P95_SECONDS, (p95, sorted(samples))
+    within_budget(p95, P95_SECONDS, 'test_trade_matches_answers_200_friends_within_the_design_target', unit='s')

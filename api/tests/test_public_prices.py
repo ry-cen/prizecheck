@@ -1,4 +1,5 @@
 """Public price records (ticket P5, ADR 0019 design 4.6): the `price:` writer, its registry, its lock and its callers."""
+from timing_support import within_budget
 import threading
 import time
 from uuid import uuid4
@@ -362,6 +363,7 @@ def test_the_post_commit_step_publishes_and_a_publish_failure_keeps_the_rebind_c
 # --- capacity ----------------------------------------------------------------------------------------------------------
 
 
+@pytest.mark.timing
 @pytest.mark.slow(reason="capacity: 40,000 priced Editions on the filesystem adapter")
 @pytest.mark.serial(reason="an upper bound on elapsed time")
 def test_a_first_publish_of_40000_records_finishes_inside_5_minutes(world, store):  # noqa: F811
@@ -386,4 +388,4 @@ def test_a_first_publish_of_40000_records_finishes_inside_5_minutes(world, store
     again = run_publish(store)
     print(f"capacity: first publish of {count} records {first:.1f}s, repeat {time.monotonic() - started:.1f}s")
     assert result.written == count and again.written == 0 and again.unchanged == count
-    assert first < 300
+    within_budget(first, 300, 'test_a_first_publish_of_40000_records_finishes_inside_5_minutes', unit='s')

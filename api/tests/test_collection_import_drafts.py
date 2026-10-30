@@ -6,6 +6,7 @@ Needs you. Another collector's draft id answers 404 on every route. 10,000 rows 
 Signed HTTP against PostgreSQL, with test_collection_import's catalog seed. Expiry is tested by moving a draft's
 expires_at (and the start log's started_at) into the past, never by waiting.
 """
+from timing_support import within_budget
 import csv
 import io
 import time
@@ -222,6 +223,7 @@ def budget_file(count=10_000):
 
 # Not slow, though it builds a 10,000-row draft: the ticket asks for this budget in CI, which runs the fast tier. About
 # 0.6 s against the 10 s bound (#233).
+@pytest.mark.timing
 @pytest.mark.serial(reason="asserts an upper bound on the start route's elapsed time")
 def test_ten_thousand_fixture_rows_parse_and_match_within_ten_seconds():
     seed()
@@ -232,4 +234,4 @@ def test_ten_thousand_fixture_rows_parse_and_match_within_ten_seconds():
     took = time.perf_counter() - began
     assert response.status_code == 201, response.text
     assert response.json()["counts"] == counts(rows=10_000, needs_you=3400, ready=6600, by_name=1800)
-    assert took < 10, f"10,000 rows took {took:.1f} s"
+    within_budget(took, 10, 'test_ten_thousand_fixture_rows_parse_and_match_within_ten_seconds', unit='s')
