@@ -2,7 +2,7 @@
 import client_generator as gen
 
 TARGET = "web/src/metadata_generated.ts"
-NAMES = ('MetadataReportInput','MetadataReportView','MetadataReportUpdate','MetadataReportDecision','MatchedProduct','MetadataQueueItem','MetadataQueuePage',
+NAMES = ('LikelyReprintEvidence','LikelyReprintPrinting','LikelyReprintPair','LikelyReprintPage','LikelyReprintDismissal','LikelyReprintDecision','MetadataReportInput','MetadataReportView','MetadataReportUpdate','MetadataReportDecision','MatchedProduct','MetadataQueueItem','MetadataQueuePage',
              'MetadataDecisionRow','MetadataDecisionInput','MetadataDecisionResult','RuleVersionView','ActiveRuleView','RuleRolloutView','MetadataRuleView',
              'AttributeValues','AttributeReportInput','AttributeReportView',
              'AttributeReportUpdate','AttributeReportDecision','AttributeEvidence','AttributeQueuePage','AttributeDecisionRow',
@@ -41,6 +41,9 @@ export const getAttributeEvidence=(printingId: string)=>request<AttributeEvidenc
 export const getAttributeHistory=(printingId: string)=>request<AttributeDecisionRow[]>('GET',`/api/admin/card-attributes/${id(printingId)}/history`);
 export const decideAttributeReport=(reportId: string,body: AttributeReportDecision)=>request<AttributeReportView>('POST',`/api/admin/card-attributes/reports/${id(reportId)}/decision`,body);
 export const decideAttributes=(body: AttributeDecisionInput)=>request<AttributeDecisionResult>('POST','/api/admin/card-attributes/decisions',body);
+export const getLikelyReprints=(cursor?: string)=>request<LikelyReprintPage>('GET',`/api/admin/card-identities/likely-reprints${cursor?`?cursor=${id(cursor)}`:''}`);
+export const dismissLikelyReprints=(body: LikelyReprintDismissal)=>request<LikelyReprintDecision>('POST','/api/admin/card-identities/likely-reprints/dismiss',body);
+export const undoLikelyReprints=(decisionId: string,body: LikelyReprintEvidence)=>request<LikelyReprintDecision>('POST',`/api/admin/card-identities/likely-reprints/${id(decisionId)}/undo`,body);
 export const getCardIdentityQueue=(cursor?: string)=>request<CardIdentityQueuePage>('GET',`/api/admin/card-identities/queue${cursor?`?cursor=${id(cursor)}`:''}`);
 export const getCardIdentityOfPrinting=(printingId: string)=>request<CardIdentityEvidence>('GET',`/api/admin/card-identities?printing_id=${id(printingId)}`);
 export const getCardIdentityEvidence=(identityId: string)=>request<CardIdentityEvidence>('GET',`/api/admin/card-identities/${id(identityId)}`);

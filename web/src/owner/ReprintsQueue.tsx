@@ -1,3 +1,4 @@
+import { LikelyReprints } from "./LikelyReprints";
 import { useEffect, useState } from "react";
 import {
   getCardIdentityQueue,
@@ -81,51 +82,54 @@ export function ReprintsQueue({ onChanged }: { onChanged: () => void }) {
 
   const rows = identityRows(items);
   return (
-    <ReviewQueue
-      title="Reprint Groups"
-      intro="Card Identities with a manually approved Printing in no Reprint Group. A manual Printing joins a group only through this review. The card can also move other Printings, merge groups, or merge the Card Identity into another."
-      tableLabel="Card Identity review queue"
-      rows={rows.map((row) => ({
-        key: row.identityId,
-        label: row.name,
-        card: row.name,
-        setNumber: row.printings.map(place).join(", "),
-        kind:
-          row.printings.length === 1
-            ? "Manual Printing in no group"
-            : `${row.printings.length} manual Printings in no group`,
-        reports: "—",
-        opened: row.openedAt,
-      }))}
-      emptyText="Nothing waits for review."
-      open={open}
-      onOpen={setOpen}
-      renderCard={(key, close) => {
-        const row = rows.find((entry) => entry.identityId === key);
-        return (
-          row && (
-            <ReprintReviewCard
-              key={key}
-              row={row}
-              onClose={close}
-              onDone={(message, removed, reload) =>
-                done(row, message, removed, reload)
-              }
-            />
+    <>
+      <LikelyReprints onChanged={onChanged} />
+      <ReviewQueue
+        title="Reprint Groups"
+        intro="Card Identities with a manually approved Printing in no Reprint Group. A manual Printing joins a group only through this review. The card can also move other Printings, merge groups, or merge the Card Identity into another."
+        tableLabel="Card Identity review queue"
+        rows={rows.map((row) => ({
+          key: row.identityId,
+          label: row.name,
+          card: row.name,
+          setNumber: row.printings.map(place).join(", "),
+          kind:
+            row.printings.length === 1
+              ? "Manual Printing in no group"
+              : `${row.printings.length} manual Printings in no group`,
+          reports: "—",
+          opened: row.openedAt,
+        }))}
+        emptyText="Nothing waits for review."
+        open={open}
+        onOpen={setOpen}
+        renderCard={(key, close) => {
+          const row = rows.find((entry) => entry.identityId === key);
+          return (
+            row && (
+              <ReprintReviewCard
+                key={key}
+                row={row}
+                onClose={close}
+                onDone={(message, removed, reload) =>
+                  done(row, message, removed, reload)
+                }
+              />
+            )
+          );
+        }}
+        onRefresh={() => void load()}
+        status={status}
+        after={
+          next && (
+            <div>
+              <Button disabled={loadingMore} onClick={() => void loadMore()}>
+                Load more
+              </Button>
+            </div>
           )
-        );
-      }}
-      onRefresh={() => void load()}
-      status={status}
-      after={
-        next && (
-          <div>
-            <Button disabled={loadingMore} onClick={() => void loadMore()}>
-              Load more
-            </Button>
-          </div>
-        )
-      }
-    />
+        }
+      />
+    </>
   );
 }
