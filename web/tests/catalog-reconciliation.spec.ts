@@ -6,6 +6,7 @@ import { chmodSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
+import { artUpstream } from "./support/art-upstream";
 import { exemptFromPublishGate } from "./support/publish-gate";
 
 test("owner resolves source drift with evidence in one step", async ({
@@ -101,6 +102,7 @@ test("collector explicitly confirms reviewed Edition reassignment without changi
 }) => {
   // Catalog imports through Python, a publication, a reassignment and a reload: about 20 s, near the 30 s budget.
   test.slow();
+  (await artUpstream()).reset();
   execFileSync(
     ".venv/bin/python",
     [
@@ -196,7 +198,7 @@ run(MetadataSource({'card-1': 'Correction Pikachu'}))`,
     exemptFromPublishGate(deckId); // a three-card Deck List, not legal in any Format
     const normalEdition = (
       await pool.query(
-        "SELECT e.id,e.public_ref,p.public_ref AS printing_ref FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='card-1' AND e.descriptor->>'finish'='normal'"
+        "SELECT e.id,e.public_ref,p.id AS printing_id,p.public_ref AS printing_ref FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='card-1' AND e.descriptor->>'finish'='normal'"
       )
     ).rows[0];
     expect(
@@ -212,6 +214,14 @@ run(MetadataSource({'card-1': 'Correction Pikachu'}))`,
         })
       ).status()
     ).toBe(200);
+    // Public art follows the current stored picture (ADR 0020); publication warms each size independently.
+    // Store both before taking a snapshot, rather than racing a warm-up using a previous spec's art upstream.
+    for (const size of ["small", "large"]) {
+      const art = await page.request.get(
+        gateway(`/api/art/${normalEdition.printing_id}/${size}`)
+      );
+      expect(art.status(), await art.text()).toBe(200);
+    }
     // Publishing freezes the Deck List; list the cards just added.
     await listHoldings(pool, `Published ${location}`, 3);
     const published = await page.request.post(
@@ -229,6 +239,10 @@ run(MetadataSource({'card-1': 'Correction Pikachu'}))`,
     expect(snapshot.identities[0].editions[0]).toMatchObject({
       edition_ref: normalEdition.public_ref,
       printing_ref: normalEdition.printing_ref,
+      image_url: expect.stringMatching(/^\/api\/public\/art\/.+\/small\?v=/),
+      large_image_url: expect.stringMatching(
+        /^\/api\/public\/art\/.+\/large\?v=/
+      ),
     });
     refresh("0.25");
     const firstQueue = await queue();
