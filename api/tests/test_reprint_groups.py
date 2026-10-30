@@ -7,9 +7,9 @@ attribute and rules-text rules read. Records whose ID starts with "fixture-" are
 from datetime import date
 from uuid import uuid4
 
-from app.catalog import rederive_card_attributes
+from app.games.pokemon.catalog.catalog import rederive_card_attributes
 from app.main import connect
-from app.reprint_groups import RULES, ReprintTextRules, read_reprint_groups, rules_digest
+from app.games.pokemon.catalog.reprint_groups import RULES, ReprintTextRules, read_reprint_groups, rules_digest
 from test_card_attributes import ENERGY_SV, SWITCH_ME, card, edition_of, printing_ids, revision
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -265,7 +265,7 @@ def test_the_pending_review_query_reads_by_the_status_index():
     of looking reviews up per Printing: catalog_review has no printing_id index (Deck Lists 19, from #94). This checks
     PENDING's plan: it is keyed by catalog_review_pending (its status prefix). Seq scans are priced out, as row counts
     would at catalog scale. The pending-review tests above cover the behaviour."""
-    from app.reprint_groups import PENDING
+    from app.games.pokemon.catalog.reprint_groups import PENDING
     with connect() as conn, conn.transaction():
         conn.execute("SET LOCAL enable_seqscan=off")
         plan = conn.execute("EXPLAIN (FORMAT JSON) " + PENDING).fetchone()["QUERY PLAN"][0]["Plan"]
@@ -318,7 +318,7 @@ def scans(query, params):
 
 
 def test_format_checks_look_reprint_groups_up_by_index():
-    from app.deck_format_checks import LINES, MEMBERS  # Imported here: the module imports app.main's routers.
+    from app.games.pokemon.formats.deck_format_checks import LINES, MEMBERS  # Imported here: the module imports app.main's routers.
     reset_catalog()
     run(Records(*CARDS))
     owner, deck = deck_with([("sv01-191", 4)])
@@ -374,7 +374,7 @@ def test_a_pokemon_with_a_legal_identical_reprint_stays_not_legal():
 
 def test_a_command_adding_a_card_legal_through_its_reprint_group_returns_legal_and_a_read_reuses_it(monkeypatch):
     """The command path (Deck Lists 17) judges Reprint Groups like the read path, and the read reuses what it saved."""
-    from app import deck_format_checks  # Imported here: the module imports app.main's routers.
+    from app.games.pokemon.formats import deck_format_checks  # Imported here: the module imports app.main's routers.
     monkeypatch.setattr(deck_format_checks, "today", lambda: date(2026, 10, 11))
     reset_catalog()
     run(Records(*CARDS))

@@ -14,7 +14,8 @@ from uuid import uuid4
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_budget, prices
+from app import price_budget
+from app.games.pokemon.prices import prices
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import store  # noqa: F401  (a fixture)
 from test_prices import ago, client, headers_for, seed, world

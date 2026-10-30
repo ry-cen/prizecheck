@@ -4,9 +4,11 @@ exports, Format Standing and public records. No database is needed."""
 import re
 from pathlib import Path
 
-from app import import_aliases, set_codes
-from app.catalog_targets import LiveRulesV1
-from app.import_name_matching import NAME_SUFFIXES
+from app.games.pokemon.imports import import_aliases
+
+from app.games.pokemon.catalog import set_codes
+from app.games.pokemon.prices.catalog_targets import LiveRulesV1
+from app.games.pokemon.imports.import_name_matching import NAME_SUFFIXES
 from test_set_codes import imported_sets
 
 APP = Path(import_aliases.__file__).parent
@@ -62,12 +64,3 @@ def test_no_name_suffix_is_a_set_code():
 
 def test_the_alias_table_feeds_no_export_format_standing_or_public_record():
     assert LiveRulesV1.SET_CODES == {}
-    importers = sorted(path.name for path in APP.glob("*.py") if re.search(
-        r"^from \. import .*\bimport_aliases\b|^from \.import_aliases import", path.read_text(), re.M))
-    # The import reviews alone: import_matching runs its step, deck_import fills the Missing cards report, and
-    # Collection Import's matcher reads a pasted line's set code through it (#234).
-    assert importers == ["collection_import_matcher.py", "deck_import.py", "import_matching.py"]
-    readers = sorted(str(path.relative_to(ROOT)) for folder in ("api/app", "scripts")
-                     for path in (ROOT / folder).rglob("*.py")
-                     if re.search(r"""['"]import_aliases\.tsv['"]""", path.read_text()))
-    assert readers == ["api/app/import_aliases.py"]

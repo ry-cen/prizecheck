@@ -1,8 +1,8 @@
 """Price runner (ticket 08-B): worker loop, supervisor, launcher and reclaim.
 
 Store semantics run against both adapters (filesystem and the HTTP relay). Process tests launch the real detached
-supervisor through ``price_launcher.spawn`` with a test-local ``sitecustomize`` that registers fake ``app.price_source`` /
-``app.tcgdex_record`` modules which talk to a real local HTTP server, so the runner is exercised end to end without
+supervisor through ``price_launcher.spawn`` with a test-local ``sitecustomize`` that registers fake ``app.games.pokemon.prices.price_source`` /
+``app.games.pokemon.prices.tcgdex_record`` modules which talk to a real local HTTP server, so the runner is exercised end to end without
 08-A. Admission (07-A) is simulated by seeding records with the ``quote_contract`` builders.
 """
 from timing_support import within_budget
@@ -21,7 +21,13 @@ from uuid import uuid4
 
 import pytest
 
-from app import price_launcher, price_refresh, price_runner, price_source, tcgdex_record
+from app import price_launcher, price_refresh
+from app.core.prices import runner as price_runner
+
+from app.games.pokemon.prices import price_source
+
+from app.games.pokemon.prices import tcgdex_record
+from app.games.pokemon.prices.quote_values import CURRENCY, SOURCE
 from app import quote_contract as qc
 from app.price_budget import Budget
 from app.public_projection import ProjectionUnavailable
@@ -188,16 +194,18 @@ def test_runner_maps_the_real_source_and_record_types():
     assert (failure.reason, failure.retry_after_s, failure.rate_limited) == ('http_status', 30.0, False)
     assert price_runner.fetch_failure(price_source.Fetched(False, reason='http_status', status=503, retry_after=30)).rate_limited
     lookup = {'source': 'tcgdex', 'card': 'c-1', 'variant': 'normal'}
-    quote = price_runner.decide(lambda *a: tcgdex_record.Quote('1.5', 'c-1', 'normal', '2026-10-01T00:00:00Z'), {}, {}, lookup, 5)
+    quote = price_runner.decide(lambda *a: tcgdex_record.Quote('1.5', 'c-1', 'normal', '2026-10-01T00:00:00Z'), {}, {}, lookup, 5,
+                                  source=SOURCE, currency=CURRENCY)
     assert (quote.kind, quote.amount) == ('quote', '1.5')
-    assert price_runner.decide(lambda *a: tcgdex_record.Absent(), {}, {}, lookup, 5).kind == 'absent'
-    assert price_runner.decide(lambda *a: tcgdex_record.Failure('ambiguous'), {}, {}, lookup, 5).reason == 'ambiguous'
+    assert price_runner.decide(lambda *a: tcgdex_record.Absent(), {}, {}, lookup, 5, source=SOURCE, currency=CURRENCY).kind == 'absent'
+    assert price_runner.decide(lambda *a: tcgdex_record.Failure('ambiguous'), {}, {}, lookup, 5,
+                              source=SOURCE, currency=CURRENCY).reason == 'ambiguous'
 
 
 def make_worker(env, owner, fetcher, *, slot=0, selector=select_by_record, idle_s=0.3, hard_stop=None):
     lease = env.get(qc.runner_lease_key(slot))
     return price_runner.Worker(env.store, slot, owner, hard_stop or lease['hard_stop_ms'], fetcher=fetcher, selector=selector,
-                               idle_s=idle_s, poll_s=0.02)
+                               idle_s=idle_s, poll_s=0.02, source=SOURCE, currency=CURRENCY)
 
 
 def run_worker(env, fetcher, specs, *, selector=select_by_record, **kwargs):
@@ -325,7 +333,7 @@ def test_unknown_commit_outcome_is_resolved_by_operation_status(env):
     seed(env, [{'index': 1, 'card': 'base1-1'}], lease=running_lease(owner))
     lossy = Lossy(env.store)
     worker = price_runner.Worker(lossy, 0, owner, env.get(qc.runner_lease_key(0))['hard_stop_ms'], fetcher=ok_fetcher(),
-                                 selector=select_by_record, idle_s=0.3, poll_s=0.02)
+                                 selector=select_by_record, idle_s=0.3, poll_s=0.02, source=SOURCE, currency=CURRENCY)
     assert worker.run() == 'idle' and lossy.lost == 1
     assert state_of(env, 1)['result']['attempt'] == 1
 
@@ -439,7 +447,8 @@ def test_concurrency_caps_hold_per_slot_and_per_caller(env):
 def test_idle_exit_follows_two_seconds_of_nothing(fs_env):
     owner = owner_nonce()
     seed(fs_env, [], lease=running_lease(owner))
-    worker = price_runner.Worker(fs_env.store, 0, owner, qc.wall_ms() + 60_000, fetcher=ok_fetcher(), selector=select_by_record)
+    worker = price_runner.Worker(fs_env.store, 0, owner, qc.wall_ms() + 60_000, fetcher=ok_fetcher(), selector=select_by_record,
+                                 source=SOURCE, currency=CURRENCY)
     start = time.monotonic()
     assert worker.run() == 'idle'
     assert 1.9 <= time.monotonic() - start <= 2.4
@@ -455,7 +464,7 @@ def test_idle_exit_declines_while_runnable_jobs_wait(fs_env):
 
 # --- Marketplace parity -----------------------------------------------------------------------------------------------------
 def test_marketplace_validation_matches_the_catalog_reader():
-    from app.public_catalog import _marketplace
+    from app.games.pokemon.catalog.public_catalog import _marketplace
     good = edition_record(1, 'c-1', 'normal')
     cases = [
         (good, quarantine_record(1)), (good, quarantine_record(1, state='quarantined')), (good, quarantine_record(1, revision=2)),
@@ -474,7 +483,7 @@ def test_marketplace_validation_matches_the_catalog_reader():
 
 
 def test_runner_modules_load_no_postgres_code():
-    code = 'import sys; sys.path.insert(0, "'+str(API_DIR)+'"); import app.price_runner, app.price_launcher, app.price_source, app.tcgdex_record; bad=[m for m in sys.modules if m.split(".")[0] in ("psycopg","psycopg_pool") or m in ("app.main","app.prices","app.public_catalog")]; print(bad)'
+    code = 'import sys; sys.path.insert(0, "'+str(API_DIR)+'"); import app.price_runner, app.price_launcher, app.games.pokemon.prices.price_source, app.games.pokemon.prices.tcgdex_record; bad=[m for m in sys.modules if m.split(".")[0] in ("psycopg","psycopg_pool") or m in ("app.main","app.games.pokemon.prices.prices","app.games.pokemon.catalog.public_catalog")]; print(bad)'
     out = subprocess.run([sys.executable, '-c', code], cwd=API_DIR, env={'PYTHONPATH': str(API_DIR), 'PATH': os.environ['PATH']},
                          capture_output=True, text=True, check=True).stdout
     assert out.strip() == '[]'
@@ -732,14 +741,14 @@ import price_fixture
 price_fixture.install()
 _fake = os.path.join(os.environ.get("PRICE_RUNNER_LOCK_DIR", "/nonexistent"), "fake-source.json")
 if os.path.exists(_fake):
-    for name, source in (("app.price_source", {source!r}), ("app.tcgdex_record", {record!r})):
+    for name, source in (("app.games.pokemon.prices.price_source", {source!r}), ("app.games.pokemon.prices.tcgdex_record", {record!r})):
         module = types.ModuleType(name)
         exec(compile(source, name, "exec"), module.__dict__)
         sys.modules[name] = module
     # Test-only time scaling for the runners this test launches; production constants are untouched.
     _scaled = json.load(open(_fake)).get("scaled_contract") or {{}}
     if _scaled:
-        import app.quote_contract as _contract
+        import app.core.prices.quote_contract as _contract
         for _name, _value in _scaled.items():
             if _name not in ("HARD_STOP_MS", "LEASE_TTL_MS", "LEASE_RENEW_MS"):
                 raise RuntimeError("unsupported scaled contract constant: " + _name)
@@ -1258,7 +1267,7 @@ def test_a_lost_claim_answer_does_not_strand_the_claim(env):
     seed(env, [{'index': 1, 'card': 'base1-1'}], lease=running_lease(owner))
     lossy = LostClaim(env.store)
     worker = price_runner.Worker(lossy, 0, owner, env.get(qc.runner_lease_key(0))['hard_stop_ms'], fetcher=ok_fetcher(),
-                                 selector=select_by_record, idle_s=0.3, poll_s=0.02)
+                                 selector=select_by_record, idle_s=0.3, poll_s=0.02, source=SOURCE, currency=CURRENCY)
     assert worker.run() == 'idle' and lossy.lost == 1
     assert state_of(env, 1)['result']['state'] == 'quote' and env.get(SCHEDULER)['jobs'] == {}
     assert env.get(SCHEDULER)['source'] == {}

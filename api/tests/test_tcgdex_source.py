@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.catalog import CatalogError, TCGdexSource
+from app.games.pokemon.catalog.catalog import CatalogError, TCGdexSource
 
 
 def pocket_listing(overrides=None):

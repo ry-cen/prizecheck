@@ -22,7 +22,7 @@ from pathlib import Path
 
 import psycopg
 
-from .catalog_targets import LIVE, MATCHING, load_active
+from app.games.pokemon.prices.catalog_targets import LIVE, MATCHING, load_active
 from .db import connect
 
 # A price import or catalog check that has recorded no outcome after this long did not finish (a crash or a kill).

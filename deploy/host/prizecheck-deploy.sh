@@ -766,7 +766,7 @@ with psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=5) as conn:
 sys.exit(0 if files <= applied else 1)
 PY
   # Modules only the detached catalog import and price runner load; /api/health never imports them.
-  compose exec -T api python -c 'import app.catalog, app.catalog_import, app.price_source, app.price_runner' \
+  compose exec -T api python -c 'import app.games.pokemon.catalog.catalog, app.catalog_import, app.games.pokemon.prices.price_source, app.price_runner' \
     || { log "Smoke: API background-job modules fail to import"; return 1; }
   for service in "${APP_SERVICES[@]}"; do
     image="$(docker inspect --format '{{.Config.Image}}' "$(compose ps -q "$service")" 2>/dev/null || true)"
@@ -1272,7 +1272,7 @@ cmd_tool() {
 # (scripts/price_import_job.py; its exit codes are in that file), then the change check in the current API image, then
 # the scanner index job on every run except after a pull the check started that failed, then the index's exit status
 # written on the check's row. Takes its own non-blocking lock (fd 8, not deploy.lock's fd 9) and never deploy.lock: the pull
-# can run for an hour, and a deploy waits only 120 s for deploy.lock. Exit codes of the check are in api/app/catalog_refresh.py.
+# can run for an hour, and a deploy waits only 120 s for deploy.lock. Exit codes of the check are in api/app/games/pokemon/catalog/catalog_refresh.py.
 # True while a deploy or rollback holds deploy.lock. Only probed, never held. Only flock's status 1 means "held"; any other
 # failure (flock missing, the file cannot be opened) stops the refresh rather than being read as a free lock.
 deploy_lock_held() {

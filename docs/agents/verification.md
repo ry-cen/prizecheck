@@ -87,6 +87,23 @@ It makes a second build into a temporary directory with a manifest and source ma
 
 A `FAILED:` line names the module, the chunk and the route it reached. Fix it by removing the static import that pulls the module in, not by editing the lists. Adding a page to `lazyPages.ts` needs no change to the check; a new inner private module worth guarding, such as a sub-screen of a private page, goes in `EXTRA_PRIVATE_MODULES`. Examples of passing and failing builds are in `tests/tooling/test_bundle_boundary.py`.
 
+## Python boundaries
+
+`scripts/check_python_boundaries.py` guards the core/game split of `api/app` ([ADR 0023](../adr/0023-split-core-and-games-by-composition.md)). `npm run guardrails` runs it. It reads imports with the `ast` module, including function-level imports and `importlib.import_module("app.…")` literals, and needs no database. It fails when:
+
+- `app.core.*` or a module marked `mixed` imports a game or a root module, or `app.core.*` imports a `mixed` top-level module; a game imports another game;
+- a module under `api/app` has no owner in `scripts/python_module_owners.txt`, or a line there names no module;
+- SQL outside `identity_store.py` names an identity table;
+- an architecture rule in `scripts/python_architecture_rules.py` finds a different set than it pins (exact importer lists, the social area's reads and imports, the price client's settings).
+
+A `FAILED: <rule>: <detail>` line names the rule. `--show-pins` prints what each rule found on the tree.
+
+Edges that exist today are listed in `scripts/python_boundary_allowlist.txt`. A stale line fails too, so the list only shrinks. Never add a line to get a change through: move the game value to the call site or split the module. `--write-baseline` rewrites the list only to record a removal.
+
+`api/tests/test_api_contract.py` compares the OpenAPI document and the route table, in match order, with the snapshots under `api/tests/api_contract/`. A move or split must leave both byte-identical. There is no regenerate flag: a change to a snapshot is a change to the API contract and needs the owner's approval.
+
+On a host whose `/tmp` has slow `fsync`, run verify with `TMPDIR=<checkout>/.scratch/tmp` so the runner's temporary files, including its copied workspace, land on a disk with a faster `fsync`.
+
 ## Artifacts
 
 Each run prints its `.scratch/verification/<run>/` directory. It holds:

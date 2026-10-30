@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'api'))
 import psycopg  # noqa: E402
-from app import rule_rollout  # noqa: E402
+from app.games.pokemon.catalog import rule_rollout  # noqa: E402
 from app.db import connect  # noqa: E402
 
 

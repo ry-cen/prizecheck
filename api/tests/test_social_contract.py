@@ -24,8 +24,6 @@ from app.main import app
 
 APP = Path(__file__).resolve().parents[1] / 'app'
 SOCIAL = APP / 'social'
-# The one place that may ask which Friends a collector has (ADR 0014: "only code"); everything else goes through them.
-FRIENDS_OF_READERS = {'social/friends.py', 'social/friend_copies.py', 'social/friend_reads.py'}
 # Reads of inventory tables, schema-qualified, quoted, ONLY or comma-joined too. Matched against the string constants of
 # a module (and the pieces of its f-strings), never its docstrings. A collector's own Trade Wants and Will accept choices
 # (trading #268) count as inventory: in the social area only the choke point may read them.
@@ -37,8 +35,6 @@ INVENTORY_TABLE = re.compile(
 # For trade Locations (140) and the listable rule (142, trading #269). Matched against the whole source text, docstrings
 # and comments too, so a social module's prose must never write one of these names followed by an open parenthesis.
 HIDDEN_CALL = re.compile(r'\b(?:hidden_location(?:s|_ids)|for_trade_locations|trade_listable)\s*\(')
-# In the social area only friend_copies (the choke point) and hidden_locations (the rule it calls) may read inventory.
-READERS = {'social/friend_copies.py', 'social/hidden_locations.py'}
 # Calls of migration 142's placement rule and listable rule (trading #268, ADR 0015) and of migration 140's For trade
 # rule, matched against string constants only (SQL text and f-string pieces, never docstrings), as inventory_reads
 # matches: no error message or other string may write a call form. Only these modules may call them: counts for one
@@ -76,143 +72,6 @@ SEVERAL_OWNERS_TABLE = re.compile(
     r'(?:\bFROM|\bJOIN|,)\s+(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?(?:holding|deck_list_line|location|borrowed_holding)"?\b',
     re.IGNORECASE)
 SEVERAL_OWNERS_FILTER = re.compile(r'\b(?:owner_id|borrower_id)\s*=\s*ANY\s*\(', re.IGNORECASE)
-# What each social module may import from inside the app, as (module as written, relative to this package, name). A new
-# import of the Want List, copy allocation, the Location readers, hidden_locations or friend_copies.READ fails here
-# until someone justifies it by adding it.
-ALLOWED_IMPORTS = {
-    'social/__init__.py': set(),
-    'social/counts.py': set(),
-    'social/hidden_locations.py': set(),
-    'social/name_rules.py': set(),
-    # The owner facts the Loan and Trade steps share: the inventory revision, the command start (replay, hourly count).
-    'social/owners.py': {('..location_tree', 'replay')},
-    # The choke point counts each Friend's wants with the pure allocation over rows it reads itself (trading #276).
-    'social/friend_copies.py': {('.', 'counts'), ('..', 'copy_allocation'), ('..copy_allocation', 'allocate_rows'),
-                                ('..copy_allocation', 'AllocationRows')},
-    'social/friend_reads.py': {
-        ('.', 'name_rules'), ('..', 'set_codes'), ('..db', 'connect'), ('..identity', 'verified_user'),
-        # Only the error helper of the Location readers; the Want List's capture and card order drive the wanted cards.
-        ('..location_tree', 'error'), ('..want_list', 'capture_want_list'), ('..want_list', 'number_order'),
-        ('.friend_copies', 'friend_copies')},
-    # A Friend's Trade List (trading #269): the Friend by Handle and the card facts as a Friend's Collection reads them,
-    # and their listable copies from the choke point. Discovery and Ask to trade (trading #276): the viewer's own wants
-    # (the Want List's capture, their Trade Wants and their Will accept choices) and Trade List from the inventory
-    # modules, the Friends' copies and wants from the choke point, the catalog's Will accept expansion, and the one
-    # definition of "are Friends", a set of account ids.
-    'social/trade_matches.py': {
-        ('.', 'name_rules'), ('..db', 'connect'), ('..identity', 'verified_user'), ('..location_tree', 'error'),
-        ('.friend_copies', 'friend_trade_copies'), ('.friend_reads', 'FRIEND_BY_HANDLE'),
-        ('.friend_reads', 'PAGE_IDENTITIES'), ('.friend_reads', 'card_facts'), ('.friend_reads', 'search_key'),
-        ('..trade_list', 'own_trade_copies'), ('..trade_wants', 'own_wants'), ('..trade_wants', 'own_rules'),
-        ('..want_list', 'capture_want_list'), ('.friend_copies', 'friend_wants'), ('..card_accepts', 'accepts'),
-        ('.friends', 'friend_ids'),
-        # Each Friend's completed-Trade count on their row and Trade List (trading #298), one read for all of them.
-        ('.trades', 'completed_trades'),
-        # Near you and card search (trading #300): the nearby candidates and the viewer's status and radius from the
-        # discovery module's one definition, and the band order.
-        ('.discovery', 'BANDS'), ('.discovery', 'DiscoveryStatus'), ('.discovery', 'Radius'),
-        ('.discovery', 'nearby'), ('.discovery', 'search_setting'),
-        # The trader reads (trading #299) ask the reach rule after resolving the trader id, and take the header's
-        # status, band and count from the conversations' one definition (``standings``) and the pair's conversation
-        # (``pair_row``).
-        ('.conversations', 'pair_row'), ('.conversations', 'standings'), ('.discovery', 'Band'),
-        ('.discovery', 'reach_one'), ('.discovery', 'trader_user'),
-        # The trader header's add_friend (trading #304) comes from the Friend code's one definition.
-        ('.friends', 'add_friend_state')},
-    'social/friends.py': {
-        ('.', 'name_rules'), ('..db', 'connect'), ('..identity', 'verified_user'), ('..publications', 'TOKEN'),
-        ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
-        ('.owners', 'lock_owners'), ('.profile', 'token_hash'),
-        # Ending a friendship cancels the pair's Loans nobody has confirmed a handover for (#260), then their Trades
-        # nobody has confirmed the swap for (trading #274), inside the command that already locked both owners; the
-        # Loan and Trade rows are written in app.social.loans and app.social.trades, never here.
-        ('.loans', 'end_loans_between'), ('.trades', 'end_trades_between'),
-        # Block for strangers (trading #302): the trader routes resolve a trader id, and a Block or Unblock moves the
-        # pair's conversation watermark.
-        ('.conversations', 'pair_changed'), ('.discovery', 'trader_user'),
-        # Add as Friend (trading #304): the Trade by id through the Trades' own statement, the one suspension check and
-        # the reach rule, checked before the Friend command and again under its locks.
-        ('.discovery', 'reach_one'), ('.discovery', 'require_not_suspended'), ('.trades', 'TRADES')},
-    # Reports and the owner queue (trading #303): the Friend command and its Block, the reach rule, trader ids and the
-    # discovery helpers from their one definitions, the conversation lookup, cursors and text rule, the Trades' end and
-    # counterparties, and card facts for the snapshot.
-    'social/reports.py': {
-        ('..db', 'connect'), ('..identity', 'verified_user'), ('..identity', 'require_owner'),
-        ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'lock_owners'),
-        ('.friends', '_command'), ('.friends', 'command_payload'), ('.friends', 'place_block'),
-        ('.discovery', 'reach_one'), ('.discovery', 'trader_user'), ('.discovery', 'lock_discovery'),
-        ('.discovery', 'switch_off'), ('.discovery', 'remove_from_discovery'), ('.discovery', 'restore_discovery'),
-        ('.discovery', 'account_state'),
-        ('.conversations', 'normalize_text'), ('.conversations', 'pair_row'), ('.conversations', 'account_changed'),
-        ('.conversations', 'encode_cursor'), ('.conversations', 'decode_cursor'),
-        ('.trades', 'end_trades_between'), ('.trades', 'unconfirmed_partners'),
-        ('.friend_reads', 'card_facts')},
-    # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
-    # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
-    # app.loan_inventory, outside this area.
-    'social/loans.py': {
-        # The borrower's own count of written-off copies awaiting their keep-or-remove choice (#257): a count per Loan,
-        # read for the reader's Loans as borrower only, never a Location; the read stays in app.borrowed_copies.
-        ('..borrowed_copies', 'awaiting_choice'),
-        # Which of the reader's Loans as lender have a reserved pick out of date, so Needs you and the inbox list them
-        # (#259): a set of Loan ids from the lender's own Holdings, never a Location; the read stays in app.loan_picks.
-        ('..loan_picks', 'stale_pick_loans'),
-        ('..db', 'connect'), ('..identity', 'verified_user'), ('..location_tree', 'error'),
-        ('..location_tree', 'record_response'), ('.friend_reads', 'card_facts'), ('.owners', 'NOW'),
-        ('.owners', 'advance_revision'), ('.owners', 'begin_owner_command'), ('.owners', 'lock_owners'),
-        # Whether the lender is still the reader's Friend, so Edit and resend is offered only then (owner's decision,
-        # 2026-10-16): the one definition of "are Friends", a set of account ids, never anything of their inventory.
-        ('.friends', 'friend_ids')},
-    # The inbox (#259): the reader's own Loans through the Loans' one definition of what waits on them, and the updates
-    # stored for them. Nothing of another collector's inventory.
-    'social/inbox.py': {
-        ('..db', 'connect'), ('..identity', 'verified_user'), ('.loans', 'LOANS'), ('.loans', 'LoanView'),
-        ('.loans', 'loan_facts'), ('.loans', 'loan_views'), ('.loans', 'role_of'),
-        # The nudge's 14 days, so a nudge's update says when it began to apply (owner's decision, 2026-10-16).
-        ('.loans', 'NUDGE_DAYS'),
-        # The reader's own Trades through the Trades' one definition of what waits on them, and since when (trading
-        # #273): the Trade view both sides read, never a pick or a Location.
-        ('.trades', 'TRADES'), ('.trades', 'TradeView'), ('.trades', 'trade_facts'), ('.trades', 'trade_views'),
-        ('.trades', 'waiting_trade_step'), ('.trades', 'trade_waiting_since')},
-    # Trade Proposals and Trades both sides read (trading #270), as the Loans read theirs: card facts, the owner lock and
-    # the Loans' revision helper. Steps that touch a collector's own inventory are in app.trade_inventory. Which of the
-    # reader's Trades have a pick out of date, so Needs you and the inbox list them (``trade_picks.stale_pick_trades``,
-    # #273): a set of Trade ids from the reader's own Holdings, never a Location; the read stays in app.trade_picks. The
-    # Friends set is allowed ahead of Counter (#278), as the resolution lists it; ending a friendship's Trades (#274)
-    # needs none. ``friend_ids`` must be imported inside the function that uses it, as in social/loans.py, because
-    # app.social.friends imports this module (``end_trades_between``).
-    'social/trades.py': {
-        ('..trade_picks', 'stale_pick_trades'), ('..db', 'connect'), ('..identity', 'verified_user'),
-        ('..location_tree', 'error'), ('..location_tree', 'record_response'), ('.friend_reads', 'card_facts'),
-        ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.owners', 'advance_revision'), ('.owners', 'NOW'),
-        ('.owners', 'begin_owner_command'),
-        ('.friends', 'friend_ids'),
-        # The other side's availability on a Trade (``TradeParty``, trading #299): one call to the reach rule for all the
-        # rows' other sides, never a query of its own.
-        ('.discovery', 'reach')},
-    # Conversations and messages (trading #298): the pair's Trades as cards through the Trades' own views and their one
-    # definition of what waits on the reader, the Friends set (imported inside the functions that use it, because
-    # app.social.friends imports app.social.trades), and the completed-Trade count. Nothing of another collector's
-    # inventory.
-    'social/conversations.py': {
-        ('..db', 'connect'), ('..identity', 'verified_user'), ('..location_tree', 'error'),
-        ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.friends', 'friend_ids'),
-        ('.trades', 'TRADES'), ('.trades', 'TradeView'), ('.trades', 'trade_facts'), ('.trades', 'trade_views'),
-        ('.trades', 'waiting_trade_step'), ('.trades', 'completed_trades'),
-        # The reach rule (trading #299): the party's band and the open-or-not check of a conversation come from its one
-        # definition, and the one suspension check is ``require_not_suspended``.
-        ('.discovery', 'Band'), ('.discovery', 'reach'), ('.discovery', 'reach_one'),
-        ('.discovery', 'require_not_suspended')},
-    'social/discovery.py': {
-        ('..db', 'connect'), ('..identity', 'verified_user'), ('..location_tree', 'error'),
-        ('.owners', 'ensure_owner'), ('.owners', 'lock_owners')},
-    'social/profile.py': {
-        ('.', 'name_rules'), ('..db', 'connect'), ('..identity', 'verified_user'),
-        ('..location_tree', 'error'), ('..location_tree', 'owner_and_rows'), ('..location_tree', 'replay'),
-        ('..public_projection', 'ProjectionUnavailable'), ('..public_records', 'MAX_BATCH'),
-        ('..public_records', 'invite_key'), ('..public_records', 'public_record_store'),
-        ('..publications', 'PUBLIC_HEADERS'), ('..publications', 'TOKEN')},
-}
 
 FORBIDDEN = frozenset({'location', 'locations', 'deck', 'decks', 'leaf', 'leaves', 'unsorted',
                        'binder', 'shelf', 'storage'})
@@ -559,24 +418,6 @@ def sources() -> dict[str, str]:
     return {str(path.relative_to(APP)): path.read_text(encoding='utf-8') for path in SOCIAL.rglob('*.py')}
 
 
-def test_only_the_choke_point_reads_inventory_tables_in_the_social_area():
-    found = {path for path, source in sources().items() if inventory_reads(source)}
-    assert found == READERS
-
-
-def test_social_modules_import_only_what_they_are_allowed_to():
-    found = {path: app_imports(source) for path, source in sources().items()}
-    assert set(found) == set(ALLOWED_IMPORTS), 'a new social module needs an entry in ALLOWED_IMPORTS'
-    assert {path: imports - ALLOWED_IMPORTS[path] for path, imports in found.items()} \
-        == {path: set() for path in found}
-
-
-def test_only_the_friend_code_asks_which_friends_a_collector_has():
-    found = {str(path.relative_to(APP)) for path in APP.rglob('*.py')
-             if re.search(r'\bfriends_of\b', path.read_text(encoding='utf-8'))}
-    assert found == FRIENDS_OF_READERS
-
-
 def test_the_choke_points_statement_never_reads_borrowed_holdings():
     from app.social import friend_copies
     assert 'borrowed_holding' not in friend_copies.READ
@@ -585,12 +426,6 @@ def test_the_choke_points_statement_never_reads_borrowed_holdings():
 def test_the_trade_statement_never_reads_borrowed_holdings():
     from app.social import friend_copies
     assert 'borrowed_holding' not in friend_copies.TRADE_READ
-
-
-def test_only_the_choke_point_reads_several_owners_inventory():
-    found = {str(path.relative_to(APP)) for path in APP.rglob('*.py')
-             if several_owners_reads(path.read_text(encoding='utf-8'))}
-    assert found <= {'social/friend_copies.py'}, found
 
 
 def test_the_several_owners_guard_catches_a_filter_on_a_list_of_owners():
@@ -631,11 +466,6 @@ def test_the_trade_list_and_wants_statements_ask_the_reach_rule_and_the_collecti
     assert 'trade_reach(' in friend_copies.TRADE_READ
     assert 'trade_reach(' in friend_copies.WANTS_FRIENDS
     assert 'trade_reach' not in friend_copies.READ
-
-
-def test_the_trade_steps_no_longer_ask_the_friends_set():
-    imported = app_imports((APP / 'trade_inventory.py').read_text(encoding='utf-8'))
-    assert not any(name == 'friend_ids' for _, name in imported)
 
 
 def test_only_the_discovery_module_names_the_discovery_tables():

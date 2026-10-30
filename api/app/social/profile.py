@@ -33,7 +33,7 @@ from ..db import connect
 from ..identity import verified_user
 from ..public_projection import ProjectionUnavailable
 from ..public_records import MAX_BATCH, invite_key, public_record_store
-from ..publications import PUBLIC_HEADERS, TOKEN
+from ..core.publications.publish import PUBLIC_HEADERS, TOKEN
 from . import name_rules
 
 router = APIRouter(prefix='/api/profile', tags=['profile'])

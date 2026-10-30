@@ -24,7 +24,9 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import deck_format_checks, discovery, format_evaluator
+from app.games.pokemon.publications import discovery
+from app.games.pokemon.formats import deck_format_checks
+from app.games.pokemon.formats import format_evaluator
 from app.public_records import catalog_edition_key, price_key, quarantine_key
 from test_card_attributes import BULBASAUR_ME, ENERGY_MEE, ENERGY_SV, RARE_CANDY_ME, card, edition_of
 from test_catalog import reset_catalog
@@ -146,7 +148,7 @@ def listing_world(prefix):
     priced, then four Listed decks titled ``prefix`` and a name, published in this order: "Full" (every copy priced),
     "Partial" (two Fixture Sprout ex not priced), "Bare" (no copy priced; Target Format Expanded) and "Over" (not legal,
     so never shown). Returns {name: token}."""
-    from app import public_catalog
+    from app.games.pokemon.catalog import public_catalog
     from app.public_records import public_record_store
     catalog(SPROUT_EX, ENERGY_MEE)
     with connect() as conn:
@@ -225,7 +227,7 @@ def test_a_delivered_attribute_correction_and_a_rules_deploy_each_move_the_listi
 
 
 def test_a_result_is_evaluated_once_and_reused_until_a_key_part_moves(store, monkeypatch):
-    from app import published_format_checks
+    from app.games.pokemon.formats import published_format_checks
     catalog()
     _, token = published(LEGAL, title="Cached deck")
     real, calls = published_format_checks.checks_for, []

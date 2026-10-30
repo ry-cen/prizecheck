@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'api'))
 import psycopg  # noqa: E402
-from app.public_catalog import RebuildBusy, backfill  # noqa: E402
+from app.games.pokemon.catalog.public_catalog import RebuildBusy, backfill  # noqa: E402
 from app.public_projection import ProjectionUnavailable  # noqa: E402
 
 

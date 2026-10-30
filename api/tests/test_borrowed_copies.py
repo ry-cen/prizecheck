@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from app.main import connect  # noqa: F401
 from app.copy_allocation import allocate, available_to
 from app.deck_list_capture import capture_deck_list
-from app.import_replace import read_replaced, replacement
+from app.games.pokemon.imports.import_replace import read_replaced, replacement
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import body_of, cost, launches, store  # noqa: F401  (autouse fixtures)
 from test_batch_add import undo, undo_records

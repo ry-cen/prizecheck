@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app import price_import
+from app.games.pokemon.prices import price_import
 from app.db import connect
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -481,9 +481,3 @@ def test_the_job_script_exposes_main():
     code = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "price_import_job.py"), "--help"],
                           capture_output=True, text=True)
     assert code.returncode == 0 and "--force" in code.stdout
-
-
-def test_only_price_import_talks_to_tcgcsv():
-    offenders = [path.name for path in (ROOT / "api" / "app").glob("*.py")
-                 if path.name != "price_import.py" and "tcgcsv.com" in path.read_text().lower()]
-    assert offenders == []

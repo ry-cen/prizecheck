@@ -33,7 +33,7 @@ export async function getPublishedDeckCost(token: string, version: number, signa
 
 
 def render(openapi):
-    from app.prices import MAX_EDITIONS  # noqa: E402
+    from app.games.pokemon.prices.prices import MAX_EDITIONS  # noqa: E402
 
     schemas = openapi["components"]["schemas"]
     body = BODY % {"max_editions": MAX_EDITIONS, "error": gen.error_class("PriceError"),

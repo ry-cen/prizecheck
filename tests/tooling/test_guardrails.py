@@ -269,10 +269,10 @@ class FlakeGuardrailTest(unittest.TestCase):
     def test_webp_suffixes_are_built_only_by_the_art_url_module_and_the_scanner(self):
         for source in ('url = f"{base}/low.webp"', "const big = url.replace(/\\/low\\.webp$/, '/high.webp');",
                        "SELECT image_url || '/high.webp' AS image_url", 'src = base + "/low.webp"'):
-            for other in ('api/app/collection.py', 'api/app/art_store.py', 'web/src/ui/largeArt.ts',
+            for other in ('api/app/collection.py', 'api/app/core/art/store.py', 'web/src/ui/largeArt.ts',
                           'web/src/ui/EditionTile.tsx', 'api/app/social/friend_reads.py'):
                 self.assertTrue(guardrails.webp_suffix_violations(source, other), (source, other))
-            for owner in ('api/app/art_urls.py', 'api/app/scanner.py'):
+            for owner in ('api/app/games/pokemon/art/urls.py', 'api/app/games/pokemon/scanner/scanner.py'):
                 self.assertFalse(guardrails.webp_suffix_violations(source, owner), (source, owner))
 
     def test_other_webp_mentions_are_allowed(self):

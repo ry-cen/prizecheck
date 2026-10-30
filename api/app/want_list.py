@@ -51,7 +51,7 @@ from pydantic import BaseModel
 
 from .card_accepts import accepts
 from .copy_allocation import Allocation, LineCount, allocate, deck_order
-from .deck_list_display import read_line_display
+from app.games.pokemon.decks.line_display import read_line_display
 from .location_tree import error, owner_and_rows
 from .db import connect
 from .identity import verified_user

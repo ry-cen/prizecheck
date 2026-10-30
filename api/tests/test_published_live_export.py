@@ -12,8 +12,11 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import deck_live_export, public_catalog, public_deck, published_live_export
-from app.catalog_targets import LIVE, activate_rule
+from app.games.pokemon.publications import public_deck
+from app.games.pokemon.exports import deck_live_export
+from app.games.pokemon.catalog import public_catalog
+from app.games.pokemon.exports import published_live_export
+from app.games.pokemon.prices.catalog_targets import LIVE, activate_rule
 from app.public_projection import ProjectionUnavailable
 from test_catalog_metadata import owner
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse: clears rule activations)

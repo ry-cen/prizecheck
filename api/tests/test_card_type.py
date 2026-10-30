@@ -16,7 +16,7 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
-from app.catalog import rederive_card_attributes
+from app.games.pokemon.catalog.catalog import rederive_card_attributes
 from app.main import connect
 from test_attribute_corrections import ADMIN, OWNER, decide, error, evidence, report, revision, seed
 from test_card_attributes import (BULBASAUR_ME, ENERGY_SV, RARE_CANDY_ME, STAGE_ONE, SUPPORTER, SWITCH_ME,

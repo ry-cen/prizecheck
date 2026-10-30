@@ -8,9 +8,9 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from app.catalog import claim_run, execute_run
+from app.games.pokemon.catalog.catalog import claim_run, execute_run
 from app.main import connect
-from app.set_counts import set_counts
+from app.games.pokemon.catalog.set_counts import set_counts
 from test_card_attributes import card
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records

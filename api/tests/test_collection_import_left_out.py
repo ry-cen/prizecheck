@@ -21,7 +21,7 @@ import csv
 import io
 from pathlib import Path
 
-from app import collection_import_matcher as matcher
+from app.games.pokemon.imports import collection_import_matcher as matcher
 from app.main import connect  # first: app.main imports the routers, and they import it
 from test_batch_add import held
 from test_collection_import import (FOURTEEN, HEADER_12, all_rows, code, collector, edition, rows, save,

@@ -5,8 +5,9 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.main import app, connect
-from app import scanner, set_codes
-from app.art_urls import art_version
+from app.games.pokemon.scanner import scanner
+from app.games.pokemon.catalog import set_codes
+from app.core.art.urls import art_version
 from test_catalog import headers
 from test_catalog_search import promote
 

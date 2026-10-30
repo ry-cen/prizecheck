@@ -2,7 +2,7 @@
 import json
 from uuid import uuid4
 import pytest
-from app.catalog import CatalogError, claim_run, execute_run
+from app.games.pokemon.catalog.catalog import CatalogError, claim_run, execute_run
 from app.main import connect
 from test_catalog import Source, reset_catalog
 from test_holdings import call

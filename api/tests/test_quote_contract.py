@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from app import quote_contract as qc
+from app.core.prices import quote_contract as core_qc
 from app.public_records import key_family
 
 REF = 'a' * 48
@@ -17,11 +18,11 @@ ANON = 'anon:' + '0f' * 16
 
 def test_module_is_pure_and_prices_reexports_the_amount_parser():
     code = ("import sys, json; import app.quote_contract; "
-            "print(json.dumps([m for m in ('psycopg', 'app.main', 'app.prices') if m in sys.modules]))")
+            "print(json.dumps([m for m in ('psycopg', 'app.main', 'app.games.pokemon.prices.prices') if m in sys.modules]))")
     out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout) == []
     import app.main  # noqa: F401
-    from app import prices
+    from app.games.pokemon.prices import prices
     assert prices.parse_amount is qc.parse_amount
 
 
@@ -55,8 +56,8 @@ def test_ledger_shard_is_stable_and_in_range():
 
 
 def test_wall_clock_is_one_patchable_function(monkeypatch):
-    monkeypatch.setattr(qc, 'wall_ms', lambda: 42)
-    assert qc.wall_ms() == 42
+    monkeypatch.setattr(core_qc, 'wall_ms', lambda: 42)
+    assert core_qc.wall_ms() == 42
     assert qc.iso_from_ms(0) == '1970-01-01T00:00:00Z'
 
 

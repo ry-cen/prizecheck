@@ -38,7 +38,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from .. import set_codes
 from ..location_tree import error
 from ..db import connect
 from ..identity import verified_user
@@ -89,12 +88,13 @@ FRIEND_BY_HANDLE = """SELECT p.user_id AS collector_id, p.handle, p.display_name
 
 # What a card shows, its Printing and Card Identity, and its name as Catalog's name search compares it.
 CARD_FACTS = """SELECT e.id AS edition_id, e.printing_id, p.identity_id,
-  coalesce(pd.display_name, ci.display_name) AS name, coalesce(pd.set_id, '') AS set_id,
+  coalesce(pd.display_name, ci.display_name) AS name, psc.set_code AS set_code,
   coalesce(pd.set_name, '') AS set_name, coalesce(pd.collector_number, '') AS collector_number, e.descriptor,
   art.small_art_url AS image_url, replace(catalog_search_words(coalesce(pd.display_name, ci.display_name)), ' ', '') AS search_key
   FROM catalog_edition e
   JOIN catalog_printing p ON p.id = e.printing_id
   JOIN catalog_identity ci ON ci.id = p.identity_id
+  JOIN catalog_printing_set_code psc ON psc.printing_id = p.id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id = p.id
   LEFT JOIN catalog_printing_art art ON art.printing_id = p.id
   WHERE e.id = ANY(%s)"""
@@ -139,7 +139,7 @@ def card_facts(conn, edition_ids) -> dict[UUID, Card]:
         return {}
     return {row['edition_id']: Card(
         edition_id=row['edition_id'], printing_id=row['printing_id'], identity_id=row['identity_id'], name=row['name'],
-        set_code=set_codes.code_for(row['set_id']), set_name=row['set_name'],
+        set_code=row['set_code'], set_name=row['set_name'],
         collector_number=row['collector_number'], descriptor=row['descriptor'],
         image_url=row['image_url'], search_key=row['search_key'] or '')
         for row in conn.execute(CARD_FACTS, (ids,))}

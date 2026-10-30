@@ -6,7 +6,7 @@ import pytest
 
 from app.main import app, connect, operation_counter  # noqa: F401
 from app.price_budget import Budget
-from app.prices import format_usd, parse_amount
+from app.games.pokemon.prices.prices import format_usd, parse_amount
 
 # ------------------------------------------------------------------ amounts and display
 
@@ -63,10 +63,10 @@ from uuid import uuid4  # noqa: E402
 import psycopg  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import prices  # noqa: E402
+from app.games.pokemon.prices import prices  # noqa: E402
 from app.bounded_work import Lane, Late  # noqa: E402
 from app.price_reads import price_reads_enabled  # noqa: E402
-from app.catalog_targets import MATCHING  # noqa: E402
+from app.games.pokemon.prices.catalog_targets import MATCHING  # noqa: E402
 from app.public_records import public_record_store, quote_key, result_key  # noqa: E402
 from test_catalog import reset_catalog  # noqa: E402
 from test_catalog_metadata import Records, furret  # noqa: E402
@@ -188,7 +188,7 @@ def seed(store, edition, amount="0.43", *, low=None, mid=None, sub_type=None, pr
 def publish_prices(store=None):
     """Write the public ``price:`` records (what the import job's last step does) for every priced Edition, so the readers
     that never touch PostgreSQL (Published Deck cost, Discover) see what ``seed`` stored."""
-    from app.public_prices import publish
+    from app.games.pokemon.prices.public_prices import publish
     with connect() as conn:
         return publish(conn, store or public_record_store())
 
@@ -471,7 +471,7 @@ def test_a_postgres_failure_withholds_the_row_as_validation_unavailable(store, m
 
 
 def test_a_catalog_pull_writes_no_quote_result_or_fence_record(store):
-    from app import catalog
+    from app.games.pokemon.catalog import catalog
     from app.public_records import fence_key
     world()
     assert not hasattr(catalog, "seed_from_import") and not hasattr(catalog, "price_views") and not hasattr(catalog, "price_view")

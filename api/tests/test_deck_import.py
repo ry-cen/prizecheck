@@ -14,7 +14,8 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher, prices
+from app import price_launcher
+from app.games.pokemon.prices import prices
 from app.public_records import public_record_store, result_key
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records

@@ -12,7 +12,8 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher, prices, quote_contract
+from app import price_launcher, quote_contract
+from app.games.pokemon.prices import prices
 from app.public_records import public_record_store
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
 from test_holdings import add, call

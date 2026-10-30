@@ -3,7 +3,7 @@
 Every Card Printing's standing in every Format is stored with a key per Format. Writers are driven the way their callers
 drive them: catalog imports through the importer, attribute and Reprint Group decisions over signed HTTP, a rules deploy
 through the API's startup, and the rule-date job through its script. No route serves standings yet (the Catalog browse
-route, #173, will), so stored rows and the reader are observed through ``app.format_standing``, and each stored standing
+route, #173, will), so stored rows and the reader are observed through ``app.games.pokemon.formats.format_standing``, and each stored standing
 is compared with what a Deck's format check returns over HTTP for a Deck List holding that card.
 
 Every test fixes the day standings are computed for (``format_standing.today``), because rule dates in the rules files
@@ -28,9 +28,9 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
 from app.main import app, connect
-from app import format_evaluator as evaluator
-from app import format_standing
-from app.card_attributes import attribute_revision
+from app.games.pokemon.formats import format_evaluator as evaluator
+from app.games.pokemon.formats import format_standing
+from app.games.pokemon.catalog.card_attributes import attribute_revision
 from test_attribute_corrections import decide as decide_attributes, seed as seed_owner
 from test_card_attributes import ACE_SPEC_BW, BULBASAUR_ME, ENERGY_SEARCH, ENERGY_SV, EX_BW, SWITCH_ME, edition_of
 from test_catalog import reset_catalog

@@ -10,12 +10,12 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
-import app.catalog as catalog_module
-import app.catalog_targets as catalog_targets_module
-from app.card_identity import card_identity_key
-from app.catalog import claim_run, execute_run
+import app.games.pokemon.catalog.catalog as catalog_module
+import app.games.pokemon.prices.catalog_targets as catalog_targets_module
+from app.games.pokemon.catalog.card_identity import card_identity_key
+from app.games.pokemon.catalog.catalog import claim_run, execute_run
 from app.main import connect
-from app.public_catalog import rebuild
+from app.games.pokemon.catalog.public_catalog import rebuild
 from app.public_projection import FilePublicProjection, public_record_store
 from app.public_records import catalog_printing_key
 

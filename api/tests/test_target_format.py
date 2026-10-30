@@ -20,7 +20,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
 from app.main import app, connect  # noqa: F401
-from app import deck_format_checks
+from app.games.pokemon.formats import deck_format_checks
 from test_card_attributes import edition_of
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records

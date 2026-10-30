@@ -110,7 +110,7 @@ def test_public_cost_lists_each_frozen_editions_price_with_no_age(store, monkeyp
     assert not keys_of(body["editions"]) & {"age", "stale", "provider_updated_at", "checked_at", "refresh"}
 
     # An answer withheld for its validation carries no Edition either.
-    from app import public_deck
+    from app.games.pokemon.publications import public_deck
     from app.public_projection import ProjectionUnavailable
     real, calls = public_deck._record, []
 
@@ -209,7 +209,7 @@ def page_world(owner, prefix):
     "Over" holds five Professor's Research (a card-level copy-limit issue) and is Listed; "Orphan" is legal and
     Unlisted, and its Deck is gone (its publication unlinked, as deleting the Deck leaves it). Returns the tokens and
     the Legal Deck's id."""
-    from app import public_catalog
+    from app.games.pokemon.catalog import public_catalog
     from app.public_records import public_record_store
     from test_discover_listing import LEGAL as LISTED_LEGAL, OVER, catalog, list_publicly, priced
     from test_published_cost import listed_deck

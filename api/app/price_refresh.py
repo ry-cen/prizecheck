@@ -1,4 +1,4 @@
-"""Access-triggered price-refresh admission (ticket 07). PostgreSQL-free: no psycopg, no ``app.main``, no ``app.prices``.
+"""Access-triggered price-refresh admission (ticket 07). PostgreSQL-free: no psycopg, no ``app.main``, no ``app.games.pokemon.prices.prices``.
 
 ``evaluate_and_admit(rows, caller, budget)`` classifies the stored state of each row by the age of ``result.checked_at``,
 joins rows already in flight, admits new jobs under every cap with one bounded compare-and-swap, reserves a runner
@@ -25,7 +25,8 @@ import socket
 import time
 from uuid import uuid4
 
-from . import price_launcher, quote_contract as qc
+from . import price_launcher
+from .core.prices import quote_contract as qc
 from .public_projection import ProjectionUnavailable
 from .public_records import OperationConflict, public_record_store, quote_states, result_key
 

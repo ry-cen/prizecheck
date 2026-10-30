@@ -1,0 +1,80 @@
+{
+  "body": {
+    "quantity": "3",
+    "revision": 2
+  },
+  "digest": "87fb41aca33b0ccb3445bfa39af374b40504ce1e12f7ff73eb2ccd743a7252c8",
+  "kind": "deck",
+  "method": "PATCH",
+  "path": "/api/decks/efb0382e-7524-4c67-8e9a-2b63403f4014/deck-list/lines/3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+  "response": {
+    "deck_id": "efb0382e-7524-4c67-8e9a-2b63403f4014",
+    "deck_list": {
+      "lines": [
+        {
+          "card_kind": "pokemon",
+          "collector_number": "1",
+          "descriptor": {
+            "size": "standard",
+            "type": "normal"
+          },
+          "edition_id": "3db7e10c-c240-4b5f-8e33-daf6e0092c79",
+          "evolution_root": "Furret",
+          "evolution_stage": 0,
+          "evolves_from": null,
+          "identity_id": "74e3bee3-7192-4ff3-838e-6c410d13d395",
+          "identity_name": "Furret",
+          "image_url": null,
+          "in_deck": "0",
+          "name": "Furret",
+          "quantity": "3",
+          "set_id": "swsh3",
+          "set_name": "Darkness Ablaze",
+          "trainer_type": null
+        }
+      ],
+      "revision": 3
+    },
+    "format_checks": {
+      "attribute_revision": 3,
+      "catalog_revision": 1,
+      "deck_id": "efb0382e-7524-4c67-8e9a-2b63403f4014",
+      "deck_list_revision": 3,
+      "disclaimer": "Advisory format checks: a result is not a guarantee of tournament legality. Missing rules or card data makes a result unknown, never legal.",
+      "results": [
+        {
+          "computed_at": "2026-10-29T07:45:08.650550Z",
+          "evaluated_on": "2026-10-29",
+          "format": "standard",
+          "issues": [
+            {
+              "code": "deck_size",
+              "effect": "not_legal",
+              "kind": "deck",
+              "lines": ["3db7e10c-c240-4b5f-8e33-daf6e0092c79"],
+              "reason": "a Standard deck has exactly 60 cards; this one has 3"
+            },
+            {
+              "code": "not_in_card_pool",
+              "effect": "not_legal",
+              "kind": "card",
+              "lines": ["3db7e10c-c240-4b5f-8e33-daf6e0092c79"],
+              "reason": "not in the Standard card pool: Sword & Shield era, regulation marks D to F, all rotated out by 2025-04-11"
+            },
+            {
+              "code": "attribute_unknown",
+              "effect": "unknown",
+              "kind": "card",
+              "lines": ["3db7e10c-c240-4b5f-8e33-daf6e0092c79"],
+              "reason": "Basic Pok\u00e9mon status unknown"
+            }
+          ],
+          "notes": [],
+          "rules_version": "1 (2026-10-11)",
+          "status": "not_legal"
+        }
+      ]
+    },
+    "target_format": "standard"
+  }
+}

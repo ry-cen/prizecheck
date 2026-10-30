@@ -5,7 +5,8 @@ import time
 import pytest
 
 from app.main import app  # noqa: F401
-from app import bounded_work, prices
+from app import bounded_work
+from app.games.pokemon.prices import prices
 from app.bounded_work import Lane, Late
 
 

@@ -26,8 +26,8 @@ from pathlib import Path
 import pytest
 
 from app.main import connect
-from app import format_evaluator as evaluator
-from app import format_standing
+from app.games.pokemon.formats import format_evaluator as evaluator
+from app.games.pokemon.formats import format_standing
 from test_card_attributes import ACE_SPEC_BW, BULBASAUR_ME, ENERGY_SV, EX_BW, SWITCH_ME
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records

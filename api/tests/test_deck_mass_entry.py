@@ -1,5 +1,5 @@
 """Private Deck TCGplayer Mass Entry export: pure formatter first, then the HTTP contract against PostgreSQL."""
-from app.mass_entry_export import (MAX_LINK_QUANTITY, MAX_URL_BYTES, MassEntryInputRow, format_mass_entry,
+from app.games.pokemon.exports.mass_entry_export import (MAX_LINK_QUANTITY, MAX_URL_BYTES, MassEntryInputRow, format_mass_entry,
                                    iter_mass_entry_text, mass_entry_text)
 
 BASE = "https://www.tcgplayer.com/massentry?productline=Pokemon&c="
@@ -123,7 +123,8 @@ from uuid import uuid4  # noqa: E402
 import pytest  # noqa: E402
 
 from app.main import connect  # noqa: E402
-from app import deck_mass_entry, public_catalog  # noqa: E402
+from app.games.pokemon.exports import deck_mass_entry  # noqa: E402
+from app.games.pokemon.catalog import public_catalog  # noqa: E402
 from test_catalog_metadata import Records  # noqa: E402
 from test_catalog_reconciliation import run  # noqa: E402
 from test_catalog_targets import card, isolated_rules, metadata  # noqa: E402,F401 (isolated_rules is an autouse fixture)

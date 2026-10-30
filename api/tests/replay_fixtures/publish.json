@@ -1,0 +1,104 @@
+{
+  "action": "publish",
+  "body": {
+    "title": "Furret deck"
+  },
+  "kind": "publication",
+  "method": "POST",
+  "path": "/api/decks/efb0382e-7524-4c67-8e9a-2b63403f4014/publication",
+  "projection": {
+    "snapshot": {
+      "checks": {
+        "disclaimer": "Basic deck checks only. Format legality, including rotation and banned cards, is reported by the advisory format checks.",
+        "excess": "0",
+        "identities": [
+          {
+            "name": "Furret",
+            "quantity": "7",
+            "status": "over_limit"
+          }
+        ],
+        "shortage": "53",
+        "size_status": "shortage"
+      },
+      "identities": [
+        {
+          "editions": [
+            {
+              "card_kind": "pokemon",
+              "collector_number": "1",
+              "edition_ref": "a633bbbb14e45d276da3b1484d2a3a9207439bcfd36f43fb",
+              "evolution_root": "Furret",
+              "evolution_stage": 0,
+              "evolves_from": null,
+              "image_url": null,
+              "printing_name": "Furret",
+              "printing_ref": "c6b91ade3ae12bc0d5c2d280dcb62102bb56d6b968d65268",
+              "quantity": "1",
+              "set_id": "swsh3",
+              "set_name": "Darkness Ablaze",
+              "trainer_type": null,
+              "variant": {
+                "size": "standard",
+                "type": "normal"
+              }
+            },
+            {
+              "card_kind": "pokemon",
+              "collector_number": "1",
+              "edition_ref": "53117d51f21864484786368b8c26846b5df426a30657e4c0",
+              "evolution_root": "Furret",
+              "evolution_stage": 0,
+              "evolves_from": null,
+              "image_url": null,
+              "printing_name": "Furret",
+              "printing_ref": "c6b91ade3ae12bc0d5c2d280dcb62102bb56d6b968d65268",
+              "quantity": "2",
+              "set_id": "swsh3",
+              "set_name": "Darkness Ablaze",
+              "trainer_type": null,
+              "variant": {
+                "size": "standard",
+                "type": "reverse"
+              }
+            },
+            {
+              "card_kind": "pokemon",
+              "collector_number": "2",
+              "edition_ref": "b0f7356d81edde33d0b488d02619b7e89015b7daf42ec50c",
+              "evolution_root": "Furret",
+              "evolution_stage": 0,
+              "evolves_from": null,
+              "image_url": null,
+              "printing_name": "Furret",
+              "printing_ref": "43d51bc9e28b4c6656c2a6be21de17521efb410c4739f1d6",
+              "quantity": "4",
+              "set_id": "swsh3",
+              "set_name": "Darkness Ablaze",
+              "trainer_type": null,
+              "variant": {
+                "kind": "unspecified",
+                "label": "Unspecified Variant"
+              }
+            }
+          ],
+          "name": "Furret",
+          "quantity": "7"
+        }
+      ],
+      "published_at": "2026-10-29T07:45:08.980415Z",
+      "target_format": "expanded",
+      "title": "Furret deck",
+      "total": "7",
+      "version": 1
+    },
+    "visibility": "unlisted"
+  },
+  "response": {
+    "revoked": false,
+    "token": "kL4rynnwHp6IXSDL8HUWZC7SCK1XgvyP",
+    "version": 1
+  },
+  "title": "Furret deck",
+  "token": "kL4rynnwHp6IXSDL8HUWZC7SCK1XgvyP"
+}
