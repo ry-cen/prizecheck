@@ -41,6 +41,12 @@ def read_pointer(ref, size) -> dict | None:
         return None
 
 
+def same_object(pointer: dict | None, row) -> bool:
+    """Pointer identity includes its key and media type, even for identical bytes."""
+    return pointer is not None and all(pointer[p] == row[r] for p, r in (
+        ('key', 'storage_key'), ('sha256', 'sha256'), ('content_type', 'content_type')))
+
+
 def public_address(ref: str | None, size: str, *, excluded_prefixes: tuple[str, ...]) -> str | None:
     pointer = read_pointer(ref, size)
     if pointer is None or pointer['key'].split('/')[0] in excluded_prefixes:

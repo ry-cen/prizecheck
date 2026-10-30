@@ -31,13 +31,14 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor
 from functools import partial
 from dataclasses import dataclass
 from typing import Callable, NamedTuple
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import psycopg
 import httpx
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from app.art_storage import storage
-from app.core.art.public import read_pointer, write_pointer, delete_pointer
+from app.core.art.public import read_pointer, write_pointer, delete_pointer, same_object
 from app.core.art.urls import SIZES, art_version
 from app.core.art.dimensions import image_size
 from app.db import connect
@@ -331,20 +332,54 @@ def _stored(conn, printing_id: UUID, size: str, source: str, obj, fresh: bool, c
     return _image(data, obj["content_type"], IMMUTABLE if fresh else REVALIDATE)
 
 
-def _pointer(ref, size, obj):
-    try:
-        write_pointer(ref, size, storage_key=obj["storage_key"], sha256=obj["sha256"], content_type=obj["content_type"])
-    except (OSError, ValueError) as error:
-        log.warning("Art pointer write failed: %s", type(error).__name__)
-        try:
+ART_POINTER_LOCK = 914720
+POINTER_LOCK_TIMEOUT = "5s"
+
+
+def lock_pointer(conn, printing_id, size) -> None:
+    conn.execute(psycopg.sql.SQL("SET LOCAL lock_timeout = {}").format(psycopg.sql.Literal(POINTER_LOCK_TIMEOUT)))
+    conn.execute("SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (ART_POINTER_LOCK, f"{printing_id}/{size}"))
+
+
+def sync_pointer(conn, printing_id, size, *, verify_file: bool, skip=lambda row: False) -> str:
+    """Align a pointer with the current row under the caller's transaction and pointer lock."""
+    row = conn.execute("SELECT a.storage_key,a.sha256,a.content_type,p.public_ref FROM art_object a "
+                       "JOIN catalog_printing p ON p.id=a.printing_id WHERE a.printing_id=%s AND a.size=%s",
+                       (printing_id, size)).fetchone()
+    ref = row["public_ref"] if row else conn.execute(
+        "SELECT public_ref FROM catalog_printing WHERE id=%s", (printing_id,)).fetchone()["public_ref"]
+    if row is None:
+        delete_pointer(ref, size)
+        return "deleted"
+    if skip(row):
+        return "skipped"
+    if verify_file:
+        data = storage().get(row["storage_key"])
+        if data is None or hashlib.sha256(data).hexdigest() != row["sha256"]:
             delete_pointer(ref, size)
-        except (OSError, ValueError):
-            pass
+            return "deleted"
+    if same_object(read_pointer(ref, size), row):
+        return "kept"
+    write_pointer(ref, size, storage_key=row["storage_key"], sha256=row["sha256"], content_type=row["content_type"])
+    return "written"
+
+
+def _repair_pointer(pid, size):
+    try:
+        with connect() as conn, conn.transaction():
+            lock_pointer(conn, pid, size)
+            sync_pointer(conn, pid, size, verify_file=False)
+    except (psycopg.Error, OSError, ValueError) as error:
+        log.warning("Art pointer repair failed: %s", type(error).__name__)
+
+
+def _before_commit(conn):
+    """Failure injection seam after pointer synchronization."""
 
 
 def _store(pid, size, source, obj, data, content_type, fresh, count, key_prefix, public_ref, extra=None):
     digest = hashlib.sha256(data).hexdigest()
-    key = f"{key_prefix}/{size}/{str(pid)[:2]}/{pid}-{hashlib.sha256(source.encode()).hexdigest()[:16]}"
+    key = f"{key_prefix}/{size}/{str(pid)[:2]}/{pid}-{hashlib.sha256(source.encode()).hexdigest()[:16]}-{uuid4().hex[:16]}"
     try:
         storage().put(key, data)
     except OSError as error:
@@ -353,22 +388,38 @@ def _store(pid, size, source, obj, data, content_type, fresh, count, key_prefix,
             with connect() as conn:
                 _hit(conn, pid, size)
         return _image(data, content_type, REVALIDATE)
-    with connect() as conn, conn.transaction():
-        if extra is not None:
-            extra(conn)
-        conn.execute("""INSERT INTO art_object(printing_id,size,source_url,storage_key,sha256,content_type,byte_size)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (printing_id,size) DO UPDATE SET source_url=EXCLUDED.source_url,
-              storage_key=EXCLUDED.storage_key, sha256=EXCLUDED.sha256, content_type=EXCLUDED.content_type,
-              byte_size=EXCLUDED.byte_size, stored_at=now()""",
-                     (pid, size, source, key, digest, content_type, len(data)))
-        conn.execute("DELETE FROM art_fetch_failure WHERE printing_id=%s AND size=%s", (pid, size))
-        if count:
-            _hit(conn, pid, size)
-    _pointer(public_ref, size, dict(storage_key=key, sha256=digest, content_type=content_type))
-    if obj and obj["storage_key"] != key:
+    pointer_unknown = False
+    try:
+        with connect() as conn, conn.transaction():
+            lock_pointer(conn, pid, size)
+            old = conn.execute("SELECT storage_key FROM art_object WHERE printing_id=%s AND size=%s FOR UPDATE",
+                               (pid, size)).fetchone()
+            if extra is not None:
+                extra(conn)
+            conn.execute("""INSERT INTO art_object(printing_id,size,source_url,storage_key,sha256,content_type,byte_size)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (printing_id,size) DO UPDATE SET source_url=EXCLUDED.source_url,
+                  storage_key=EXCLUDED.storage_key, sha256=EXCLUDED.sha256, content_type=EXCLUDED.content_type,
+                  byte_size=EXCLUDED.byte_size, stored_at=now()""",
+                         (pid, size, source, key, digest, content_type, len(data)))
+            conn.execute("DELETE FROM art_fetch_failure WHERE printing_id=%s AND size=%s", (pid, size))
+            if count:
+                _hit(conn, pid, size)
+            try:
+                sync_pointer(conn, pid, size, verify_file=False)
+            except (OSError, ValueError) as error:
+                log.warning("Art pointer write failed: %s", type(error).__name__)
+                try:
+                    delete_pointer(public_ref, size)
+                except (OSError, ValueError):
+                    pointer_unknown = True
+            _before_commit(conn)
+    except (psycopg.Error, OSError, ValueError) as error:
+        log.warning("Art store transaction failed: %s", type(error).__name__)
+        return _image(data, content_type, REVALIDATE)
+    if old and old["storage_key"] != key and not pointer_unknown:
         try:
-            storage().delete(obj["storage_key"])
+            storage().delete(old["storage_key"])
         except (ValueError, OSError):
             pass
     return _image(data, content_type, IMMUTABLE if fresh else REVALIDATE)
@@ -393,7 +444,7 @@ def serve(printing_id: str, size: str, v: str | None, count: bool = True, *, all
             if linked_art.fullmatch(source):
                 return _linked(source, fresh)
             answer = _stored(conn, pid, size, source, art.obj, fresh, count)
-            if answer and (count or (read_pointer(art.public_ref, size) or {}).get("sha256") == art.obj["sha256"]):
+            if answer and (count or same_object(read_pointer(art.public_ref, size), art.obj)):
                 return answer
     lock = _lock_for(str(pid), size)
     if not lock.acquire(timeout=LOCK_WAIT):
@@ -418,7 +469,7 @@ def serve(printing_id: str, size: str, v: str | None, count: bool = True, *, all
                 answer = _stored(conn, pid, size, source, art.obj, _fresh(art, size, source, v), count)
             if answer:
                 if not count:
-                    _pointer(art.public_ref, size, art.obj)
+                    _repair_pointer(pid, size)
                 return answer
             source = "measure"
         if source == "measure":
@@ -446,7 +497,7 @@ def serve(printing_id: str, size: str, v: str | None, count: bool = True, *, all
         if answer:
             record_comparison()
             if not count:
-                _pointer(art.public_ref, size, art.obj)
+                _repair_pointer(pid, size)
             return answer
         failure = art.failure
         if failure and failure["source_url"] == source and failure["age"] < backoff_seconds(failure["failures"]):

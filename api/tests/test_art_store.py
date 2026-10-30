@@ -254,9 +254,9 @@ def test_row_matches_disk_and_a_missing_or_corrupt_file_is_refetched(pids, upstr
     path = tmp_path / row["storage_key"]
     assert path.read_bytes() == body
     path.unlink()
-    assert get(pid).content == body and upstream.count == 2 and path.read_bytes() == body
+    assert get(pid).content == body and upstream.count == 2 and (path := tmp_path / objects(pid)[0]["storage_key"]).read_bytes() == body
     path.write_bytes(b"corrupt")
-    assert get(pid).content == body and upstream.count == 3 and path.read_bytes() == body
+    assert get(pid).content == body and upstream.count == 3 and (path := tmp_path / objects(pid)[0]["storage_key"]).read_bytes() == body
 
 
 def test_each_served_request_counts_a_hit(pids, upstream):
@@ -614,99 +614,325 @@ def test_off_on_recovery_remeasures_the_candidate(pids, candidate, monkeypatch):
     assert candidate.count == 2
 
 
-def test_purge_keeps_a_concurrently_replaced_base_row_and_pointer(pids, candidate, monkeypatch):
+# Pointer writers run in separate processes in production; these helpers use separate
+# connections and events to exercise their shared PostgreSQL lock deterministically.
+def pointer_tool(name):
     import runpy
-    from contextlib import contextmanager
     from pathlib import Path
-    from app.core.art.public import read_pointer
+    return runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts' / 'art_store.py'))[name]
+
+
+def pointer_ref(pid):
+    return sql('SELECT public_ref FROM catalog_printing WHERE id=%s', pid)[0]['public_ref']
+
+
+def store_bytes(pid, source='https://assets.tcgdex.net/replacement/high.webp', data=None):
+    return art_store._store(pid, 'large', source, None, webp(128) if data is None else data,
+                            'image/webp', True, True, 'tcgdex', pointer_ref(pid))
+
+
+def assert_pointer_current(pid, monkeypatch):
+    import psycopg
+    from app.core.art.public import read_pointer, same_object
+    row = next(r for r in objects(pid) if r['size'] == 'large')
+    ref = pointer_ref(pid)
+    assert same_object(read_pointer(ref, 'large'), row)
+    data = art_storage.storage().get(row['storage_key'])
+    assert data is not None and hashlib.sha256(data).hexdigest() == row['sha256']
+    def forbidden(*args, **kwargs):
+        raise AssertionError('public art opened PostgreSQL')
+    with monkeypatch.context() as patch:
+        patch.setattr(psycopg, 'connect', forbidden)
+        answer = client.get(f'/api/public/art/{ref}/large')
+        assert answer.status_code == 200 and answer.content == data
+    return row
+
+
+def run_locked_race(monkeypatch, target, attribute, first, second):
+    entered, release = threading.Event(), threading.Event()
+    original = target[attribute] if isinstance(target, dict) else getattr(target, attribute)
+    def paused(*args, **kwargs):
+        entered.set()
+        assert release.wait(10), 'writer was not released'
+        return original(*args, **kwargs)
+    with monkeypatch.context() as patch:
+        if isinstance(target, dict):
+            patch.setitem(target, attribute, paused)
+        else:
+            patch.setattr(target, attribute, paused)
+        with ThreadPoolExecutor(2) as pool:
+            left = pool.submit(first)
+            try:
+                assert entered.wait(10), 'writer never reached pointer hook'
+                right = pool.submit(second)
+                deadline = time.monotonic() + 4
+                with connect() as conn:
+                    while True:
+                        waiting = conn.execute("SELECT count(*) AS n FROM pg_locks WHERE locktype='advisory' "
+                                               'AND classid=914720 AND objsubid=2 AND NOT granted').fetchone()['n']
+                        if waiting >= 1:
+                            break
+                        assert time.monotonic() < deadline, 'no scoped advisory waiter observed'
+            finally:
+                release.set()
+            return left.result(timeout=10), right.result(timeout=10)
+
+
+def test_pointer_repair_cannot_restore_a_replaced_object(pids, monkeypatch):
+    from app.core.art.public import delete_pointer
     pid = pids['card-1']
-    assert get(pid, 'large').status_code == 200
+    store_bytes(pid)
+    old = objects(pid)[0]
+    delete_pointer(pointer_ref(pid), 'large')
+    repair = pointer_tool('pointers')
+    run_locked_race(monkeypatch, art_store, 'write_pointer', repair,
+                    lambda: store_bytes(pid, data=webp(256)))
+    assert_pointer_current(pid, monkeypatch)
+    assert art_storage.storage().get(old['storage_key']) is None
+
+
+def test_api_replacement_waits_for_nothing_stale(pids, monkeypatch, capsys):
+    pid = pids['card-1']
+    store_bytes(pid)
+    repair = pointer_tool('pointers')
+    run_locked_race(monkeypatch, art_store, 'write_pointer',
+                    lambda: store_bytes(pid, data=webp(256)), repair)
+    assert '1 kept' in capsys.readouterr().out
+    assert_pointer_current(pid, monkeypatch)
+
+
+def test_purge_keeps_a_concurrently_replaced_base_row_and_pointer(pids, candidate, monkeypatch):
+    # Pause after the identity scan, before purge takes its lock.
+    from contextlib import contextmanager
+    pid = pids['card-1']
+    get(pid, 'large')
+    old = objects(pid)[0]
     monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
-    tool = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts' / 'art_store.py'))
-    purge = tool['purge_tcgplayer']
-    replaced = []
-
-    class Interleaved:
-        def __init__(self, conn):
-            self.conn = conn
-
-        def transaction(self):
-            return self.conn.transaction()
-
-        def execute(self, sql, params=None):
-            if sql.startswith('DELETE FROM art_object') and not replaced:
-                assert get(pid, 'large').content == webp(64)
-                replaced.append(next(row for row in objects(pid) if row['size'] == 'large'))
-            return self.conn.execute(sql, params)
-
+    purge = pointer_tool('purge_tcgplayer')
+    scanned, release = threading.Event(), threading.Event()
+    calls = 0
     @contextmanager
-    def interleaved_connect():
+    def paused_connect():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            scanned.set()
+            assert release.wait(10)
         with connect() as conn:
-            yield Interleaved(conn)
-
-    monkeypatch.setitem(purge.__globals__, 'connect', interleaved_connect)
-    assert purge() == 0
-    assert objects(pid) == replaced
-    assert art_storage.storage().get(replaced[0]['storage_key']) == webp(64)
-    with connect() as conn:
-        ref = conn.execute('SELECT public_ref FROM catalog_printing WHERE id=%s', (pid,)).fetchone()['public_ref']
-    assert read_pointer(ref, 'large')['key'] == replaced[0]['storage_key']
+            yield conn
+    monkeypatch.setitem(purge.__globals__, 'connect', paused_connect)
+    with ThreadPoolExecutor(1) as pool:
+        future = pool.submit(purge)
+        try:
+            assert scanned.wait(10)
+            assert get(pid, 'large').content == webp(64)
+            replacement = objects(pid)
+        finally:
+            release.set()
+        assert future.result(timeout=10) == 0
+    assert objects(pid) == replacement
+    assert_pointer_current(pid, monkeypatch)
+    assert art_storage.storage().get(old['storage_key']) is None
 
 
 def test_purge_repairs_pointer_replaced_after_commit(pids, candidate, monkeypatch):
-    import runpy
-    from pathlib import Path
-    from app.core.art.public import delete_pointer, read_pointer
     pid = pids['card-1']
-    assert get(pid, 'large').status_code == 200
+    get(pid, 'large')
+    old = objects(pid)[0]
     monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
-    tool = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts' / 'art_store.py'))
-    purge = tool['purge_tcgplayer']
-    replacements = []
-
-    def interleaved_delete(ref, size):
-        if not replacements:
-            # The conditional deletion has committed before file/pointer cleanup.
-            assert objects(pid) == []
-            assert get(pid, 'large').content == webp(64)
-            replacements.extend(objects(pid))
-        delete_pointer(ref, size)
-
-    monkeypatch.setitem(purge.__globals__, 'delete_pointer', interleaved_delete)
-    assert purge() == 0
-    with connect() as conn:
-        ref = conn.execute('SELECT public_ref FROM catalog_printing WHERE id=%s', (pid,)).fetchone()['public_ref']
-    assert read_pointer(ref, 'large')['key'] == replacements[0]['storage_key']
-    assert art_storage.storage().get(replacements[0]['storage_key']) == webp(64)
+    purge = pointer_tool('purge_tcgplayer')
+    run_locked_race(monkeypatch, purge.__globals__, 'delete_pointer', purge,
+                    lambda: get(pid, 'large'))
+    assert_pointer_current(pid, monkeypatch)
+    assert art_storage.storage().get(old['storage_key']) is None
 
 
 def test_pointers_repairs_replacement_when_old_file_disappears(pids, candidate, monkeypatch):
-    import runpy
-    from pathlib import Path
+    # The repair owns the lock first; the API removes the old file only after it commits.
+    from app.core.art.public import delete_pointer
+    pid = pids['card-1']
+    get(pid, 'large')
+    old = objects(pid)[0]
+    delete_pointer(pointer_ref(pid), 'large')
+    repair = pointer_tool('pointers')
+    def replace():
+        monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
+        return get(pid, 'large')
+    run_locked_race(monkeypatch, art_store, 'write_pointer', repair, replace)
+    assert_pointer_current(pid, monkeypatch)
+    assert art_storage.storage().get(old['storage_key']) is None
+
+
+def test_identical_bytes_under_two_keys_are_told_apart(pids, monkeypatch, capsys):
+    from app.core.art.public import read_pointer, write_pointer
+    pid = pids['card-1']
+    get(pid, 'large')
+    old = objects(pid)[0]
+    old_data = art_storage.storage().get(old['storage_key'])
+    set_image(pid, 'https://assets.tcgdex.net/en/fixture/moved')
+    get(pid, 'large')
+    row = objects(pid)[0]
+    assert old['sha256'] == row['sha256'] and old['storage_key'] != row['storage_key']
+    assert read_pointer(pointer_ref(pid), 'large')['key'] == row['storage_key']
+    assert art_storage.storage().get(old['storage_key']) is None
+    # A valid old pointer with identical bytes must be repaired by both writers.
+    art_storage.storage().put(old['storage_key'], old_data)
+    def stale():
+        write_pointer(pointer_ref(pid), 'large', storage_key=old['storage_key'],
+                      sha256=old['sha256'], content_type=old['content_type'])
+    stale()
+    assert pointer_tool('pointers')() == 0
+    assert '1 written' in capsys.readouterr().out
+    assert read_pointer(pointer_ref(pid), 'large')['key'] == row['storage_key']
+    stale()
+    art_store.serve(str(pid), 'large', None, count=False, allowed_host=ALLOWED_HOST,
+                    linked_art=art_route.LINKED_ART, fetcher=lambda: art_route._fetcher,
+                    key_prefix='tcgdex', upgrade=None)
+    assert read_pointer(pointer_ref(pid), 'large')['key'] == row['storage_key']
+    assert_pointer_current(pid, monkeypatch)
+
+
+def test_failed_commit_leaves_no_dangling_pointer(pids, monkeypatch, capsys):
     from app.core.art.public import read_pointer
     pid = pids['card-1']
-    assert get(pid, 'large').status_code == 200
+    store_bytes(pid)
     old = objects(pid)[0]
-    tool = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts' / 'art_store.py'))
-    pointers = tool['pointers']
-    original_get = art_storage.DiskArtStorage.get
-    replacements = []
+    def fail(conn):
+        raise psycopg.OperationalError('injected commit failure')
+    import psycopg
+    with monkeypatch.context() as patch:
+        patch.setattr(art_store, '_before_commit', fail)
+        answer = store_bytes(pid, data=webp(256))
+    assert answer.headers['cache-control'] == art_store.REVALIDATE
+    assert objects(pid) == [old]
+    assert art_storage.storage().get(old['storage_key']) is not None
+    ref = pointer_ref(pid)
+    pointer = read_pointer(ref, 'large')
+    assert pointer['key'] != old['storage_key']
+    data = art_storage.storage().get(pointer['key'])
+    assert hashlib.sha256(data).hexdigest() == pointer['sha256']
+    with monkeypatch.context() as patch:
+        patch.setattr(psycopg, 'connect', lambda *a, **k: pytest.fail('public connected'))
+        assert client.get(f'/api/public/art/{ref}/large').content == data
+    pointer_tool('pointers')()
+    assert '1 written' in capsys.readouterr().out
+    assert_pointer_current(pid, monkeypatch)
 
-    def interleaved_get(self, key):
-        if key == old['storage_key'] and not replacements:
-            # Replacing the object also writes its pointer and removes the old file.
-            monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
-            # Avoid intercepting the signed-in request's own reads.
-            with monkeypatch.context() as patch:
-                patch.setattr(art_storage.DiskArtStorage, 'get', original_get)
-                assert get(pid, 'large').content == webp(64)
-            replacements.extend(objects(pid))
-            assert original_get(self, old['storage_key']) is None
-        return original_get(self, key)
 
-    monkeypatch.setattr(art_storage.DiskArtStorage, 'get', interleaved_get)
-    assert pointers() == 0
-    assert replacements
-    with connect() as conn:
-        ref = conn.execute('SELECT public_ref FROM catalog_printing WHERE id=%s', (pid,)).fetchone()['public_ref']
-    assert read_pointer(ref, 'large')['key'] == replacements[0]['storage_key']
+def test_pointer_write_and_delete_both_fail_keep_the_old_file(pids, monkeypatch):
+    pid = pids['card-1']
+    store_bytes(pid)
+    old = objects(pid)[0]
+    def fail(*args, **kwargs):
+        raise OSError('storage unavailable')
+    monkeypatch.setattr(art_store, 'write_pointer', fail)
+    monkeypatch.setattr(art_store, 'delete_pointer', fail)
+    assert store_bytes(pid, data=webp(256)).body == webp(256)
+    assert art_storage.storage().get(old['storage_key']) is not None
+
+
+@pytest.mark.parametrize('missing', [True, False])
+def test_pointers_deletes_only_under_the_lock(pids, monkeypatch, capsys, missing):
+    from app.core.art.public import read_pointer
+    pid = pids['card-1']
+    store_bytes(pid)
+    row = objects(pid)[0]
+    repair = pointer_tool('pointers')
+    original_lock = repair.__globals__['lock_pointer']
+    def locked(conn, pid, size):
+        original_lock(conn, pid, size)
+        if not missing:
+            conn.execute('DELETE FROM art_object WHERE printing_id=%s AND size=%s', (pid, size))
+    monkeypatch.setitem(repair.__globals__, 'lock_pointer', locked)
+    if missing:
+        art_storage.storage().delete(row['storage_key'])
+    original_delete = art_store.delete_pointer
+    def checked(ref, size):
+        with connect() as conn:
+            assert conn.execute("SELECT count(*) AS n FROM pg_locks WHERE locktype='advisory' "
+                                'AND classid=914720 AND objsubid=2 AND granted').fetchone()['n'] >= 1
+        original_delete(ref, size)
+    monkeypatch.setattr(art_store, 'delete_pointer', checked)
+    real_delete = art_storage.DiskArtStorage.delete
+    def metadata_only(self, key):
+        assert key.startswith('public/'), 'repair deleted an object file'
+        return real_delete(self, key)
+    monkeypatch.setattr(art_storage.DiskArtStorage, 'delete', metadata_only)
+    assert repair() == 0
+    assert '1 deleted' in capsys.readouterr().out
+    assert read_pointer(pointer_ref(pid), 'large') is None
+    if not missing:
+        assert art_storage.storage().get(row['storage_key']) is not None
+
+
+def test_purge_then_recreate_never_unlinks_the_new_file(pids, candidate, monkeypatch):
+    pid = pids['card-1']
+    get(pid, 'large')
+    old = objects(pid)[0]
+    monkeypatch.setenv('ART_TCGPLAYER_SOURCE', 'off')
+    purge = pointer_tool('purge_tcgplayer')
+    paused_cleanup(monkeypatch, old['storage_key'], purge,
+                   lambda: store_bytes(pid, old['source_url']))
+    row = assert_pointer_current(pid, monkeypatch)
+    assert row['storage_key'] != old['storage_key']
+    assert art_storage.storage().get(old['storage_key']) is None
+
+
+def paused_cleanup(monkeypatch, old_key, first, second):
+    entered, release = threading.Event(), threading.Event()
+    original = art_storage.DiskArtStorage.delete
+    def paused(self, key):
+        if key == old_key:
+            entered.set()
+            assert release.wait(10)
+        return original(self, key)
+    with monkeypatch.context() as patch:
+        patch.setattr(art_storage.DiskArtStorage, 'delete', paused)
+        with ThreadPoolExecutor(1) as pool:
+            future = pool.submit(first)
+            try:
+                assert entered.wait(10)
+                second()
+            finally:
+                release.set()
+            future.result(timeout=10)
+
+
+def test_a_b_a_replacement_keeps_the_current_file(pids, monkeypatch):
+    pid = pids['card-1']
+    source = 'https://assets.tcgdex.net/a/high.webp'
+    store_bytes(pid, source)
+    old = objects(pid)[0]
+    keys = [old['storage_key']]
+    def again():
+        keys.append(objects(pid)[0]['storage_key'])
+        store_bytes(pid, source)
+        keys.append(objects(pid)[0]['storage_key'])
+    paused_cleanup(monkeypatch, old['storage_key'], lambda: store_bytes(pid), again)
+    assert len(set(keys)) == 3
+    assert_pointer_current(pid, monkeypatch)
+
+
+def test_same_url_different_bytes_get_distinct_keys(pids, monkeypatch):
+    pid = pids['card-1']
+    store_bytes(pid)
+    old = objects(pid)[0]
+    store_bytes(pid, data=webp(256))
+    row = assert_pointer_current(pid, monkeypatch)
+    assert row['storage_key'] != old['storage_key'] and row['sha256'] != old['sha256']
+
+
+def test_pointer_lock_timeout_changes_nothing(pids, monkeypatch):
+    from app.core.art.public import read_pointer
+    pid = pids['card-1']
+    store_bytes(pid)
+    old, pointer = objects(pid)[0], read_pointer(pointer_ref(pid), 'large')
+    monkeypatch.setattr(art_store, 'POINTER_LOCK_TIMEOUT', '200ms')
+    with connect() as conn, conn.transaction():
+        art_store.lock_pointer(conn, pid, 'large')
+        with ThreadPoolExecutor(1) as pool:
+            answer = pool.submit(store_bytes, pid, data=webp(256)).result(timeout=5)
+    assert answer.headers['cache-control'] == art_store.REVALIDATE
+    assert objects(pid) == [old]
+    assert read_pointer(pointer_ref(pid), 'large') == pointer
+    assert_pointer_current(pid, monkeypatch)
