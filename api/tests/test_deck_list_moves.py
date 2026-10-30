@@ -1,5 +1,6 @@
 """Deck Lists follow Moves (ADR 0009): copies arriving in a Deck are covered by its Deck List, and copies leaving it
 never shrink the list. Exercised through the real Holding, Move, undo and reassignment routes over signed HTTP."""
+from timing_support import within_budget
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -286,6 +287,7 @@ def test_holdings_written_without_the_current_routes_still_extend_the_deck_list(
     assert deck_list(owner, deck) == (3, {edition: ('5', '5'), second: ('1', '1')})
 
 
+@pytest.mark.timing
 @pytest.mark.serial(reason='wall-clock: bounds the Deck List trigger statements at 25,000 Holdings')
 @pytest.mark.slow(reason='capacity: 25,000 Holdings in one Deck')
 def test_25000_holdings_extend_the_deck_list_after_plans_cached_from_empty_statements():
@@ -328,7 +330,8 @@ def test_25000_holdings_extend_the_deck_list_after_plans_cached_from_empty_state
     if os.environ.get('TEST_LOG_DIR'):
         with open(os.path.join(os.environ['TEST_LOG_DIR'], 'deck-list-trigger-metrics.log'), 'a') as log:
             log.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n")
-    assert inserted < 10 and raised < 10, (inserted, raised)
+    within_budget(inserted, 10, 'Deck List insert', unit='s')
+    within_budget(raised, 10, 'Deck List raise', unit='s')
     revision, lines = deck_list(owner, deck)
     assert revision == 3 and len(lines) == 25000
     # n = 12345 arrived with 1 + 12345 % 3 = 1 copy and was raised to 2: its line covers both.

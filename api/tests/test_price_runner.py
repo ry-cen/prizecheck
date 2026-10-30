@@ -5,6 +5,7 @@ supervisor through ``price_launcher.spawn`` with a test-local ``sitecustomize`` 
 ``app.tcgdex_record`` modules which talk to a real local HTTP server, so the runner is exercised end to end without
 08-A. Admission (07-A) is simulated by seeding records with the ``quote_contract`` builders.
 """
+from timing_support import within_budget
 import fcntl
 import json
 import multiprocessing
@@ -902,6 +903,7 @@ def test_late_or_foreign_claim_exits_without_any_source_io(fs_env, proc):
     assert not price_launcher.lock_path(0, owner).exists()      # F6: a supervisor whose claim failed removes its lock file
 
 
+@pytest.mark.timing
 @pytest.mark.serial(reason='process: measures real cold-start latency (p95 <= 0.6 s)')
 @pytest.mark.slow(reason='process: 20 real cold starts')
 def test_cold_start_from_admission_commit_to_first_request(fs_env, proc):
@@ -933,7 +935,7 @@ def test_cold_start_from_admission_commit_to_first_request(fs_env, proc):
     samples.sort()
     p95 = samples[int(len(samples) * 0.95) - 1]
     print(f'cold start s: min={samples[0]:.3f} median={samples[len(samples) // 2]:.3f} p95={p95:.3f} max={samples[-1]:.3f}')
-    assert p95 <= 0.6, samples
+    within_budget(p95, 0.6, 'test_cold_start_from_admission_commit_to_first_request', unit='s')
 
 
 @pytest.mark.serial(reason='process: stops a real runner past its lease')

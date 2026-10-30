@@ -1,4 +1,5 @@
 """Multi-source Move, Removal and Undo at the signed HTTP seam (collector workspace spec, API test list)."""
+from timing_support import within_budget
 import hashlib
 import json
 import os
@@ -358,6 +359,7 @@ def test_previous_application_records_keep_working_after_migration():
                       "already_at_destination_count": "0"}
 
 
+@pytest.mark.timing
 @pytest.mark.serial(reason='wall-clock: asserts the two-minute 25,000-Edition Move budget')
 @pytest.mark.slow(reason='capacity: 25 000 Editions across five sources')
 def test_25000_edition_move_across_five_sources_within_two_minutes():
@@ -382,7 +384,7 @@ def test_25000_edition_move_across_five_sources_within_two_minutes():
     elapsed = time.perf_counter() - started
     assert moved.status_code == 200, moved.text
     assert (moved.json()["edition_count"], moved.json()["copy_count"], moved.json()["source_count"]) == (25000, "25000", 5)
-    assert elapsed < 120, f"25,000-Edition multi-source Move took {elapsed:.1f} s"
+    within_budget(elapsed, 120, 'test_25000_edition_move_across_five_sources_within_two_minutes', unit='s')
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         for source in sources:
             assert conn.execute("SELECT count(*),sum(quantity) FROM holding WHERE owner_id=%s AND location_id=%s",

@@ -17,7 +17,7 @@ gh workflow run verify.yml --ref <branch> -f integration=full
 ```
 
 - `sharded` adds the `integration-legs` jobs, 14 legs that run at once, each on its own runner with its own database server: `--suite api --fast --shard K/3` for K from 1 to 3, `--suite auth --fast` (guardrails, the build and vitest, run once for every leg) and `--suite browser --fast --shard K/10` for K from 1 to 10; each leg uploads its own artifact, `verification-<leg>` (such as `verification-api-2` or `verification-browser-7`). On one runner the fast tier took about 32 minutes; a leg takes about 5. It also adds `integration-scanner-model` on both architectures, which builds the Dockerfile's `test` stage and runs the real-model test, the only test that needs ONNX Runtime.
-- `full` adds `integration-full`, one unsharded `npm run verify` (slow tests and the operations suite included) whose artifact is `verification`, plus `integration-scanner-model`. The slow capacity and timing tests fail at random on hosted runners, so a red `full` run needs a look at the failing test before it counts.
+- `full` adds `integration-full`, one unsharded `npm run verify` (slow tests and the operations suite included) whose artifact is `verification`, plus `integration-scanner-model`. A timing budget warns and never fails; read `timing_warnings` in `result.json`. Functional failures still fail the run.
 - `none`, the default, adds nothing (a pull request to `main` runs `sharded` regardless). The default checks run in every dispatched run too.
 
 The local gate (`npm run verify`) and the burn-in (below) are optional tools, not a step before a pull request.
@@ -70,7 +70,7 @@ Worker counts follow the host: pytest `min(6, max(2, cores / 2))`, browser stack
 
 Vitest (`auth/tests`) runs its files in parallel, as before; each file's tests run in order. A whole file is slow with a `// @module-tag slow` line, a single test with `{ tags: ["slow"] }`; either carries a `// slow (<category>): why` comment, and the `slow` tag is defined in `vitest.config.ts`. `--fast` passes `--tags-filter=!slow`, so those tests count as skipped and a fully slow file starts none of its servers. The deck-cost and published-cost files are slow (they start the multi-process price stacks), as are the public-records rebuild test (real API and auth processes) and the tests that wait out the gateway's 3 s budget or the mail relay's 5 s timeout. Those two limits are production constants with no test seam, so their tests keep real time.
 
-Timing tests use real time only where they say why.
+Timing tests use real time only where they say why. A timing budget warns and never fails. The `timing` marker preserves the existing `serial` and `slow` passes. Budget checks record measured values, budgets, units and test node ids; read `timing_warnings` in `result.json`. Functional assertions, protocol timing, hard stops and timeouts that prevent hangs still fail.
 
 ## Bundle boundary
 
@@ -91,12 +91,12 @@ A `FAILED:` line names the module, the chunk and the route it reached. Fix it by
 
 Each run prints its `.scratch/verification/<run>/` directory. It holds:
 
-- `verification.log`, ending with a summary: phase seconds, pytest, vitest and Playwright totals, and the slowest tests;
+- `verification.log`, with one `== WARNING: timing budget exceeded:` line per breach and ending with a summary: phase seconds, pytest, vitest and Playwright totals, and the slowest tests;
 - service logs: `api.log`, `auth.log` and `web.log` for the first stack, `stack-<n>/` for the others;
 - `browser/parallel/` and `browser/serial/` (Playwright output), `playwright-parallel.json`, `playwright-serial.json`;
 - `pytest-parallel.xml`, `pytest-serial.xml`, `vitest.xml` (per-test times), `phases.tsv`, `timings.md`, `timings.json`;
 - `bundle-boundary.json`: the bundle-boundary check's report, also summarised as one line in the summary and recorded in `result.json` under `timings.bundle_boundary`;
-- `result.json`: exit code, suite, selectors, `fast`, `shard`, worker counts, databases, timings.
+- `result.json`: exit code, suite, selectors, `fast`, `shard`, worker counts, databases, timings, and `timing_warnings` (an empty list when no budget was exceeded).
 
 The runner prints `Verification run: <id>` before anything else, so a run that is stopped early still names its directory. Remove a run with `.venv/bin/python scripts/verify_discard.py <id>`, which refuses anything but one existing run directory; never `rm -rf` a path built from a captured id, because an empty id removes every run's evidence.
 

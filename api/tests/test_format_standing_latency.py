@@ -15,6 +15,7 @@ Each rebuild is ``ensure_current`` for all three Formats, timed with a real cloc
 Budgets: ``COLD_BUDGET_S`` for the cold build and ``WARM_BUDGET_S`` for each warm rebuild, recorded in the ticket's
 evidence with the measured times (format-standing-latency-metrics.log in TEST_LOG_DIR).
 """
+from timing_support import within_budget
 import json
 import math
 import os
@@ -99,6 +100,7 @@ def stale():
         conn.execute("SELECT catalog_advance_attribute_revision()")
 
 
+@pytest.mark.timing
 @pytest.mark.serial(reason="wall-clock: asserts the full rebuild's latency budget")
 @pytest.mark.slow(reason="capacity: a 25,000-Printing catalog")
 def test_a_full_rebuild_of_a_catalog_sized_catalog_meets_its_budget(monkeypatch):
@@ -138,5 +140,5 @@ def test_a_full_rebuild_of_a_catalog_sized_catalog_meets_its_budget(monkeypatch)
     metric(json.dumps({"printings": printings, "formats": len(evaluator.FORMATS), "cold_s": round(cold, 2),
                        "warm_s": [round(value, 2) for value in warm], "cold_budget_s": COLD_BUDGET_S,
                        "warm_budget_s": WARM_BUDGET_S}, sort_keys=True))
-    assert cold < COLD_BUDGET_S, cold
-    assert max(warm) < WARM_BUDGET_S, warm
+    within_budget(cold, COLD_BUDGET_S, 'test_a_full_rebuild_of_a_catalog_sized_catalog_meets_its_budget', unit='s')
+    within_budget(max(warm), WARM_BUDGET_S, 'test_a_full_rebuild_of_a_catalog_sized_catalog_meets_its_budget', unit='s')

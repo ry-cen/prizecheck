@@ -148,6 +148,30 @@ def clock_warnings(suspended, skews):
     return lines
 
 
+def timing_warnings(directory):
+    """Collect per-process performance diagnostics after both pytest passes."""
+    breaches = []
+    required = {'nodeid', 'measured', 'budget', 'unit', 'what'}
+    for path in sorted(Path(directory).glob('timing-warnings-*.jsonl')):
+        for line in path.read_text().splitlines():
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and required <= record.keys():
+                breaches.append(record)
+    return breaches
+
+
+def report_timing_warnings(directory):
+    breaches = timing_warnings(directory)
+    with (Path(directory) / 'verification.log').open('a') as log:
+        for breach in breaches:
+            log.write(f"== WARNING: timing budget exceeded: {breach['nodeid']}: "
+                      f"{breach['measured']} > {breach['budget']} {breach['unit']}\n")
+    return {'timing_warnings': breaches}
+
+
 def network_warnings(tests):
     """Lines naming failed Playwright tests during which Chromium dropped requests with net::ERR_NETWORK_CHANGED because
     the host's network configuration changed (an interface or address came or went). The dropped request may be
@@ -333,7 +357,7 @@ def main(argv=None):
                 result = 0 if plan else 1
                 (artifacts/'result.json').write_text(json.dumps({
                     'run': identifier, 'exit_code': result, 'suite': suite, 'selectors': [], 'browser_args': [],
-                    'fast': args.fast, 'shard': None, 'burn_in': plan}))
+                    'fast': args.fast, 'shard': None, 'burn_in': plan, 'timing_warnings': []}))
                 return result
         pytest_workers, browser_workers = effective_workers(suite, args.pytest_workers, args.browser_workers)
         if plan and not plan['specs']:
@@ -386,6 +410,10 @@ def main(argv=None):
             wall, steady = time.time(), time.monotonic()
             with (artifacts/'verification.log').open('a') as log:
                 result = subprocess.run(gate_command(args.selectors), cwd=checkout, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+            try:
+                timing_report = report_timing_warnings(artifacts)
+            except Exception as error:  # A broken report never changes the gate's result.
+                timing_report = {'timing_warnings': [], 'timing_report_error': type(error).__name__}
             suspended = round(max(0.0, (time.time() - wall) - (time.monotonic() - steady)), 1)
             skews['end'] = database_skew(args.admin_url)
             warnings = clock_warnings(suspended, skews)
@@ -403,7 +431,7 @@ def main(argv=None):
             except Exception as error:  # A broken report never changes the gate's result.
                 timings = {'error': type(error).__name__}
             (artifacts/'result.json').write_text(json.dumps({
-                'run': identifier, 'exit_code': result, 'suite': suite, 'selectors': args.selectors,
+                **timing_report, 'run': identifier, 'exit_code': result, 'suite': suite, 'selectors': args.selectors,
                 'browser_args': args.selectors if suite == 'browser' else [], 'fast': args.fast, 'shard': args.shard,
                 'pytest_workers': pytest_workers, 'browser_workers': browser_workers, 'ports': ports, 'databases': names,
                 'database_removed': False, 'reaper': reaper, 'reaped_databases': reaped, 'timings': timings,

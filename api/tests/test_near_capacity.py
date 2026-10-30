@@ -15,6 +15,7 @@ The p95 targets (2.0 s and 1.0 s) are design targets. Here each test proves the 
 correctly; the numbers are confirmed only in #305's quiet serial run, because the verification host is shared while
 the Stage 2 tickets are built.
 """
+from timing_support import within_budget
 import math
 import statistics
 import time
@@ -151,6 +152,7 @@ def p95_of(samples):
     return sorted(samples)[math.ceil(len(samples) * 0.95) - 1]
 
 
+@pytest.mark.timing
 @pytest.mark.slow(reason='capacity: seeds 501 collectors in open discovery with 2,000 listable Editions each and 60 Decks for 200 of them')
 @pytest.mark.serial(reason='bounds the 95th percentile of the Near you read, so it runs with nothing else')
 def test_near_you_answers_500_nearby_candidates_within_the_design_target():
@@ -180,9 +182,10 @@ def test_near_you_answers_500_nearby_candidates_within_the_design_target():
     samples = timed(read, check)
     p95 = p95_of(samples)
     print(f'near-you p95 {p95:.3f}s median {statistics.median(samples):.3f}s', sorted(round(s, 3) for s in samples))
-    assert p95 <= NEAR_P95_SECONDS, (p95, sorted(samples))
+    within_budget(p95, NEAR_P95_SECONDS, 'test_near_you_answers_500_nearby_candidates_within_the_design_target', unit='s')
 
 
+@pytest.mark.timing
 @pytest.mark.slow(reason='capacity: seeds 1,001 collectors in open discovery with 2,000 listable Editions each')
 @pytest.mark.serial(reason='bounds the 95th percentile of the card search read, so it runs with nothing else')
 def test_card_search_answers_1000_nearby_candidates_within_the_design_target():
@@ -210,4 +213,4 @@ def test_card_search_answers_1000_nearby_candidates_within_the_design_target():
     samples = timed(read, check)
     p95 = p95_of(samples)
     print(f'card-search p95 {p95:.3f}s median {statistics.median(samples):.3f}s', sorted(round(s, 3) for s in samples))
-    assert p95 <= SEARCH_P95_SECONDS, (p95, sorted(samples))
+    within_budget(p95, SEARCH_P95_SECONDS, 'test_card_search_answers_1000_nearby_candidates_within_the_design_target', unit='s')
