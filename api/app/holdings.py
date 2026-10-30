@@ -19,11 +19,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .api_errors import api_error
-from .art_urls import route_address
+from .core.art.urls import route_address
 from .db import connect
 from .identity import verified_user
 from .idempotency import expire
-from . import set_codes
 from .inventory_core import MAX_QUANTITY, REPLAY, leaf, lock_owner, quantity, record_undo, undo_id_for
 
 router = APIRouter(prefix="/api/holdings", tags=["holdings"])
@@ -305,12 +304,13 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
         rows = conn.execute(f"""SELECT h.edition_id,h.quantity,h.version,h.location_id,l.name AS location_name,
           p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
           coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
-          coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
+          coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
           coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source
           FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
           JOIN catalog_edition e ON e.id=h.edition_id
           JOIN catalog_printing p ON p.id=e.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
+          JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
           LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
           LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
           LEFT JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=p.id
@@ -319,7 +319,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
         page = rows[:48]
         views = [HoldingView(edition_id=row["edition_id"], quantity=str(row["quantity"]), version=row["version"],
                              printing_id=row["printing_id"], printing_name=row["printing_name"],
-                             set_id=row["set_id"], set_name=row["set_name"], set_code=set_codes.code_for(row["set_id"]), collector_number=row["collector_number"],
+                             set_id=row["set_id"], set_name=row["set_name"], set_code=row["set_code"], collector_number=row["collector_number"],
                              descriptor=row["descriptor"], image_url=route_address(row["printing_id"], row["art_source"]),
                              location_id=row["location_id"], location_name=row["location_name"]) for row in page]
         return LeafHoldings(holdings=views, owner_revision=revision, catalog_revision=state["revision"],

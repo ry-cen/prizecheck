@@ -10,8 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, connect
-from app.catalog import claim_run, execute_run
-from app.catalog_search import _encode_cursor
+from app.games.pokemon.catalog.catalog import claim_run, execute_run
+from app.games.pokemon.catalog.catalog_search import _encode_cursor
 from test_catalog import Source
 
 client = TestClient(app)

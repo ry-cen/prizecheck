@@ -2,12 +2,12 @@
 
 No production configuration enables this. Hooks are inert unless their environment variable is set:
 
-- ``PRICE_FIXTURE_SOURCE_ORIGIN=http://127.0.0.1:<port>``: when ``app.price_source`` is imported, its module-level
+- ``PRICE_FIXTURE_SOURCE_ORIGIN=http://127.0.0.1:<port>``: when ``app.games.pokemon.prices.price_source`` is imported, its module-level
   ``ORIGIN`` string is replaced by this loopback origin. Production code has no origin parameter, so this is the
   only way a test points the source client at a local server. Only loopback http origins are accepted.
 - ``$PRICE_RUNNER_LOCK_DIR/fixture-source-origin``: the same redirect for launched runners. The launcher's environment
   allowlist drops ``PRICE_FIXTURE_SOURCE_ORIGIN`` but keeps ``PRICE_RUNNER_LOCK_DIR``, so a test writes the loopback
-  origin into this file. It is read when ``app.price_source`` is imported (not at start), the environment variable wins
+  origin into this file. It is read when ``app.games.pokemon.prices.price_source`` is imported (not at start), the environment variable wins
   when both are present, and a non-loopback value fails the import loudly. While a redirect is active, requests from a
   runner process (``--slot n`` on its command line) carry ``x-fixture-slot``, ``x-fixture-pid`` and ``x-fixture-pgid``
   so a fake source can attribute concurrency per slot and stop or kill the exact process group.
@@ -103,7 +103,7 @@ def install_connect_guard(violation_log=None, connect_log=None):
 
 
 class _HeaderedHttpx:
-    """``httpx`` as ``app.price_source`` sees it: every attribute is the real one (so ``httpx.TimeoutException`` still
+    """``httpx`` as ``app.games.pokemon.prices.price_source`` sees it: every attribute is the real one (so ``httpx.TimeoutException`` still
     classifies timeouts), except that ``Client`` merges the fixture headers into the client's own."""
 
     def __init__(self, real, headers):
@@ -128,10 +128,10 @@ def runner_slot(argv=None):
 
 
 def source_redirect(origin):
-    """The ``app.price_source`` patch: a loopback origin, plus attribution headers when this process is a runner."""
+    """The ``app.games.pokemon.prices.price_source`` patch: a loopback origin, plus attribution headers when this process is a runner."""
     def redirect(module):
         if type(getattr(module, 'ORIGIN', None)) is not str:
-            raise RuntimeError('app.price_source must define a module-level ORIGIN string')
+            raise RuntimeError('app.games.pokemon.prices.price_source must define a module-level ORIGIN string')
         module.ORIGIN = origin
         slot = runner_slot()
         if slot is not None:
@@ -141,7 +141,7 @@ def source_redirect(origin):
 
 
 def origin_from_file(directory):
-    """The redirect for a launched runner, decided when ``app.price_source`` is imported: the file, if present."""
+    """The redirect for a launched runner, decided when ``app.games.pokemon.prices.price_source`` is imported: the file, if present."""
     def redirect(module):
         path = os.path.join(directory, ORIGIN_FILE)
         try:
@@ -214,9 +214,9 @@ def install(environ=None):
     environ = os.environ if environ is None else environ
     patches, on_lookup = {}, {}
     if environ.get(SOURCE_ORIGIN):
-        patches['app.price_source'] = source_redirect(loopback_origin(environ[SOURCE_ORIGIN]))
+        patches['app.games.pokemon.prices.price_source'] = source_redirect(loopback_origin(environ[SOURCE_ORIGIN]))
     elif environ.get(LOCK_DIR):
-        patches['app.price_source'] = origin_from_file(environ[LOCK_DIR])
+        patches['app.games.pokemon.prices.price_source'] = origin_from_file(environ[LOCK_DIR])
     if environ.get(LAUNCHER):
         spawn = launcher_hook(environ[LAUNCHER], environ.get(LAUNCH_LOG))
         patches['app.price_launcher'] = lambda module: setattr(module, 'spawn', spawn)

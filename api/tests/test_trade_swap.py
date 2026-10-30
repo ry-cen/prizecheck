@@ -23,7 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, connect  # noqa: F401
-from app import trade_inventory
+from app.games.pokemon.trading import trade_inventory
 from app.social import trades
 import test_holdings
 from test_batch_add import undo, undo_records
@@ -848,7 +848,7 @@ def test_a_confirm_and_a_removal_of_the_same_holding_run_one_after_the_other(sto
 # Static guards, as test_handover's for Loans.
 
 
-TRADE_MODULES = ('social/trades.py', 'trade_inventory.py', 'trade_picks.py')
+TRADE_MODULES = ('social/trades.py', 'games/pokemon/trading/trade_inventory.py', 'trade_picks.py')
 
 
 def _string_constants(path):
@@ -866,12 +866,12 @@ def test_a_trade_step_writes_its_trade_row_once():
     # too, once per Trade); a second write would key-share the other side's owner row after the step's own locks.
     app_dir = Path(__file__).resolve().parents[1] / 'app'
     writes = {name: len(re.findall(r'\bUPDATE\s+trade\s', _string_constants(app_dir / name))) for name in TRADE_MODULES}
-    assert writes == {'social/trades.py': 1, 'trade_inventory.py': 0, 'trade_picks.py': 0}
+    assert writes == {'social/trades.py': 1, 'games/pokemon/trading/trade_inventory.py': 0, 'trade_picks.py': 0}
 
 
 def test_no_trade_step_takes_a_lock_that_holds_off_a_foreign_key_check():
     app_dir = Path(__file__).resolve().parents[1] / 'app'
     for name in TRADE_MODULES:
         assert 'FOR UPDATE' not in _string_constants(app_dir / name).replace('FOR NO KEY UPDATE', ''), name
-    source = (app_dir / 'trade_inventory.py').read_text()
+    source = (app_dir / 'games/pokemon/trading/trade_inventory.py').read_text()
     assert 'owner_and_rows(' not in source and not re.search(r'\block_owner\(', source)

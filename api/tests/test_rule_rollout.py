@@ -12,8 +12,12 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app import card_art, public_catalog, rule_rollout
-from app.catalog_targets import LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, LiveRulesV1, activate_rule, load_active
+from app.games.pokemon.prices import card_art
+
+from app.games.pokemon.catalog import public_catalog
+
+from app.games.pokemon.catalog import rule_rollout
+from app.games.pokemon.prices.catalog_targets import LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, LiveRulesV1, activate_rule, load_active
 from app.main import app, connect
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret, owner
@@ -700,7 +704,7 @@ def test_a_rollout_gives_a_pre_v5_candidate_its_card_level_id_and_verifies_it_wi
 
 
 def test_the_candidate_refresh_is_enrichment_idempotent_and_leaves_other_candidates_alone(monkeypatch, tcgplayer_products):
-    from app.catalog_targets import add_card_tcgplayer
+    from app.games.pokemon.prices.catalog_targets import add_card_tcgplayer
     reset_rules()
     reset_catalog()
     owner()

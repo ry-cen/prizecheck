@@ -1,5 +1,5 @@
 """Deck -> Pokemon TCG Live export: pure formatter first, then signed HTTP against PostgreSQL."""
-from app.live_export import LiveInputRow, format_live, iter_live_text, live_text
+from app.games.pokemon.exports.live_export import LiveInputRow, format_live, iter_live_text, live_text
 
 
 def ident(category, name, set_code, number):
@@ -86,8 +86,8 @@ from uuid import uuid4  # noqa: E402
 import pytest  # noqa: E402
 
 from app.main import connect  # noqa: E402
-from app import deck_live_export  # noqa: E402
-from app.catalog_targets import LIVE, LIVE_RULES, LiveRulesV1, TargetContext, activate_rule, fingerprint, refresh_printing  # noqa: E402
+from app.games.pokemon.exports import deck_live_export  # noqa: E402
+from app.games.pokemon.prices.catalog_targets import LIVE, LIVE_RULES, LiveRulesV1, TargetContext, activate_rule, fingerprint, refresh_printing  # noqa: E402
 from app.main import connect  # noqa: E402
 from test_catalog import reset_catalog  # noqa: E402
 from test_catalog_metadata import Records, furret  # noqa: E402

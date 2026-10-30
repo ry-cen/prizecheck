@@ -6,8 +6,10 @@ import threading
 import httpx
 import pytest
 
-from app import art_store
-from app.art_store import ArtFetcher, RateLimiter
+from app.core.art import store as art_store
+from app.core.art.store import ArtFetcher, RateLimiter
+from app.games.pokemon.art import route as art_route
+from app.games.pokemon.art.hosts import ALLOWED_HOST
 from app.main import connect
 from test_art_store import Upstream, webp
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, SWITCH_ME, edition_of
@@ -24,8 +26,8 @@ def stub(monkeypatch, tmp_path):
     monkeypatch.setenv('ART_STORE_DIR', str(tmp_path))
     monkeypatch.setenv('ART_WARM_UP', '1')
     upstream = Upstream()
-    monkeypatch.setattr(art_store, '_fetcher',
-                        ArtFetcher(transport=httpx.MockTransport(upstream.handler), limiter=RateLimiter(100000)))
+    monkeypatch.setattr(art_route, '_fetcher',
+                        ArtFetcher(allowed_host=ALLOWED_HOST, transport=httpx.MockTransport(upstream.handler), limiter=RateLimiter(100000)))
     return upstream
 
 

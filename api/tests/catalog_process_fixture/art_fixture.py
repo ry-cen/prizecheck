@@ -1,9 +1,9 @@
 """CI-only card art upstream redirect; loaded by this directory's ``sitecustomize`` when it is on PYTHONPATH.
 
 No production configuration enables this, and the API image copies only ``api/app``, so this file never ships. The art
-fetcher (``app.art_store``) checks every URL against its exact-host allowlist (``https://assets.tcgdex.net``) first; only
+fetcher (``app.core.art.store``) checks every URL against its exact-host allowlist (``https://assets.tcgdex.net``) first; only
 afterwards does it ask ``upstream_target`` where to send the request. In production that is the URL itself. With this
-fixture installed, when ``app.art_store`` is imported its module-level ``upstream_target`` is replaced by a function that
+fixture installed, when ``app.core.art.store`` is imported its module-level ``upstream_target`` is replaced by a function that
 reads ``$CATALOG_PROCESS_FIXTURE_DIR/art-upstream-origin`` on every call (a browser spec writes the file) and returns that
 loopback http origin plus the URL's path. With no file it returns a loopback port that refuses connections, so a test
 never reaches the internet.
@@ -44,7 +44,7 @@ class _PatchOnImport(importlib.abc.MetaPathFinder):
         self.directory = directory
 
     def find_spec(self, name, path=None, target=None):
-        if name != 'app.art_store':
+        if name != 'app.core.art.store':
             return None
         spec = importlib.machinery.PathFinder.find_spec(name, path)
         if spec is None or spec.loader is None:
@@ -56,7 +56,7 @@ class _PatchOnImport(importlib.abc.MetaPathFinder):
         def exec_module(module):
             original(module)
             if not callable(getattr(module, 'upstream_target', None)):
-                raise RuntimeError('app.art_store must define upstream_target')
+                raise RuntimeError('app.core.art.store must define upstream_target')
             module.upstream_target = upstream_target_from(directory)
         loader.exec_module = exec_module
         return spec

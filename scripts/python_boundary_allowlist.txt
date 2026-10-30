@@ -1,0 +1,16 @@
+# Forbidden Python imports and identity-table SQL that exist today, as found by scripts/check_python_boundaries.py.
+# Each Now package removes its own lines. Never add a line to get a change through: split the module instead.
+# Regenerate (only to record a removal) with: .venv/bin/python scripts/check_python_boundaries.py --write-baseline
+
+[edges]
+app.host_readiness -> app.games.pokemon.prices.catalog_targets
+app.want_list -> app.games.pokemon.decks.line_display
+
+[sql]
+app.host_readiness: owner_binding
+app.host_readiness: user
+app.identity: owner_binding
+app.operations: auth_rate_event
+app.operations: auth_send_event
+app.games.pokemon.catalog.rule_rollout: owner_binding
+app.social.profile: released_handle

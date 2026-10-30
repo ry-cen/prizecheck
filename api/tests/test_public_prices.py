@@ -6,9 +6,13 @@ from uuid import uuid4
 
 import pytest
 
-from app import price_binding, price_import, public_prices
+from app.games.pokemon.prices import price_binding
+
+from app.games.pokemon.prices import price_import
+
+from app.games.pokemon.prices import public_prices
 from app.db import connect
-from app.public_prices import publish
+from app.games.pokemon.prices.public_prices import publish
 from app.public_projection import ProjectionUnavailable
 from app.public_records import FilePublicRecords, price_key
 from test_price_binding import HOLO, NORMAL, REVERSE, add_editions, do_rebind, stock, world  # noqa: F401  (world is a fixture)

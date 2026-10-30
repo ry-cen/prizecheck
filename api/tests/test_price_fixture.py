@@ -140,7 +140,7 @@ def recorder():
 
 def test_the_origin_file_in_the_lock_directory_redirects_the_source_and_the_env_wins(tmp_path):
     (tmp_path / price_fixture.ORIGIN_FILE).write_text('http://127.0.0.1:8123\n')
-    show = "import app.price_source as s; print(s.ORIGIN)"
+    show = "import app.games.pokemon.prices.price_source as s; print(s.ORIGIN)"
     out = run(show, tmp_path, PRICE_RUNNER_LOCK_DIR=str(tmp_path))
     assert out.stdout.strip() == 'http://127.0.0.1:8123', out.stderr
     out = run(show, tmp_path, PRICE_RUNNER_LOCK_DIR=str(tmp_path), PRICE_FIXTURE_SOURCE_ORIGIN='http://127.0.0.1:9001')
@@ -154,7 +154,7 @@ def test_the_origin_file_is_read_when_the_source_is_imported_not_at_start(tmp_pa
     target = tmp_path / price_fixture.ORIGIN_FILE
     code = ("import pathlib, sys\n"
             "pathlib.Path(sys.argv[1]).write_text('http://127.0.0.1:8124')\n"
-            "import app.price_source as s; print(s.ORIGIN)\n")
+            "import app.games.pokemon.prices.price_source as s; print(s.ORIGIN)\n")
     full = {k: v for k, v in os.environ.items() if not k.startswith(('PRICE_', 'CATALOG_PROCESS'))}
     full.update(PYTHONPATH=f'{FIXTURE}:{API}', PRICE_RUNNER_LOCK_DIR=str(tmp_path))
     out = subprocess.run([sys.executable, '-c', code, str(target)], capture_output=True, text=True, env=full, cwd=tmp_path)
@@ -164,7 +164,7 @@ def test_the_origin_file_is_read_when_the_source_is_imported_not_at_start(tmp_pa
 @pytest.mark.parametrize('origin', ['https://api.tcgdex.net', 'http://10.0.0.1:80', 'garbage'])
 def test_a_bad_origin_file_is_refused_loudly(tmp_path, origin):
     (tmp_path / price_fixture.ORIGIN_FILE).write_text(origin)
-    out = run("import app.price_source as s; print(s.ORIGIN)", tmp_path, PRICE_RUNNER_LOCK_DIR=str(tmp_path))
+    out = run("import app.games.pokemon.prices.price_source as s; print(s.ORIGIN)", tmp_path, PRICE_RUNNER_LOCK_DIR=str(tmp_path))
     assert out.returncode != 0 and 'loopback' in out.stderr and 'api.tcgdex.net' not in out.stdout
 
 
@@ -174,7 +174,7 @@ def test_a_redirected_runner_names_its_slot_pid_and_group_and_a_hang_is_still_a_
     (tmp_path / price_fixture.ORIGIN_FILE).write_text(origin)
     code = ("import os, sys\n"
             "sys.argv[1:] = ['--slot', '1', '--owner', 'a' * 32]\n"
-            "import app.price_source as s\n"
+            "import app.games.pokemon.prices.price_source as s\n"
             "r = s.fetch('card-1')\n"
             "print(r.ok, r.reason, os.getpid(), os.getpgid(0))\n")
     out = run(code, tmp_path, PRICE_RUNNER_LOCK_DIR=str(tmp_path))
@@ -192,7 +192,7 @@ def test_a_redirected_runner_names_its_slot_pid_and_group_and_a_hang_is_still_a_
 def test_a_process_that_is_not_a_runner_sends_no_fixture_headers(tmp_path, recorder):
     origin, seen, _ = recorder
     (tmp_path / price_fixture.ORIGIN_FILE).write_text(origin)
-    out = run("import app.price_source as s; print(s.fetch('card-1').ok)", tmp_path, PRICE_RUNNER_LOCK_DIR=str(tmp_path))
+    out = run("import app.games.pokemon.prices.price_source as s; print(s.fetch('card-1').ok)", tmp_path, PRICE_RUNNER_LOCK_DIR=str(tmp_path))
     assert out.stdout.strip() == 'True', out.stderr
     assert not any(key.startswith('x-fixture-') for key in seen[0]['headers'])
 

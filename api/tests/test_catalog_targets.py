@@ -11,7 +11,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
+from app.games.pokemon.prices.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
                                  LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, MatchingRulesV4, MatchingRulesV5, MatchingRulesV6, PrintingState, TargetContext, activate_rule,
                                  code_digest, complete_quote_variant, rematch_promos, edition_state, edition_targets, evaluate_edition, normalized_name,
                                  evaluate_printing, fingerprint, load_active, printing_live, refresh_printing)
@@ -701,7 +701,7 @@ def test_quarantine_is_sticky_for_pure_edition_evaluation():
 
 
 def test_pure_live_evaluation_honours_rejections_and_the_closed_flag():
-    from app.catalog_targets import ActiveRule
+    from app.games.pokemon.prices.catalog_targets import ActiveRule
     active = ActiveRule(LIVE, 99, uuid4(), InjectedLive)
     export = {"name": "Furret", "category": "Pokemon", "set": {"id": "swsh3"}, "localId": "136"}
     never = PrintingState()
@@ -784,7 +784,7 @@ def test_import_takes_the_clock_before_touching_metadata_and_blocks_behind_an_ea
                 with connect() as conn:
                     run_id = conn.execute("INSERT INTO catalog_run DEFAULT VALUES RETURNING id").fetchone()["id"]
                     conn.commit()
-                    from app.catalog import claim_run, execute_run
+                    from app.games.pokemon.catalog.catalog import claim_run, execute_run
                     claim_run(conn, run_id)
                     execute_run(conn, run_id, Records(furret()), before_promotion=reached.set)
             except BaseException as exc:  # surfaced below
@@ -929,7 +929,7 @@ def test_sibling_editions_sharing_a_quote_variant_never_both_verify():
 
 def test_a_price_slot_belongs_to_one_edition_of_a_printing_whatever_the_product():
     """The public quote lookup names the Printing's source card and variant key, not the product."""
-    from app.catalog_targets import verified_elsewhere
+    from app.games.pokemon.prices.catalog_targets import verified_elsewhere
     reset_catalog(); activate(MATCHING, 1)
     run(Records(card(1)))
     printing, rows = metadata()
@@ -1017,7 +1017,7 @@ def promo(source_id, number, set_id="svp", name="Pikachu", variants=None):
 
 
 def listing(product_id, name, number, group, conn=None):
-    from app.catalog_targets import number_key
+    from app.games.pokemon.prices.catalog_targets import number_key
     with connect() as connection:
         connection.execute("""INSERT INTO tcgplayer_product(product_id,group_id,name,number,number_key,seen_at,source_updated_at)
           VALUES (%s,%s,%s,%s,%s,now(),now())""", (product_id, group, name, number, number_key(number)))
@@ -1376,7 +1376,7 @@ def stock_prices(*rows):
 
 
 def bound_sub_types():
-    from app.price_binding import rebind
+    from app.games.pokemon.prices.price_binding import rebind
     with connect() as conn:
         rebind(conn)
         return sorted((row["product_id"], row["sub_type_name"]) for row in conn.execute("SELECT * FROM edition_price_binding"))
@@ -1449,7 +1449,7 @@ def test_v5_shared_block_binds_unlimited_and_the_first_edition_sibling_and_leave
     assert states("gym-4") == [("unverified", "rule_failed", None, None)]
     stock_prices((700, "1st Edition"), (700, "Unlimited"), (701, "1st Edition Holofoil"), (701, "Unlimited Holofoil"))
     with connect() as conn:
-        from app.price_binding import rebind
+        from app.games.pokemon.prices.price_binding import rebind
         rebind(conn)
         rows = conn.execute("""SELECT e.descriptor,b.sub_type_name FROM edition_price_binding b JOIN catalog_edition e ON e.id=b.edition_id""").fetchall()
     assert sorted(("1st-edition" in row["descriptor"].get("stamp", []), row["sub_type_name"]) for row in rows) == [
@@ -1492,7 +1492,7 @@ def test_v5_30th_sets_match_by_number_and_name_and_by_name_alone(tcgplayer_produ
 
 
 def test_v5_30th_classic_printing_gets_tcgplayer_art_and_a_30th_printing_keeps_its_tcgdex_image(tcgplayer_products):
-    from app import card_art
+    from app.games.pokemon.prices import card_art
     reset_catalog()
     thirty_products()
     with connect() as conn:
@@ -1520,7 +1520,7 @@ def test_v5_rematch_picks_up_a_30th_product_listed_after_activation(tcgplayer_pr
 
 
 def test_v5_tables_follow_the_active_rule_and_v4_ignores_the_30th_sets(tcgplayer_products):
-    from app.catalog_targets import reviewed_rule, tcgplayer_candidates
+    from app.games.pokemon.prices.catalog_targets import reviewed_rule, tcgplayer_candidates
     thirty_products()
     with connect() as conn:
         assert reviewed_rule(None) is MatchingRulesV6 and reviewed_rule(load_active(conn, MATCHING)) is MatchingRulesV6
@@ -1606,7 +1606,7 @@ def test_v5_a_gained_card_field_is_enrichment_and_a_later_change_or_removal_quar
     assert states("xy11-116") == [("verified", None, 121240, "normal")]
     strip_card_field("xy11-116")
     with connect() as conn:  # the accepted projection a v5 activation over the old candidate shape would have stored
-        from app.catalog_targets import fingerprint, rule_projection
+        from app.games.pokemon.prices.catalog_targets import fingerprint, rule_projection
         row = conn.execute("""SELECT m.edition_id,m.mapping_candidate FROM catalog_edition_metadata m JOIN catalog_edition e ON e.id=m.edition_id
           JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='xy11-116'""").fetchone()
         conn.execute("UPDATE catalog_edition_metadata SET accepted_fingerprint=%s,accepted_projection=%s WHERE edition_id=%s",
@@ -1815,7 +1815,7 @@ def test_v6_rematch_picks_up_a_product_listed_after_activation_in_any_group_of_a
 
 
 def test_v6_digest_covers_the_candidate_lookup_and_the_hook_that_calls_it():
-    from app.catalog_targets import multi_group_candidates, v6_set_path_facts
+    from app.games.pokemon.prices.catalog_targets import multi_group_candidates, v6_set_path_facts
     table = MatchingRulesV6.table()
     assert table["multi_group_candidates"] == inspect.getsource(multi_group_candidates)
     assert table["v6_set_path_facts"] == inspect.getsource(v6_set_path_facts)
@@ -1824,7 +1824,7 @@ def test_v6_digest_covers_the_candidate_lookup_and_the_hook_that_calls_it():
 
 
 def test_v6_candidates_span__a_sets_groups_and_earlier_rules_see_exactly_what_they_did_before(tcgplayer_products):
-    from app.catalog_targets import multi_group_candidates, reviewed_rule, tcgplayer_candidates
+    from app.games.pokemon.prices.catalog_targets import multi_group_candidates, reviewed_rule, tcgplayer_candidates
     v6_products()
     listing(20, "Chespin", "XY01", 1451)
     listing(21, "Cabinet", "XY01", 1452)

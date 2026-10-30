@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from app import catalog_dispatch
+from app.games.pokemon.catalog import catalog_dispatch
 from app.main import connect  # first: app.main imports the routers, and they import it
 from test_collection_import import _card, all_rows, code, collector, edition, save, seed_import_catalog, started
 from test_collection_import_finishes import DRAGON_SHIELD, TCGPLAYER, change, changed, counts

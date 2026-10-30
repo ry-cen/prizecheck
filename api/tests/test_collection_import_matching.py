@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from app import collection_import_aliases as aliases
+from app.games.pokemon.imports import collection_import_aliases as aliases
 from app.main import connect  # first: app.main imports the routers, and they import it
 from test_batch_add import held
 from test_collection_import import _card, _detailed, all_rows, collector, edition, save, seed_import_catalog, started

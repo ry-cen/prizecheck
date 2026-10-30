@@ -31,8 +31,8 @@ from pydantic import BaseModel, Field
 
 from .api_errors import api_error
 from .copy_allocation import spare_rule
-from .deck_ownership import CompetitionWarning, read_ownership
-from .decks import check_revision, read_deck_list, require_deck
+from app.core.decks.ownership import CompetitionWarning, read_ownership
+from app.core.decks.store import check_revision, read_deck_list_revision, require_deck
 from .location_tree import owner_and_rows
 from .db import connect
 from .identity import verified_user
@@ -176,7 +176,7 @@ def pick_list(deck_id: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
         revision, rows = owner_and_rows(conn, user_id)
         require_deck(rows, deck_id)
-        deck_list_revision = read_deck_list(conn, user_id, deck_id).revision
+        deck_list_revision = read_deck_list_revision(conn, user_id, deck_id)
         ownership = read_ownership(conn, user_id, deck_id)
         short = [line for line in ownership.lines if int(line.elsewhere) > 0]
         held = {}

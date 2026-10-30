@@ -8,7 +8,7 @@ from uuid import uuid4
 import psycopg
 
 import app.main  # noqa: F401  (registers the app)
-from app import scanner_save
+from app.games.pokemon.scanner import scanner_save
 from test_batch_add import editions, held, ok, revision, undo_records
 from test_decks import create
 from test_holdings import add, call, client, fixture

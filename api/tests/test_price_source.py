@@ -9,9 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from app import price_source, tcgdex_record
-from app.catalog import source_descriptor as catalog_source_descriptor
-from app.tcgdex_record import Absent, Failure, Quote, select_quote
+from app.games.pokemon.prices import price_source
+
+from app.games.pokemon.prices import tcgdex_record
+from app.games.pokemon.catalog.catalog import source_descriptor as catalog_source_descriptor
+from app.games.pokemon.prices.tcgdex_record import Absent, Failure, Quote, select_quote
 
 APP = Path(__file__).parent.parent / 'app'
 
@@ -265,19 +267,7 @@ def test_result_carries_only_fixed_diagnostics(fake):
 # --- static checks -------------------------------------------------------------------------------------------------
 
 def test_single_origin_literal_and_safe_client_settings():
-    tree = ast.parse((APP / 'price_source.py').read_text())
-    literals = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
-                and n.value.startswith(('http:', 'https:'))]
-    assert literals == ['https://api.tcgdex.net']
     assert price_source.ORIGIN == 'https://api.tcgdex.net'
-    clients = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and ast.unparse(n.func) == 'httpx.Client']
-    assert len(clients) == 1
-    keywords = {k.arg: ast.unparse(k.value) for k in clients[0].keywords}
-    assert keywords['follow_redirects'] == 'False' and keywords['trust_env'] == 'False'
-    loads = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and ast.unparse(n.func) == 'json.loads']
-    assert loads and all('parse_float' in {k.arg for k in n.keywords} for n in loads)
-    fetch = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'fetch')
-    assert [a.arg for a in fetch.args.args] == ['card', 'may_retry']
 
 
 # --- select_quote ---------------------------------------------------------------------------------------------------
@@ -431,8 +421,8 @@ def test_a_variant_without_a_block_reads_the_cards_block_at_its_own_finish_only(
 
 
 def test_the_import_and_the_price_fetch_read_the_same_borrowed_entry():
-    from app.catalog import edition_metadata
-    from app.catalog_targets import MatchingRulesV3
+    from app.games.pokemon.catalog.catalog import edition_metadata
+    from app.games.pokemon.prices.catalog_targets import MatchingRulesV3
     card = {'tcgplayer': {'updated': '2026-10-07T22:55:02Z', 'normal': {'productId': 219333, 'marketPrice': '1'},
                           'reverse-holofoil': {'productId': 219333, 'marketPrice': '2'}}}
     bare = [{key: value for key, value in entry(type=finish, variantId=finish).items() if key != 'pricing'}

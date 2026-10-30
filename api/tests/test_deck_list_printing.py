@@ -11,7 +11,7 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import prices
+from app.games.pokemon.prices import prices
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse)
 from test_decks import create
 from test_deck_lists import add_line, change_line, code, detail

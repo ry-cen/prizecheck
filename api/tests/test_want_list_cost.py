@@ -19,7 +19,7 @@ import psycopg
 import pytest
 
 from app.main import connect  # noqa: F401
-from app import prices
+from app.games.pokemon.prices import prices
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import EMPTY, cost as deck_cost, store  # noqa: F401  (a fixture)
 from test_deck_counting import counting, deck, hold, iono_world, line, new_owner

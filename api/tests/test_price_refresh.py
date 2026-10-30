@@ -68,7 +68,7 @@ def test_absent_follows_the_same_bands_by_checked_at():
 
 def test_the_module_is_postgresql_free():
     code = ("import sys, json; import app.price_refresh; "
-            "print(json.dumps([m for m in ('psycopg', 'app.main', 'app.prices') if m in sys.modules]))")
+            "print(json.dumps([m for m in ('psycopg', 'app.main', 'app.games.pokemon.prices.prices') if m in sys.modules]))")
     out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout) == []
 

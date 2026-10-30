@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 
 from app.main import connect  # noqa: F401
-from app import prices
+from app.games.pokemon.prices import prices
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import buy_missing, counting, deck, hold, iono_world, line, new_owner

@@ -18,7 +18,9 @@ from uuid import uuid4
 import pytest
 
 from app.main import connect  # first: app.main imports the routers, and they import it
-from app import catalog_dispatch, price_launcher, price_refresh, prices, public_records  # noqa: E402
+from app import price_launcher, price_refresh, public_records  # noqa: E402
+from app.games.pokemon.catalog import catalog_dispatch  # noqa: E402
+from app.games.pokemon.prices import prices  # noqa: E402
 from test_batch_add import batch, held, revision, undo_records
 from test_card_attributes import card
 from test_catalog import reset_catalog
@@ -502,7 +504,7 @@ def test_no_route_reads_prices_or_starts_a_catalog_pull_or_returns_source_data(m
     banned = {"prices", "price_refresh", "price_launcher", "public_records", "catalog_dispatch", "catalog"}
     for module in ("collection_import", "collection_import_reader", "collection_import_matcher",
                    "collection_import_finish", "collection_import_aliases"):
-        tree = ast.parse((Path(__file__).parents[1] / "app" / f"{module}.py").read_text())
+        tree = ast.parse(next((Path(__file__).parents[1] / "app").rglob(f"{module}.py")).read_text())
         imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
                     for alias in node.names} | {node.module.split(".")[-1] for node in ast.walk(tree)
                                                 if isinstance(node, ast.ImportFrom) and node.module}

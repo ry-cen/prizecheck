@@ -16,8 +16,9 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher, public_catalog
-from app.catalog_targets import LIVE, activate_rule
+from app import price_launcher
+from app.games.pokemon.catalog import public_catalog
+from app.games.pokemon.prices.catalog_targets import LIVE, activate_rule
 from app.public_projection import FilePublicProjection
 from app.public_records import public_record_store
 from test_catalog import reset_catalog
@@ -116,7 +117,7 @@ def seed_price_rows(editions):
 def seed_quotes(store, editions):
     """The PostgreSQL half (the private readers), then the public ``price:`` records the Published Deck readers read, published
     against the test's store. Every tenth Edition has no market price, so it stays unpriced."""
-    from app.public_prices import publish
+    from app.games.pokemon.prices.public_prices import publish
     seed_price_rows(editions)
     with connect() as conn:
         publish(conn, store)

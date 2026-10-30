@@ -6,9 +6,9 @@ exemption reads effective attributes) and the effective attributes every reader 
 """
 from uuid import UUID, uuid4
 
-from app.card_attributes import RULES, CardAttributeRules, CardAttributes, advance_attribute_revision, \
+from app.games.pokemon.catalog.card_attributes import RULES, CardAttributeRules, CardAttributes, advance_attribute_revision, \
     attribute_revision, read_card_attributes
-from app.attribute_corrections import consistent
+from app.games.pokemon.catalog.attribute_corrections import consistent
 from app.main import connect
 from test_card_attributes import ENERGY_BW, EX_BW, EX_SV, RARE_CANDY_SM, REVERSAL_MISLABELLED, TRAINER_KIT_ENERGY, \
     edition_of, printing_ids

@@ -7,9 +7,9 @@ import pytest
 from fastapi import HTTPException
 
 from app.main import app  # noqa: F401
-from app import public_deck
+from app.games.pokemon.publications import public_deck
 from app.bounded_work import Lane, Late
-from app.public_deck import FrozenRow, SnapshotLate, same_printing, read_current, read_for_export
+from app.games.pokemon.publications.public_deck import FrozenRow, SnapshotLate, same_printing, read_current, read_for_export
 
 
 def test_same_printing_proves_only_a_frozen_pair_whose_edition_record_names_the_frozen_printing():

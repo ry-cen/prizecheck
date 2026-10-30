@@ -354,7 +354,7 @@ class CountingConnection:
 
 
 def test_the_capture_reads_only_the_holdings_of_the_cards_the_lines_reach(monkeypatch):
-    from app import import_owned
+    from app.games.pokemon.imports import import_owned
     e = editions()
     owner, unsorted = new_owner()
     hold(owner, unsorted, e["185R"], 1)

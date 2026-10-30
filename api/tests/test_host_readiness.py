@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from app import host_readiness
-from app.catalog_targets import LIVE, MATCHING, activate_rule
+from app.games.pokemon.prices.catalog_targets import LIVE, MATCHING, activate_rule
 from app.db import connect
 
 SCRIPT = "bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh"

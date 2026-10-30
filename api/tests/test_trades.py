@@ -17,7 +17,7 @@ import psycopg
 import pytest
 
 from app.main import connect  # noqa: F401
-from app import trade_inventory
+from app.games.pokemon.trading import trade_inventory
 from app.social import conversations, owners, trades
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)

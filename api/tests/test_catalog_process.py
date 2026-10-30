@@ -62,7 +62,7 @@ def test_detached_child_survives_api_restart_and_exits_after_exact_run(tmp_path)
     Thread(target=source.serve_forever,kwargs={'poll_interval':0.02},daemon=True).start()
     # Trusted interpreter bootstrap redirects the external source HTTP boundary,
     # without adding test source/fixture switches to the production importer.
-    (tmp_path/'sitecustomize.py').write_text(f"import os, app.catalog\napp.catalog.BASE_URL='http://127.0.0.1:{source.server_port}/cards'\n_original=app.catalog.TCGdexSource.__init__\ndef _fixture_init(self):\n _original(self)\n self.client.headers['x-process-fixture']=str(os.getpid())\napp.catalog.TCGdexSource.__init__=_fixture_init\n")
+    (tmp_path/'sitecustomize.py').write_text(f"import os, app.games.pokemon.catalog.catalog\napp.games.pokemon.catalog.catalog.BASE_URL='http://127.0.0.1:{source.server_port}/cards'\n_original=app.games.pokemon.catalog.catalog.TCGdexSource.__init__\ndef _fixture_init(self):\n _original(self)\n self.client.headers['x-process-fixture']=str(os.getpid())\napp.games.pokemon.catalog.catalog.TCGdexSource.__init__=_fixture_init\n")
     root = Path(__file__).resolve().parents[2]
     env = {**os.environ,'PYTHONPATH':str(tmp_path)+os.pathsep+str(root/'api')}
     port = free_port()
@@ -137,13 +137,13 @@ def test_exact_child_exit_codes_and_safe_terminal_failures(tmp_path):
         runner.execute('SELECT pg_advisory_lock(914703)'); runner.commit()
         assert child(run_id).wait(timeout=5) == 2
     # Only this trusted test interpreter's source boundary is replaced.
-    (tmp_path/'sitecustomize.py').write_text("import app.catalog\nclass Fixture(app.catalog.TCGdexSource):\n def enumerate(self): raise RuntimeError('private credentials')\napp.catalog.TCGdexSource=Fixture\n")
+    (tmp_path/'sitecustomize.py').write_text("import app.games.pokemon.catalog.catalog\nclass Fixture(app.games.pokemon.catalog.catalog.TCGdexSource):\n def enumerate(self): raise RuntimeError('private credentials')\napp.games.pokemon.catalog.catalog.TCGdexSource=Fixture\n")
     assert child(run_id).wait(timeout=5) == 1
     with connect() as conn:
         state = conn.execute('SELECT outcome,error FROM catalog_run WHERE id=%s',(run_id,)).fetchone()
         assert state['outcome'] == 'failed' and 'credentials' not in state['error']
     started = tmp_path/'started'
-    (tmp_path/'sitecustomize.py').write_text(f"import app.catalog,time\nfrom pathlib import Path\nclass Fixture(app.catalog.TCGdexSource):\n def enumerate(self):\n  Path({str(started)!r}).write_text('started')\n  time.sleep(30)\napp.catalog.TCGdexSource=Fixture\n")
+    (tmp_path/'sitecustomize.py').write_text(f"import app.games.pokemon.catalog.catalog,time\nfrom pathlib import Path\nclass Fixture(app.games.pokemon.catalog.catalog.TCGdexSource):\n def enumerate(self):\n  Path({str(started)!r}).write_text('started')\n  time.sleep(30)\napp.games.pokemon.catalog.catalog.TCGdexSource=Fixture\n")
     run_id = reserve()
     process = child(run_id)
     try:
@@ -168,7 +168,7 @@ def test_exact_child_exit_codes_and_safe_terminal_failures(tmp_path):
         from test_catalog_dispatch import start
         with connect() as conn:
             owner = conn.execute('SELECT user_id FROM owner_binding').fetchone()['user_id']
-        with patch('app.catalog_dispatch.launch_import'):
+        with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import'):
             recovered = start(owner)
         assert recovered.status_code == 200 and recovered.json()['run']['id'] != str(killed_run)
         with connect() as conn:

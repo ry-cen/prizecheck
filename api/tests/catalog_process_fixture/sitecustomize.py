@@ -8,8 +8,8 @@ from pathlib import Path
 import time
 
 if os.environ.get('CATALOG_PROCESS_FIXTURE_DIR'):
-    import app.catalog
-    class FixtureSource(app.catalog.TCGdexSource):
+    import app.games.pokemon.catalog.catalog
+    class FixtureSource(app.games.pokemon.catalog.catalog.TCGdexSource):
         def enumerate(self):
             gate = Path(os.environ['CATALOG_PROCESS_FIXTURE_DIR']) / 'release'
             deadline = time.monotonic()+30
@@ -18,7 +18,7 @@ if os.environ.get('CATALOG_PROCESS_FIXTURE_DIR'):
             return {'process-1'}
         def fetch(self, source_id):
             return {'id':source_id,'name':'Pikachu','localId':'1','set':{'id':'fixture','name':'Fixture Set'},'category':'Pokemon','variants':{'normal':True}}
-    app.catalog.TCGdexSource = FixtureSource
+    app.games.pokemon.catalog.catalog.TCGdexSource = FixtureSource
 
 import price_fixture
 price_fixture.install()

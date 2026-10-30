@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 import pytest
 from fastapi.testclient import TestClient
 
-from app.catalog import CatalogError, claim_run, execute_run
+from app.games.pokemon.catalog.catalog import CatalogError, claim_run, execute_run
 from unittest.mock import patch
 from app.main import app, connect
 
@@ -54,7 +54,7 @@ def claim_current(conn):
 
 def dispatch_fixture(owner):
     path = '/api/admin/catalog-runs'
-    with patch('app.catalog_dispatch.launch_import'):
+    with patch('app.games.pokemon.catalog.catalog_dispatch.launch_import'):
         return client.post(path,headers=headers(owner,'POST',path))
 
 def reset_catalog():

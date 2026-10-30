@@ -1,4 +1,4 @@
-"""The scheduled catalog change check (app.catalog_refresh) against a disposable PostgreSQL database.
+"""The scheduled catalog change check (app.games.pokemon.catalog.catalog_refresh) against a disposable PostgreSQL database.
 
 TCGdex is a fake list (the fakes of test_catalog.py); the pull the check starts runs in process through a fake child whose
 wait() claims the reserved run and executes it, like the detached importer would."""
@@ -9,9 +9,9 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
-from app.catalog import CatalogError, TCGdexSource, claim_run, execute_run, user_agent
-from app.catalog_refresh import main, record_index, run_check
-from app.catalog_targets import LIVE, MATCHING, activate_rule
+from app.games.pokemon.catalog.catalog import CatalogError, TCGdexSource, claim_run, execute_run, user_agent
+from app.games.pokemon.catalog.catalog_refresh import main, record_index, run_check
+from app.games.pokemon.prices.catalog_targets import LIVE, MATCHING, activate_rule
 from app.main import connect
 from test_catalog import Source, reset_catalog
 from test_catalog_excluded_series import PHYSICAL, PocketSource
@@ -77,7 +77,7 @@ def seed(ids=SEED):
 def check(source, pull=None):
     """One check with `pull` as the launched importer; returns (exit code, stdout, the check row, launch stub)."""
     out, pull = io.StringIO(), pull or launcher(Listed(ids=("test-1", "test-2", "test-3")))
-    with connect() as conn, patch("app.catalog_dispatch.launch_import", pull):
+    with connect() as conn, patch("app.games.pokemon.catalog.catalog_dispatch.launch_import", pull):
         code = run_check(conn, source, out=out)
     with connect() as conn:
         row = conn.execute("SELECT * FROM catalog_check ORDER BY started_at DESC, id LIMIT 1").fetchone()
@@ -196,7 +196,7 @@ def test_a_promotion_committing_reads_as_pull_running():
 
 
 def test_a_generation_promoted_during_the_check_starts_no_redundant_pull():
-    from app.catalog_dispatch import dispatch_import_detailed
+    from app.games.pokemon.catalog.catalog_dispatch import dispatch_import_detailed
     seed()
 
     def promoted_first(*args, **kwargs):
@@ -204,7 +204,7 @@ def test_a_generation_promoted_during_the_check_starts_no_redundant_pull():
         return dispatch_import_detailed(*args, **kwargs)
 
     before = runs()
-    with patch("app.catalog_refresh.dispatch_import_detailed", promoted_first):
+    with patch("app.games.pokemon.catalog.catalog_refresh.dispatch_import_detailed", promoted_first):
         code, _, row, pull = check(Listed(ids=("test-1", "test-2", "test-3")))
     assert code == 0 and not pull.children and runs() == before + 1  # only the owner's run
     assert (row["outcome"], row["new_count"], row["removed_count"], row["catalog_run_id"]) == ("no_change", 0, 0, None)
@@ -247,7 +247,7 @@ def test_retries_are_bounded_and_requests_carry_the_user_agent(monkeypatch):
 
     source = TCGdexSource(attempts=3, max_backoff=1)
     source.client = httpx.Client(transport=httpx.MockTransport(handler), headers=source.client.headers)
-    with patch("app.catalog.time.sleep") as sleep:
+    with patch("app.games.pokemon.catalog.catalog.time.sleep") as sleep:
         code, _, row, pull = check(source)
     assert code == 2 and row["error_code"] == "TCGDEX_UNAVAILABLE" and not pull.children
     assert len(seen) == 3 and sleep.call_count == 2
@@ -399,7 +399,7 @@ def unfinished_check_run(lease="-1 minute"):
 
 
 def test_an_unfinished_run_counts_only_when_no_live_runner_holds_the_lock():
-    from app.catalog_refresh import pause_failures
+    from app.games.pokemon.catalog.catalog_refresh import pause_failures
     seed()
     run_id = unfinished_check_run()
     with connect() as holder, connect() as conn:
@@ -417,7 +417,7 @@ def test_an_unfinished_run_counts_only_when_no_live_runner_holds_the_lock():
 
 
 def test_a_check_row_rewritten_to_failed_still_counts_toward_the_pause():
-    from app.catalog_refresh import pause_failures
+    from app.games.pokemon.catalog.catalog_refresh import pause_failures
     seed()
     with connect() as conn:
         run_id = conn.execute("""INSERT INTO catalog_run(phase,outcome,error,finished_at) VALUES
@@ -432,7 +432,7 @@ def test_an_unexpected_error_records_catalog_check_error_and_exits_2():
     def explode(*args, **kwargs):
         raise RuntimeError("payload fragment")
 
-    with patch("app.catalog_refresh.dispatch_import_detailed", explode):
+    with patch("app.games.pokemon.catalog.catalog_refresh.dispatch_import_detailed", explode):
         code, out, row, pull = check(Listed(ids=("test-1", "test-2", "test-3")))
     assert code == 2 and not pull.children and out.startswith("catalog_check_id=")
     assert (row["outcome"], row["error_code"]) == ("failed", "CATALOG_CHECK_ERROR")
@@ -441,7 +441,7 @@ def test_an_unexpected_error_records_catalog_check_error_and_exits_2():
 
 def test_a_failing_on_reserved_keeps_the_check_attributable_to_the_run(monkeypatch):
     seed()
-    from app import catalog_dispatch
+    from app.games.pokemon.catalog import catalog_dispatch
     real = catalog_dispatch.dispatch_import_detailed
 
     def failing_reservation(conn, on_reserved=None, guard=None):
@@ -450,7 +450,7 @@ def test_a_failing_on_reserved_keeps_the_check_attributable_to_the_run(monkeypat
             raise RuntimeError("after the association")
         return real(conn, on_reserved=broken, guard=guard)
 
-    with patch("app.catalog_refresh.dispatch_import_detailed", failing_reservation):
+    with patch("app.games.pokemon.catalog.catalog_refresh.dispatch_import_detailed", failing_reservation):
         code, _, row, pull = check(Listed(ids=("test-1", "test-2", "test-3")))
     assert code == 4 and not pull.children
     assert (row["outcome"], row["error_code"]) == ("pull_started", "CATALOG_DISPATCH_FAILED")
@@ -458,9 +458,9 @@ def test_a_failing_on_reserved_keeps_the_check_attributable_to_the_run(monkeypat
 
 
 def test_the_check_builds_its_source_with_the_bounded_retry_budget():
-    from app.catalog_refresh import CHECK_ATTEMPTS, CHECK_MAX_BACKOFF
+    from app.games.pokemon.catalog.catalog_refresh import CHECK_ATTEMPTS, CHECK_MAX_BACKOFF
     seed()
-    with patch("app.catalog_refresh.TCGdexSource", return_value=Listed(ids=SEED)) as factory:
+    with patch("app.games.pokemon.catalog.catalog_refresh.TCGdexSource", return_value=Listed(ids=SEED)) as factory:
         out = io.StringIO()
         with connect() as conn:
             assert run_check(conn, out=out) == 0
@@ -504,7 +504,7 @@ def test_a_stopped_pull_is_marked_interrupted_and_the_next_check_starts_a_new_on
 
 
 def test_a_run_that_finishes_while_it_is_being_marked_interrupted_keeps_its_real_outcome():
-    from app.catalog_refresh import _wait_for_pull
+    from app.games.pokemon.catalog.catalog_refresh import _wait_for_pull
     seed()
     with connect() as conn:
         run_id = conn.execute("INSERT INTO catalog_run(phase) VALUES ('promoting') RETURNING id").fetchone()["id"]

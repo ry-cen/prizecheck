@@ -85,7 +85,7 @@ from ..location_tree import error
 from ..db import connect
 from ..identity import verified_user
 from ..trade_list import own_trade_copies
-from ..trade_wants import own_rules, own_wants
+from app.core.trading.trade_wants import own_rules, own_wants
 from ..want_list import capture_want_list
 from . import name_rules
 from .conversations import pair_row, standings

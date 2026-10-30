@@ -225,17 +225,17 @@ def onnxruntime_import_violations(source, filename):
 
 # Card art (ADR 0020, #354, #360): a Printing's art comes from one place, the `catalog_printing_art` view, and the
 # signed-in app shows it through the art route. TCGdex's `/low.webp` and `/high.webp` file names are built only by the
-# art-URL module (`api/app/art_urls.py`, the scanner's TCGdex-only rule) and the scanner's own query; the web build
+# art-URL module (`api/app/games/pokemon/art/urls.py`, the scanner's TCGdex-only rule) and the scanner's own query; the web build
 # never spells them, so a client cannot derive a size by editing an address.
 WEBP_SUFFIX = re.compile(r'/(?:low|high)\.webp')
-WEBP_SUFFIX_MODULES = ('api/app/scanner.py', 'api/app/art_urls.py')
+WEBP_SUFFIX_MODULES = ('api/app/games/pokemon/scanner/scanner.py', 'api/app/games/pokemon/art/urls.py')
 
 
 def webp_suffix_violations(source, filename):
     """No `/low.webp` or `/high.webp` outside the modules that own the TCGdex file names."""
     if filename in WEBP_SUFFIX_MODULES:
         return []
-    return [(number, 'Build card art addresses through the art route (api/app/art_urls.py, catalog_printing_art), '
+    return [(number, 'Build card art addresses through the art route (api/app/games/pokemon/art/urls.py, catalog_printing_art), '
                      'not with a /low.webp or /high.webp suffix')
             for number, line in enumerate(source.splitlines(), 1)
             if WEBP_SUFFIX.search(line) and not line.lstrip().startswith(('#', '//', '*', '/*'))]
@@ -363,8 +363,25 @@ def colour_scope_files():
             yield from sorted(item for item in path.rglob('*') if item.is_file() and item.suffix in ('.ts', '.tsx', '.css', '.html'))
 
 
+def set_code_migration_violations(migrations, tsv_text):
+    """``migrations`` maps file name to text. The newest migration that opens with a set_codes.tsv digest line must carry
+    the digest of the TSV as it is now, or the TSV changed without its migration."""
+    import hashlib
+    for name in sorted(migrations, reverse=True):
+        found = re.match(r'-- set_codes\.tsv digest: ([0-9a-f]{16})(?:\n|$)', migrations[name])
+        if found:
+            if found.group(1) == hashlib.sha256(tsv_text.encode()).hexdigest()[:16]:
+                return []
+            return [(name, 'FAILED: set_codes.tsv changed; run scripts/set_code_migration.py <next number>')]
+    return [('migrations', 'FAILED: no migration carries a set_codes.tsv digest; run scripts/set_code_migration.py <next number>')]
+
+
 def main():
     failed = False
+    migrations = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
+    for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/games/pokemon/catalog/set_codes.tsv').read_text(encoding='utf-8')):
+        print(f'{name}: {reason}')
+        failed = True
     for relative in ('scripts/release.py', 'scripts/release_runtime.py'):
         for line, reason in violations((ROOT/relative).read_text(), relative):
             print(f'{relative}:{line}: {reason}')
