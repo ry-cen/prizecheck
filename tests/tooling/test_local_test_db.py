@@ -3,6 +3,7 @@ container command, ownership refusals, redaction and the doctor's tiers."""
 import importlib.util
 import json
 import os
+import socket
 from pathlib import Path
 import subprocess
 import tempfile
@@ -80,6 +81,21 @@ class Versions(unittest.TestCase):
             wanted = make_tools(Path(temp) / 'postgresql' / '16' / 'bin')
             with mock.patch.dict(os.environ, {'PG_BIN': str(newer)}):
                 self.assertEqual(db.native_bin_dir([newer, wanted]), newer)
+
+
+class Ports(unittest.TestCase):
+    def test_port_left_in_time_wait_counts_as_free(self):
+        with socket.socket() as server:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(('127.0.0.1', 0))
+            server.listen()
+            port = server.getsockname()[1]
+            self.assertFalse(db.port_free(port))
+            client = socket.create_connection(('127.0.0.1', port))
+            accepted, _ = server.accept()
+            accepted.close()  # the server side closes first, so its end of the connection waits in TIME_WAIT
+            client.close()
+        self.assertTrue(db.port_free(port))
 
 
 class Backend(unittest.TestCase):

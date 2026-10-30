@@ -105,7 +105,10 @@ def free_port():
 
 
 def port_free(port):
+    """Whether a server could listen on 127.0.0.1:port now. SO_REUSEADDR, as PostgreSQL sets it, so the TIME_WAIT
+    connections a stopped server leaves behind do not count as the port being in use."""
     with socket.socket() as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(('127.0.0.1', port))
         except OSError:

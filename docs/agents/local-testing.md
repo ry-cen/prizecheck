@@ -42,6 +42,8 @@ npm run verify:local -- --suite browser -- web/tests/workspace-actions.spec.ts
 npm run verify:local -- --fast
 ```
 
+A browser run that ends in `curl: (22) The requested URL returned error: 500` before any spec ran had a stack that did not answer `scripts/ci.sh`'s 10-second health check, most often because its auth gateway was still compiling: on the dev container (16 cores, a fresh `node_modules`), four stacks starting at once missed it, and `--browser-workers 1` passed. Rerun narrow browser runs with `--browser-workers 1` (or 2) on such a host.
+
 When `TEST_ADMIN_DATABASE_URL` is already set, `run` passes it through instead (add `--local` to use this checkout's server anyway). The other commands:
 
 ```sh
