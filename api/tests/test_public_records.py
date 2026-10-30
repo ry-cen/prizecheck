@@ -4,6 +4,7 @@ One suite runs against both adapters. Tests assert observable ordering through
 the adapter API; private layout knowledge and OS fault injection stay in
 public_records_fixture.
 """
+from timing_support import within_budget
 import multiprocessing
 import os
 from pathlib import Path
@@ -565,6 +566,7 @@ def _stop_paused(process, writer):
             writer.join(5)
 
 
+@pytest.mark.timing
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_reads_are_not_blocked_by_an_in_flight_commit(adapter):
     store, config = adapter
@@ -577,7 +579,7 @@ def test_reads_are_not_blocked_by_an_in_flight_commit(adapter):
         assert reached.wait(10)
         started = time.monotonic()
         snapshot = values(store, [result, quote])
-        assert time.monotonic() - started < .5
+        within_budget(time.monotonic() - started, .5, 'test_reads_are_not_blocked_by_an_in_flight_commit', unit='s')
         assert snapshot[result] == {'state': 'pending', 'fence': 2}
     finally:
         _stop_paused(process, writer)
@@ -801,6 +803,7 @@ def _p95(samples):
     return statistics.quantiles(samples, n=20)[-1]
 
 
+@pytest.mark.timing
 @pytest.mark.parametrize('adapter_name', ['filesystem', 'http'])
 @pytest.mark.serial(reason='capacity: asserts read latency percentiles at 10k records')
 @pytest.mark.slow(reason='capacity: builds 10k records')
@@ -837,10 +840,10 @@ def test_cached_reads_at_10k_records_are_well_under_the_500ms_budget(populated, 
         print(f'\n{adapter_name}: populate {PERF_RECORDS} records {populate:.2f}s; first read_all(1000) {cold * 1000:.1f}ms; '
               f'read_records(128) p95 {_p95(single) * 1000:.1f}ms; read_all(1000) p95 {_p95(complete) * 1000:.1f}ms; '
               f'3-key CAS p95 {_p95(commits) * 1000:.1f}ms')
-        assert _p95(single) < .1
-        assert _p95(complete) < .25
-        assert cold < .5
-        assert _p95(commits) < .25
+        within_budget(_p95(single), .1, 'test_cached_reads_at_10k_records_are_well_under_the_500ms_budget', unit='s')
+        within_budget(_p95(complete), .25, 'test_cached_reads_at_10k_records_are_well_under_the_500ms_budget', unit='s')
+        within_budget(cold, .5, 'test_cached_reads_at_10k_records_are_well_under_the_500ms_budget', unit='s')
+        within_budget(_p95(commits), .25, 'test_cached_reads_at_10k_records_are_well_under_the_500ms_budget', unit='s')
     finally:
         if relay:
             stop(relay)

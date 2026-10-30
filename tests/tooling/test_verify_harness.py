@@ -1,6 +1,7 @@
 """Pure parts of the verification harness: scripts/verify.py, run_pytest.py, run_playwright.py, verify_resources.py,
 verify_report.py, verify_discard.py, verify_reaper.py, and the pytest shard split in api/tests/conftest.py. Nothing here
 needs a database, a browser or a network; api/tests/test_verify_reaper.py checks the reaper against PostgreSQL."""
+from contextlib import ExitStack
 import importlib.util
 import json
 import os
@@ -681,3 +682,57 @@ class VerifyReaperTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TimingWarningsTest(unittest.TestCase):
+    def test_breach_is_recorded_without_failure_and_reported(self):
+        support = load('timing_support', ROOT / 'api/tests/timing_support.py')
+        for worker in ('gw0', ''):
+            with self.subTest(worker=worker), tempfile.TemporaryDirectory() as directory:
+                with mock.patch.dict(os.environ, {'TEST_LOG_DIR': directory, 'PYTEST_CURRENT_TEST': 'api/tests/test_example.py::test_read (call)', 'PYTEST_XDIST_WORKER': worker}):
+                    self.assertIsNone(support.within_budget(2, 1, 'read', unit='ms'))
+                report = verify.report_timing_warnings(Path(directory))
+                self.assertEqual(json.loads(json.dumps(report))['timing_warnings'], [{
+                    'nodeid': 'api/tests/test_example.py::test_read', 'measured': 2, 'budget': 1, 'unit': 'ms', 'what': 'read'}])
+                self.assertEqual((Path(directory) / 'verification.log').read_text(),
+                                 '== WARNING: timing budget exceeded: api/tests/test_example.py::test_read: 2 > 1 ms\n')
+
+    def test_invalid_lines_leave_valid_breaches_in_the_report(self):
+        breach = {'nodeid': 'test_read', 'measured': 2, 'budget': 1, 'unit': 's', 'what': 'read'}
+        for invalid in ('{"nodeid":', '{}'):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                (Path(directory) / 'timing-warnings-worker.jsonl').write_text(
+                    json.dumps(breach) + '\n' + invalid + '\n' + json.dumps(breach) + '\n')
+                self.assertEqual(verify.report_timing_warnings(directory), {'timing_warnings': [breach, breach]})
+
+    def test_a_broken_timing_report_preserves_the_gate_result_and_result_json(self):
+        for exit_code in (0, 7):
+            with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+                stack.enter_context(mock.patch.object(verify, 'ROOT', Path(directory)))
+                for name, value in (('reap', ([], [])), ('database_skew', 0), ('network_changes', []),
+                                    ('summarize', {}), ('create_databases', None), ('current_owner', {})):
+                    stack.enter_context(mock.patch.object(verify, name, return_value=value))
+                stack.enter_context(mock.patch.object(verify.psycopg, 'connect'))
+                stack.enter_context(mock.patch.object(verify.subprocess, 'check_output', return_value=b''))
+                stack.enter_context(mock.patch.object(verify.subprocess, 'run', return_value=SimpleNamespace(returncode=exit_code)))
+                stack.enter_context(mock.patch.object(verify, 'report_timing_warnings', side_effect=OSError('broken report')))
+                self.assertEqual(verify.main(['--admin-url', ADMIN, '--suite', 'api']), exit_code)
+                report = json.loads(next(Path(directory).glob('.scratch/verification/*/result.json')).read_text())
+                self.assertEqual(report['exit_code'], exit_code)
+                self.assertEqual(report['timing_warnings'], [])
+                self.assertEqual(report['timing_report_error'], 'OSError')
+
+    def test_within_budget_records_nothing(self):
+        support = load('timing_support', ROOT / 'api/tests/timing_support.py')
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(os.environ, {'TEST_LOG_DIR': directory}):
+                support.within_budget(1, 1, 'read')
+                support.within_budget(0.5, 1, 'read')
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            self.assertEqual(verify.report_timing_warnings(Path(directory)), {'timing_warnings': []})
+
+    def test_outside_runner_prints_to_stderr(self):
+        support = load('timing_support', ROOT / 'api/tests/timing_support.py')
+        with mock.patch.dict(os.environ, {'TEST_LOG_DIR': ''}), mock.patch('sys.stderr') as stderr:
+            support.within_budget(2, 1, 'read')
+        self.assertIn('timing budget exceeded', ''.join(call.args[0] for call in stderr.write.call_args_list))

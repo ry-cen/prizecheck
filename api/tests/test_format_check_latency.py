@@ -17,6 +17,7 @@ check reads three-member Reprint Groups and judges two of every three lines thro
 
 Budgets: p95 under 200 ms at 60 lines (the spec) and under ``LARGE_P95_MS`` at 1,000 lines (Deck Lists 19).
 """
+from timing_support import within_budget
 import json
 import math
 import os
@@ -254,6 +255,7 @@ def lines_of(ids, editions, lines):
     return chosen
 
 
+@pytest.mark.timing
 @pytest.mark.serial(reason="process: asserts a p95 of real gateway and API processes")
 @pytest.mark.slow(reason="process: starts a real gateway and API and samples 260 requests")
 def test_a_60_line_format_check_meets_its_p95_through_the_gateway(world, gateway):
@@ -267,9 +269,10 @@ def test_a_60_line_format_check_meets_its_p95_through_the_gateway(world, gateway
                     {"standard": "legal", "expanded": "legal", "glc": "not_legal"})
     metric(json.dumps({"lines": 60, "bound_ms": P95_MS, **found}, sort_keys=True))
     for path, figures in found.items():
-        assert figures["p95"] < P95_MS, (path, found)
+        within_budget(figures["p95"], P95_MS, 'test_a_60_line_format_check_meets_its_p95_through_the_gateway', unit='ms')
 
 
+@pytest.mark.timing
 @pytest.mark.serial(reason="process: asserts a p95 of real gateway and API processes")
 @pytest.mark.slow(reason="capacity: a 1,000-line Deck List through a real gateway and API")
 def test_a_1000_line_format_check_meets_its_bound_through_the_gateway(world, gateway):
@@ -281,4 +284,4 @@ def test_a_1000_line_format_check_meets_its_bound_through_the_gateway(world, gat
                     {"standard": "not_legal", "expanded": "not_legal", "glc": "not_legal"})
     metric(json.dumps({"lines": LARGE_LINES, "bound_ms": LARGE_P95_MS, **found}, sort_keys=True))
     for path, figures in found.items():
-        assert figures["p95"] < LARGE_P95_MS, (path, found)
+        within_budget(figures["p95"], LARGE_P95_MS, 'test_a_1000_line_format_check_meets_its_bound_through_the_gateway', unit='ms')
