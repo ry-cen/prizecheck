@@ -100,10 +100,11 @@ A `FAILED: <rule>: <detail>` line names the rule. `--show-pins` prints what each
 
 ## Web boundaries
 
-`scripts/check_web_boundaries.py` guards the same split in `web/src` ([frontend composition](../planning/shared-core/frontend-composition.md)). `npm run guardrails` runs it, after the Python check. It reads each `.ts` and `.tsx` file as text, with comments removed: `import`, `import type`, `export … from` and side-effect imports starting a line, and `import("…")` with a literal anywhere. It fails when:
+`scripts/check_web_boundaries.py` guards the same split in `web/src` ([frontend composition](../planning/shared-core/frontend-composition.md)). `npm run guardrails` runs it, after the Python check. `scripts/web_imports.mjs` reads each `.ts` and `.tsx` file with the installed TypeScript parser and lists its module references: `import`, `export … from`, `import x = require()`, `import()`, `typeof import()`, `require()` and `new URL("…", import.meta.url)`. Code inside a template's `${…}` counts; text in strings, comments and regular expressions does not. It fails when:
 
 - a shared file (anything outside `web/src/games/<game>/`) imports a game, unless the edge is a listed composition point in `scripts/web_boundary_allowlist.txt`; a `*.test.ts(x)` file outside the games may import one;
 - a game imports another game;
+- a reference's module is not a string literal (`import(name)`, `import.meta.glob(…)`), or a non-relative specifier is neither a `node:` builtin nor a package `package.json` declares. The repository has no path aliases, so either could reach a game unseen;
 - a file sits directly under `web/src/games`;
 - an allow-list line matches no import.
 
