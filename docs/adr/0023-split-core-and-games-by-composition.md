@@ -23,4 +23,4 @@
 - Core is game-agnostic in imports only. Its SQL still names Pokémon catalog relations (`catalog_edition`, `catalog_printing` and others), and some modules still carry Pokémon literals until their package lands. A second game must provide relations with those names and shapes, or a later phase puts a contract in front of them.
 - `games/pokemon` is the only place that knows Pokémon values. Adding a game adds `games/<game>` and a mount in `main.py`; it does not edit core.
 - Migrations are not split. The Pokémon track stays the existing files; migration tracks for core wait for the second game.
-- Docs that name a module by path follow it to its new location. The allow-list holds what is left of the old imports (two root-to-game edges and the identity-table SQL lines) and only shrinks.
+- Docs that name a module by path follow it to its new location. The allow-list holds what is left of the old imports (no edges remain; the identity-table SQL lines wait for the identity work) and only shrinks.

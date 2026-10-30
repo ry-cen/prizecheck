@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from .db import connect
 from .identity import verified_user
 from .social import counts
-from .social.friend_reads import card_facts
+from .core.catalog.card_facts import card_facts
 from .social.hidden_locations import hidden_by
 
 router = APIRouter(prefix='/api/trades', tags=['trades'])

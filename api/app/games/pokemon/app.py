@@ -52,7 +52,7 @@ from app.games.pokemon.trading.trade_inventory import router as trade_inventory_
 from app.trade_list import router as trade_list_router
 from app.games.pokemon.trading.trade_value import router as trade_value_router
 from app.games.pokemon.trading.trade_wants import router as trade_wants_router
-from app.want_list import router as want_list_router
+from app.games.pokemon.decks.want_list import router as want_list_router
 from app.games.pokemon.decks.want_list_cost import router as want_list_cost_router
 from app.games.pokemon.exports.want_list_mass_entry import router as want_list_mass_entry_router
 

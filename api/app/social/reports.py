@@ -42,10 +42,10 @@ from pydantic import BaseModel, Field, model_validator
 from ..location_tree import error, replay
 from ..db import connect
 from ..identity import require_owner, verified_user
+from ..core.catalog.card_facts import card_facts
 from .conversations import account_changed, decode_cursor, encode_cursor, normalize_text, pair_row
 from .discovery import (account_state, lock_discovery, reach_one, remove_from_discovery, restore_discovery, switch_off,
                         trader_user)
-from .friend_reads import card_facts
 from .friends import _command, command_payload, place_block
 from .owners import lock_owners
 from .trades import end_trades_between, unconfirmed_partners
