@@ -677,7 +677,7 @@ function BorrowComposer({
             return (
               <li
                 key={line.edition_id}
-                className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 phone:grid-cols-[3.5rem_minmax(0,1fr)]"
+                className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 phone:grid-cols-[3rem_minmax(0,1fr)]"
               >
                 <CardImage url={line.image_url} />
                 <div className="min-w-0">
