@@ -8758,6 +8758,170 @@
     "title": "LentOut",
     "type": "object"
    },
+   "LikelyReprintDecision": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "LikelyReprintDecision",
+    "type": "object"
+   },
+   "LikelyReprintDismissal": {
+    "properties": {
+     "evidence_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Evidence Digest",
+      "type": "string"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     }
+    },
+    "required": [
+     "evidence_digest",
+     "key"
+    ],
+    "title": "LikelyReprintDismissal",
+    "type": "object"
+   },
+   "LikelyReprintEvidence": {
+    "properties": {
+     "evidence_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Evidence Digest",
+      "type": "string"
+     }
+    },
+    "required": [
+     "evidence_digest"
+    ],
+    "title": "LikelyReprintEvidence",
+    "type": "object"
+   },
+   "LikelyReprintPage": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/LikelyReprintPair"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "next_cursor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Next Cursor"
+     }
+    },
+    "required": [
+     "items",
+     "next_cursor"
+    ],
+    "title": "LikelyReprintPage",
+    "type": "object"
+   },
+   "LikelyReprintPair": {
+    "properties": {
+     "evidence_digest": {
+      "title": "Evidence Digest",
+      "type": "string"
+     },
+     "group_ids": {
+      "items": {
+       "format": "uuid",
+       "type": "string"
+      },
+      "title": "Group Ids",
+      "type": "array"
+     },
+     "identity_id": {
+      "format": "uuid",
+      "title": "Identity Id",
+      "type": "string"
+     },
+     "identity_name": {
+      "title": "Identity Name",
+      "type": "string"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "printings": {
+      "items": {
+       "$ref": "#/components/schemas/LikelyReprintPrinting"
+      },
+      "title": "Printings",
+      "type": "array"
+     }
+    },
+    "required": [
+     "evidence_digest",
+     "key",
+     "identity_id",
+     "identity_name",
+     "group_ids",
+     "printings"
+    ],
+    "title": "LikelyReprintPair",
+    "type": "object"
+   },
+   "LikelyReprintPrinting": {
+    "properties": {
+     "collector_number": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Collector Number"
+     },
+     "printing_id": {
+      "format": "uuid",
+      "title": "Printing Id",
+      "type": "string"
+     },
+     "set_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Set Id"
+     },
+     "text_key": {
+      "title": "Text Key",
+      "type": "string"
+     }
+    },
+    "required": [
+     "printing_id",
+     "set_id",
+     "collector_number",
+     "text_key"
+    ],
+    "title": "LikelyReprintPrinting",
+    "type": "object"
+   },
    "LineOwnership": {
     "properties": {
      "edition_id": {
@@ -19614,6 +19778,286 @@
      }
     },
     "summary": "Merge Identities"
+   }
+  },
+  "/api/admin/card-identities/likely-reprints": {
+   "get": {
+    "operationId": "likely_reprints_api_admin_card_identities_likely_reprints_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "cursor",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cursor"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LikelyReprintPage"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Likely Reprints"
+   }
+  },
+  "/api/admin/card-identities/likely-reprints/dismiss": {
+   "post": {
+    "operationId": "dismiss_likely_reprints_api_admin_card_identities_likely_reprints_dismiss_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LikelyReprintDismissal"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LikelyReprintDecision"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Dismiss Likely Reprints"
+   }
+  },
+  "/api/admin/card-identities/likely-reprints/{decision_id}/undo": {
+   "post": {
+    "operationId": "undo_likely_reprints_api_admin_card_identities_likely_reprints__decision_id__undo_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "decision_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Decision Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LikelyReprintEvidence"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LikelyReprintDecision"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Undo Likely Reprints"
    }
   },
   "/api/admin/card-identities/queue": {
