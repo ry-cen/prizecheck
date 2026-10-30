@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import type { DeckDetail, DeckListLine } from "../decks_generated";
 import { publishedGroups } from "../public/publishedDeckModel";
-import { deckLine, deckListModel, groupLines, kindText } from "./deckListModel";
+import { kindText, POKEMON_DECK_GROUPING } from "../games/pokemon/deckGroups";
+import { deckLine, deckListModel, groupLines } from "./deckListModel";
 
 // The Deck List's card-type groups and each line's type words, as the deck builder, the Published Deck and the copy
 // sheet show them.
@@ -46,7 +47,8 @@ const EVERY_KIND = [
 
 test("every card type has its own group, in the fixed order, with its heading and copies", () => {
   const groups = groupLines(
-    EVERY_KIND.map((line) => deckLine(line, undefined))
+    EVERY_KIND.map((line) => deckLine(line, undefined)),
+    POKEMON_DECK_GROUPING
   );
   expect(
     groups.map(({ key, kind, title, copies }) => ({ key, kind, title, copies }))
@@ -73,7 +75,8 @@ test("a group sorts its lines by copies, then name; empty groups are left out", 
       listLine("Rare Candy", "1", "trainer", "item"),
       listLine("Ultra Ball", "4", "trainer", "item"),
       listLine("Nest Ball", "4", "trainer", "item"),
-    ].map((line) => deckLine(line, undefined))
+    ].map((line) => deckLine(line, undefined)),
+    POKEMON_DECK_GROUPING
   );
   expect(groups.map(({ title }) => title)).toEqual(["Items"]);
   expect(groups[0].lines.map(({ line }) => line.name)).toEqual([
@@ -113,7 +116,7 @@ test("a Deck read groups its lines and totals their copies", () => {
     ownership: [],
     loans: [],
   } as unknown as DeckDetail;
-  const model = deckListModel(detail);
+  const model = deckListModel(detail, POKEMON_DECK_GROUPING);
   expect(model.total).toBe("24");
   expect(model.groups.map(({ title }) => title)).toEqual([
     "Pokémon",
@@ -149,4 +152,42 @@ test("a Published Deck groups like the builder, or as one Cards group when no ca
   expect(
     legacy.map(({ key, title, copies }) => ({ key, title, copies }))
   ).toEqual([{ key: "cards", title: "Cards", copies: 5n }]);
+});
+
+test("the generic grouping takes its groups, order and headings from the grouping passed in", () => {
+  const groups = groupLines(
+    EVERY_KIND.map((line) => deckLine(line, undefined)),
+    {
+      groups: [
+        { kind: "b", title: "Second letter" },
+        { kind: "a", title: "First letter" },
+      ],
+      kindOf: (line) => (line.name < "C" ? "a" : "b"),
+    }
+  );
+  expect(
+    groups.map(({ key, title, lines }) => ({
+      key,
+      title,
+      names: lines.map(({ line }) => line.name),
+    }))
+  ).toEqual([
+    {
+      key: "b",
+      title: "Second letter",
+      names: [
+        "Charmander",
+        "Ultra Ball",
+        "Iono",
+        "Choice Belt",
+        "Odd Trainer",
+        "Unknown Card",
+      ],
+    },
+    {
+      key: "a",
+      title: "First letter",
+      names: ["Basic Fire Energy", "Artazon"],
+    },
+  ]);
 });
