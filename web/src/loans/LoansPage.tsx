@@ -1,3 +1,7 @@
+import { ArrowUpRight, ArrowDownLeft, ChevronDown } from "lucide-react";
+import { Avatar } from "../ui/Avatar";
+import { Icon } from "../ui/Icon";
+import { Pill } from "../ui/Pill";
 import {
   useEffect,
   useId,
@@ -66,21 +70,27 @@ function LoansList({ onOpenLoan }: { onOpenLoan: (id: string) => void }) {
   }, [attempt, changed]);
 
   const frame = (children: ReactNode) => (
-    <main className="mx-auto box-border flex max-w-3xl flex-col gap-5 px-7 py-7 phone:px-4 phone:py-5">
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
       <PageHeader title="Loans" />
       {children}
     </main>
   );
   if (load.kind === "loading")
     return frame(
-      <p role="status" className="m-0 text-body text-text-muted">
+      <p
+        role="status"
+        className="m-0 rounded-panel border border-border bg-surface p-5 text-body text-text-muted"
+      >
         Loading Loans…
       </p>
     );
   if (load.kind === "failed")
     return frame(
       <div className="flex flex-wrap items-center gap-3">
-        <p role="status" className="m-0 text-body text-text-muted">
+        <p
+          role="status"
+          className="m-0 rounded-panel border border-border bg-surface p-5 text-body text-text-muted"
+        >
           Your Loans couldn't be loaded.
         </p>
         <Button
@@ -96,7 +106,7 @@ function LoansList({ onOpenLoan }: { onOpenLoan: (id: string) => void }) {
   const { loans } = load.view;
   if (loans.length === 0)
     return frame(
-      <p className="m-0 text-body text-text-muted">
+      <p className="m-0 rounded-panel border border-border bg-surface p-5 text-body text-text-muted">
         No Loans yet. Ask a Friend to lend you cards from the Want List, a
         card's details or their Collection.
       </p>
@@ -116,8 +126,9 @@ function LoansList({ onOpenLoan }: { onOpenLoan: (id: string) => void }) {
         ) : null;
       })}
       {history.length > 0 && (
-        <details className="group">
+        <details className="group flex flex-col gap-3 border-t border-border pt-4">
           <summary className="inline-flex min-h-control cursor-pointer items-center gap-2 rounded-control text-heading font-semibold phone:min-h-tap">
+            <Icon icon={ChevronDown} className="group-open:rotate-180" />
             History
             <span className="text-meta font-normal text-text-muted tabular-nums">
               {history.length}
@@ -142,9 +153,14 @@ function LoanSection({
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
-      <h2 id={headingId} className="m-0 text-heading font-semibold">
-        {title}
-      </h2>
+      <div className="flex items-center gap-2">
+        <h2 id={headingId} className="m-0 text-heading font-semibold">
+          {title}
+        </h2>
+        <span className="text-meta text-text-muted tabular-nums">
+          {loans.length}
+        </span>
+      </div>
       <LoanRows loans={loans} onOpenLoan={onOpenLoan} label={title} />
     </section>
   );
@@ -176,21 +192,31 @@ function LoanRows({
                 event.preventDefault();
                 onOpenLoan(loan.id);
               }}
-              className="grid min-h-tap grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-3 px-4 py-3 text-text no-underline hover:bg-surface-raised"
+              className="grid min-h-tap grid-cols-[auto_3.5rem_minmax(0,1fr)] phone:grid-cols-[auto_3rem_minmax(0,1fr)] items-center gap-3 px-4 py-3 text-text no-underline hover:bg-surface-raised"
             >
+              <Avatar name={loan.other.display_name} />
               <CardImage url={loanLines(loan)[0]?.image_url ?? null} />
-              <span className="flex min-w-0 flex-col">
+              <span className="flex min-w-0 flex-col items-start gap-1">
                 <span className="text-body font-semibold wrap-anywhere">
+                  <Icon
+                    icon={loan.role === "lender" ? ArrowUpRight : ArrowDownLeft}
+                    className="mr-1 inline-block align-middle text-text-muted"
+                  />
                   {loanHeadline(loan)}
                 </span>
                 <span className="text-meta text-text-muted wrap-anywhere">
                   {loanCardNames(loan)}
                 </span>
-                {status && (
-                  <span className="text-meta text-text-subtle wrap-anywhere">
-                    {status}
-                  </span>
-                )}
+                {status &&
+                  (status.length > 30 ? (
+                    <span className="text-meta text-text-muted wrap-anywhere">
+                      {status}
+                    </span>
+                  ) : (
+                    <Pill tone={loan.overdue_since ? "warn" : "neutral"}>
+                      {status}
+                    </Pill>
+                  ))}
               </span>
             </a>
           </li>

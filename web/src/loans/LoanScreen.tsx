@@ -1,3 +1,4 @@
+import { Avatar } from "../ui/Avatar";
 import {
   useEffect,
   useLayoutEffect,
@@ -276,9 +277,17 @@ export function LoanScreen({
     </a>
   );
   const frame = (title: string, children: ReactNode, actions?: ReactNode) => (
-    <main className="mx-auto box-border flex max-w-3xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
       {back}
-      <PageHeader title={title} actions={actions} headingRef={heading} />
+      <div className="relative flex min-w-0 items-start gap-3 pr-10">
+        {load.kind === "ready" && (
+          <Avatar name={load.loan.other.display_name} />
+        )}
+        <div className="min-w-0 flex-1">
+          <PageHeader title={title} headingRef={heading} />
+        </div>
+        {actions && <div className="absolute top-0 right-0">{actions}</div>}
+      </div>
       {children}
     </main>
   );
@@ -859,7 +868,9 @@ export function LoanScreen({
   return frame(
     loanHeadline(loan),
     <>
-      <p className="m-0 text-meta text-text-muted">{facts.join(" · ")}</p>
+      <p className="m-0 border-b border-border pb-4 text-meta text-text-muted tabular-nums">
+        {facts.join(" · ")}
+      </p>
       {(showing.includes("nudge_answer") ||
         showing.includes("nudge_handover")) && (
         <p role="status" className="m-0 text-body">
@@ -908,7 +919,7 @@ export function LoanScreen({
       )}
       <ul
         aria-label="Cards"
-        className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0"
+        className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-5 p-0"
       >
         {loan.lines.map((line) => (
           <LoanLine
@@ -948,35 +959,37 @@ export function LoanScreen({
           />
         ))}
       </ul>
-      {asking ? (
-        <div
-          role="group"
-          aria-label={asks[asking].yes}
-          className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
-        >
-          <p className="m-0 min-w-0 flex-1 text-body">
-            {asks[asking].question(other)}
-          </p>
-          <Button
-            ref={askButton}
-            variant="danger"
-            aria-disabled={busy || undefined}
-            onClick={run[asking]}
+      <div className="flex flex-col gap-3 border-t border-border pt-4">
+        {asking ? (
+          <div
+            role="group"
+            aria-label={asks[asking].yes}
+            className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
           >
-            {asks[asking].yes}
-          </Button>
-          <Button
-            onClick={() => {
-              focusNext.current = asking === "decline" ? "decline" : "menu";
-              setAsking(null);
-            }}
-          >
-            Keep it
-          </Button>
-        </div>
-      ) : (
-        primary
-      )}
+            <p className="m-0 min-w-0 flex-1 text-body">
+              {asks[asking].question(other)}
+            </p>
+            <Button
+              ref={askButton}
+              variant="danger"
+              aria-disabled={busy || undefined}
+              onClick={run[asking]}
+            >
+              {asks[asking].yes}
+            </Button>
+            <Button
+              onClick={() => {
+                focusNext.current = asking === "decline" ? "decline" : "menu";
+                setAsking(null);
+              }}
+            >
+              Keep it
+            </Button>
+          </div>
+        ) : (
+          primary
+        )}
+      </div>
       <p role="alert" className="m-0 text-meta text-danger empty:hidden">
         {message}
       </p>
@@ -1103,7 +1116,7 @@ function LoanLine({
   let count: ReactNode;
   if (counting !== null)
     count = (
-      <div className="flex flex-col items-end gap-1 phone:items-start">
+      <div className="flex flex-col items-start gap-1">
         <Stepper
           label={`Copies of ${line.name}, ${edition} to ${counting.verb}`}
           value={counting.value}
@@ -1118,7 +1131,7 @@ function LoanLine({
     );
   else if (answering && loan.kind === "lend_offer")
     count = (
-      <div className="flex flex-col items-end gap-1 phone:items-start">
+      <div className="flex flex-col items-start gap-1">
         <Stepper
           label={`Copies of ${line.name}, ${edition} to borrow`}
           value={value}
@@ -1133,7 +1146,7 @@ function LoanLine({
     );
   else if (answering)
     count = (
-      <div className="flex flex-col items-end gap-1 phone:items-start">
+      <div className="flex flex-col items-start gap-1">
         <Stepper
           label={`Copies of ${line.name}, ${edition} to lend`}
           value={value}
@@ -1164,8 +1177,10 @@ function LoanLine({
       </span>
     );
   return (
-    <li className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3 last:border-b-0 phone:grid-cols-[2.5rem_minmax(0,1fr)]">
-      <CardImage url={line.image_url} />
+    <li className="flex min-w-0 flex-col items-start gap-2">
+      <div className="w-full max-w-[145px]">
+        <CardImage url={line.image_url} />
+      </div>
       <div className="min-w-0">
         <p className="m-0 text-body font-medium wrap-anywhere">{line.name}</p>
         <p className="m-0 text-meta text-text-muted wrap-anywhere">{edition}</p>
@@ -1198,9 +1213,7 @@ function LoanLine({
           </p>
         )}
       </div>
-      <div className="min-w-0 text-right phone:col-start-2 phone:text-left">
-        {count}
-      </div>
+      <div className="min-w-0 text-left">{count}</div>
     </li>
   );
 }
