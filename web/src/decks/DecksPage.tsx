@@ -10,6 +10,7 @@ import { wantListPath, type DecksView } from "./wantListModel";
 type Props = {
   /** My Decks (/decks) or the Want List (/decks/want-list). */
   view: DecksView;
+  active: boolean;
   /** Opens a Deck in the deck builder (/decks/<id>). */
   onOpenDeck: (id: string) => void;
   /** Goes to another address in the app. */
@@ -27,7 +28,13 @@ const LINK =
  * across both addresses, so it keeps the focus when a view is chosen; choosing the Want List always opens All Decks,
  * and the Deck page's "Want List" button opens it scoped to that Deck.
  */
-export function DecksPage({ view, onOpenDeck, onNavigate, message }: Props) {
+export function DecksPage({
+  active,
+  view,
+  onOpenDeck,
+  onNavigate,
+  message,
+}: Props) {
   const idBase = useId();
   const panelId = `${idBase}-panel`;
   return (
@@ -74,7 +81,11 @@ export function DecksPage({ view, onOpenDeck, onNavigate, message }: Props) {
         {view === "want-list" ? (
           <WantListView onOpenDeck={onOpenDeck} onNavigate={onNavigate} />
         ) : (
-          <DecksIndexPage onOpenDeck={onOpenDeck} onNavigate={onNavigate} />
+          <DecksIndexPage
+            active={active}
+            onOpenDeck={onOpenDeck}
+            onNavigate={onNavigate}
+          />
         )}
       </div>
       <p role="alert" className="m-0 text-body text-danger">

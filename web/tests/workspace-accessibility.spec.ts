@@ -1,6 +1,6 @@
 // Ticket 114: the workspace's accessibility baseline (spec "Accessibility baseline", resolution 28).
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -19,7 +19,7 @@ import {
 import { animationsFinished } from "./support/motion";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -248,6 +248,8 @@ test.describe("desktop", () => {
   test("the workspace has no WCAG 2.2 AA violations in its main states", async ({
     page,
   }) => {
+    // This walkthrough runs axe in many complete UI states; its budget includes every audit.
+    test.setTimeout(60_000);
     promoteCatalog({ "card-1": "Access Abra", "card-2": "Access Bulbasaur" });
     await signIn(page);
     const s = randomUUID().slice(0, 8);

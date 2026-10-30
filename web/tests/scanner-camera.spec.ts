@@ -1,9 +1,10 @@
+import { test } from "./support/art-upstream";
 // Ticket #321: the real-camera smoke test. Chromium's fake capture device plays web/tests/fixtures/scanner/synthetic-card.mjpeg
 // (a synthetic 320x240 clip made by scripts/make_scanner_fixtures.py, no card artwork) in place of a camera, and the page's
 // real CameraFrameSource reads it. The recognizer is the stub, so only the camera path is under test: frames come out of
 // the camera, cross to the worker and are answered there. The launch flags are scoped to this file with `test.use`.
 import { fileURLToPath } from "node:url";
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
 import { installScript, openScanner, signInFresh } from "./support/scanner";
 
 const CLIP = fileURLToPath(

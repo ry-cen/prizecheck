@@ -1,6 +1,7 @@
 import { Avatar } from "../ui/Avatar";
 import { Pill } from "../ui/Pill";
-import { useEffect, useState, type MouseEvent } from "react";
+import { useFirstReadSettled, useReadOnShow } from "../shell/keptRead";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   usePollPulse,
   usePulseChanged,
@@ -58,7 +59,9 @@ type More = "idle" | "loading" | "failed";
  */
 export function ConversationList({
   onNavigate,
+  active,
 }: {
+  active: boolean;
   onNavigate: (to: string) => void;
 }) {
   const [archived, setArchived] = useState(false);
@@ -70,11 +73,24 @@ export function ConversationList({
   const pollPulse = usePollPulse();
   const tradesChanged = useTradesChanged();
 
+  const generation = useRef(0);
+  const paged = useRef(false);
+  const paginationGeneration = useRef(0);
+  const removed = useRef(new Set<string>());
+  useFirstReadSettled(load.kind !== "loading");
+  useReadOnShow(
+    active,
+    load.kind === "failed",
+    () => setAttempt((n) => n + 1),
+    paged.current
+  );
   useEffect(() => {
+    if (paged.current) return;
+    const mine = ++generation.current;
     const controller = new AbortController();
     getConversations({ archived }, controller.signal).then(
       (view) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || mine !== generation.current) return;
         setMore("idle");
         setLoad({
           kind: "ready",
@@ -84,7 +100,7 @@ export function ConversationList({
         });
       },
       () => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || mine !== generation.current) return;
         // A failed re-read leaves the list on screen.
         setLoad((current) =>
           current.kind === "ready" ? current : { kind: "failed" }
@@ -95,6 +111,10 @@ export function ConversationList({
   }, [archived, attempt, pulseChanged, tradesChanged]);
 
   const switchList = () => {
+    paged.current = false;
+    paginationGeneration.current++;
+    removed.current.clear();
+    generation.current++;
     setArchived((value) => !value);
     setLoad({ kind: "loading" });
     setMore("idle");
@@ -132,9 +152,14 @@ export function ConversationList({
   const { rows, nextBefore } = load;
   const showMore = async () => {
     if (!nextBefore) return;
+    paged.current = true;
+    // A late first-page refresh must not replace rows appended by this walk.
+    generation.current++;
+    const mine = ++paginationGeneration.current;
     setMore("loading");
     try {
       const view = await getConversations({ archived, before: nextBefore });
+      if (mine !== paginationGeneration.current) return;
       setLoad((current) =>
         current.kind === "ready"
           ? {
@@ -142,7 +167,9 @@ export function ConversationList({
               rows: [
                 ...current.rows,
                 ...view.conversations.filter(
-                  (row) => !current.rows.some((old) => old.id === row.id)
+                  (row) =>
+                    !removed.current.has(row.id) &&
+                    !current.rows.some((old) => old.id === row.id)
                 ),
               ],
               nextBefore: view.next_before,
@@ -152,13 +179,18 @@ export function ConversationList({
       );
       setMore("idle");
     } catch {
+      if (mine !== paginationGeneration.current) return;
       setMore("failed");
     }
   };
   const change = async (row: ConversationSummary) => {
+    generation.current++;
     setNotice(false);
     try {
       await (archived ? unarchiveConversation : archiveConversation)(row.id);
+      // A read started while the command was pending must not put this row back afterwards.
+      generation.current++;
+      removed.current.add(row.id);
       pollPulse();
       setLoad((current) =>
         current.kind === "ready"

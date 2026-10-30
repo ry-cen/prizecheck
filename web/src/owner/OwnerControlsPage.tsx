@@ -1,3 +1,4 @@
+import { useFirstReadSettled, useReadOnShow } from "../shell/keptRead";
 import {
   useCallback,
   useEffect,
@@ -31,6 +32,7 @@ import { StatusPanel } from "./StatusPanel";
 import { useQueueCounts } from "./useQueueCounts";
 
 type Props = {
+  active: boolean;
   /** The owner's catalog status; null for anyone else, who sees the heading and nothing more. */
   status: OwnerCatalogStatus | null;
   section: OwnerSection;
@@ -63,6 +65,7 @@ export function OwnerControlsPage(props: Props) {
 
 function OwnerControls({
   status,
+  active,
   section,
   onSection,
   onStatus,
@@ -72,7 +75,11 @@ function OwnerControls({
   const panelId = `${idBase}-panel`;
   const [operations, setOperations] = useState<OperationsStatus | null>(null);
   const [operationsFailed, setOperationsFailed] = useState(false);
-  const { counts, refresh: refreshCounts } = useQueueCounts(section);
+  const {
+    counts,
+    settled: countsSettled,
+    refresh: refreshCounts,
+  } = useQueueCounts(section, active);
   // The Metadata tab's two views; the Status panel's matched-by-number link opens the second.
   const [metadataView, setMetadataView] = useState<"review" | "card_number">(
     "review"
@@ -80,7 +87,7 @@ function OwnerControls({
 
   // Only the latest read may set the state, so a slow earlier read can't overwrite a newer one.
   const latestRead = useRef(0);
-  const readOperations = useCallback(async () => {
+  const readOperations = useCallback(async (quiet = false) => {
     const mine = ++latestRead.current;
     try {
       const next = await getOperationsStatus();
@@ -88,37 +95,64 @@ function OwnerControls({
       setOperations(next);
       setOperationsFailed(false);
     } catch {
-      if (mine === latestRead.current) setOperationsFailed(true);
+      if (!quiet && mine === latestRead.current) setOperationsFailed(true);
     }
   }, []);
+  const shown = useRef(active);
+  shown.current = active;
+  const statusGeneration = useRef(0);
+  const [statusSettled, setStatusSettled] = useState(false);
+  const [statusFailed, setStatusFailed] = useState(false);
+  const readStatus = useCallback(
+    async (quiet = false) => {
+      const mine = ++statusGeneration.current;
+      try {
+        const next = await getOwnerCatalogStatus();
+        if (mine === statusGeneration.current) {
+          onStatus(next);
+          setStatusFailed(false);
+        }
+      } catch {
+        if (mine !== statusGeneration.current) return;
+        setStatusFailed(true);
+        if (!quiet && shown.current)
+          onMessage("Catalog status temporarily unavailable.");
+      } finally {
+        if (mine === statusGeneration.current) setStatusSettled(true);
+      }
+    },
+    [onStatus, onMessage]
+  );
+  useFirstReadSettled(
+    (operations !== null || operationsFailed) && statusSettled && countsSettled
+  );
+  useReadOnShow(active, operationsFailed || statusFailed, (quiet) => {
+    void readOperations(quiet);
+    void readStatus(quiet);
+  });
   // Read with the counts on opening and on every tab switch, with the catalog status too, so a run
   // started after sign-in shows on the next view.
   useEffect(() => {
     void readOperations();
-    void getOwnerCatalogStatus()
-      .then(onStatus)
-      .catch(() => onMessage("Catalog status temporarily unavailable."));
+    void readStatus();
   }, [section, readOperations]);
 
   useEffect(() => {
+    if (!active) return;
     const checking =
       !!status.last_check &&
       !status.last_check.outcome &&
       !status.last_check.unfinished_stale;
     if ((!status.run || status.run.outcome) && !checking) return;
     const timer = window.setInterval(() => {
-      void getOwnerCatalogStatus()
-        .then(onStatus)
-        .catch(() => onMessage("Catalog status temporarily unavailable."));
+      void readStatus();
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [status.run?.outcome, status.last_check?.outcome]);
+  }, [active, status.run?.outcome, status.last_check?.outcome, readStatus]);
 
   function refresh() {
     onMessage("");
-    void getOwnerCatalogStatus()
-      .then(onStatus)
-      .catch(() => onMessage("Catalog status temporarily unavailable."));
+    void readStatus();
     void readOperations();
     refreshCounts();
   }
@@ -131,9 +165,12 @@ function OwnerControls({
   async function start() {
     onMessage("");
     try {
-      onStatus(await startCatalogRun());
+      const next = await startCatalogRun();
+      statusGeneration.current++;
+      onStatus(next);
     } catch {
-      onMessage("Unable to start catalog pull. Please retry.");
+      if (shown.current)
+        onMessage("Unable to start catalog pull. Please retry.");
     }
   }
 

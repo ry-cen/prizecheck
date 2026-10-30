@@ -20,6 +20,7 @@ import {
 type Props = {
   /** The section the address names (``sectionAt``): null for /trades, "find", "list", "new/<trader id>" (or "new/<Handle>", which redirects), "trader/<trader id>", "with/<trader id>", "conversation/<conversation id>", "<id>/counter", or a Trade id. */
   section: string | null;
+  active: boolean;
   /** Goes to another address in the app; `replace` swaps the current history entry. */
   onNavigate: (to: string, options?: { replace?: boolean }) => void;
 };
@@ -33,7 +34,7 @@ type Props = {
  * (/trades/trader/<trader id>, #299), the Counter builder for a proposal sent to you (/trades/<id>/counter, #278)
  * and one Trade (/trades/<id>) are pages of their own under the tab.
  */
-export function TradesPage({ section, onNavigate }: Props) {
+export function TradesPage({ active, section, onNavigate }: Props) {
   const idBase = useId();
   const panelId = `${idBase}-panel`;
   const route = tradesRoute(section);
@@ -116,7 +117,7 @@ export function TradesPage({ section, onNavigate }: Props) {
         className="flex min-w-0 flex-col gap-5"
       >
         {view === "trades" ? (
-          <ConversationList onNavigate={onNavigate} />
+          <ConversationList active={active} onNavigate={onNavigate} />
         ) : view === "find" ? (
           <FindTrades onNavigate={onNavigate} />
         ) : (

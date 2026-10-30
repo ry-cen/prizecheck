@@ -1,10 +1,11 @@
+import { test } from "./support/art-upstream";
 // The Scan Choice: a recognized card that has look-alike Printings or more than one active Edition asks which version
 // and finish before it is added; one with a single Edition and no look-alikes is added directly. One tap on a finish
 // adds one copy to the row of that Printing and Edition (or starts a row); the scanner never preselects a finish. A card
 // taken away with the prompt open is skipped and must leave the guide before the next lock; a chip change that matches
 // another row merges the two. Driven by the stub recognizer. Every state runs the shared page check at 1280×800 and
 // 375×812.
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
 import {

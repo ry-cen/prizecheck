@@ -1,6 +1,6 @@
 import { OWNER_SUBPATHS } from "../owner/sections";
 
-/** The signed-in pages inside the app shell, and the addresses that open them. Routing is client-side. */
+/** The signed-in shell tabs and their addresses. Tab roots stay mounted; detail screens exist only while shown. */
 export type PageId =
   | "collection"
   | "decks"
@@ -16,10 +16,6 @@ export type PageDef = {
   path: string;
   /** The tab, menu and phone header label. */
   label: string;
-  /** The page stays mounted, hidden, while another page is shown, so it keeps its state and scroll.
-   * Old pages that read their data only on mount remount on every visit until their redesign ticket
-   * moves them onto the kit and turns this on. */
-  keepMounted: boolean;
   /** Sub-addresses under `path` that open this page on one of its sections, for example /owner/rules for
    * Owner controls' Rules tab. The page reads its section with sectionAt. */
   sections?: readonly string[];
@@ -39,7 +35,6 @@ export const PAGES: readonly PageDef[] = [
     id: "collection",
     path: "/collection",
     label: "Collection",
-    keepMounted: true,
     // /collection/import: Collection Import (#226).
     sections: ["import"],
   },
@@ -47,7 +42,6 @@ export const PAGES: readonly PageDef[] = [
     id: "decks",
     path: "/decks",
     label: "Decks",
-    keepMounted: false,
     param: true,
     itemSections: ["replace"],
   },
@@ -55,14 +49,12 @@ export const PAGES: readonly PageDef[] = [
     id: "catalog",
     path: "/catalog",
     label: "Catalog",
-    keepMounted: true,
   },
   {
     // /loans/<Loan id>: one Loan (#252).
     id: "loans",
     path: "/loans",
     label: "Loans",
-    keepMounted: false,
     param: true,
   },
   {
@@ -75,7 +67,6 @@ export const PAGES: readonly PageDef[] = [
     id: "trades",
     path: "/trades",
     label: "Trades",
-    keepMounted: false,
     sections: ["find", "list"],
     sectionItems: ["new", "with", "conversation", "trader"],
     param: true,
@@ -85,19 +76,16 @@ export const PAGES: readonly PageDef[] = [
     id: "reports",
     path: "/reports",
     label: "Missing cards",
-    keepMounted: true,
   },
   {
     id: "settings",
     path: "/settings",
     label: "Settings",
-    keepMounted: false,
   },
   {
     id: "owner",
     path: "/owner",
     label: "Owner controls",
-    keepMounted: false,
     sections: OWNER_SUBPATHS,
   },
 ];

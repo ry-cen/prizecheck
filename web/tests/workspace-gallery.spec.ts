@@ -1,10 +1,10 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 type TreeNode = { id: string; name: string; version: number };
 

@@ -70,17 +70,12 @@ export function useDeckActions({
 
   const actions: ReactNode = detail && (
     <div className="flex min-w-0 flex-col items-end gap-1 phone:w-full phone:items-start">
-      <div className="flex flex-wrap items-center gap-2 phone:flex-nowrap phone:gap-1 phone:[&>button]:px-2">
-        <Button
-          variant="secondary"
-          className="phone:flex-1"
-          onClick={onReplaceList}
-        >
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 phone:w-full phone:gap-1 phone:[&>button]:min-w-control-phone phone:[&>button]:min-h-control-phone phone:[&>button]:h-auto phone:[&>button]:flex-auto phone:[&>button]:py-2 phone:[&>button]:max-w-full phone:[&>button]:whitespace-normal phone:[&>button]:wrap-anywhere phone:[&>button]:px-2">
+        <Button variant="secondary" onClick={onReplaceList}>
           Replace list…
         </Button>
         <Button
           variant="secondary"
-          className="phone:flex-1"
           onClick={(event) => {
             exportOpener.current = event.currentTarget;
             setExporting({ kind: "live", scope: "not_owned" });
@@ -100,7 +95,7 @@ export function useDeckActions({
         <Button
           ref={deleteButton}
           variant="quiet"
-          className="!text-danger phone:flex-1"
+          className="!text-danger"
           aria-label="Delete Deck"
           onClick={() => setDeleting(true)}
         >

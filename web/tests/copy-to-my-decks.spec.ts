@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -6,7 +6,7 @@ import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner, signInWithButton } from "./support/sign-in";
 import { expectTouchTarget } from "./support/touch-target";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 // Copy to my Decks (decklist import #216). A Published Deck's Copy to my Decks opens the import's paste screen with the
 // snapshot's cards in place of the text box, the new Deck named after the Published Deck and set to its Target Format

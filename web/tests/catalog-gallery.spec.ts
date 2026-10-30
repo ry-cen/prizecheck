@@ -5,7 +5,7 @@
 // three states, the page keeping its state across a tab switch, the CardPopup a tile opens (#174; its own behaviour is
 // in catalog-popup.spec.ts), My metadata reports in the header, and the shared page check at 1280×800 and 375×812 with
 // the dialogs open as well as closed. The collector flows that predate the gallery are in catalog-search.spec.ts.
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -13,7 +13,7 @@ import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 function python(code: string) {

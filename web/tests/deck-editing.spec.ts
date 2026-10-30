@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -6,7 +6,7 @@ import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { listCards, raiseLine } from "./support/deck-list";
 import { startAsNewOwner } from "./support/owner";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 // Editing the Deck List (#177): the deck builder's library (the browse route with the Deck's id), adding by drag and
 // by tap, the copy sheet's ±1 and Swap, Delete and Backspace, one batch per edit with an Undo toast, and fast taps
