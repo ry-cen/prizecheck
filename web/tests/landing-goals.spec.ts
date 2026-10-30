@@ -78,5 +78,16 @@ test.describe("landing goals", () => {
       await signInWithButton(page);
       await expect(page).toHaveURL(`${ORIGIN}${goal.href}`);
       await expect(heading(page)).toHaveText(goal.opens);
+      // Signed in, the shell carries none of the signed-out frame's header height or scroll padding. (Provider sign-in
+      // loads the page again, so this checks what the shell sets up, not the frame's own clean-up.)
+      expect(
+        await page.evaluate(() => ({
+          publicShell: document.documentElement.dataset.publicShell ?? null,
+          height: document.documentElement.style.getPropertyValue(
+            "--public-header-height"
+          ),
+          padding: document.documentElement.style.scrollPaddingTop,
+        }))
+      ).toEqual({ publicShell: null, height: "", padding: "" });
     });
 });
