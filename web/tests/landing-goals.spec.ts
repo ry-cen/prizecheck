@@ -29,10 +29,11 @@ const GOALS = [
 test.describe("landing goals", () => {
   test("the landing page offers Import a deck and Add my cards beside Sign in and Discover decks", async ({
     page,
-  }) => {
+  }, testInfo) => {
     for (const [width, height] of [
       [1280, 800],
       [375, 812],
+      [320, 568],
     ] as const) {
       await page.setViewportSize({ width, height });
       await page.goto(`${ORIGIN}/`);
@@ -53,6 +54,11 @@ test.describe("landing goals", () => {
         main.getByRole("link", { name: "Discover decks" })
       ).toHaveAttribute("href", "/discover");
       await expectPageChecks(page, `the landing goals at ${width} px`);
+      // Kept for a visual check of the layout at each width, pass or fail.
+      await page.screenshot({
+        path: testInfo.outputPath(`landing-${width}.png`),
+        fullPage: true,
+      });
     }
   });
 
