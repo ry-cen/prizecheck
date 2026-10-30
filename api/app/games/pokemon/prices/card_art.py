@@ -65,3 +65,33 @@ def refresh_fallbacks(conn) -> int:
         total = conn.execute("SELECT count(*) AS n FROM catalog_printing_fallback_art").fetchone()["n"]
     log.info("fallback art: %s Printings, %s changed, %s removed", total, len(changed), len(gone))
     return total
+
+
+ART_PRODUCT_CANDIDATES = CANDIDATES.replace("a.tcgdex_url IS NULL AND ", "").replace(
+    "  JOIN tcgplayer_product", "  JOIN edition_price_binding b ON b.edition_id=e.id AND b.product_id=m.product_id "
+    "AND b.mapping_revision=m.mapping_revision\n  JOIN tcgplayer_product")
+
+
+def refresh_art_products(conn) -> int:
+    """Bring the art product table in line with the catalog and the product table; the table's row count afterwards.
+
+    No public revision is advanced.
+    """
+    with conn.transaction():
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (PRICE_LOCK,))
+        wanted = choose((r["printing_id"], r["product_id"], r["descriptor"]) for r in conn.execute(ART_PRODUCT_CANDIDATES))
+        current = {r["printing_id"]: r["product_id"]
+                   for r in conn.execute("SELECT printing_id, product_id FROM catalog_printing_art_product")}
+        gone = [printing for printing in current if printing not in wanted]
+        changed = [printing for printing, product in wanted.items() if current.get(printing) != product]
+        for start in range(0, len(gone), CHUNK):
+            conn.execute("DELETE FROM catalog_printing_art_product WHERE printing_id = ANY(%s)", (gone[start:start + CHUNK],))
+        for start in range(0, len(changed), CHUNK):
+            part = changed[start:start + CHUNK]
+            conn.execute("""INSERT INTO catalog_printing_art_product(printing_id, product_id)
+              SELECT * FROM unnest(%s::uuid[], %s::int[])
+              ON CONFLICT (printing_id) DO UPDATE SET product_id = EXCLUDED.product_id, chosen_at = now()""",
+                         (part, [wanted[printing] for printing in part]))
+        total = conn.execute("SELECT count(*) AS n FROM catalog_printing_art_product").fetchone()["n"]
+    log.info("art products: %s Printings, %s changed, %s removed", total, len(changed), len(gone))
+    return total

@@ -9,3 +9,13 @@ KEY_PREFIX = "tcgdex"
 # Fallback art (ADR 0019, #354): linked, never copied. The route answers a redirect to this exact URL shape, which
 # the view builds from an integer product id.
 LINKED_ART = re.compile(r"https://tcgplayer-cdn\.tcgplayer\.com/product/[0-9]{1,9}_(?:200|400)w\.jpg")
+
+TCGPLAYER_HOST = "tcgplayer-cdn.tcgplayer.com"
+TCGPLAYER_LARGE = re.compile(r"https://tcgplayer-cdn\.tcgplayer\.com/product/[0-9]{1,9}_in_1000x1000\.jpg")
+TCGPLAYER_KEY_PREFIX = "tcgplayer"
+
+
+def tcgplayer_beats(base: str, width: int, height: int) -> bool:
+    if LINKED_ART.fullmatch(base):
+        return width >= 400 and height >= 558
+    return width * height > 600 * 825

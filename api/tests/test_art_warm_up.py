@@ -160,3 +160,26 @@ def test_the_warm_up_is_off_when_disabled(stub, monkeypatch):
     assert add_line(owner, deck, edition_of('me01-001'), '1', 1).status_code == 200
     art_store.join_warmups()
     assert stub.count == 0
+
+
+def test_publish_warms_small_and_large(stub, tmp_path, monkeypatch):
+    from test_publications import command, list_cards
+    from app.public_projection import FilePublicProjection
+    from app.core.art.public import read_pointer
+    monkeypatch.setenv("PUBLIC_PROJECTION_DIR", str(tmp_path / "public"))
+    # Initialize the publication store independently of the art store fixture.
+    with FilePublicProjection().writer(initialize=True):
+        pass
+    seed(BULBASAUR_ART)
+    owner = collector()
+    deck = new_deck(owner)
+    edition = edition_of('me01-001')
+    list_cards(owner, deck, {edition: 1})
+    response = command(owner, deck)
+    assert response.status_code == 200, response.text
+    art_store.join_warmups()
+    with connect() as conn:
+        ref = conn.execute('SELECT public_ref FROM catalog_printing WHERE source_id=%s', ('me01-001',)).fetchone()['public_ref']
+    assert read_pointer(ref, 'small') is not None
+    assert read_pointer(ref, 'large') is not None
+    assert stub.count == 2

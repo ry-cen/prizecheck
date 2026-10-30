@@ -81,6 +81,7 @@ beforeAll(async () => {
   const env = {
     ...process.env,
     EMAIL_SIGN_IN: "on",
+    TRUSTED_PROXY_IPS: "127.0.0.1",
     DATABASE_URL: connection.toString(),
     AUTH_PORT: String(port),
     API_ORIGIN: `http://127.0.0.1:${apiPort}`,
@@ -309,5 +310,133 @@ describe("card art", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("cross-origin-resource-policy")).toBeNull();
     expect(await response.text()).toBe("not really a png");
+  });
+});
+
+const publicArt = `/api/public/art/${"a".repeat(48)}/small?v=abcd1234`;
+
+describe("public card art", () => {
+  it("anonymous art bytes pass unchanged with public cache and isolation headers", async () => {
+    const bytes = pixels(200 * 1024 + 3);
+    const publicCache = "public, max-age=31536000, immutable";
+    behaviour = (_, response) => {
+      response.writeHead(200, {
+        "content-type": "image/jpeg",
+        "content-length": String(bytes.length),
+        "cache-control": publicCache,
+      });
+      response.end(bytes);
+    };
+    for (const headers of [{}, { cookie }]) {
+      seen.length = 0;
+      const response = await fetch(base + publicArt, { headers });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("image/jpeg");
+      expect(response.headers.get("cache-control")).toBe(publicCache);
+      expect(response.headers.get("cross-origin-resource-policy")).toBe(
+        "same-origin"
+      );
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+      expect(seen).toHaveLength(1);
+      expect(seen[0].url).toBe(publicArt);
+      expect(seen[0].headers["x-internal-user"]).toBeUndefined();
+    }
+  });
+
+  it("a public art 404 stays JSON and no-store", async () => {
+    behaviour = (_, response) => {
+      response.writeHead(404, {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60",
+      });
+      response.end(JSON.stringify({ detail: { code: "ART_NOT_FOUND" } }));
+    };
+    const response = await fetch(base + publicArt);
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      detail: { code: "ART_NOT_FOUND" },
+    });
+  });
+
+  it("a public art redirect is neither followed nor relayed", async () => {
+    seen.length = 0;
+    behaviour = (_, response) => {
+      response.writeHead(302, {
+        location: "/api/public/redirect-target",
+        "cache-control": cache,
+      });
+      response.end();
+    };
+    const response = await fetch(base + publicArt, { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await response.text();
+    expect(seen).toHaveLength(1);
+  });
+
+  it("art and other public reads have independent per-IP budgets", async () => {
+    behaviour = (_, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+    };
+    // Retry with fresh callers if the real gateway clock crosses its fixed minute window during the requests.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const window = Math.floor(Date.now() / 60_000);
+      const read = async (path: string, ip: string) => {
+        const response = await fetch(base + path, {
+          headers: { "x-real-ip": ip },
+        });
+        await response.text();
+        return response;
+      };
+      const fill = async (path: string, ip: string, count: number) => {
+        const statuses: number[] = [];
+        for (let offset = 0; offset < count; offset += 20) {
+          statuses.push(
+            ...(await Promise.all(
+              Array.from(
+                { length: Math.min(20, count - offset) },
+                async () => (await read(path, ip)).status
+              )
+            ))
+          );
+        }
+        return statuses;
+      };
+      const artFirst = `192.0.2.${attempt * 2 + 1}`;
+      const otherFirst = `192.0.2.${attempt * 2 + 2}`;
+      const artStatuses = await fill(publicArt, artFirst, 600);
+      const artLimited = await read(publicArt, artFirst);
+      const otherStatuses = await fill("/api/public/decks", artFirst, 120);
+      const otherLimited = await read("/api/public/decks", artFirst);
+      const reverseOther = await fill("/api/public/decks", otherFirst, 120);
+      const reverseLimited = await read("/api/public/decks", otherFirst);
+      const reverseArt = await fill(publicArt, otherFirst, 600);
+      const reverseArtLimited = await read(publicArt, otherFirst);
+      if (Math.floor(Date.now() / 60_000) !== window) continue;
+      for (const statuses of [
+        artStatuses,
+        otherStatuses,
+        reverseOther,
+        reverseArt,
+      ])
+        expect(statuses.every((status) => status === 200)).toBe(true);
+      for (const response of [
+        artLimited,
+        otherLimited,
+        reverseLimited,
+        reverseArtLimited,
+      ]) {
+        expect(response.status).toBe(429);
+        expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+      }
+      return;
+    }
+    throw new Error("Public read checks crossed three minute boundaries");
   });
 });

@@ -206,3 +206,31 @@ def test_a_failing_refresh_never_fails_the_import(world, monkeypatch):
         result = price_import.run(conn, fake.client())
         row = conn.execute("SELECT outcome, fallback_art FROM price_import ORDER BY id DESC LIMIT 1").fetchone()
     assert result.outcome == "imported" and row["outcome"] == "imported" and row["fallback_art"] is None
+
+
+def test_refresh_art_products_requires_current_binding_and_prefers_unstamped(world):
+    stock(300)
+    stock(500)
+    stamped = add_edition(world, 'card-1', {'type':'normal','stamp':['staff']},300)
+    plain = add_edition(world, 'card-1', NORMAL,500)
+    def refresh_products():
+        with connect() as conn:
+            return card_art.refresh_art_products(conn)
+    def bind(edition, stale=False):
+        with connect() as conn:
+            conn.execute("""INSERT INTO edition_price_binding(edition_id,product_id,mapping_revision,reason)
+                SELECT edition_id,product_id,mapping_revision-%s,'no_product_rows' FROM catalog_edition_metadata
+                WHERE edition_id=%s ON CONFLICT (edition_id) DO UPDATE SET mapping_revision=EXCLUDED.mapping_revision""",
+                (int(stale), edition))
+    assert refresh_products() == 0
+    bind(stamped)
+    bind(plain,stale=True)
+    assert refresh_products() == 1
+    with connect() as conn:
+        assert conn.execute('SELECT product_id FROM catalog_printing_art_product').fetchone()['product_id'] == 300
+    bind(plain)
+    assert refresh_products() == 1
+    with connect() as conn:
+        assert conn.execute('SELECT product_id FROM catalog_printing_art_product').fetchone()['product_id'] == 500
+        conn.execute('DELETE FROM edition_price_binding WHERE edition_id=ANY(%s)',([stamped,plain],))
+    assert refresh_products() == 0

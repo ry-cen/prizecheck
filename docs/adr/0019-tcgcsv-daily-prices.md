@@ -121,5 +121,5 @@ user-facing request, and a thank-you link is appreciated. The owner decided on 2
 - **Rollback.** The cutover is staged: one release imports, binds and publishes while the old readers still serve, and the next switches the readers. There is no path back to TCGdex prices. Mistakes are hidden with `PRICE_READS=off`, repaired in TCGCSV data, or fixed by a follow-up release.
 - **A visible TCGCSV credit.** This departs from the provenance rule in AGENTS.md, by the owner's decision. AGENTS.md is left unchanged; this ADR records the exception.
 - **Card-number matching can mis-price a stamped promo** that TCGdex records without its stamp. The owner's review list is the control.
-- **Published Deck snapshots** keep the art they were published with. A republish picks up fallback art.
+- **Published Deck snapshots** keep the art they were published with. A republish picks up fallback art. (Amended by [ADR 0020](0020-card-art-store.md)'s #439 amendment: art stored by the art store follows the Printing's current art.)
 - [#342](https://github.com/ry-cen/prizecheck/issues/342) (seeding budget) is superseded.

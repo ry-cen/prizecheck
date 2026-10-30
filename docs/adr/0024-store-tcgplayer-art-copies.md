@@ -27,5 +27,5 @@
 - **We redistribute TCGplayer's images without written permission.** The launch checklist records the risk and the takedown steps.
 - **The first large view of a Printing may fetch twice:** once from TCGdex and once from TCGplayer, until the comparison is recorded.
 - **Signed-out traffic reaches the art route.** It needs abuse limits and a public cache policy, so ADR 0020's `private` caching and signed-in rule no longer hold for public pages.
-- **Public art meets the Published Deck's zero-connection rule.** ADR 0006, as kept by ADR 0019, says anonymous Published Deck access makes zero PostgreSQL connections. Art requests from that page would reach the route, which reads PostgreSQL. The implementation ticket either serves public art without a database read or brings the change to the owner.
+- **Public art meets the Published Deck's zero-connection rule.** ADR 0006, as kept by ADR 0019, says anonymous Published Deck access makes zero PostgreSQL connections. Art requests from that page would reach the route, which reads PostgreSQL. Public art is served from pointer files stored next to each image, with no database read ([ADR 0020](0020-card-art-store.md), amendment for #438 and #439), so the rule holds.
 - **ADR 0020's guardrail and allowed-host list change.** The fetcher accepts `tcgplayer-cdn.tcgplayer.com`, but only for product image addresses.
