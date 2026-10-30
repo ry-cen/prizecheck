@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from . import deck_live_export
-from app import public_deck
+from app.games.pokemon.publications import public_deck
 from .live_export import LiveExport, LiveInputRow, format_live
 from ..catalog.public_catalog import live_states
 from app.public_projection import ProjectionUnavailable

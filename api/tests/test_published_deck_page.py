@@ -110,7 +110,7 @@ def test_public_cost_lists_each_frozen_editions_price_with_no_age(store, monkeyp
     assert not keys_of(body["editions"]) & {"age", "stale", "provider_updated_at", "checked_at", "refresh"}
 
     # An answer withheld for its validation carries no Edition either.
-    from app import public_deck
+    from app.games.pokemon.publications import public_deck
     from app.public_projection import ProjectionUnavailable
     real, calls = public_deck._record, []
 

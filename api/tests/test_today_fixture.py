@@ -9,7 +9,7 @@ API = Path(__file__).parent.parent
 
 CODE = '''
 from datetime import datetime, timezone
-from app import discovery
+from app.games.pokemon.publications import discovery
 from app.games.pokemon.formats import deck_format_checks
 from app.games.pokemon.formats import format_standing
 real = datetime.now(timezone.utc).date()

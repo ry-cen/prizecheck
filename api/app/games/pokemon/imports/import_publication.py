@@ -25,14 +25,14 @@ one. Nothing here writes, reads prices or touches the owner's inventory.
 from dataclasses import dataclass
 from uuid import UUID
 
-from app import public_deck
+from app.games.pokemon.publications import public_deck
 
 from app.games.pokemon.catalog import set_codes
 from app.games.pokemon.imports.decklist_text import MAX_CARD_LINES, CardLine
 from app.games.pokemon.imports.import_match_core import ACTIVE, Match
 from app.location_tree import error
 from app.public_projection import ProjectionUnavailable
-from app.publications import TOKEN
+from app.core.publications.publish import TOKEN
 
 SECTIONS = ('pokemon', 'trainer', 'energy')
 

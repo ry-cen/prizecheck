@@ -220,7 +220,7 @@ def test_backfill_script_publishes_existing_data_and_refuses_an_uninitialized_st
 
 
 def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_cursor_unchanged():
-    from app.discovery import cursor_encode
+    from app.core.publications.discovery import cursor_encode
     from app.games.pokemon.catalog.public_catalog import backfill
     from app.public_records import quote_key, result_key
     from test_discovery import visibility

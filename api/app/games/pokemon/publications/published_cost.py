@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import public_deck
+from app.games.pokemon.publications import public_deck
 
 from app.games.pokemon.prices import prices
 from app.core.prices.cost import CostStatus, IncompleteReason, summarize

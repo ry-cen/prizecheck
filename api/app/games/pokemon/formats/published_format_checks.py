@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from . import format_evaluator as evaluator
-from app import public_deck
+from app.games.pokemon.publications import public_deck
 from ..catalog.card_attributes import UNKNOWN
 from .deck_format_checks import DISCLAIMER, format_check, parse_as_of, today
 from ..catalog.public_catalog import format_facts

@@ -17,7 +17,8 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher, public_deck
+from app import price_launcher
+from app.games.pokemon.publications import public_deck
 from app.games.pokemon.publications import published_cost
 from app.bounded_work import Lane, Late
 from app.public_projection import FilePublicProjection, ProjectionUnavailable

@@ -18,7 +18,6 @@ app.db core
 app.deck_deletion core
 app.deck_list_capture core
 app.deck_pick_list core
-app.discovery mixed
 app.holdings mixed
 app.host_readiness mixed
 app.idempotency core
@@ -36,10 +35,8 @@ app.price_launcher core
 app.price_reads core
 app.price_refresh core
 app.price_runner root
-app.public_deck mixed
 app.public_projection core
 app.public_records core
-app.publications mixed
 app.quote_contract root
 app.settings core
 app.social core
@@ -90,3 +87,9 @@ app.games.pokemon.decks.line_display pokemon
 app.games.pokemon.decks.checks pokemon
 app.games.pokemon.decks.commands pokemon
 app.games.pokemon.trading.trade_wants pokemon
+app.core.publications.publish core
+app.core.publications.discovery core
+app.games.pokemon.publications.models pokemon
+app.games.pokemon.publications.public_deck pokemon
+app.games.pokemon.publications.publications pokemon
+app.games.pokemon.publications.discovery pokemon

@@ -78,7 +78,7 @@ ALLOWED_IMPORTS = {
         # The trader header's add_friend (trading #304) comes from the Friend code's one definition.
         ('app.social.friends', 'add_friend_state')},
     'app.social.friends': {
-        ('app.social', 'name_rules'), ('app.db', 'connect'), ('app.identity', 'verified_user'), ('app.publications', 'TOKEN'),
+        ('app.social', 'name_rules'), ('app.db', 'connect'), ('app.identity', 'verified_user'), ('app.core.publications.publish', 'TOKEN'),
         ('app.location_tree', 'error'), ('app.location_tree', 'replay'), ('app.social.owners', 'ensure_owner'),
         ('app.social.owners', 'lock_owners'), ('app.social.profile', 'token_hash'),
         # Ending a friendship cancels the pair's Loans nobody has confirmed a handover for (#260), then their Trades
@@ -169,7 +169,7 @@ ALLOWED_IMPORTS = {
         ('app.location_tree', 'error'), ('app.location_tree', 'owner_and_rows'), ('app.location_tree', 'replay'),
         ('app.public_projection', 'ProjectionUnavailable'), ('app.public_records', 'MAX_BATCH'),
         ('app.public_records', 'invite_key'), ('app.public_records', 'public_record_store'),
-        ('app.publications', 'PUBLIC_HEADERS'), ('app.publications', 'TOKEN')},
+        ('app.core.publications.publish', 'PUBLIC_HEADERS'), ('app.core.publications.publish', 'TOKEN')},
 }
 
 RULES = {

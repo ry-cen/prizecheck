@@ -20,9 +20,7 @@ store generation as the facts with the Published Deck cost route's eligibility p
 
 Contract: docs/public-projections.md ("Discover lists legal decks").
 """
-import base64
 import hashlib
-import hmac
 import json
 import os
 import threading
@@ -36,7 +34,7 @@ from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from . import public_deck
+from app.games.pokemon.publications import public_deck
 
 from app.games.pokemon.catalog import card_attributes
 
@@ -51,13 +49,13 @@ from app.games.pokemon.formats import format_evaluator as evaluator
 from app.core.prices.cost import summarize
 from app.games.pokemon.formats.deck_format_checks import TargetFormat, today
 from app.games.pokemon.catalog.public_catalog import marketplace_states
-from .public_projection import ProjectionUnavailable, public_projection_store
-from .public_records import public_record_store
+from app.public_projection import ProjectionUnavailable, public_projection_store
+from app.public_records import public_record_store
 from app.games.pokemon.publications.published_cost import _view
-from .publications import PublicModel, TOKEN, PUBLIC_HEADERS
+from app.core.publications.discovery import HEADERS, cursor_encode, cursor_decode, listed_snapshots
+from app.games.pokemon.publications.models import PublicCheckSummary, DiscoverCost, PublicDeckSummary, DiscoveryPage
 
 router = APIRouter(tags=['public discovery'])
-HEADERS = {**PUBLIC_HEADERS, 'X-Robots-Tag': 'index, follow'}
 PAGE = 30
 # Every Discover request confirms its decks within this many seconds of store reads; decks not confirmed by then are left
 # out of the answer.
@@ -71,89 +69,6 @@ CACHE_ENTRIES = 4096
 CODE_SHA256 = hashlib.sha256(b''.join(Path(path).read_bytes() for path in (
     evaluator.__file__, card_attributes.__file__, public_catalog.__file__, published_format_checks.__file__,
     deck_format_checks.__file__))).hexdigest()
-
-
-class PublicCheckSummary(PublicModel):
-    size_status: str
-    shortage: str
-    excess: str
-    over_limit_groups: int
-    unresolved_groups: int
-
-
-class DiscoverCost(PublicModel):
-    """The deck's cost from cached quotes only (base-10 strings, like the Published Deck cost)."""
-    amount: str | None          # exact decimal subtotal of the priced copies; None when no copy is priced
-    priced_copies: str          # copies with a cached quote, stale ones included
-    total_copies: str           # every copy in the snapshot
-
-
-class PublicDeckSummary(PublicModel):
-    url: str
-    title: str
-    total: str
-    published_at: datetime
-    checks: PublicCheckSummary
-    image_url: str | None       # the featured card's art (``featured``)
-    featured_name: str | None   # the featured card's name, for its alt text
-    target_format: TargetFormat
-    target_format_status: evaluator.Status  # always 'legal': only legal decks are listed
-    cost: DiscoverCost
-
-
-class DiscoveryPage(PublicModel):
-    decks: list[PublicDeckSummary]
-    revision: int
-    next_cursor: str | None
-
-
-def invalid_cursor():
-    raise HTTPException(400, {'code': 'INVALID_CURSOR'}, headers=HEADERS)
-
-
-def cursor_encode(query, format_name, revision, key):
-    payload = json.dumps({'v': 2, 'q': query, 'f': format_name, 'r': revision, 'k': key}, separators=(',', ':')).encode()
-    mac = hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(), payload, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(payload + mac).decode().rstrip('=')
-
-
-def cursor_decode(token, query, format_name, revision):
-    try:
-        if len(token)>2048:
-            raise ValueError()
-        raw = base64.urlsafe_b64decode(token + '=' * (-len(token) % 4))
-        payload, mac = raw[:-32], raw[-32:]
-        expected = hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(), payload, hashlib.sha256).digest()
-        if not hmac.compare_digest(mac, expected):
-            raise ValueError()
-        value = json.loads(payload)
-        if value['v'] != 2 or value['q'] != query or value['f'] != format_name or not isinstance(value['r'], int):
-            raise ValueError()
-        if value['r'] != revision:
-            raise HTTPException(409, {'code': 'DISCOVERY_CHANGED'}, headers=HEADERS)
-        key = value['k']
-        if not isinstance(key, list) or len(key) != 2 or not all(isinstance(part,str) for part in key) or not TOKEN.fullmatch(key[1]):
-            raise ValueError()
-        datetime.fromisoformat(key[0])
-        return tuple(key)
-    except (ValueError, KeyError, TypeError):
-        invalid_cursor()
-
-
-def listed_snapshots():
-    """Every Listed snapshot as ``(token, public_deck.ActiveSnapshot)``, and the manifest revision. A malformed manifest
-    or Listed record is 503, never a shorter list."""
-    try:
-        objects, revision = public_projection_store().read_state()
-        listed = []
-        for token, record in objects.items():
-            if not TOKEN.fullmatch(token) or record['visibility'] not in ('listed','unlisted'):
-                raise ProjectionUnavailable()
-            if record['visibility'] == 'listed':
-                listed.append((token, public_deck.parse_record(token, record)))
-        return listed, revision
-    except (ProjectionUnavailable, KeyError, TypeError):
-        raise HTTPException(503, {'code': 'PUBLIC_PROJECTION_UNAVAILABLE'}, headers=HEADERS) from None
 
 
 # --- Legality ------------------------------------------------------------------------------------------------------
@@ -296,7 +211,7 @@ def discover(response: Response, q: str = '', cursor: str | None = None,
         raise HTTPException(422, {'code':'INVALID_SEARCH'}, headers=HEADERS)
     if format_name is not None and format_name not in evaluator.FORMATS:
         raise HTTPException(422, {'code': 'UNKNOWN_FORMAT'}, headers=HEADERS)
-    objects, revision = listed_snapshots()
+    objects, revision = listed_snapshots(parse=public_deck.parse_record)
     key = cursor_decode(cursor, query, format_name, revision) if cursor else None
     matches = [(token, active) for token, active in objects
                if (format_name is None or active.snapshot.target_format == format_name)
@@ -333,7 +248,7 @@ def discover(response: Response, q: str = '', cursor: str | None = None,
 
 @router.get('/api/public/sitemap.xml', response_class=Response)
 def sitemap():
-    objects, _ = listed_snapshots()
+    objects, _ = listed_snapshots(parse=public_deck.parse_record)
     origin = os.environ.get('PUBLIC_ORIGIN','http://localhost:5173').rstrip('/')
     urls = ''.join(f'<url><loc>{escape(origin + "/published/" + token)}</loc><lastmod>{active.snapshot.published_at.date().isoformat()}</lastmod></url>'
                    for token, active in sorted(objects, key=lambda item: item[0]))

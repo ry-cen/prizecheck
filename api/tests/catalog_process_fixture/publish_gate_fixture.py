@@ -87,7 +87,7 @@ def _wrap_discovery(discovery):
 
 def install():
     """Wrap the gate in this process now (pytest and Python helpers, where the app is imported anyway)."""
-    from app import publications
+    from app.games.pokemon.publications import publications
     _wrap(publications)
 
 
@@ -99,7 +99,7 @@ def install_on_import():
         return
     import sys
     from price_fixture import _PatchOnImport
-    sys.meta_path.insert(0, _PatchOnImport({'app.publications': _wrap, 'app.discovery': _wrap_discovery}, {}))
+    sys.meta_path.insert(0, _PatchOnImport({'app.games.pokemon.publications.publications': _wrap, 'app.games.pokemon.publications.discovery': _wrap_discovery}, {}))
 
 
 def exempt(deck_id):
@@ -111,7 +111,7 @@ def exempt(deck_id):
 def exempt_listing(token):
     """Let Discover list the snapshot ``token`` whatever its Target Format result: in this process, and in the stack's
     API process when a fixture directory is set."""
-    from app import discovery
+    from app.games.pokemon.publications import discovery
     _wrap_discovery(discovery)
     _listing_exempt.add(str(token))
     root = _root()

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from . import deck_mass_entry
-from app import public_deck
+from app.games.pokemon.publications import public_deck
 from ..prices.catalog_targets import is_unspecified
 from .mass_entry_export import MassEntryExport, MassEntryInputRow
 from ..catalog.public_catalog import marketplace_states

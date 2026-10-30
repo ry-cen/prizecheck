@@ -24,7 +24,7 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import discovery
+from app.games.pokemon.publications import discovery
 from app.games.pokemon.formats import deck_format_checks
 from app.games.pokemon.formats import format_evaluator
 from app.public_records import catalog_edition_key, price_key, quarantine_key

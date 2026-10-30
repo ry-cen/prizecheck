@@ -17,7 +17,7 @@ from app.games.pokemon.exports.deck_live_export import router as deck_live_expor
 from app.games.pokemon.exports.deck_mass_entry import router as deck_mass_entry_router
 from app.deck_pick_list import router as deck_pick_list_router
 from app.games.pokemon.decks.routes import router as decks_router
-from app.discovery import router as discovery_router
+from app.games.pokemon.publications.discovery import router as discovery_router
 from app.games.pokemon.formats.format_standing import rebuild_on_startup as rebuild_format_standing, router as format_standing_router
 from app.holdings import router as holdings_router
 from app.loan_inventory import router as loan_inventory_router
@@ -28,7 +28,7 @@ from app.games.pokemon.catalog.missing_cards import router as missing_cards_rout
 from app.moves import router as moves_router
 from app.operations import router as operations_router
 from app.games.pokemon.prices.prices import router as prices_router
-from app.publications import router as publications_router
+from app.games.pokemon.publications.publications import router as publications_router
 from app.games.pokemon.publications.published_cost import router as published_cost_router
 from app.games.pokemon.formats.published_format_checks import router as published_format_checks_router
 from app.games.pokemon.exports.published_live_export import router as published_live_export_router

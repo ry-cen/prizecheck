@@ -54,7 +54,7 @@ from pydantic import BaseModel, Field
 from ..location_tree import error, replay
 from ..db import connect
 from ..identity import verified_user
-from ..publications import TOKEN
+from ..core.publications.publish import TOKEN
 from . import name_rules
 from .conversations import pair_changed
 from .discovery import reach_one, require_not_suspended, trader_user
