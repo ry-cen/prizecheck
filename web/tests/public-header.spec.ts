@@ -3,7 +3,7 @@
 // is one 64 px row at the usual text size. It also fits with the page zoomed to 200% (a 1280 px window is 640 px wide)
 // and with text alone enlarged to 200% at desktop and phone widths, where its links wrap onto a second row. The page's
 // overlay scroll bar always starts at the header's bottom edge, and a control focused by Tab is never hidden behind
-// the header.
+// the header: it shows whole below it.
 import { test, expect, type Page } from "@playwright/test";
 import { expectPageChecks } from "./support/page-check";
 
@@ -40,12 +40,24 @@ async function expectHeaderInView(page: Page, width: number) {
   await expect(discover).toHaveText("Discover decks");
 }
 
-/** The page's overlay scroll bar, where it is drawn (a mouse or trackpad screen, a page that scrolls), starts at the
- * header's bottom edge. */
+/**
+ * The page's overlay scroll bar (a mouse or trackpad screen draws one; headless Chromium does) is drawn exactly when the
+ * page scrolls (useOverlayScrollbar sets the rail's `hidden` otherwise), and then starts at the header's bottom edge.
+ */
 async function expectRailBelowHeader(page: Page) {
   const bottom = (await banner(page).boundingBox())!.height;
   const rail = page.locator('[data-overlay-scrollbar="page"]');
-  if (!(await rail.isVisible())) return;
+  if ((await rail.count()) === 0) return;
+  const scrolls = await page.evaluate(
+    () =>
+      document.documentElement.scrollHeight >
+      document.documentElement.clientHeight
+  );
+  if (!scrolls) {
+    await expect(rail).toBeHidden();
+    return;
+  }
+  await expect(rail).toBeVisible();
   await expect
     .poll(async () => Math.round((await rail.boundingBox())!.y))
     .toBe(Math.round(bottom));
@@ -137,12 +149,8 @@ test.describe("public header", () => {
             if (header.contains(focused)) return null;
             const box = focused.getBoundingClientRect();
             const edge = header.getBoundingClientRect().bottom;
-            // A control that fits below the header shows whole. One taller than that space (a goal card at 200% text
-            // on a 568 px screen) is never hidden behind the header (WCAG 2.4.11): it fills the space below it.
-            const fits = box.height <= window.innerHeight - edge;
-            const shown = fits
-              ? box.top >= edge - 0.5 && box.bottom <= window.innerHeight + 0.5
-              : box.top <= edge + 0.5 && box.bottom >= window.innerHeight - 0.5;
+            const shown =
+              box.top >= edge - 0.5 && box.bottom <= window.innerHeight + 0.5;
             return shown
               ? null
               : `${focused.textContent?.trim().slice(0, 30)}: ${Math.round(box.top)}-${Math.round(box.bottom)}, header ends at ${Math.round(edge)}`;

@@ -56,7 +56,11 @@ const GOALS = [
   },
 ];
 
-/** A whole-card link: its name is the goal, and the line under it is its description. */
+/**
+ * A goal card. Its title row is the link, named by the goal and described by the line under it; the link's ::after
+ * covers the card, so a click anywhere on it follows the link. Focus rings the title row alone, which always fits below
+ * the sticky header when focus scrolls it into view, however large the text.
+ */
 function GoalLink({
   title,
   description,
@@ -67,29 +71,25 @@ function GoalLink({
 }) {
   const id = useId();
   return (
-    <a
-      href={href}
-      onClick={onClick}
-      aria-labelledby={`${id}-title`}
-      aria-describedby={`${id}-description`}
-      className="box-border flex h-full flex-col gap-2 rounded-panel border border-border-strong bg-surface p-5 text-text no-underline hover:border-accent"
-    >
-      <span
-        id={`${id}-title`}
-        className="flex items-center justify-between gap-3 text-heading font-semibold"
+    <div className="relative box-border flex h-full flex-col gap-2 rounded-panel border border-border-strong bg-surface p-5 has-[a:hover]:border-accent">
+      <a
+        href={href}
+        onClick={onClick}
+        aria-describedby={`${id}-description`}
+        className="flex min-h-control items-center justify-between gap-3 text-heading font-semibold text-text no-underline after:absolute after:inset-0 after:rounded-panel after:content-[''] phone:min-h-control-phone"
       >
         {title}
         <span aria-hidden="true" className="text-accent-strong">
           ›
         </span>
-      </span>
-      <span
+      </a>
+      <p
         id={`${id}-description`}
-        className="text-body leading-normal text-text-muted"
+        className="m-0 text-body leading-normal text-text-muted"
       >
         {description}
-      </span>
-    </a>
+      </p>
+    </div>
   );
 }
 
