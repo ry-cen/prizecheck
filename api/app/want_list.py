@@ -3,7 +3,8 @@
 ``GET /api/want-list`` answers what the collector's Decks still need from outside the Collection under the account's
 Want List counting setting: one section per Deck, oldest Deck first, and a combined total listing each card once with
 the Decks that need it. ``?deck=<id>`` scopes the answer to one Deck: its section only, and a combined total of that
-Deck's needs. It is derived only; nothing here is stored.
+Deck's needs. It is derived only; nothing here is stored. The route lives with the Pokémon line display it lists the
+lines with (``app.games.pokemon.decks.want_list``); the capture, the counting and the response models are here.
 
 Every count comes from ``copy_allocation.allocate``, the one allocation behind the Deck detail's ``to_get``, the cost
 to complete and Buy missing, so a Deck's section needs exactly what its builder says it does. Counting is per Card
@@ -41,24 +42,18 @@ settings; received copies of a wanted Edition fill its own lines first; a target
 only to a Deck that lists it; and with a Deck destination only that Deck is offered.
 """
 import hashlib
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from .card_accepts import accepts
 from .copy_allocation import Allocation, LineCount, allocate, deck_order
-from app.games.pokemon.decks.line_display import read_line_display
 from .location_tree import error, owner_and_rows
 from .db import connect
-from .identity import verified_user
 from .settings import WantListCounting, read_settings
 from .swap_hints import FACTS, GroupEdition, SwapCapture, SwapHint, capture_swaps, has_rules, hints, swap_hint
-
-router = APIRouter(prefix='/api/want-list', tags=['want-list'])
 
 
 class WantListDeck(BaseModel):
@@ -312,61 +307,4 @@ def deck_switch_candidates(conn, user_id: str, received: Sequence[tuple[UUID, in
     return found
 
 
-NUMBER_PARTS = re.compile(r'^([a-z]*)(\d*)(.*)$', re.DOTALL)
-
-
-def number_order(number: str) -> tuple:
-    """A collector number in natural order, compared the way catalog search compares it (``catalog_browse.NUMBER_KEY``:
-    zeros after a number's letters don't count, so 097 reads as 97): plain numbers by value (2 before 10), a letter
-    suffix after its number, numbers with a letter prefix after the plain ones. The raw text breaks a tie."""
-    key = re.sub(r'^([a-z]*)0*([0-9])', r'\1\2', number.lower())
-    prefix, digits, rest = NUMBER_PARTS.match(key).groups()
-    return prefix != '', prefix, int(digits) if digits else -1, rest, number
-
-
 DISPLAY_FIELDS = ('name', 'set_id', 'set_name', 'collector_number', 'descriptor', 'image_url')
-
-
-@router.get('', response_model=WantList)
-def want_list(deck: UUID | None = None, user_id: str = Depends(verified_user)):
-    capture = capture_want_list(user_id, deck, swaps=True)
-    needs = {shown.id: capture.needs(shown.id) for shown in capture.shown()}
-    with connect() as conn:
-        display = read_line_display(conn, {line.edition_id for lines in needs.values() for line in lines})
-
-    def shown_of(edition: UUID) -> dict:
-        return {key: display[edition][key] for key in DISPLAY_FIELDS}
-
-    # Lines read by card, then by Edition: name, set, collector number, then the Edition id for a stable order.
-    def card_order(line: LineCount):
-        fields = display[line.edition_id]
-        return fields['name'].casefold(), fields['set_name'], number_order(fields['collector_number']), line.edition_id
-
-    for lines in needs.values():
-        lines.sort(key=card_order)
-
-    # The Swap hints (#211), handed out in the same card order over every Deck, oldest first.
-    def group_order(edition: GroupEdition):
-        return edition.name.casefold(), edition.set_name, number_order(edition.collector_number), edition.edition_id
-
-    offered = hints(capture.swaps, [captured.id for captured in capture.decks], group_order)
-    sections = [WantListSection(
-        deck_id=shown.id, name=shown.name, deck_list_revision=shown.deck_list_revision,
-        to_get=str(sum(line.need for line in needs[shown.id])),
-        lines=[WantListLine(
-            edition_id=line.edition_id, **shown_of(line.edition_id), quantity=str(line.quantity), held=str(line.held),
-            spare=str(line.spare), other_decks=str(line.other_decks),
-            counted_from=[CountedFromDeck(deck_id=other, quantity=str(count)) for other, count in line.from_decks],
-            lent=str(line.lent), borrowed=str(line.borrowed),
-            owned=str(capture.allocation.owned.get(line.edition_id, 0)), need=str(line.need),
-            swap=swap_hint(offered.get((shown.id, line.edition_id)), capture.swaps))
-            for line in needs[shown.id]]) for shown in capture.shown()]
-    total = combined(capture, needs)
-    rows = [CombinedRow(edition_id=edition, **shown_of(edition), need=str(need),
-                        decks=[CombinedDeckNeed(deck_id=line.deck_id, need=str(line.need)) for line in lines])
-            for edition, need, lines in total]
-    return WantList(want_list_counting=capture.counting, settings_revision=capture.settings_revision,
-                    owner_revision=capture.owner_revision, deck_lists_digest=capture.deck_lists_digest,
-                    deck_id=capture.scope,
-                    decks=[WantListDeck(id=shown.id, name=shown.name) for shown in capture.decks],
-                    sections=sections, combined=rows, to_get=str(sum(need for _, need, _ in total)))

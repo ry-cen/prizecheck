@@ -87,11 +87,12 @@ from ..identity import verified_user
 from ..trade_list import own_trade_copies
 from app.core.trading.trade_wants import own_rules, own_wants
 from ..want_list import capture_want_list
+from ..core.catalog.card_facts import card_facts
 from . import name_rules
 from .conversations import pair_row, standings
 from .discovery import BANDS, Band, DiscoveryStatus, Radius, nearby, reach_one, search_setting, trader_user
 from .friend_copies import friend_trade_copies, friend_wants
-from .friend_reads import FRIEND_BY_HANDLE, PAGE_IDENTITIES, card_facts, search_key
+from .friend_reads import FRIEND_BY_HANDLE, PAGE_IDENTITIES, search_key
 from .friends import add_friend_state, friend_ids
 from .trades import completed_trades
 

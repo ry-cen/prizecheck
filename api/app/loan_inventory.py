@@ -77,7 +77,7 @@ from .identity import verified_user
 from .inventory_core import MAX_QUANTITY, first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
 from .social import counts
 from .social.friend_copies import friend_copies
-from .social.friend_reads import card_facts
+from .core.catalog.card_facts import card_facts
 from .social.discovery import require_not_suspended
 from .social.friends import friend_ids
 from .social.loans import LoanStep, LoanView, close, record_update, return_by_columns, run_step, store, today, write_loan
