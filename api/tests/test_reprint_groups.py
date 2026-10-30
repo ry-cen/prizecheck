@@ -4,12 +4,14 @@ checks over signed HTTP.
 The records are minimal copies of real TCGdex English records from the 2026-10-10 crawl, cut down to the fields the
 attribute and rules-text rules read. Records whose ID starts with "fixture-" are made up for one rule.
 """
+import pytest
+
 from datetime import date
 from uuid import uuid4
 
 from app.games.pokemon.catalog.catalog import rederive_card_attributes
 from app.main import connect
-from app.games.pokemon.catalog.reprint_groups import RULES, ReprintTextRules, read_reprint_groups, rules_digest
+from app.games.pokemon.catalog.reprint_groups import RULES, ReprintTextRules, read_reprint_groups, rules_digest, text_key
 from test_card_attributes import ENERGY_SV, SWITCH_ME, card, edition_of, printing_ids, revision
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -19,7 +21,7 @@ from test_deck_lists import add_line
 from test_holdings import call
 
 # Changing a rules-text rule changes this digest: bump ReprintTextRules.VERSION and pin the new pair here.
-PINNED_RULES = (1, "4c41cbb597dd1b97d2f00bef3476b3342a85e43e6f0e8774b721f381444b9d55")
+PINNED_RULES = (2, "5a50872fd9eb0144b4d9a74b6aa19e3272827019f966eb18c74575e226cf9038")
 
 ME_CANDY = ("Choose 1 of your Basic Pokémon in play. If you have a Stage 2 card in your hand that evolves from that "
             "Pokémon, put that card onto the Basic Pokémon to evolve it, skipping the Stage 1. You can't use this card "
@@ -170,6 +172,75 @@ def test_rules_text_folds_typography_but_keeps_case_reminder_text_and_missing_da
                    {"attacks": [{"cost": ["Lightning"], "damage": 10}]},
                    {"abilities": [{"type": "Ability", "name": "Static"}]}):
         assert text(edited(PIKACHU_G, **broken)) is None, broken
+
+
+
+@pytest.mark.parametrize("type_name,symbol", [
+    ("Grass", "G"), ("Fire", "R"), ("Water", "W"), ("Lightning", "L"), ("Psychic", "P"),
+    ("Fighting", "F"), ("Darkness", "D"), ("Metal", "M"), ("Fairy", "Y"), ("Dragon", "N"), ("Colorless", "C"),
+])
+def test_energy_spellings_fold_every_energy_type(type_name, symbol):
+    brace = "{" + symbol + "}"
+    assert RULES.text("[" + symbol + "]") == brace
+    assert RULES.text(f'<span class="energy-symbol {type_name}" title="{type_name}">{type_name}</span>') == brace
+    assert RULES.text(f"Basic {type_name} Energy") == f"Basic {brace} Energy"
+    # Line breaks, doubled spaces and <em> inside the phrase fold the same way.
+    for spelled in (f"Basic\n{type_name} Energy", f"Basic  {type_name}\tEnergy", f"Basic <em>{type_name}</em> Energy"):
+        assert RULES.text(spelled) == f"Basic {brace} Energy"
+    # Older wording and case are deliberately kept.
+    assert RULES.text(f"{type_name} Energy") == f"{type_name} Energy"
+    assert RULES.text(f"basic {type_name} Energy") == f"basic {type_name} Energy"
+    assert RULES.text(f"Basic {type_name.lower()} Energy") == f"Basic {type_name.lower()} Energy"
+
+
+@pytest.mark.parametrize("printed,canonical", [
+    ("Attach [R] Energy.", "Attach {R} Energy."),  # Mega Charizard X ex mep-023 / me02-013
+    ("Attach Basic Fire Energy.", "Attach Basic {R} Energy."),  # Delphox mep-074 / me04-013
+    ('Attach <span class="energy-symbol Dragon" title="Dragon">Dragon</span> Energy.', "Attach {N} Energy."),
+    ("Attack. <em>(Keep this reminder.)</em>", "Attack. (Keep this reminder.)"),  # Pikachu 30th-025
+])
+def test_v2_spellings_join_the_same_reprint_group_on_import(printed, canonical):
+    reset_catalog()
+    # These differ under v1: none of its NFC, typography or whitespace folds changes either spelling.
+    assert printed != canonical
+    first = edited(PIKACHU_G, attacks=[{**SCRAPPY_SPARK[0], "effect": printed}])
+    second = edited(PIKACHU_I, attacks=[{**SCRAPPY_SPARK[0], "effect": canonical}])
+    run(Records(first, second))
+    groups = groups_of(first["id"], second["id"])
+    assert groups[first["id"]] is not None
+    assert groups[first["id"]] == groups[second["id"]]
+
+
+@pytest.mark.parametrize("effect,v1_key", [
+    (RESEARCH, "f842464c0afea0878907e4daf6b378f203c42a8a0cebddc9d916f0c4d5dc9f82"),
+    ("Attach a Fire Energy. (Keep this reminder.)", "45ef9b1c5e21ec81c54163ba967be774d762f55dc76b200a8b0f6226f300317a"),
+])
+def test_text_without_new_spellings_keeps_its_v1_text_key(effect, v1_key):
+    assert text_key(RULES.rules_text({"category": "Trainer", "effect": effect})) == v1_key
+
+
+def test_rederiving_existing_v1_groups_applies_v2_without_fetching(monkeypatch):
+    reset_catalog()
+    first = edited(PIKACHU_G, attacks=[{**SCRAPPY_SPARK[0], "effect": "Attach [R] Energy."}])
+    second = edited(PIKACHU_I, attacks=[{**SCRAPPY_SPARK[0], "effect": "Attach {R} Energy."}])
+    with monkeypatch.context() as old_rules:
+        old_rules.setattr(ReprintTextRules, "VERSION", 1)
+        # These fixture strings contain no typography, NFC or whitespace differences: v1 keeps them verbatim.
+        old_rules.setattr(ReprintTextRules, "text", classmethod(lambda cls, value: value if isinstance(value, str) else None))
+        run(Records(first, second))
+    before = groups_of(first["id"], second["id"])
+    assert before[first["id"]] != before[second["id"]]
+    with connect() as conn:
+        rederive_card_attributes(conn)
+        versions = conn.execute("SELECT DISTINCT rules_version FROM catalog_derived_reprint_group").fetchall()
+    after = groups_of(first["id"], second["id"])
+    assert after[first["id"]] == after[second["id"]]
+    assert [row["rules_version"] for row in versions] == [2]
+
+
+def test_other_markup_and_symbols_stay_printed():
+    for text in ("[r] [Z]", "<strong>Reminder</strong>", '<span class="energy-symbol Unknown">Fire</span>'):
+        assert RULES.text(text) == text
 
 
 def test_import_groups_printings_with_equal_text_within_one_card_identity():
