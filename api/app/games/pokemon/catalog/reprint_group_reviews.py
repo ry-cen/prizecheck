@@ -53,6 +53,9 @@ another). A group is legal in a Format when the format checks would find one of 
 ``deck_format_checks`` reads them): a ban on any member makes it not legal, and otherwise it is unknown when no member
 is legal and one is unknown. The regulation mark is part of the evidence digest, so a decision binds to it; the
 legality is not, because it changes with the date and the rules files, never with the reviewed records.
+
+Likely reprints are pairs of effective groups with matching Pokémon structure and a known regulation mark.
+Their append-only dismissals bind to text keys, never alter membership, and can be undone.
 """
 import hashlib
 import hmac
@@ -73,7 +76,7 @@ from app.db import connect
 from app.identity import require_owner, verified_user
 from ..prices.metadata_reviews import delivery_status
 from .public_catalog import publish_catalog_best_effort
-from .reprint_groups import GROUP_NAMESPACE, refresh_reprint_groups
+from .reprint_groups import GROUP_NAMESPACE, ReprintTextRules, refresh_reprint_groups
 
 router = APIRouter()
 
@@ -276,6 +279,174 @@ def printing_identity(printing_id: UUID = Query(), as_of: date | None = None, us
         if not row:
             fail(404, "PRINTING_NOT_FOUND")
         return evidence_view(conn, load_evidence(conn, row["identity_id"]), as_of)
+
+
+class LikelyReprintPrinting(BaseModel):
+    printing_id: UUID
+    set_id: str | None
+    collector_number: str | None
+    text_key: str
+
+
+class LikelyReprintPair(BaseModel):
+    evidence_digest: str
+    key: str
+    identity_id: UUID
+    identity_name: str
+    group_ids: list[UUID]
+    printings: list[LikelyReprintPrinting]
+
+
+class LikelyReprintPage(BaseModel):
+    items: list[LikelyReprintPair]
+    next_cursor: str | None
+
+
+class LikelyReprintEvidence(BaseModel):
+    evidence_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class LikelyReprintDismissal(LikelyReprintEvidence):
+    key: str
+
+
+class LikelyReprintDecision(BaseModel):
+    id: UUID
+
+
+def likely_pairs(conn):
+    """Matching cross pairs, bucketed before comparing, including dismissed evidence for decision validation."""
+    rows = conn.execute("""SELECT p.id AS printing_id, p.identity_id, i.display_name AS identity_name,
+        m.group_id, dg.text_key, ca.regulation_mark, pm.source_record, gp.set_id, gp.collector_number
+      FROM catalog_state s
+      JOIN catalog_generation_printing gp ON gp.generation_id=s.active_generation AND NOT gp.tombstoned
+      JOIN catalog_printing p ON p.id=gp.printing_id
+      JOIN catalog_identity i ON i.id=p.identity_id
+      JOIN catalog_reprint_group_member m ON m.printing_id=p.id
+      JOIN catalog_derived_reprint_group dg ON dg.printing_id=p.id
+      JOIN catalog_card_attribute ca ON ca.printing_id=p.id AND ca.regulation_mark IS NOT NULL
+      JOIN catalog_printing_metadata pm ON pm.printing_id=p.id
+      WHERE s.singleton AND p.identity_id IN (
+        SELECT ep.identity_id FROM catalog_state es
+        JOIN catalog_generation_printing eg ON eg.generation_id=es.active_generation AND NOT eg.tombstoned
+        JOIN catalog_printing ep ON ep.id=eg.printing_id
+        JOIN catalog_reprint_group_member em ON em.printing_id=ep.id
+        JOIN catalog_card_attribute ea ON ea.printing_id=ep.id AND ea.regulation_mark IS NOT NULL
+        JOIN catalog_printing_metadata epm ON epm.printing_id=ep.id AND epm.category='Pokemon'
+        WHERE es.singleton GROUP BY ep.identity_id HAVING count(DISTINCT em.group_id)>1
+      ) ORDER BY p.id""").fetchall()
+    buckets = {}
+    for row in rows:
+        text = ReprintTextRules.rules_text(row["source_record"])
+        if not text or text["category"] != "Pokemon":
+            continue
+        shape = (row["identity_id"], row["regulation_mark"], text["hp"], tuple(text["types"]),
+                 tuple((tuple(a["cost"]), a["damage"]) for a in text["attacks"]),
+                 tuple(a["type"] for a in text["abilities"]))
+        buckets.setdefault(shape, []).append(row)
+    pairs = {}
+    for bucket in buckets.values():
+        for index, left in enumerate(bucket):
+            for right in bucket[index + 1:]:
+                if left["group_id"] == right["group_id"]:
+                    continue
+                groups = sorted((left["group_id"], right["group_id"]), key=str)
+                key = ":".join(map(str, (left["identity_id"], *groups)))
+                pair = pairs.setdefault(key, {"identity_id": left["identity_id"],
+                    "identity_name": left["identity_name"], "group_ids": groups, "matches": []})
+                pair["matches"].append((left, right))
+    return pairs
+
+
+def pair_keys(pair):
+    return sorted({tuple(sorted((a["text_key"], b["text_key"]))) for a, b in pair["matches"]})
+
+
+def pair_digest(pair):
+    return hashlib.sha256(json.dumps(pair_keys(pair)).encode()).hexdigest()
+
+
+def lock_likely_decisions(conn):
+    conn.execute(f"SET LOCAL lock_timeout='{LOCK_TIMEOUT}'")
+    # Share the catalog writers' first lock without advancing the public revision.
+    conn.execute("SELECT 1 FROM catalog_public_clock WHERE singleton FOR UPDATE")
+
+
+def dismissed_keys(conn):
+    return {(r["left_key"], r["right_key"]) for r in conn.execute("""SELECT DISTINCT ON (left_key,right_key)
+      left_key,right_key, dismissed FROM catalog_likely_reprint_decision
+      ORDER BY left_key,right_key,sequence DESC""").fetchall() if r["dismissed"]}
+
+
+@router.get(f"{ADMIN}/likely-reprints", response_model=LikelyReprintPage)
+def likely_reprints(cursor: str | None = None, user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        require_owner(conn, user_id)
+        dismissed = dismissed_keys(conn)
+        items = []
+        for key, pair in sorted(likely_pairs(conn).items()):
+            if cursor and key <= cursor:
+                continue
+            matches = pair["matches"]
+            if all(tuple(sorted((a["text_key"], b["text_key"]))) in dismissed for a, b in matches):
+                continue
+            printings = {r["printing_id"]: LikelyReprintPrinting(**{k: r[k]
+                         for k in LikelyReprintPrinting.model_fields}) for match in matches for r in match}
+            items.append(LikelyReprintPair(key=key, evidence_digest=pair_digest(pair), identity_id=pair["identity_id"],
+                         identity_name=pair["identity_name"], group_ids=pair["group_ids"],
+                         printings=list(printings.values())))
+            if len(items) > QUEUE_PAGE:
+                break
+        return LikelyReprintPage(items=items[:QUEUE_PAGE],
+                                next_cursor=items[QUEUE_PAGE - 1].key if len(items) > QUEUE_PAGE else None)
+
+
+@router.post(f"{ADMIN}/likely-reprints/dismiss", response_model=LikelyReprintDecision)
+def dismiss_likely_reprints(body: LikelyReprintDismissal, user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        require_owner(conn, user_id)
+        lock_likely_decisions(conn)
+        pair = likely_pairs(conn).get(body.key)
+        if not pair:
+            fail(409, "LIKELY_REPRINT_PAIR_CHANGED")
+        if not hmac.compare_digest(body.evidence_digest, pair_digest(pair)):
+            fail(409, "IDENTITY_EVIDENCE_CHANGED")
+        decision = uuid4()
+        keys = set(pair_keys(pair)) - dismissed_keys(conn)
+        if not keys:
+            fail(409, "LIKELY_REPRINT_DECISION_CHANGED")
+        for left, right in sorted(keys):
+            conn.execute("""INSERT INTO catalog_likely_reprint_decision
+              (id,batch_id,left_key,right_key,dismissed,reviewer_id,pair_key,evidence_digest) VALUES (%s,%s,%s,%s,true,%s,%s,%s)""",
+                         (uuid4(), decision, left, right, user_id, body.key, body.evidence_digest))
+        return LikelyReprintDecision(id=decision)
+
+
+@router.post(f"{ADMIN}/likely-reprints/{{decision_id}}/undo", response_model=LikelyReprintDecision)
+def undo_likely_reprints(decision_id: UUID, body: LikelyReprintEvidence, user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        require_owner(conn, user_id)
+        lock_likely_decisions(conn)
+        rows = conn.execute("""SELECT * FROM catalog_likely_reprint_decision
+          WHERE batch_id=%s AND dismissed""", (decision_id,)).fetchall()
+        if not rows:
+            fail(404, "DISMISSAL_NOT_FOUND")
+        pair = likely_pairs(conn).get(rows[0]["pair_key"])
+        if (not pair or not hmac.compare_digest(body.evidence_digest, pair_digest(pair))
+                or body.evidence_digest != rows[0]["evidence_digest"]):
+            fail(409, "IDENTITY_EVIDENCE_CHANGED")
+        for row in rows:
+            latest = conn.execute("""SELECT id FROM catalog_likely_reprint_decision
+              WHERE left_key=%s AND right_key=%s ORDER BY sequence DESC LIMIT 1""",
+              (row["left_key"], row["right_key"])).fetchone()
+            if latest["id"] != row["id"]:
+                fail(409, "LIKELY_REPRINT_DECISION_CHANGED")
+        decision = uuid4()
+        for row in rows:
+            conn.execute("""INSERT INTO catalog_likely_reprint_decision
+              (id,batch_id,left_key,right_key,dismissed,reviewer_id,pair_key,evidence_digest) VALUES (%s,%s,%s,%s,false,%s,%s,%s)""",
+                         (uuid4(), decision, row["left_key"], row["right_key"], user_id, rows[0]["pair_key"], body.evidence_digest))
+        return LikelyReprintDecision(id=decision)
 
 
 @router.get(f"{ADMIN}/{{identity_id}}", response_model=CardIdentityEvidence)

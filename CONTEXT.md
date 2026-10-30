@@ -34,6 +34,7 @@ _Avoid_: Mode, ruleset, legality
 
 **Reprint Group**:
 The Card Printings within one Card Identity whose rules text is functionally identical. Format legality and bans apply to the whole group; copy limits still count by Card Identity.
+Owner review lists likely reprints: pairs of effective Reprint Groups whose Pokémon Printings have matching structural facts and a known regulation mark. These are suggestions; only owner review merges them. A text-key dismissal hides a suggestion until its text changes or the owner undoes it.
 _Avoid_: Gameplay Identity, reprint set, equivalent card
 
 **Format Standing**:
