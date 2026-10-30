@@ -1,5 +1,10 @@
 """The printed set code in the catalog (WP-C1): ``catalog_set_code`` holds exactly the rows of set_codes.tsv, and the view
 ``catalog_printing_set_code`` gives every Printing ``set_codes.code_for(coalesce(pd.set_id, ''))`` once."""
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 from uuid import uuid4
 
 from app.games.pokemon.catalog import set_codes
@@ -48,3 +53,19 @@ def test_an_unmapped_set_and_a_printing_without_display_data_fall_back_as_code_f
         finally:
             conn.execute("DELETE FROM catalog_printing WHERE identity_id = %s", (identity,))
             conn.execute("DELETE FROM catalog_identity WHERE id = %s", (identity,))
+
+
+def test_the_migration_check_writes_nothing_into_the_tree_it_runs_from(tmp_path):
+    """A release activation runs scripts/migrate.py inside its store directory and then verifies every file there."""
+    root = Path(__file__).resolve().parents[2]
+    shutil.copytree(root / "scripts", tmp_path / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(root / "migrations", tmp_path / "migrations")
+    tsv = tmp_path / "api/app/games/pokemon/catalog/set_codes.tsv"
+    tsv.parent.mkdir(parents=True)
+    shutil.copy2(root / "api/app/games/pokemon/catalog/set_codes.tsv", tsv)
+    before = sorted(path for path in tmp_path.rglob("*"))
+    run = subprocess.run([sys.executable, str(tmp_path / "scripts/migrate.py")], cwd=tmp_path, env=dict(os.environ),
+                         capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "Set codes match set_codes.tsv" in run.stdout
+    assert sorted(path for path in tmp_path.rglob("*")) == before

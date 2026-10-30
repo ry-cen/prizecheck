@@ -4,7 +4,10 @@ from pathlib import Path
 
 import psycopg
 
-import set_code_migration
+# A release runs this file from inside its verified store directory (scripts/release.py), and the runtime then checks every
+# file there against the release receipt, so importing the helper must not leave a __pycache__ beside it.
+sys.dont_write_bytecode = True
+import set_code_migration  # noqa: E402
 
 root = Path(__file__).resolve().parents[1]
 with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
