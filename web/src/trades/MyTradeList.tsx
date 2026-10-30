@@ -123,14 +123,16 @@ function LocationPanel({ panel }: { panel: TradeListPanel }) {
       </div>
       <ul
         aria-label={panel.title}
-        className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0"
+        className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-4 rounded-panel border border-border bg-surface p-4"
       >
         {panel.cards.map(({ card, copies }) => (
           <li
             key={card.edition_id}
-            className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+            className="flex min-w-0 flex-col items-start gap-2"
           >
-            <CardImage url={card.image_url} />
+            <div className="w-full max-w-[145px] self-center">
+              <CardImage url={card.image_url} />
+            </div>
             <span className="flex min-w-0 flex-col">
               <span className="text-body font-semibold wrap-anywhere">
                 {card.name}

@@ -438,7 +438,7 @@ export function DeckBuilderPage({
 
   if (!detail || !model)
     return (
-      <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
+      <main className="mx-auto box-border flex w-full min-w-0 max-w-7xl flex-col gap-4 px-7 py-6 phone:gap-2 phone:px-4 phone:py-2">
         {back}
         {load.kind === "missing" ? (
           <>
@@ -478,18 +478,39 @@ export function DeckBuilderPage({
       className={`flex min-w-0 flex-col gap-4 rounded-panel${dropLook(drag.dragging, "deck")}`}
     >
       <CompetitionNotice warnings={detail.competition} lines={model.lines} />
-      <h2 id={`${idBase}-deck-list`} className="sr-only">
-        Deck List
-      </h2>
-      {/* Row 1: the count, the cost, Gather N and Buy missing (#181). */}
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <p className="m-0 tabular-nums">
-          <strong className="text-display font-semibold">{model.total}</strong>
-          <span className="text-body text-text-muted">/60</span>
-          <span className="sr-only"> cards</span>
-        </p>
-        <DeckCostLine settled={cost} />
-        <div className="ml-auto flex flex-wrap items-center gap-2 self-center">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-y border-border bg-surface px-3 py-2 phone:flex phone:flex-col phone:items-stretch phone:gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className="m-0 shrink-0 tabular-nums">
+            <strong className="text-display font-semibold">
+              {model.total}
+            </strong>
+            <span className="text-body text-text-muted">/60</span>
+            <span className="sr-only"> cards</span>
+          </p>
+          <TargetFormatControl
+            value={changing ?? detail.target_format}
+            result={changing ? null : targetResult}
+            busy={changing !== null || edits.busy}
+            onChange={(target) => void changeTarget(target)}
+            onOpenResult={() => setResultsOpen(true)}
+            resultRef={resultButton}
+          />
+        </div>
+        <div
+          aria-hidden="true"
+          className="col-span-full row-start-3 h-1 overflow-hidden rounded-round bg-border"
+        >
+          <div
+            className="h-full bg-accent"
+            style={{
+              width: `${Math.min(100, (Number(model.total) / 60) * 100)}%`,
+            }}
+          />
+        </div>
+        <div className="col-start-1 row-start-2">
+          <DeckCostLine settled={cost} />
+        </div>
+        <div className="col-start-2 row-span-2 row-start-1 flex flex-wrap items-center gap-2 phone:[&>button]:flex-1 phone:[&>button]:px-2">
           <Button
             disabled={toGather === 0n}
             onClick={(event) => {
@@ -503,25 +524,20 @@ export function DeckBuilderPage({
           <Button onClick={onWantList}>Want List</Button>
         </div>
       </div>
-      {/* Row 2: the Target Format control (#178), then the view switch. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <TargetFormatControl
-          value={changing ?? detail.target_format}
-          result={changing ? null : targetResult}
-          busy={changing !== null || edits.busy}
-          onChange={(target) => void changeTarget(target)}
-          onOpenResult={() => setResultsOpen(true)}
-          resultRef={resultButton}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2
+          id={`${idBase}-deck-list`}
+          className="m-0 text-heading font-semibold"
+        >
+          Deck List
+        </h2>
+        <Segmented
+          mode="choice"
+          label="Deck List view"
+          options={VIEWS}
+          value={view}
+          onChange={setView}
         />
-        <div className="ml-auto">
-          <Segmented
-            mode="choice"
-            label="Deck List view"
-            options={VIEWS}
-            value={view}
-            onChange={setView}
-          />
-        </div>
       </div>
       <DeckListBody
         view={view}
@@ -580,14 +596,16 @@ export function DeckBuilderPage({
   );
 
   return (
-    <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-7xl flex-col gap-4 px-7 py-6 phone:gap-2 phone:px-4 phone:py-2">
       {back}
-      <PageHeader
-        title={detail.deck.name}
-        actions={deckActions.actions}
-        titleAction={rename.action}
-        titleEditor={rename.editor}
-      />
+      <div className="[&>div]:mb-0 phone:[&>div]:gap-2">
+        <PageHeader
+          title={detail.deck.name}
+          actions={deckActions.actions}
+          titleAction={rename.action}
+          titleEditor={rename.editor}
+        />
+      </div>
       {rename.status}
       {notice && (
         <p role="status" className="m-0 text-body text-warning">
