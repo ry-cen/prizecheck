@@ -169,7 +169,7 @@ export function DeckLibrary({
         className="flex-1"
         scroll={ownScroll}
         viewportRef={scroller}
-        viewportClassName={`flex flex-col gap-3 p-4${ownScroll ? " overscroll-contain" : ""}`}
+        viewportClassName={`flex flex-col gap-3 p-4 phone:gap-2 phone:p-3${ownScroll ? " overscroll-contain" : ""}`}
       >
         <h2 id={headingId} className="m-0 text-heading font-semibold">
           Library

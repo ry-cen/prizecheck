@@ -261,7 +261,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
       <div
         role="group"
         aria-label="Show Decks"
-        className="flex flex-wrap items-center gap-1"
+        className="flex flex-wrap items-center gap-1 border-b border-border pb-3"
       >
         <Chip selected={scope === null} onChange={() => choose(null)}>
           All Decks

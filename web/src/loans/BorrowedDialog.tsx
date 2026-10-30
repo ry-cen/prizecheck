@@ -220,7 +220,7 @@ export function BorrowedDialog({
               aria-label={card.name}
               className="flex flex-col gap-3 border-b border-border px-4 py-3 last:border-b-0"
             >
-              <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3">
+              <div className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] phone:grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-3">
                 <CardImage url={card.image_url} />
                 <span className="flex min-w-0 flex-col">
                   <span className="text-body font-semibold wrap-anywhere">

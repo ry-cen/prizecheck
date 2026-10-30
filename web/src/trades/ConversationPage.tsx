@@ -1,3 +1,4 @@
+import { Avatar } from "../ui/Avatar";
 import {
   useEffect,
   useRef,
@@ -82,7 +83,7 @@ type Load =
     };
 
 const FRAME =
-  "mx-auto box-border flex max-w-3xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4";
+  "mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5";
 const BACK =
   "inline-flex h-control items-center gap-1 self-start rounded-control px-2 text-control font-medium text-text-muted no-underline hover:bg-surface-raised hover:text-text phone:h-control-phone";
 const LINK =
@@ -382,19 +383,24 @@ export function ConversationPage({
   return (
     <main className={FRAME}>
       {back}
-      <PageHeader
-        title={name}
-        headingRef={heading}
-        actions={
-          menuItems.length > 0 ? (
-            <ConversationMenu
-              name={name}
-              items={menuItems}
-              anchor={menuAnchor}
-            />
-          ) : undefined
-        }
-      />
+      <div className="flex min-w-0 items-center gap-3">
+        <Avatar name={name} size="md" />
+        <div className="min-w-0 flex-1 [&>div]:mb-0 [&>div]:flex-nowrap [&>div]:items-start [&_h1]:min-w-0 [&_h1]:flex-1 phone:[&>div>div]:basis-auto">
+          <PageHeader
+            title={name}
+            headingRef={heading}
+            actions={
+              menuItems.length > 0 ? (
+                <ConversationMenu
+                  name={name}
+                  items={menuItems}
+                  anchor={menuAnchor}
+                />
+              ) : undefined
+            }
+          />
+        </div>
+      </div>
       {block.panel}
       {report.panel}
       {record !== null && (

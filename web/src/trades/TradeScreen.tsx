@@ -7,7 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronLeft, Ellipsis, TriangleAlert } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ChevronLeft,
+  Ellipsis,
+  TriangleAlert,
+} from "lucide-react";
 import { getLocationTree, type TreeLocation } from "../location_generated";
 import { useInboxRefresh, useOpenedFromInbox } from "../inbox/Inbox";
 import { lineEdition } from "../loans/loanText";
@@ -340,9 +345,11 @@ export function TradeScreen({
     actions?: ReactNode,
     dialog?: ReactNode
   ) => (
-    <main className="mx-auto box-border flex max-w-5xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
       {back}
-      <PageHeader title={title} actions={actions} headingRef={heading} />
+      <div className="[&>div]:mb-0 [&>div]:flex-nowrap [&>div]:items-start [&_h1]:min-w-0 [&_h1]:flex-1 phone:[&>div>div]:basis-auto">
+        <PageHeader title={title} actions={actions} headingRef={heading} />
+      </div>
       {children}
       {dialog}
     </main>
@@ -637,7 +644,7 @@ export function TradeScreen({
       )}
       {note && <p className="m-0 text-body text-text-muted">{note}</p>}
       <MeetInPublicTip trade={trade} />
-      <div className="grid grid-cols-2 items-start gap-4 phone:grid-cols-1">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 phone:grid-cols-1">
         <TradeSide
           title="You give"
           cards={trade.you_give}
@@ -647,6 +654,10 @@ export function TradeScreen({
               ? sideValueText(value, "you_give", trade.you_give.length > 0)
               : null
           }
+        />
+        <Icon
+          icon={ArrowLeftRight}
+          className="mt-12 text-text-muted phone:hidden"
         />
         <TradeSide
           title="You get"
@@ -701,7 +712,9 @@ export function TradeScreen({
           </Button>
         </div>
       ) : (
-        answers
+        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+          {answers}
+        </div>
       )}
       {showsAddFriend(trade) && (
         <AddAsFriend
@@ -957,7 +970,7 @@ function TradeSide({
       </h2>
       <ul
         aria-label={title}
-        className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0"
+        className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-4 rounded-panel border border-border bg-surface p-4"
       >
         {cards.length === 0 ? (
           <li className="px-4 py-3 text-body text-text-muted">Nothing</li>
@@ -965,9 +978,11 @@ function TradeSide({
           cards.map((card) => (
             <li
               key={card.edition_id}
-              className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+              className="flex min-w-0 flex-col items-start gap-2"
             >
-              <CardImage url={card.image_url} />
+              <div className="w-full max-w-[145px] self-center">
+                <CardImage url={card.image_url} />
+              </div>
               <span className="flex min-w-0 flex-col">
                 <span className="text-body font-semibold wrap-anywhere">
                   {card.name}
