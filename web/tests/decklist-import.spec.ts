@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -6,7 +6,7 @@ import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 // Importing a list into a new Deck (#212, #213): Decks' Import a list button opens /decks/import, where a pasted TCG Live
 // or Limitless list is read by the server (a live count of card lines and cards), named, and given a Target Format; the
@@ -139,7 +139,9 @@ test.describe("on a desktop", () => {
       "Meowth ex POR 62 could be 2 cards: pick the one on your list."
     );
     await meowth.getByRole("button", { name: "Fix" }).click();
-    await expect(page.getByLabel("Search the catalog")).toBeFocused();
+    await expect(
+      page.locator("#main-content").getByLabel("Search the catalog")
+    ).toBeFocused();
     const candidates = page.getByRole("list", {
       name: "Cards this line could mean",
     });

@@ -1,11 +1,11 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner } from "./support/sign-in";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 // Replace a Deck's list (#215). The builder's Replace list… opens /decks/<id>/replace, where a pasted list is reviewed
 // as the Deck's new Deck List: the Deck's own copies come first (under Exact printings in their own Edition), and the

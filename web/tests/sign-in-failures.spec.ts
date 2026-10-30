@@ -100,7 +100,7 @@ test("a signed-in collector never sees a failure code, and it leaves the address
     page.getByRole("navigation", { name: "Main views" })
   ).toBeVisible();
   await expect(page.getByText("Sign-in was cancelled.")).toHaveCount(0);
-  await expect(page.locator("body")).not.toContainText("INJECTED");
+  await expect(page.locator("#main-content")).not.toContainText("INJECTED");
 });
 
 test("the message takes focus once and the sign-in links are the next stop", async ({

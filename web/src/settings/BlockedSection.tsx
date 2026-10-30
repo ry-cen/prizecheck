@@ -1,3 +1,4 @@
+import { useReadOnShow } from "../shell/keptRead";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   BLOCKED_EMPTY,
@@ -30,7 +31,7 @@ type Load =
  * either kind of Block is lifted here. Unblocking lets them find the collector and send a Friend Request again; it
  * doesn't make them Friends. Rendered inside the Privacy section (#246), under its own heading.
  */
-export function BlockedSection() {
+export function BlockedSection({ active }: { active: boolean }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   useSettingsSectionSettled("blocked", load.kind !== "loading");
   const [busy, setBusy] = useState(false);
@@ -44,6 +45,10 @@ export function BlockedSection() {
     null
   );
   useEffect(() => {
+    if (!active) {
+      if (focusNext) setFocusNext(null);
+      return;
+    }
     if (!focusNext || busy) return;
     const target = Array.from(
       list.current?.querySelectorAll<HTMLElement>("li[data-block]") ?? []
@@ -52,23 +57,33 @@ export function BlockedSection() {
       ?.querySelector<HTMLElement>("button");
     (target ?? heading.current)?.focus();
     setFocusNext(null);
-  }, [focusNext, busy, load]);
+  }, [active, focusNext, busy, load]);
 
+  const generation = useRef(0);
   function read() {
+    const mine = ++generation.current;
     return getBlocked()
-      .then(({ blocked }) => setLoad({ kind: "ready", blocked }))
-      .catch(() =>
+      .then(({ blocked }) => {
+        if (mine === generation.current) setLoad({ kind: "ready", blocked });
+      })
+      .catch(() => {
+        if (mine !== generation.current) return;
         setLoad((current) =>
           current.kind === "ready" ? current : { kind: "failed" }
-        )
-      );
+        );
+      });
   }
   useEffect(() => {
     void read();
+    return () => {
+      generation.current++;
+    };
   }, []);
+  useReadOnShow(active, load.kind === "failed", () => void read());
 
   async function unblock(person: BlockedCollector) {
     if (busy) return;
+    generation.current++;
     setBusy(true);
     setStatus("");
     setProblem("");

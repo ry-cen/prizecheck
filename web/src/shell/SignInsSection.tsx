@@ -1,3 +1,4 @@
+import { useFirstReadSettled, useReadOnShow } from "./keptRead";
 import { useEffect, useId, useRef, useState } from "react";
 import { SECONDARY } from "../public/controls";
 import { ProviderMark, SignInAlert } from "../public/SignIn";
@@ -20,7 +21,13 @@ type LinkedSignIn = { provider: string; linkedAt: string };
 /** Where a stale session goes: sign in again, then come back here. */
 const SIGN_IN_AGAIN = `/sign-in?next=${encodeURIComponent("/settings")}`;
 
-export function SignInsSection({ email }: { email: string | null }) {
+export function SignInsSection({
+  email,
+  active,
+}: {
+  email: string | null;
+  active: boolean;
+}) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [linked, setLinked] = useState<LinkedSignIn[] | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -28,13 +35,15 @@ export function SignInsSection({ email }: { email: string | null }) {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   // A failed link returns here with ?error=<code>: read once, shown once, then removed from the address bar.
-  const [arrived] = useState(failureInAddress);
-  const arrivalShown = useRef(false);
+  const generation = useRef(0);
   const failureRef = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const shown = useRef(active);
+  shown.current = active;
   const headingId = useId();
 
-  async function load() {
+  async function load(quiet = false) {
+    const mine = ++generation.current;
     try {
       const [methods, signIns] = await Promise.all([
         fetch("/auth/methods", { credentials: "same-origin" }),
@@ -47,19 +56,23 @@ export function SignInsSection({ email }: { email: string | null }) {
         !Array.isArray(signInsBody?.signIns)
       )
         throw new Error("Sign-ins unavailable");
+      if (mine !== generation.current) return;
       setProviders(methodsBody.providers as Provider[]);
       setLinked(signInsBody.signIns as LinkedSignIn[]);
       setUnavailable(false);
     } catch {
-      setUnavailable(true);
+      if (!quiet && mine === generation.current) setUnavailable(true);
     }
   }
   useEffect(() => {
     void load();
   }, []);
+  useFirstReadSettled(providers !== null || unavailable);
+  useReadOnShow(active, unavailable, (quiet) => void load(quiet));
   useEffect(() => {
-    if (!arrived || arrivalShown.current || providers === null) return;
-    arrivalShown.current = true;
+    if (!active || providers === null) return;
+    const arrived = failureInAddress();
+    if (!arrived) return;
     setFailure(
       signInMessage(
         arrived.code,
@@ -69,12 +82,13 @@ export function SignInsSection({ email }: { email: string | null }) {
       )
     );
     clearFailureFromAddress();
-  }, [arrived, providers]);
+  }, [active, providers]);
   useEffect(() => {
-    if (failure) failureRef.current?.focus();
+    if (active && failure) failureRef.current?.focus();
   }, [failure]);
 
   async function remove(provider: Provider) {
+    generation.current++;
     setBusy(true);
     setFailure(null);
     setNotice("");
@@ -150,7 +164,7 @@ export function SignInsSection({ email }: { email: string | null }) {
                   type="button"
                   onClick={() => {
                     // The message (and this button) goes, so focus moves to the section's heading, not the page body.
-                    heading.current?.focus();
+                    if (shown.current) heading.current?.focus();
                     setFailure(null);
                   }}
                   className={`${SECONDARY} mt-1 self-start`}

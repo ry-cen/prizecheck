@@ -353,6 +353,13 @@ test("an all-mapped Deck offers the TCGplayer link only after the explanation, a
 test("an open Deck's banner shows its cost and coverage and links to the deck builder, and other views show no Deck banner", async ({
   page,
 }) => {
+  // These counts describe the Collection banner; warming is covered in kept-pages.
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, "connection", {
+      configurable: true,
+      value: { saveData: true },
+    })
+  );
   const ids = priceWorld();
   await signIn(page);
   const deck = await deckWith(page, [
@@ -447,6 +454,13 @@ test("the cost comes from the complete Deck read even when the gallery's tiles f
 test("a cost for a newer inventory revision re-reads the Deck and prices the new contents", async ({
   page,
 }) => {
+  // These counts describe the Collection banner; warming is covered in kept-pages.
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, "connection", {
+      configurable: true,
+      value: { saveData: true },
+    })
+  );
   const ids = priceWorld();
   await signIn(page);
   const deck = await deckWith(page, [[ids.normal, 3]]);

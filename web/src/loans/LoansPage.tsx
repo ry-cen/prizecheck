@@ -2,6 +2,7 @@ import { ArrowUpRight, ArrowDownLeft, ChevronDown } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { Icon } from "../ui/Icon";
 import { Pill } from "../ui/Pill";
+import { useFirstReadSettled, useReadOnShow } from "../shell/keptRead";
 import {
   useEffect,
   useId,
@@ -26,6 +27,7 @@ import {
 type Props = {
   /** The Loan the address names (/loans/<id>), or null for the list. */
   loanId: string | null;
+  active: boolean;
   onOpenLoan: (id: string) => void;
   onAllLoans: () => void;
 };
@@ -36,10 +38,10 @@ type Props = {
  * (LoanScreen). The tab's badge counts the Loans in Needs you, read through the inbox (#259). The list is read again
  * after a Friend command that may have cancelled Loans (#260, `useLoansChanged`).
  */
-export function LoansPage({ loanId, onOpenLoan, onAllLoans }: Props) {
+export function LoansPage({ active, loanId, onOpenLoan, onAllLoans }: Props) {
   if (loanId)
     return <LoanScreen key={loanId} loanId={loanId} onAllLoans={onAllLoans} />;
-  return <LoansList onOpenLoan={onOpenLoan} />;
+  return <LoansList active={active} onOpenLoan={onOpenLoan} />;
 }
 
 type Load =
@@ -51,10 +53,18 @@ const SECTIONS = [
   { id: "pending", title: "Pending" },
 ] as const;
 
-function LoansList({ onOpenLoan }: { onOpenLoan: (id: string) => void }) {
+function LoansList({
+  active,
+  onOpenLoan,
+}: {
+  active: boolean;
+  onOpenLoan: (id: string) => void;
+}) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const changed = useLoansChanged();
+  useFirstReadSettled(load.kind !== "loading");
+  useReadOnShow(active, load.kind === "failed", () => setAttempt((n) => n + 1));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,7 +73,10 @@ function LoansList({ onOpenLoan }: { onOpenLoan: (id: string) => void }) {
         if (!controller.signal.aborted) setLoad({ kind: "ready", view });
       },
       () => {
-        if (!controller.signal.aborted) setLoad({ kind: "failed" });
+        if (!controller.signal.aborted)
+          setLoad((current) =>
+            current.kind === "ready" ? current : { kind: "failed" }
+          );
       }
     );
     return () => controller.abort();

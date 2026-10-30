@@ -102,8 +102,10 @@ test("refuses a sign-in another collector holds, without naming them", async ({
     );
     await expect(alert).toBeFocused();
     await expect(page).toHaveURL(`${ORIGIN}/settings`);
-    await expect(page.locator("body")).not.toContainText("sign-ins-spec-other");
-    await expect(page.locator("body")).not.toContainText("newcomer");
+    await expect(page.locator("#main-content")).not.toContainText(
+      "sign-ins-spec-other"
+    );
+    await expect(page.locator("#main-content")).not.toContainText("newcomer");
     await expect(
       row(page, "Discord").getByRole("link", { name: "Connect Discord" })
     ).toBeVisible();

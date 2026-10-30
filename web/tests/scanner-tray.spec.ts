@@ -1,9 +1,10 @@
+import { test } from "./support/art-upstream";
 // Ticket #318: the scanner screen and its tray, driven by the stub recognizer (frame injection). A lock of a card with
 // several finishes asks which (the scan choice, scanner-choice.spec.ts); a card with one finish adds a row with its
 // chosen finish selected; a second placement counts it; a shutter with no candidate opens search; an unreachable printings
 // route adds no row and says so; the tray survives a reload and belongs to its account; no image bytes leave the page.
 // Every state runs the shared page check (axe, no horizontal scroll, 44 px targets on a phone) at 1280×800 and 375×812.
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { retireOwnerSeat } from "./support/collectors";

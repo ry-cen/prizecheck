@@ -3,6 +3,7 @@ export default defineConfig({
   test: {
     include: [
       "auth/tests/**/*.test.ts",
+      "web/src/shell/**/*.test.ts",
       "web/src/catalog/**/*.test.ts",
       "web/src/decks/**/*.test.ts",
       "web/src/scanner/**/*.test.ts",

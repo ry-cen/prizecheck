@@ -1,4 +1,11 @@
-import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { pageAddress } from "./shell/keptPages";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { replacedDeckAt, replacePath } from "./decks/import/replaceList";
@@ -16,7 +23,6 @@ import {
   MissingCardsPage,
   OwnerControlsPage,
   preloadInitialPage,
-  preloadShellPages,
   ReplaceListPage,
   TradesPage,
   Workspace,
@@ -140,6 +146,8 @@ function App() {
   const friendTradeHandle = friendTradeListHandleAt(path);
   const def = pageAt(path);
   const page: PageId = def ? def.id : "collection";
+  const ownerShown = useRef(false);
+  ownerShown.current = signedIn && page === "owner";
   useLayoutEffect(() => {
     if (
       signedIn &&
@@ -165,11 +173,6 @@ function App() {
     page,
     navigate,
   ]);
-  // Signed in, the other tabs' code loads in the background, so opening one never waits on a download.
-  const owner = ownerCatalog !== null;
-  useEffect(() => {
-    if (signedIn) return preloadShellPages(owner);
-  }, [signedIn, owner]);
   // A failure code in the address belongs to the sign-in page: signed in, it is never shown, only removed. The
   // Settings page's Sign-ins section reads and removes its own.
   useEffect(() => {
@@ -314,10 +317,11 @@ function App() {
     );
   }
   function pageContent(id: PageId, active: boolean) {
+    const address = pageAddress(id, active, path);
     switch (id) {
       case "collection":
         // Collection Import (#226) shows in Collection's place; saving lands on its Storage Leaf in a new Workspace.
-        if (path === COLLECTION_IMPORT_PATH)
+        if (address === COLLECTION_IMPORT_PATH)
           return (
             <CollectionImportPage
               onCancel={() => navigate(pageDef("collection").path)}
@@ -339,7 +343,7 @@ function App() {
         // /decks is the index (My Decks) and /decks/want-list the Want List (#209), one page with a switch between
         // them; /decks/import imports a list (#212); /decks/<id> opens that Deck in the deck builder (#176), and
         // /decks/<id>/replace its Replace list… (#215).
-        const deckId = sectionAt(path);
+        const deckId = sectionAt(address);
         if (deckId === "import")
           return (
             <ImportPage
@@ -371,6 +375,7 @@ function App() {
           />
         ) : (
           <DecksPage
+            active={active}
             view={deckId === WANT_LIST_SEGMENT ? "want-list" : "decks"}
             onOpenDeck={(id) =>
               navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
@@ -386,7 +391,8 @@ function App() {
         // /loans lists the Loans; /loans/<id> is one Loan (#252).
         return (
           <LoansPage
-            loanId={sectionAt(path)}
+            active={active}
+            loanId={sectionAt(address)}
             onOpenLoan={(id) => navigate(loanPath(id))}
             onAllLoans={() => navigate(pageDef("loans").path)}
           />
@@ -394,27 +400,37 @@ function App() {
       case "trades":
         // /trades is the Trades list, /trades/list My Trade List (Trading #269), /trades/new/<Handle> the proposal
         // builder for that Friend (#284) and /trades/<id> one Trade (#270).
-        return <TradesPage section={sectionAt(path)} onNavigate={navigate} />;
+        return (
+          <TradesPage
+            active={active}
+            section={sectionAt(address)}
+            onNavigate={navigate}
+          />
+        );
       case "reports":
         return <MissingCardsPage active={active} message={message} />;
       case "owner":
         return (
           <OwnerControlsPage
+            active={active}
             status={ownerCatalog}
-            section={ownerSection(sectionAt(path))}
+            section={ownerSection(sectionAt(address))}
             onSection={(next) => navigate(ownerSectionPath(next))}
             onStatus={setOwnerCatalog}
             message={message}
-            onMessage={setMessage}
+            onMessage={(next) => {
+              if (ownerShown.current) setMessage(next);
+            }}
           />
         );
       case "settings":
-        return <SettingsPage email={accountEmail} />;
+        return <SettingsPage active={active} email={accountEmail} />;
     }
   }
   return (
     <OpenProposalProvider onNavigate={go}>
       <Shell
+        path={path}
         page={page}
         email={accountEmail}
         name={session?.name ?? null}

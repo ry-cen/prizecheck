@@ -1,3 +1,4 @@
+import { useFirstReadSettled, useReadOnShow } from "../shell/keptRead";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   getMyMissingCardReports,
@@ -49,20 +50,23 @@ export function MissingCardsPage({ active, message }: Props) {
   // is shown again with a row already open. A row claims each count once.
   const [focusReply, setFocusReply] = useState(0);
   const claimedReply = useRef(0);
+  const shown = useRef(active);
+  shown.current = active;
   const claimReplyFocus = useCallback((count: number) => {
-    if (!count || count === claimedReply.current) return false;
+    if (!shown.current || !count || count === claimedReply.current)
+      return false;
     claimedReply.current = count;
     return true;
   }, []);
   // Focus moves to the status line after a send, once it holds the new message.
   const [focusStatus, setFocusStatus] = useState(0);
   useEffect(() => {
-    if (focusStatus) statusLine.current?.focus();
+    if (active && focusStatus) statusLine.current?.focus();
   }, [focusStatus]);
 
   // Only the latest read may set the list, so a slow earlier read can't overwrite a newer one.
   const latestRead = useRef(0);
-  const load = useCallback(async () => {
+  const load = useCallback(async (quiet = false) => {
     const mine = ++latestRead.current;
     try {
       const rows = await getMyMissingCardReports();
@@ -77,12 +81,14 @@ export function MissingCardsPage({ active, message }: Props) {
       );
       setStatus((current) => (current === LOAD_FAILED ? "" : current));
     } catch {
-      if (mine === latestRead.current) setStatus(LOAD_FAILED);
+      if (!quiet && mine === latestRead.current) setStatus(LOAD_FAILED);
     }
   }, []);
   useEffect(() => {
-    if (active) void load();
-  }, [active, load]);
+    void load();
+  }, [load]);
+  useFirstReadSettled(reports !== null || status === LOAD_FAILED);
+  useReadOnShow(active, status === LOAD_FAILED, (quiet) => void load(quiet));
 
   // A report link opens Report a card with a new draft from the link, whenever the page is shown with one; the link
   // then leaves the address.

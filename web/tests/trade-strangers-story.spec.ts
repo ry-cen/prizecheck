@@ -139,7 +139,7 @@ async function world(
 
 /** Nothing on this screen names Ash's zip or a data source, nor his Handle while `handle` is given. */
 async function expectNoLeaks(page: Page, handle?: string) {
-  const body = page.locator("body");
+  const body = page.locator("#main-content");
   await expect(body).not.toContainText(new RegExp(`\\b${A_ZIP}\\b`));
   await expect(body).not.toContainText(NO_SOURCES);
   if (handle) await expect(body).not.toContainText(handle);
@@ -351,7 +351,7 @@ async function storyOne(
   await page.goto(`${ORIGIN}/trades/${tradeId}`);
   await expect(page.getByText(`@${w.ashHandle}`)).toBeVisible();
   await expect(addFriend).toHaveCount(0);
-  await expect(page.locator("body")).not.toContainText(
+  await expect(page.locator("#main-content")).not.toContainText(
     new RegExp(`\\b${A_ZIP}\\b`)
   );
 }

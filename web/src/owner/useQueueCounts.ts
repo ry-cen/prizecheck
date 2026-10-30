@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useReadOnShow } from "../shell/keptRead";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getOwnerMissingCardReports } from "../generated";
 import { getOwnerTradeReports } from "../social_generated";
 import {
@@ -22,21 +23,32 @@ const paged = (page: { items: unknown[]; next_cursor: string | null }) =>
  * are read again whenever `section` changes, so a decision made inside a queue shows in its count once the
  * owner switches tab, without the queue components knowing about the counts.
  */
-export function useQueueCounts(section: OwnerSection) {
+export function useQueueCounts(section: OwnerSection, active: boolean) {
   const [counts, setCounts] = useState<QueueCounts>({});
-  const refresh = useCallback(() => {
+  const generation = useRef(0);
+  const [settled, setSettled] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const refresh = useCallback((quiet = false) => {
+    const mine = ++generation.current;
+    let failure = false;
     const read = (
       id: OwnerSection,
       load: () => Promise<string>
     ): Promise<void> =>
       load().then(
-        (count) => setCounts((previous) => ({ ...previous, [id]: count })),
-        () =>
+        (count) => {
+          if (mine === generation.current)
+            setCounts((previous) => ({ ...previous, [id]: count }));
+        },
+        () => {
+          failure = true;
+          if (quiet || mine !== generation.current) return;
           setCounts((previous) => {
             const next = { ...previous };
             delete next[id];
             return next;
-          })
+          });
+        }
       );
     void Promise.all([
       read("metadata", () => getMetadataQueue().then(paged)),
@@ -63,8 +75,13 @@ export function useQueueCounts(section: OwnerSection) {
           String(list.open_count)
         )
       ),
-    ]);
+    ]).then(() => {
+      if (mine !== generation.current) return;
+      setSettled(true);
+      setFailed(failure);
+    });
   }, []);
-  useEffect(refresh, [section, refresh]);
-  return { counts, refresh };
+  useEffect(() => refresh(), [section, refresh]);
+  useReadOnShow(active, failed, (quiet) => refresh(quiet));
+  return { counts, settled, refresh: () => refresh() };
 }

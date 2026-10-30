@@ -5,7 +5,7 @@
 // with one Undo toast; and Collection's Add cards opening the same gallery over Collection, set to the open Location
 // or with a Location picker, closing on Add N cards and leaving the collector in the Location with one Undo toast.
 // The shared page check runs on each state at 1280×800 and 375×812, dialogs open and closed.
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -13,7 +13,7 @@ import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
-import { artUpstream } from "./support/art-upstream";
+import { test, artUpstream } from "./support/art-upstream";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 /** Five tiles (api/tests/test_catalog_browse.py seed_popup): Bulbasaur Normal and Reverse Holo (MEG 001), Rare Candy
