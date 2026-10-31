@@ -334,9 +334,16 @@ test.describe("on a phone", () => {
   });
 });
 
-test("Deck layout stays readable through desktop and phone resizing", async ({
-  page,
-}) => {
+const decksMain = (page: Page) =>
+  page.getByRole("main").filter({
+    has: page.getByRole("heading", { name: "Decks", level: 1, exact: true }),
+  });
+
+const layoutWidths = [1024, 1280, 1440, 1920, 320, 375, 390];
+
+// Each fixture/route gets its own test budget; keep the full resize sequence in
+// one test so unsaved form state is still checked across the phone breakpoint.
+async function seedLayoutDecks(page: Page, count: number) {
   promoteLegalCatalog();
   await signIn(page);
   await stubCost(page);
@@ -356,19 +363,22 @@ test("Deck layout stays readable through desktop and phone resizing", async ({
     }
   );
   expect(published.status()).toBe(200);
-  const decksMain = page.getByRole("main").filter({
-    has: page.getByRole("heading", { name: "Decks", level: 1, exact: true }),
-  });
-  const widths = [1024, 1280, 1440, 1920, 320, 375, 390];
-  for (const count of [1, 6, 22]) {
-    for (let n = count === 1 ? 1 : count === 6 ? 1 : 6; n < count; n++)
-      await emptyDeck(page);
+  for (let n = 1; n < count; n++) await emptyDeck(page);
+  return built;
+}
+
+for (const count of [1, 6, 22]) {
+  test(`Deck layout stays readable through desktop and phone resizing with ${count} Decks`, async ({
+    page,
+  }) => {
+    const built = await seedLayoutDecks(page, count);
+    const main = decksMain(page);
     await page.goto(`${ORIGIN}/decks`);
     await expect(deckIndex(page).getByRole("listitem")).toHaveCount(count);
-    await decksMain
+    await main
       .getByRole("textbox", { name: "Deck name", exact: true })
       .fill("Unsaved Deck name");
-    for (const width of widths) {
+    for (const width of layoutWidths) {
       await page.setViewportSize({
         width,
         height: width === 1920 ? 1080 : 900,
@@ -383,7 +393,7 @@ test("Deck layout stays readable through desktop and phone resizing", async ({
         )
         .toBe(true);
       await expect(
-        decksMain.getByRole("textbox", { name: "Deck name", exact: true })
+        main.getByRole("textbox", { name: "Deck name", exact: true })
       ).toHaveValue("Unsaved Deck name");
       await expectTouchTarget(
         tile(page, built.deckName).getByRole("link", {
@@ -393,9 +403,7 @@ test("Deck layout stays readable through desktop and phone resizing", async ({
       );
       await expect
         .poll(() =>
-          decksMain.evaluate((el) =>
-            Math.round(el.getBoundingClientRect().width)
-          )
+          main.evaluate((el) => Math.round(el.getBoundingClientRect().width))
         )
         .toBe(Math.min(width, 1536));
       await expect
@@ -415,19 +423,29 @@ test("Deck layout stays readable through desktop and phone resizing", async ({
             : { horizontal: false }
         );
     }
-  }
-  for (const [name, route] of [
-    ["want-all", "/decks/want-list"],
-    ["want-scoped", `/decks/want-list?deck=${built.deckId}`],
-  ]) {
+  });
+}
+
+for (const name of ["want-all", "want-scoped"]) {
+  test(`Want List layout stays readable through desktop and phone resizing: ${name}`, async ({
+    page,
+  }) => {
+    const built = await seedLayoutDecks(page, 22);
+    const main = decksMain(page);
+    const route =
+      name === "want-all"
+        ? "/decks/want-list"
+        : `/decks/want-list?deck=${built.deckId}`;
+    // Match the original test's phone viewport when first checking the Deck's card name.
+    await page.setViewportSize({ width: 390, height: 900 });
     await page.goto(`${ORIGIN}${route}`);
     await expect(
-      decksMain
+      main
         .getByRole("region", { name: built.deckName, exact: true })
         .getByRole("paragraph")
         .filter({ hasText: /^Basic Grass Energy$/ })
     ).toBeVisible();
-    for (const width of widths) {
+    for (const width of layoutWidths) {
       await page.setViewportSize({
         width,
         height: width === 1920 ? 1080 : 900,
@@ -435,15 +453,13 @@ test("Deck layout stays readable through desktop and phone resizing", async ({
       if (width > 760) {
         await expect
           .poll(() =>
-            decksMain.evaluate((el) =>
-              Math.round(el.getBoundingClientRect().width)
-            )
+            main.evaluate((el) => Math.round(el.getBoundingClientRect().width))
           )
           .toBe(Math.min(width, 1536));
         if (name === "want-all") {
           await expect
             .poll(() =>
-              decksMain
+              main
                 .getByRole("complementary", { name: /^Combined total/ })
                 .evaluate((el) => Math.round(el.getBoundingClientRect().width))
             )
@@ -451,7 +467,7 @@ test("Deck layout stays readable through desktop and phone resizing", async ({
         } else {
           await expect
             .poll(() =>
-              decksMain
+              main
                 .getByRole("region", { name: /^Want List/ })
                 .locator("..")
                 .evaluate((el) => Math.round(el.getBoundingClientRect().width))
@@ -460,5 +476,5 @@ test("Deck layout stays readable through desktop and phone resizing", async ({
         }
       }
     }
-  }
-});
+  });
+}
