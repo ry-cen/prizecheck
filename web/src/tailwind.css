@@ -115,3 +115,29 @@
 @custom-variant phone (@media (max-width: 760px));
 @custom-variant wide (@media (min-width: 1550px));
 @custom-variant extra-wide (@media (min-width: 2200px));
+
+/* Collection pins controls only when a phone has enough vertical room. */
+@custom-variant collection-pinned (@media (max-width: 760px) and (min-height: 481px));
+
+@media (max-width: 760px) {
+  :root:has(#main-content [data-collection-page]) {
+    scroll-padding-top: calc(
+      var(--collection-header-clearance, 0px) +
+        var(--collection-stale-height, 0px)
+    );
+    scroll-padding-bottom: var(--layout-tabbar-height);
+  }
+  /* Header controls already occupy the pinned area. Applying its clearance to them can make
+     native input focus scroll the header's original flow position back into view. */
+  :root:has(#main-content [data-collection-page] > header:focus-within) {
+    scroll-padding-top: 0px;
+  }
+}
+@variant collection-pinned {
+  [data-collection-page] {
+    --layout-sticky-top: var(--layout-header-height);
+  }
+  :root:has(#main-content [data-collection-page]) {
+    --collection-header-clearance: var(--layout-header-height);
+  }
+}
