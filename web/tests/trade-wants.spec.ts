@@ -136,7 +136,7 @@ const notifications = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 const IONO_254 = /^Iono \(Paldea Evolved · 254 · Normal\)$/;
 const energy = (page: Page) =>
-  page.getByRole("combobox", {
+  page.getByRole("list", { name: /^What .* needs$/ }).getByRole("radiogroup", {
     name: /^Will accept for Basic Psychic Energy \(Scarlet & Violet Energies · 013 /,
   });
 
@@ -270,30 +270,56 @@ test.describe("on a desktop", () => {
     await setLine(page, newer, ids["SVE 13"], 1);
     await page.goto(`${ORIGIN}/decks/want-list`);
     await expect(energy(page)).toHaveCount(2);
-    await expect(energy(page).first()).toHaveValue("edition");
+    await expect(
+      energy(page)
+        .first()
+        .getByRole("radio", { name: "This exact card", exact: true })
+    ).toBeChecked();
     await expect(page.getByText("3 cards", { exact: true })).toBeVisible();
-    await expectPageChecks(page, "the Want List with Will accept selects");
+    await expectPageChecks(page, "the Want List with Will accept choices");
 
-    await energy(page).first().selectOption({ label: "Any finish" });
+    await energy(page)
+      .first()
+      .getByRole("radio", { name: "Any finish", exact: true })
+      .check();
     await expect(notifications(page)).toContainText(
       /^Trades will match any finish for Basic Psychic Energy \(Scarlet & Violet Energies · 013 /
     );
-    await expect(energy(page).nth(1)).toHaveValue("printing");
+    await expect(
+      energy(page)
+        .nth(1)
+        .getByRole("radio", { name: "Any finish", exact: true })
+    ).toBeChecked();
     expect((await tradeWants(page)).rules).toEqual({
       [ids["SVE 13"]]: "printing",
     });
     await expect(page.getByText("3 cards", { exact: true })).toBeVisible();
 
     await page.reload();
-    await expect(energy(page).first()).toHaveValue("printing");
-    await expect(energy(page).nth(1)).toHaveValue("printing");
-    await energy(page).nth(1).selectOption({ label: "This exact card" });
-    // The select shows the choice at once; wait for the save to land before reading it back.
+    await expect(
+      energy(page)
+        .first()
+        .getByRole("radio", { name: "Any finish", exact: true })
+    ).toBeChecked();
+    await expect(
+      energy(page)
+        .nth(1)
+        .getByRole("radio", { name: "Any finish", exact: true })
+    ).toBeChecked();
+    await energy(page)
+      .nth(1)
+      .getByRole("radio", { name: "This exact card", exact: true })
+      .check();
+    // The radio group shows the choice at once; wait for the save to land before reading it back.
     await expect(energy(page).nth(1)).not.toHaveAttribute(
       "aria-disabled",
       "true"
     );
-    await expect(energy(page).first()).toHaveValue("edition");
+    await expect(
+      energy(page)
+        .first()
+        .getByRole("radio", { name: "This exact card", exact: true })
+    ).toBeChecked();
     expect((await tradeWants(page)).rules).toEqual({});
   });
 
@@ -305,9 +331,29 @@ test.describe("on a desktop", () => {
     const deck = await createDeck(page, `Deck ${randomUUID().slice(0, 6)}`, 1);
     await setLine(page, deck, ids["SVE 13"], 1);
     await page.goto(`${ORIGIN}/decks/want-list`);
-    await expect(energy(page)).toHaveValue("edition");
+    await expect(
+      energy(page).getByRole("radio", { name: "This exact card", exact: true })
+    ).toBeChecked();
 
-    // Held PUT: the select already shows the new choice, and the stored one hasn't changed.
+    const group = energy(page);
+    const printing = group.getByRole("radio", {
+      name: "Any finish",
+      exact: true,
+    });
+    const identity = group.getByRole("radio", {
+      name: "Any card with the same name",
+      exact: true,
+    });
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "PUT" &&
+        new URL(request.url()).pathname.startsWith("/api/trade-wants/")
+      )
+        writes.push(request.postDataJSON().rule);
+    });
+
+    // Held PUT: the radio group already shows the new choice, and the stored one hasn't changed.
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
     const held = (url: URL) =>
@@ -316,14 +362,52 @@ test.describe("on a desktop", () => {
       await gate;
       await route.continue();
     });
-    await energy(page).selectOption({ label: "Any finish" });
+    await energy(page)
+      .getByRole("radio", { name: "Any finish", exact: true })
+      .check();
     await expect(energy(page)).toHaveAttribute("aria-disabled", "true");
-    await expect(energy(page)).toHaveValue("printing");
+    await expect(
+      energy(page).getByRole("radio", { name: "Any finish", exact: true })
+    ).toBeChecked();
+    expect((await tradeWants(page)).rules).toEqual({});
+    await expect.poll(() => writes).toEqual(["printing"]);
+    await expect(printing).toHaveAttribute("aria-disabled", "true");
+    await expect(identity).toHaveAttribute("aria-disabled", "true");
+    // Force bypasses Playwright's aria-disabled actionability guard, so the label actually receives the click.
+    await identity.locator("..").click({ force: true });
+    await expect(printing).toBeChecked();
+    await expect(identity).not.toBeChecked();
+    await printing.focus();
+    await printing.press("ArrowDown");
+    await expect(printing).toBeChecked();
+    await identity.focus();
+    await identity.press("Space");
+    await expect(printing).toBeChecked();
+    await expect(identity).not.toBeChecked();
+    await expect(group).toHaveAttribute("aria-disabled", "true");
+    // Flush browser event handling before sampling the no-additional-write invariant.
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+    );
+    expect(writes).toEqual(["printing"]);
     expect((await tradeWants(page)).rules).toEqual({});
     release();
     await expect(notifications(page)).toContainText(/^Trades will match any/);
-    await expect(energy(page)).toHaveValue("printing");
+    await expect(
+      energy(page).getByRole("radio", { name: "Any finish", exact: true })
+    ).toBeChecked();
+    await expect(group).not.toHaveAttribute("aria-disabled", "true");
     await page.unroute(held);
+
+    // Clicking or pressing Space on the saved choice is a no-op.
+    await printing.locator("..").click();
+    await printing.focus();
+    await printing.press("Space");
+    await expect(printing).toBeChecked();
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+    );
+    expect(writes).toEqual(["printing"]);
 
     // A failed PUT puts the saved choice back.
     await page.route(held, (route) =>
@@ -333,14 +417,34 @@ test.describe("on a desktop", () => {
         body: JSON.stringify({ detail: { code: "INTERNAL" } }),
       })
     );
-    await energy(page).selectOption({ label: "This exact card" });
+    await energy(page)
+      .getByRole("radio", { name: "This exact card", exact: true })
+      .check();
     await expect(notifications(page)).toContainText(
       "That choice couldn't be saved. Please try again."
     );
-    await expect(energy(page)).toHaveValue("printing");
+    await expect(
+      energy(page).getByRole("radio", { name: "Any finish", exact: true })
+    ).toBeChecked();
     expect((await tradeWants(page)).rules).toEqual({
       [ids["SVE 13"]]: "printing",
     });
+    await expect(group).not.toHaveAttribute("aria-disabled", "true");
+    expect(writes).toEqual(["printing", "edition"]);
+    await page.unroute(held);
+
+    // After rollback, ordinary native arrow-key navigation saves the next choice.
+    await printing.focus();
+    await printing.press("ArrowDown");
+    await expect(identity).toBeChecked();
+    await expect(notifications(page)).toContainText(
+      /^Trades will match any card with the same name/
+    );
+    await expect(group).not.toHaveAttribute("aria-disabled", "true");
+    expect((await tradeWants(page)).rules).toEqual({
+      [ids["SVE 13"]]: "identity",
+    });
+    expect(writes).toEqual(["printing", "edition", "identity"]);
   });
 
   test("the Trade Wants panel is not part of a one-Deck Want List", async ({
@@ -487,7 +591,7 @@ test.describe("on a phone", () => {
     const deck = await createDeck(page, `Deck ${randomUUID().slice(0, 6)}`, 1);
     await setLine(page, deck, ids["SVE 13"], 1);
     await page.goto(`${ORIGIN}/decks/want-list`);
-    await expectTouchTarget(energy(page));
+    await expectTouchTarget(energy(page).locator("label").first());
     await expectTouchTarget(
       panel(page).getByRole("button", { name: "Add a card" })
     );

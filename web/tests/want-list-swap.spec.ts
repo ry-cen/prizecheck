@@ -161,7 +161,7 @@ async function sameName(page: Page, ids: Editions) {
 }
 
 const willAccept = (page: Page) =>
-  page.getByRole("combobox", {
+  page.getByRole("list", { name: /^What .* needs$/ }).getByRole("radiogroup", {
     name: /^Will accept for Basic Psychic Energy \(Scarlet & Violet Energies · 013 /,
   });
 const sameNameHint = "↻ You own a card with the same name (sve 005) × 2";
@@ -340,12 +340,17 @@ test.describe("on a desktop", () => {
     await page.goto(`${ORIGIN}/decks/want-list`);
     await expect(needs(page, name)).toContainText("4 of 4");
     // This exact card, the default: the Energy is in no Reprint Group, so there is no hint.
-    await expect(willAccept(page)).toHaveValue("edition");
+    await expect(
+      willAccept(page).getByRole("radio", {
+        name: "This exact card",
+        exact: true,
+      })
+    ).toBeChecked();
     await expect(page.getByText(/You own a/)).toHaveCount(0);
 
-    await willAccept(page).selectOption({
-      label: "Any card with the same name",
-    });
+    await willAccept(page)
+      .getByRole("radio", { name: "Any card with the same name", exact: true })
+      .check();
     await expect(needs(page, name)).toContainText(sameNameHint);
     // The choice changes no figure: the Deck still needs 4.
     await expect(needs(page, name)).toContainText("4 of 4");
@@ -392,10 +397,10 @@ test.describe("on a phone", () => {
     await signIn(page);
     const { name } = await sameName(page, ids);
     await page.goto(`${ORIGIN}/decks/want-list`);
-    await expectTouchTarget(willAccept(page));
-    await willAccept(page).selectOption({
-      label: "Any card with the same name",
-    });
+    await expectTouchTarget(willAccept(page).locator("label").first());
+    await willAccept(page)
+      .getByRole("radio", { name: "Any card with the same name", exact: true })
+      .check();
     await expect(needs(page, name)).toContainText(sameNameHint);
     await expectTouchTarget(energySwap(page));
     await expectPageChecks(
