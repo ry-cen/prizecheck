@@ -1062,7 +1062,7 @@ def test_svp173_repair_records_both_owner_decisions_and_survives_source_rematch(
     import runpy
     from pathlib import Path
     from test_catalog_targets import listing, stock_prices
-    from app.catalog_targets import refresh_editions, TargetContext
+    from app.games.pokemon.prices.catalog_targets import refresh_editions, TargetContext
 
     seed_users()
     root = Path(__file__).resolve().parents[2]

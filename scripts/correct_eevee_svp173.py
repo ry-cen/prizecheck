@@ -10,9 +10,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'api'))
 
 from app.db import connect  # noqa: E402
-from app.catalog_targets import MatchingRulesV3  # noqa: E402
-from app.metadata_reviews import MetadataDecisionInput, decide, load_target  # noqa: E402
-from app.price_binding import join_spawned_rebinds, rebind_best_effort  # noqa: E402
+from app.games.pokemon.prices.catalog_targets import MatchingRulesV3  # noqa: E402
+from app.games.pokemon.prices.metadata_reviews import MetadataDecisionInput, decide, load_target  # noqa: E402
+from app.games.pokemon.prices.price_binding import join_spawned_rebinds, rebind_best_effort  # noqa: E402
 
 EVIDENCE = 'https://tcgcsv.com/tcgplayer/3/22872/products'
 CORRECTIONS = (({'type': 'holo', 'size': 'standard'}, 610758, 'Eevee - 173'),
