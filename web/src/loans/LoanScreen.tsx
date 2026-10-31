@@ -131,10 +131,14 @@ const OFFER_ASK: typeof ASK = {
  */
 export function LoanScreen({
   loanId,
+  focusOnOpen = false,
+  onLoanChanged,
   onAllLoans,
   onOpenDeck,
 }: {
   loanId: string;
+  focusOnOpen?: boolean;
+  onLoanChanged: () => void;
   onAllLoans: () => void;
   onOpenDeck: (id: string) => void;
 }) {
@@ -173,6 +177,7 @@ export function LoanScreen({
   const askButton = useRef<HTMLButtonElement>(null);
   const declineButton = useRef<HTMLButtonElement>(null);
   const focusNext = useRef<FocusNext | null>(null);
+  const focusInitialHeading = useRef(focusOnOpen);
   // A step refused because the Loan moved on reads it again: the open form closes and the heading takes focus once
   // the new Loan is drawn, so focus never lands on the old headline.
   const reloading = useRef(false);
@@ -199,7 +204,10 @@ export function LoanScreen({
           setWriting(null);
           setDating(null);
         }
-        if (openedFromInbox(loanId)) focusNext.current = "heading";
+        if (openedFromInbox(loanId) || focusInitialHeading.current) {
+          focusNext.current = "heading";
+          focusInitialHeading.current = false;
+        }
         setLoad({ kind: "ready", loan, side });
         setPromised(promiseStart(loan, side));
         setAnswerDate(loan.return_by ?? "");
@@ -281,7 +289,7 @@ export function LoanScreen({
     </a>
   );
   const frame = (title: string, children: ReactNode, actions?: ReactNode) => (
-    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       {back}
       <div className="relative flex min-w-0 items-start gap-3 pr-10">
         {load.kind === "ready" && (
@@ -293,7 +301,7 @@ export function LoanScreen({
         {actions && <div className="absolute top-0 right-0">{actions}</div>}
       </div>
       {children}
-    </main>
+    </div>
   );
 
   if (load.kind === "loading")
@@ -366,10 +374,12 @@ export function LoanScreen({
       setLoad({ kind: "ready", loan: next, side: nextSide });
       setPromised(promiseStart(next, nextSide));
       refreshInbox();
+      onLoanChanged();
     } catch (cause) {
       if (!outcomeUnknown(cause)) keys.current.delete(name);
       setMessage(loanStepMessage(cause, other, cardName));
       if (cause instanceof SocialError && RELOAD.has(cause.code)) {
+        onLoanChanged();
         reloading.current = true;
         setAttempt((n) => n + 1);
         refreshInbox();
