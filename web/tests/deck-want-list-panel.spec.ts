@@ -255,6 +255,66 @@ test.describe("on a desktop", () => {
     await expect(swapButton(page)).toBeVisible();
   });
 
+  for (const inFlight of [false, true]) {
+    test(`Swap Undo survives the phone breakpoint${inFlight ? " while the command is in flight" : ""}`, async ({
+      page,
+    }) => {
+      const ids = seedCatalog();
+      await signIn(page);
+      const { deck } = await lastGap(page, ids);
+      await page.goto(`${ORIGIN}/decks/${deck}`);
+      await toggle(page).click();
+      await expect(swapButton(page)).toBeVisible();
+
+      const panelId = await panel(page).getAttribute("id");
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started!: () => void;
+      const commandStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      if (inFlight) {
+        await page.route(
+          `**/api/decks/${deck}/deck-list/changes`,
+          async (route) => {
+            started();
+            await held;
+            await route.continue();
+          },
+          { times: 1 }
+        );
+      }
+      await swapButton(page).click();
+      const undo = notifications(page).getByRole("button", { name: "Undo" });
+      if (inFlight) await commandStarted;
+      else await expect(undo).toBeVisible();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(page.getByRole("tab", { name: /Deck/ })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      );
+      const librarySearch = page.getByRole("searchbox", {
+        name: "Search the library",
+        includeHidden: true,
+      });
+      await expect(librarySearch).toHaveCount(1);
+      await expect(librarySearch).toBeHidden();
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await expect(librarySearch).toBeVisible();
+      release();
+      await expect(undo).toBeVisible();
+      await expect(page.getByText("Every card is in this Deck.")).toBeVisible();
+      await expect(toggle(page)).toHaveAttribute("aria-expanded", "true");
+      await expect(panel(page)).toHaveAttribute("id", panelId!);
+      await undo.click();
+      await expect(readiness(page)).toContainText("Not owned1");
+      expect(await deckList(page, deck)).toEqual({ [ids["PAL 185"]]: "1" });
+      await expect(swapButton(page)).toBeVisible();
+    });
+  }
+
   test("a failed read says so in the panel, and Retry reads again", async ({
     page,
   }) => {
