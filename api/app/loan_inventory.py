@@ -17,6 +17,10 @@ Holdings is here, under ``/api/loans``, and never answers one side's Locations o
 - **Each side's own view** (``GET /api/loans/{id}/side``): for the lender, how many copies each line could take while
   answering, and the Loan Pick List with their own Location names; for the borrower, the Deck the cards go to.
 
+**Pending for a Deck** (``GET /api/loans/pending?deck=``): the borrower's own read of what one of their Decks is
+waiting on from Friends, per card, beside the Want List and never inside it (``pending_for_deck``). Copies
+asked for and copies promised but not yet received are information only; nothing the Want List counts changes.
+
 **The Loan Pick List** takes copies in the Deck Pick List's order (``deck_pick_list.suggest``): loose storage, largest
 Holding first, then other Decks' copies beyond their own lines, then copies Decks hold for their own lines; copies
 other Loans' picks take are left for them.
@@ -264,6 +268,28 @@ class MoveBorrowed(BaseModel):
     to_location_id: UUID
     quantity: str
     idempotency_key: UUID
+
+
+class PendingLender(BaseModel):
+    """One open Loan of the borrower's, for one card of the Deck: the lender's Display Name, and the copies asked for
+    (``requested``, nobody has answered) or promised and not yet received (``accepted``)."""
+    lender: str
+    state: Literal['requested', 'accepted']
+    copies: str
+
+
+class PendingLine(BaseModel):
+    """What Friends have been asked for, or have promised, of one card the Deck's Deck List names. Information only:
+    the Want List's counts never take it off what is still needed."""
+    edition_id: UUID
+    requested: str
+    accepted: str
+    lenders: list[PendingLender]    # Accepted first, then requested, oldest Loan first.
+
+
+class PendingLoans(BaseModel):
+    deck_id: UUID
+    lines: list[PendingLine]        # Edition order; only cards with something asked for or on its way.
 
 
 def copies_count(raw: str) -> int:
@@ -539,6 +565,64 @@ def lent_out(user_id: str = Depends(verified_user)):
         collector_number=cards[row['edition_id']].collector_number, image_url=cards[row['edition_id']].image_url,
         copies=str(row['copies']), borrower=row['borrower_name']) for row in rows],
         copies=str(sum(int(row['copies']) for row in rows)))
+
+
+# What a borrower's Deck is waiting on from Friends, per Loan line: copies asked for in a Borrow Request nobody has
+# answered, and copies a Friend promised (an accepted Borrow Request, or a Lend Offer the borrower took for this Deck)
+# that the borrower hasn't confirmed receiving. Only Editions the Deck's own Deck List names. The Deck row comes first
+# through a LEFT JOIN, so a missing, foreign or non-Deck id gives no row at all and an empty Deck gives one empty row.
+PENDING_FOR_DECK = """WITH d AS (
+    SELECT id FROM location WHERE owner_id = %(user)s AND id = %(deck)s AND kind = 'deck')
+  SELECT d.id AS deck_id, p.edition_id, p.state, p.lender_name, p.copies
+  FROM d LEFT JOIN LATERAL (
+    SELECT l.edition_id, o.state, o.lender_name, o.created_at, o.id,
+           CASE WHEN o.state = 'requested' THEN l.requested ELSE l.promised - l.written_off END AS copies
+    FROM loan o JOIN loan_line l ON l.loan_id = o.id
+    WHERE o.borrower_id = %(user)s AND o.deck_id = d.id AND o.borrower_handover_at IS NULL
+      AND ((o.state = 'requested' AND l.requested > 0) OR (o.state = 'accepted' AND l.promised > l.written_off))
+      AND l.edition_id IN (SELECT dl.edition_id FROM deck_list_line dl
+                           WHERE dl.owner_id = %(user)s AND dl.deck_id = d.id)
+  ) p ON true
+  ORDER BY p.edition_id, p.state = 'requested', p.created_at, p.id"""
+
+
+def pending_for_deck(conn, borrower_id: str, deck_id: UUID) -> list[dict] | None:
+    """The borrower's open Loans waiting on one of their own Decks (want list pending loans): rows of ``edition_id``,
+    ``state`` ('requested' or 'accepted'), ``lender_name`` and ``copies``, one per Loan and Edition, in Edition order,
+    accepted before requested, oldest Loan first. ``requested`` copies are the line's ask while nobody answered;
+    ``accepted`` copies are ``promised - written_off`` until the borrower confirms the handover, when they become
+    Borrowed Copies (a take-back brings them back). It doesn't look at the friendship: a Loan the lender confirmed a
+    handover for outlives a Remove Friend or Block (``end_loans_between``) and is still on its way. None when
+    ``deck_id`` isn't one of the borrower's Decks. One statement, no lock, information only: no count, total, cost or
+    export reads it, and it never moves a revision."""
+    rows = conn.execute(PENDING_FOR_DECK, {'user': borrower_id, 'deck': deck_id}).fetchall()
+    if not rows:
+        return None
+    return [row for row in rows if row['edition_id'] is not None]
+
+
+@router.get('/pending', response_model=PendingLoans)
+def pending_loans(deck: UUID, user_id: str = Depends(verified_user)):
+    """What one of the borrower's own Decks is waiting on from Friends (want list pending loans): per card its Deck
+    List names, the copies asked for in Borrow Requests nobody has answered and the copies promised and not yet
+    received, with each lender's Display Name. 404 DECK_NOT_FOUND unless ``deck`` is one of the caller's Decks. It is
+    apart from ``GET /api/want-list`` on purpose: none of that answer's pins covers it, so it reads again on its own
+    (a Friend's answer moves no revision of the borrower's) without a new Want List, cost or price access."""
+    with connect() as conn, conn.transaction():
+        rows = pending_for_deck(conn, user_id, deck)
+    if rows is None:
+        error(404, 'DECK_NOT_FOUND')
+    lines: dict[UUID, list[dict]] = {}
+    for row in rows:
+        lines.setdefault(row['edition_id'], []).append(row)
+
+    def total(found: list[dict], state: str) -> str:
+        return str(sum(int(row['copies']) for row in found if row['state'] == state))
+
+    return PendingLoans(deck_id=deck, lines=[PendingLine(
+        edition_id=edition, requested=total(found, 'requested'), accepted=total(found, 'accepted'),
+        lenders=[PendingLender(lender=row['lender_name'], state=row['state'], copies=str(row['copies']))
+                 for row in found]) for edition, found in lines.items()])
 
 
 def borrowed_copies(conn, user_id: str) -> BorrowedCopies:

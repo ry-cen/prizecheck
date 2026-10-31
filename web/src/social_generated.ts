@@ -35,6 +35,9 @@ export type LentOut = { cards: LentCard[]; copies: string };
 export type BorrowedCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; copies: string; lender: string };
 export type BorrowedCopies = { cards: BorrowedCard[]; copies: string };
 export type MoveBorrowed = { loan_id: string; edition_id: string; from_location_id: string; to_location_id: string; quantity: string; idempotency_key: string };
+export type PendingLender = { lender: string; state: "requested" | "accepted"; copies: string };
+export type PendingLine = { edition_id: string; requested: string; accepted: string; lenders: PendingLender[] };
+export type PendingLoans = { deck_id: string; lines: PendingLine[] };
 export type ReturnedLine = { edition_id: string; quantity: string };
 export type StartReturn = { revision: number; idempotency_key: string; lines: ReturnedLine[] };
 export type WriteOffLine = { edition_id: string; quantity: string };
@@ -206,6 +209,9 @@ export const getLentOut = (signal?: AbortSignal) => request<LentOut>('/api/loans
 export const getBorrowed = (signal?: AbortSignal) =>
   request<BorrowedCopies>('/api/loans/borrowed', 'GET', undefined, signal);
 export const moveBorrowed = (body: MoveBorrowed) => request<BorrowedCopies>('/api/loans/borrowed/move', 'POST', body);
+// What one of your Decks is waiting on from Friends: copies asked for and copies promised but not yet received.
+export const getPendingLoans = (deck: string, signal?: AbortSignal) =>
+  request<PendingLoans>(`/api/loans/pending${query({ deck })}`, 'GET', undefined, signal);
 // Returns (#255): either side starts one (its confirmation), and the other side confirms it.
 export const startReturn = (id: string, body: StartReturn) =>
   request<LoanView>(`/api/loans/${at(id)}/returns`, 'POST', body);

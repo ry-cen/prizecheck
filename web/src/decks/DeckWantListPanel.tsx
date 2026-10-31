@@ -11,6 +11,7 @@ import { useTradeWants } from "./useTradeWants";
 import { useWantListCost, WantListCostContext } from "./WantListCost";
 import { NeededLines } from "./WantListView";
 import { useWantListSwap } from "./useWantListSwap";
+import { usePendingLoans } from "./usePendingLoans";
 
 const NO_COPIES = new Map<string, FriendCopy[]>();
 
@@ -102,6 +103,9 @@ function PanelBody({ deckId, pins }: { deckId: string; pins: string }) {
   });
   const friends = useFriendMatches(list);
   const trade = useTradeWants(reload);
+  // What this Deck is waiting on from Friends, read apart from the Want List, so a refresh reads no cost again. The
+  // builder's pins (Deck List, owner and settings revisions) read it again whenever they read the Want List again.
+  const pending = usePendingLoans(deckId, pins);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -171,6 +175,7 @@ function PanelBody({ deckId, pins }: { deckId: string; pins: string }) {
             byCard={byCard}
             trade={trade}
             borrowFor={deckId}
+            pending={pending}
           />
         )}
       </div>

@@ -52,6 +52,12 @@ import { SwapHint } from "./SwapHint";
 import { useWantListSwap, type WantListSwap } from "./useWantListSwap";
 import { TradeWantsPanel, WillAcceptSelect } from "./TradeWantsPanel";
 import { useTradeWants, type TradeWantsApi } from "./useTradeWants";
+import { pendingText } from "./pendingLoans";
+import {
+  usePendingLoans,
+  wantListPins,
+  type PendingApi,
+} from "./usePendingLoans";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
@@ -127,6 +133,12 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const friends = useFriendMatches(load.kind === "ready" ? load.list : null);
   const drafts = useBorrowDrafts();
   const trade = useTradeWants(reload);
+  // What a scoped Deck is waiting on from Friends, read apart from the Want List; All Decks reads none. The answer's
+  // own pins read it again when a Swap or a reload brings a new Want List, never the other way round.
+  const friendRequests = usePendingLoans(
+    load.kind === "ready" ? load.list.deck_id : null,
+    load.kind === "ready" ? wantListPins(load.list) : ""
+  );
   const [view, setView] = useState<View>("buy");
 
   function choose(deckId: string | null) {
@@ -337,6 +349,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
                 byCard={byCard}
                 trade={trade}
                 borrowFor={shownScope}
+                pending={friendRequests}
               />
             ))}
             {!shownScope && <TradeWantsPanel api={trade} />}
@@ -360,6 +373,7 @@ function DeckSection({
   byCard,
   trade,
   borrowFor,
+  pending,
 }: {
   section: WantListSection;
   deckName: (id: string) => string;
@@ -371,6 +385,8 @@ function DeckSection({
   trade: TradeWantsApi;
   /** The Deck a new Borrow Request draft is For, or null (NeededLines). */
   borrowFor: string | null;
+  /** What the scoped Deck is waiting on from Friends. */
+  pending: PendingApi;
 }) {
   const idBase = useId();
   return (
@@ -413,6 +429,7 @@ function DeckSection({
           byCard={byCard}
           trade={trade}
           borrowFor={borrowFor}
+          pending={pending}
         />
       )}
     </section>
@@ -432,6 +449,7 @@ export function NeededLines({
   byCard,
   trade,
   borrowFor,
+  pending,
 }: {
   section: WantListSection;
   deckName: (id: string) => string;
@@ -442,52 +460,81 @@ export function NeededLines({
   trade: TradeWantsApi;
   /** The Deck a new Borrow Request draft is For, or null for none. */
   borrowFor: string | null;
+  /** What this Deck is waiting on from Friends, when it is the Deck in scope: shown beside each line's counts and
+   * never taken off them. */
+  pending?: PendingApi;
 }) {
+  const waiting =
+    pending &&
+    pending.state.kind !== "idle" &&
+    pending.state.deckId === section.deck_id
+      ? pending.state
+      : null;
   return (
-    <ul
-      aria-label={`What ${section.name} needs`}
-      className="m-0 list-none border-t border-border p-0"
-    >
-      {section.lines.map((line) => (
-        <NeededLine
-          key={line.edition_id}
-          deckId={section.deck_id}
-          line={line}
-          deckName={deckName}
-          accept={<WillAcceptSelect line={line} api={trade} />}
-        >
-          <SwapHint
-            section={section}
+    <>
+      {waiting &&
+        (waiting.kind === "failed" ||
+          (waiting.kind === "ready" && waiting.stale)) && (
+          <p
+            role="status"
+            className="m-0 flex flex-wrap items-center gap-2 border-t border-border px-4 py-2 text-meta text-text-muted"
+          >
+            {waiting.kind === "failed"
+              ? "Requests to Friends couldn't be loaded."
+              : "Requests to Friends may be out of date."}
+            <Button onClick={pending!.retry}>Retry</Button>
+          </p>
+        )}
+      <ul
+        aria-label={`What ${section.name} needs`}
+        className="m-0 list-none border-t border-border p-0"
+      >
+        {section.lines.map((line) => (
+          <NeededLine
+            key={line.edition_id}
+            deckId={section.deck_id}
             line={line}
-            swap={swap}
-            rule={
-              trade.state.kind === "ready"
-                ? trade.state.rules.get(line.edition_id)
-                : undefined
+            deckName={deckName}
+            accept={<WillAcceptSelect line={line} api={trade} />}
+            pendingNote={
+              waiting?.kind === "ready"
+                ? pendingText(waiting.lines.get(line.edition_id))
+                : ""
             }
-          />
-          <FriendChips
-            name={line.name}
-            edition={editionText(line)}
-            wanted={line.edition_id}
-            copies={byCard.get(line.edition_id)}
-            chip={(copy, text) => (
-              <AskChip
-                friend={copy}
-                card={copyCard(
-                  copy,
-                  copy.edition_id === line.edition_id ? line.image_url : null
-                )}
-                cap={copyCap(copy)}
-                lendable={lendableText(copy)}
-                text={text}
-                deckId={borrowFor}
-              />
-            )}
-          />
-        </NeededLine>
-      ))}
-    </ul>
+          >
+            <SwapHint
+              section={section}
+              line={line}
+              swap={swap}
+              rule={
+                trade.state.kind === "ready"
+                  ? trade.state.rules.get(line.edition_id)
+                  : undefined
+              }
+            />
+            <FriendChips
+              name={line.name}
+              edition={editionText(line)}
+              wanted={line.edition_id}
+              copies={byCard.get(line.edition_id)}
+              chip={(copy, text) => (
+                <AskChip
+                  friend={copy}
+                  card={copyCard(
+                    copy,
+                    copy.edition_id === line.edition_id ? line.image_url : null
+                  )}
+                  cap={copyCap(copy)}
+                  lendable={lendableText(copy)}
+                  text={text}
+                  deckId={borrowFor}
+                />
+              )}
+            />
+          </NeededLine>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -496,6 +543,7 @@ function NeededLine({
   line,
   deckName,
   accept,
+  pendingNote = "",
   children,
 }: {
   deckId: string;
@@ -503,6 +551,8 @@ function NeededLine({
   deckName: (id: string) => string;
   /** The line's Will accept select (#275), under its card's name. */
   accept?: ReactNode;
+  /** What Friends were asked for or agreed to lend of this card for this Deck, under its counts; "" for none. */
+  pendingNote?: string;
   /** The line's Swap hint (#211) and Friend chips (#251), under its card and counts. */
   children?: ReactNode;
 }) {
@@ -525,6 +575,11 @@ function NeededLine({
         <p className="m-0 text-meta text-text-muted wrap-anywhere">
           {countedText(line, deckName)}
         </p>
+        {pendingNote && (
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {pendingNote}
+          </p>
+        )}
       </div>
       <LineCost deckId={deckId} editionId={line.edition_id} />
       {children}

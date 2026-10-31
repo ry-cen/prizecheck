@@ -11745,6 +11745,89 @@
     "title": "OwnerCatalogStatus",
     "type": "object"
    },
+   "PendingLender": {
+    "description": "One open Loan of the borrower's, for one card of the Deck: the lender's Display Name, and the copies asked for\n(``requested``, nobody has answered) or promised and not yet received (``accepted``).",
+    "properties": {
+     "copies": {
+      "title": "Copies",
+      "type": "string"
+     },
+     "lender": {
+      "title": "Lender",
+      "type": "string"
+     },
+     "state": {
+      "enum": [
+       "requested",
+       "accepted"
+      ],
+      "title": "State",
+      "type": "string"
+     }
+    },
+    "required": [
+     "lender",
+     "state",
+     "copies"
+    ],
+    "title": "PendingLender",
+    "type": "object"
+   },
+   "PendingLine": {
+    "description": "What Friends have been asked for, or have promised, of one card the Deck's Deck List names. Information only:\nthe Want List's counts never take it off what is still needed.",
+    "properties": {
+     "accepted": {
+      "title": "Accepted",
+      "type": "string"
+     },
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "lenders": {
+      "items": {
+       "$ref": "#/components/schemas/PendingLender"
+      },
+      "title": "Lenders",
+      "type": "array"
+     },
+     "requested": {
+      "title": "Requested",
+      "type": "string"
+     }
+    },
+    "required": [
+     "edition_id",
+     "requested",
+     "accepted",
+     "lenders"
+    ],
+    "title": "PendingLine",
+    "type": "object"
+   },
+   "PendingLoans": {
+    "properties": {
+     "deck_id": {
+      "format": "uuid",
+      "title": "Deck Id",
+      "type": "string"
+     },
+     "lines": {
+      "items": {
+       "$ref": "#/components/schemas/PendingLine"
+      },
+      "title": "Lines",
+      "type": "array"
+     }
+    },
+    "required": [
+     "deck_id",
+     "lines"
+    ],
+    "title": "PendingLoans",
+    "type": "object"
+   },
    "PendingReturn": {
     "description": "The Loan's return one side has confirmed and the other hasn't (#255): who started it, its copies, and which\nsides confirmed it.",
     "properties": {
@@ -28795,6 +28878,98 @@
      }
     },
     "summary": "Send Lend Offer",
+    "tags": [
+     "loans"
+    ]
+   }
+  },
+  "/api/loans/pending": {
+   "get": {
+    "description": "What one of the borrower's own Decks is waiting on from Friends (want list pending loans): per card its Deck\nList names, the copies asked for in Borrow Requests nobody has answered and the copies promised and not yet\nreceived, with each lender's Display Name. 404 DECK_NOT_FOUND unless ``deck`` is one of the caller's Decks. It is\napart from ``GET /api/want-list`` on purpose: none of that answer's pins covers it, so it reads again on its own\n(a Friend's answer moves no revision of the borrower's) without a new Want List, cost or price access.",
+    "operationId": "pending_loans_api_loans_pending_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "deck",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Deck",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PendingLoans"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Pending Loans",
     "tags": [
      "loans"
     ]
