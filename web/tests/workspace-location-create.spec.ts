@@ -197,7 +197,7 @@ test.describe("desktop", () => {
     await expect(heading).toHaveText(name);
   });
 
-  test("Add child shows on hover or focus, never on Decks, and expands the new Location's ancestors", async ({
+  test("Add child stays shown on the open Location, reveals on hover or focus elsewhere, never on Decks, and expands the new Location's ancestors", async ({
     page,
   }) => {
     await signIn(page);
@@ -237,7 +237,7 @@ test.describe("desktop", () => {
       .locator("xpath=..")
       .boundingBox())!;
     // Both tools are 30 px square and sit at the row's end: the gear 2 px inside it, the + immediately left of
-    // the gear with a 2 px gap, so the open row's border stays visible.
+    // the gear with no gap, so the open row's border stays visible.
     const gearBox = (await gearShelf.boundingBox())!;
     expect(Math.abs(addBox.width - 30)).toBeLessThanOrEqual(1);
     expect(Math.abs(addBox.height - 30)).toBeLessThanOrEqual(1);
@@ -246,9 +246,9 @@ test.describe("desktop", () => {
     expect(
       Math.abs(gearBox.x + gearBox.width - (rowBox.x + rowBox.width - 2))
     ).toBeLessThanOrEqual(1);
-    expect(
-      Math.abs(addBox.x + addBox.width - (gearBox.x - 2))
-    ).toBeLessThanOrEqual(1);
+    expect(Math.abs(addBox.x + addBox.width - gearBox.x)).toBeLessThanOrEqual(
+      1
+    );
     expect(Math.abs(entryBox.width - rowBox.width)).toBeLessThanOrEqual(1);
     await page.mouse.move(1500, 850);
     await expect(addShelf).toHaveCSS("opacity", "0");
@@ -263,7 +263,7 @@ test.describe("desktop", () => {
     await page.keyboard.press("Enter");
     await expect(dialog).toBeVisible();
     await expect(parentField.locator("option:checked")).toHaveText(shelf);
-    const binder = `Binder ${suffix()}`;
+    const binder = `Binder ${suffix()} with a long name to truncate in the sidebar`;
     await dialog.getByLabel("Name", { exact: true }).fill(binder);
     await dialog.getByRole("button", { name: "Create location" }).click();
     await expect(dialog).toBeHidden();
@@ -273,6 +273,35 @@ test.describe("desktop", () => {
       "aria-current",
       "page"
     );
+
+    // The open leaf keeps both tools visible after pointer and keyboard focus leave the tree.
+    const binderRow = row(shelfList, binder);
+    const binderAdd = addChild(nav, `${shelf} / ${binder}`);
+    const binderGear = nav.getByRole("button", {
+      name: `Settings for ${shelf} / ${binder}`,
+      exact: true,
+    });
+    await page.mouse.move(0, 0);
+    await row(nav, "All owned").focus();
+    await expect(binderAdd).toHaveCSS("opacity", "1");
+    await expect(binderGear).toHaveCSS("opacity", "1");
+    await expect(binderRow).toHaveCSS("padding-right", "68px");
+    const name = binderRow.locator("span.truncate");
+    await expect
+      .poll(() =>
+        name.evaluate((element) => element.scrollWidth > element.clientWidth)
+      )
+      .toBe(true);
+    const activeAddBox = (await binderAdd.boundingBox())!;
+    const activeGearBox = (await binderGear.boundingBox())!;
+    const nameBox = (await name.boundingBox())!;
+    expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(activeAddBox.x);
+    expect(
+      Math.abs(activeGearBox.x - activeAddBox.x - activeAddBox.width)
+    ).toBeLessThanOrEqual(1);
+    const addIcon = (await binderAdd.locator("svg").boundingBox())!;
+    const gearIcon = (await binderGear.locator("svg").boundingBox())!;
+    expect(gearIcon.x - addIcon.x - addIcon.width).toBeLessThanOrEqual(17);
 
     // Choosing a deeper parent in the form expands every ancestor, including collapsed ones.
     await shelfRow.click();
@@ -564,6 +593,15 @@ test.describe("mobile", () => {
     await expect(addShelf).toBeVisible();
     await expect(addShelf).toHaveCSS("opacity", "1");
     const size = await expectTouchTarget(addShelf);
+    const gearShelf = nav.getByRole("button", {
+      name: `Settings for ${shelf}`,
+      exact: true,
+    });
+    const gearSize = await expectTouchTarget(gearShelf);
+    expect(Math.abs(gearSize.x - size.x - size.width)).toBeLessThanOrEqual(1);
+    const addIcon = (await addShelf.locator("svg").boundingBox())!;
+    const gearIcon = (await gearShelf.locator("svg").boundingBox())!;
+    expect(gearIcon.x - addIcon.x - addIcon.width).toBeLessThanOrEqual(31);
     const shelfBox = (await row(nav, shelf).boundingBox())!;
     expect(size.x).toBeGreaterThanOrEqual(shelfBox.x + shelfBox.width - 1);
     expect(Math.abs(size.y - shelfBox.y)).toBeLessThanOrEqual(1);
