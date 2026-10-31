@@ -9278,6 +9278,10 @@
       "title": "Name",
       "type": "string"
      },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
      "short": {
       "title": "Short",
       "type": "string"
@@ -9287,6 +9291,7 @@
      "edition_id",
      "location_id",
      "name",
+     "path",
      "copies",
      "short"
     ],
@@ -12042,6 +12047,10 @@
       "title": "Name",
       "type": "string"
      },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
      "suggested": {
       "title": "Suggested",
       "type": "string"
@@ -12064,6 +12073,7 @@
     "required": [
      "location_id",
      "name",
+     "path",
      "kind",
      "available",
      "committed",
@@ -17332,6 +17342,10 @@
       "title": "Name",
       "type": "string"
      },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
      "short": {
       "title": "Short",
       "type": "string"
@@ -17341,6 +17355,7 @@
      "edition_id",
      "location_id",
      "name",
+     "path",
      "copies",
      "short"
     ],
