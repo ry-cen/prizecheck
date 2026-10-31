@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -348,3 +348,130 @@ test.describe("on a phone", () => {
     await expect(page.getByRole("button", { name: "Gather 9" })).toBeVisible();
   });
 });
+
+/** Enlarges text alone by `factor`: every element's computed font size, as public-header.spec.ts does (the type
+ * tokens are px, so a root font-size change would leave them as they are). */
+async function enlargeText(page: Page, factor: number) {
+  await page.evaluate((factor) => {
+    const all = Array.from(document.querySelectorAll<HTMLElement>("body *"));
+    const sizes = all.map((el) => parseFloat(getComputedStyle(el).fontSize));
+    all.forEach((el, i) =>
+      el.style.setProperty("font-size", `${sizes[i] * factor}px`, "important")
+    );
+  }, factor);
+}
+
+const fontSize = (locator: Locator) =>
+  locator.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+
+/** A Deck listing 3 Pikachu held in Shelf / Binder A / Page 1 (2) and Shelf / Binder B / Page 1 (1): Location names
+ * are unique only among siblings. Returns the Deck and the two full paths. */
+async function buildPathsDeck(page: Page) {
+  const suffix = randomUUID().slice(0, 6);
+  const deckId = (
+    await post(page, "/api/decks", {
+      name: `Paths ${suffix}`,
+      idempotency_key: randomUUID(),
+    })
+  ).location.id as string;
+  const create = async (name: string, parent: string | null) => {
+    const version = parent
+      ? (
+          await query<{ version: number }>(
+            "SELECT version FROM location WHERE id=$1",
+            [parent]
+          )
+        )[0].version
+      : null;
+    return (
+      await post(page, "/api/location-tree", {
+        name,
+        parent_id: parent,
+        parent_version: version,
+        idempotency_key: randomUUID(),
+      })
+    ).location.id as string;
+  };
+  const shelf = await create(`Shelf ${suffix}`, null);
+  const binderA = await create("Binder A", shelf);
+  const binderB = await create("Binder B", shelf);
+  const pageA = await create("Page 1", binderA);
+  const pageB = await create("Page 1", binderB);
+  const pikachu = await editionOf("card-3");
+  for (const [location, quantity] of [
+    [pageA, 2],
+    [pageB, 1],
+  ] as const)
+    await post(page, "/api/holdings", {
+      location_id: location,
+      edition_id: pikachu,
+      quantity: String(quantity),
+      idempotency_key: randomUUID(),
+    });
+  const [{ owner_id: owner }] = await query<{ owner_id: string }>(
+    "SELECT owner_id FROM location WHERE id=$1",
+    [deckId]
+  );
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    await listCards(pool, owner, deckId, { [pikachu]: 3 });
+  } finally {
+    await pool.end();
+  }
+  return {
+    deckId,
+    pathA: `Shelf ${suffix} / Binder A / Page 1`,
+    pathB: `Shelf ${suffix} / Binder B / Page 1`,
+  };
+}
+
+for (const width of [320, 375])
+  test.describe(`on a ${width} px phone with text at 200%`, () => {
+    test.use({ viewport: { width, height: 640 }, hasTouch: true });
+
+    test("each source names its full Location path, so two Page 1s read apart, and the paths wrap", async ({
+      page,
+    }) => {
+      promoteCatalog();
+      await signIn(page);
+      const { deckId, pathA, pathB } = await buildPathsDeck(page);
+      await page.goto(`${ORIGIN}/decks/${deckId}`);
+
+      await page.getByRole("tab", { name: /^Deck / }).tap();
+      await page.getByRole("button", { name: "Gather 3" }).tap();
+      const dialog = page.getByRole("dialog", {
+        name: "Gather cards you own",
+      });
+      const row = dialog.getByRole("listitem").filter({ hasText: "Pikachu" });
+      const source = row.getByLabel("Source for Pikachu");
+      await expect(source.locator("option")).toHaveText([
+        "Suggested: 2 Locations",
+        `${pathA}: 2 here`,
+        `${pathB}: 1 here`,
+      ]);
+      const takes = row.getByText(
+        `3 copies: 2 from ${pathA} · 1 from ${pathB}`
+      );
+      await expect(takes).toBeVisible();
+
+      const before = [await fontSize(takes), await fontSize(source)];
+      await enlargeText(page, 2);
+      expect([await fontSize(takes), await fontSize(source)]).toEqual(
+        before.map((size) => size * 2)
+      );
+      // The full paths wrap inside the screen: the line ends inside the viewport and nothing scrolls sideways.
+      const box = await takes.boundingBox();
+      expect(box && box.x >= 0 && box.x + box.width <= width).toBe(true);
+      expect(
+        await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth
+        )
+      ).toBe(true);
+      await expectPageChecks(
+        page,
+        `${width} px Gather dialog with full paths, text at 200%`
+      );
+    });
+  });

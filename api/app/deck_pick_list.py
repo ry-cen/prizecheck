@@ -33,7 +33,7 @@ from .api_errors import api_error
 from .copy_allocation import spare_rule
 from app.core.decks.ownership import CompetitionWarning, read_ownership
 from app.core.decks.store import check_revision, read_deck_list_revision, require_deck
-from .location_tree import owner_and_rows
+from .location_tree import location_paths, owner_and_rows
 from .db import connect
 from .identity import verified_user
 from .idempotency import expire
@@ -55,6 +55,8 @@ class PickWarning(BaseModel):
 class PickSource(BaseModel):
     location_id: UUID
     name: str
+    # The Location's full path, such as "Shelf / Binder 2": names are unique only among siblings.
+    path: str
     # 'storage_leaf' for loose storage, 'deck' for another Deck.
     kind: str
     # Every copy of the Edition held in this Location.
@@ -191,6 +193,7 @@ def pick_list(deck_id: UUID, user_id: str = Depends(verified_user)):
               WHERE h.owner_id=%s AND h.location_id<>%s AND h.edition_id=ANY(%s)""",
                                     (user_id, deck_id, [line.edition_id for line in short])):
                 held[(row['location_id'], row['edition_id'])] = row
+        paths = location_paths(conn, user_id) if short else {}
         picks = []
         for line in short:
             # The Spare Copy rule over every copy of the Edition: this Deck's (all held for its short line) and each
@@ -217,7 +220,8 @@ def pick_list(deck_id: UUID, user_id: str = Depends(verified_user)):
                 if place['kind'] == 'deck' and taken > spare:
                     warning = PickWarning(deck_id=place['location_id'], name=place['name'], short_by=str(taken - spare))
                 sources.append(PickSource(
-                    location_id=place['location_id'], name=place['name'], kind=place['kind'],
+                    location_id=place['location_id'], name=place['name'],
+                    path=paths.get(place['location_id'], place['name']), kind=place['kind'],
                     available=str(place['available']), committed=str(place['committed']),
                     version=held[(place['location_id'], line.edition_id)]['version'], suggested=str(taken),
                     warning=warning))

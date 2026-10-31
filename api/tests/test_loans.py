@@ -101,8 +101,8 @@ def test_a_request_reserves_nothing_until_the_lender_accepts_part_of_it(store):
     # The promised copies are reserved: Ash sees one spare copy left; the line left out reserved nothing.
     assert copies(ash, [misty]) == {(misty, ids['PAL 185']): (1, 0), (misty, ids['SVI 166']): (0, 1)}
     assert side(misty, accepted)['picks'] == [
-        {'edition_id': ids['PAL 185'], 'location_id': node(misty, 'Unsorted')['id'], 'name': 'Unsorted', 'copies': '2',
-         'short': '0'}]
+        {'edition_id': ids['PAL 185'], 'location_id': node(misty, 'Unsorted')['id'], 'name': 'Unsorted', 'path': 'Unsorted',
+         'copies': '2', 'short': '0'}]
     assert view(ash, loan)['lines'] == accepted['lines']
     assert side(ash, loan)['deck']['id'] == charizard
 

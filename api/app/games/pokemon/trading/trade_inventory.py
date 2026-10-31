@@ -79,7 +79,7 @@ from pydantic import BaseModel, Field
 from app.deck_deletion import unsorted_leaf
 from app.core.decks.store import write_deck_list
 from app.games.pokemon.decks.commands import advance_deck_list
-from app.location_tree import error, refuse
+from app.location_tree import error, location_paths, refuse
 from app.db import connect
 from app.identity import verified_user
 from app.inventory_core import add_in, is_deck, leaf, quantity, take_out
@@ -157,6 +157,9 @@ class TradePickPlace(BaseModel):
     edition_id: UUID
     location_id: UUID | None
     name: str
+    # The Location's full path, such as "Shelf / Binder 2" (names are unique only among siblings); "Unsorted" too
+    # when the Location was deleted.
+    path: str
     copies: str
     short: str
 
@@ -487,6 +490,7 @@ def trade_side(trade_id: UUID, destination_id: UUID | None = None, user_id: str 
         replaced = replacement_trade_picks(conn, user_id, trade_id) if any(shortfall.values()) else None
         names = {location['id']: location['name'] for location in conn.execute(
             'SELECT id, name FROM location WHERE owner_id = %s', (user_id,))}
+        paths = location_paths(conn, user_id)
         other = other_side(side)
         received = [(line['edition_id'], int(line['quantity'])) for line in conn.execute(
             'SELECT edition_id, quantity FROM trade_line WHERE trade_id = %s AND side = %s ORDER BY position',
@@ -503,7 +507,7 @@ def trade_side(trade_id: UUID, destination_id: UUID | None = None, user_id: str 
                                                            names.get(item[0][1], 'Unsorted').casefold(),
                                                            str(item[0][1])))
         return [TradePickPlace(edition_id=edition, location_id=location, name=names.get(location, 'Unsorted'),
-                               copies=str(copies), short=str(missing.get((edition, location), 0)))
+                               path=paths.get(location, names.get(location, 'Unsorted')), copies=str(copies), short=str(missing.get((edition, location), 0)))
                 for (edition, location), copies in ordered]
 
     def card(edition: UUID) -> SwitchCard:
