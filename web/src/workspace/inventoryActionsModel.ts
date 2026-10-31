@@ -320,7 +320,7 @@ export function partialMoveFailure(
 
 /** The dedicated route returned a receipt that violates its no-Undo postcondition. */
 export function unsupportedUndoFailure(copies: number, place: string): Failure {
-  const text = `Moved ${plural(copies, "copy", "copies")} to ${place}. Undo unavailable. This Move's no-Undo protection could not be confirmed; refresh before continuing.`;
+  const text = `Moved ${plural(copies, "copy", "copies")} to ${place}. Undo unavailable. Refresh before continuing.`;
   return {
     text,
     toastText: text,

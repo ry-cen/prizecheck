@@ -126,7 +126,8 @@ test("the unavailable-outcome message cannot become a definite partial refusal",
 test("unsupported no-Undo receipt reports moved quantities without claiming protection or definite failure", () => {
   const failure = unsupportedUndoFailure(3, "Box");
   expect(failure.text).toContain("Moved 3 copies to Box. Undo unavailable.");
-  expect(failure.text).toContain("could not be confirmed");
+  expect(failure.text).toContain("Refresh before continuing.");
+  expect(failure.text).not.toContain("protection");
   expect(failure.text).not.toContain("didn't move");
   expect(failure.retrySame).toBe(true);
 });

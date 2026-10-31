@@ -67,6 +67,7 @@ import { DragBadge, useTileDrag } from "./tileDrag";
 import { useUndoToast } from "./UndoToast";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { useGalleryData } from "./useGalleryData";
+import { PendingMoveNotice } from "./PendingMoveNotice";
 import { useInventoryActions } from "./useInventoryActions";
 import { useOwnedSets } from "./useOwnedSets";
 import { useSelection } from "./useSelection";
@@ -249,6 +250,7 @@ export function Workspace({
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
+    userId,
     selection,
     holdings: gallery.holdings,
     byKey: gallery.byKey,
@@ -808,6 +810,16 @@ export function Workspace({
           </div>
         </main>
       </div>
+      {active && actions.pending && (
+        <PendingMoveNotice
+          key={actions.pending.id}
+          text={actions.pending.text}
+          blocked={actions.pending.blocked}
+          busy={actions.busy}
+          onCheck={actions.checkPending}
+          onDismiss={actions.dismissPending}
+        />
+      )}
       {/* The selection bar (the Actions strip). It and the dialogs below draw outside the page
           (KitLayer, #165), so they are drawn only while Collection is the shown page; their state
           stays, and they show again when it does. */}

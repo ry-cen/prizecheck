@@ -1,6 +1,9 @@
+import { pendingMoves, recoveryText } from "./pendingMove";
 import type { BorrowedMoveItem } from "../collection_generated";
 import {
   advance,
+  RecoveryBlocked,
+  PENDING_MOVE_MAX_AGE_MS,
   moveApi,
   createRemoval,
   operationFor,
@@ -72,6 +75,7 @@ export type ToastState = {
 };
 
 type Options = {
+  userId: string;
   selection: SelectionState;
   holdings: GalleryHolding[];
   /** The gallery's Holdings by key (GalleryData.byKey). */
@@ -85,11 +89,12 @@ type Options = {
 type FocusTarget = "heading" | "actions";
 
 /** A failure whose refresh may empty the selection: its toast text and the selection it was about. */
-type Carried = { toastText: string; selection: Selection };
+type Carried = { toastText: string; selection: Selection; mixed: boolean };
 
 /** Move, Inventory Removal and Undo for the workspace (ticket 107), on the multi-source manifest API, and the toast
  * for Add cards' batch adds (#175). */
 export function useInventoryActions({
+  userId,
   selection,
   holdings,
   byKey,
@@ -110,7 +115,66 @@ export function useInventoryActions({
   const toastLive = useRef(toast);
   toastLive.current = toast;
   const toastId = useRef(0);
-  const operation = useRef<HeldOperation | null>(null);
+  const account = useRef({ userId, active: true });
+  account.current.userId = userId;
+  const store = useMemo(() => {
+    try {
+      return pendingMoves(userId);
+    } catch {
+      return null;
+    }
+  }, [userId]);
+  const [recovery, setRecovery] = useState<{
+    held: HeldOperation | null;
+    blocked: boolean;
+  }>(() => {
+    try {
+      const held = store?.load() ?? null;
+      if (held) store?.adopt();
+      return { held, blocked: !store || !!held?.state.blocked };
+    } catch {
+      return { held: null, blocked: true };
+    }
+  });
+  const operation = useRef<HeldOperation | null>(recovery.held);
+  const recoveryOwner = useRef(userId);
+  useEffect(() => {
+    if (recoveryOwner.current !== userId) {
+      recoveryOwner.current = userId;
+      try {
+        const held = store?.load() ?? null;
+        if (held) store?.adopt();
+        operation.current = held;
+        setRecovery({ held, blocked: !store || !!held?.state.blocked });
+      } catch {
+        operation.current = null;
+        setRecovery({ held: null, blocked: true });
+      }
+      setToast(null);
+      setBarError("");
+      setDialogError("");
+      setDialog(null);
+      finish();
+    }
+    account.current.active = true;
+    return () => {
+      account.current.active = false;
+    };
+  }, [userId, store]);
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      const held = operation.current;
+      if (!held?.op.noUndo || event.storageArea !== localStorage) return;
+      try {
+        if (!store?.load()) throw new RecoveryBlocked();
+      } catch {
+        held.state.blocked = true;
+        setRecovery({ held, blocked: true });
+      }
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, [store]);
   const undoKeys = useRef(new Map<string, string>());
   const focusAfter = useRef<FocusTarget | null>(null);
   const carried = useRef<Carried | null>(null);
@@ -209,6 +273,8 @@ export function useInventoryActions({
       surface: "dialog" | "bar"
     ) => {
       if (
+        recoveryOwner.current !== userId ||
+        recovery.blocked ||
         busyRef.current ||
         (!operation.current && !groups.length && !borrowed.length)
       )
@@ -218,6 +284,17 @@ export function useInventoryActions({
       setBarError("");
       setDialogError("");
       carried.current = null;
+      // Read durable recovery before considering any new request, including from another tab.
+      if (!operation.current) {
+        try {
+          operation.current = store?.load() ?? null;
+          if (operation.current) store?.adopt();
+        } catch {
+          setRecovery({ held: null, blocked: true });
+          finish();
+          return;
+        }
+      }
       // Resume the immutable carried request before considering a new target or selection.
       const held =
         target.kind === "move"
@@ -229,19 +306,81 @@ export function useInventoryActions({
             )
           : (operation.current ?? createRemoval(groups));
       operation.current = held;
+      if (held.op.noUndo) {
+        setRecovery({ held, blocked: false });
+        setToast((current) =>
+          current ? { ...current, entry: null, unavailable: false } : null
+        );
+      }
+      const active = () =>
+        account.current.active && account.current.userId === userId;
+      const checkpoint = async (beforeWrite: boolean) => {
+        if (!held.op.noUndo) return;
+        try {
+          if (!active() || !store) throw new RecoveryBlocked();
+          if (beforeWrite) {
+            if (
+              held.state.blocked ||
+              Date.now() < held.op.createdAt ||
+              Date.now() - held.op.createdAt >= PENDING_MOVE_MAX_AGE_MS
+            )
+              throw new RecoveryBlocked();
+            const response = await fetch("/auth/session", {
+              credentials: "same-origin",
+            });
+            const session = await response.json();
+            if (
+              !response.ok ||
+              session.signedIn !== true ||
+              session.userId !== userId ||
+              held.state.blocked ||
+              Date.now() < held.op.createdAt ||
+              Date.now() - held.op.createdAt >= PENDING_MOVE_MAX_AGE_MS ||
+              !active()
+            )
+              throw new RecoveryBlocked();
+          }
+          store.save(held);
+          setRecovery({ held, blocked: !!held.state.blocked });
+        } catch {
+          throw new RecoveryBlocked();
+        }
+      };
       setProgress(held.op.target.kind === "move" ? "Moving…" : "Removing…");
       try {
-        const outcome = await advance(held.op, held.state, {
-          ...moveApi,
-          moveBorrowedCopies: async (body) => {
-            const result = await moveApi.moveBorrowedCopies(body);
-            // Remove confirmed Borrowed entries before preparing or committing the owned stage.
-            live.current.selection.dropBorrowed();
-            return result;
+        // Initial storage is established before even preparing a manifest.
+        if (held.op.noUndo) await checkpoint(false);
+        const outcome = await advance(
+          held.op,
+          held.state,
+          {
+            ...moveApi,
+            moveBorrowedCopies: async (body) => {
+              const result = await moveApi.moveBorrowedCopies(body);
+              if (!active()) throw new RecoveryBlocked();
+              // Remove confirmed Borrowed entries before preparing or committing the owned stage.
+              live.current.selection.dropBorrowed();
+              return result;
+            },
           },
-        });
+          checkpoint
+        );
+        if (!active()) return;
         const { op, state } = held;
-        if (outcome.kind !== "unknown") operation.current = null;
+        if (outcome.kind !== "unknown") {
+          if (op.noUndo) {
+            try {
+              store?.remove(held);
+              const next = store?.load() ?? null;
+              if (next) store?.adopt();
+              operation.current = next;
+              setRecovery({ held: next, blocked: false });
+            } catch {
+              setRecovery({ held, blocked: true });
+              return;
+            }
+          } else operation.current = null;
+        } else if (op.noUndo) setRecovery({ held, blocked: !!state.blocked });
         const destination =
           op.target.kind === "move" ? place(op.target.destinationId) : "";
         if (outcome.kind === "done") {
@@ -295,7 +434,12 @@ export function useInventoryActions({
                 {
                   omitNothing: !!state.borrowedResult,
                   unknown: outcome.kind === "unknown",
-                  unsupported: op.noUndo && outcome.kind === "refused",
+                  unsupported:
+                    op.noUndo &&
+                    outcome.kind === "refused" &&
+                    outcome.error instanceof MoveError &&
+                    outcome.error.code === "MOVE_REQUEST_FAILED" &&
+                    [404, 405].includes(outcome.error.status),
                 }
               );
         if (
@@ -320,6 +464,7 @@ export function useInventoryActions({
           ? {
               toastText: failure.toastText,
               selection: live.current.selection.selected,
+              mixed: op.noUndo,
             }
           : null;
         if (failure.reloadGallery) live.current.reloadGallery();
@@ -328,11 +473,16 @@ export function useInventoryActions({
         if (surface === "dialog" && dialogRef.current)
           setDialogError(failure.text);
         else setBarError(failure.text);
+      } catch {
+        if (active() && held.op.noUndo) {
+          held.state.blocked = true;
+          setRecovery({ held, blocked: true });
+        }
       } finally {
-        finish();
+        if (active()) finish();
       }
     },
-    [place, card, edition, showToast, readUndo]
+    [place, card, edition, showToast, readUndo, userId, store, recovery.blocked]
   );
 
   const openMove = useCallback(() => {
@@ -380,7 +530,7 @@ export function useInventoryActions({
       destinationId: string,
       carried: { groups: SelectedGroup[]; borrowed: BorrowedMoveItem[] }
     ) =>
-      void run(
+      run(
         { kind: "move", destinationId },
         carried.groups,
         carried.borrowed,
@@ -647,8 +797,10 @@ export function useInventoryActions({
     ) {
       showToast({
         message: failure.toastText,
-        entry: toastLive.current?.entry ?? null,
-        unavailable: toastLive.current?.unavailable ?? false,
+        entry: failure.mixed ? null : (toastLive.current?.entry ?? null),
+        unavailable: failure.mixed
+          ? false
+          : (toastLive.current?.unavailable ?? false),
       });
       // The bar and Actions unmount with the selection; focus would fall to <body>.
       focusAfter.current = "heading";
@@ -680,7 +832,63 @@ export function useInventoryActions({
     [dialog, selection.selected, labels, place]
   );
 
+  const recoveryHeld = recovery.held;
+  const recoveryBlocked =
+    recovery.blocked ||
+    !!recoveryHeld?.state.blocked ||
+    !!(
+      recoveryHeld &&
+      !recoveryHeld.state.refusal &&
+      (Date.now() < recoveryHeld.op.createdAt ||
+        Date.now() - recoveryHeld.op.createdAt >= PENDING_MOVE_MAX_AGE_MS)
+    );
+  const checkPending = useCallback(() => {
+    const held = operation.current;
+    if (held && !recoveryBlocked) return run(held.op.target, [], [], "bar");
+  }, [run, recoveryBlocked]);
+  const dismissPending = useCallback(
+    (reviewed: boolean) => {
+      if (
+        !reviewed ||
+        busyRef.current ||
+        !recoveryBlocked ||
+        !account.current.active ||
+        account.current.userId !== userId
+      )
+        return;
+      try {
+        if (recovery.held) store?.remove(recovery.held);
+        else store?.dismissUnreadable();
+        const next = store?.load() ?? null;
+        if (next) store?.adopt();
+        operation.current = next;
+        setRecovery({ held: next, blocked: !store });
+        setBarError("");
+        setDialogError("");
+      } catch {
+        setRecovery((current) => ({ ...current, blocked: true }));
+      }
+    },
+    [store, recovery, recoveryBlocked, userId]
+  );
+
   return {
+    pending:
+      recoveryOwner.current === userId && (recoveryHeld || recovery.blocked)
+        ? {
+            id: recoveryHeld?.op.id ?? "unreadable",
+            text: recoveryText(
+              recoveryHeld,
+              recoveryHeld?.op.target.kind === "move"
+                ? place(recoveryHeld.op.target.destinationId)
+                : "the destination",
+              recoveryBlocked
+            ),
+            blocked: recoveryBlocked,
+          }
+        : null,
+    checkPending,
+    dismissPending,
     busy,
     progress,
     barError,

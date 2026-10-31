@@ -31,7 +31,7 @@ Spare Copies, Removal, Undo, the Trade List, Swap hints and every Friend view ne
 | D11 | **The mark** is a pill at the bottom left of the art reading "From Ash K.". The tile's accessible name and title add "borrowed from Ash K.". The Inspector says "N borrowed from Ash K." in place of "N copies here". | AGENTS.md: names and counts only. It mirrors the Deck line's "1 from Ash K.". |
 | D12 | The **Set filter** also offers the sets of the Borrowed Copies in view, in a Location view and in All owned. | A borrowed-only card stays reachable by filter. |
 | D13 | A **snapshot token** names every revision a listing depends on: owner, catalog and card attribute. Both listings return it, and the client matches the owned walk and the borrowed read on it. | Review item 3: the cursor already binds the attribute revision (`collection.py:300-306`), but the response exposed only the catalog revision. |
-| D14 | **A Move is one immutable operation record**, independent of the selection. It holds the carried items, both keys, the manifest and the state of each stage. An operation with an unknown outcome is resolved, by replaying with its keys, before anything else runs or is reported. | Review items 1 and 2. |
+| D14 | **A Move is one durable, account-scoped immutable operation record**, independent of the selection. It holds the carried items, both keys, the manifest and the state of each stage. An operation with an unknown outcome is resolved, by replaying with its keys, before anything else runs or is reported. | Review items 1 and 2. |
 
 ## 3. Acceptance criteria
 
@@ -76,7 +76,7 @@ Spare Copies, Removal, Undo, the Trade List, Swap hints and every Friend view ne
 14. Friend views, Spare Copies, Swap hints, the Trade List and Removal are unchanged; their existing tests pass, and
     `test_social_contract.py` passes with no edits.
 15. CONTEXT.md and spec.md carry §7's wording. No copy shows a Loan id, state, date or data source.
-16. Only `collection_generated.ts` and `moves_generated.ts` change among the generated clients (`npm run check:client` passes). The mixed Move uses the dedicated no-Undo route on the first attempt and every same-key replay. An initial definitive unknown-route 404/405 refuses the owned write; every other failure stays UNKNOWN until reconciled. An earlier uncertain attempt stays UNKNOWN even if a later retry gets 404/405. No Undo is offered.
+16. Only `collection_generated.ts` and `moves_generated.ts` change among the generated clients (`npm run check:client` passes). The mixed Move uses the dedicated no-Undo route on the first attempt and every same-key replay. An initial definitive unknown-route 404/405 refuses the owned write; documented first-attempt pre-mutation refusals are also terminal. Other failures stay UNKNOWN until reconciled or explicitly reviewed. An earlier uncertain attempt stays UNKNOWN even if a later retry gets 404/405. No Undo is offered.
     `npm run check`, `npm run guardrails` and the runs in §8 pass.
 
 ## 4. Context
@@ -261,8 +261,9 @@ It takes no `loan` lock and doesn't touch `loan`, `loan_line` or `holding`. Regi
 **The record.** It is frozen when the operation starts and never rebuilt from the selection:
 
 ```ts
-type Stage = "todo" | "done" | "unknown";
+type Stage = "todo" | "done" | "unknown" | "refused";
 type MoveOperation = Readonly<{
+  id: string; createdAt: number;             // durable operation identity and age
   target: { kind: "move"; destinationId: string };
   owned: readonly SelectedGroup[];          // owned rows already at the destination removed
   borrowed: readonly BorrowedMoveItem[];
@@ -270,8 +271,9 @@ type MoveOperation = Readonly<{
   noUndo: boolean;                          // original selection carried Borrowed Copies, even if they stayed
   borrowedKey: string; ownedKey: string;    // crypto.randomUUID() each, at creation
 }>;
-type OperationState = { manifestId: string | null; staged: boolean; borrowed: Stage; owned: Stage;
+type OperationState = { manifestId: string | null; manifestAttempted?: boolean; staged: boolean; borrowed: Stage; owned: Stage;
                         borrowedAttempted: boolean; ownedAttempted: boolean;
+                        blocked?: boolean; refusal?: { stage: "owned" | "borrowed"; status: number; code: string };
                         borrowedResult?: BorrowedMoveResult; ownedResult?: MoveResult };
 ```
 
@@ -284,7 +286,7 @@ signature-based `pending`.
 1. If `borrowed` is non-empty and the Borrowed stage isn't `done`, call `moveBorrowedCopies({to_location_id, items:
    op.borrowed, idempotency_key: op.borrowedKey})`.
    - A 2xx answer sets `done`.
-   - A `BorrowedMoveError` with status < 500 is a **definite refusal**, except any rejection after an earlier uncertain attempt, or an unavailable replay, remains UNKNOWN. Return `{kind: "refused", stage: "borrowed"}` only for a definite refusal.
+   - A documented first-attempt non-mutating `BorrowedMoveError` is a **definite refusal**; any rejection after an earlier uncertain attempt, or an unavailable replay, remains UNKNOWN. Return `{kind: "refused", stage: "borrowed"}` only for a definite refusal.
    - Anything else (a network error, timeout or 5xx) sets the stage to `unknown` and returns `{kind: "unknown",
      stage: "borrowed"}`. Stop.
 2. If `owned` is non-empty and the owned stage isn't `done`, start a manifest if `manifestId` is null and stage
@@ -293,8 +295,9 @@ signature-based `pending`.
    occupy the destination, count them as stayed and skip the manifest entirely.
    - A 2xx receipt sets `done`; a non-null Undo id on the strict route instead retains the receipt as an
      unsupported diagnostic, never offers Undo and sends no DELETE.
-   - For the strict route, only an initial unknown-route 404/405 (default route-not-found response) is refused.
-     All other failures are UNKNOWN. After an earlier uncertain attempt, even a later 404/405 stays UNKNOWN.
+   - An initial unknown-route 404/405 or documented non-mutating refusal is refused. Preparation failures
+     before an owned commit are distinct from possibly committed responses. After an earlier uncertain attempt,
+     every later refusal stays UNKNOWN; unavailable replay goes to manual review, never a new manifest or key.
    - Owned-only requests keep today's initial refusal classification; every rejection after an uncertain
      attempt stays UNKNOWN. Every retry uses the same route, key and manifest; no failure alone proves a
      possibly committed request did not execute.
@@ -303,7 +306,12 @@ signature-based `pending`.
 
 **`run` in the hook.**
 
-- It keeps `operation.current: {op, state} | null`.
+- It keeps `operation.current: {op, state} | null`, backed by an account-scoped local-storage record for mixed
+  operations. Before each write it durably saves the keys, immutable command and sent/unknown stage; each receipt
+  and preparation boundary is saved before continuing. If storage cannot be written and read back, no write proceeds.
+- On reload it restores before enabling writes. A Pending Move notice outside the selection bar shows partial
+  progress or uncertainty and offers Check Move using the original route, manifest and keys. It remains when an
+  empty-source refresh clears selection or closes the dialog. Every mixed-operation toast has no inherited Undo.
 - If an operation is held whose stages aren't all `done` and which wasn't refused, **any** new Move call, dialog or
   drop, whatever its target or selection, resumes it with `advance` and ignores the new request. This resolves the
   uncertainty before anything else runs. The new request is not run. After the stored operation resolves, the
@@ -321,7 +329,7 @@ destination.
 | done | Toast: "Moved {all copies} to {place}.{stayed}". No Undo if `borrowed` was non-empty; otherwise today's Undo lookup with `undo_id`. | gallery and tree |
 | refused, borrowed | `describeBorrowedFailure` lead + "Nothing moved." `NOT_ENOUGH_BORROWED`: "Some borrowed copies aren't where you selected them any more. Nothing moved." `LOCATION_NOT_FOUND`: today's destination-gone text. Anything else: "The Move was refused. Nothing moved." | gallery for `NOT_ENOUGH_BORROWED` and `LOCATION_NOT_FOUND`; tree as today |
 | unknown, borrowed | "The Move may not have finished. Try again to check safely; your selection is kept." | none |
-| initial unknown-route 404/405, owned, Borrowed done | "Moved {n borrowed copies} to {place}; your own copies didn't move: This Move is unavailable right now. Try again later." | gallery and tree |
+| definite first-attempt refusal, owned, Borrowed done | "Moved {n borrowed copies} to {place}; your own copies didn't move: This Move is unavailable right now. Try again later." | gallery and tree |
 | refused, owned, no Borrowed | owned-only: today's `describeFailure`; mixed selection whose Borrowed copies stayed: unavailable message only for initial unknown-route 404/405 | as today |
 | unknown, owned, Borrowed done | "Moved {n borrowed copies} to {place}. Moving your own copies may not have finished. Try again to check safely." | gallery and tree (borrowed rows moved) |
 | unknown, owned, no Borrowed | today's unknown text, unchanged | none |
@@ -567,10 +575,16 @@ The owner approved `POST /api/moves/manifests/{manifest_id}/commit-without-undo`
 
 Images carry the same source tag and normal startup orders API → auth → web, but separate containers and rollback do not remove already loaded JavaScript. A capability GET cannot bind a later write to that server version. The dedicated route closes that particular unsafe fallback: an old or rolled-back API rejects its unknown route instead of interpreting the request as a normal undoable Move. There is no client fallback to normal commit and no after-commit DELETE.
 
-Only an initial definitive unknown-route 404/405, before any possibly committed request, establishes that the owned part did not execute. The UI says the Move is unavailable and can be tried later. All other failures, including timeouts, lost or aborted responses, network errors, 5xx and other refusal responses, leave the strict owned outcome UNKNOWN. Reconciliation retries the same route, manifest and idempotency key; it never starts another operation with a new key while the result is unknown. An earlier uncertain request remains UNKNOWN if a later retry gets 404/405 after rollback. The borrowed batch runs first in its own transaction: when it succeeds, the UI reports those borrowed copies as moved even if the owned part is refused or remains unknown. No failure without a receipt is treated as proof that nothing moved.
+### Durable recovery and refusal categories (root review amendment)
 
-The existing replay ledger records successful commits, not refusal outcomes. Under the required strict-client classification, a non-route refusal such as `STALE_HOLDING` therefore stays UNKNOWN if repeated requests never yield a receipt; the client does not silently turn it into a failed operation. Automatic resolution of that case would require separately approved recorded refusal outcomes or an outcome lookup. Neither is added here.
+Before any mixed-operation write, the client saves the operation id, creation timestamp, destination, immutable owned and borrowed items, both idempotency keys, manifest, preparation state, sent/unknown flags, confirmed receipts and any deterministic refusal. Records use `prizecheck:mixed-move:v1:{account}:{operation}` in localStorage, following the Scan Tray's account scoping and IDs/quantities-only storage. Per-operation keys preserve concurrent records; recovery checks the oldest pending record before considering a new operation. A sessionStorage witness detects a missing local record across reload. A sent manifest-start whose response was lost also blocks rather than creating a replacement manifest. Unreadable data, failed writes/read-back or loss of an established record blocks further writes. A late callback cannot recreate deleted recovery data.
 
-An idempotency receipt can expire after 24 hours. If replay becomes unavailable or the manifest is gone after an uncertain attempt, the client remains UNKNOWN and does not invent a result or mint a key. Automatic reconciliation after that retention window would need a separately approved durable outcome lookup or longer retention; this work adds neither. The in-memory operation can also be lost on reload or crash; no persistence or cross-tab recovery guarantee is claimed.
+A reload restores the same operation before writes are enabled. Check Move is independent of the selection, retries only the existing endpoint/key and never rebuilds a manifest after a commit was attempted. Confirmed borrowed progress remains visible. Recovery data is removed only after all attempted stages have known receipts or deterministic refusals (unattempted stages are known not to have run), or after explicit manual review. Storage removal failures remain blocked. Closing the dialog or clearing selection does not dismiss recovery. All mixed-operation messages clear inherited Undo entries; older history is not attached to the mixed Move's message. A malformed non-null Undo receipt remains diagnostic, with actionable copy only: "Undo unavailable. Refresh before continuing."
+
+**Accounts and privacy.** Like the existing account-keyed Scan Tray, records stay on this browser across sign-out, inaccessible to other accounts. Signing back into the same account restores them. Workspace is keyed by account, continuations are invalidated on unmount or account change, and each write checks the existing `/auth/session` against the initiating account. A late response cannot start another step or recreate a record. Server ownership checks on destination, borrowed rows and manifest also prevent a command from moving another account's inventory if the session changes between the account check and the write. Privacy settings currently change profile and visibility rather than clearing browser storage. If storage is deleted during a live operation, or localStorage is cleared while its session witness survives, recovery blocks and requests review. Clearing both storage areas and reloading destroys all client evidence; without a retained key the existing APIs cannot rediscover the operation. This physical data-erasure limit is not claimed solved, and no lookup API is added.
+
+**Known refusal versus unknown.** A first-attempt unknown-route 404/405 is a known rejection. Named pre-mutation owned refusals are `DESTINATION_REQUIRED`, `EMPTY_MOVE_SELECTION`, `SAME_LOCATION`, `LOCATION_NOT_FOUND`, `STALE_HOLDING`, `INSUFFICIENT_QUANTITY`, `QUANTITY_OVERFLOW`, `DUPLICATE_MOVE_ITEM`, `SOURCE_REQUIRED`, `INVALID_QUANTITY`, `MOVE_MANIFEST_NOT_FOUND` and `MOVE_MANIFEST_EXPIRED`. Preparation refusals before any owned commit preserve confirmed borrowed progress. Borrowed refusals are `INVALID_QUANTITY`, `DUPLICATE_MOVE_ITEM`, `SAME_LOCATION`, `LOCATION_NOT_FOUND` and `NOT_ENOUGH_BORROWED`. FastAPI request-validation 422s also occur before dispatch. These are raised before inventory writes in `moves.py` and `borrowed_gallery.py`. A timeout, aborted/lost response, network error, 5xx or unrecognized error stays UNKNOWN. After an earlier uncertain commit, even a documented refusal cannot erase that uncertainty. `REPLAY_OUTCOME_UNAVAILABLE`, a key mismatch, or a missing/expired manifest after an owned attempt blocks reconciliation for manual review, never labels it a failed Move.
+
+**Receipt lifetime.** Owned receipts expire after 24 hours (`migrations/006_add_holdings.sql`); manifests expire after one hour (`011_move_holdings.sql`) and successful commit consumes its manifest. Thus a same-key owned retry after receipt expiry cannot repeat the Move, but its 404/410 cannot distinguish success from refusal. Borrowed receipts use `location_command`, which has no TTL or cleanup. The client conservatively blocks the entire mixed operation at 23 hours from creation (including before every write), with a one-hour margin; it does not auto-retry past that cutoff, recreate a manifest, mint a key or label an expired/unrecorded receipt known. The collector sees "Check the source and destination Location contents" and can dismiss only after affirming that review. Manual dismissal forgets recovery; it neither repeats the Move nor infers its historical outcome. No new API is needed or added for same-key recovery within retention.
 
 A non-null `undo_id` from this route violates its postcondition. Defence in depth retains that receipt, never offers the Undo, refuses further operation writes and shows "Undo unavailable". It sends no DELETE and does not claim that response diagnostics protect other tabs or repair a broken server. The safe no-Undo guarantee comes from the dedicated server transaction, not client cleanup.

@@ -135,11 +135,11 @@ for (const stage of ["borrowed", "owned"] as const)
       );
     });
 for (const stage of ["borrowed", "owned"] as const)
-  test(`${stage} server refusal ${stage === "owned" ? "keeps the strict outcome UNKNOWN" : "stops before the owned stage"}`, async () => {
+  test(`${stage} documented first-attempt refusal stops before further writes`, async () => {
     const held = createOperation("dest", owned, borrowed);
     const fake = server(stage, "refused");
     expect(await advance(held.op, held.state, fake.api)).toMatchObject({
-      kind: stage === "owned" ? "unknown" : "refused",
+      kind: "refused",
       stage,
     });
     expect(fake.copies()).toBe(stage === "borrowed" ? 0 : 1);
@@ -453,7 +453,7 @@ for (const status of [404, 405])
     expect(fake.applied.size).toBe(2);
   });
 
-for (const status of [400, 401, 409, 422, 500, 503])
+for (const status of [400, 401, 409, 500, 503])
   test(`strict failure ${status} cannot establish that the owned part did not move`, async () => {
     const held = createOperation("dest", owned, borrowed);
     const fake = server("owned", "network");
@@ -469,14 +469,14 @@ for (const status of [400, 401, 409, 422, 500, 503])
   });
 
 for (const code of ["MOVE_MANIFEST_NOT_FOUND", "LOCATION_NOT_FOUND"])
-  test(`a domain 404 ${code} is not an unknown-route rejection`, async () => {
+  test(`a domain 404 ${code} is a documented first-attempt non-mutating refusal`, async () => {
     const held = createOperation("dest", owned, borrowed);
     const fake = server("owned", "network");
     fake.api.commitMoveWithoutUndo = async () => {
       throw new MoveError(404, code);
     };
     expect(await advance(held.op, held.state, fake.api)).toMatchObject({
-      kind: "unknown",
+      kind: "refused",
       stage: "owned",
     });
     expect(operationFor(held, "elsewhere", [], [])).toBe(held);
