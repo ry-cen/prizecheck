@@ -1,4 +1,5 @@
 import { Avatar } from "../ui/Avatar";
+import { canRetryHandover } from "../social/confirmationRetry";
 import {
   Fragment,
   useEffect,
@@ -356,7 +357,27 @@ export function LoanScreen({
     const key = keys.current.get(name) ?? crypto.randomUUID();
     keys.current.set(name, key);
     try {
-      const next = await call(key);
+      let next: LoanView;
+      try {
+        next = await call(key);
+      } catch (cause) {
+        if (
+          name !== "handover" ||
+          !(cause instanceof SocialError) ||
+          cause.code !== "LOAN_CHANGED"
+        )
+          throw cause;
+        const [fresh, freshSide] = await Promise.all([
+          getLoan(loan.id),
+          getLoanSide(loan.id),
+        ]);
+        if (!canRetryHandover(loan, fresh, side, freshSide)) throw cause;
+        setLoad({ kind: "ready", loan: fresh, side: freshSide });
+        next = await confirmHandover(loan.id, {
+          revision: fresh.revision,
+          idempotency_key: key,
+        });
+      }
       keys.current.delete(name);
       // The open form stays, its buttons busy, until the screen's own side is read again: the new Loan, the form
       // closing and focus on the new headline then land in one render.
