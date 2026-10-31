@@ -33,6 +33,7 @@
 [["PUT"], "/api/moves/manifests/{manifest_id}/items", "stage_items"],
 [["DELETE"], "/api/moves/manifests/{manifest_id}", "cancel_move"],
 [["POST"], "/api/moves/manifests/{manifest_id}/commit", "commit_move"],
+[["POST"], "/api/moves/manifests/{manifest_id}/commit-without-undo", "commit_move_without_undo"],
 [["POST"], "/api/moves/manifests/{manifest_id}/remove", "remove_inventory"],
 [["GET"], "/api/moves/undo", "list_undo"],
 [["DELETE"], "/api/moves/undo/{undo_id}", "dismiss_undo"],

@@ -4334,17 +4334,39 @@
       "default": false,
       "title": "Put Away",
       "type": "boolean"
-     },
-     "undo": {
-      "default": true,
-      "title": "Undo",
-      "type": "boolean"
      }
     },
     "required": [
      "idempotency_key"
     ],
     "title": "CommitMove",
+    "type": "object"
+   },
+   "CommitMoveWithoutUndo": {
+    "additionalProperties": false,
+    "properties": {
+     "destination_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Destination Id"
+     },
+     "idempotency_key": {
+      "format": "uuid",
+      "title": "Idempotency Key",
+      "type": "string"
+     }
+    },
+    "required": [
+     "idempotency_key"
+    ],
+    "title": "CommitMoveWithoutUndo",
     "type": "object"
    },
    "CompetingDeck": {
@@ -32170,6 +32192,107 @@
      }
     },
     "summary": "Commit Move",
+    "tags": [
+     "moves"
+    ]
+   }
+  },
+  "/api/moves/manifests/{manifest_id}/commit-without-undo": {
+   "post": {
+    "operationId": "commit_move_without_undo_api_moves_manifests__manifest_id__commit_without_undo_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "manifest_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Manifest Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CommitMoveWithoutUndo"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/MoveResult"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Commit Move Without Undo",
     "tags": [
      "moves"
     ]
