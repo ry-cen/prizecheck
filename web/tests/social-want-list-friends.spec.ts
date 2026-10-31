@@ -141,10 +141,10 @@ const chips = (page: Page, card: string) =>
 const views = (page: Page) =>
   page.getByRole("radiogroup", { name: "Show the Want List as" });
 
-test("Friend chips on the Want List, the Get from Friends view and Friends who have this in the card popup", async ({
-  page,
-  collectors,
-}) => {
+async function wantListFriendsExample(
+  page: Page,
+  collectors: { signIn: SignInOther }
+) {
   const ids = seedCatalog();
   const secret = `Secret ${randomUUID().slice(0, 6)}`;
   const misty = await collectors.signIn({ next: "/decks" });
@@ -165,54 +165,78 @@ test("Friend chips on the Want List, the Get from Friends view and Friends who h
   await setLine(page, charizard, ids["PAL 185"], 2);
   await setLine(page, charizard, ids["PAL 172"], 1);
 
-  // Without Friends, the Want List is as it was: no chips and no switch.
-  await page.goto(`${ORIGIN}/decks/want-list`);
-  await expect(
-    page.getByRole("list", { name: `What ${deckName} needs` })
-  ).toContainText("Iono");
-  await expect(views(page)).toHaveCount(0);
-  await expect(chips(page, "Iono")).toHaveCount(0);
+  return { misty, brock, secret, brockHandle, deckName };
+}
 
+for (const width of [1280, 390]) {
+  test(`Friend chips and Get from Friends preserve facts and fit ${width}px`, async ({
+    page,
+    collectors,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const { misty, brock, secret, brockHandle, deckName } =
+      await wantListFriendsExample(page, collectors);
+    // Without Friends, the Want List is as it was: no chips and no switch.
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    await expect(
+      page.getByRole("list", { name: `What ${deckName} needs` })
+    ).toContainText("Iono");
+    await expect(views(page)).toHaveCount(0);
+    await expect(chips(page, "Iono")).toHaveCount(0);
+
+    await befriend(page, misty.page);
+    await befriend(page, brock.page);
+    await page.reload();
+    // Spare copies first: Brock's spare PAL 254 (another Printing, so it says which), then Misty's copy in a Deck.
+    await expect(chips(page, "Iono").getByRole("listitem")).toHaveText([
+      "Brock S · 1 spare · PAL 254",
+      "Misty W · 1 in a Deck",
+    ]);
+    await expect(chips(page, "Boss's Orders")).toHaveCount(0);
+    await expect(views(page).getByRole("radio", { name: "Buy" })).toBeChecked();
+    await expectPageChecks(page, "the Want List with Friend chips");
+
+    // Get from Friends: one panel per card a Friend can lend, and one line for the rest.
+    await views(page).getByRole("radio", { name: "Get from Friends" }).click();
+    const iono = page.getByRole("region", { name: "Iono" });
+    await expect(iono).toContainText(`You need 2 · ${deckName}`);
+    const rows = chips(page, "Iono").getByRole("listitem");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText(`Brock S @${brockHandle}`);
+    await expect(rows.nth(0)).toContainText("1 spare");
+    await expect(rows.nth(0)).toContainText("PAL 254");
+    await expect(rows.nth(1)).toContainText("Misty W");
+    await expect(rows.nth(1)).toContainText("1 in a Deck");
+    await expect(
+      page.getByRole("region", { name: "Boss's Orders" })
+    ).toHaveCount(0);
+    await expect(page.getByRole("main")).toContainText(
+      "1 card you need isn't available from any Friend."
+    );
+    await expect(page.getByRole("main")).not.toContainText(secret);
+    await expectPageChecks(page, "Get from Friends");
+
+    if (width <= 760) {
+      await views(page).getByRole("radio", { name: "Buy" }).click();
+      await expect(chips(page, "Iono").getByRole("listitem")).toHaveCount(2);
+      await expectPageChecks(
+        page,
+        "the Want List with Friend chips on a phone"
+      );
+    }
+  });
+}
+
+test("Friends who have this in the card popup fit desktop and phone widths", async ({
+  page,
+  collectors,
+}) => {
+  const { misty, brock, secret, brockHandle } = await wantListFriendsExample(
+    page,
+    collectors
+  );
   await befriend(page, misty.page);
   await befriend(page, brock.page);
-  await page.reload();
-  // Spare copies first: Brock's spare PAL 254 (another Printing, so it says which), then Misty's copy in a Deck.
-  await expect(chips(page, "Iono").getByRole("listitem")).toHaveText([
-    "Brock S · 1 spare · PAL 254",
-    "Misty W · 1 in a Deck",
-  ]);
-  await expect(chips(page, "Boss's Orders")).toHaveCount(0);
-  await expect(views(page).getByRole("radio", { name: "Buy" })).toBeChecked();
-  await expectPageChecks(page, "the Want List with Friend chips");
-
-  // Get from Friends: one panel per card a Friend can lend, and one line for the rest.
-  await views(page).getByRole("radio", { name: "Get from Friends" }).click();
-  const iono = page.getByRole("region", { name: "Iono" });
-  await expect(iono).toContainText(`You need 2 · ${deckName}`);
-  const rows = chips(page, "Iono").getByRole("listitem");
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText(`Brock S @${brockHandle}`);
-  await expect(rows.nth(0)).toContainText("1 spare");
-  await expect(rows.nth(0)).toContainText("PAL 254");
-  await expect(rows.nth(1)).toContainText("Misty W");
-  await expect(rows.nth(1)).toContainText("1 in a Deck");
-  await expect(page.getByRole("region", { name: "Boss's Orders" })).toHaveCount(
-    0
-  );
-  await expect(page.getByRole("main")).toContainText(
-    "1 card you need isn't available from any Friend."
-  );
-  await expect(page.getByRole("main")).not.toContainText(secret);
-  await expectPageChecks(page, "Get from Friends");
-
-  // On a phone: the switch, the panels and the chips fit without sideways scroll, with 44 px controls.
-  await page.setViewportSize(PHONE);
-  await expectPageChecks(page, "Get from Friends on a phone");
-  await views(page).getByRole("radio", { name: "Buy" }).click();
-  await expect(chips(page, "Iono").getByRole("listitem")).toHaveCount(2);
-  await expectPageChecks(page, "the Want List with Friend chips on a phone");
-  await page.setViewportSize({ width: 1280, height: 800 });
-
   // Catalog's card popup lists Friends who have this, for a card on the Want List or not.
   await page.goto(`${ORIGIN}/catalog`);
   const results = page.getByRole("region", { name: "Catalog results" });

@@ -50,7 +50,12 @@ import {
 } from "./WantListCost";
 import { SwapHint } from "./SwapHint";
 import { useWantListSwap, type WantListSwap } from "./useWantListSwap";
-import { TradeWantsPanel, WillAcceptSelect } from "./TradeWantsPanel";
+import { CopyArt } from "../ui/CopyTile";
+import {
+  TradeWantsPanel,
+  WillAcceptSelect,
+  WillAcceptRadios,
+} from "./TradeWantsPanel";
 import { useTradeWants, type TradeWantsApi } from "./useTradeWants";
 import { pendingText } from "./pendingLoans";
 import {
@@ -423,6 +428,7 @@ function DeckSection({
         </p>
       ) : (
         <NeededLines
+          layout="tiles"
           section={section}
           deckName={deckName}
           swap={swap}
@@ -443,6 +449,7 @@ function DeckSection({
  * about that one Deck, and none on All Decks.
  */
 export function NeededLines({
+  layout = "rows",
   section,
   deckName,
   swap,
@@ -451,6 +458,7 @@ export function NeededLines({
   borrowFor,
   pending,
 }: {
+  layout?: "rows" | "tiles";
   section: WantListSection;
   deckName: (id: string) => string;
   swap: WantListSwap;
@@ -487,15 +495,26 @@ export function NeededLines({
         )}
       <ul
         aria-label={`What ${section.name} needs`}
-        className="m-0 list-none border-t border-border p-0"
+        className={
+          layout === "tiles"
+            ? "m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 border-t border-border p-4 phone:grid-cols-1 phone:gap-3 phone:p-3"
+            : "m-0 list-none border-t border-border p-0"
+        }
       >
         {section.lines.map((line) => (
           <NeededLine
+            layout={layout}
             key={line.edition_id}
             deckId={section.deck_id}
             line={line}
             deckName={deckName}
-            accept={<WillAcceptSelect line={line} api={trade} />}
+            accept={
+              layout === "tiles" ? (
+                <WillAcceptRadios line={line} api={trade} />
+              ) : (
+                <WillAcceptSelect line={line} api={trade} />
+              )
+            }
             pendingNote={
               waiting?.kind === "ready"
                 ? pendingText(waiting.lines.get(line.edition_id))
@@ -503,6 +522,7 @@ export function NeededLines({
             }
           >
             <SwapHint
+              compact={layout === "tiles"}
               section={section}
               line={line}
               swap={swap}
@@ -539,6 +559,7 @@ export function NeededLines({
 }
 
 function NeededLine({
+  layout = "rows",
   deckId,
   line,
   deckName,
@@ -546,6 +567,7 @@ function NeededLine({
   pendingNote = "",
   children,
 }: {
+  layout?: "rows" | "tiles";
   deckId: string;
   line: WantListLine;
   deckName: (id: string) => string;
@@ -556,6 +578,41 @@ function NeededLine({
   /** The line's Swap hint (#211) and Friend chips (#251), under its card and counts. */
   children?: ReactNode;
 }) {
+  if (layout === "tiles")
+    return (
+      <li className="min-w-0 rounded-card border border-border p-2 phone:grid phone:grid-cols-[64px_minmax(0,1fr)] phone:items-start phone:gap-3">
+        <CopyArt
+          name={line.name}
+          imageUrl={line.image_url}
+          className="mx-auto w-(--tile-medium) max-w-full phone:w-full"
+        />
+        <div className="min-w-0">
+          <p className="m-0 mt-2 text-body font-semibold wrap-anywhere phone:mt-0">
+            {line.name}
+          </p>
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {editionText(line)}
+          </p>
+          <p className="m-0 text-heading font-semibold tabular-nums text-accent-strong">
+            ×{line.need}{" "}
+            <span className="text-meta font-normal text-text-muted">
+              of {line.quantity}
+            </span>
+          </p>
+          <LineCost deckId={deckId} editionId={line.edition_id} compact />
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {countedText(line, deckName)}
+          </p>
+          {pendingNote && (
+            <p className="m-0 text-meta text-text-muted wrap-anywhere">
+              {pendingNote}
+            </p>
+          )}
+          {accept}
+          <div className="mt-2 flex min-w-0 flex-col gap-2">{children}</div>
+        </div>
+      </li>
+    );
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1 border-b border-border px-4 py-3 last:border-b-0 phone:grid-cols-1">
       <div className="min-w-0">
@@ -611,23 +668,26 @@ function CombinedTotal({
         {rows.map((row) => (
           <li
             key={row.edition_id}
-            className="flex items-baseline gap-3 border-b border-border py-2 last:border-b-0"
+            className="grid grid-cols-[52px_minmax(0,1fr)] items-start gap-3 border-b border-border py-2 last:border-b-0"
           >
-            <span className="w-6 shrink-0 text-right text-body font-semibold tabular-nums">
-              {row.need}
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-body wrap-anywhere">{row.name}</span>
-              <span className="text-meta text-text-muted wrap-anywhere">
-                {editionText(row)}
+            <CopyArt name={row.name} imageUrl={row.image_url} />
+            <div className="flex min-w-0 flex-col">
+              <span className="text-body font-semibold tabular-nums">
+                {row.need}
               </span>
-              <span className="text-meta text-text-muted wrap-anywhere">
-                {row.decks
-                  .map((deck) => `${deckName(deck.deck_id)} ${deck.need}`)
-                  .join(" · ")}
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-body wrap-anywhere">{row.name}</span>
+                <span className="text-meta text-text-muted wrap-anywhere">
+                  {editionText(row)}
+                </span>
+                <span className="text-meta text-text-muted wrap-anywhere">
+                  {row.decks
+                    .map((deck) => `${deckName(deck.deck_id)} ${deck.need}`)
+                    .join(" · ")}
+                </span>
               </span>
-            </span>
-            <RowCost editionId={row.edition_id} />
+              <RowCost editionId={row.edition_id} />
+            </div>
           </li>
         ))}
       </ul>

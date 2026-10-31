@@ -3,7 +3,7 @@ import { editionText } from "../decks/wantListModel";
 import type { FriendCopy } from "../social_generated";
 import { Pill } from "../ui/Pill";
 import type { CombinedRow } from "../want_list_generated";
-import { CardImage } from "./FriendCollectionPage";
+import { CopyArt } from "../ui/CopyTile";
 import { chipText, lendableText, otherEditionText } from "./friendCards";
 
 /**
@@ -144,10 +144,14 @@ function CardPanel({
   return (
     <section
       aria-labelledby={`${headingId} ${editionId}`}
-      className="rounded-panel border border-border bg-surface"
+      className="grid min-w-0 grid-cols-[var(--tile-small)_minmax(0,1fr)] gap-x-3 rounded-panel border border-border bg-surface p-3 phone:grid-cols-[64px_minmax(0,1fr)]"
     >
-      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 phone:grid-cols-[2.5rem_minmax(0,1fr)]">
-        <CardImage url={row.image_url} />
+      <CopyArt
+        name={row.name}
+        imageUrl={row.image_url}
+        className="row-span-2 phone:row-span-1"
+      />
+      <div className="flex min-w-0 flex-wrap items-center gap-3 pb-3">
         <div className="min-w-0">
           <h3
             id={headingId}
@@ -166,7 +170,7 @@ function CardPanel({
           </p>
         </div>
         {asked && (
-          <span className="phone:col-start-2">
+          <span>
             <Pill tone={askedCopies >= Number(row.need) ? "ok" : "neutral"}>
               {askedCopies} of {row.need} asked
             </Pill>
@@ -175,16 +179,16 @@ function CardPanel({
       </div>
       <ul
         aria-label={`Friends who can lend ${row.name}, ${editionText(row)}`}
-        className="m-0 list-none border-t border-border p-0"
+        className="col-start-2 m-0 min-w-0 list-none border-t border-border p-0 phone:col-span-full phone:col-start-1"
       >
         {copies.map((copy) => {
           const other = otherEditionText(copy, row.edition_id);
           return (
             <li
               key={`${copy.collector_id}:${copy.edition_id}`}
-              className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2 last:border-b-0"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2 last:border-b-0 phone:px-0"
             >
-              <span className="min-w-0 flex-1 wrap-anywhere">
+              <span className="min-w-0 flex-1 wrap-anywhere phone:basis-full">
                 <span className="text-body font-medium">
                   {copy.display_name}
                 </span>{" "}
