@@ -77,13 +77,15 @@ type DraftsApi = {
   drafts: Draft[];
   /** Copies of one Edition in the draft to one Friend. */
   quantity: (friendId: string, editionId: string) => number;
-  /** Sets a line: 0 takes it out, and a draft with no lines goes. */
+  /** Sets a line: 0 takes it out, and a draft with no lines goes. `deckId` is the Deck the asking page is about: it
+   * becomes For Deck only when this starts the Friend's draft, so a draft already started keeps its own choice. */
   set: (
     friend: DraftFriend,
     card: DraftCard,
     quantity: number,
     cap: number | null,
-    lendable: string
+    lendable: string,
+    deckId?: string | null
   ) => void;
   /** Opens the composer on the draft to one Friend. */
   review: (friendId: string, opener?: HTMLElement | null) => void;
@@ -193,11 +195,13 @@ export function copyCap(copy: { spare: string; in_deck: string }): number {
 /**
  * Draft Borrow Requests (social network #252, the Friends' cards verdict): client-only, one per Friend, kept in this
  * tab's sessionStorage under the account id. **Ask** anywhere (a Want List chip or panel, the card popup, a Friend's
- * Collection) adds to that Friend's draft. The tray lists the drafts with **Review**, which opens the composer: a
- * stepper per line capped at what the Friend could lend, **For Deck** (or none: Unsorted), an optional **Return by**
- * and **Send Borrow Request**. On a phone the tray is one bar above the tab bar; with several drafts its **Review**
- * lists them first. When the composer closes and the control that opened it went with it (the tray's Review, once the
- * last draft is sent or discarded), focus goes to the page's h1; a sent request's toast then takes it for View.
+ * Collection) adds to that Friend's draft; Ask on a page about one Deck (the Want List scoped to it, the deck builder's
+ * Ways to get missing cards) starts a new draft For that Deck, and never changes one already started. The tray lists
+ * the drafts with **Review**, which opens the composer: a stepper per line capped at what the Friend could lend, **For
+ * Deck** (or none: Unsorted), an optional **Return by** and **Send Borrow Request**. On a phone the tray is one bar
+ * above the tab bar; with several drafts its **Review** lists them first. When the composer closes and the control that
+ * opened it went with it (the tray's Review, once the last draft is sent or discarded), focus goes to the page's h1; a
+ * sent request's toast then takes it for View.
  */
 export function BorrowDraftsProvider({
   userId,
@@ -241,12 +245,12 @@ export function BorrowDraftsProvider({
         drafts
           .find((draft) => draft.friend.collector_id === friendId)
           ?.lines.find((line) => line.edition_id === editionId)?.quantity ?? 0,
-      set: (friend, card, quantity, cap, lendable) =>
+      set: (friend, card, quantity, cap, lendable, deckId) =>
         change(friend.collector_id, (draft) => {
           const base: Draft = draft ?? {
             friend,
             lines: [],
-            deckId: null,
+            deckId: deckId ?? null,
             returnBy: "",
             replaces: null,
           };
@@ -803,12 +807,15 @@ export function AskControl({
   cap,
   lendable,
   text = "Ask",
+  deckId = null,
 }: {
   friend: DraftFriend;
   card: DraftCard;
   cap: number;
   lendable: string;
   text?: "Ask" | "Ask to borrow";
+  /** The Deck the page is about, For Deck when this starts the Friend's draft; null for none. */
+  deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
   const ask = useRef<HTMLButtonElement>(null);
@@ -841,7 +848,7 @@ export function AskControl({
         aria-label={name}
         onClick={() => {
           pressed.current = true;
-          drafts.set(friend, card, 1, cap, lendable);
+          drafts.set(friend, card, 1, cap, lendable, deckId);
         }}
       >
         {text}
@@ -856,7 +863,7 @@ export function AskControl({
         max={cap}
         onChange={(next) => {
           pressed.current = true;
-          drafts.set(friend, card, next, cap, lendable);
+          drafts.set(friend, card, next, cap, lendable, deckId);
         }}
       />
     </span>
@@ -873,12 +880,15 @@ export function AskChip({
   cap,
   lendable,
   text,
+  deckId = null,
 }: {
   friend: DraftFriend;
   card: DraftCard;
   cap: number;
   lendable: string;
   text: string;
+  /** The Deck the page is about, For Deck when this starts the Friend's draft; null for none. */
+  deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
   if (!drafts || cap < 1)
@@ -897,7 +907,9 @@ export function AskChip({
           ? `In your Borrow Request to ${friend.display_name}`
           : `Ask ${friend.display_name} to lend one`
       }
-      onClick={() => drafts.set(friend, card, asked ? 0 : 1, cap, lendable)}
+      onClick={() =>
+        drafts.set(friend, card, asked ? 0 : 1, cap, lendable, deckId)
+      }
       className="group m-0 box-border inline-flex min-h-chip max-w-full cursor-pointer items-center border-0 bg-transparent p-0 text-left font-sans phone:min-h-tap"
     >
       <span className="box-border inline-flex min-h-chip max-w-full items-center gap-1 rounded-round border border-border-strong px-2.5 text-meta text-text-muted wrap-anywhere group-hover:border-control-outline group-aria-pressed:border-accent-border group-aria-pressed:bg-accent-wash group-aria-pressed:text-accent-strong phone:min-h-control">
