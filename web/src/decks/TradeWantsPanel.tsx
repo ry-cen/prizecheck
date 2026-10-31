@@ -3,6 +3,7 @@ import {
   browseEditions,
   type BrowseEdition,
 } from "../catalog_browse_generated";
+import { CopyArt } from "../ui/CopyTile";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { SearchField } from "../ui/SearchField";
@@ -60,6 +61,51 @@ export function WillAcceptSelect({
   );
 }
 
+/** Visible choices for page tiles; names stay unique across Deck sections. */
+export function WillAcceptRadios({
+  line,
+  api,
+}: {
+  line: WantListLine;
+  api: TradeWantsApi;
+}) {
+  const name = useId();
+  if (api.state.kind !== "ready") return null;
+  const rule =
+    api.pendingRule?.edition_id === line.edition_id
+      ? api.pendingRule.rule
+      : (api.state.rules.get(line.edition_id) ?? "edition");
+  return (
+    <div
+      role="radiogroup"
+      aria-label={`Will accept for ${cardText(line)}`}
+      aria-disabled={api.busy || undefined}
+      className="mt-2 flex min-w-0 flex-col gap-1"
+    >
+      {WILL_ACCEPT_OPTIONS.map((option) => (
+        <label
+          key={option.value}
+          className={`flex min-h-8 min-w-0 cursor-pointer items-center gap-2 rounded-control border px-2 py-1 text-meta phone:min-h-tap ${rule === option.value ? "border-accent-border bg-surface-selected font-semibold text-accent-strong" : "border-border-strong text-text-muted"}`}
+        >
+          <input
+            type="radio"
+            name={name}
+            value={option.value}
+            checked={rule === option.value}
+            aria-disabled={api.busy || undefined}
+            onChange={() => {
+              if (!api.busy && rule !== option.value)
+                api.setRule(line, option.value);
+            }}
+            className="m-0 shrink-0 accent-accent"
+          />
+          <span className="min-w-0 wrap-anywhere">{option.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Trade Wants, the panel after the Decks on the Want List (Trading #275; prototype variant A): the exact cards the
  * collector wants in trades that no Deck names, each with a stepper (0 removes it), and **Add a card**, which searches
@@ -109,28 +155,35 @@ export function TradeWantsPanel({ api }: { api: TradeWantsApi }) {
           ) : (
             <ul
               aria-label="Your Trade Wants"
-              className="m-0 list-none border-t border-border p-0"
+              className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 border-t border-border p-4 phone:grid-cols-1 phone:gap-3 phone:p-3"
             >
               {state.wants.lines.map((line) => (
                 <li
                   key={line.edition_id}
-                  className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-3 last:border-b-0"
+                  className="min-w-0 rounded-card border border-border p-2 phone:grid phone:grid-cols-[64px_minmax(0,1fr)] phone:items-start phone:gap-3"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="m-0 text-body font-medium wrap-anywhere">
+                  <CopyArt
+                    name={line.name}
+                    imageUrl={line.image_url}
+                    className="mx-auto w-(--tile-medium) max-w-full phone:w-full"
+                  />
+                  <div className="min-w-0">
+                    <p className="m-0 mt-2 text-body font-medium wrap-anywhere phone:mt-0">
                       {line.name}
                     </p>
                     <p className="m-0 text-meta text-text-muted wrap-anywhere">
                       {editionText(line)}
                     </p>
+                    <div className="mt-2">
+                      <Stepper
+                        label={cardText(line)}
+                        value={Number(line.quantity)}
+                        max={MAX_TRADE_WANT_COPIES}
+                        disabled={api.busy}
+                        onChange={(value) => void api.setQuantity(line, value)}
+                      />
+                    </div>
                   </div>
-                  <Stepper
-                    label={cardText(line)}
-                    value={Number(line.quantity)}
-                    max={MAX_TRADE_WANT_COPIES}
-                    disabled={api.busy}
-                    onChange={(value) => void api.setQuantity(line, value)}
-                  />
                 </li>
               ))}
             </ul>

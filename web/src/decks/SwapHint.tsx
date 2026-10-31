@@ -10,11 +10,13 @@ import { swapHintText, swapLabel, type WantListSwap } from "./useWantListSwap";
  * accept choice (Trading #275), which only changes the wording.
  */
 export function SwapHint({
+  compact = false,
   section,
   line,
   swap,
   rule,
 }: {
+  compact?: boolean;
   section: WantListSection;
   line: WantListLine;
   swap: WantListSwap;
@@ -23,7 +25,13 @@ export function SwapHint({
   const hint = line.swap;
   if (!hint) return null;
   return (
-    <div className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control border border-accent-border bg-accent-wash px-3 py-2">
+    <div
+      className={
+        compact
+          ? "flex min-w-0 flex-wrap items-center gap-2"
+          : "col-span-full flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control border border-accent-border bg-accent-wash px-3 py-2"
+      }
+    >
       <p className="m-0 min-w-0 flex-1 text-meta wrap-anywhere">
         <span aria-hidden="true">↻</span> {swapHintText(hint, rule)}
       </p>
@@ -33,7 +41,7 @@ export function SwapHint({
         onClick={() => {
           if (!swap.busy) swap.swap(section, line);
         }}
-        className="phone:w-full"
+        className={compact ? "shrink-0" : "phone:w-full"}
       >
         Swap
       </Button>

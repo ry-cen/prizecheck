@@ -135,9 +135,11 @@ export function SectionCost({ deckId }: { deckId: string }) {
  * right-hand column on a desktop and below the line on a phone.
  */
 export function LineCost({
+  compact = false,
   deckId,
   editionId,
 }: {
+  compact?: boolean;
   deckId: string;
   editionId: string;
 }) {
@@ -149,7 +151,13 @@ export function LineCost({
   const parts = [costText(line.cost)];
   if (line.price_each) parts.push(`${line.price_each} each`);
   return (
-    <p className="col-start-2 m-0 text-right text-meta tabular-nums text-text-muted wrap-anywhere phone:col-start-1 phone:text-left">
+    <p
+      className={
+        compact
+          ? "m-0 text-meta tabular-nums text-text-muted wrap-anywhere"
+          : "col-start-2 m-0 text-right text-meta tabular-nums text-text-muted wrap-anywhere phone:col-start-1 phone:text-left"
+      }
+    >
       {parts.join(" · ")}
     </p>
   );
