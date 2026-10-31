@@ -303,6 +303,8 @@ async function story(
   await expect(heading(ash.page)).toHaveText("Swapped with Misty W");
 
   // A changed cash term in the refreshed answer requires review, even when the other side confirmed.
+  // Stock a fresh Arven in Ash's For trade Binder: his remaining copy is in the unlisted Box after the first swap.
+  await hold(ash.page, ashBinder, arven, 1);
   const review = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
   const offered = await api(ash.page, "GET", `/api/social/trades/${review}`);
   const accepted = await api(ash.page, "POST", `/api/trades/${review}/accept`, {
