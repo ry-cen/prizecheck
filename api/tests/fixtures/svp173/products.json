@@ -1,0 +1,138 @@
+[
+  {
+    "productId": 610757,
+    "name": "Eevee - 173 (Pokemon Center Exclusive)",
+    "cleanName": "Eevee 173 Pokemon Center Exclusive",
+    "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/610757_200w.jpg",
+    "categoryId": 3,
+    "groupId": 22872,
+    "url": "https://www.tcgplayer.com/product/610757/pokemon-sv-scarlet-and-violet-promo-cards-eevee-173-pokemon-center-exclusive",
+    "modifiedOn": "2026-09-09T01:23:51.157",
+    "imageCount": 1,
+    "presaleInfo": {
+      "isPresale": false,
+      "releasedOn": null,
+      "note": null
+    },
+    "extendedData": [
+      {
+        "name": "Number",
+        "displayName": "Card Number",
+        "value": "173"
+      },
+      {
+        "name": "Rarity",
+        "displayName": "Rarity",
+        "value": "Promo"
+      },
+      {
+        "name": "Card Type",
+        "displayName": "Card Type",
+        "value": "Colorless"
+      },
+      {
+        "name": "HP",
+        "displayName": "HP",
+        "value": "50"
+      },
+      {
+        "name": "Stage",
+        "displayName": "Stage",
+        "value": "Basic"
+      },
+      {
+        "name": "CardText",
+        "displayName": "Card Text",
+        "value": "<strong>Ability \u2014 Boosted Evolution</strong>\r\n<br>As long as this Pok\u00e9mon is in the Active Spot, it can evolve during your first turn or the turn you play it."
+      },
+      {
+        "name": "Attack 1",
+        "displayName": "Attack 1",
+        "value": "[2] Reckless Charge (30)\r\n<br>This Pok\u00e9mon also does 10 damage to itself."
+      },
+      {
+        "name": "Weakness",
+        "displayName": "Weakness",
+        "value": "Fx2"
+      },
+      {
+        "name": "Resistance",
+        "displayName": "Resistance",
+        "value": "None"
+      },
+      {
+        "name": "RetreatCost",
+        "displayName": "Retreat Cost",
+        "value": "1"
+      }
+    ]
+  },
+  {
+    "productId": 610758,
+    "name": "Eevee - 173",
+    "cleanName": "Eevee 173",
+    "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/610758_200w.jpg",
+    "categoryId": 3,
+    "groupId": 22872,
+    "url": "https://www.tcgplayer.com/product/610758/pokemon-sv-scarlet-and-violet-promo-cards-eevee-173",
+    "modifiedOn": "2026-06-24T22:12:04.213",
+    "imageCount": 1,
+    "presaleInfo": {
+      "isPresale": false,
+      "releasedOn": null,
+      "note": null
+    },
+    "extendedData": [
+      {
+        "name": "Number",
+        "displayName": "Card Number",
+        "value": "173"
+      },
+      {
+        "name": "Rarity",
+        "displayName": "Rarity",
+        "value": "Promo"
+      },
+      {
+        "name": "Card Type",
+        "displayName": "Card Type",
+        "value": "Colorless"
+      },
+      {
+        "name": "HP",
+        "displayName": "HP",
+        "value": "50"
+      },
+      {
+        "name": "Stage",
+        "displayName": "Stage",
+        "value": "Basic"
+      },
+      {
+        "name": "CardText",
+        "displayName": "Card Text",
+        "value": "<strong>Ability \u2014 Boosted Evolution</strong>\r\n<br>As long as this Pok\u00e9mon is in the Active Spot, it can evolve during your first turn or the turn you play it."
+      },
+      {
+        "name": "Attack 1",
+        "displayName": "Attack 1",
+        "value": "[2] Reckless Charge (30)\r\n<br>This Pok\u00e9mon also does 10 damage to itself."
+      },
+      {
+        "name": "Weakness",
+        "displayName": "Weakness",
+        "value": "Fx2"
+      },
+      {
+        "name": "Resistance",
+        "displayName": "Resistance",
+        "value": "None"
+      },
+      {
+        "name": "RetreatCost",
+        "displayName": "Retreat Cost",
+        "value": "1"
+      }
+    ]
+  }
+]

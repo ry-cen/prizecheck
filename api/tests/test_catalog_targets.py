@@ -1847,3 +1847,16 @@ def test_v6_refresh_uses_every_group_of_a_set_while_v5_active_leaves_the_main_se
     assert states("bw11-rc1") == [("unverified", "rule_failed", None, None)] and states("ex15-1") == [("unverified", "rule_failed", None, None)]
     activate(MATCHING, 6)
     assert states("bw11-rc1") == [("verified", None, 5, "holofoil")] and states("ex15-1") == [("verified", None, 1, "holofoil")]
+
+
+@pytest.mark.parametrize('rule', [MatchingRulesV4, MatchingRulesV5, MatchingRulesV6])
+def test_svp173_public_source_ids_are_swapped_and_require_reviewed_correction(rule):
+    record = json.loads((Path(__file__).parent / 'fixtures/svp173/card.json').read_text())
+    products = json.loads((Path(__file__).parent / 'fixtures/svp173/products.json').read_text())
+    assert {p['productId']: p['name'] for p in products} == {
+        610757: 'Eevee - 173 (Pokemon Center Exclusive)', 610758: 'Eevee - 173'}
+    for variant, expected in zip(record['variants_detailed'], [(610757, 'holofoil'), (610758, None)]):
+        value = promo_facts(name='Eevee', number='173', set_id='svp', descriptor=variant, lookup=variant)
+        value['descriptor'] = {k: v for k, v in variant.items() if k not in ('pricing', 'variantId')}
+        value['source_record'] = record
+        assert rule.evaluate(value, lambda *_: False) == expected
