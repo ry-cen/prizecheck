@@ -175,7 +175,7 @@ const DELETE_REASON = "Only an empty Location with no children can be deleted.";
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
-  test("the gear appears on hover and keyboard focus, keeps the row in place, and opens the Location's own settings", async ({
+  test("the gear stays visible on the open Location, reveals on hover and keyboard focus elsewhere, and opens the Location's own settings", async ({
     page,
   }) => {
     await signIn(page);
@@ -238,6 +238,31 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(g).toBeFocused();
+
+    // Open the leaf, then move focus and the pointer away: its gear stays available.
+    await row.click();
+    await page.mouse.move(0, 0);
+    await button(nav, "All owned").focus();
+    await expect(row).toHaveAttribute("aria-current", "page");
+    await expect(g).toHaveCSS("opacity", "1");
+    await expect(row).toHaveCSS("padding-right", "68px");
+    // The inactive parent still needs hover or keyboard focus.
+    await expect(gear(nav, shelf)).toHaveCSS("opacity", "0");
+
+    // An open Deck reserves space for its sole tool, with no Add child.
+    const deckRow = button(nav, deckName);
+    await deckRow.click();
+    await page.mouse.move(0, 0);
+    await button(nav, "All owned").focus();
+    await expect(deckRow).toHaveAttribute("aria-current", "page");
+    await expect(deckRow).toHaveCSS("padding-right", "36px");
+    await expect(gear(nav, deckName)).toHaveCSS("opacity", "1");
+    await expect(
+      nav.getByRole("button", {
+        name: `Add child location to ${deckName}`,
+        exact: true,
+      })
+    ).toHaveCount(0);
 
     // A Deck's settings have only a Deck's actions.
     await gear(nav, deckName).click();

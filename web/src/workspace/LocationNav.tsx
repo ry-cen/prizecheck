@@ -38,8 +38,8 @@ type Props = {
   onOpenSettings?: (id: string, opener: HTMLButtonElement) => void;
   /** The phone drawer: 44 px rows, Add child and the settings gear always shown beside each row, and no
    * sticky tree. Without it, the desktop sidebar: the tree stays in view while the gallery scrolls, so a
-   * drag can always reach a leaf, and Add child and the gear overlay the row end, shown on hover or
-   * keyboard focus (always, on a device without hover). */
+   * drag can always reach a leaf. Add child and the gear overlay the row end, shown for the open Location
+   * or on hover or keyboard focus (always, on a device without hover). */
   touch?: boolean;
   /** The Lent out entry (social network #253): copies lent to Friends, in no Location, and what opens their list.
    * Shown only while some copies are out. */
@@ -57,11 +57,11 @@ const TOOL =
   "box-border m-0 inline-flex cursor-pointer items-center justify-center rounded-control border border-solid border-transparent p-0 font-sans text-text-muted hover:text-accent-strong";
 // Desktop: the tools overlay the row's end, inset 2 px from the end and 1 px top and bottom, so the open row's
 // border shows; hidden during a tile drag so the drop ring shows;
-// hidden until the row is hovered or holds keyboard focus on a device that can hover; a device without hover
-// always shows them, and the row reserves room for them.
+// The open row always shows them and reserves room; other rows reveal them on hover or keyboard focus.
+// A device without hover always shows them, with room reserved.
 const TOOLS_SIDEBAR =
-  "pointer-events-none absolute inset-y-0 right-0.5 flex items-center gap-0.5";
-const TOOL_SIDEBAR = `${TOOL} pointer-events-auto size-control opacity-100 [@media(hover:hover)]:opacity-0 group-hover/entry:opacity-100 group-has-[:focus-visible]/entry:opacity-100`;
+  "pointer-events-none absolute inset-y-0 right-0.5 flex items-center";
+const TOOL_SIDEBAR = `${TOOL} pointer-events-auto size-control opacity-100`;
 const TOOL_DRAWER = `${TOOL} size-tap shrink-0 bg-transparent`;
 
 /** A tree row's look: the open Location, a drop target under a tile drag, or a plain row. */
@@ -97,8 +97,8 @@ function rowClass({
     : tools === 0
       ? "pr-2"
       : tools === 1
-        ? "pr-9 [@media(hover:hover)]:pr-2"
-        : "pr-17 [@media(hover:hover)]:pr-2";
+        ? `pr-9 ${current ? "" : "[@media(hover:hover)]:pr-2"}`
+        : `pr-17 ${current ? "" : "[@media(hover:hover)]:pr-2"}`;
   return `${ROW} ${size} ${padding} ${look} ${outline}`;
 }
 
@@ -199,7 +199,7 @@ export function LocationNav({
           <Icon icon={Settings} size={14} />
         </button>
       );
-    const toolClass = `${TOOL_SIDEBAR} ${active ? "bg-surface-selected" : "bg-surface-raised"}`;
+    const toolClass = `${TOOL_SIDEBAR} ${active ? "bg-surface-selected" : "bg-surface-raised [@media(hover:hover)]:opacity-0 group-hover/entry:opacity-100 group-has-[:focus-visible]/entry:opacity-100"}`;
     return (
       <li key={node.id}>
         <div className="group/entry relative flex min-w-0 items-center">
