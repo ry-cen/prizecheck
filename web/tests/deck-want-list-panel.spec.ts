@@ -359,7 +359,7 @@ for (const width of [375, 320]) {
       await signIn(page);
       const { deck } = await lastGap(page, ids);
       await page.goto(`${ORIGIN}/decks/${deck}`);
-      // A phone opens the builder on its Library tab.
+      // A Deck that lists cards opens on its Deck tab on a phone; the tap keeps it there.
       await page.getByRole("tab", { name: /^Deck / }).tap();
       await expect(readiness(page)).toContainText("Not owned1");
       await expectTouchTarget(toggle(page));

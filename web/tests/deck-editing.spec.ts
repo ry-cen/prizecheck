@@ -734,6 +734,7 @@ test.describe("on a phone", () => {
     await signIn(page);
     const built = await buildDeck(page, { "edit-1": 1 });
     await page.goto(`${ORIGIN}/decks/${built.deckId}`);
+    await page.getByRole("tab", { name: "Library" }).tap();
     const charmander = library(page).getByRole("button", {
       name: /^Charmander, set-a 4, /,
     });
@@ -752,6 +753,30 @@ test.describe("on a phone", () => {
       .toBeGreaterThan(100);
   });
 
+  test("an empty Deck opens on Library, and adding its first card keeps Library open", async ({
+    page,
+  }) => {
+    promoteCatalog();
+    await signIn(page);
+    const built = await buildDeck(page);
+    await page.goto(`${ORIGIN}/decks/${built.deckId}`);
+
+    const tab = page.getByRole("tab", { name: "Library" });
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    await library(page)
+      .getByRole("button", { name: /^Charmander, set-a 4, / })
+      .tap();
+    const popup = page.getByRole("dialog", { name: "Charmander" });
+    await popup
+      .getByRole("group", { name: "Deck List copies" })
+      .getByRole("button", { name: "+1" })
+      .tap();
+    await expect.poll(() => listed(built)).toEqual({ "edit-1": 1 });
+    await popup.getByRole("button", { name: "Close card details" }).tap();
+    await expect(page.getByRole("tab", { name: "Deck 1/60" })).toBeVisible();
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+  });
+
   test("the Library tab lists the library, its card popup is a bottom sheet with ±1, and the Deck tab counts the copy", async ({
     page,
   }) => {
@@ -760,6 +785,12 @@ test.describe("on a phone", () => {
     const built = await buildDeck(page, { "edit-1": 1 });
     await page.goto(`${ORIGIN}/decks/${built.deckId}`);
 
+    // A Deck that lists cards opens on its Deck tab; Library is a tap away.
+    await expect(page.getByRole("tab", { name: "Deck 1/60" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    await page.getByRole("tab", { name: "Library" }).tap();
     await expect(page.getByRole("tab", { name: "Library" })).toHaveAttribute(
       "aria-selected",
       "true"

@@ -15,10 +15,10 @@ import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 
 // The deck builder's Ways to get missing cards uses the Want List's Friend chips (#251): a chip there asks the Friend
-// through the same Borrow Request drafts (#252) as the Want List page, so asking needs no trip to that page. Brock has a
-// spare Iono PAL 254, another Printing of the PAL 185 the Deck needs (the Swap catalog,
-// api/tests/want_list_swap_fixtures.py). The other collector signs in first, so the test's own page signs in afterwards
-// as a new account.
+// through the same Borrow Request drafts (#252) as the Want List page, so asking needs no trip to that page, and a new
+// draft is For the builder's Deck. Brock has a spare Iono PAL 254, another Printing of the PAL 185 the Deck needs (the
+// Swap catalog, api/tests/want_list_swap_fixtures.py). The other collector signs in first, so the test's own page signs
+// in afterwards as a new account.
 
 const hold = (
   page: Page,
@@ -72,4 +72,18 @@ test("a Friend chip in the deck builder's panel asks the Friend through the Borr
   await expect(
     panel.getByRole("list", { name: `What ${deckName} needs` })
   ).toContainText("2 of 2");
+
+  // The new draft is For this Deck, and For Deck still changes it.
+  await page
+    .getByRole("region", { name: "Borrow Request drafts" })
+    .getByRole("button", { name: "Review Borrow Request to Brock S" })
+    .click();
+  const composer = page.getByRole("dialog", {
+    name: "Borrow Request to Brock S",
+  });
+  await expect(composer.getByLabel("For Deck")).toHaveValue(deck);
+  await composer
+    .getByLabel("For Deck")
+    .selectOption({ label: "No Deck (they go to Unsorted)" });
+  await expect(composer.getByLabel("For Deck")).toHaveValue("");
 });
