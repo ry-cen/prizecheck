@@ -2,6 +2,7 @@
 --burn-in repeats the vitest files and Playwright specs changed against the merge base with --base (origin/dev).
 --shard K/N runs the K-th of N parts of --suite api or --suite browser, as the CI legs of the fast tier do."""
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 import os
@@ -10,6 +11,7 @@ import posixpath
 import re
 import secrets
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -315,6 +317,123 @@ def verify_settings(suite, fast, shard, workers, stacks, browser_repeat, vitest_
                 VERIFY_BURN_IN_SPECS=' '.join(plan['specs']) if plan else '')
 
 
+def inherited_environment():
+    """The few host variables the gate inherits, and a git ceiling at the temporary directory. The copied checkout lies
+    under it; when TMPDIR is inside a repository (`<checkout>/.scratch/tmp`, for a slow /tmp), git run in the copy or in
+    a test's temporary directory would otherwise walk up and find that repository, where under /tmp it finds none."""
+    inherited = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'LANG', 'PLAYWRIGHT_BROWSERS_PATH') if key in os.environ}
+    return dict(inherited, GIT_CEILING_DIRECTORIES=os.path.realpath(tempfile.gettempdir()))
+
+
+# Seconds the gate's processes get to exit after SIGTERM, and then after SIGKILL. ci.sh gives its servers 10 s after its
+# own SIGTERM before it kills them, so this outlasts that. A bound on cleanup, not on any test.
+GATE_STOP_GRACE_S = 30
+
+
+def group_running(group):
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def stop_group(process, grace=GATE_STOP_GRACE_S):
+    """(signals sent, stopped): stop every process left in the gate's process group with SIGTERM, up to `grace` seconds
+    for the group to empty, then SIGKILL and the same wait. `stopped` is whether the group was seen empty at the end; a
+    sent signal is not proof, since a process in uninterruptible I/O outlives even SIGKILL for a while."""
+    sent = []
+    for signum in (signal.SIGTERM, signal.SIGKILL):
+        process.poll()
+        if not group_running(process.pid):
+            return sent, True
+        try:
+            os.killpg(process.pid, signum)
+        except ProcessLookupError:
+            return sent, True
+        sent.append(signum.name)
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            process.poll()
+            if not group_running(process.pid):
+                return sent, True
+            time.sleep(.1)
+    process.poll()
+    return sent, not group_running(process.pid)
+
+
+TERMINATING = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+def stop_gate(process, outcome, grace=GATE_STOP_GRACE_S):
+    """stop_group with Ctrl-C, SIGTERM and SIGHUP held back, so a second one cannot cut the stop short and send main
+    on to remove the checkout and the databases under a running gate. The outcome is recorded before they are let
+    through; one that arrived meanwhile then ends this script as usual."""
+    held = signal.pthread_sigmask(signal.SIG_BLOCK, TERMINATING)
+    try:
+        outcome['leftovers'], outcome['stopped'] = stop_group(process, grace)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, held)
+
+
+def run_gate(command, cwd, env, log, outcome):
+    """The gate's exit code: ci.sh in its own session, so its whole process tree can be stopped before the copied
+    checkout and the databases it uses are removed. When this script is interrupted (Ctrl-C, SIGTERM) the group gets
+    SIGTERM, and ci.sh's EXIT trap stops its servers; after ci.sh exits, anything it left running is stopped. `outcome`
+    gets `leftovers`, the signals that had to be sent, and `stopped`, False until the group is seen empty: main keeps
+    the checkout and the databases while it is False."""
+    outcome.update(leftovers=[], stopped=False)
+    process = subprocess.Popen(command, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        code = process.wait()
+    except BaseException:
+        stop_gate(process, outcome)
+        raise
+    stop_gate(process, outcome)
+    return code
+
+
+@contextmanager
+def workspace(outcome):
+    """A temporary directory for the copied checkout, removed on the way out unless the gate may still be running in it."""
+    temp = tempfile.mkdtemp(prefix='tcg-verify-')
+    try:
+        yield temp
+    finally:
+        if outcome.get('stopped', True):
+            shutil.rmtree(temp)
+
+
+def cleanup_failures(directory):
+    """What ci.sh reported it could not clean up, one line each in cleanup-failures.txt (its log has them too)."""
+    path = Path(directory) / 'cleanup-failures.txt'
+    return [line for line in path.read_text().splitlines() if line] if path.exists() else []
+
+
+def stop_failures(outcome):
+    """The processes the gate left running, which run_gate then stopped, and processes that outlived SIGKILL."""
+    failures = []
+    if outcome.get('leftovers'):
+        failures.append(f'processes the gate started were still running after it exited; sent {", ".join(outcome["leftovers"])}')
+    if not outcome.get('stopped', True):
+        failures.append('processes of the gate were still running after SIGKILL; its checkout and databases were kept')
+    return failures
+
+
+def final_result(result, failures):
+    """The run's exit code: the gate's own failure stands; a cleanup failure fails a run that had passed."""
+    return 1 if result == 0 and failures else result
+
+
+def retained_lines(temp, names):
+    """What a run whose gate outlived SIGKILL leaves behind: no URL or password, only the directory and database names."""
+    return [f'RETAINED: the copied checkout {temp}, because processes of the gate were still running after SIGKILL',
+            f'RETAINED: the databases {", ".join(names)} on the test server; the reaper (scripts/verify_reaper.py) '
+            'drops them once no session is connected and this run has exited']
+
+
 def gate_command(selectors):
     """ci.sh, kept from idle sleep where the host offers caffeinate (macOS). A closed lid on battery still sleeps."""
     command = ['bash', 'scripts/ci.sh', *selectors]
@@ -340,6 +459,8 @@ def main(argv=None):
     name = 'tcg_verify_'+secrets.token_hex(8)
     created = []
     result = None
+    outcome = {}  # run_gate's: whether the gate's processes are gone, so its checkout and databases may be removed
+    kept = None
     ports = []
     reservations = []
     plan = None
@@ -378,7 +499,8 @@ def main(argv=None):
             sock.bind(('127.0.0.1', 0))
             reservations.append(sock)
             ports.append(sock.getsockname()[1])
-        with tempfile.TemporaryDirectory(prefix='tcg-verify-') as temp:
+        with workspace(outcome) as temp:
+            kept = temp
             checkout = Path(temp)/'checkout'
             checkout.mkdir()
             files = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd=ROOT).decode().split('\0')
@@ -395,7 +517,7 @@ def main(argv=None):
             stacks = [{'database_url': database_url(args.admin_url, f'{name}_s{number}'), 'api_port': extra[3*number-3],
                        'auth_port': extra[3*number-2], 'web_port': extra[3*number-1]} for number in range(1, browser_workers)]
             workers = [database_url(args.admin_url, database) for database in names if database.startswith(name+'_gw')]
-            env = dict({key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'LANG', 'PLAYWRIGHT_BROWSERS_PATH') if key in os.environ},
+            env = dict(inherited_environment(),
               DATABASE_URL=database_url(args.admin_url, name), RECOVERY_TEST_DATABASE_URL=args.admin_url,
               API_PORT=str(api), AUTH_PORT=str(auth), WEB_PORT=str(web),
               API_ORIGIN=f'http://127.0.0.1:{api}', TEST_ORIGIN=f'http://localhost:{web}',
@@ -409,7 +531,12 @@ def main(argv=None):
             skews = {'start': database_skew(args.admin_url)}
             wall, steady = time.time(), time.monotonic()
             with (artifacts/'verification.log').open('a') as log:
-                result = subprocess.run(gate_command(args.selectors), cwd=checkout, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+                result = run_gate(gate_command(args.selectors), cwd=checkout, env=env, log=log, outcome=outcome)
+            stopping = stop_failures(outcome)
+            cleanup = cleanup_failures(artifacts) + stopping
+            result = final_result(result, cleanup)
+            with (artifacts/'verification.log').open('a') as log:
+                log.write(''.join(f'== cleanup failed: {line}\n' for line in stopping))
             try:
                 timing_report = report_timing_warnings(artifacts)
             except Exception as error:  # A broken report never changes the gate's result.
@@ -437,11 +564,15 @@ def main(argv=None):
                 'database_removed': False, 'reaper': reaper, 'reaped_databases': reaped, 'timings': timings,
                 'host_suspended_seconds': suspended,
                 'database_clock_skew_seconds': skews, 'clock_warnings': warnings, 'network_warnings': network,
-                'repeat': browser_repeat, 'vitest_repeat': vitest_repeat, 'burn_in': plan}))
+                'repeat': browser_repeat, 'vitest_repeat': vitest_repeat, 'burn_in': plan, 'cleanup_failures': cleanup}))
     finally:
         for sock in reservations:
             sock.close()
-        if created:
+        if created and not outcome.get('stopped', True):
+            for line in retained_lines(kept, created):
+                print(line)
+            result = final_result(result if result is not None else 1, ['retained'])
+        elif created:
             drop_databases(args.admin_url, name, created)
             if (artifacts/'result.json').exists():
                 report = json.loads((artifacts/'result.json').read_text())
@@ -449,6 +580,8 @@ def main(argv=None):
                 (artifacts/'result.json').write_text(json.dumps(report))
         if (artifacts/'result.json').exists():
             report = json.loads((artifacts/'result.json').read_text())
+            for line in report.get('cleanup_failures', []):
+                print(f'CLEANUP FAILED: {line}')
             for line in report.get('clock_warnings', []):
                 print(f'WARNING: {line}; timing failures in this run are not evidence. Keep the host awake and rerun.')
             for line in report.get('network_warnings', []):
@@ -457,5 +590,12 @@ def main(argv=None):
     return result if result is not None else 1
 
 
+def exit_on_signal(signum, frame):
+    """SIGTERM and SIGHUP end this script like Ctrl-C does: through run_gate's and main's cleanup, not around it."""
+    raise SystemExit(128 + signum)
+
+
 if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, exit_on_signal)
+    signal.signal(signal.SIGHUP, exit_on_signal)
     raise SystemExit(main())

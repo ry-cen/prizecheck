@@ -35,12 +35,70 @@ export VERIFY_WORK="$(mktemp -d)"
 export VERIFY_PYTEST_WORKER_ROOT="$VERIFY_WORK/pytest"
 pids=()
 stacks=1
+# Seconds the stacks' servers get to exit after SIGTERM, and again after SIGKILL; a bound on cleanup, not on any test.
+STOP_GRACE_S="${VERIFY_STOP_GRACE_S:-10}"
+running_servers() {  # the servers' pids that are still running, space-separated
+  local pid alive=""
+  for pid in "${pids[@]}"; do if kill -0 "$pid" 2>/dev/null; then alive="$alive $pid"; fi; done
+  echo "$alive"
+}
+wait_for_servers() {  # up to STOP_GRACE_S for every server to exit; prints those still running
+  local waited=0 alive
+  alive=$(running_servers)
+  while [ -n "$alive" ] && [ "$waited" -lt $((STOP_GRACE_S * 10)) ]; do
+    sleep .1
+    waited=$((waited + 1))
+    alive=$(running_servers)
+  done
+  echo "$alive"
+}
+# SIGTERM every server, then SIGKILL those still running after the grace, and reap them. Fails, reaping none, when a
+# server is still running after SIGKILL's grace too (uninterruptible I/O): waiting for it would not be bounded.
+stop_servers() {
+  local pid alive
+  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null; done
+  alive=$(wait_for_servers)
+  if [ -n "$alive" ]; then
+    echo "== cleanup: servers still running ${STOP_GRACE_S}s after SIGTERM, sent SIGKILL:$alive"
+    for pid in $alive; do kill -KILL "$pid" 2>/dev/null; done
+    alive=$(wait_for_servers)
+  fi
+  if [ -n "$alive" ]; then
+    survivors="$alive"
+    return 1
+  fi
+  for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null; done
+  return 0  # wait returns a killed server's status
+}
+# Runs on every exit. It keeps the gate's own exit status, stops the servers before it removes the directories they
+# write to (removing them first raced their last writes and turned passing runs into exit 1), and attempts every removal.
+# What it cannot clean up is a real failure: named on a `== cleanup failed:` line and in $TEST_LOG_DIR/cleanup-failures.txt
+# (verify.py adds it to result.json), and it fails a run that had passed. Servers that survive SIGKILL keep every
+# directory: they may still be writing to them.
 cleanup() {
-  if [ "${#pids[@]}" -gt 0 ]; then kill "${pids[@]}" 2>/dev/null || true; fi
-  rm -f "$MAIL_FILE"
-  rm -rf "$PUBLIC_PROJECTION_DIR" "$CATALOG_PROCESS_FIXTURE_DIR" "$PRICE_RUNNER_LOCK_DIR" "$VERIFY_WORK"
+  local status=$? path problem="" survivors=""
+  set +e
+  if [ "${#pids[@]}" -gt 0 ] && ! stop_servers; then
+    problem="servers still running ${STOP_GRACE_S}s after SIGKILL:$survivors; kept $MAIL_FILE $PUBLIC_PROJECTION_DIR $CATALOG_PROCESS_FIXTURE_DIR $PRICE_RUNNER_LOCK_DIR $VERIFY_WORK"
+    echo "== cleanup failed: $problem"
+    printf '%s\n' "$problem" >> "$TEST_LOG_DIR/cleanup-failures.txt"
+  else
+    for path in "$MAIL_FILE" "$PUBLIC_PROJECTION_DIR" "$CATALOG_PROCESS_FIXTURE_DIR" "$PRICE_RUNNER_LOCK_DIR" "$VERIFY_WORK"; do
+      if ! rm -rf "$path"; then
+        problem=1
+        echo "== cleanup failed: could not remove $path"
+        printf 'could not remove %s\n' "$path" >> "$TEST_LOG_DIR/cleanup-failures.txt"
+      fi
+    done
+  fi
+  if [ -n "$problem" ] && [ "$status" -eq 0 ]; then status=1; fi
+  exit "$status"
 }
 trap cleanup EXIT
+# A signal ends the gate through the EXIT trap, so its servers are stopped and its directories removed.
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
 phase() {  # $1: phase name; $2: start or end
   printf '%s\t%s\t%s\n' "$1" "$2" "$(date +%s)" >> "$TEST_LOG_DIR/phases.tsv"
   echo "== verify phase: $1 $2"
