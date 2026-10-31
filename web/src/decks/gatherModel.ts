@@ -84,9 +84,10 @@ export function confirmItems(
   );
 }
 
-/** How the page names a source: its name, with "(Deck)" after another Deck's. */
+/** How the page names a source: its full path ("Shelf / Binder 2", since names are unique only among siblings), with
+ * "(Deck)" after another Deck's. */
 export function sourceLabel(source: PickSource): string {
-  return source.kind === "deck" ? `${source.name} (Deck)` : source.name;
+  return source.kind === "deck" ? `${source.path} (Deck)` : source.path;
 }
 
 /** A picker option for one source: "Binder: 3 here". */
