@@ -38,6 +38,7 @@ export const TILE_PRICE =
   "block [&_.edition-price]:block [&_.edition-price]:truncate [&_.edition-price]:text-text-subtle [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-text";
 
 type Props = {
+  marqueeArea: React.RefObject<HTMLElement | null>;
   data: GalleryData;
   display: DisplayPrefs;
   /** True in All owned: each tile shows its source Location's name. */
@@ -72,12 +73,14 @@ const MARQUEE_THRESHOLD_PX = 4;
 /** While a marquee is held this close to the viewport's top or bottom edge, the window scrolls. */
 const AUTOSCROLL_EDGE_PX = 48;
 const AUTOSCROLL_MAX_STEP_PX = 24;
-/** Targets that never start a marquee: tiles and every control. */
-const NO_MARQUEE = "button, a, input, select, textarea, label";
+/** Tiles, controls and explicitly excluded workspace regions keep their own pointer gestures. */
+const NO_MARQUEE =
+  "button, a, input, select, textarea, label, [data-no-marquee]";
 
 /** The card gallery: one tile per copy, virtualized against the window's scroll position.
  * Only rows near the viewport are mounted; positions come from the layout model. */
 export function Gallery({
+  marqueeArea,
   data,
   display,
   caption,
@@ -239,12 +242,20 @@ export function Gallery({
     const { layout: model, loadedCopies } = live.current;
     if (!active || !grid || !section || !model) return;
     const gridBox = grid.getBoundingClientRect();
-    const area = section.getBoundingClientRect();
+    const mainBox = marqueeArea.current?.getBoundingClientRect();
+    if (!mainBox) return;
+    const area = {
+      left: mainBox.left,
+      right: mainBox.right,
+      top: section.getBoundingClientRect().top,
+      bottom: mainBox.bottom,
+    };
     // The band stays inside the gallery area, so it never makes the page wider or taller.
     const clientX = Math.min(Math.max(active.clientX, area.left), area.right);
     const clientY = Math.min(Math.max(active.clientY, area.top), area.bottom);
-    const x = clientX - gridBox.left;
-    const y = clientY - gridBox.top;
+    // Hit-testing keeps the full content rect, including coordinates outside the grid.
+    const x = active.clientX - gridBox.left;
+    const y = active.clientY - gridBox.top;
     if (
       !active.moved &&
       Math.hypot(x - active.x, y - active.y) < MARQUEE_THRESHOLD_PX
@@ -257,11 +268,19 @@ export function Gallery({
       right: Math.max(active.x, x),
       bottom: Math.max(active.y, y),
     };
+    const left = Math.min(
+      Math.max(active.x + gridBox.left, area.left),
+      area.right
+    );
+    const top = Math.min(
+      Math.max(active.y + gridBox.top, area.top),
+      area.bottom
+    );
     setBand({
-      left: rect.left,
-      top: rect.top,
-      width: rect.right - rect.left,
-      height: rect.bottom - rect.top,
+      left: Math.min(left, clientX),
+      top: Math.min(top, clientY),
+      width: Math.abs(clientX - left),
+      height: Math.abs(clientY - top),
     });
     live.current.onMarquee({
       phase: "move",
@@ -270,9 +289,9 @@ export function Gallery({
     });
   }
 
-  function endMarquee() {
+  function endMarquee(event: PointerEvent) {
     const active = marquee.current;
-    if (!active) return;
+    if (!active || event.pointerId !== active.pointerId) return;
     marquee.current = null;
     active.stop();
     setBand(null);
@@ -283,15 +302,39 @@ export function Gallery({
     });
   }
 
-  function startMarquee(event: React.PointerEvent<HTMLElement>) {
+  function startMarquee(event: PointerEvent) {
     // Touch scrolls the page; only a mouse or pen draws a marquee.
-    if (event.button !== 0 || event.pointerType === "touch") return;
+    if (
+      event.button !== 0 ||
+      !event.isPrimary ||
+      (event.pointerType !== "mouse" && event.pointerType !== "pen") ||
+      window.matchMedia(MOBILE_QUERY).matches
+    )
+      return;
     if ((event.target as Element).closest(NO_MARQUEE)) return;
     const grid = gridRef.current;
-    if (!grid || !layout || marquee.current) return;
+    const section = marqueeArea.current;
+    const gallery = sectionRef.current;
+    if (
+      !grid ||
+      !section ||
+      !gallery ||
+      !live.current.layout ||
+      marquee.current
+    )
+      return;
+    // Everything above the gallery (heading, toolbar, filters and notices) is excluded.
+    // The Inspector opts out across its whole column, including the blank space below it.
+    const area = section.getBoundingClientRect();
+    if (
+      event.clientY < gallery.getBoundingClientRect().top ||
+      event.clientY > area.bottom ||
+      event.clientX < area.left ||
+      event.clientX > area.right
+    )
+      return;
     const gridBox = grid.getBoundingClientRect();
     const additive = event.ctrlKey || event.metaKey;
-    const section = event.currentTarget;
     const pointerId = event.pointerId;
     section.setPointerCapture(pointerId);
     event.preventDefault();
@@ -335,14 +378,39 @@ export function Gallery({
     };
     marquee.current = state;
     state.frame = requestAnimationFrame(tick);
-    onMarquee({ phase: "start", additive, spans: [] });
+    live.current.onMarquee({ phase: "start", additive, spans: [] });
   }
+
+  useEffect(() => {
+    const area = marqueeArea.current;
+    if (!area) return;
+    const move = (event: PointerEvent) => {
+      const active = marquee.current;
+      if (!active || event.pointerId !== active.pointerId) return;
+      active.clientX = event.clientX;
+      active.clientY = event.clientY;
+      updateMarquee();
+    };
+    area.addEventListener("pointerdown", startMarquee);
+    area.addEventListener("pointermove", move);
+    area.addEventListener("pointerup", endMarquee);
+    area.addEventListener("pointercancel", endMarquee);
+    area.addEventListener("lostpointercapture", endMarquee);
+    return () => {
+      area.removeEventListener("pointerdown", startMarquee);
+      area.removeEventListener("pointermove", move);
+      area.removeEventListener("pointerup", endMarquee);
+      area.removeEventListener("pointercancel", endMarquee);
+      area.removeEventListener("lostpointercapture", endMarquee);
+    };
+  }, [marqueeArea]);
 
   // Stop a marquee (and its listeners) if the gallery unmounts mid-drag.
   useEffect(
     () => () => {
-      marquee.current?.stop();
+      const active = marquee.current;
       marquee.current = null;
+      active?.stop();
     },
     []
   );
@@ -472,17 +540,6 @@ export function Gallery({
         if (!hoveredTile.current?.contains(event.relatedTarget as Node | null))
           clearPreview();
       }}
-      onPointerDown={startMarquee}
-      onPointerMove={(event) => {
-        const active = marquee.current;
-        if (!active || event.pointerId !== active.pointerId) return;
-        active.clientX = event.clientX;
-        active.clientY = event.clientY;
-        updateMarquee();
-      }}
-      onPointerUp={endMarquee}
-      onPointerCancel={endMarquee}
-      onLostPointerCapture={endMarquee}
     >
       {preview && <HoverArt key={preview.small} {...preview} />}
       {data.error && (
@@ -533,7 +590,8 @@ export function Gallery({
         {cells}
         {band && (
           <div
-            className="pointer-events-none absolute z-1 box-border border border-solid border-accent bg-accent-wash"
+            data-marquee-band
+            className="pointer-events-none fixed z-1 box-border border border-solid border-accent bg-accent-wash"
             aria-hidden="true"
             style={band}
           />

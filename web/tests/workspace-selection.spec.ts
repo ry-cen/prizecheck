@@ -187,6 +187,277 @@ async function marquee(
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 860 } });
 
+  async function shortCollection(page: Page) {
+    promoteCatalog({ "card-1": "Area Abra" });
+    await signIn(page);
+    const source = await createLocation(page, "0 Area source", null);
+    await addCopies(page, source, await editionOf("card-1"), 8);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(8);
+  }
+
+  for (const origin of [
+    "left gutter",
+    "Inspector gap",
+    "below tiles",
+    "right gutter",
+    "bottom padding",
+  ] as const) {
+    test(`a marquee from ${origin} reaches the tiles and stays within the gallery area`, async ({
+      page,
+    }) => {
+      await shortCollection(page);
+      const main = await box(page.getByRole("main"));
+      const grid = await box(cards(page));
+      const panel = await box(inspector(page));
+      const first = await box(tiles(page).first());
+      const last = await box(tiles(page).last());
+      expect(main.y + main.height).toBeGreaterThanOrEqual(860);
+      const from = {
+        x:
+          origin === "left gutter"
+            ? (main.x + grid.x) / 2
+            : origin === "Inspector gap"
+              ? (grid.x + grid.width + panel.x) / 2
+              : origin === "right gutter"
+                ? (panel.x + panel.width + main.x + main.width) / 2
+                : first.x + first.width / 2,
+        y:
+          origin === "below tiles"
+            ? last.y + last.height + 20
+            : origin === "bottom padding"
+              ? main.y + main.height - 20
+              : last.y + last.height / 2,
+      };
+      const to = await center(tiles(page).first());
+      const expected = await tiles(page).evaluateAll(
+        (elements, { from, to }) =>
+          elements.flatMap((element, index) => {
+            const b = element.getBoundingClientRect();
+            return b.right > Math.min(from.x, to.x) &&
+              b.left < Math.max(from.x, to.x) &&
+              b.bottom > Math.min(from.y, to.y) &&
+              b.top < Math.max(from.y, to.y)
+              ? [index]
+              : [];
+          }),
+        { from, to }
+      );
+      expect(expected.length).toBeGreaterThan(0);
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(to.x, to.y, { steps: 8 });
+      const band = page.locator("[data-marquee-band]");
+      await expect(band).toBeVisible();
+      const bounds = await box(band);
+      const currentMain = await box(page.getByRole("main"));
+      const currentGrid = await box(cards(page));
+      expect(bounds.x).toBeGreaterThanOrEqual(currentMain.x);
+      expect(bounds.y).toBeGreaterThanOrEqual(currentGrid.y);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(
+        currentMain.x + currentMain.width
+      );
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(
+        currentMain.y + currentMain.height
+      );
+      // Selection can make the Inspector taller. Measure with the same selection, hiding only
+      // the band within one DOM task, so only overflow contributed by the band fails this check.
+      await expect
+        .poll(() =>
+          band.evaluate((element) => {
+            const size = () => ({
+              width: document.documentElement.scrollWidth,
+              height: document.documentElement.scrollHeight,
+            });
+            const withBand = size();
+            const previousDisplay = element.style.display;
+            try {
+              element.style.display = "none";
+              const withoutBand = size();
+              return {
+                width: withBand.width - withoutBand.width,
+                height: withBand.height - withoutBand.height,
+              };
+            } finally {
+              element.style.display = previousDisplay;
+            }
+          })
+        )
+        .toEqual({ width: 0, height: 0 });
+      await page.mouse.up();
+      await expect(band).toHaveCount(0);
+      await expect(pressed(page)).toHaveCount(expected.length);
+      for (const index of expected)
+        await expect(tiles(page).nth(index)).toHaveAttribute(
+          "aria-pressed",
+          "true"
+        );
+    });
+  }
+
+  test("heading, toolbar and blank Inspector column presses preserve selection; gutter clicks clear or keep it", async ({
+    page,
+  }) => {
+    await shortCollection(page);
+    await tiles(page).first().click();
+    const main = page.getByRole("main");
+    const heading = await box(page.locator("#ws-heading").locator(".."));
+    const toolbar = main.locator(":scope > [data-no-marquee]").nth(1);
+    const search = await box(toolbar.locator(":scope > div").first());
+    const panel = await box(inspector(page));
+    const area = await box(main);
+    const grid = await box(cards(page));
+    for (const from of [
+      { x: heading.x + 2, y: heading.y + heading.height - 2 },
+      { x: search.x + search.width + 4, y: search.y + search.height / 2 },
+      { x: panel.x + panel.width / 2, y: area.y + area.height - 70 },
+    ]) {
+      await marquee(page, from, { x: from.x + 8, y: from.y + 8 });
+      await expect(page.locator("[data-marquee-band]")).toHaveCount(0);
+      await expect(tiles(page).first()).toHaveAttribute("aria-pressed", "true");
+      await expect(pressed(page)).toHaveCount(1);
+    }
+    const gutter = { x: (area.x + grid.x) / 2, y: grid.y + 50 };
+    await page.keyboard.down("ControlOrMeta");
+    await page.mouse.click(gutter.x, gutter.y);
+    await page.keyboard.up("ControlOrMeta");
+    await expect(pressed(page)).toHaveCount(1);
+    await page.mouse.click(gutter.x, gutter.y);
+    await expect(pressed(page)).toHaveCount(0);
+    await tiles(page).nth(2).click();
+    await expect(pressed(page)).toHaveCount(1);
+    await expect(tiles(page).nth(2)).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("release outside the area ends capture, and tile drag still moves to a Location", async ({
+    page,
+  }) => {
+    await shortCollection(page);
+    await createLocation(page, "0 Area destination", null);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(8);
+    const main = await box(page.getByRole("main"));
+    const grid = await box(cards(page));
+    const start = { x: (main.x + grid.x) / 2, y: grid.y + 50 };
+    await marquee(page, start, { x: main.x - 10, y: grid.y + 100 });
+    await expect(page.locator("[data-marquee-band]")).toHaveCount(0);
+    await page.mouse.move(start.x + 10, start.y + 10);
+    await expect(page.locator("[data-marquee-band]")).toHaveCount(0);
+    const from = await center(tiles(page).first());
+    const destination = page
+      .getByRole("complementary", { name: "Sidebar" })
+      .getByRole("button", { name: "0 Area destination", exact: true });
+    const to = await center(destination);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await expect(destination).toHaveCSS("outline-style", "solid");
+    await expect(page.locator("[data-marquee-band]")).toHaveCount(0);
+    await page.mouse.up();
+    await destination.click();
+    await expect(tiles(page)).toHaveCount(1);
+  });
+
+  for (const pointerType of ["mouse", "pen"] as const) {
+    test(`a ${pointerType} at the phone breakpoint preserves selection while held in an empty gutter`, async ({
+      page,
+    }) => {
+      await shortCollection(page);
+      await tiles(page).first().click();
+      await page.setViewportSize({ width: 375, height: 812 });
+      await expect(
+        page.getByRole("button", { name: "Select", exact: true })
+      ).toBeVisible();
+      await expect(tiles(page).first()).toHaveAttribute("aria-pressed", "true");
+      const main = await box(page.getByRole("main"));
+      const grid = await box(cards(page));
+      const first = await box(tiles(page).first());
+      const from = { x: (main.x + grid.x) / 2, y: first.y + first.height / 2 };
+      const to = await center(tiles(page).nth(1));
+      expect(from.x).toBeLessThan(grid.x);
+      // Prove the origin hits empty main space, rather than a tile or another excluded region.
+      await expect
+        .poll(() =>
+          page.evaluate(({ x, y }) => {
+            const target = document.elementFromPoint(x, y);
+            return (
+              !!target?.closest("main") &&
+              !target.closest(
+                "button, a, input, select, textarea, label, [data-no-marquee]"
+              )
+            );
+          }, from)
+        )
+        .toBe(true);
+      const errors: string[] = [];
+      const onError = (error: Error) => errors.push(error.message);
+      page.on("pageerror", onError);
+      // CDP creates an active pen pointer, so a missing breakpoint guard cannot hide behind
+      // setPointerCapture throwing for an invented pointer ID.
+      const cdp =
+        pointerType === "pen" ? await page.context().newCDPSession(page) : null;
+      try {
+        if (cdp) {
+          await cdp.send("Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            ...from,
+            pointerType,
+          });
+          await cdp.send("Input.dispatchMouseEvent", {
+            type: "mousePressed",
+            ...from,
+            button: "left",
+            buttons: 1,
+            clickCount: 1,
+            pointerType,
+          });
+        } else {
+          await page.mouse.move(from.x, from.y);
+          await page.mouse.down();
+        }
+        // A forbidden marquee clears plain selection on pointerdown, even before its threshold.
+        await expect(tiles(page).first()).toHaveAttribute(
+          "aria-pressed",
+          "true"
+        );
+        if (cdp) {
+          await cdp.send("Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            ...to,
+            button: "left",
+            buttons: 1,
+            pointerType,
+          });
+        } else {
+          await page.mouse.move(to.x, to.y, { steps: 8 });
+        }
+        // Both assertions run while the real pointer is still held, after crossing the threshold.
+        await expect(pressed(page)).toHaveCount(1);
+        await expect(tiles(page).first()).toHaveAttribute(
+          "aria-pressed",
+          "true"
+        );
+        await expect(page.locator("[data-marquee-band]")).toHaveCount(0);
+        expect(errors).toEqual([]);
+      } finally {
+        if (cdp) {
+          await cdp.send("Input.dispatchMouseEvent", {
+            type: "mouseReleased",
+            ...to,
+            button: "left",
+            buttons: 0,
+            clickCount: 1,
+            pointerType,
+          });
+          await cdp.detach();
+        } else {
+          await page.mouse.up();
+        }
+        page.off("pageerror", onError);
+      }
+    });
+  }
+
   test("click, Ctrl/Cmd-click and Shift-click select tiles; the bar counts copies, editions and locations", async ({
     page,
   }) => {
