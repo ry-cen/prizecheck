@@ -1,6 +1,7 @@
 import type { BorrowedMoveItem } from "../collection_generated";
 import {
   advance,
+  moveApi,
   createRemoval,
   operationFor,
   type HeldOperation,
@@ -221,10 +222,16 @@ export function useInventoryActions({
       operation.current = held;
       setProgress(held.op.target.kind === "move" ? "Moving…" : "Removing…");
       try {
-        const outcome = await advance(held.op, held.state);
+        const outcome = await advance(held.op, held.state, {
+          ...moveApi,
+          moveBorrowedCopies: async (body) => {
+            const result = await moveApi.moveBorrowedCopies(body);
+            // Remove confirmed Borrowed entries before preparing or committing the owned stage.
+            live.current.selection.dropBorrowed();
+            return result;
+          },
+        });
         const { op, state } = held;
-        if (state.borrowed === "done" && op.borrowed.length)
-          live.current.selection.dropBorrowed();
         if (outcome.kind !== "unknown") operation.current = null;
         const destination =
           op.target.kind === "move" ? place(op.target.destinationId) : "";
