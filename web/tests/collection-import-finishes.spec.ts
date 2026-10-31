@@ -327,4 +327,86 @@ test.describe("phone", () => {
       "phone Collection Import review, rows skipped"
     );
   });
+
+  test("the seven-item bulk finish menu fits a 320 px phone and keeps keyboard items hittable", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    seedImportCatalog();
+    await signIn(page);
+    await review(page, FINISHES, true);
+    await page.getByRole("button", { name: "Select all 4" }).tap();
+    const trigger = bulkBar(page).getByRole("button", {
+      name: "Set finish…",
+      exact: true,
+    });
+    await trigger.press("ArrowUp");
+    const menu = page.getByRole("menu", { name: "Set finish…" });
+    const items = menu.getByRole("menuitem");
+    await expect(items).toHaveCount(7);
+    const expectPanelBounds = async () => {
+      await expect
+        .poll(() =>
+          menu.evaluate((el) => {
+            const panel = el
+              .closest<HTMLElement>("[data-menu-panel]")!
+              .getBoundingClientRect();
+            return (
+              panel.left >= 7.5 &&
+              panel.top >= 7.5 &&
+              panel.right <= innerWidth - 7.5 &&
+              panel.bottom <= innerHeight - 7.5 &&
+              document.documentElement.scrollWidth <= innerWidth
+            );
+          })
+        )
+        .toBe(true);
+    };
+    const expectFocusedHit = async (item: Locator) => {
+      await expect(item).toBeFocused();
+      // Sample after the captured scroll events and positioning frames have settled; a transient hit is insufficient.
+      expect(
+        await item.evaluate(async (el) => {
+          for (let frame = 0; frame < 8; frame++) {
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve())
+            );
+            const r = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              r.left + r.width / 2,
+              r.top + r.height / 2
+            );
+            const viewport = el
+              .closest("ul")!
+              .parentElement!.getBoundingClientRect();
+            if (
+              document.activeElement !== el ||
+              r.top < viewport.top - 0.5 ||
+              r.bottom > viewport.bottom + 0.5 ||
+              !hit ||
+              !el.contains(hit)
+            )
+              return false;
+          }
+          return true;
+        })
+      ).toBe(true);
+    };
+    await expectPanelBounds();
+    await expectFocusedHit(items.last()); // ArrowUp-open starts at the last item.
+    await page.keyboard.press("Home");
+    // Hit-test every item in the scrolling list as keyboard navigation reveals it.
+    for (let index = 0; index < 7; index++) {
+      if (index > 0) await page.keyboard.press("ArrowDown");
+      await expectFocusedHit(items.nth(index));
+      await expectPanelBounds();
+    }
+    await page.keyboard.press("Home");
+    await page.keyboard.press("End");
+    await expectFocusedHit(items.last());
+    await expectPanelBounds();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
 });
