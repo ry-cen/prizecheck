@@ -1,3 +1,4 @@
+import { removeInventory } from "../inventoryUndo";
 import {
   BorrowedMoveError,
   type BorrowedMoveItem,
@@ -11,12 +12,12 @@ import {
   commitMove,
   type MoveResult,
 } from "../moves_generated";
-import { STAGE_BATCH } from "./inventoryActionsModel";
+import { STAGE_BATCH, type ActionTarget } from "./inventoryActionsModel";
 import type { SelectedGroup } from "./selectionModel";
 
 type Stage = "todo" | "done" | "unknown";
 export type MoveOperation = Readonly<{
-  target: { kind: "move"; destinationId: string };
+  target: Readonly<ActionTarget>;
   owned: readonly SelectedGroup[];
   borrowed: readonly BorrowedMoveItem[];
   stayed: number;
@@ -38,7 +39,13 @@ export type Outcome =
       stage: "borrowed" | "owned";
       error: unknown;
     };
-export const moveApi = { moveBorrowedCopies, startMove, stageMove, commitMove };
+export const moveApi = {
+  moveBorrowedCopies,
+  startMove,
+  stageMove,
+  commitMove,
+  removeInventory,
+};
 export type HeldOperation = { op: MoveOperation; state: OperationState };
 export function createOperation(
   destinationId: string,
@@ -67,7 +74,11 @@ export async function advance(
   state: OperationState,
   api = moveApi
 ): Promise<Outcome> {
-  if (op.borrowed.length && state.borrowed !== "done") {
+  if (
+    op.target.kind === "move" &&
+    op.borrowed.length &&
+    state.borrowed !== "done"
+  ) {
     try {
       state.borrowedResult = await api.moveBorrowedCopies({
         to_location_id: op.target.destinationId,
@@ -93,11 +104,14 @@ export async function advance(
           );
         state.staged = true;
       }
-      state.ownedResult = await api.commitMove(
-        state.manifestId,
-        op.target.destinationId,
-        op.ownedKey
-      );
+      state.ownedResult =
+        op.target.kind === "move"
+          ? await api.commitMove(
+              state.manifestId,
+              op.target.destinationId,
+              op.ownedKey
+            )
+          : await api.removeInventory(state.manifestId, op.ownedKey);
       state.owned = "done";
     } catch (error) {
       if (error instanceof MoveError && error.status < 500)
@@ -117,4 +131,16 @@ export function operationFor(
   borrowed: BorrowedMoveItem[]
 ) {
   return held ?? createOperation(destination, owned, borrowed);
+}
+
+/** Removal uses the same immutable owned stage, with no Borrowed stage or destination. */
+export function createRemoval(owned: SelectedGroup[]): HeldOperation {
+  const held = createOperation("", owned, []);
+  return {
+    ...held,
+    op: Object.freeze({
+      ...held.op,
+      target: Object.freeze({ kind: "remove" as const }),
+    }),
+  };
 }

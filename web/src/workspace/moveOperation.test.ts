@@ -4,6 +4,7 @@ import { MoveError } from "../moves_generated";
 import {
   advance,
   createOperation,
+  createRemoval,
   operationFor,
   type moveApi,
 } from "./moveOperation";
@@ -74,6 +75,13 @@ function server(
       commit("borrowed", body.idempotency_key, 1);
       return { copy_count: "1", owner_revision: 2 };
     },
+    removeInventory: async () => ({
+      copy_count: "2",
+      edition_count: 1,
+      source_count: 1,
+      already_at_destination_count: "0",
+      owner_revision: 3,
+    }),
     commitMove: async (id, _destination, key) => {
       expect(id).toBe("manifest");
       commit("owned", key, 2);
@@ -134,3 +142,34 @@ for (const only of ["borrowed", "owned"] as const)
     });
     expect(fake.applied.size).toBe(1);
   });
+
+test("Removal keeps its owned record after a lost response and resumes before a new Move", async () => {
+  const held = createRemoval(owned);
+  const fake = server("borrowed", "network");
+  const applied = new Set<string>();
+  let lost = false;
+  fake.api.removeInventory = async (_manifest, key) => {
+    applied.add(key);
+    if (!lost) {
+      lost = true;
+      throw new TypeError("lost response");
+    }
+    return {
+      copy_count: "2",
+      edition_count: 1,
+      source_count: 1,
+      already_at_destination_count: "0",
+      owner_revision: 3,
+    };
+  };
+  expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+    kind: "unknown",
+    stage: "owned",
+  });
+  const resumed = operationFor(held, "new-destination", [], borrowed);
+  expect(resumed).toBe(held);
+  expect(await advance(resumed.op, resumed.state, fake.api)).toEqual({
+    kind: "done",
+  });
+  expect([...applied]).toEqual([held.op.ownedKey]);
+});

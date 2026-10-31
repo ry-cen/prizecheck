@@ -205,12 +205,30 @@ def test_a_batch_racing_the_borrowers_return_confirmation_serialises(store):
 
 
 def test_a_batch_racing_a_handover_confirmation_of_another_loan_serialises(store):
-    owner, lender, edition, source, box, _, loan = setup()
-    accepted = ok(accept(lender, view(lender, sent(owner, lender, [(edition, 2)])), [(edition, 2)]))
+    owner, lender, edition, source, _, deck, loan = setup()
+    accepted = ok(accept(lender, view(lender, sent(owner, lender, [(edition, 2)], deck_id=deck)), [(edition, 2)]))
     ok(handover(lender, accepted))
     with ThreadPoolExecutor(max_workers=2) as pool:
-        moved = pool.submit(move, owner, box, [item(loan, edition, source)])
+        moved = pool.submit(move, owner, deck, [item(loan, edition, source)])
         arrived = pool.submit(handover, owner, accepted)
         ok(moved.result()); ok(arrived.result())
     assert ok(read(owner))['total'] == '5'
-    assert ok(read(owner, location_id=box))['total'] == '1'
+    assert ok(read(owner, location_id=deck))['total'] == '3'
+
+
+def test_owned_commit_replays_by_key_even_with_an_expired_manifest(store):
+    # The mixed operation must not re-stage after a lost commit response: replay precedes manifest validation.
+    from test_moves import commit, selected, stage, start
+    owner, _, edition, _, box, deck, _ = setup()
+    before = ok(call('GET', '/api/collection/holdings?location_id=' + box, owner))
+    row = next(row for row in before['holdings'] if row['edition_id'] == edition)
+    manifest = start(owner, box)
+    ok(stage(owner, manifest, [selected(edition, 1, row['version'])]))
+    key = uuid4()
+    first = ok(commit(owner, manifest, deck, key))
+    with connect() as conn:
+        conn.execute("""INSERT INTO move_manifest(owner_id,id,source_id,expires_at)
+          VALUES (%s,%s,%s,now()-interval '1 hour')""", (owner, manifest, box))
+    assert ok(commit(owner, manifest, deck, key)) == first
+    after = ok(call('GET', '/api/collection/holdings?location_id=' + box, owner))
+    assert int(next(row for row in after['holdings'] if row['edition_id'] == edition)['quantity']) == int(row['quantity']) - 1
