@@ -1,3 +1,4 @@
+import { canKeepSwapChoices, canRetrySwap } from "../social/confirmationRetry";
 import {
   useEffect,
   useId,
@@ -263,6 +264,34 @@ export function TradeScreen({
     return () => controller.abort();
   }, [tradeId, attempt]);
 
+  // Refresh an idle view when returning to it. An open consent dialog or unsettled command keeps its snapshot.
+  useEffect(() => {
+    if (tradeId === null || busy || confirming || asking) return;
+    let controller: AbortController | null = null;
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || keys.current.size > 0)
+        return;
+      controller?.abort();
+      const request = new AbortController();
+      controller = request;
+      Promise.all([
+        getTrade(tradeId, request.signal),
+        getTradeSide(tradeId, request.signal),
+      ])
+        .then(([trade, side]) => {
+          if (!request.signal.aborted) setLoad({ kind: "ready", trade, side });
+        })
+        .catch(() => {});
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      controller?.abort();
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [tradeId, busy, confirming, asking]);
+
   // After each render: a focus move asked for by the last press or step (FocusNext).
   useLayoutEffect(() => {
     const target = focusNext.current;
@@ -508,8 +537,8 @@ export function TradeScreen({
     const answered: { current: ConfirmedSwap | null } = { current: null };
     void step(
       "confirm",
-      (body) =>
-        confirmSwap(trade.id, {
+      async (body) => {
+        const command = {
           ...body,
           destination_id: gets && destination !== "" ? destination : null,
           deck_switches: sent.map((offer) => ({
@@ -518,7 +547,38 @@ export function TradeScreen({
             to_edition_id: offer.to_edition_id,
             count: offer.count,
           })),
-        }).then((answer) => (answered.current = answer)),
+        };
+        try {
+          return (answered.current = await confirmSwap(trade.id, command));
+        } catch (cause) {
+          if (
+            !(cause instanceof TradesError || cause instanceof SocialError) ||
+            cause.code !== "TRADE_CHANGED"
+          )
+            throw cause;
+          const [fresh, freshSide, tree] = await Promise.all([
+            getTrade(trade.id),
+            getTradeSide(trade.id, undefined, command.destination_id),
+            getLocationTree(),
+          ]);
+          if (
+            !canRetrySwap(trade, fresh, side, freshSide) ||
+            !canKeepSwapChoices(
+              freshSide,
+              tree.locations,
+              command.destination_id,
+              command.deck_switches
+            )
+          )
+            throw cause;
+          // Keep the revision with the held key if this retry's outcome is unknown.
+          setLoad({ kind: "ready", trade: fresh, side: freshSide });
+          return (answered.current = await confirmSwap(trade.id, {
+            ...command,
+            revision: fresh.revision,
+          }));
+        }
+      },
       () =>
         [
           swapDoneMessage(trade, gets ? (chosen?.path ?? "Unsorted") : null),
