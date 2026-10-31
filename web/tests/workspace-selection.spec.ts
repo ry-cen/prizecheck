@@ -244,30 +244,46 @@ test.describe("desktop", () => {
         { from, to }
       );
       expect(expected.length).toBeGreaterThan(0);
-      const size = await page.evaluate(() => ({
-        width: document.documentElement.scrollWidth,
-        height: document.documentElement.scrollHeight,
-      }));
       await page.mouse.move(from.x, from.y);
       await page.mouse.down();
       await page.mouse.move(to.x, to.y, { steps: 8 });
       const band = page.locator("[data-marquee-band]");
       await expect(band).toBeVisible();
       const bounds = await box(band);
-      expect(bounds.x).toBeGreaterThanOrEqual(main.x);
-      expect(bounds.y).toBeGreaterThanOrEqual(grid.y);
-      expect(bounds.x + bounds.width).toBeLessThanOrEqual(main.x + main.width);
-      expect(bounds.y + bounds.height).toBeLessThanOrEqual(
-        main.y + main.height
+      const currentMain = await box(page.getByRole("main"));
+      const currentGrid = await box(cards(page));
+      expect(bounds.x).toBeGreaterThanOrEqual(currentMain.x);
+      expect(bounds.y).toBeGreaterThanOrEqual(currentGrid.y);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(
+        currentMain.x + currentMain.width
       );
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(
+        currentMain.y + currentMain.height
+      );
+      // Selection can make the Inspector taller. Measure with the same selection, hiding only
+      // the band within one DOM task, so only overflow contributed by the band fails this check.
       await expect
         .poll(() =>
-          page.evaluate(() => ({
-            width: document.documentElement.scrollWidth,
-            height: document.documentElement.scrollHeight,
-          }))
+          band.evaluate((element) => {
+            const size = () => ({
+              width: document.documentElement.scrollWidth,
+              height: document.documentElement.scrollHeight,
+            });
+            const withBand = size();
+            const previousDisplay = element.style.display;
+            try {
+              element.style.display = "none";
+              const withoutBand = size();
+              return {
+                width: withBand.width - withoutBand.width,
+                height: withBand.height - withoutBand.height,
+              };
+            } finally {
+              element.style.display = previousDisplay;
+            }
+          })
         )
-        .toEqual(size);
+        .toEqual({ width: 0, height: 0 });
       await page.mouse.up();
       await expect(band).toHaveCount(0);
       await expect(pressed(page)).toHaveCount(expected.length);
