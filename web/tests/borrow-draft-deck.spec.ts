@@ -17,7 +17,7 @@ import { signInAsOwner } from "./support/sign-in";
 // For that Deck, through the existing deck_id. A draft already started keeps its own For Deck, a different Deck or
 // none; the unscoped All Decks Want List starts one with no Deck; the choice survives a reload, stays editable, and the
 // sent request carries it. The deck builder's panel is in deck-want-list-panel-friends.spec.ts. Brock lends a spare
-// Iono PAL 254 and a Boss's Orders; Misty a spare Iono PAL 254 and a Boss's Orders (the Swap catalog,
+// Iono PAL 185 and a Boss's Orders; Misty a spare Iono PAL 185 and a Boss's Orders (the Swap catalog,
 // api/tests/want_list_swap_fixtures.py). The Friends sign in first, so the test's own page signs in afterwards.
 
 const tray = (page: Page) =>
@@ -59,12 +59,12 @@ test("Ask on a Deck's Want List starts the draft For that Deck and never changes
   const brock = await collectors.signIn({ next: "/decks" });
   await nameCollector(brock.page, "Brock S");
   const brockUnsorted = await unsorted(brock.page);
-  await hold(brock.page, brockUnsorted, ids["PAL 254"], 1);
+  await hold(brock.page, brockUnsorted, ids["PAL 185"], 1);
   await hold(brock.page, brockUnsorted, ids["PAL 172"], 1);
   const misty = await collectors.signIn({ next: "/decks" });
   await nameCollector(misty.page, "Misty W");
   const mistyUnsorted = await unsorted(misty.page);
-  await hold(misty.page, mistyUnsorted, ids["PAL 254"], 1);
+  await hold(misty.page, mistyUnsorted, ids["PAL 185"], 1);
   await hold(misty.page, mistyUnsorted, ids["PAL 172"], 1);
 
   await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>

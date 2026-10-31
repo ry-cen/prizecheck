@@ -2,8 +2,8 @@
 and ``GET /api/social/card-matches``, through signed HTTP against PostgreSQL.
 
 Both answer Friends' copies from ``friend_copies`` only: for each card the Want List still needs (under the account's
-counting setting and the Deck in scope), or for one Card Printing, the copies the viewer's ``printings`` choice
-reaches, spare copies first. Neither carries a need, a Location or a Deck.
+counting setting and the Deck in scope) under Will accept, or for one Card Printing under ``printings``, spare copies
+first. Neither carries a need, a Location or a Deck.
 
 Every test seeds the Swap catalog (``want_list_swap_fixtures``) and starts new collectors.
 """
@@ -16,6 +16,7 @@ from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, hold, line
 from test_friend_copies import befriend, block, collector, hide, node, ok, place
 from test_holdings import call
+from test_trade_wants import set_rule
 from want_list_swap_fixtures import seed_swap_catalog
 
 COPY_FIELDS = ['collector_id', 'handle', 'display_name', 'edition_id', 'name', 'set_code', 'collector_number',
@@ -64,6 +65,7 @@ def test_each_needed_card_lists_its_friends_copies_spare_first_then_its_own_prin
     hold(misty, node(misty, 'Unsorted')['id'], ids['PAF 80'], 1)
     for key in ('PAL 185', 'PAL 254'):
         hold(brock, node(brock, 'Unsorted')['id'], ids[key], 1)
+    ok(set_rule(ash, ids['PAL 185'], 'identity'))
     body = ok(matches(ash))
     assert body['has_friends'] is True
     # Spare copies first, the wanted card's own Printing first among them, then by Friend; copies in a Deck last.
@@ -78,7 +80,8 @@ def test_each_needed_card_lists_its_friends_copies_spare_first_then_its_own_prin
     assert (other['handle'], other['display_name'], other['name'], other['set_code'], other['collector_number']) == (
         brock_handle, 'Brock S.', 'Iono', 'PAL', '254')
     assert wanted['copies'][3]['handle'] == misty_handle
-    # Exact printings: only the wanted card's own Printing.
+    # Any finish: only the wanted card's own Printing, regardless of the obsolete printings query.
+    ok(set_rule(ash, ids['PAL 185'], 'printing'))
     assert by_card(ok(matches(ash, printings='exact'))) == {ids['PAL 185']: [
         (brock, ids['PAL 185'], False, '1', '0'), (misty, ids['PAL 185'], False, '0', '1')]}
     # Nothing names a Deck or a Location, the viewer's or the Friend's.
@@ -188,6 +191,7 @@ def test_one_friend_copies_read_covers_every_friend_and_card(store, monkeypatch)
         befriend(ash, friend)
         for key in ('PAL 254', 'SVI 166', 'SVE 13'):
             hold(friend, node(friend, 'Unsorted')['id'], ids[key], 1)
+    ok(set_rule(ash, ids['PAL 185'], 'identity'))
     reads = []
     real = friend_reads.friend_copies
 
@@ -204,3 +208,31 @@ def test_one_friend_copies_read_covers_every_friend_and_card(store, monkeypatch)
     assert reads[0][1] >= {UUID(ids['PAL 185']), UUID(ids['PAL 254']), UUID(ids['PAF 80']), UUID(ids['SVE 5'])}
     reads.clear()
     assert len(ok(card(ash, printing_of(ids['SVI 166'])))['copies']) == 3 and len(reads) == 1
+
+
+def test_will_accept_controls_friend_editions_without_changing_want_list_counts(store):
+    ids = seed_swap_catalog()
+    (ash, _), (misty, _) = collector(), collector()
+    befriend(ash, misty)
+    wanted = deck(ash, 'Wanted', 0)
+    for key in ('SVI 166', 'SVE 5'):
+        line(ash, wanted, ids[key], 2)
+    for key in ('SVI 166', 'SVI 166 Reverse Holo', 'SVE 13', 'PAL 185'):
+        hold(misty, node(misty, 'Unsorted')['id'], ids[key], 3)
+    before = ok(call('GET', '/api/want-list', ash))
+
+    def editions():
+        return {wanted: {copy[1] for copy in copies} for wanted, copies in by_card(ok(matches(ash))).items()}
+
+    # Missing choice is exact Edition: the reverse finish and the other Energy Printing are excluded.
+    assert editions() == {ids['SVI 166']: {ids['SVI 166']}}
+    ok(set_rule(ash, ids['SVI 166'], 'printing'))
+    assert editions() == {ids['SVI 166']: {ids['SVI 166'], ids['SVI 166 Reverse Holo']}}
+    # Same Identity reaches another Printing even with no Reprint Group; a different Identity never matches.
+    ok(set_rule(ash, ids['SVE 5'], 'identity'))
+    assert editions() == {ids['SVI 166']: {ids['SVI 166'], ids['SVI 166 Reverse Holo']},
+                          ids['SVE 5']: {ids['SVE 13']}}
+    ok(set_rule(ash, ids['SVE 5'], 'printing'))
+    ok(set_rule(ash, ids['SVI 166'], 'edition'))
+    assert editions() == {ids['SVI 166']: {ids['SVI 166']}}
+    assert ok(call('GET', '/api/want-list', ash)) == before

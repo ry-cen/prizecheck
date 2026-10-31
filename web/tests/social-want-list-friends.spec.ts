@@ -187,6 +187,20 @@ for (const width of [1280, 390]) {
     await befriend(page, misty.page);
     await befriend(page, brock.page);
     await page.reload();
+    // Exact Edition is the default: Misty's PAL 185 matches, Brock's PAL 254 does not.
+    await expect(chips(page, "Iono").getByRole("listitem")).toHaveText([
+      "Misty W · 1 in a Deck",
+    ]);
+    const accept = page
+      .getByRole("list", { name: `What ${deckName} needs` })
+      .getByRole("radiogroup", { name: /^Will accept for Iono/ });
+    await expect(
+      accept.getByRole("radio", { name: "This exact card", exact: true })
+    ).toBeChecked();
+    await accept
+      .getByRole("radio", { name: "Any card with the same name", exact: true })
+      .check();
+    // Widening from the tile updates its Friend chips without a reload.
     // Spare copies first: Brock's spare PAL 254 (another Printing, so it says which), then Misty's copy in a Deck.
     await expect(chips(page, "Iono").getByRole("listitem")).toHaveText([
       "Brock S · 1 spare · PAL 254",
@@ -224,6 +238,18 @@ for (const width of [1280, 390]) {
         "the Want List with Friend chips on a phone"
       );
     }
+
+    // Narrowing from the tile refetches chips and the Friends view too, without changing the need.
+    await views(page).getByRole("radio", { name: "Buy" }).click();
+    await accept
+      .getByRole("radio", { name: "This exact card", exact: true })
+      .check();
+    await expect(chips(page, "Iono").getByRole("listitem")).toHaveText([
+      "Misty W · 1 in a Deck",
+    ]);
+    await views(page).getByRole("radio", { name: "Get from Friends" }).click();
+    await expect(iono).toContainText(`You need 2 · ${deckName}`);
+    await expect(chips(page, "Iono").getByRole("listitem")).toHaveCount(1);
   });
 }
 

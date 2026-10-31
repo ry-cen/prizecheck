@@ -5,7 +5,6 @@ import {
   type WantListMatches,
 } from "../social_generated";
 import type { WantList } from "../want_list_generated";
-import { readPrintings } from "./friendCards";
 
 /** Friends' cards for the Want List on the page: Friends' copies by the Edition of the card they match. */
 export type FriendMatches =
@@ -23,32 +22,32 @@ const NONE: FriendMatches = { kind: "none" };
 /**
  * Friends' cards for the Want List answer on the page (#251): GET /api/social/want-list-matches for the same scope,
  * read after the Want List and apart from it, so its revisions, its cost and its export never wait on Friends. It reads
- * again when the answer changes (another scope, or a Deck List, Holding or setting change). Until the first answer is in, and when
+ * again when the answer changes (another scope, or a Deck List, Holding, setting or Will accept change). Until the first answer is in, and when
  * the first read fails, there are no Friends' cards: the page is the Want List without them. A re-read that fails keeps
  * the last answer, with `pending` set.
  */
-export function useFriendMatches(list: WantList | null): FriendMatches {
+export function useFriendMatches(
+  list: WantList | null,
+  refresh: number
+): FriendMatches {
   const [state, setState] = useState<{
     key: string;
     answer: WantListMatches;
   } | null>(null);
-  const printings = useMemo(readPrintings, []);
   const key = list
     ? [
         list.deck_id ?? "",
         list.settings_revision,
         list.owner_revision,
         list.deck_lists_digest,
+        refresh,
       ].join(":")
     : "";
 
   useEffect(() => {
     if (!list) return;
     const controller = new AbortController();
-    getWantListMatches(
-      { deck: list.deck_id, printings },
-      controller.signal
-    ).then(
+    getWantListMatches({ deck: list.deck_id }, controller.signal).then(
       (answer) => {
         if (!controller.signal.aborted) setState({ key, answer });
       },
