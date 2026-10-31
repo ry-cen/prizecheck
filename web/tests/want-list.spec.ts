@@ -398,6 +398,42 @@ test.describe("on a desktop", () => {
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
+  for (const width of [320, 375, 390]) {
+    test(`long Deck scope chips fit at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await signIn(page);
+      const name =
+        "Charizard ex with a very long Deck name for the regional championship finals";
+      const deck = await createDeck(page, name, 1);
+      const { iono } = editions();
+      await setLine(page, deck, iono, 2);
+
+      for (const scoped of [false, true]) {
+        await page.goto(
+          `${ORIGIN}/decks/want-list${scoped ? `?deck=${deck}` : ""}`
+        );
+        const deckChip = chip(page, name);
+        await expect(deckChip).toBeVisible();
+        await expect(deckChip).toHaveAccessibleName(name);
+        await expect(deckChip).toHaveAttribute("aria-pressed", String(scoped));
+        await expectTouchTarget(deckChip);
+        await expect(deckChip.locator("[title]")).toHaveAttribute(
+          "title",
+          name
+        );
+        await expect.soft
+          .poll(() =>
+            page.evaluate(
+              () =>
+                document.documentElement.scrollWidth -
+                document.documentElement.clientWidth
+            )
+          )
+          .toBeLessThanOrEqual(0);
+      }
+    });
+  }
+
   test("the combined total is a collapsed row under the summary, and nothing scrolls sideways", async ({
     page,
   }) => {
