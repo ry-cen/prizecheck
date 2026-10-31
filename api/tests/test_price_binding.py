@@ -383,3 +383,15 @@ def test_rebind_pass_exception_is_logged_and_worker_keeps_serving(monkeypatch, c
     price_binding.spawn_rebind()
     price_binding.join_spawned_rebinds()
     assert len(calls) == 2
+
+
+def test_svp173_distinct_swapped_products_do_not_trigger_shared_price_guard():
+    # The public TCGdex ids are swapped; only an owner mapping correction can fix the prices.
+    rows = [dict(id='plain', descriptor=HOLO, product_id=610757, mapping_revision=1, offered={'Holofoil': True}),
+            dict(id='stamped', descriptor={**HOLO, 'stamp': ['pokemon-center']}, product_id=610758,
+                 mapping_revision=1, offered={'Holofoil': True})]
+    assert [r[3:5] for r in price_binding.resolve(rows)] == [('Holofoil', None), ('Holofoil', None)]
+    rows[0].update(product_id=610758, mapping_revision=2)
+    rows[1].update(product_id=610757, mapping_revision=2)
+    assert price_binding.resolve(rows) == [('plain', 610758, 2, 'Holofoil', None, True),
+                                          ('stamped', 610757, 2, 'Holofoil', None, True)]
