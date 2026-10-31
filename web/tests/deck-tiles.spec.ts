@@ -333,3 +333,131 @@ test.describe("on a phone", () => {
     );
   });
 });
+
+test("Deck layout stays readable through desktop and phone resizing", async ({
+  page,
+}) => {
+  promoteLegalCatalog();
+  await signIn(page);
+  await stubCost(page);
+  const built = await buildLegalDeck(
+    page,
+    "A long Deck name for checking compact cards and wrapping"
+  );
+  const published = await page.request.post(
+    `${ORIGIN}/api/decks/${built.deckId}/publication`,
+    {
+      headers: { origin: ORIGIN },
+      data: {
+        title:
+          "A long published Deck title for checking wrapping and readable publication controls",
+        idempotency_key: randomUUID(),
+      },
+    }
+  );
+  expect(published.status()).toBe(200);
+  const decksMain = page.getByRole("main").filter({
+    has: page.getByRole("heading", { name: "Decks", level: 1, exact: true }),
+  });
+  const widths = [1024, 1280, 1440, 1920, 320, 375, 390];
+  for (const count of [1, 6, 22]) {
+    for (let n = count === 1 ? 1 : count === 6 ? 1 : 6; n < count; n++)
+      await emptyDeck(page);
+    await page.goto(`${ORIGIN}/decks`);
+    await expect(deckIndex(page).getByRole("listitem")).toHaveCount(count);
+    await decksMain
+      .getByRole("textbox", { name: "Deck name", exact: true })
+      .fill("Unsaved Deck name");
+    for (const width of widths) {
+      await page.setViewportSize({
+        width,
+        height: width === 1920 ? 1080 : 900,
+      });
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              document.documentElement.scrollWidth <=
+              document.documentElement.clientWidth
+          )
+        )
+        .toBe(true);
+      await expect(
+        decksMain.getByRole("textbox", { name: "Deck name", exact: true })
+      ).toHaveValue("Unsaved Deck name");
+      await expectTouchTarget(
+        tile(page, built.deckName).getByRole("link", {
+          name: built.deckName,
+          exact: true,
+        })
+      );
+      await expect
+        .poll(() =>
+          decksMain.evaluate((el) =>
+            Math.round(el.getBoundingClientRect().width)
+          )
+        )
+        .toBe(Math.min(width, 1536));
+      await expect
+        .poll(() =>
+          tile(page, built.deckName).evaluate((el) => {
+            const art = el.firstElementChild!.getBoundingClientRect();
+            const link = el.querySelector("a")!.getBoundingClientRect();
+            return {
+              artWidth: Math.round(art.width),
+              horizontal: link.x > art.x + art.width,
+            };
+          })
+        )
+        .toMatchObject(
+          width > 760
+            ? { artWidth: 64, horizontal: true }
+            : { horizontal: false }
+        );
+    }
+  }
+  for (const [name, route] of [
+    ["want-all", "/decks/want-list"],
+    ["want-scoped", `/decks/want-list?deck=${built.deckId}`],
+  ]) {
+    await page.goto(`${ORIGIN}${route}`);
+    await expect(
+      decksMain
+        .getByRole("region", { name: built.deckName, exact: true })
+        .getByText("Basic Grass Energy", { exact: true })
+    ).toBeVisible();
+    for (const width of widths) {
+      await page.setViewportSize({
+        width,
+        height: width === 1920 ? 1080 : 900,
+      });
+      if (width > 760) {
+        await expect
+          .poll(() =>
+            decksMain.evaluate((el) =>
+              Math.round(el.getBoundingClientRect().width)
+            )
+          )
+          .toBe(Math.min(width, 1536));
+        if (name === "want-all") {
+          await expect
+            .poll(() =>
+              decksMain
+                .getByRole("complementary", { name: /^Combined total/ })
+                .evaluate((el) => Math.round(el.getBoundingClientRect().width))
+            )
+            .toBe(352);
+        } else {
+          await expect
+            .poll(() =>
+              decksMain
+                .getByRole("region", { name: /^Want List/ })
+                .locator("..")
+                .evaluate((el) => Math.round(el.getBoundingClientRect().width))
+            )
+            .toBe(Math.min(width - 56, 960));
+        }
+      }
+    }
+  }
+});
