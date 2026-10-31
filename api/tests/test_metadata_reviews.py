@@ -1058,12 +1058,13 @@ def test_the_matched_list_shows_main_set_matches_under_v6_with_the_group_and_lea
                       ("Radiant Charizard", "bw11", 901, 1465, 6)]
 
 
-def test_svp173_repair_records_both_owner_decisions_and_survives_source_rematch(world, price_store, tcgplayer_products):
+def test_svp173_repair_records_both_owner_decisions_and_survives_source_rematch(price_store, tcgplayer_products):
     import runpy
     from pathlib import Path
     from test_catalog_targets import listing, stock_prices
     from app.catalog_targets import refresh_editions, TargetContext
 
+    seed_users()
     root = Path(__file__).resolve().parents[2]
     record = json.loads((root / 'api/tests/fixtures/svp173/card.json').read_text())
     listing(610757, 'Eevee - 173 (Pokemon Center Exclusive)', '173', 22872)
