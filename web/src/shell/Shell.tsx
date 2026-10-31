@@ -373,7 +373,7 @@ function ShellFrame({
           #246, and the bell, #259). The page's own heading sits right under it and the tab bar marks the section, so a title here would
           only repeat them. Where the wordmark and the actions can't share one row (a 320 px phone with text at 200%), the
           actions wrap onto a second row, still at the end, as the public header's links do; the header scrolls away on a
-          phone, so nothing sticky depends on its height. */}
+          phone. Collection supplies its own compact sticky header on taller phones. */}
           {(showing !== "collection" || collectionStandIns.size > 0) && (
             <header className="box-border hidden min-h-header flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2 phone:flex">
               <Wordmark />

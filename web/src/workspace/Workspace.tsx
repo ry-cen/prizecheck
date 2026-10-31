@@ -595,7 +595,7 @@ export function Workspace({
           drawer, the page title (for screen readers only: the tab bar marks the section, and Search needs the room
           once the bell joins the header actions, #259), then Search, Filters & display and the shell's phone header
           actions (#246). */}
-      <header className="box-border hidden h-header items-center gap-2 border-b border-border px-3 phone:flex">
+      <header className="box-border hidden h-header items-center gap-0 border-b border-border px-0 phone:flex collection-pinned:sticky collection-pinned:top-0 collection-pinned:z-(--layer-sticky) collection-pinned:bg-bg">
         <Button
           ref={drawerOpener}
           variant="quiet"
@@ -615,7 +615,7 @@ export function Workspace({
           onOpen={() => setFiltersDrawerOpen(true)}
         />
         {/* The camera button sits with the header actions (one gap, 4 px, not two): Search needs 44 px at 375. */}
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0 [&>div]:gap-0">
           <Button
             variant="quiet"
             icon={CameraIcon}
@@ -723,6 +723,7 @@ export function Workspace({
             </section>
           )}
           <StaleBanner
+            active={active}
             stale={staleness.stale}
             note={staleness.note}
             busy={actions.busy}
