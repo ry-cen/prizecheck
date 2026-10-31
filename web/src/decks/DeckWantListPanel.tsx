@@ -17,9 +17,9 @@ const NO_COPIES = new Map<string, FriendCopy[]>();
 /**
  * The deck builder's Ways to get missing cards (finish-deck flow): this Deck's section of the Want List
  * (GET /api/want-list?deck=<id>) inside the Deck List, with the Want List's own controls reused (`NeededLines`): Swap
- * with Undo, Friend chips with Ask, Will accept, and each line's cost. Its "N of M" counts are the Want List's, under the
- * counting setting it names, which can differ from the readiness counts' "not owned". Buy missing and the Want List
- * button stay in row 1; the panel adds no buy or export control.
+ * with Undo, Friend chips with Ask (a new Borrow Request draft is For this Deck), Will accept, and each line's cost.
+ * Its "N of M" counts are the Want List's, under the counting setting it names, which can differ from the readiness
+ * counts' "not owned". Buy missing and the Want List button stay in row 1; the panel adds no buy or export control.
  *
  * The toggle shows while any copy is missing from this Deck. Nothing is read until it first opens; from then on the
  * panel stays mounted, collapsed or not and even once the Deck is complete, so a Swap's Undo toast lives as long as the
@@ -170,6 +170,7 @@ function PanelBody({ deckId, pins }: { deckId: string; pins: string }) {
             swap={swap}
             byCard={byCard}
             trade={trade}
+            borrowFor={deckId}
           />
         )}
       </div>

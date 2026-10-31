@@ -295,6 +295,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
               )}
               cap={copyCap(copy)}
               lendable={lendableText(copy)}
+              deckId={shownScope}
             />
           )}
           asked={
@@ -335,6 +336,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
                 swap={swap}
                 byCard={byCard}
                 trade={trade}
+                borrowFor={shownScope}
               />
             ))}
             {!shownScope && <TradeWantsPanel api={trade} />}
@@ -357,6 +359,7 @@ function DeckSection({
   swap,
   byCard,
   trade,
+  borrowFor,
 }: {
   section: WantListSection;
   deckName: (id: string) => string;
@@ -366,6 +369,8 @@ function DeckSection({
   byCard: Map<string, FriendCopy[]>;
   /** The collector's Will accept choices (#275). */
   trade: TradeWantsApi;
+  /** The Deck a new Borrow Request draft is For, or null (NeededLines). */
+  borrowFor: string | null;
 }) {
   const idBase = useId();
   return (
@@ -407,6 +412,7 @@ function DeckSection({
           swap={swap}
           byCard={byCard}
           trade={trade}
+          borrowFor={borrowFor}
         />
       )}
     </section>
@@ -416,6 +422,8 @@ function DeckSection({
 /**
  * A section's lines that still need copies (#209), each with its Will accept select (#275), Swap hint (#211) and Friend
  * chips with Ask (#251). The Want List's Deck sections and the deck builder's Ways to get missing cards panel draw them.
+ * A chip that starts a Friend's Borrow Request draft makes it For `borrowFor`: the section's Deck where the page is
+ * about that one Deck, and none on All Decks.
  */
 export function NeededLines({
   section,
@@ -423,6 +431,7 @@ export function NeededLines({
   swap,
   byCard,
   trade,
+  borrowFor,
 }: {
   section: WantListSection;
   deckName: (id: string) => string;
@@ -431,6 +440,8 @@ export function NeededLines({
   byCard: Map<string, FriendCopy[]>;
   /** The collector's Will accept choices (#275). */
   trade: TradeWantsApi;
+  /** The Deck a new Borrow Request draft is For, or null for none. */
+  borrowFor: string | null;
 }) {
   return (
     <ul
@@ -470,6 +481,7 @@ export function NeededLines({
                 cap={copyCap(copy)}
                 lendable={lendableText(copy)}
                 text={text}
+                deckId={borrowFor}
               />
             )}
           />

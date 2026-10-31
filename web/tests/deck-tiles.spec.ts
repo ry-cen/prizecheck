@@ -320,7 +320,7 @@ test.describe("on a phone", () => {
     );
     await expectPageChecks(page, "Decks index tiles, phone");
     await mine.getByRole("link", { name: built.deckName, exact: true }).tap();
-    // A phone opens the deck builder on Library; the Want List button is on the Deck tab.
+    // A phone opens a Deck that lists cards on its Deck tab, where the Want List button is.
     await page.getByRole("tab", { name: /^Deck / }).tap();
     const wantList = page.getByRole("button", {
       name: "Want List",

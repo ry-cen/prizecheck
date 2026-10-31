@@ -526,7 +526,7 @@ test.describe("on a desktop", () => {
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-  test("the builder opens on Library, the Deck tab carries the live count, and the Deck List opens Stacked", async ({
+  test("a Deck with cards opens on its Deck tab, which carries the live count, and the Deck List opens Stacked", async ({
     page,
   }) => {
     promoteCatalog();
@@ -537,16 +537,6 @@ test.describe("on a phone", () => {
 
     const library = page.getByRole("tab", { name: "Library" });
     const deck = page.getByRole("tab", { name: "Deck 23/60" });
-    await expect(library).toHaveAttribute("aria-selected", "true");
-    // The library (#177) fills the Library tab.
-    await expect(
-      page
-        .getByRole("tabpanel")
-        .getByRole("searchbox", { name: "Search the library" })
-    ).toBeVisible();
-    await expectPageChecks(page, "phone deck builder, Library");
-
-    await deck.tap();
     await expect(deck).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("radio", { name: "Stacked" })).toBeChecked();
     const pile = page.getByRole("button", { name: /^Charmander, / });
@@ -560,6 +550,18 @@ test.describe("on a phone", () => {
     await sheet.getByRole("button", { name: "Close card" }).tap();
     await expect(sheet).toBeHidden();
 
+    // The library (#177) fills the Library tab, which stays chosen.
+    await library.tap();
+    await expect(library).toHaveAttribute("aria-selected", "true");
+    await expect(
+      page
+        .getByRole("tabpanel")
+        .getByRole("searchbox", { name: "Search the library" })
+    ).toBeVisible();
+    await expectPageChecks(page, "phone deck builder, Library");
+
+    await deck.tap();
+    await expect(deck).toHaveAttribute("aria-selected", "true");
     await page.getByRole("radio", { name: "Spread" }).tap();
     await expect(
       page.getByRole("button", { name: /^Basic Fire Energy, / })
