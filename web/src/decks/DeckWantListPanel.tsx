@@ -101,7 +101,7 @@ function PanelBody({ deckId, pins }: { deckId: string; pins: string }) {
     },
     notify: setNotice,
   });
-  const friends = useFriendMatches(list);
+  const friends = useFriendMatches(list, attempt);
   const trade = useTradeWants(reload);
   // What this Deck is waiting on from Friends, read apart from the Want List, so a refresh reads no cost again. The
   // builder's pins (Deck List, owner and settings revisions) read it again whenever they read the Want List again.
