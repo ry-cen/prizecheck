@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { MoveLocks } from "./moveRecovery";
 import { indexLocations } from "./locationTree";
 
 // Small hook host: effects and state transitions run without a browser or a new test dependency.
@@ -152,6 +153,37 @@ const older = {
   source_count: 0,
   expires_at: "later",
 };
+let serverNow: number;
+function testLocks(): MoveLocks {
+  const held = new Set<string>();
+  return {
+    async request(
+      name: string,
+      _options: LockOptions,
+      work: (lock: Lock | null) => Promise<unknown>
+    ) {
+      if (held.has(name)) return work(null);
+      held.add(name);
+      try {
+        return await work({ name, mode: "exclusive" });
+      } finally {
+        held.delete(name);
+      }
+    },
+    async query() {
+      return {
+        held: [...held].map((name) => ({ name, mode: "exclusive" as const })),
+        pending: [],
+      };
+    },
+  } as unknown as MoveLocks;
+}
+function sessionResponse(userId = "A") {
+  return Response.json(
+    { signedIn: true, userId },
+    { headers: { date: new Date(serverNow).toUTCString() } }
+  );
+}
 let disk: Storage, witness: Storage;
 function options(userId = "A"): Parameters<typeof useInventoryActions>[0] {
   return {
@@ -200,6 +232,8 @@ function render(opts: ReturnType<typeof options>) {
 beforeEach(() => {
   host.reset();
   vi.clearAllMocks();
+  serverNow = Date.parse("2026-10-31T20:00:00Z");
+  vi.stubGlobal("navigator", { locks: testLocks() });
   disk = storage();
   witness = storage();
   vi.stubGlobal("localStorage", disk);
@@ -213,7 +247,7 @@ beforeEach(() => {
   vi.stubGlobal("document", { activeElement: null, body: {} });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => Response.json({ signedIn: true, userId: "A" }))
+    vi.fn(async () => sessionResponse())
   );
   vi.mocked(listUndo).mockResolvedValue([older]);
   vi.mocked(moveBorrowedCopies).mockResolvedValue({
@@ -350,7 +384,7 @@ test("reload restores confirmed borrowed progress and reuses the original owned 
 test("account mismatch at preflight sends no inventory request", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => Response.json({ signedIn: true, userId: "B" }))
+    vi.fn(async () => sessionResponse("B"))
   );
   const opts = options();
   await render(opts).dropMove("dest", { groups: owned, borrowed });
@@ -378,10 +412,10 @@ test("erasing a live record blocks retry and allows dismissal only after explici
   let actions = render(opts);
   expect(actions.pending?.blocked).toBe(true);
   expect(commitMoveWithoutUndo).toHaveBeenCalledTimes(1);
-  actions.dismissPending(false);
+  await actions.dismissPending(false);
   actions = render(opts);
   expect(actions.pending).not.toBeNull();
-  actions.dismissPending(true);
+  await actions.dismissPending(true);
   actions = render(opts);
   expect(actions.pending).toBeNull();
   expect(commitMoveWithoutUndo).toHaveBeenCalledExactlyOnceWith(...first);
@@ -401,7 +435,7 @@ test("changing accounts in place hides A's recovery before rendering B's actions
 test("restored expired recovery has no retry and can be dismissed only after review", async () => {
   const { createOperation, PENDING_MOVE_MAX_AGE_MS } =
     await import("./moveOperation");
-  const held = createOperation("dest", owned, borrowed);
+  const held = createOperation("dest", owned, borrowed, serverNow);
   held.state.borrowed = "done";
   held.state.borrowedResult = { copy_count: "1", owner_revision: 2 };
   held.state.manifestId = "original";
@@ -409,20 +443,22 @@ test("restored expired recovery has no retry and can be dismissed only after rev
   held.state.ownedAttempted = true;
   held.state.owned = "unknown";
   pendingMoves("A").save(held);
+  serverNow += PENDING_MOVE_MAX_AGE_MS;
   const clock = vi
     .spyOn(Date, "now")
-    .mockReturnValue(held.op.createdAt + PENDING_MOVE_MAX_AGE_MS);
+    .mockReturnValue(held.op.createdAt - 24 * 60 * 60 * 1000);
   try {
     const opts = options();
     let actions = render(opts);
-    expect(actions.pending?.blocked).toBe(true);
     expect(actions.pending?.text).toContain("Moved 1 borrowed copy");
     await actions.checkPending();
+    actions = render(opts);
+    expect(actions.pending?.blocked).toBe(true);
     expect(commitMoveWithoutUndo).not.toHaveBeenCalled();
     expect(pendingMoves("A").load()?.op.ownedKey).toBe(held.op.ownedKey);
-    actions.dismissPending(false);
+    await actions.dismissPending(false);
     expect(render(opts).pending).not.toBeNull();
-    actions.dismissPending(true);
+    await actions.dismissPending(true);
     actions = render(opts);
     expect(actions.pending).toBeNull();
     expect(startMove).not.toHaveBeenCalled();
@@ -430,4 +466,142 @@ test("restored expired recovery has no retry and can be dismissed only after rev
   } finally {
     clock.mockRestore();
   }
+});
+
+test("another tab's writer blocks normal Moves as well as mixed Moves, and adoption re-reads its manifest", async () => {
+  const { withMoveWriter } = await import("./moveRecovery");
+  const { createOperation } = await import("./moveOperation");
+  let entered!: () => void, release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const held = createOperation("dest", owned, borrowed, serverNow);
+  held.state.borrowed = "done";
+  held.state.borrowedResult = { copy_count: "1", owner_revision: 2 };
+  held.state.manifestId = "original";
+  held.state.staged = true;
+  held.state.ownedAttempted = true;
+  held.state.owned = "unknown";
+  held.state.ownedFirstAttempt = "first";
+  held.state.ownedAttempt = "first";
+  const owner = withMoveWriter("A", async () => {
+    pendingMoves("A").save(held);
+    entered();
+    await waiting;
+  });
+  await ready;
+  const opts = options();
+  let actions = render(opts);
+  await actions.dropMove("different-dest", { groups: owned, borrowed: [] });
+  actions = render(opts);
+  expect(actions.pending?.otherTab).toBe(true);
+  expect(actions.pending?.text).toContain("in progress in another tab");
+  expect(actions.pending?.text).toContain("Moved 1 borrowed copy");
+  expect(startMove).not.toHaveBeenCalled();
+  expect(commitMoveWithoutUndo).not.toHaveBeenCalled();
+  release();
+  await owner;
+  await actions.refreshPending();
+  actions = render(opts);
+  expect(actions.pending?.otherTab).toBe(false);
+  vi.mocked(commitMoveWithoutUndo).mockResolvedValue({
+    copy_count: "2",
+    edition_count: 1,
+    source_count: 1,
+    already_at_destination_count: "0",
+    owner_revision: 3,
+    undo_id: null,
+  });
+  await actions.checkPending();
+  expect(commitMoveWithoutUndo).toHaveBeenCalledExactlyOnceWith(
+    "original",
+    "dest",
+    held.op.ownedKey
+  );
+  expect(startMove).not.toHaveBeenCalled();
+});
+
+test("mixed Moves fail closed without Web Locks", async () => {
+  vi.stubGlobal("navigator", {});
+  const opts = options();
+  await render(opts).dropMove("dest", { groups: owned, borrowed });
+  expect(render(opts).pending?.blocked).toBe(true);
+  expect(moveBorrowedCopies).not.toHaveBeenCalled();
+  expect(startMove).not.toHaveBeenCalled();
+  expect(pendingMoves("A").load()).toBeNull();
+});
+
+test("missing server Date blocks creation before any inventory POST", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ signedIn: true, userId: "A" }))
+  );
+  const opts = options();
+  await render(opts).dropMove("dest", { groups: owned, borrowed });
+  expect(render(opts).pending?.blocked).toBe(true);
+  expect(moveBorrowedCopies).not.toHaveBeenCalled();
+  expect(startMove).not.toHaveBeenCalled();
+});
+
+test("a stale unreadable-data review cannot dismiss a different operation published by another writer", async () => {
+  const { withMoveWriter } = await import("./moveRecovery");
+  const { createOperation } = await import("./moveOperation");
+  const { pendingMovePrefix } = await import("./pendingMove");
+  disk.setItem(pendingMovePrefix("A") + "broken", "{");
+  const opts = options(),
+    actions = render(opts);
+  expect(actions.pending?.blocked).toBe(true);
+  const held = createOperation("dest", owned, borrowed, serverNow);
+  await withMoveWriter("A", async () => {
+    const store = pendingMoves("A");
+    store.dismissUnreadable(serverNow);
+    store.save(held);
+  });
+  await actions.dismissPending(true);
+  expect(pendingMoves("A").load()?.op.id).toBe(held.op.id);
+  expect(render(opts).pending?.id).toBe(held.op.id);
+});
+
+test("another tab's terminal receipt clears the old uncertainty message as well as the witness", async () => {
+  const { withMoveWriter } = await import("./moveRecovery");
+  let opts = options(),
+    actions = render(opts);
+  await actions.dropMove("dest", { groups: owned, borrowed });
+  opts = {
+    ...opts,
+    holdings: [],
+    byKey: new Map(),
+    selection: {
+      ...opts.selection,
+      summary: { ...opts.selection.summary, copies: 0 },
+    },
+  };
+  render(opts);
+  actions = render(opts);
+  expect(actions.toast?.message).toContain("may not have finished");
+  await withMoveWriter("A", async () => {
+    const witness = storage(),
+      other = pendingMoves("A", disk, witness),
+      latest = other.load()!;
+    latest.state.owned = "done";
+    latest.state.ownedResult = {
+      copy_count: "2",
+      edition_count: 1,
+      source_count: 1,
+      already_at_destination_count: "0",
+      owner_revision: 3,
+      undo_id: null,
+    };
+    other.save(latest);
+    other.remove(latest, "done", serverNow);
+  });
+  await actions.refreshPending();
+  actions = render(opts);
+  expect(actions.pending).toBeNull();
+  expect(actions.toast?.message).toBe("Move checking finished in another tab.");
+  expect(actions.toast?.entry).toBeNull();
+  expect(pendingMoves("A").load()).toBeNull();
 });

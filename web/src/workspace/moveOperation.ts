@@ -22,6 +22,7 @@ export class RecoveryBlocked extends Error {}
 export type MoveOperation = Readonly<{
   id: string;
   createdAt: number;
+  serverCreatedAt?: number;
   target: Readonly<ActionTarget>;
   owned: readonly SelectedGroup[];
   borrowed: readonly BorrowedMoveItem[];
@@ -33,13 +34,25 @@ export type MoveOperation = Readonly<{
 export type OperationState = {
   manifestId: string | null;
   manifestAttempted?: boolean;
+  lastServerTime?: number;
+  lastServerDate?: number;
+  revision?: number;
+  borrowedFirstAttempt?: string;
+  borrowedAttempt?: string;
+  ownedFirstAttempt?: string;
+  ownedAttempt?: string;
   staged: boolean;
   borrowed: Stage;
   owned: Stage;
   borrowedAttempted: boolean;
   ownedAttempted: boolean;
   blocked?: boolean;
-  refusal?: { stage: "owned" | "borrowed"; status: number; code: string };
+  refusal?: {
+    stage: "owned" | "borrowed";
+    status: number;
+    code: string;
+    attemptId?: string;
+  };
   borrowedResult?: BorrowedMoveResult;
   ownedResult?: MoveResult;
 };
@@ -62,7 +75,8 @@ export type HeldOperation = { op: MoveOperation; state: OperationState };
 export function createOperation(
   destinationId: string,
   owned: SelectedGroup[],
-  borrowed: BorrowedMoveItem[]
+  borrowed: BorrowedMoveItem[],
+  serverCreatedAt?: number
 ): HeldOperation {
   const moving = borrowed.filter(
     (item) => item.from_location_id !== destinationId
@@ -70,7 +84,8 @@ export function createOperation(
   return {
     op: Object.freeze({
       id: crypto.randomUUID(),
-      createdAt: Date.now(),
+      createdAt: serverCreatedAt ?? Date.now(),
+      ...(serverCreatedAt === undefined ? {} : { serverCreatedAt }),
       target: Object.freeze({ kind: "move" as const, destinationId }),
       owned: Object.freeze(
         owned
@@ -108,6 +123,14 @@ export async function advance(
   api = moveApi,
   checkpoint: (beforeWrite: boolean) => void | Promise<void> = () => {}
 ): Promise<Outcome> {
+  if (op.noUndo && state.blocked) {
+    state.blocked = true;
+    return {
+      kind: "unknown",
+      stage: state.borrowed === "done" ? "owned" : "borrowed",
+      error: new RecoveryBlocked(),
+    };
+  }
   const refused = state.refusal;
   if (refused)
     return {
@@ -118,21 +141,6 @@ export async function advance(
           ? new MoveError(refused.status, refused.code)
           : new BorrowedMoveError(refused.status, refused.code),
     };
-  if (
-    op.noUndo &&
-    (state.blocked ||
-      (!state.refusal &&
-        (state.borrowed !== "done" || state.owned !== "done") &&
-        (Date.now() < op.createdAt ||
-          Date.now() - op.createdAt >= PENDING_MOVE_MAX_AGE_MS)))
-  ) {
-    state.blocked = true;
-    return {
-      kind: "unknown",
-      stage: state.borrowed === "done" ? "owned" : "borrowed",
-      error: new RecoveryBlocked(),
-    };
-  }
   const settleFailure = async (
     stage: "owned" | "borrowed",
     error: unknown,
@@ -168,6 +176,8 @@ export async function advance(
         stage,
         status: error.status,
         code: error.code,
+        attemptId:
+          stage === "owned" ? state.ownedAttempt : state.borrowedAttempt,
       };
       try {
         await checkpoint(false);
@@ -192,6 +202,8 @@ export async function advance(
   ) {
     const attempted = state.borrowedAttempted;
     try {
+      state.borrowedAttempt = crypto.randomUUID();
+      state.borrowedFirstAttempt ??= state.borrowedAttempt;
       state.borrowedAttempted = true;
       state.borrowed = "unknown";
       await checkpoint(true);
@@ -229,6 +241,8 @@ export async function advance(
         state.staged = true;
         await checkpoint(false);
       }
+      state.ownedAttempt = crypto.randomUUID();
+      state.ownedFirstAttempt ??= state.ownedAttempt;
       state.ownedAttempted = true;
       state.owned = "unknown";
       await checkpoint(true);
@@ -332,9 +346,10 @@ export function operationFor(
   held: HeldOperation | null,
   destination: string,
   owned: SelectedGroup[],
-  borrowed: BorrowedMoveItem[]
+  borrowed: BorrowedMoveItem[],
+  serverCreatedAt?: number
 ) {
-  return held ?? createOperation(destination, owned, borrowed);
+  return held ?? createOperation(destination, owned, borrowed, serverCreatedAt);
 }
 
 /** Removal uses the same immutable owned stage, with no Borrowed stage or destination. */

@@ -8,6 +8,8 @@ import {
   type moveApi,
 } from "./moveOperation";
 import { pendingMoves, pendingMovePrefix, recoveryText } from "./pendingMove";
+import { MoveServerClock } from "./moveRecovery";
+const SERVER_TIME = Date.parse("2026-10-31T20:00:00Z");
 import { MoveError } from "../moves_generated";
 
 export function memoryStorage(): Storage {
@@ -95,7 +97,7 @@ for (const boundary of [
     const disk = memoryStorage(),
       witness = memoryStorage();
     const store = pendingMoves("A", disk, witness),
-      held = createOperation("dest", owned, borrowed),
+      held = createOperation("dest", owned, borrowed, SERVER_TIME),
       fake = backend();
     store.save(held);
     let reached!: () => void;
@@ -141,7 +143,7 @@ for (const stage of ["borrowed", "owned"] as const)
   test(`${stage} response lost after commit replays the original key after reload exactly once`, async () => {
     const disk = memoryStorage(),
       witness = memoryStorage(),
-      held = createOperation("dest", owned, borrowed),
+      held = createOperation("dest", owned, borrowed, SERVER_TIME),
       fake = backend();
     const store = pendingMoves("A", disk, witness);
     store.save(held);
@@ -178,19 +180,19 @@ for (const stage of ["borrowed", "owned"] as const)
 test("accounts cannot read or dismiss each other's records; signing back in restores A", () => {
   const disk = memoryStorage(),
     witness = memoryStorage(),
-    held = createOperation("dest", owned, borrowed);
+    held = createOperation("dest", owned, borrowed, SERVER_TIME);
   const a = pendingMoves("A", disk, witness);
   a.save(held);
   const b = pendingMoves("B", disk, witness);
   expect(b.load()).toBeNull();
-  b.dismissUnreadable();
+  b.dismissUnreadable(SERVER_TIME);
   expect(pendingMoves("A", disk, witness).load()?.op).toEqual(held.op);
 });
 
 test("storage deletion blocks the live operation and reload without recreating its record", () => {
   const disk = memoryStorage(),
     witness = memoryStorage(),
-    held = createOperation("dest", owned, borrowed);
+    held = createOperation("dest", owned, borrowed, SERVER_TIME);
   const store = pendingMoves("A", disk, witness);
   store.save(held);
   disk.clear();
@@ -208,14 +210,14 @@ test("unreadable data is retained and blocks fresh writes until reviewed", () =>
   const store = pendingMoves("A", disk, witness);
   expect(() => store.load()).toThrow();
   expect(disk.length).toBe(1);
-  store.dismissUnreadable();
+  store.dismissUnreadable(SERVER_TIME);
   expect(store.load()).toBeNull();
 });
 
 test("quota failure persists nothing and prevents any inventory POST", async () => {
   const disk = memoryStorage(),
     witness = memoryStorage(),
-    held = createOperation("dest", owned, borrowed),
+    held = createOperation("dest", owned, borrowed, SERVER_TIME),
     fake = backend();
   disk.setItem = () => {
     throw new Error("quota");
@@ -234,31 +236,37 @@ test("quota failure persists nothing and prevents any inventory POST", async () 
   expect(fake.applied()).toBe(0);
 });
 
-test("past the conservative receipt cutoff recovery is blocked without any new POST or key", async () => {
-  vi.useFakeTimers();
+test("past the conservative receipt cutoff fresh server time blocks without any new POST or key", async () => {
   const disk = memoryStorage(),
     witness = memoryStorage(),
-    held = createOperation("dest", owned, borrowed),
+    held = createOperation("dest", owned, borrowed, SERVER_TIME),
     fake = backend();
   const store = pendingMoves("A", disk, witness);
   store.save(held);
-  const keys = [held.op.borrowedKey, held.op.ownedKey];
-  vi.setSystemTime(Date.now() + PENDING_MOVE_MAX_AGE_MS);
-  const restored = store.load()!;
-  expect(restored.state.blocked).toBe(true);
-  expect(await advance(restored.op, restored.state, fake.api)).toMatchObject({
-    kind: "unknown",
+  const restored = store.load()!,
+    clock = new MoveServerClock(() => 0);
+  const response = new Response(null, {
+    headers: {
+      date: new Date(SERVER_TIME + PENDING_MOVE_MAX_AGE_MS).toUTCString(),
+    },
   });
+  expect(
+    await advance(restored.op, restored.state, fake.api, () => {
+      clock.check(restored, response);
+      store.save(restored);
+    })
+  ).toMatchObject({ kind: "unknown" });
+  expect(restored.state.blocked).toBe(true);
   expect(fake.applied()).toBe(0);
   expect(fake.api.startMove).not.toHaveBeenCalled();
-  expect([restored.op.borrowedKey, restored.op.ownedKey]).toEqual(keys);
+  expect(restored.op.ownedKey).toBe(held.op.ownedKey);
   expect(recoveryText(restored, "Box", true)).toContain(
     "Check the source and destination Location contents"
   );
 });
 
 test("an unrecorded owned outcome after a prior attempt blocks instead of rebuilding its manifest", async () => {
-  const held = createOperation("dest", owned, borrowed),
+  const held = createOperation("dest", owned, borrowed, SERVER_TIME),
     fake = backend();
   held.state.borrowed = "done";
   held.state.borrowedResult = { copy_count: "1", owner_revision: 2 };
@@ -276,7 +284,7 @@ test("an unrecorded owned outcome after a prior attempt blocks instead of rebuil
 });
 
 test("a preparation refusal before any owned commit is known and preserves borrowed progress", async () => {
-  const held = createOperation("dest", owned, borrowed),
+  const held = createOperation("dest", owned, borrowed, SERVER_TIME),
     fake = backend();
   fake.api.stageMove = async () => {
     throw new MoveError(404, "MOVE_MANIFEST_NOT_FOUND");
@@ -293,7 +301,7 @@ test("a preparation refusal before any owned commit is known and preserves borro
 test("a lost manifest-start response never causes a replacement manifest on recovery", async () => {
   const disk = memoryStorage(),
     witness = memoryStorage(),
-    held = createOperation("dest", owned, borrowed),
+    held = createOperation("dest", owned, borrowed, SERVER_TIME),
     fake = backend();
   const store = pendingMoves("A", disk, witness);
   store.save(held);
@@ -316,7 +324,7 @@ test("a lost manifest-start response never causes a replacement manifest on reco
 test("a disabled session witness also fails closed before any inventory write", async () => {
   const disk = memoryStorage(),
     witness = memoryStorage(),
-    held = createOperation("dest", owned, borrowed),
+    held = createOperation("dest", owned, borrowed, SERVER_TIME),
     fake = backend();
   witness.setItem = () => {
     throw new Error("disabled");
@@ -336,7 +344,7 @@ test("a disabled session witness also fails closed before any inventory write", 
 });
 
 test("a first request-validation 422 is a known non-mutating refusal", async () => {
-  const held = createOperation("dest", owned, borrowed),
+  const held = createOperation("dest", owned, borrowed, SERVER_TIME),
     fake = backend();
   fake.api.commitMoveWithoutUndo = async () => {
     throw new MoveError(422, "MOVE_REQUEST_FAILED");
@@ -350,7 +358,7 @@ test("a first request-validation 422 is a known non-mutating refusal", async () 
 });
 
 test("a documented refusal after an uncertain commit cannot erase uncertainty", async () => {
-  const held = createOperation("dest", owned, borrowed),
+  const held = createOperation("dest", owned, borrowed, SERVER_TIME),
     fake = backend();
   fake.api.commitMoveWithoutUndo = async () => {
     throw new TypeError("lost");

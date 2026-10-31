@@ -815,6 +815,8 @@ export function Workspace({
           key={actions.pending.id}
           text={actions.pending.text}
           blocked={actions.pending.blocked}
+          otherTab={actions.pending.otherTab}
+          onRefresh={() => void actions.refreshPending()}
           busy={actions.busy}
           onCheck={actions.checkPending}
           onDismiss={actions.dismissPending}

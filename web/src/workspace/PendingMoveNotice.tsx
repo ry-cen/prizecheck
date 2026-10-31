@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../ui/Button";
 
 /** Recovery stays available when the refreshed selection and its Actions bar disappear. */
@@ -6,16 +6,21 @@ export function PendingMoveNotice({
   text,
   blocked,
   busy,
+  otherTab,
+  onRefresh,
   onCheck,
   onDismiss,
 }: {
   text: string;
   blocked: boolean;
   busy: boolean;
+  otherTab: boolean;
+  onRefresh: () => void;
   onCheck: () => void;
   onDismiss: (reviewed: boolean) => void;
 }) {
   const [reviewed, setReviewed] = useState(false);
+  useEffect(() => setReviewed(false), [text, blocked, otherTab]);
   return (
     <section
       aria-label="Pending Move"
@@ -24,7 +29,13 @@ export function PendingMoveNotice({
       <p role="status" className="m-0 text-meta text-text">
         {text}
       </p>
-      {blocked ? (
+      {otherTab ? (
+        <>
+          <Button disabled={busy} onClick={onRefresh}>
+            Check availability
+          </Button>
+        </>
+      ) : blocked ? (
         <>
           <label className="flex min-h-8 items-center gap-2 text-meta text-text phone:min-h-tap">
             <input

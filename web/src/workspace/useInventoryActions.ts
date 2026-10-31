@@ -1,9 +1,16 @@
+import {
+  MoveServerClock,
+  MoveInAnotherTab,
+  MoveLocksUnavailable,
+  withMoveWriter,
+  moveWriterBusy,
+  moveActivityKey,
+} from "./moveRecovery";
 import { pendingMoves, recoveryText } from "./pendingMove";
 import type { BorrowedMoveItem } from "../collection_generated";
 import {
   advance,
   RecoveryBlocked,
-  PENDING_MOVE_MAX_AGE_MS,
   moveApi,
   createRemoval,
   operationFor,
@@ -116,6 +123,9 @@ export function useInventoryActions({
   toastLive.current = toast;
   const toastId = useRef(0);
   const account = useRef({ userId, active: true });
+  const clock = useMemo(() => new MoveServerClock(), [userId]);
+  const lockRequest = useRef(false);
+  const [otherTab, setOtherTab] = useState(false);
   account.current.userId = userId;
   const store = useMemo(() => {
     try {
@@ -161,20 +171,66 @@ export function useInventoryActions({
       account.current.active = false;
     };
   }, [userId, store]);
+  const refreshPending = useCallback(async () => {
+    if (
+      busyRef.current ||
+      lockRequest.current ||
+      !account.current.active ||
+      account.current.userId !== userId
+    )
+      return;
+    try {
+      const held = store?.load() ?? null;
+      const elsewhere = await moveWriterBusy(userId);
+      if (
+        !account.current.active ||
+        account.current.userId !== userId ||
+        busyRef.current ||
+        lockRequest.current
+      )
+        return;
+      // Keep an unrelated owned-only pending request in this tab; shared mixed recovery takes precedence.
+      if (!held && operation.current?.op.noUndo) {
+        setBarError("");
+        setDialogError("");
+        toastId.current += 1;
+        setToast({
+          id: toastId.current,
+          message: "Move checking finished in another tab.",
+          entry: null,
+          unavailable: false,
+        });
+      }
+      if (held || operation.current?.op.noUndo) operation.current = held;
+      setRecovery({ held, blocked: !store || !!held?.state.blocked });
+      setOtherTab(elsewhere);
+    } catch {
+      const held = operation.current?.op.noUndo ? operation.current : null;
+      if (held) held.state.blocked = true;
+      setRecovery({ held, blocked: true });
+    }
+  }, [store, userId]);
   useEffect(() => {
     const changed = (event: StorageEvent) => {
-      const held = operation.current;
-      if (!held?.op.noUndo || event.storageArea !== localStorage) return;
-      try {
-        if (!store?.load()) throw new RecoveryBlocked();
-      } catch {
-        held.state.blocked = true;
-        setRecovery({ held, blocked: true });
-      }
+      if (
+        event.storageArea === localStorage &&
+        (event.key === null ||
+          event.key === moveActivityKey(userId) ||
+          event.key?.startsWith(
+            `prizecheck:mixed-move:v1:${encodeURIComponent(userId)}:`
+          ))
+      )
+        void refreshPending();
     };
+    const focused = () => void refreshPending();
     window.addEventListener("storage", changed);
-    return () => window.removeEventListener("storage", changed);
-  }, [store]);
+    window.addEventListener("focus", focused);
+    void refreshPending();
+    return () => {
+      window.removeEventListener("storage", changed);
+      window.removeEventListener("focus", focused);
+    };
+  }, [refreshPending, userId]);
   const undoKeys = useRef(new Map<string, string>());
   const focusAfter = useRef<FocusTarget | null>(null);
   const carried = useRef<Carried | null>(null);
@@ -265,7 +321,7 @@ export function useInventoryActions({
     return undoProtectionUnconfirmed(operation.current) ? [] : entries;
   }, []);
 
-  const run = useCallback(
+  const runLocked = useCallback(
     async (
       target: ActionTarget,
       groups: SelectedGroup[],
@@ -284,11 +340,50 @@ export function useInventoryActions({
       setBarError("");
       setDialogError("");
       carried.current = null;
-      // Read durable recovery before considering any new request, including from another tab.
-      if (!operation.current) {
+      // The writer always re-reads under the account lock; a stale tab never resumes its own snapshot.
+      try {
+        const hadMixed = !!operation.current?.op.noUndo;
+        const latest = store?.load() ?? null;
+        if (latest || hadMixed) operation.current = latest;
+        setRecovery({
+          held: latest,
+          blocked: !store || !!latest?.state.blocked,
+        });
+        if (hadMixed && !latest) {
+          toastId.current += 1;
+          setToast({
+            id: toastId.current,
+            message: "Move checking finished in another tab.",
+            entry: null,
+            unavailable: false,
+          });
+          finish();
+          return;
+        } // Another writer already settled this operation.
+      } catch {
+        setRecovery({ held: null, blocked: true });
+        finish();
+        return;
+      }
+      let createdServerTime: number | undefined;
+      if (!operation.current && borrowed.length) {
         try {
-          operation.current = store?.load() ?? null;
-          if (operation.current) store?.adopt();
+          const requestStarted = performance.now();
+          const response = await fetch("/auth/session", {
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+          const session = await response.json();
+          if (
+            !response.ok ||
+            session.signedIn !== true ||
+            session.userId !== userId ||
+            !account.current.active ||
+            account.current.userId !== userId
+          )
+            throw new RecoveryBlocked();
+          clock.observe(response, requestStarted);
+          createdServerTime = Date.parse(response.headers.get("date")!);
         } catch {
           setRecovery({ held: null, blocked: true });
           finish();
@@ -302,7 +397,8 @@ export function useInventoryActions({
               operation.current,
               target.destinationId,
               groups,
-              borrowed
+              borrowed,
+              createdServerTime
             )
           : (operation.current ?? createRemoval(groups));
       operation.current = held;
@@ -319,14 +415,11 @@ export function useInventoryActions({
         try {
           if (!active() || !store) throw new RecoveryBlocked();
           if (beforeWrite) {
-            if (
-              held.state.blocked ||
-              Date.now() < held.op.createdAt ||
-              Date.now() - held.op.createdAt >= PENDING_MOVE_MAX_AGE_MS
-            )
-              throw new RecoveryBlocked();
+            if (held.state.blocked) throw new RecoveryBlocked();
+            const requestStarted = performance.now();
             const response = await fetch("/auth/session", {
               credentials: "same-origin",
+              cache: "no-store",
             });
             const session = await response.json();
             if (
@@ -334,11 +427,11 @@ export function useInventoryActions({
               session.signedIn !== true ||
               session.userId !== userId ||
               held.state.blocked ||
-              Date.now() < held.op.createdAt ||
-              Date.now() - held.op.createdAt >= PENDING_MOVE_MAX_AGE_MS ||
               !active()
             )
               throw new RecoveryBlocked();
+            clock.check(held, response, requestStarted);
+            store.prune(clock.serverDate());
           }
           store.save(held);
           setRecovery({ held, blocked: !!held.state.blocked });
@@ -370,7 +463,26 @@ export function useInventoryActions({
         if (outcome.kind !== "unknown") {
           if (op.noUndo) {
             try {
-              store?.remove(held);
+              const requestStarted = performance.now();
+              const response = await fetch("/auth/session", {
+                credentials: "same-origin",
+                cache: "no-store",
+              });
+              const session = await response.json();
+              if (
+                !response.ok ||
+                session.signedIn !== true ||
+                session.userId !== userId ||
+                !active()
+              )
+                throw new RecoveryBlocked();
+              clock.observe(response, requestStarted);
+              store?.remove(
+                held,
+                state.refusal ? "refused" : "done",
+                clock.serverDate()
+              );
+              store?.prune(clock.serverDate());
               const next = store?.load() ?? null;
               if (next) store?.adopt();
               operation.current = next;
@@ -482,7 +594,66 @@ export function useInventoryActions({
         if (active()) finish();
       }
     },
-    [place, card, edition, showToast, readUndo, userId, store, recovery.blocked]
+    [
+      place,
+      card,
+      edition,
+      showToast,
+      readUndo,
+      userId,
+      store,
+      clock,
+      recovery.blocked,
+    ]
+  );
+
+  const run = useCallback(
+    async (...args: Parameters<typeof runLocked>) => {
+      if (
+        lockRequest.current ||
+        busyRef.current ||
+        !account.current.active ||
+        account.current.userId !== userId
+      )
+        return;
+      lockRequest.current = true;
+      try {
+        await withMoveWriter(userId, async () => {
+          if (!account.current.active || account.current.userId !== userId)
+            return;
+          setOtherTab(false);
+          await runLocked(...args);
+        });
+      } catch (error) {
+        if (!account.current.active || account.current.userId !== userId)
+          return;
+        if (error instanceof MoveInAnotherTab) {
+          setOtherTab(true);
+          try {
+            const held = store?.load() ?? null;
+            operation.current = held;
+            setRecovery({ held, blocked: !store || !!held?.state.blocked });
+          } catch {
+            setRecovery((current) => ({ ...current, blocked: true }));
+          }
+        } else if (
+          error instanceof MoveLocksUnavailable &&
+          !args[2].length &&
+          !operation.current?.op.noUndo
+        ) {
+          // Legacy owned-only Moves need no mixed-recovery writer when there is no shared operation.
+          try {
+            if (!store?.load()) await runLocked(...args);
+            else setRecovery((current) => ({ ...current, blocked: true }));
+          } catch {
+            setRecovery((current) => ({ ...current, blocked: true }));
+          }
+        } else setRecovery((current) => ({ ...current, blocked: true }));
+      } finally {
+        lockRequest.current = false;
+      }
+    },
+    [runLocked, userId, store]
   );
 
   const openMove = useCallback(() => {
@@ -833,48 +1004,80 @@ export function useInventoryActions({
   );
 
   const recoveryHeld = recovery.held;
-  const recoveryBlocked =
-    recovery.blocked ||
-    !!recoveryHeld?.state.blocked ||
-    !!(
-      recoveryHeld &&
-      !recoveryHeld.state.refusal &&
-      (Date.now() < recoveryHeld.op.createdAt ||
-        Date.now() - recoveryHeld.op.createdAt >= PENDING_MOVE_MAX_AGE_MS)
-    );
+  const recoveryBlocked = recovery.blocked || !!recoveryHeld?.state.blocked;
   const checkPending = useCallback(() => {
     const held = operation.current;
     if (held && !recoveryBlocked) return run(held.op.target, [], [], "bar");
   }, [run, recoveryBlocked]);
   const dismissPending = useCallback(
-    (reviewed: boolean) => {
+    async (reviewed: boolean) => {
       if (
         !reviewed ||
         busyRef.current ||
+        lockRequest.current ||
         !recoveryBlocked ||
         !account.current.active ||
         account.current.userId !== userId
       )
         return;
+      lockRequest.current = true;
       try {
-        if (recovery.held) store?.remove(recovery.held);
-        else store?.dismissUnreadable();
-        const next = store?.load() ?? null;
-        if (next) store?.adopt();
-        operation.current = next;
-        setRecovery({ held: next, blocked: !store });
-        setBarError("");
-        setDialogError("");
-      } catch {
-        setRecovery((current) => ({ ...current, blocked: true }));
+        await withMoveWriter(userId, async () => {
+          const requestStarted = performance.now();
+          const response = await fetch("/auth/session", {
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+          const session = await response.json();
+          if (
+            !response.ok ||
+            session.signedIn !== true ||
+            session.userId !== userId ||
+            !account.current.active ||
+            account.current.userId !== userId
+          )
+            throw new RecoveryBlocked();
+          clock.observe(response, requestStarted);
+          const serverNow = clock.serverDate();
+          let latest: HeldOperation | null = null;
+          try {
+            latest = store?.load() ?? null;
+          } catch {
+            // Explicit review acknowledges unreadable or erased records; it never reconstructs a Move.
+            store?.dismissUnreadable(serverNow);
+          }
+          if (latest && recovery.held && latest.op.id === recovery.held.op.id)
+            store?.remove(latest, "reviewed", serverNow);
+          store?.prune(serverNow);
+          const next = store?.load() ?? null;
+          operation.current = next;
+          setRecovery({ held: next, blocked: !store || !!next?.state.blocked });
+          setOtherTab(false);
+          setBarError("");
+          setDialogError("");
+        });
+      } catch (error) {
+        if (error instanceof MoveInAnotherTab) {
+          setOtherTab(true);
+          try {
+            const held = store?.load() ?? null;
+            operation.current = held;
+            setRecovery({ held, blocked: !store || !!held?.state.blocked });
+          } catch {
+            setRecovery((current) => ({ ...current, blocked: true }));
+          }
+        } else setRecovery((current) => ({ ...current, blocked: true }));
+      } finally {
+        lockRequest.current = false;
       }
     },
-    [store, recovery, recoveryBlocked, userId]
+    [store, recoveryBlocked, userId, clock, recovery.held]
   );
 
   return {
     pending:
-      recoveryOwner.current === userId && (recoveryHeld || recovery.blocked)
+      recoveryOwner.current === userId &&
+      (recoveryHeld || recovery.blocked || otherTab)
         ? {
             id: recoveryHeld?.op.id ?? "unreadable",
             text: recoveryText(
@@ -882,11 +1085,14 @@ export function useInventoryActions({
               recoveryHeld?.op.target.kind === "move"
                 ? place(recoveryHeld.op.target.destinationId)
                 : "the destination",
-              recoveryBlocked
+              recoveryBlocked,
+              otherTab
             ),
             blocked: recoveryBlocked,
+            otherTab,
           }
         : null,
+    refreshPending,
     checkPending,
     dismissPending,
     busy,
