@@ -3,13 +3,16 @@ verify_report.py, verify_discard.py, verify_reaper.py, and the pytest shard spli
 needs a database, a browser or a network; api/tests/test_verify_reaper.py checks the reaper against PostgreSQL."""
 from contextlib import ExitStack
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import random
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -148,6 +151,123 @@ class ClockGuardTest(unittest.TestCase):
         command = verify.gate_command(['-k', 'x'])
         self.assertEqual(command[-4:], ['bash', 'scripts/ci.sh', '-k', 'x'])
         self.assertIn(command[0], ('bash', 'caffeinate'))
+
+
+class GateLifecycleTest(unittest.TestCase):
+    """verify.py runs ci.sh in its own session and stops whatever is left of it before it removes the copied checkout
+    and the databases, and keeps git in the copy from finding a repository around the temporary directory."""
+
+    def test_the_gate_runs_in_its_own_session_and_what_it_leaves_running_is_stopped(self):
+        with tempfile.TemporaryDirectory() as directory, (Path(directory) / 'log').open('w+') as log:
+            leaves_a_child = 'import os, subprocess; print(os.getsid(0) == os.getpid()); subprocess.Popen(["sleep", "60"])'
+            outcome = {}
+            code = verify.run_gate([sys.executable, '-c', leaves_a_child], directory, dict(os.environ), log, outcome)
+            log.seek(0)
+            self.assertEqual((code, outcome, log.read().strip()), (0, {'leftovers': ['SIGTERM'], 'stopped': True}, 'True'))
+
+    def test_a_gate_that_leaves_nothing_running_is_not_signalled(self):
+        with tempfile.TemporaryDirectory() as directory, (Path(directory) / 'log').open('w') as log:
+            outcome = {}
+            code = verify.run_gate([sys.executable, '-c', 'raise SystemExit(3)'], directory, dict(os.environ), log, outcome)
+            self.assertEqual((code, outcome), (3, {'leftovers': [], 'stopped': True}))
+
+    def test_a_group_that_ignores_sigterm_is_killed(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        ready = Path(directory.name) / 'ready'
+        process = subprocess.Popen(['bash', '-c', 'trap "" TERM; sleep 60 & touch "$1"; wait', 'gate', str(ready)],
+                                   start_new_session=True)
+        self.addCleanup(process.wait)
+        deadline = time.monotonic() + 30
+        while not ready.exists() and time.monotonic() < deadline:  # signalled before its trap, it would just exit
+            time.sleep(.05)
+        self.assertEqual(verify.stop_group(process, grace=.5), (['SIGTERM', 'SIGKILL'], True))
+        self.assertFalse(verify.group_running(process.pid))
+
+    def test_a_group_still_running_after_sigkill_is_not_reported_stopped(self):
+        # A process in uninterruptible I/O outlives SIGKILL; signals that reach nobody stand in for it.
+        process = subprocess.Popen(['true'], start_new_session=True)
+        self.addCleanup(process.wait)
+        with mock.patch.object(verify, 'group_running', return_value=True), mock.patch.object(verify.os, 'killpg') as killpg:
+            self.assertEqual(verify.stop_group(process, grace=.2), (['SIGTERM', 'SIGKILL'], False))
+        self.assertEqual([call.args[1] for call in killpg.call_args_list], [verify.signal.SIGTERM, verify.signal.SIGKILL])
+
+    def test_an_interrupted_run_stops_the_gate_before_the_interruption_reaches_main(self):
+        started = []
+
+        class Interrupted(subprocess.Popen):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                started.append(self)
+
+            def wait(self, timeout=None):
+                raise KeyboardInterrupt
+
+        outcome = {}
+        with tempfile.TemporaryDirectory() as directory, (Path(directory) / 'log').open('w') as log, \
+                mock.patch.object(verify.subprocess, 'Popen', Interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                verify.run_gate(['bash', '-c', 'sleep 60 & sleep 60'], directory, dict(os.environ), log, outcome)
+        self.assertFalse(verify.group_running(started[0].pid))
+        self.assertEqual(outcome, {'leftovers': ['SIGTERM'], 'stopped': True})
+
+    def test_a_second_signal_waits_until_the_stop_is_recorded(self):
+        previous = signal.signal(signal.SIGTERM, verify.exit_on_signal)
+        self.addCleanup(signal.signal, signal.SIGTERM, previous)
+        finished = []
+
+        def stop_group(process, grace):
+            os.kill(os.getpid(), signal.SIGTERM)  # a second SIGTERM in the middle of the stop
+            time.sleep(.2)
+            finished.append(True)
+            return ['SIGTERM'], True
+
+        outcome = {}
+        with mock.patch.object(verify, 'stop_group', stop_group), self.assertRaises(SystemExit) as raised:
+            verify.stop_gate(object(), outcome)
+        self.assertEqual((finished, outcome, raised.exception.code), ([True], {'leftovers': ['SIGTERM'], 'stopped': True}, 143))
+
+    def test_cleanup_failures_are_what_ci_sh_reported_and_what_stopping_the_gate_found(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(verify.cleanup_failures(directory), [])
+            (Path(directory) / 'cleanup-failures.txt').write_text('could not remove /tmp/work\n')
+            self.assertEqual(verify.cleanup_failures(directory), ['could not remove /tmp/work'])
+        self.assertEqual(verify.stop_failures({'leftovers': [], 'stopped': True}), [])
+        self.assertEqual(verify.stop_failures({'leftovers': ['SIGTERM', 'SIGKILL'], 'stopped': False}), [
+            'processes the gate started were still running after it exited; sent SIGTERM, SIGKILL',
+            'processes of the gate were still running after SIGKILL; its checkout and databases were kept'])
+
+    def test_a_cleanup_failure_fails_a_passing_run_and_a_failing_run_keeps_its_code(self):
+        self.assertEqual([verify.final_result(code, failures) for code, failures in
+                          ((0, []), (0, ['could not remove /tmp/work']), (7, ['could not remove /tmp/work']), (7, []))],
+                         [0, 1, 7, 7])
+
+    def test_the_gate_inherits_no_git_variables_and_a_ceiling_at_the_temporary_directory(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(tempfile, 'tempdir', directory), \
+                mock.patch.dict(os.environ, {'GIT_DIR': '/elsewhere/.git', 'GIT_INDEX_FILE': '/elsewhere/index'}):
+            environment = verify.inherited_environment()
+        self.assertEqual([key for key in environment if key.startswith('GIT_')], ['GIT_CEILING_DIRECTORIES'])
+        self.assertEqual(environment['GIT_CEILING_DIRECTORIES'], os.path.realpath(directory))
+
+    def test_the_ceiling_keeps_git_in_a_copied_checkout_out_of_the_repository_around_it(self):
+        # TMPDIR=<checkout>/.scratch/tmp puts the copied checkout and the tests' temporary directories inside a repository.
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(os.path.realpath(directory))
+            subprocess.run(['git', 'init', '-q'], cwd=repository, env=verify.git_environment(), check=True)
+            temporary = repository / '.scratch' / 'tmp'
+            copies = [temporary / 'tcg-verify-x' / 'checkout' / 'api', temporary / 'tmpabc']
+            for copy in copies:
+                copy.mkdir(parents=True)
+            toplevel = lambda copy, environment: subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=copy,
+                                                                env=environment, capture_output=True, text=True)
+            with mock.patch.object(tempfile, 'tempdir', str(temporary)):
+                ceiling = verify.inherited_environment()['GIT_CEILING_DIRECTORIES']
+            for copy in copies:
+                with self.subTest(copy=copy.relative_to(repository)):
+                    self.assertEqual(toplevel(copy, verify.git_environment()).stdout.strip(), str(repository))
+                    found = toplevel(copy, dict(verify.git_environment(), GIT_CEILING_DIRECTORIES=ceiling))
+                    self.assertNotEqual(found.returncode, 0)
+                    self.assertIn('not a git repository', found.stderr)
 
 
 class BurnInTest(unittest.TestCase):
@@ -684,6 +804,68 @@ if __name__ == '__main__':
     unittest.main()
 
 
+def gate(exit_code, leftovers=(), stopped=True):
+    """A stand-in for verify.run_gate: the gate exits with exit_code, and stopping it finds `leftovers` and `stopped`."""
+    def run_gate(command, cwd, env, log, outcome):
+        outcome.update(leftovers=list(leftovers), stopped=stopped)
+        return exit_code
+    return run_gate
+
+
+class MainCleanupTest(unittest.TestCase):
+    """main() fails a passing run that could not clean up, and keeps the checkout and databases of a gate that is
+    still running after SIGKILL."""
+
+    def run_main(self, run_gate, admin=ADMIN):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        (root / 'tmp').mkdir()
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(verify, 'ROOT', root))
+            stack.enter_context(mock.patch.object(tempfile, 'tempdir', str(root / 'tmp')))
+            for name, value in (('reap', ([], [])), ('database_skew', 0), ('network_changes', []), ('summarize', {}),
+                                ('current_owner', {}), ('report_timing_warnings', {'timing_warnings': []})):
+                stack.enter_context(mock.patch.object(verify, name, return_value=value))
+            stack.enter_context(mock.patch.object(verify, 'create_databases',
+                                                  side_effect=lambda conn, names, owner, created: created.extend(names)))
+            stack.enter_context(mock.patch.object(verify.psycopg, 'connect'))
+            stack.enter_context(mock.patch.object(verify.subprocess, 'check_output', return_value=b''))
+            stack.enter_context(mock.patch.object(verify, 'run_gate', side_effect=run_gate))
+            drop = stack.enter_context(mock.patch.object(verify, 'drop_databases'))
+            output = stack.enter_context(mock.patch('sys.stdout', new_callable=io.StringIO))
+            code = verify.main(['--admin-url', admin, '--suite', 'api', '--pytest-workers', '2'])
+        report = json.loads(next(root.glob('.scratch/verification/*/result.json')).read_text())
+        return code, report, drop, output.getvalue(), sorted(path.name for path in (root / 'tmp').iterdir())
+
+    def test_a_passing_run_that_left_processes_running_fails(self):
+        code, report, drop, output, temporary = self.run_main(gate(0, ['SIGTERM']))
+        self.assertEqual((code, report['exit_code']), (1, 1))
+        self.assertEqual(report['cleanup_failures'],
+                         ['processes the gate started were still running after it exited; sent SIGTERM'])
+        self.assertIn('CLEANUP FAILED: processes the gate started', output)
+        drop.assert_called_once()
+        self.assertEqual(temporary, [])
+
+    def test_a_failing_run_keeps_its_own_exit_code(self):
+        code, report, _, _, _ = self.run_main(gate(7, ['SIGTERM']))
+        self.assertEqual((code, report['exit_code']), (7, 7))
+
+    def test_a_gate_still_running_after_sigkill_keeps_its_checkout_and_databases(self):
+        admin = 'postgresql://tcg:test-secret-password@127.0.0.1:5432/postgres'
+        code, report, drop, output, temporary = self.run_main(gate(0, ['SIGTERM', 'SIGKILL'], stopped=False), admin)
+        self.assertEqual((code, report['exit_code'], report['database_removed']), (1, 1, False))
+        self.assertIn('processes of the gate were still running after SIGKILL; its checkout and databases were kept',
+                      report['cleanup_failures'])
+        drop.assert_not_called()
+        self.assertEqual(len(temporary), 1)
+        self.assertIn('RETAINED: the copied checkout ', output)
+        for database in report['databases']:
+            self.assertIn(database, output)
+        self.assertIn(temporary[0], output)
+        self.assertNotIn('test-secret-password', output)
+
+
 class TimingWarningsTest(unittest.TestCase):
     def test_breach_is_recorded_without_failure_and_reported(self):
         support = load('timing_support', ROOT / 'api/tests/timing_support.py')
@@ -714,7 +896,7 @@ class TimingWarningsTest(unittest.TestCase):
                     stack.enter_context(mock.patch.object(verify, name, return_value=value))
                 stack.enter_context(mock.patch.object(verify.psycopg, 'connect'))
                 stack.enter_context(mock.patch.object(verify.subprocess, 'check_output', return_value=b''))
-                stack.enter_context(mock.patch.object(verify.subprocess, 'run', return_value=SimpleNamespace(returncode=exit_code)))
+                stack.enter_context(mock.patch.object(verify, 'run_gate', side_effect=gate(exit_code)))
                 stack.enter_context(mock.patch.object(verify, 'report_timing_warnings', side_effect=OSError('broken report')))
                 self.assertEqual(verify.main(['--admin-url', ADMIN, '--suite', 'api']), exit_code)
                 report = json.loads(next(Path(directory).glob('.scratch/verification/*/result.json')).read_text())
