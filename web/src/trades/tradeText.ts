@@ -115,8 +115,8 @@ export function tradeNote(trade: TradeView, stale: boolean): string {
   return "Swap the cards in person, then confirm.";
 }
 
-/** Where the reader's picks take one card's copies from: "From Binder 1", or each place with its copies. Only the
- * reader's own Locations, from their own side read. `lower`: "from …", inside the confirm dialog's line. */
+/** Where the reader's picks take one card's copies from: "From Shelf / Binder 1" (full paths: names are unique only
+ * among siblings), or each place with its copies. Only the reader's own Locations, from their own side read. `lower`: "from …", inside the confirm dialog's line. */
 export function tradePickText(
   places: readonly TradePickPlace[],
   editionId: string,
@@ -125,8 +125,8 @@ export function tradePickText(
   const found = places.filter((place) => place.edition_id === editionId);
   if (found.length === 0) return null;
   const from = lower ? "from" : "From";
-  if (found.length === 1) return `${from} ${found[0].name}`;
-  return `${from} ${found.map((place) => `${place.name} (${place.copies})`).join(" · ")}`;
+  if (found.length === 1) return `${from} ${found[0].path}`;
+  return `${from} ${found.map((place) => `${place.path} (${place.copies})`).join(" · ")}`;
 }
 
 /**
@@ -153,7 +153,7 @@ export function tradeStaleText(
   const added = suggested
     .filter((place) => place.edition_id === editionId)
     .map((place) => ({
-      name: place.name,
+      name: place.path,
       copies: Number(place.copies) - (kept.get(place.location_id) ?? 0),
     }))
     .filter((place) => place.copies > 0);
@@ -175,8 +175,8 @@ export function tradeStaleText(
       key: place.location_id ?? `place-${index}`,
       text:
         (left > 0
-          ? `${place.name} has only ${left} now`
-          : `${place.name} has none now`) +
+          ? `${place.path} has only ${left} now`
+          : `${place.path} has none now`) +
         (index === stale.length - 1 ? take : ""),
     };
   });

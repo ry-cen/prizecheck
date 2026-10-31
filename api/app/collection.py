@@ -9,6 +9,7 @@ from .core.art.urls import route_address
 from .db import connect
 from .identity import verified_user
 from .holdings import HoldingView, fail
+from .location_tree import LOCATION_PATHS
 from .social import counts
 
 router = APIRouter(prefix='/api/collection', tags=['collection'])
@@ -143,14 +144,8 @@ def distribution(edition_id: UUID,user_id: str=Depends(verified_user)):
 # Holding-level listing for the collector workspace gallery (tickets #103 and #104).
 # One row per Holding (Storage Leaf + Card Edition), never per copy: the client expands quantities into tiles.
 HOLDING_PAGE_SIZE = 500
-# Full Location paths such as "Shelf / Binder 2". The depth guard only stops a corrupt cycle;
-# Location commands already cap the tree at 12 levels.
-HOLDING_PATHS = """WITH RECURSIVE paths AS (
-  SELECT id,name::text AS path,1 AS depth FROM location WHERE owner_id=%s AND parent_id IS NULL
-  UNION ALL
-  SELECT child.id,parent.path||' / '||child.name,parent.depth+1
-  FROM location child JOIN paths parent ON child.parent_id=parent.id
-  WHERE child.owner_id=%s AND parent.depth<32)"""
+# Full Location paths such as "Shelf / Binder 2" (``location_tree.LOCATION_PATHS``).
+HOLDING_PATHS = LOCATION_PATHS
 # Every sort key is NOT NULL: a NULL would drop rows from the keyset comparison.
 # edition_total is the Card Edition's copies within the listed rows (the view after search and filters).
 HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,coalesce(lp.path,l.name) AS location_path,h.quantity,h.version,
