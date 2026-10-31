@@ -7,6 +7,7 @@ import {
   describeFailure,
   movePreview,
   partialMoveFailure,
+  unsupportedUndoFailure,
 } from "./inventoryActionsModel";
 const names = { place: () => "Box", card: () => "Iono", edition: () => "Iono" };
 for (const [code, text] of [
@@ -120,4 +121,12 @@ test("the unavailable-outcome message cannot become a definite partial refusal",
   expect(partial.retrySame).toBe(true);
   expect(partial.text).not.toContain("didn't move");
   expect(partial.text).toContain("may not have finished");
+});
+
+test("unsupported no-Undo receipt reports moved quantities without claiming protection or definite failure", () => {
+  const failure = unsupportedUndoFailure(3, "Box");
+  expect(failure.text).toContain("Moved 3 copies to Box. Undo unavailable.");
+  expect(failure.text).toContain("could not be confirmed");
+  expect(failure.text).not.toContain("didn't move");
+  expect(failure.retrySame).toBe(true);
 });

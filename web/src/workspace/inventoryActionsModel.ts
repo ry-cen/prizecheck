@@ -308,3 +308,15 @@ export function partialMoveFailure(
     reloadTree: true,
   };
 }
+
+/** The Move applied, but an old server may have created an Undo despite the requested protection. */
+export function unsupportedUndoFailure(copies: number, place: string): Failure {
+  const text = `Moved ${plural(copies, "copy", "copies")} to ${place}. Undo unavailable. This Move's no-Undo protection could not be confirmed; refresh before continuing.`;
+  return {
+    text,
+    toastText: text,
+    reloadGallery: true,
+    reloadTree: true,
+    retrySame: true,
+  };
+}

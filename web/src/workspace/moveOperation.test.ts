@@ -1,18 +1,12 @@
-import {
-  applyUndo,
-  dismissUndo,
-  listUndo,
-  type UndoEntry,
-} from "../inventoryUndo";
 import { expect, test, vi } from "vitest";
 import { BorrowedMoveError } from "../collection_generated";
-import { MoveError } from "../moves_generated";
+import { MoveError, commitMove } from "../moves_generated";
 import {
   advance,
   createOperation,
   createRemoval,
   operationFor,
-  offerableUndo,
+  undoProtectionUnconfirmed,
   type moveApi,
 } from "./moveOperation";
 const owned = [
@@ -62,7 +56,6 @@ function server(
     }
   }
   const api: typeof moveApi = {
-    dismissUndo: async () => {},
     startMove: async () => ({
       id: "manifest",
       source_id: null,
@@ -90,11 +83,17 @@ function server(
       already_at_destination_count: "0",
       owner_revision: 3,
     }),
-    commitMove: async (id, _destination, key) => {
+    commitMove: async (
+      id,
+      _destination,
+      key,
+      _putAway = false,
+      undo = true
+    ) => {
       expect(id).toBe("manifest");
       commit("owned", key, 2);
       return {
-        undo_id: "owned-undo",
+        undo_id: undo ? "owned-undo" : null,
         copy_count: "2",
         edition_count: 1,
         source_count: 1,
@@ -217,8 +216,6 @@ for (const stage of ["borrowed", "owned"] as const)
         expect([held.op.borrowedKey, held.op.ownedKey]).toEqual(keys);
       }
       expect(fake.copies()).toBe(stage === "owned" ? 3 : 1);
-      if (stage === "owned")
-        expect(offerableUndo([undoEntry("uncertain-half")], held)).toEqual([]);
     });
 
 test("a manifest refusal before any commit attempt remains definite", async () => {
@@ -232,127 +229,6 @@ test("a manifest refusal before any commit attempt remains definite", async () =
     stage: "owned",
   });
   expect(held.state.ownedAttempted).toBe(false);
-});
-
-function undoEntry(id: string): UndoEntry {
-  return {
-    id,
-    action: "move",
-    source_id: "box",
-    destination_id: "dest",
-    source_count: 1,
-    expires_at: "2099-01-01",
-  };
-}
-for (const loss of ["lost deletion response", "server refusal"] as const)
-  test(`mixed Move retains and suppresses its Undo while recovering from ${loss}`, async () => {
-    const held = createOperation("dest", owned, borrowed);
-    const fake = server("borrowed", "network");
-    fake.api.moveBorrowedCopies = async () => ({
-      copy_count: "1",
-      owner_revision: 2,
-    });
-    let present = true;
-    let attempts = 0;
-    fake.api.dismissUndo = async (id) => {
-      expect(id).toBe("owned-undo");
-      attempts++;
-      if (attempts === 1) {
-        if (loss === "lost deletion response") {
-          present = false;
-          throw new TypeError("lost");
-        }
-        throw new MoveError(403, "REFUSED");
-      }
-      if (!present) throw new MoveError(404, "UNDO_NOT_FOUND");
-      present = false;
-    };
-    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
-      kind: "unknown",
-      stage: "discard",
-    });
-    expect(held.state.owned).toBe("done");
-    expect(held.state.discard).toBe("unknown");
-    expect(
-      offerableUndo(
-        [undoEntry("newer"), undoEntry("owned-undo"), undoEntry("older")],
-        held
-      ).map((entry) => entry.id)
-    ).toEqual(["newer"]);
-    expect(operationFor(held, "different", [], [])).toBe(held);
-    expect(await advance(held.op, held.state, fake.api)).toEqual({
-      kind: "done",
-    });
-    expect(present).toBe(false);
-    expect(attempts).toBe(2);
-    expect(fake.copies()).toBe(2);
-    expect(held.state.discard).toBe("done");
-    expect(
-      offerableUndo([undoEntry("owned-undo")], null, new Set(["owned-undo"]))
-    ).toEqual([]);
-  });
-
-test("mixed Move is absent after a newer owned Move's incompatible Undo is dismissed", async () => {
-  const records: UndoEntry[] = [];
-  const deletes: string[] = [];
-  vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-    const path = new URL(String(input), "https://test.invalid").pathname;
-    if (path === "/api/moves/undo") return Response.json(records);
-    const id = path.split("/").at(-1)!;
-    if (init?.method === "DELETE") {
-      deletes.push(id);
-      const at = records.findIndex((entry) => entry.id === id);
-      if (at < 0)
-        return Response.json(
-          { detail: { code: "UNDO_NOT_FOUND" } },
-          { status: 404 }
-        );
-      records.splice(at, 1);
-      return new Response(null, { status: 204 });
-    }
-    return Response.json(
-      { detail: { code: "UNDO_INCOMPATIBLE" } },
-      { status: 409 }
-    );
-  });
-  try {
-    const fake = server("borrowed", "network");
-    fake.api.moveBorrowedCopies = async () => ({
-      copy_count: "1",
-      owner_revision: 2,
-    });
-    fake.api.dismissUndo = dismissUndo;
-    fake.api.commitMove = async (_id, _dest, key) => {
-      records.unshift(undoEntry(key));
-      return {
-        undo_id: key,
-        copy_count: "2",
-        edition_count: 1,
-        source_count: 1,
-        already_at_destination_count: "0",
-        owner_revision: 3,
-      };
-    };
-    const mixed = createOperation("dest", owned, borrowed);
-    expect(await advance(mixed.op, mixed.state, fake.api)).toEqual({
-      kind: "done",
-    });
-    expect(deletes).toEqual([mixed.op.ownedKey]);
-    const newer = createOperation("dest", owned, []);
-    expect(await advance(newer.op, newer.state, fake.api)).toEqual({
-      kind: "done",
-    });
-    expect((await listUndo()).map((entry) => entry.id)).toEqual([
-      newer.op.ownedKey,
-    ]);
-    await expect(
-      applyUndo(newer.op.ownedKey, "undo-attempt")
-    ).rejects.toMatchObject({ code: "UNDO_INCOMPATIBLE" });
-    await dismissUndo(newer.op.ownedKey);
-    expect(await listUndo()).toEqual([]);
-  } finally {
-    vi.unstubAllGlobals();
-  }
 });
 
 test("owned copies already at the target stay while borrowed copies move without an owned manifest", async () => {
@@ -381,9 +257,6 @@ test("owned-only Moves retain Undo even when some owned copies stay", async () =
     []
   );
   const fake = server("borrowed", "network");
-  fake.api.dismissUndo = async () => {
-    throw new Error("Owned-only Undo must remain");
-  };
   expect(held.op.stayed).toBe(3);
   expect(held.op.noUndo).toBe(false);
   expect(await advance(held.op, held.state, fake.api)).toEqual({
@@ -406,4 +279,110 @@ test("an unavailable outcome is unknown even on the first received reply", async
     stage: "owned",
   });
   expect(held.state.owned).toBe("unknown");
+});
+
+test("supported mixed Move sends undo:false and creates no cleanup work", async () => {
+  const held = createOperation("dest", owned, borrowed);
+  const fake = server("owned", "network");
+  const commit = vi.fn(fake.api.commitMove);
+  const dismissUndo = vi.fn();
+  const api = { ...fake.api, commitMove: commit, dismissUndo };
+  expect(await advance(held.op, held.state, api)).toMatchObject({
+    kind: "unknown",
+    stage: "owned",
+  });
+  expect(await advance(held.op, held.state, api)).toEqual({ kind: "done" });
+  expect(commit.mock.calls).toEqual([
+    ["manifest", "dest", held.op.ownedKey, false, false],
+    ["manifest", "dest", held.op.ownedKey, false, false],
+  ]);
+  expect(held.state.ownedResult?.undo_id).toBeNull();
+  expect(dismissUndo).not.toHaveBeenCalled();
+});
+
+test("owned-only Move uses the default request and keeps its Undo", async () => {
+  const held = createOperation("dest", owned, []);
+  const fake = server("borrowed", "network");
+  const commit = vi.fn(fake.api.commitMove);
+  expect(
+    await advance(held.op, held.state, { ...fake.api, commitMove: commit })
+  ).toEqual({ kind: "done" });
+  expect(commit).toHaveBeenCalledExactlyOnceWith(
+    "manifest",
+    "dest",
+    held.op.ownedKey
+  );
+  expect(held.state.ownedResult?.undo_id).toBe("owned-undo");
+});
+
+test("an unexpected old-server Undo receipt never completes the operation or triggers a cleanup guarantee", async () => {
+  const held = createOperation("dest", owned, borrowed);
+  const fake = server("owned", "network");
+  const commit = vi.fn(async () => ({
+    undo_id: "old-server-record",
+    copy_count: "2",
+    edition_count: 1,
+    source_count: 1,
+    already_at_destination_count: "0",
+    owner_revision: 3,
+  }));
+  const dismissUndo = vi.fn();
+  const api = { ...fake.api, commitMove: commit, dismissUndo };
+  for (let retry = 0; retry < 2; retry++) {
+    expect(await advance(held.op, held.state, api)).toMatchObject({
+      kind: "unknown",
+      stage: "owned",
+    });
+    expect(operationFor(held, "other", [], [])).toBe(held);
+  }
+  expect(commit).toHaveBeenCalledTimes(1);
+  expect(dismissUndo).not.toHaveBeenCalled();
+  expect(undoProtectionUnconfirmed(held)).toBe(true);
+});
+
+test("generated Move requests keep legacy bodies and send undo only when false", async () => {
+  const bodies: string[] = [];
+  vi.stubGlobal("fetch", async (_input: unknown, init?: RequestInit) => {
+    bodies.push(String(init?.body));
+    return Response.json({
+      copy_count: "1",
+      edition_count: 1,
+      source_count: 1,
+      already_at_destination_count: "0",
+      owner_revision: 2,
+      undo_id: null,
+    });
+  });
+  try {
+    await commitMove("manifest", "dest", "key");
+    await commitMove("manifest", "dest", "key", false, true);
+    await commitMove("manifest", "dest", "key", true);
+    await commitMove("manifest", "dest", "key", false, false);
+    expect(bodies).toEqual([
+      '{"destination_id":"dest","idempotency_key":"key"}',
+      '{"destination_id":"dest","idempotency_key":"key"}',
+      '{"destination_id":"dest","idempotency_key":"key","put_away":true}',
+      '{"destination_id":"dest","idempotency_key":"key","undo":false}',
+    ]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("confirmed new-server null receipt and owned-only records do not block normal Undo offers", async () => {
+  const mixed = createOperation("dest", owned, borrowed);
+  const normal = createOperation("dest", owned, []);
+  const fake = server("borrowed", "network");
+  fake.api.moveBorrowedCopies = async () => ({
+    copy_count: "1",
+    owner_revision: 2,
+  });
+  expect(await advance(mixed.op, mixed.state, fake.api)).toEqual({
+    kind: "done",
+  });
+  expect(await advance(normal.op, normal.state, fake.api)).toEqual({
+    kind: "done",
+  });
+  expect(undoProtectionUnconfirmed(mixed)).toBe(false);
+  expect(undoProtectionUnconfirmed(normal)).toBe(false);
 });

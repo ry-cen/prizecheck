@@ -204,6 +204,13 @@ class DomainDifferencesInTheCommittedClients(unittest.TestCase):
             types_block = generated(name).split('\n\n')[0]  # the generated types; hand-written query types follow
             self.assertNotRegex(types_block, r'\w\?:', name)
 
+    def test_move_undo_flag_is_optional_and_only_false_is_sent(self):
+        moves = generated('moves')
+        self.assertIn('put_away = false, undo = true', moves)
+        self.assertIn('...(put_away ? { put_away } : {})', moves)
+        self.assertIn('...(!undo ? { undo: false } : {})', moves)
+        self.assertNotIn('undo: true', moves)
+
     def test_domain_errors_stay_separate_except_the_shared_holding_error(self):
         for name in ('collection', 'reconciliation', 'metadata'):
             self.assertIn("from './holdings_generated'", generated(name))

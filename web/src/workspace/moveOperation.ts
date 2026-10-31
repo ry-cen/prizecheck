@@ -133,13 +133,19 @@ export async function advance(
       state.ownedAttempted = true;
       state.ownedResult =
         op.target.kind === "move"
-          ? await api.commitMove(
-              state.manifestId,
-              op.target.destinationId,
-              op.ownedKey,
-              false,
-              !op.noUndo
-            )
+          ? op.noUndo
+            ? await api.commitMove(
+                state.manifestId,
+                op.target.destinationId,
+                op.ownedKey,
+                false,
+                false
+              )
+            : await api.commitMove(
+                state.manifestId,
+                op.target.destinationId,
+                op.ownedKey
+              )
           : await api.removeInventory(state.manifestId, op.ownedKey);
       state.owned = "done";
     } catch (error) {
@@ -153,6 +159,15 @@ export async function advance(
       return { kind: "unknown", stage: "owned", error };
     }
   } else if (!op.owned.length) state.owned = "done";
+  // Defence in depth only: this cannot undo an old server's already-committed write.
+  // Retain the receipt and refuse further writes; never treat an ignored flag as successful protection.
+  if (op.noUndo && state.ownedResult && state.ownedResult.undo_id !== null) {
+    return {
+      kind: "unknown",
+      stage: "owned",
+      error: new Error("Server did not confirm no-Undo support"),
+    };
+  }
   return { kind: "done" };
 }
 
@@ -166,6 +181,15 @@ function unavailableReplay(
     (attempted &&
       (error.code === "MOVE_MANIFEST_NOT_FOUND" ||
         error.code === "MOVE_MANIFEST_EXPIRED"))
+  );
+}
+
+/** Diagnostic fail-closed UI state after a broken server postcondition; not an atomic safety guarantee. */
+export function undoProtectionUnconfirmed(held: HeldOperation | null): boolean {
+  return !!(
+    held?.op.noUndo &&
+    held.state.ownedResult &&
+    held.state.ownedResult.undo_id !== null
   );
 }
 
