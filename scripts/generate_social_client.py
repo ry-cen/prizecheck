@@ -12,7 +12,7 @@ NAMES = ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "Look
          "PendingReturn", "LoanView",
          "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
          "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
-         "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
+         "BorrowedCopies", "MoveBorrowed", "PendingLender", "PendingLine", "PendingLoans", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
          "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
          "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
          "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
@@ -119,6 +119,9 @@ export const getLentOut = (signal?: AbortSignal) => request<LentOut>('/api/loans
 export const getBorrowed = (signal?: AbortSignal) =>
   request<BorrowedCopies>('/api/loans/borrowed', 'GET', undefined, signal);
 export const moveBorrowed = (body: MoveBorrowed) => request<BorrowedCopies>('/api/loans/borrowed/move', 'POST', body);
+// What one of your Decks is waiting on from Friends: copies asked for and copies promised but not yet received.
+export const getPendingLoans = (deck: string, signal?: AbortSignal) =>
+  request<PendingLoans>(`/api/loans/pending${query({ deck })}`, 'GET', undefined, signal);
 // Returns (#255): either side starts one (its confirmation), and the other side confirms it.
 export const startReturn = (id: string, body: StartReturn) =>
   request<LoanView>(`/api/loans/${at(id)}/returns`, 'POST', body);
