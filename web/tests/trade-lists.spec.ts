@@ -355,3 +355,77 @@ test.describe("phone", () => {
     await story(page, collectors, size, "375 px");
   });
 });
+
+test("My Trade List uses desktop width with capped art and keeps Location quantities at 390 px", async ({
+  page,
+}) => {
+  const ids = seedCatalog();
+  await noArtwork(page);
+  await signInAsOwner(page, "/trades/list");
+  const binder = await forTradeBinder(page, "Desktop trade binder");
+  for (const edition of Object.values(ids)) {
+    await hold(page, binder, edition, 2);
+  }
+  const vault = await forTradeBinder(page, "Desktop trade vault", {
+    hidden: true,
+  });
+  await hold(page, vault, ids["PAL 185"], 3);
+  await page.goto(`${ORIGIN}/trades/list`);
+  // Other tabs stay mounted; only the Trades main is relevant here.
+  const main = page.getByRole("main").filter({
+    has: page.getByRole("heading", { name: "Trades", exact: true, level: 1 }),
+  });
+  const cards = main.getByRole("list", {
+    name: "Desktop trade binder",
+    exact: true,
+  });
+  const hidden = main.getByRole("region", {
+    name: "Desktop trade vault",
+    exact: true,
+  });
+  await expect(cards.getByRole("listitem")).toHaveCount(5);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  const columns = () =>
+    cards.evaluate(
+      (el) => getComputedStyle(el).gridTemplateColumns.split(" ").length
+    );
+  // Wait for the 1024 px layout: six 120 px tracks fit inside the frame and panel gutters.
+  const narrowColumns = 6;
+  await expect.poll(columns).toBe(narrowColumns);
+  for (const width of [1440, 1920, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(main).toBeVisible();
+    await expect
+      .poll(() => main.evaluate((el) => el.getBoundingClientRect().width))
+      .toBe(Math.min(width, 1536));
+    await expect
+      .poll(() => main.evaluate((el) => getComputedStyle(el).paddingLeft))
+      .toBe(width === 390 ? "16px" : "28px");
+    if (width > 760) await expect.poll(columns).toBeGreaterThan(narrowColumns);
+    await expect(cards.getByRole("listitem")).toHaveCount(5);
+    for (const item of await cards.getByRole("listitem").all()) {
+      await expect(item).toContainText("×2");
+    }
+    await expect(hidden).toContainText("Hidden from Friends");
+    await expect(hidden.getByRole("listitem")).toContainText("×3");
+    // Check the art wrapper so missing/blocked artwork is covered too.
+    await expect
+      .poll(() =>
+        main
+          .locator("li > div")
+          .evaluateAll((els) =>
+            Math.max(...els.map((el) => el.getBoundingClientRect().width))
+          )
+      )
+      .toBeLessThanOrEqual(145);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth
+        )
+      )
+      .toBeLessThanOrEqual(0);
+  }
+});

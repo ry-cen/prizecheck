@@ -96,8 +96,12 @@ export function TradesPage({ active, section, onNavigate }: Props) {
       />
     );
   const view = route.view;
+  // Find trades keeps search above stacked Friends / Near you groups: no prototype
+  // evidence supports two columns, so its existing frame stays unchanged.
   return (
-    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
+    <main
+      className={`mx-auto box-border flex w-full min-w-0 ${view === "list" ? "max-w-[1536px]" : "max-w-5xl"} flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5`}
+    >
       {/* The switch sits right under the title, closer than the page's sections are to each other. */}
       <div className="flex min-w-0 flex-col gap-1 border-b border-border pb-4">
         <PageHeader title="Trades" />
