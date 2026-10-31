@@ -128,6 +128,7 @@ export function Workspace({
     setPrefs((previous) => ({ ...previous, filters: next }));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false);
+  const marqueeArea = useRef<HTMLElement>(null);
   const filtersOpener = useRef<HTMLButtonElement>(null);
   const closeFiltersDrawer = useCallback(() => setFiltersDrawerOpen(false), []);
   const [manageOpen, setManageOpen] = useState(false);
@@ -641,10 +642,14 @@ export function Workspace({
         {/* The gallery area takes the remaining height (ticket 105: empty space below it starts a
             marquee). The bottom padding on a phone keeps the selection strip off the last row. */}
         <main
-          className="box-border flex min-w-0 flex-col px-(--layout-gutter) pt-7 pb-12 phone:pt-5 phone:pb-24"
+          ref={marqueeArea}
+          className="box-border flex min-w-0 flex-col select-none px-(--layout-gutter) pt-7 pb-12 phone:pt-5 phone:pb-24"
           aria-labelledby="ws-heading"
         >
-          <div className="mb-5 flex items-baseline gap-4 phone:flex-wrap phone:gap-y-2">
+          <div
+            data-no-marquee
+            className="mb-5 flex items-baseline gap-4 phone:flex-wrap phone:gap-y-2"
+          >
             <h1
               id="ws-heading"
               className="m-0 text-display font-[550] tracking-[-0.5px] wrap-anywhere"
@@ -692,7 +697,10 @@ export function Workspace({
           )}
           {/* Desktop toolbar: Search and Filters on the left; Sort, Card size, Names and Prices pushed
               right, all at the kit's control height. Narrow desktop widths wrap the right group. */}
-          <div className="flex flex-wrap items-center gap-2 phone:hidden">
+          <div
+            data-no-marquee
+            className="flex flex-wrap items-center gap-2 phone:hidden"
+          >
             <div className="max-w-105 min-w-0 flex-[1_1_180px]">{search}</div>
             <FiltersToggle
               filters={prefs.filters}
@@ -757,6 +765,7 @@ export function Workspace({
           {/* The gallery and the inspector column, which keeps its width while idle. */}
           <div className="grid flex-[1_0_auto] grid-cols-[minmax(0,1fr)_var(--layout-inspector-width)] gap-7 compact:grid-cols-[minmax(0,1fr)_var(--layout-inspector-width-compact)] compact:gap-5 phone:block">
             <Gallery
+              marqueeArea={marqueeArea}
               data={gallery}
               display={display}
               caption={galleryView === "all"}
@@ -782,12 +791,14 @@ export function Workspace({
               onMarquee={selection.marquee}
               onTilePointerDown={drag.start}
             />
-            <Inspector
-              card={selection.inspected}
-              locationPath={locationPath}
-              ownerRevision={gallery.ownerRevision}
-              ownedTotals={ownedTotals}
-            />
+            <div data-no-marquee>
+              <Inspector
+                card={selection.inspected}
+                locationPath={locationPath}
+                ownerRevision={gallery.ownerRevision}
+                ownedTotals={ownedTotals}
+              />
+            </div>
           </div>
         </main>
       </div>
