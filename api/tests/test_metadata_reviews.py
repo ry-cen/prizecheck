@@ -1056,3 +1056,34 @@ def test_the_matched_list_shows_main_set_matches_under_v6_with_the_group_and_lea
                      item["rule_version"]) for item in matches()["items"])
     assert listed == [("Ampharos δ", "ex15", 900, 1411, 6), ("Leafeon-GX", "sma", 902, 2594, 6),
                       ("Radiant Charizard", "bw11", 901, 1465, 6)]
+
+
+def test_svp173_repair_records_both_owner_decisions_and_survives_source_rematch(price_store, tcgplayer_products):
+    import runpy
+    from pathlib import Path
+    from test_catalog_targets import listing, stock_prices
+    from app.games.pokemon.prices.catalog_targets import refresh_editions, TargetContext
+
+    seed_users()
+    root = Path(__file__).resolve().parents[2]
+    record = json.loads((root / 'api/tests/fixtures/svp173/card.json').read_text())
+    listing(610757, 'Eevee - 173 (Pokemon Center Exclusive)', '173', 22872)
+    listing(610758, 'Eevee - 173', '173', 22872)
+    run(Records(record))
+    activate_as_owner(MATCHING, 5)
+    stock_prices((610757, 'Holofoil'), (610758, 'Holofoil'))
+    repair = runpy.run_path(str(root / 'scripts/correct_eevee_svp173.py'))['repair']
+    repair(OWNER)  # dry run writes no decisions
+    with connect() as conn:
+        assert conn.execute('SELECT count(*) AS n FROM catalog_metadata_decision').fetchone()['n'] == 0
+    repair(OWNER, apply=True)
+    repair(OWNER, apply=True)  # repeat remains safe
+    run(Records(record))
+    with connect() as conn:
+        ids = [r['id'] for r in conn.execute("SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='svp-173'")]
+        refresh_editions(conn, TargetContext(conn), ids)
+        rows = conn.execute("""SELECT e.descriptor,m.product_id,m.mapping_basis,b.sub_type_name
+          FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id
+          JOIN edition_price_binding b ON b.edition_id=e.id WHERE e.id=ANY(%s)""", (ids,)).fetchall()
+    assert sorted((bool(r['descriptor'].get('stamp')), r['product_id'], r['mapping_basis'], r['sub_type_name']) for r in rows) == [
+        (False, 610758, 'maintainer', 'Holofoil'), (True, 610757, 'maintainer', 'Holofoil')]

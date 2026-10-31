@@ -1,0 +1,132 @@
+{
+  "category": "Pokemon",
+  "id": "svp-173",
+  "illustrator": "Makura Tami",
+  "image": "https://assets.tcgdex.net/en/sv/svp/173",
+  "localId": "173",
+  "name": "Eevee",
+  "rarity": "Promo",
+  "set": {
+    "cardCount": {
+      "official": 225,
+      "total": 226
+    },
+    "id": "svp",
+    "name": "SVP Black Star Promos"
+  },
+  "variants": {
+    "firstEdition": false,
+    "holo": true,
+    "normal": false,
+    "reverse": false,
+    "wPromo": false
+  },
+  "variants_detailed": [
+    {
+      "type": "holo",
+      "size": "standard",
+      "thirdParty": {
+        "cardmarket": 805370,
+        "tcgplayer": 610757
+      },
+      "variantId": "jr7oetx1mqug9",
+      "pricing": {
+        "cardmarket": {
+          "updated": "2026-10-30T22:54:33.125Z",
+          "unit": "EUR",
+          "idProduct": 805370,
+          "avg": 16.59,
+          "low": 6,
+          "trend": 17.18,
+          "avg1": 15.83,
+          "avg7": 16.59,
+          "avg30": 16.93,
+          "avg-holo": null,
+          "low-holo": null,
+          "trend-holo": 0,
+          "avg1-holo": null,
+          "avg7-holo": null,
+          "avg30-holo": null
+        },
+        "tcgplayer": null
+      }
+    },
+    {
+      "type": "holo",
+      "size": "standard",
+      "stamp": ["pokemon-center"],
+      "thirdParty": {
+        "cardmarket": 806407,
+        "tcgplayer": 610758
+      },
+      "variantId": "23hmnvtwdrrnjw8wxr5005pugcpk",
+      "pricing": {
+        "cardmarket": {
+          "updated": "2026-10-30T22:54:33.125Z",
+          "unit": "EUR",
+          "idProduct": 806407,
+          "avg": 102.64,
+          "low": 89.99,
+          "trend": 73.59,
+          "avg1": 129.98,
+          "avg7": 104.05,
+          "avg30": 137.14,
+          "avg-holo": null,
+          "low-holo": null,
+          "trend-holo": 0,
+          "avg1-holo": null,
+          "avg7-holo": null,
+          "avg30-holo": null
+        },
+        "tcgplayer": null
+      }
+    }
+  ],
+  "dexId": [133],
+  "cameoDexIds": [25, 100],
+  "hp": 50,
+  "types": ["Colorless"],
+  "stage": "Basic",
+  "abilities": [
+    {
+      "type": "Ability",
+      "name": "Boosted Evolution",
+      "effect": "As long as this Pok\u00e9mon is in the Active Spot, it can evolve during your first turn or the turn you play it."
+    }
+  ],
+  "attacks": [
+    {
+      "cost": ["Colorless", "Colorless"],
+      "name": "Reckless Charge",
+      "effect": "This Pok\u00e9mon also does 10 damage to itself.",
+      "damage": 30
+    }
+  ],
+  "retreat": 1,
+  "regulationMark": "H",
+  "legal": {
+    "standard": true,
+    "expanded": true
+  },
+  "updated": "2026-09-06T11:00:03+01:00",
+  "pricing": {
+    "cardmarket": {
+      "updated": "2026-10-30T22:54:33.125Z",
+      "unit": "EUR",
+      "idProduct": 805370,
+      "avg": 16.59,
+      "low": 6,
+      "trend": 17.18,
+      "avg1": 15.83,
+      "avg7": 16.59,
+      "avg30": 16.93,
+      "avg-holo": null,
+      "low-holo": null,
+      "trend-holo": 0,
+      "avg1-holo": null,
+      "avg7-holo": null,
+      "avg30-holo": null
+    },
+    "tcgplayer": null
+  }
+}
