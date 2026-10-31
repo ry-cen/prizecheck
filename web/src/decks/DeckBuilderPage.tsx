@@ -641,35 +641,38 @@ export function DeckBuilderPage({
           )}
         </div>
       )}
-      {phone ? (
-        <>
-          <Segmented
-            label="Deck builder"
-            idBase={idBase}
-            panelId={`${idBase}-panel`}
-            value={pane}
-            onChange={setPane}
-            options={[
-              { value: "library", label: "Library" },
-              { value: "deck", label: "Deck", count: `${model.total}/60` },
-            ]}
-          />
-          <div
-            role="tabpanel"
-            id={`${idBase}-panel`}
-            aria-labelledby={segmentId(idBase, pane)}
-            className="min-w-0"
-          >
-            <div hidden={pane !== "deck"}>{deckList}</div>
-            <div hidden={pane !== "library"}>{library}</div>
-          </div>
-        </>
-      ) : (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] items-start gap-6 compact:grid-cols-[minmax(0,1fr)_16rem]">
+      {/* Keep both panes in the same tree: resizing must preserve panel state and in-flight commands. */}
+      <div className="hidden phone:block">
+        <Segmented
+          label="Deck builder"
+          idBase={idBase}
+          panelId={`${idBase}-panel`}
+          value={pane}
+          onChange={setPane}
+          options={[
+            { value: "library", label: "Library" },
+            { value: "deck", label: "Deck", count: `${model.total}/60` },
+          ]}
+        />
+      </div>
+      <div
+        role={phone ? "tabpanel" : undefined}
+        id={`${idBase}-panel`}
+        aria-labelledby={phone ? segmentId(idBase, pane) : undefined}
+        className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] items-start gap-6 compact:grid-cols-[minmax(0,1fr)_16rem] phone:block"
+      >
+        {/* Contents keeps the desktop grid items (including the sticky Library) in their original layout. */}
+        <div
+          className={`contents ${pane === "deck" ? "phone:block" : "phone:hidden"}`}
+        >
           {deckList}
+        </div>
+        <div
+          className={`contents ${pane === "library" ? "phone:block" : "phone:hidden"}`}
+        >
           {library}
         </div>
-      )}
+      </div>
       {deckActions.dialogs}
       <CopySheet
         line={sheetLine}
