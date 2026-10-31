@@ -18,7 +18,15 @@ const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const HIDDEN_MARK = "Hidden from Friends";
 
 type Editions = Record<
-  "PAL 185" | "PAL 254" | "PAF 80" | "SVI 166" | "PAL 172",
+  | "PAL 185"
+  | "PAL 254"
+  | "PAF 80"
+  | "SVI 166"
+  | "SVI 166 Reverse Holo"
+  | "SVE 5"
+  | "SVE 13"
+  | "PAL 172"
+  | "PAL 172 Reverse Holo",
   string
 >;
 
@@ -363,6 +371,7 @@ test("My Trade List uses desktop width with capped art and keeps Location quanti
   await noArtwork(page);
   await signInAsOwner(page, "/trades/list");
   const binder = await forTradeBinder(page, "Desktop trade binder");
+  // The Swap catalog has nine Editions, including both Arven and Boss's Orders finishes and two Energy Printings.
   for (const edition of Object.values(ids)) {
     await hold(page, binder, edition, 2);
   }
@@ -383,7 +392,7 @@ test("My Trade List uses desktop width with capped art and keeps Location quanti
     name: "Desktop trade vault",
     exact: true,
   });
-  await expect(cards.getByRole("listitem")).toHaveCount(5);
+  await expect(cards.getByRole("listitem")).toHaveCount(9);
   await page.setViewportSize({ width: 1024, height: 900 });
   const columns = () =>
     cards.evaluate(
@@ -402,7 +411,7 @@ test("My Trade List uses desktop width with capped art and keeps Location quanti
       .poll(() => main.evaluate((el) => getComputedStyle(el).paddingLeft))
       .toBe(width === 390 ? "16px" : "28px");
     if (width > 760) await expect.poll(columns).toBeGreaterThan(narrowColumns);
-    await expect(cards.getByRole("listitem")).toHaveCount(5);
+    await expect(cards.getByRole("listitem")).toHaveCount(9);
     for (const item of await cards.getByRole("listitem").all()) {
       await expect(item).toContainText("×2");
     }
