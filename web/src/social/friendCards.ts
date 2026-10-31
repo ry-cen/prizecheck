@@ -21,9 +21,8 @@ export function friendHandleAt(path: string): string | null {
 }
 
 /**
- * Which of a Friend's copies count for a card the collector needs: the device's owned-cards choice from Decklist
- * Import (Exact printings, or Use cards I own, the default), so Friends' matches follow the same rule as the cards
- * the collector uses from their own Collection.
+ * Collection and catalog-popup matching: the device's owned-cards choice from Decklist
+ * Import (Exact printings, or Use cards I own, the default). Want List chips use each card's Will accept instead.
  */
 export function readPrintings(): Printings {
   try {
@@ -45,8 +44,8 @@ export function lendableText(copy: { spare: string; in_deck: string }): string {
 }
 
 /**
- * Which Edition a Friend's copy is, when it isn't the card asked about: the set and number of another Printing of
- * its Reprint Group ("PAL 254"), or the Variant of another Edition of the same Printing ("Reverse Holo"). Null for
+ * Which Edition a Friend's copy is, when it isn't the card asked about: the set and number of another Printing
+ * ("PAL 254"), or the Variant of another Edition of the same Printing ("Reverse Holo"). Null for
  * the very Edition asked about (`wanted`).
  */
 export function otherEditionText(

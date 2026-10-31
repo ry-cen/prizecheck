@@ -79,7 +79,7 @@ export const getFriendCollection = (handle: string,
   params: { show?: 'wanted' | 'all'; q?: string; printings?: Printings; page?: number }, signal?: AbortSignal) =>
   request<FriendCollection>(`/api/social/collections/${at(handle)}${query(params)}`, 'GET', undefined, signal);
 // Friends' cards for the Want List in scope (#251): its own read, apart from the Want List's.
-export const getWantListMatches = (params: { deck?: string | null; printings?: Printings }, signal?: AbortSignal) =>
+export const getWantListMatches = (params: { deck?: string | null }, signal?: AbortSignal) =>
   request<WantListMatches>(`/api/social/want-list-matches${query(params)}`, 'GET', undefined, signal);
 // Friends who have this (#251): Friends' copies of one Card Printing, for the card popup.
 export const getCardMatches = (printingId: string, params: { printings?: Printings }, signal?: AbortSignal) =>

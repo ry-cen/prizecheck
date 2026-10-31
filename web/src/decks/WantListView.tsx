@@ -135,7 +135,10 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     reload,
     notify: setNotice,
   });
-  const friends = useFriendMatches(load.kind === "ready" ? load.list : null);
+  const friends = useFriendMatches(
+    load.kind === "ready" ? load.list : null,
+    attempt
+  );
   const drafts = useBorrowDrafts();
   const trade = useTradeWants(reload);
   // What a scoped Deck is waiting on from Friends, read apart from the Want List; All Decks reads none. The answer's

@@ -48,6 +48,7 @@ ALLOWED_IMPORTS = {
     'app.social.friend_copies': {('app.social', 'counts'), ('app', 'copy_allocation'), ('app.copy_allocation', 'allocate_rows'),
                                 ('app.copy_allocation', 'AllocationRows')},
     'app.social.friend_reads': {
+        ('app.card_accepts', 'accepts'), ('app.core.trading.trade_wants', 'own_rules'),
         ('app.social', 'name_rules'), ('app', 'set_codes'), ('app.db', 'connect'), ('app.identity', 'verified_user'),
         # Only the error helper of the Location readers; the Want List's capture drives the wanted cards, and the catalog's
         # card facts and card order show them.
