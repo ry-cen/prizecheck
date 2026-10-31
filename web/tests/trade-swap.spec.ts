@@ -183,6 +183,14 @@ async function story(
   // B: both Arven move to Ash's Box while his screen is open. His Confirm swap finds the pick out of date, and the
   // screen reads the Trade and his picks again.
   await move(ash.page, ashBinder, arven, 2, ashBox);
+  let stalePickConfirmations = 0;
+  ash.page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith(`/api/trades/${swap}/confirm-swap`)
+    )
+      stalePickConfirmations++;
+  });
   await ashMain.getByRole("button", { name: "Confirm swap" }).click();
   const ashDialog = confirmDialog(ash.page, "Misty W");
   await expect(ashDialog).toBeVisible();
@@ -191,6 +199,7 @@ async function story(
   ).toHaveValue("");
   await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
   await expect(ashDialog).toBeHidden();
+  expect(stalePickConfirmations).toBe(1);
   await expect(ashMain.getByRole("alert")).toHaveText(
     "A pick is out of date. Use the suggested picks first."
   );
@@ -208,6 +217,29 @@ async function story(
   await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
     `From ${secret} Box`
   );
+
+  await page.goto(`${ORIGIN}/trades/${swap}`);
+  await expect(heading(page)).toHaveText("Ready to swap with Ash K");
+  // Keep consent open so focus refresh cannot hide the stale-revision regression.
+  const dialog = confirmDialog(page, "Ash K");
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: "Confirm swap" })
+    .click();
+  await expect(dialog).toBeVisible();
+  const confirmations: {
+    revision: number;
+    idempotency_key: string;
+    destination_id: string | null;
+    deck_switches: object[];
+  }[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith(`/api/trades/${swap}/confirm-swap`)
+    )
+      confirmations.push(request.postDataJSON());
+  });
 
   // C: Ash confirms, putting Misty's Iono in his Box.
   await ashMain.getByRole("button", { name: "Confirm swap" }).click();
@@ -234,20 +266,11 @@ async function story(
   await expectOnlyReport(ash.page);
   expect(await held(ash.page, ashBox)).toEqual({ [arven]: "1", [iono]: "1" });
 
-  // D: Misty sees Ash confirmed; nothing of hers moved, and nobody can cancel now.
-  await page.goto(`${ORIGIN}/trades/${swap}`);
+  // D: Misty's screen was open before Ash confirmed; confirming must recover from its stale revision.
   const main = page.getByRole("main");
-  await expect(heading(page)).toHaveText("Ash K confirmed the swap");
-  await expect(main).toContainText(
-    "Ash K confirmed the swap. Confirm yours once you have the cards."
-  );
-  await expectOnlyReport(page);
   expect(await held(page, shelf)).toEqual({ [iono]: "3" });
-  await expectPageChecks(page, `a half-confirmed Trade at ${width}`);
 
   // E: Misty confirms into her Deck: the Trade is swapped, and the Deck lists the Arven it now holds.
-  await main.getByRole("button", { name: "Confirm swap" }).click();
-  const dialog = confirmDialog(page, "Ash K");
   await dialog
     .getByRole("combobox", { name: "Put the cards you get in" })
     .selectOption({ label: `${secret} Deck (Deck)` });
@@ -256,6 +279,16 @@ async function story(
     `Swapped. 1 card is in ${secret} Deck.`
   );
   await expect(heading(page)).toHaveText("Swapped with Ash K");
+  expect(confirmations).toHaveLength(2);
+  expect(confirmations[1].revision).toBe(confirmations[0].revision + 1);
+  expect(confirmations[0].destination_id).toBe(deck);
+  expect(confirmations[1].destination_id).toBe(deck);
+  expect(confirmations[1].deck_switches).toEqual(
+    confirmations[0].deck_switches
+  );
+  expect(confirmations[1].idempotency_key).toBe(
+    confirmations[0].idempotency_key
+  );
   await expect(main.getByRole("button", { name: "Confirm swap" })).toHaveCount(
     0
   );
@@ -268,6 +301,50 @@ async function story(
   ]);
   await ash.page.reload();
   await expect(heading(ash.page)).toHaveText("Swapped with Misty W");
+
+  // A changed cash term in the refreshed answer requires review, even when the other side confirmed.
+  // Stock a fresh Arven in Ash's For trade Binder: his remaining copy is in the unlisted Box after the first swap.
+  await hold(ash.page, ashBinder, arven, 1);
+  const review = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
+  const offered = await api(ash.page, "GET", `/api/social/trades/${review}`);
+  const accepted = await api(ash.page, "POST", `/api/trades/${review}/accept`, {
+    revision: offered.revision,
+    idempotency_key: randomUUID(),
+  });
+  await page.goto(`${ORIGIN}/trades/${review}`);
+  await main.getByRole("button", { name: "Confirm swap" }).click();
+  await expect(dialog).toBeVisible();
+  await api(ash.page, "POST", `/api/trades/${review}/confirm-swap`, {
+    revision: accepted.revision,
+    idempotency_key: randomUUID(),
+  });
+  const changedPath = `**/api/social/trades/${review}`;
+  await page.route(changedPath, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        cash: { cents: "200", payer: "you" },
+      },
+    });
+  });
+  let reviewConfirmations = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith(`/api/trades/${review}/confirm-swap`)
+    )
+      reviewConfirmations++;
+  });
+  await dialog.getByRole("button", { name: "Confirm swap" }).click();
+  await expect(main.getByRole("alert")).toHaveText(
+    "This Trade has changed. Check it and try again."
+  );
+  await expect(dialog).toBeHidden();
+  await expect(heading(page)).toHaveText("Ash K confirmed the swap");
+  expect(reviewConfirmations).toBe(1);
+  await page.unroute(changedPath);
 
   // F: Ash accepts the gift through the API. Misty's confirm gets her nothing, so it asks nowhere to put cards.
   const read = await api(ash.page, "GET", `/api/social/trades/${gift}`);
