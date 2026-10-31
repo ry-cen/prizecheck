@@ -30,6 +30,8 @@ type Props = {
   active: boolean;
   onOpenLoan: (id: string) => void;
   onAllLoans: () => void;
+  /** Opens the borrower's Deck a Loan is for (/decks/<id>). */
+  onOpenDeck: (id: string) => void;
 };
 
 /**
@@ -38,9 +40,22 @@ type Props = {
  * (LoanScreen). The tab's badge counts the Loans in Needs you, read through the inbox (#259). The list is read again
  * after a Friend command that may have cancelled Loans (#260, `useLoansChanged`).
  */
-export function LoansPage({ active, loanId, onOpenLoan, onAllLoans }: Props) {
+export function LoansPage({
+  active,
+  loanId,
+  onOpenLoan,
+  onAllLoans,
+  onOpenDeck,
+}: Props) {
   if (loanId)
-    return <LoanScreen key={loanId} loanId={loanId} onAllLoans={onAllLoans} />;
+    return (
+      <LoanScreen
+        key={loanId}
+        loanId={loanId}
+        onAllLoans={onAllLoans}
+        onOpenDeck={onOpenDeck}
+      />
+    );
   return <LoansList active={active} onOpenLoan={onOpenLoan} />;
 }
 

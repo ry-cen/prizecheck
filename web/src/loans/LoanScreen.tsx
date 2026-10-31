@@ -1,5 +1,6 @@
 import { Avatar } from "../ui/Avatar";
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -125,14 +126,17 @@ const OFFER_ASK: typeof ASK = {
  * Decline above it. Answering a request carries the date to keep, change or clear. The facts line reads "Overdue
  * since …" from the day after the date, and a Loan nobody handed over for 14 days says so once. Lend Offers (#258):
  * the borrower answers with a stepper per line, at most what was offered, and Put them in (a Deck or Unsorted); the
- * lender withdraws one from ⋯. One form or question is open at a time: opening one closes the others.
+ * lender withdraws one from ⋯. One form or question is open at a time: opening one closes the others. The borrower's
+ * "For <Deck>" names the Deck as a link that opens it; Unsorted, or a Deck since deleted, stays plain text.
  */
 export function LoanScreen({
   loanId,
   onAllLoans,
+  onOpenDeck,
 }: {
   loanId: string;
   onAllLoans: () => void;
+  onOpenDeck: (id: string) => void;
 }) {
   const drafts = useBorrowDrafts();
   // The bell and the Loans tab's badge are read again after each step and notice seen here (#259).
@@ -497,13 +501,31 @@ export function LoanScreen({
       : []),
   ];
 
-  const facts = [
+  const deck = side.deck;
+  const facts: ReactNode[] = [
     loan.role === "lender" ? "You're lending" : "You're borrowing",
     loan.role === "borrower" &&
     loan.state !== "closed" &&
-    loan.state !== "offered"
-      ? `For ${side.deck?.name ?? "Unsorted"}`
-      : null,
+    loan.state !== "offered" ? (
+      deck ? (
+        <>
+          For{" "}
+          <a
+            href={`/decks/${encodeURIComponent(deck.id)}`}
+            onClick={(event) => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+              event.preventDefault();
+              onOpenDeck(deck.id);
+            }}
+            className="inline-flex max-w-full min-h-(--target-pointer) items-center justify-center rounded-control text-accent-strong underline underline-offset-2 wrap-anywhere hover:text-text phone:min-h-tap phone:min-w-tap"
+          >
+            {deck.name}
+          </a>
+        </>
+      ) : (
+        "For Unsorted"
+      )
+    ) : null,
     loan.overdue_since
       ? `Overdue since ${dayText(loan.overdue_since)}`
       : loan.return_by && loan.state !== "closed"
@@ -869,7 +891,12 @@ export function LoanScreen({
     loanHeadline(loan),
     <>
       <p className="m-0 border-b border-border pb-4 text-meta text-text-muted tabular-nums">
-        {facts.join(" · ")}
+        {facts.map((fact, index) => (
+          <Fragment key={index}>
+            {index > 0 && " · "}
+            {fact}
+          </Fragment>
+        ))}
       </p>
       {(showing.includes("nudge_answer") ||
         showing.includes("nudge_handover")) && (
