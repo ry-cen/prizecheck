@@ -1,6 +1,10 @@
 import { expect, test, vi } from "vitest";
 import { BorrowedMoveError } from "../collection_generated";
-import { MoveError, commitMove } from "../moves_generated";
+import {
+  MoveError,
+  commitMove,
+  commitMoveWithoutUndo,
+} from "../moves_generated";
 import {
   advance,
   createOperation,
@@ -27,7 +31,7 @@ const borrowed = [
 ];
 function server(
   stage: "owned" | "borrowed",
-  loss: "network" | "500" | "before" | "refused"
+  loss: "network" | "timeout" | "500" | "before" | "refused"
 ) {
   let failed = false;
   const applied = new Set<string>();
@@ -50,6 +54,8 @@ function server(
     if (at === stage && !failed) {
       failed = true;
       if (loss === "network") throw new TypeError("lost response");
+      if (loss === "timeout")
+        throw new DOMException("timed out", "TimeoutError");
       throw at === "owned"
         ? new MoveError(500, "UNAVAILABLE")
         : new BorrowedMoveError(500, "UNAVAILABLE");
@@ -83,17 +89,14 @@ function server(
       already_at_destination_count: "0",
       owner_revision: 3,
     }),
-    commitMove: async (
-      id,
-      _destination,
-      key,
-      _putAway = false,
-      undo = true
-    ) => {
+    commitMoveWithoutUndo: async () => {
+      throw new Error("not initialized");
+    },
+    commitMove: async (id, _destination, key) => {
       expect(id).toBe("manifest");
       commit("owned", key, 2);
       return {
-        undo_id: undo ? "owned-undo" : null,
+        undo_id: "owned-undo",
         copy_count: "2",
         edition_count: 1,
         source_count: 1,
@@ -102,10 +105,14 @@ function server(
       };
     },
   };
+  api.commitMoveWithoutUndo = async (id, destination, key) => ({
+    ...(await api.commitMove(id, destination, key)),
+    undo_id: null,
+  });
   return { api, calls, applied, copies: () => copies };
 }
 for (const stage of ["borrowed", "owned"] as const)
-  for (const loss of ["network", "500", "before"] as const)
+  for (const loss of ["network", "timeout", "500", "before"] as const)
     test(`${stage} ${loss} retries the frozen operation once even after selection changes`, async () => {
       const held = createOperation("dest", owned, borrowed);
       const fake = server(stage, loss);
@@ -128,11 +135,11 @@ for (const stage of ["borrowed", "owned"] as const)
       );
     });
 for (const stage of ["borrowed", "owned"] as const)
-  test(`definite ${stage} refusal stops at that stage`, async () => {
+  test(`${stage} server refusal ${stage === "owned" ? "keeps the strict outcome UNKNOWN" : "stops before the owned stage"}`, async () => {
     const held = createOperation("dest", owned, borrowed);
     const fake = server(stage, "refused");
     expect(await advance(held.op, held.state, fake.api)).toMatchObject({
-      kind: "refused",
+      kind: stage === "owned" ? "unknown" : "refused",
       stage,
     });
     expect(fake.copies()).toBe(stage === "borrowed" ? 0 : 1);
@@ -193,7 +200,7 @@ for (const stage of ["borrowed", "owned"] as const)
       });
       const keys = [held.op.borrowedKey, held.op.ownedKey];
       if (stage === "owned")
-        fake.api.commitMove = async () => {
+        fake.api.commitMoveWithoutUndo = async () => {
           throw new MoveError(
             code === "MOVE_MANIFEST_NOT_FOUND" ? 404 : 409,
             code
@@ -271,7 +278,7 @@ test("an unavailable outcome is unknown even on the first received reply", async
     copy_count: "1",
     owner_revision: 2,
   });
-  fake.api.commitMove = async () => {
+  fake.api.commitMoveWithoutUndo = async () => {
     throw new MoveError(409, "REPLAY_OUTCOME_UNAVAILABLE");
   };
   expect(await advance(held.op, held.state, fake.api)).toMatchObject({
@@ -281,20 +288,20 @@ test("an unavailable outcome is unknown even on the first received reply", async
   expect(held.state.owned).toBe("unknown");
 });
 
-test("supported mixed Move sends undo:false and creates no cleanup work", async () => {
+test("supported mixed Move uses the dedicated route on first attempt and replay", async () => {
   const held = createOperation("dest", owned, borrowed);
   const fake = server("owned", "network");
-  const commit = vi.fn(fake.api.commitMove);
+  const commit = vi.fn(fake.api.commitMoveWithoutUndo);
   const dismissUndo = vi.fn();
-  const api = { ...fake.api, commitMove: commit, dismissUndo };
+  const api = { ...fake.api, commitMoveWithoutUndo: commit, dismissUndo };
   expect(await advance(held.op, held.state, api)).toMatchObject({
     kind: "unknown",
     stage: "owned",
   });
   expect(await advance(held.op, held.state, api)).toEqual({ kind: "done" });
   expect(commit.mock.calls).toEqual([
-    ["manifest", "dest", held.op.ownedKey, false, false],
-    ["manifest", "dest", held.op.ownedKey, false, false],
+    ["manifest", "dest", held.op.ownedKey],
+    ["manifest", "dest", held.op.ownedKey],
   ]);
   expect(held.state.ownedResult?.undo_id).toBeNull();
   expect(dismissUndo).not.toHaveBeenCalled();
@@ -315,7 +322,7 @@ test("owned-only Move uses the default request and keeps its Undo", async () => 
   expect(held.state.ownedResult?.undo_id).toBe("owned-undo");
 });
 
-test("an unexpected old-server Undo receipt never completes the operation or triggers a cleanup guarantee", async () => {
+test("an unexpected non-null Undo receipt never completes the operation or triggers a cleanup guarantee", async () => {
   const held = createOperation("dest", owned, borrowed);
   const fake = server("owned", "network");
   const commit = vi.fn(async () => ({
@@ -327,7 +334,7 @@ test("an unexpected old-server Undo receipt never completes the operation or tri
     owner_revision: 3,
   }));
   const dismissUndo = vi.fn();
-  const api = { ...fake.api, commitMove: commit, dismissUndo };
+  const api = { ...fake.api, commitMoveWithoutUndo: commit, dismissUndo };
   for (let retry = 0; retry < 2; retry++) {
     expect(await advance(held.op, held.state, api)).toMatchObject({
       kind: "unknown",
@@ -340,9 +347,11 @@ test("an unexpected old-server Undo receipt never completes the operation or tri
   expect(undoProtectionUnconfirmed(held)).toBe(true);
 });
 
-test("generated Move requests keep legacy bodies and send undo only when false", async () => {
+test("generated Move requests preserve normal bodies and isolate the strict route", async () => {
   const bodies: string[] = [];
+  const urls: unknown[] = [];
   vi.stubGlobal("fetch", async (_input: unknown, init?: RequestInit) => {
+    urls.push(_input);
     bodies.push(String(init?.body));
     return Response.json({
       copy_count: "1",
@@ -355,14 +364,17 @@ test("generated Move requests keep legacy bodies and send undo only when false",
   });
   try {
     await commitMove("manifest", "dest", "key");
-    await commitMove("manifest", "dest", "key", false, true);
     await commitMove("manifest", "dest", "key", true);
-    await commitMove("manifest", "dest", "key", false, false);
+    await commitMoveWithoutUndo("manifest", "dest", "key");
+    expect(urls).toEqual([
+      "/api/moves/manifests/manifest/commit",
+      "/api/moves/manifests/manifest/commit",
+      "/api/moves/manifests/manifest/commit-without-undo",
+    ]);
     expect(bodies).toEqual([
       '{"destination_id":"dest","idempotency_key":"key"}',
-      '{"destination_id":"dest","idempotency_key":"key"}',
       '{"destination_id":"dest","idempotency_key":"key","put_away":true}',
-      '{"destination_id":"dest","idempotency_key":"key","undo":false}',
+      '{"destination_id":"dest","idempotency_key":"key"}',
     ]);
   } finally {
     vi.unstubAllGlobals();
@@ -386,3 +398,130 @@ test("confirmed new-server null receipt and owned-only records do not block norm
   expect(undoProtectionUnconfirmed(mixed)).toBe(false);
   expect(undoProtectionUnconfirmed(normal)).toBe(false);
 });
+
+for (const status of [404, 405])
+  test(`an old or rolled-back API ${status} refuses the owned write while preserving borrowed progress`, async () => {
+    const held = createOperation("dest", owned, borrowed);
+    const fake = server("owned", "network");
+    const normal = vi.spyOn(fake.api, "commitMove");
+    fake.api.commitMoveWithoutUndo = vi.fn(async () => {
+      throw new MoveError(status, "MOVE_REQUEST_FAILED");
+    });
+    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+      kind: "refused",
+      stage: "owned",
+    });
+    expect(fake.copies()).toBe(1);
+    expect(held.state.borrowedResult?.copy_count).toBe("1");
+    expect(held.state.ownedResult).toBeUndefined();
+    expect(normal).not.toHaveBeenCalled();
+    expect(fake.api.commitMoveWithoutUndo).toHaveBeenCalledExactlyOnceWith(
+      "manifest",
+      "dest",
+      held.op.ownedKey
+    );
+  });
+
+for (const status of [404, 405])
+  test(`a timeout followed by rollback ${status} stays UNKNOWN with the original key`, async () => {
+    const held = createOperation("dest", owned, borrowed);
+    const fake = server("owned", "timeout");
+    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+      kind: "unknown",
+    });
+    const original = fake.api.commitMoveWithoutUndo;
+    const missing = vi.fn(async () => {
+      throw new MoveError(status, "MOVE_REQUEST_FAILED");
+    });
+    fake.api.commitMoveWithoutUndo = missing;
+    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+      kind: "unknown",
+      stage: "owned",
+    });
+    expect(held.state.owned).toBe("unknown");
+    expect(operationFor(held, "elsewhere", [], [])).toBe(held);
+    expect(missing).toHaveBeenCalledExactlyOnceWith(
+      "manifest",
+      "dest",
+      held.op.ownedKey
+    );
+    fake.api.commitMoveWithoutUndo = original;
+    expect(await advance(held.op, held.state, fake.api)).toEqual({
+      kind: "done",
+    });
+    expect(fake.copies()).toBe(3);
+    expect(fake.applied.size).toBe(2);
+  });
+
+for (const status of [400, 401, 409, 422, 500, 503])
+  test(`strict failure ${status} cannot establish that the owned part did not move`, async () => {
+    const held = createOperation("dest", owned, borrowed);
+    const fake = server("owned", "network");
+    fake.api.commitMoveWithoutUndo = async () => {
+      throw new MoveError(status, "MOVE_REQUEST_FAILED");
+    };
+    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+      kind: "unknown",
+      stage: "owned",
+    });
+    expect(held.state.borrowedResult?.copy_count).toBe("1");
+    expect(operationFor(held, "elsewhere", [], [])).toBe(held);
+  });
+
+for (const code of ["MOVE_MANIFEST_NOT_FOUND", "LOCATION_NOT_FOUND"])
+  test(`a domain 404 ${code} is not an unknown-route rejection`, async () => {
+    const held = createOperation("dest", owned, borrowed);
+    const fake = server("owned", "network");
+    fake.api.commitMoveWithoutUndo = async () => {
+      throw new MoveError(404, code);
+    };
+    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+      kind: "unknown",
+      stage: "owned",
+    });
+    expect(operationFor(held, "elsewhere", [], [])).toBe(held);
+  });
+
+for (const status of [404, 405])
+  test(`an old backend ${status} makes no inventory mutation when borrowed copies already stayed`, async () => {
+    const held = createOperation("dest", owned, [
+      { ...borrowed[0], from_location_id: "dest" },
+    ]);
+    const fake = server("owned", "network");
+    fake.api.commitMoveWithoutUndo = async () => {
+      throw new MoveError(status, "MOVE_REQUEST_FAILED");
+    };
+    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+      kind: "refused",
+      stage: "owned",
+    });
+    expect(fake.calls).toEqual([]);
+    expect(fake.copies()).toBe(0);
+    expect(held.op.noUndo).toBe(true);
+    expect(held.op.stayed).toBe(1);
+  });
+
+for (const status of [404, 405])
+  test(`a borrowed receipt lost before rollback ${status} also stays UNKNOWN`, async () => {
+    const held = createOperation("dest", owned, borrowed);
+    const fake = server("borrowed", "network");
+    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+      kind: "unknown",
+      stage: "borrowed",
+    });
+    const original = fake.api.moveBorrowedCopies;
+    fake.api.moveBorrowedCopies = async () => {
+      throw new BorrowedMoveError(status, "MOVE_UNAVAILABLE");
+    };
+    expect(await advance(held.op, held.state, fake.api)).toMatchObject({
+      kind: "unknown",
+      stage: "borrowed",
+    });
+    expect(operationFor(held, "elsewhere", [], [])).toBe(held);
+    expect(fake.calls).toEqual([`borrowed:${held.op.borrowedKey}`]);
+    fake.api.moveBorrowedCopies = original;
+    expect(await advance(held.op, held.state, fake.api)).toEqual({
+      kind: "done",
+    });
+    expect(fake.copies()).toBe(3);
+  });

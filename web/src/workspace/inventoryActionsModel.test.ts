@@ -130,3 +130,19 @@ test("unsupported no-Undo receipt reports moved quantities without claiming prot
   expect(failure.text).not.toContain("didn't move");
   expect(failure.retrySame).toBe(true);
 });
+
+for (const status of [404, 405])
+  test(`a definitive initial unknown-route ${status} reports unavailable and preserves borrowed progress`, () => {
+    const failure = describeFailure(
+      { kind: "move", destinationId: "dest" },
+      new MoveError(status, "MOVE_REQUEST_FAILED"),
+      names,
+      { unsupported: true, omitNothing: true }
+    );
+    const partial = partialMoveFailure(1, "Box", failure, false);
+    expect(partial.text).toContain("Moved 1 borrowed copy to Box");
+    expect(partial.text).toContain("your own copies didn't move");
+    expect(partial.text).toContain("unavailable right now");
+    expect(partial.text).not.toContain("Nothing moved");
+    expect(partial.retrySame).toBe(false);
+  });

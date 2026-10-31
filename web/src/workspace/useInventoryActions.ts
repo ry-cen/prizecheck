@@ -295,6 +295,7 @@ export function useInventoryActions({
                 {
                   omitNothing: !!state.borrowedResult,
                   unknown: outcome.kind === "unknown",
+                  unsupported: op.noUndo && outcome.kind === "refused",
                 }
               );
         if (

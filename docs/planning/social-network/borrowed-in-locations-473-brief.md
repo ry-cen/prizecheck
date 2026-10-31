@@ -18,7 +18,7 @@ Spare Copies, Removal, Undo, the Trade List, Swap hints and every Friend view ne
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | Keep `borrowed_holding` and a dedicated write. Do not change `holding`, Undo, `GET /api/holdings/{id}`, `GET /api/collection` or the Location tree. `moves.py` changes in one way only. The Move commit takes an optional `undo` (default true), and `undo: false` commits without writing an Undo record. The web client sends it only for the owned stage of a Move that carries Borrowed Copies. Removal, Put away and Undo itself are unchanged. | ADR 0014: single-owner reads stay correct unless they opt in. |
+| D1 | Keep `borrowed_holding` and a dedicated write. Do not change `holding`, Undo, `GET /api/holdings/{id}`, `GET /api/collection` or the Location tree. `moves.py` changes in one way only. The dedicated `POST /api/moves/manifests/{manifest_id}/commit-without-undo` takes destination and idempotency key and atomically commits without writing an Undo record. The web client uses this route only for the owned stage of a Move that carries Borrowed Copies. Normal Move requests and fingerprints stay unchanged. This operation creates no Undo record; not a history barrier; an older Undo stays quantity-based. Removal, Put away and Undo itself are unchanged. | ADR 0014: single-owner reads stay correct unless they opt in. |
 | D2 | A new owner-only **gallery projection**, `GET /api/collection/borrowed`, in a new module `api/app/borrowed_gallery.py`. It takes the query parameters of `GET /api/collection/holdings`, and `location_id` is optional: none means All owned. | The owned listing's paging, cursor and totals contract stays about ownership. The filters must match it exactly, so it reuses the listing's SQL fragments. |
 | D3 | A new **batch write**, `POST /api/collection/borrowed/moves`, in the same module. It is all or nothing, advances the revision once, writes no Undo record and replays by key. It is written directly, not built by calling the singular route repeatedly. The singular `POST /api/loans/borrowed/move` stays unchanged for compatibility and for the Borrowed dialog. | The gallery moves many rows at once. The new routes stay out of `loan_inventory.py`, which #478 owns. |
 | D4 | Borrowed tiles come **after** the collector's own tiles, in the gallery's sort among themselves, with no section heading. This holds in a Location view and in All owned. | Owner decision Q2. The gallery is one index-positioned grid, and a trailing run needs no layout change. |
@@ -76,7 +76,7 @@ Spare Copies, Removal, Undo, the Trade List, Swap hints and every Friend view ne
 14. Friend views, Spare Copies, Swap hints, the Trade List and Removal are unchanged; their existing tests pass, and
     `test_social_contract.py` passes with no edits.
 15. CONTEXT.md and spec.md carry §7's wording. No copy shows a Loan id, state, date or data source.
-16. Only `collection_generated.ts` and `moves_generated.ts` change among the generated clients (`npm run check:client` passes).
+16. Only `collection_generated.ts` and `moves_generated.ts` change among the generated clients (`npm run check:client` passes). The mixed Move uses the dedicated no-Undo route on the first attempt and every same-key replay. An initial definitive unknown-route 404/405 refuses the owned write; every other failure stays UNKNOWN until reconciled. An earlier uncertain attempt stays UNKNOWN even if a later retry gets 404/405. No Undo is offered.
     `npm run check`, `npm run guardrails` and the runs in §8 pass.
 
 ## 4. Context
@@ -264,12 +264,14 @@ It takes no `loan` lock and doesn't touch `loan`, `loan_line` or `holding`. Regi
 type Stage = "todo" | "done" | "unknown";
 type MoveOperation = Readonly<{
   target: { kind: "move"; destinationId: string };
-  owned: readonly SelectedGroup[];          // as carried at the start, Borrowed already at the destination removed
+  owned: readonly SelectedGroup[];          // owned rows already at the destination removed
   borrowed: readonly BorrowedMoveItem[];
-  stayed: number;                           // carried Borrowed copies already at the destination
+  stayed: number;                           // owned and Borrowed copies already at the destination
+  noUndo: boolean;                          // original selection carried Borrowed Copies, even if they stayed
   borrowedKey: string; ownedKey: string;    // crypto.randomUUID() each, at creation
 }>;
 type OperationState = { manifestId: string | null; staged: boolean; borrowed: Stage; owned: Stage;
+                        borrowedAttempted: boolean; ownedAttempted: boolean;
                         borrowedResult?: BorrowedMoveResult; ownedResult?: MoveResult };
 ```
 
@@ -277,21 +279,26 @@ Removal keeps today's path: an owned-only operation with no Borrowed stage. Only
 signature-based `pending`.
 
 **`advance(op, state, api): Promise<Outcome>`** is a pure orchestration function with the API injected
-(`moveBorrowedCopies`, `startMove`, `stageMove`, `commitMove`):
+(`moveBorrowedCopies`, `startMove`, `stageMove`, `commitMove`, `commitMoveWithoutUndo`):
 
 1. If `borrowed` is non-empty and the Borrowed stage isn't `done`, call `moveBorrowedCopies({to_location_id, items:
    op.borrowed, idempotency_key: op.borrowedKey})`.
    - A 2xx answer sets `done`.
-   - A `BorrowedMoveError` with status < 500 is a **definite refusal**: return `{kind: "refused", stage:
-     "borrowed"}`.
+   - A `BorrowedMoveError` with status < 500 is a **definite refusal**, except any rejection after an earlier uncertain attempt, or an unavailable replay, remains UNKNOWN. Return `{kind: "refused", stage: "borrowed"}` only for a definite refusal.
    - Anything else (a network error, timeout or 5xx) sets the stage to `unknown` and returns `{kind: "unknown",
      stage: "borrowed"}`. Stop.
 2. If `owned` is non-empty and the owned stage isn't `done`, start a manifest if `manifestId` is null and stage
-   (idempotent) if not `staged`. A failure here means nothing was committed, so it is a refusal or retryable, as
-   today. Then commit with `op.ownedKey` and the same manifest.
-   - A 2xx answer sets `done`.
-   - A `MoveError` with status < 500 is refused at stage `owned`.
-   - Anything else sets the stage to `unknown` and returns unknown at stage `owned`.
+   (idempotent) if not `staged`. Commit with `op.ownedKey` and the same manifest. A mixed Move uses
+   `commitMoveWithoutUndo`; owned-only Move and Removal keep their existing APIs. If all owned copies already
+   occupy the destination, count them as stayed and skip the manifest entirely.
+   - A 2xx receipt sets `done`; a non-null Undo id on the strict route instead retains the receipt as an
+     unsupported diagnostic, never offers Undo and sends no DELETE.
+   - For the strict route, only an initial unknown-route 404/405 (default route-not-found response) is refused.
+     All other failures are UNKNOWN. After an earlier uncertain attempt, even a later 404/405 stays UNKNOWN.
+   - Owned-only requests keep today's initial refusal classification; every rejection after an uncertain
+     attempt stays UNKNOWN. Every retry uses the same route, key and manifest; no failure alone proves a
+     possibly committed request did not execute.
+
 3. When everything is `done`, return `{kind: "done"}`.
 
 **`run` in the hook.**
@@ -314,8 +321,8 @@ destination.
 | done | Toast: "Moved {all copies} to {place}.{stayed}". No Undo if `borrowed` was non-empty; otherwise today's Undo lookup with `undo_id`. | gallery and tree |
 | refused, borrowed | `describeBorrowedFailure` lead + "Nothing moved." `NOT_ENOUGH_BORROWED`: "Some borrowed copies aren't where you selected them any more. Nothing moved." `LOCATION_NOT_FOUND`: today's destination-gone text. Anything else: "The Move was refused. Nothing moved." | gallery for `NOT_ENOUGH_BORROWED` and `LOCATION_NOT_FOUND`; tree as today |
 | unknown, borrowed | "The Move may not have finished. Try again to check safely; your selection is kept." | none |
-| refused, owned, Borrowed done | "Moved {n borrowed copies} to {place}; your own copies didn't move: {describeFailure lead without its "Nothing moved." sentence}" | gallery and tree |
-| refused, owned, no Borrowed | today's `describeFailure`, unchanged | as today |
+| initial unknown-route 404/405, owned, Borrowed done | "Moved {n borrowed copies} to {place}; your own copies didn't move: This Move is unavailable right now. Try again later." | gallery and tree |
+| refused, owned, no Borrowed | owned-only: today's `describeFailure`; mixed selection whose Borrowed copies stayed: unavailable message only for initial unknown-route 404/405 | as today |
 | unknown, owned, Borrowed done | "Moved {n borrowed copies} to {place}. Moving your own copies may not have finished. Try again to check safely." | gallery and tree (borrowed rows moved) |
 | unknown, owned, no Borrowed | today's unknown text, unchanged | none |
 
@@ -487,7 +494,7 @@ All must pass. Record the baseline and actual counts. The primary may then start
 
 **Out of scope.**
 
-- `holding` and Undo. `moves.py` changes only for the optional `undo` flag described in D1; Removal, Put away and Undo itself keep their existing behavior.
+- `holding` and Undo. `moves.py` changes only for the dedicated no-Undo route described in D1; Removal, Put away and Undo itself keep their existing behavior.
 - `GET /api/holdings/{id}`, `GET /api/collection` and the Location tree.
 - `loan_inventory.py`, including the singular route, which is kept as is.
 - `BorrowedDialog.tsx`, `social_generated.ts` and every generated client except `collection_generated.ts` and `moves_generated.ts`.
@@ -550,19 +557,20 @@ All must pass. Record the baseline and actual counts. The primary may then start
    Spare Copies, Removal, Undo, the Trade List, Swap hints and every Friend view.
 
 
-## 12. Owner-approved Move Undo amendment and root corrections
+## 12. Owner-approved dedicated Move route and reconciliation
 
-The owner approved the optional `CommitMove.undo: bool = True` contract at 18:02 UTC. The owned stage of a mixed Move sends `undo: false`, including on resume. The server writes no new Undo record, does not trim the surviving history to make room for a new record, and returns `undo_id: null` on the first response and on replay. The fingerprint adds `"undo": false` only when false. Default omitted/true requests keep their existing fingerprint and Undo behavior. Put away and Removal refuse false before replay with 422 `PUT_AWAY_NEEDS_UNDO` and `REMOVAL_NEEDS_UNDO`, respectively. No table, migration or additional lock is introduced.
+The owner approved `POST /api/moves/manifests/{manifest_id}/commit-without-undo` at 19:04 UTC. It replaces the proposed optional `CommitMove.undo` field completely. Its body accepts `destination_id` and `idempotency_key`, returns the existing MoveResult, shares normal Move locking, validation, transaction and replay, and atomically skips writing a new Undo record and trimming history for that record. `undo_id` is null on the first response and on replay. Its fingerprint uses action `move_without_undo`; the same key used across normal and strict routes returns 409 `IDEMPOTENCY_KEY_REUSED`. Normal Move bodies and fingerprints are unchanged. Put away and Removal use the existing routes and keep normal Undo. The strict body rejects `put_away` and requires a destination before locking, so the flag-specific `PUT_AWAY_NEEDS_UNDO` and `REMOVAL_NEEDS_UNDO` refusals no longer apply. No table, migration or additional lock is introduced.
 
 **This operation creates no Undo record; not a history barrier; an older Undo stays quantity-based.** An older surviving Undo checks the recorded source, Card Edition and quantity, not physical-copy identity. Replenishing a destination can make an older Undo apply when it would otherwise fail; its quantity can include copies delivered by a later mixed Move. This amendment does not make older history identity-safe or solve that limitation.
 
-### Mixed-version capability: STOP pending root's contract decision
+### Mixed versions and residual windows
 
-The images are built with the same source commit tag, and `compose.deploy.yml` orders normal startup API → auth → web through healthy dependencies. However, they are separate containers, `start_release` uses Compose replacement, and `cmd_rollback` can restore an older API without removing JavaScript already loaded in browsers. The borrowed routes and the Undo flag also entered this branch in separate commits; only the completed release contains both. A borrowed-contract GET does not bind a later owned commit to that server version.
+Images carry the same source tag and normal startup orders API → auth → web, but separate containers and rollback do not remove already loaded JavaScript. A capability GET cannot bind a later write to that server version. The dedicated route closes that particular unsafe fallback: an old or rolled-back API rejects its unknown route instead of interpreting the request as a normal undoable Move. There is no client fallback to normal commit and no after-commit DELETE.
 
-A possible failure is: the new API answers the borrowed GET and completes the borrowed batch, rollback replaces the API, and the owned commit reaches an older server which ignores `undo:false`. Even a fresh GET immediately before the commit leaves a replacement window. Thus the approved contract alone does not establish an adequate fail-closed pre-write capability gate. The client gate is stopped; no after-commit DELETE is treated as a correctness or security guarantee, and the mixed-version safeguard must be resolved before shipping this client.
+Only an initial definitive unknown-route 404/405, before any possibly committed request, establishes that the owned part did not execute. The UI says the Move is unavailable and can be tried later. All other failures, including timeouts, lost or aborted responses, network errors, 5xx and other refusal responses, leave the strict owned outcome UNKNOWN. Reconciliation retries the same route, manifest and idempotency key; it never starts another operation with a new key while the result is unknown. An earlier uncertain request remains UNKNOWN if a later retry gets 404/405 after rollback. The borrowed batch runs first in its own transaction: when it succeeds, the UI reports those borrowed copies as moved even if the owned part is refused or remains unknown. No failure without a receipt is treated as proof that nothing moved.
 
-The minimal proposal sent to root, **not approved or implemented**, is a distinct `POST /api/moves/manifests/{id}/commit-without-undo` route. It would accept destination and idempotency key, force the existing atomic no-Undo path, return the existing MoveResult with `undo_id:null`, and share the existing owner lock and replay semantics. An older server cannot interpret that request as a normal undoable Move: it rejects the route before mutation. A GET capability field or deployment statement alone cannot close the check/write window.
+The existing replay ledger records successful commits, not refusal outcomes. Under the required strict-client classification, a non-route refusal such as `STALE_HOLDING` therefore stays UNKNOWN if repeated requests never yield a receipt; the client does not silently turn it into a failed operation. Automatic resolution of that case would require separately approved recorded refusal outcomes or an outcome lookup. Neither is added here.
 
+An idempotency receipt can expire after 24 hours. If replay becomes unavailable or the manifest is gone after an uncertain attempt, the client remains UNKNOWN and does not invent a result or mint a key. Automatic reconciliation after that retention window would need a separately approved durable outcome lookup or longer retention; this work adds neither. The in-memory operation can also be lost on reload or crash; no persistence or cross-tab recovery guarantee is claimed.
 
-The post-commit non-null-`undo_id` check is defence in depth only. The current workspace refuses to offer Undo or treat that operation as safely complete, and shows "Undo unavailable". It does not delete the record or make the old server's write atomic. It does not protect other tabs or repair loss of client state on reload. These residual windows are why the pre-write protocol is blocked rather than claimed solved by the response check.
+A non-null `undo_id` from this route violates its postcondition. Defence in depth retains that receipt, never offers the Undo, refuses further operation writes and shows "Undo unavailable". It sends no DELETE and does not claim that response diagnostics protect other tabs or repair a broken server. The safe no-Undo guarantee comes from the dedicated server transaction, not client cleanup.

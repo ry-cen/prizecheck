@@ -150,23 +150,3 @@ def test_put_away_is_refused_unless_it_moves_copies_out_of_one_deck():
     # Nothing moved.
     assert held(owner, deck) == {edition: '5', cut: '2'} and held(owner, binder) == {edition: '2'}
     assert held(owner, shelf) == {}
-
-
-def test_put_away_refuses_undo_false_before_replay(monkeypatch):
-    from app import moves
-    owner, deck, edition, cut, _ = cut_deck()
-    destination = leaf(owner, 'Put away destination')
-    manifest = staged_surplus(owner, deck)
-    key = uuid4()
-    normal = ok(put_away(owner, manifest, destination, key)).json()
-    before = held(owner, deck), held(owner, destination)
-    def must_not_apply(*args):
-        raise AssertionError('Put away must refuse undo:false before apply_selection or replay')
-    monkeypatch.setattr(moves, 'apply_selection', must_not_apply)
-    for request_key in (key, uuid4()):
-        refused = call('POST', f'/api/moves/manifests/{manifest}/commit', owner,
-                       {'destination_id': destination, 'put_away': True, 'undo': False,
-                        'idempotency_key': str(request_key)})
-        assert (refused.status_code, refused.json()['detail']['code']) == (422, 'PUT_AWAY_NEEDS_UNDO')
-    assert (held(owner, deck), held(owner, destination)) == before
-    assert newest_undo(owner) == normal['undo_id']

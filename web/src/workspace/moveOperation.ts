@@ -10,6 +10,7 @@ import {
   startMove,
   stageMove,
   commitMove,
+  commitMoveWithoutUndo,
   type MoveResult,
 } from "../moves_generated";
 import { STAGE_BATCH, type ActionTarget } from "./inventoryActionsModel";
@@ -47,6 +48,7 @@ export const moveApi = {
   startMove,
   stageMove,
   commitMove,
+  commitMoveWithoutUndo,
   removeInventory,
 };
 export type HeldOperation = { op: MoveOperation; state: OperationState };
@@ -110,6 +112,7 @@ export async function advance(
     } catch (error) {
       if (
         error instanceof BorrowedMoveError &&
+        !attempted &&
         error.status < 500 &&
         !unavailableReplay(error, attempted)
       )
@@ -134,12 +137,10 @@ export async function advance(
       state.ownedResult =
         op.target.kind === "move"
           ? op.noUndo
-            ? await api.commitMove(
+            ? await api.commitMoveWithoutUndo(
                 state.manifestId,
                 op.target.destinationId,
-                op.ownedKey,
-                false,
-                false
+                op.ownedKey
               )
             : await api.commitMove(
                 state.manifestId,
@@ -151,16 +152,19 @@ export async function advance(
     } catch (error) {
       if (
         error instanceof MoveError &&
-        error.status < 500 &&
-        !unavailableReplay(error, attempted)
+        !attempted &&
+        (op.noUndo
+          ? error.code === "MOVE_REQUEST_FAILED" &&
+            (error.status === 404 || error.status === 405)
+          : error.status < 500 && !unavailableReplay(error, attempted))
       )
         return { kind: "refused", stage: "owned", error };
       state.owned = "unknown";
       return { kind: "unknown", stage: "owned", error };
     }
   } else if (!op.owned.length) state.owned = "done";
-  // Defence in depth only: this cannot undo an old server's already-committed write.
-  // Retain the receipt and refuse further writes; never treat an ignored flag as successful protection.
+  // Defence in depth for a broken route postcondition, never a cleanup guarantee.
+  // Retain the receipt and refuse further writes; never offer this record as Undo.
   if (op.noUndo && state.ownedResult && state.ownedResult.undo_id !== null) {
     return {
       kind: "unknown",

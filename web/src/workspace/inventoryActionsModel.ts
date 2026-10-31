@@ -144,7 +144,11 @@ export function describeFailure(
   target: ActionTarget,
   error: unknown,
   names: Names,
-  options: { omitNothing?: boolean; unknown?: boolean } = {}
+  options: {
+    omitNothing?: boolean;
+    unknown?: boolean;
+    unsupported?: boolean;
+  } = {}
 ): Failure {
   const move = target.kind === "move";
   const noun = move ? "Move" : "Inventory Removal";
@@ -186,6 +190,11 @@ export function describeFailure(
     reloadTree,
     retrySame: false,
   });
+  if (options.unsupported)
+    return result(
+      `This Move is unavailable right now.${nothing ? ` ${nothing}` : ""} Try again later.`,
+      ""
+    );
   switch (error.code) {
     case "STALE_HOLDING":
       return result(
@@ -309,7 +318,7 @@ export function partialMoveFailure(
   };
 }
 
-/** The Move applied, but an old server may have created an Undo despite the requested protection. */
+/** The dedicated route returned a receipt that violates its no-Undo postcondition. */
 export function unsupportedUndoFailure(copies: number, place: string): Failure {
   const text = `Moved ${plural(copies, "copy", "copies")} to ${place}. Undo unavailable. This Move's no-Undo protection could not be confirmed; refresh before continuing.`;
   return {
