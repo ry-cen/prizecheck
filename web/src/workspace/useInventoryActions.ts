@@ -579,7 +579,10 @@ export function useInventoryActions({
               mixed: op.noUndo,
             }
           : null;
-        if (failure.reloadGallery) live.current.reloadGallery();
+        if (failure.reloadGallery) {
+          if (surface === "bar") keepFocus("actions");
+          live.current.reloadGallery();
+        }
         if (failure.reloadTree || failure.reloadGallery)
           void live.current.reloadTree();
         if (surface === "dialog" && dialogRef.current)

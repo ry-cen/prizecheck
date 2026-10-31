@@ -250,9 +250,21 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   await expect(tiles).toHaveCount(0);
   await sidebar.getByRole("button", { name: "Unsorted", exact: true }).click();
   await expect(tiles).toHaveCount(2);
-  await main
+  // The gallery implements pointer dragging, not native HTML drag and drop.
+  const from = await main
     .getByRole("button", { name: /Iono,.*borrowed from Misty W/ })
-    .dragTo(sidebar.getByRole("button", { name: boxName, exact: true }));
+    .boundingBox();
+  const to = await sidebar
+    .getByRole("button", { name: boxName, exact: true })
+    .boundingBox();
+  expect(from).not.toBeNull();
+  expect(to).not.toBeNull();
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
   await expect(
     page.getByText(`Moved 1 copy to ${boxName}.`, { exact: true })
   ).toBeVisible();

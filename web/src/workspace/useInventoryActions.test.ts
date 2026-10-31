@@ -605,3 +605,25 @@ test("another tab's terminal receipt clears the old uncertainty message as well 
   expect(actions.toast?.entry).toBeNull();
   expect(pendingMoves("A").load()).toBeNull();
 });
+
+test("a refused normal drag Move focuses Actions before the refreshed tile unmounts", async () => {
+  const { commitMove, MoveError } = await import("../moves_generated");
+  vi.mocked(commitMove).mockRejectedValue(new MoveError(409, "STALE_HOLDING"));
+  const focus = vi.fn(),
+    opts = options();
+  vi.stubGlobal("document", {
+    activeElement: { closest: () => ({}) },
+    body: {},
+  });
+  const actions = render(opts);
+  actions.actionsButton.current = {
+    isConnected: true,
+    focus,
+  } as unknown as HTMLButtonElement;
+  await actions.dropMove("dest", { groups: owned, borrowed: [] });
+  expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  expect(focus.mock.invocationCallOrder[0]).toBeLessThan(
+    vi.mocked(opts.reloadGallery).mock.invocationCallOrder[0]
+  );
+  expect(render(opts).barError).toContain("Nothing moved.");
+});
