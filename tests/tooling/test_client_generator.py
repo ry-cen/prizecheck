@@ -207,7 +207,19 @@ class DomainDifferencesInTheCommittedClients(unittest.TestCase):
     def test_domain_errors_stay_separate_except_the_shared_holding_error(self):
         for name in ('collection', 'reconciliation', 'metadata'):
             self.assertIn("from './holdings_generated'", generated(name))
-            self.assertNotIn('export class', generated(name))
+            if name != 'collection':
+                self.assertNotIn('export class', generated(name))
+        # #473 keeps HoldingError for every Collection read; only the borrowed batch Move has its own write error.
+        collection = generated('collection')
+        self.assertEqual(re.findall(r'export class (\w+)', collection), ['BorrowedMoveError'])
+        read_body = collection.split('async function read<T>', 1)[1].split('export const getCollection', 1)[0]
+        self.assertIn('throw new HoldingError', read_body)
+        self.assertNotIn('BorrowedMoveError', read_body)
+        write_body = collection.split('export async function moveBorrowedCopies', 1)[1].split('export const', 1)[0]
+        self.assertIn("fetch('/api/collection/borrowed/moves'", write_body)
+        self.assertIn('throw new BorrowedMoveError', write_body)
+        self.assertNotIn('HoldingError', write_body)
+        self.assertNotIn('new BorrowedMoveError', collection.replace(write_body, ''))
 
 
 class Emitters(unittest.TestCase):
