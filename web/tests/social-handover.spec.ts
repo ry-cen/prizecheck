@@ -261,6 +261,29 @@ test("both sides confirm a handover for their own inventory, after the lender fi
     lender.getByRole("button", { name: "Mark as handed over" })
   ).toBeVisible();
   await expect(title(lender)).toBeFocused();
+  await page.goto(`${ORIGIN}/loans/${sent.id}`);
+  const handovers: { revision: number; idempotency_key: string }[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith(`/api/loans/${sent.id}/handover`)
+    )
+      handovers.push(request.postDataJSON());
+  });
+  await expect(
+    page.getByRole("button", { name: "Yes, I have them" })
+  ).toBeVisible();
+  await expect(page.getByRole("main")).toContainText(
+    `You're borrowing · For ${deckName}`
+  );
+  await expect(
+    page.getByRole("main").getByRole("link", { name: deckName, exact: true })
+  ).toHaveAttribute("href", `/decks/${charizard}`);
+  await expect(page.getByRole("main")).not.toContainText(lugiaName);
+  await expect(page.getByRole("main")).not.toContainText("Unsorted");
+  await page.setViewportSize(PHONE);
+  await expectPageChecks(page, "a handover to confirm on a phone");
+  await page.setViewportSize(DESKTOP);
   await lender.getByRole("button", { name: "Mark as handed over" }).click();
   await expect(lender.getByRole("main")).toContainText(
     "Waiting for Ash K to confirm"
@@ -327,23 +350,12 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await expectPageChecks(lender, "a Deck's piles with lent copies on a phone");
   await lender.setViewportSize(DESKTOP);
 
-  // Ash: the Loan needs him; Yes, I have them puts it out on both sides.
-  await page.goto(`${ORIGIN}/loans`);
-  const needsYou = page.getByRole("region", { name: "Needs you" });
-  await expect(needsYou.getByRole("link")).toContainText(
-    "Misty W says they handed you 2 cards"
-  );
-  await needsYou.getByRole("link").click();
-  await expect(page.getByRole("main")).toContainText(
-    `You're borrowing · For ${deckName}`
-  );
-  await expect(page.getByRole("main")).not.toContainText(lugiaName);
-  await expect(page.getByRole("main")).not.toContainText("Unsorted");
-  await page.setViewportSize(PHONE);
-  await expectPageChecks(page, "a handover to confirm on a phone");
-  await page.setViewportSize(DESKTOP);
+  // Ash confirms from the screen opened before either side confirmed.
   await page.getByRole("button", { name: "Yes, I have them" }).click();
   await expect(title(page)).toHaveText("You have 2 cards of Misty W's");
+  expect(handovers).toHaveLength(2);
+  expect(handovers[1].revision).toBe(handovers[0].revision + 1);
+  expect(handovers[1].idempotency_key).toBe(handovers[0].idempotency_key);
   await expect(title(page)).toBeFocused();
   await expect(
     page.getByRole("button", { name: "More for this Loan" })
