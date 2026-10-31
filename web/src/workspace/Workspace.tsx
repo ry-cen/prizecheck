@@ -57,7 +57,11 @@ import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations, isFolder } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
 import { focusWorkspaceHeading, SelectionBar } from "./SelectionBar";
-import { selectedGroups, selectionScope } from "./selectionModel";
+import {
+  selectedBorrowed,
+  selectedGroups,
+  selectionScope,
+} from "./selectionModel";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
 import { useUndoToast } from "./UndoToast";
@@ -662,6 +666,8 @@ export function Workspace({
                 {plural(gallery.totals.editions, "edition", "editions")}
                 {gallery.totals.lent > 0 &&
                   ` · ${gallery.totals.lent} lent out`}
+                {gallery.totals.borrowed > 0 &&
+                  ` · ${gallery.totals.borrowed} borrowed`}
               </p>
             )}
             {/* The actions wrap as one group, and on a phone they always take their own row, so the totals
@@ -943,6 +949,7 @@ export function Workspace({
           index={index}
           initialExpanded={expanded}
           groups={selectedGroups(selection.selected)}
+          borrowed={selectedBorrowed(selection.selected)}
           copies={selection.summary.copies}
           busy={actions.busy}
           progress={actions.progress}

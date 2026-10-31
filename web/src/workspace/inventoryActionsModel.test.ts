@@ -1,0 +1,92 @@
+import { expect, test } from "vitest";
+import { BorrowedMoveError } from "../collection_generated";
+import { MoveError } from "../moves_generated";
+import {
+  borrowedUnknownFailure,
+  describeBorrowedFailure,
+  describeFailure,
+  movePreview,
+  partialMoveFailure,
+} from "./inventoryActionsModel";
+const names = { place: () => "Box", card: () => "Iono", edition: () => "Iono" };
+for (const [code, text] of [
+  [
+    "NOT_ENOUGH_BORROWED",
+    "Some borrowed copies aren't where you selected them any more. Nothing moved.",
+  ],
+  ["LOCATION_NOT_FOUND", "Box can no longer hold cards. Nothing moved."],
+  ["OTHER", "The Move was refused. Nothing moved."],
+])
+  test(`borrowed refusal ${code}`, () => {
+    expect(
+      describeBorrowedFailure(new BorrowedMoveError(409, code), "Box").text
+    ).toBe(text);
+  });
+test("unknown borrowed outcome keeps its selection and does not reload", () => {
+  expect(borrowedUnknownFailure()).toMatchObject({
+    text: "The Move may not have finished. Try again to check safely; your selection is kept.",
+    reloadGallery: false,
+    retrySame: true,
+  });
+});
+test("partial owned refusal reports only borrowed copies moved", () => {
+  const failure = describeFailure(
+    { kind: "move", destinationId: "box" },
+    new MoveError(409, "STALE_HOLDING"),
+    names,
+    { omitNothing: true }
+  );
+  const partial = partialMoveFailure(2, "Box", failure, false);
+  expect(partial.text).toContain(
+    "Moved 2 borrowed copies to Box; your own copies didn't move:"
+  );
+  expect(partial.text).not.toContain("Nothing moved.");
+  expect(partial.reloadGallery).toBe(true);
+});
+test("unknown owned outcome after borrowed success refreshes and remains retryable", () => {
+  const unknown = describeFailure(
+    { kind: "move", destinationId: "box" },
+    new TypeError("lost"),
+    names
+  );
+  expect(partialMoveFailure(1, "Box", unknown, true)).toMatchObject({
+    text: "Moved 1 borrowed copy to Box. Moving your own copies may not have finished. Try again to check safely.",
+    retrySame: true,
+    reloadGallery: true,
+    reloadTree: true,
+  });
+  expect(unknown.text).toContain("may not have finished");
+  expect(unknown.reloadGallery).toBe(false);
+});
+test("owned-only refusal still says nothing moved", () => {
+  expect(
+    describeFailure(
+      { kind: "move", destinationId: "box" },
+      new MoveError(409, "STALE_HOLDING"),
+      names
+    ).text
+  ).toContain("Nothing moved.");
+});
+test("Move preview includes stayed borrowed copies", () => {
+  expect(
+    movePreview(
+      [
+        {
+          source_id: "other",
+          edition_id: "edition",
+          quantity: "2",
+          expected_version: 1,
+        },
+      ],
+      "box",
+      [
+        {
+          loan_id: "loan",
+          edition_id: "edition",
+          from_location_id: "box",
+          quantity: "3",
+        },
+      ]
+    )
+  ).toEqual({ moving: 2, alreadyThere: 3 });
+});

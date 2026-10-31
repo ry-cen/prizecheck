@@ -1,4 +1,5 @@
 import type {
+  BorrowedGalleryView,
   CardCategory,
   CollectionHoldingQuery,
   CollectionHoldingView,
@@ -136,6 +137,7 @@ export type GalleryHolding = {
   /** `${location_id}:${edition_id}`. Ticket 105 keys selected counts by this. */
   key: string;
   holding: CollectionHoldingView;
+  borrowed: { loanId: string; lender: string } | null;
   /** The Holding's quantity: one tile per copy. */
   copies: number;
   /** Display index of this Holding's first tile (running sum of earlier copies). */
@@ -149,6 +151,7 @@ export type GalleryTotals = {
   /** All owned, unfiltered: copies lent to Friends (social network #253), still the collector's but in no Location,
    * so in no tile. 0 for any other view. */
   lent: number;
+  borrowed: number;
 };
 
 /** loading: no page yet. partial: some pages shown, more loading or a later page failed. */
@@ -163,6 +166,7 @@ export type GalleryData = {
   loadedCopies: number;
   /** From the first page; null until it arrives. */
   totals: GalleryTotals | null;
+  snapshot: string | null;
   ownerRevision: number | null;
   catalogRevision: number | null;
   status: GalleryStatus;
@@ -175,6 +179,7 @@ export const EMPTY_GALLERY: GalleryData = {
   byKey: new Map(),
   loadedCopies: 0,
   totals: null,
+  snapshot: null,
   ownerRevision: null,
   catalogRevision: null,
   status: "loading",
@@ -186,8 +191,9 @@ export const EMPTY_GALLERY: GalleryData = {
  * category or types without moving the catalog revision. */
 export function sameListing(a: GalleryData, b: GalleryData): boolean {
   if (
-    a.ownerRevision !== b.ownerRevision ||
-    a.catalogRevision !== b.catalogRevision ||
+    a.snapshot !== b.snapshot ||
+    a.totals?.borrowed !== b.totals?.borrowed ||
+    a.totals?.lent !== b.totals?.lent ||
     a.totals?.holdings !== b.totals?.holdings ||
     a.totals?.editions !== b.totals?.editions ||
     a.totals?.copies !== b.totals?.copies ||
@@ -196,8 +202,10 @@ export function sameListing(a: GalleryData, b: GalleryData): boolean {
     return false;
   return a.holdings.every(
     (entry, index) =>
+      JSON.stringify(entry.borrowed) ===
+        JSON.stringify(b.holdings[index].borrowed) &&
       JSON.stringify(entry.holding) ===
-      JSON.stringify(b.holdings[index].holding)
+        JSON.stringify(b.holdings[index].holding)
   );
 }
 
@@ -226,12 +234,44 @@ export function appendHoldings(
     const entry: GalleryHolding = {
       key: holdingKey(holding.location_id, holding.edition_id),
       holding,
+      borrowed: null,
       copies,
       start,
     };
     holdings.push(entry);
     byKey?.set(entry.key, entry);
     start += copies;
+  }
+  return { holdings, loadedCopies: start };
+}
+
+export const borrowedKey = (
+  loanId: string,
+  locationId: string,
+  editionId: string
+) => `borrowed:${loanId}:${locationId}:${editionId}`;
+
+export function appendBorrowed(
+  previous: GalleryHolding[],
+  loadedCopies: number,
+  rows: BorrowedGalleryView[],
+  byKey?: Map<string, GalleryHolding>
+) {
+  const holdings = previous.slice();
+  let start = loadedCopies;
+  for (const row of rows) {
+    const { loan_id, lender, ...fields } = row;
+    const entry: GalleryHolding = {
+      key: borrowedKey(loan_id, row.location_id, row.edition_id),
+      // A projection, never an owned Holding: version 0 is never staged in the general Move.
+      holding: { ...fields, version: 0 },
+      borrowed: { loanId: loan_id, lender },
+      copies: Number(row.quantity),
+      start,
+    };
+    holdings.push(entry);
+    byKey?.set(entry.key, entry);
+    start += entry.copies;
   }
   return { holdings, loadedCopies: start };
 }
@@ -377,14 +417,16 @@ export const plural = (n: number, one: string, many: string) =>
 export const tileLabel = (
   holding: HoldingView,
   ordinal: number,
-  path: string
+  path: string,
+  lender?: string
 ) =>
-  `${holding.printing_name}, ${holding.set_name} ${holding.collector_number}, ${variantLabel(holding.descriptor)}, copy ${ordinal + 1}, ${path}`;
+  `${holding.printing_name}, ${holding.set_name} ${holding.collector_number}, ${variantLabel(holding.descriptor)}, copy ${ordinal + 1}, ${lender ? `borrowed from ${lender}, ` : ""}${path}`;
 
 /** "Pikachu · Base Set 25 · Reverse Holo · copy 2 · Shelf / Binder 2" */
 export const tileTitle = (
   holding: HoldingView,
   ordinal: number,
-  path: string
+  path: string,
+  lender?: string
 ) =>
-  `${holding.printing_name} · ${holding.set_name} ${holding.collector_number} · ${variantLabel(holding.descriptor)} · copy ${ordinal + 1} · ${path}`;
+  `${holding.printing_name} · ${holding.set_name} ${holding.collector_number} · ${variantLabel(holding.descriptor)} · copy ${ordinal + 1} · ${lender ? `borrowed from ${lender} · ` : ""}${path}`;

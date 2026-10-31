@@ -1,3 +1,5 @@
+import type { BorrowedMoveItem } from "../collection_generated";
+import { advance, operationFor, type HeldOperation } from "./moveOperation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addUndoneText, batchAddedText } from "../catalog/catalogText";
 import type { AddedCards } from "../catalog/useAddToast";
@@ -8,12 +10,7 @@ import {
   removeInventory,
   type UndoEntry,
 } from "../inventoryUndo";
-import {
-  commitMove,
-  MoveError,
-  stageMove,
-  startMove,
-} from "../moves_generated";
+import { MoveError, stageMove, startMove } from "../moves_generated";
 import {
   appendedFrom,
   EMPTY_GALLERY,
@@ -26,6 +23,9 @@ import {
   cardText,
   countText,
   describeFailure,
+  describeBorrowedFailure,
+  borrowedUnknownFailure,
+  partialMoveFailure,
   STAGE_BATCH,
   trimOldest,
   type ActionTarget,
@@ -38,6 +38,7 @@ import { focusWorkspaceHeading } from "./SelectionBar";
 import {
   reconcileSelection,
   selectedGroups,
+  selectedBorrowed,
   type SelectedGroup,
   type Selection,
 } from "./selectionModel";
@@ -108,6 +109,7 @@ export function useInventoryActions({
   toastLive.current = toast;
   const toastId = useRef(0);
   const pending = useRef<Pending | null>(null);
+  const operation = useRef<HeldOperation | null>(null);
   const undoKeys = useRef(new Map<string, string>());
   const focusAfter = useRef<FocusTarget | null>(null);
   const carried = useRef<Carried | null>(null);
@@ -191,12 +193,120 @@ export function useInventoryActions({
     setProgress("");
   };
 
+  const runMove = useCallback(
+    async (
+      destinationId: string,
+      groups: SelectedGroup[],
+      borrowed: BorrowedMoveItem[],
+      surface: "dialog" | "bar"
+    ) => {
+      if (
+        busyRef.current ||
+        (!operation.current && !groups.length && !borrowed.length)
+      )
+        return;
+      busyRef.current = true;
+      setBusy(true);
+      setBarError("");
+      setDialogError("");
+      carried.current = null;
+      // Resume the immutable carried request before considering a new target or selection.
+      const held = operationFor(
+        operation.current,
+        destinationId,
+        groups,
+        borrowed
+      );
+      operation.current = held;
+      setProgress("Moving…");
+      try {
+        const outcome = await advance(held.op, held.state);
+        const { op, state } = held;
+        if (state.borrowed === "done" && op.borrowed.length)
+          live.current.selection.dropBorrowed();
+        if (outcome.kind !== "unknown") operation.current = null;
+        const destination = place(op.target.destinationId);
+        if (outcome.kind === "done") {
+          const copies =
+            Number(state.borrowedResult?.copy_count ?? 0) +
+            Number(state.ownedResult?.copy_count ?? 0);
+          const stayed =
+            op.stayed +
+            Number(state.ownedResult?.already_at_destination_count ?? 0);
+          const message = `Moved ${countText(String(copies), "copy", "copies")} to ${destination}.${stayed ? ` ${countText(String(stayed), "copy", "copies")} already there stayed.` : ""}`;
+          focusAfter.current = "heading";
+          keepFocus("heading");
+          live.current.selection.clear();
+          setDialog(null);
+          showToast({ message, entry: null, unavailable: false });
+          live.current.reloadGallery();
+          void live.current.reloadTree();
+          if (!op.borrowed.length && state.ownedResult) {
+            const result = state.ownedResult;
+            const id = toastId.current;
+            const entries = await listUndo().catch(() => [] as UndoEntry[]);
+            const newest = entries[0];
+            const mine =
+              newest &&
+              (result.undo_id
+                ? newest.id === result.undo_id
+                : newest.action === "move" &&
+                  newest.source_count === result.source_count &&
+                  newest.destination_id === op.target.destinationId)
+                ? newest
+                : null;
+            setToast((current) =>
+              current?.id === id ? { ...current, entry: mine } : current
+            );
+          }
+          return;
+        }
+        let failure =
+          outcome.stage === "borrowed"
+            ? outcome.kind === "unknown"
+              ? borrowedUnknownFailure()
+              : describeBorrowedFailure(outcome.error, destination)
+            : describeFailure(
+                op.target,
+                outcome.error,
+                { place, card, edition },
+                { omitNothing: !!state.borrowedResult }
+              );
+        if (outcome.stage === "owned" && state.borrowedResult)
+          failure = partialMoveFailure(
+            Number(state.borrowedResult.copy_count),
+            destination,
+            failure,
+            outcome.kind === "unknown"
+          );
+        carried.current = failure.reloadGallery
+          ? {
+              toastText: failure.toastText,
+              selection: live.current.selection.selected,
+            }
+          : null;
+        if (failure.reloadGallery) live.current.reloadGallery();
+        if (failure.reloadTree || failure.reloadGallery)
+          void live.current.reloadTree();
+        if (surface === "dialog" && dialogRef.current)
+          setDialogError(failure.text);
+        else setBarError(failure.text);
+      } finally {
+        finish();
+      }
+    },
+    [place, card, edition, showToast]
+  );
+
   const run = useCallback(
     async (
       target: ActionTarget,
       groups: SelectedGroup[],
-      surface: "dialog" | "bar"
+      surface: "dialog" | "bar",
+      borrowed: BorrowedMoveItem[] = []
     ) => {
+      if (target.kind === "move")
+        return runMove(target.destinationId, groups, borrowed, surface);
       if (busyRef.current || !groups.length) return;
       busyRef.current = true;
       setBusy(true);
@@ -228,25 +338,11 @@ export function useInventoryActions({
           };
           pending.current = attempt;
         }
-        setProgress(target.kind === "move" ? "Moving…" : "Removing…");
-        const result =
-          target.kind === "move"
-            ? await commitMove(
-                attempt.manifestId,
-                target.destinationId,
-                attempt.key
-              )
-            : await removeInventory(attempt.manifestId, attempt.key);
+        setProgress("Removing…");
+        const result = await removeInventory(attempt.manifestId, attempt.key);
         pending.current = null;
         const copies = countText(result.copy_count, "copy", "copies");
-        const stayed =
-          result.already_at_destination_count !== "0"
-            ? ` ${countText(result.already_at_destination_count, "copy", "copies")} already there stayed.`
-            : "";
-        const message =
-          target.kind === "move"
-            ? `Moved ${copies} to ${place(target.destinationId)}.${stayed}`
-            : `Removed ${copies} from your Collection.`;
+        const message = `Removed ${copies} from your Collection.`;
         // One batch: the selection clears, the dialog closes and the toast shows. Focus then goes to
         // the heading if it was in the dialog or the bar, which are gone.
         focusAfter.current = "heading";
@@ -269,9 +365,7 @@ export function useInventoryActions({
               ? newest
               : null
             : newest.action === target.kind &&
-                newest.source_count === result.source_count &&
-                (target.kind !== "move" ||
-                  newest.destination_id === target.destinationId)
+                newest.source_count === result.source_count
               ? newest
               : null;
         setToast((current) =>
@@ -307,7 +401,7 @@ export function useInventoryActions({
         finish();
       }
     },
-    [place, card, edition, showToast]
+    [place, card, edition, showToast, runMove]
   );
 
   const openMove = useCallback(() => {
@@ -334,7 +428,8 @@ export function useInventoryActions({
       void run(
         { kind: "move", destinationId },
         selectedGroups(live.current.selection.selected),
-        "dialog"
+        "dialog",
+        selectedBorrowed(live.current.selection.selected)
       ),
     [run]
   );
@@ -349,8 +444,16 @@ export function useInventoryActions({
   );
   /** A drop on a valid sidebar Storage Leaf moves at once; errors show in the selection bar. */
   const dropMove = useCallback(
-    (destinationId: string, groups: SelectedGroup[]) =>
-      void run({ kind: "move", destinationId }, groups, "bar"),
+    (
+      destinationId: string,
+      carried: { groups: SelectedGroup[]; borrowed: BorrowedMoveItem[] }
+    ) =>
+      void run(
+        { kind: "move", destinationId },
+        carried.groups,
+        "bar",
+        carried.borrowed
+      ),
     [run]
   );
   /** A batch add from Add cards (#175) succeeded: the toast names it, the gallery and the tree read again, and Undo
@@ -376,16 +479,18 @@ export function useInventoryActions({
   // A Lend Offer (#258): the selected copies with their cards' names, as the offer dialog lists them.
   const lendRows = useCallback(
     (): LendRow[] =>
-      Array.from(live.current.selection.selected.values(), (entry) => {
-        const label = labels.get(entry.key);
-        return {
-          key: entry.key,
-          locationId: entry.locationId,
-          editionId: entry.editionId,
-          count: entry.count,
-          card: label ? cardText(label) : "Unknown card",
-        };
-      }),
+      Array.from(live.current.selection.selected.values())
+        .filter((entry) => !entry.loanId)
+        .map((entry) => {
+          const label = labels.get(entry.key);
+          return {
+            key: entry.key,
+            locationId: entry.locationId,
+            editionId: entry.editionId,
+            count: entry.count,
+            card: label ? cardText(label) : "Unknown card",
+          };
+        }),
     [labels]
   );
   const clearSelection = useCallback(() => {

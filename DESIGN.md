@@ -350,7 +350,7 @@ The heart of the app: one copy of a Card Edition drawn as a card.
 
 - **Art:** the card image at its 245:342 aspect with 7 px corners, or a Sleeve Brown gradient placeholder showing the card's name when art is missing.
 - **Lines under the art:** an optional Names block (name in Caption; set code and collector number in tabular 10 px Faded Parchment), a price line, and a caption, each at a fixed height so the gallery's layout stays exact.
-- **Badges:** round 24 px badges with a 2 px Deck Box Black ring and Badge lift: the copy count on Raised Felt at the top left, and a filled Prize Gold check at the top right when selected.
+- **Badges:** round 24 px badges with a 2 px Deck Box Black ring and Badge lift: the copy count on Raised Felt at the top left, and a filled Prize Gold check at the top right when selected. Borrowed Copies carry a bottom-left pill reading "From <lender>" on Raised Felt with the same ring and Badge lift.
 - **States:** selected (the dark gap and gold ring outside the art, plus the check badge), elsewhere (a dashed Tarnished Brass outline inside the art), missing (40% opacity).
 
 ## Do's and Don'ts

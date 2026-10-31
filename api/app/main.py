@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
+from .borrowed_gallery import router as borrowed_gallery_router
 from .db import connect
 from .operation_counts import Count, DatabaseWriter, counter as operation_counter
 from .price_budget import is_budgeted
@@ -36,6 +37,8 @@ app = FastAPI(title="PrizeCheck API", version="0.1.0", lifespan=lifespan)
 def health():
     return HealthResponse(status="ok")
 
+
+app.include_router(borrowed_gallery_router)
 
 for included in ROUTERS:
     app.include_router(included)

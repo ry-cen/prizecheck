@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getCollectionHoldings } from "../collection_generated";
+import {
+  getCollectionHoldings,
+  getBorrowedGallery,
+} from "../collection_generated";
 import { HoldingError } from "../holdings_generated";
 import {
   appendHoldings,
+  appendBorrowed,
   EMPTY_GALLERY,
   type GalleryData,
   type GalleryHolding,
@@ -46,7 +50,7 @@ export function useGalleryData(
   const generation = useRef(0);
   const cache = useRef(new Map<string, GalleryData>()).current;
   // The revisions every kept listing was read at.
-  const cachedAt = useRef<{ owner: number; catalog: number } | null>(null);
+  const cachedAt = useRef<string | null>(null);
   const floor = useRef(knownRevision);
   floor.current = knownRevision;
   const key = JSON.stringify(queryToParams(query));
@@ -92,16 +96,9 @@ export function useGalleryData(
             const page = await getCollectionHoldings(params, cursor);
             if (!live()) return;
             const at = cachedAt.current;
-            if (
-              !at ||
-              at.owner !== page.owner_revision ||
-              at.catalog !== page.catalog_revision
-            ) {
+            if (at !== page.snapshot) {
               cache.clear();
-              cachedAt.current = {
-                owner: page.owner_revision,
-                catalog: page.catalog_revision,
-              };
+              cachedAt.current = page.snapshot;
             }
             const first = cursor === undefined;
             ({ holdings, loadedCopies } = appendHoldings(
@@ -116,10 +113,30 @@ export function useGalleryData(
                 editions: page.totals.editions,
                 copies: Number(page.totals.copies),
                 lent: Number(page.lent ?? 0),
+                borrowed: 0,
               };
             cursor = page.next_cursor ?? undefined;
             const done = cursor === undefined;
-            const snapshot = { holdings, loadedCopies, byKey };
+            if (done && totals) {
+              const borrowed = await getBorrowedGallery(params);
+              if (!live()) return;
+              if (borrowed.snapshot !== page.snapshot) {
+                throw new HoldingError(409, "INVENTORY_CHANGED");
+              }
+              ({ holdings, loadedCopies } = appendBorrowed(
+                holdings,
+                loadedCopies,
+                borrowed.copies,
+                byKey
+              ));
+              totals.borrowed = Number(borrowed.total);
+            }
+            const snapshot = {
+              holdings,
+              loadedCopies,
+              byKey,
+              snapshot: page.snapshot,
+            };
             if (done && totals) {
               const complete: GalleryData = {
                 ...snapshot,
