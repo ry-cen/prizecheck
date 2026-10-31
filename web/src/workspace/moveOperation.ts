@@ -1,4 +1,4 @@
-import { dismissUndo, removeInventory, type UndoEntry } from "../inventoryUndo";
+import { removeInventory } from "../inventoryUndo";
 import {
   BorrowedMoveError,
   type BorrowedMoveItem,
@@ -30,7 +30,6 @@ export type OperationState = {
   staged: boolean;
   borrowed: Stage;
   owned: Stage;
-  discard: Stage;
   borrowedAttempted: boolean;
   ownedAttempted: boolean;
   borrowedResult?: BorrowedMoveResult;
@@ -40,7 +39,7 @@ export type Outcome =
   | { kind: "done" }
   | {
       kind: "refused" | "unknown";
-      stage: "borrowed" | "owned" | "discard";
+      stage: "borrowed" | "owned";
       error: unknown;
     };
 export const moveApi = {
@@ -49,7 +48,6 @@ export const moveApi = {
   stageMove,
   commitMove,
   removeInventory,
-  dismissUndo,
 };
 export type HeldOperation = { op: MoveOperation; state: OperationState };
 export function createOperation(
@@ -85,7 +83,6 @@ export function createOperation(
       staged: false,
       borrowed: "todo",
       owned: "todo",
-      discard: "todo",
       borrowedAttempted: false,
       ownedAttempted: false,
     },
@@ -139,7 +136,9 @@ export async function advance(
           ? await api.commitMove(
               state.manifestId,
               op.target.destinationId,
-              op.ownedKey
+              op.ownedKey,
+              false,
+              !op.noUndo
             )
           : await api.removeInventory(state.manifestId, op.ownedKey);
       state.owned = "done";
@@ -154,23 +153,6 @@ export async function advance(
       return { kind: "unknown", stage: "owned", error };
     }
   } else if (!op.owned.length) state.owned = "done";
-  if (op.noUndo && op.owned.length && state.discard !== "done") {
-    try {
-      const undoId = state.ownedResult?.undo_id;
-      if (!undoId)
-        throw new Error("The committed Move did not identify its Undo record");
-      try {
-        await api.dismissUndo(undoId);
-      } catch (error) {
-        // DELETE is safe to repeat after losing its response; an absent record is already discarded.
-        if (!(error instanceof MoveError && error.status === 404)) throw error;
-      }
-      state.discard = "done";
-    } catch (error) {
-      state.discard = "unknown";
-      return { kind: "unknown", stage: "discard", error };
-    }
-  } else if (!op.noUndo || !op.owned.length) state.discard = "done";
   return { kind: "done" };
 }
 
@@ -185,26 +167,6 @@ function unavailableReplay(
       (error.code === "MOVE_MANIFEST_NOT_FOUND" ||
         error.code === "MOVE_MANIFEST_EXPIRED"))
   );
-}
-
-/** Until discard is confirmed, no lookup or later stack traversal may expose the mixed Move's owned half. */
-export function offerableUndo(
-  entries: UndoEntry[],
-  held: HeldOperation | null,
-  suppressed: ReadonlySet<string> = new Set()
-): UndoEntry[] {
-  if (
-    held?.op.noUndo &&
-    held.state.discard !== "done" &&
-    held.state.ownedAttempted
-  ) {
-    const id = held.state.ownedResult?.undo_id;
-    if (!id) return [];
-    // Do not promote an older record while the forbidden record still blocks it on the server.
-    const index = entries.findIndex((entry) => entry.id === id);
-    if (index >= 0) entries = entries.slice(0, index);
-  }
-  return entries.filter((entry) => !suppressed.has(entry.id));
 }
 
 /** An unresolved outcome always wins over a newly requested Move. */

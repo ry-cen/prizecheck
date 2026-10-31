@@ -308,15 +308,3 @@ export function partialMoveFailure(
     reloadTree: true,
   };
 }
-
-/** Copies moved, but their non-undoable operation must remain held until server discard is confirmed. */
-export function discardPendingFailure(copies: number, place: string): Failure {
-  const text = `Moved ${plural(copies, "copy", "copies")} to ${place}. Try again to finish safely.`;
-  return {
-    text,
-    toastText: text,
-    reloadGallery: true,
-    reloadTree: true,
-    retrySame: true,
-  };
-}

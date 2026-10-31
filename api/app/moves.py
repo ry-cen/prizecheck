@@ -53,6 +53,7 @@ class CommitMove(BaseModel):
     # The deck builder's Put away (#180): a Move out of one Deck whose Undo returns the copies to that Deck as surplus,
     # leaving its Deck List alone (migration 047). Not part of the command digest, so earlier keys still replay.
     put_away: bool = False
+    undo: bool = True
 
 
 class MoveResult(BaseModel):
@@ -155,6 +156,8 @@ def cancel_move(manifest_id: UUID, user_id: str = Depends(verified_user)):
 def commit_move(manifest_id: UUID, command: CommitMove, user_id: str = Depends(verified_user)):
     if command.destination_id is None:
         api_error(422, "DESTINATION_REQUIRED")
+    if not command.undo and command.put_away:
+        api_error(422, "PUT_AWAY_NEEDS_UNDO")
     return apply_selection(manifest_id, command, user_id)
 
 
@@ -162,6 +165,8 @@ def commit_move(manifest_id: UUID, command: CommitMove, user_id: str = Depends(v
 def remove_inventory(manifest_id: UUID, command: CommitMove, user_id: str = Depends(verified_user)):
     if command.destination_id is not None:
         api_error(422, "REMOVAL_HAS_NO_DESTINATION")
+    if not command.undo:
+        api_error(422, "REMOVAL_NEEDS_UNDO")
     return apply_selection(manifest_id, command, user_id)
 
 
@@ -175,6 +180,9 @@ def apply_selection(manifest_id, command, user_id):
     destination = command.destination_id
     # The digest is unchanged from the single-source contract so earlier keys still replay.
     payload = {"action": "move" if destination else "remove", "manifest_id": str(manifest_id), "destination_id": str(destination)}
+    # Omitting the default preserves every existing request fingerprint.
+    if not command.undo:
+        payload["undo"] = False
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     try:
         with connect() as conn, conn.transaction():
@@ -184,7 +192,7 @@ def apply_selection(manifest_id, command, user_id):
             if previous:
                 if previous["command_digest"] != digest:
                     api_error(409, "IDEMPOTENCY_KEY_REUSED")
-                return replayed(previous, undo_id_for(user_id, command.idempotency_key))
+                return replayed(previous, undo_id_for(user_id, command.idempotency_key) if command.undo else None)
             manifest(conn, user_id, manifest_id)
             if destination is not None and not leaf(conn, user_id, destination):
                 api_error(404, "LOCATION_NOT_FOUND", destination_id=destination)
@@ -271,7 +279,7 @@ def apply_selection(manifest_id, command, user_id):
                   ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE
                     SET quantity=holding.quantity+EXCLUDED.quantity,version=EXCLUDED.version""",
                              (user_id, destination, new_revision))
-            undo_id = undo_id_for(user_id, command.idempotency_key)
+            undo_id = undo_id_for(user_id, command.idempotency_key) if command.undo else None
             result = MoveResult(edition_count=summary["editions"], copy_count=str(summary["copies"]),
                                 owner_revision=new_revision, source_count=summary["sources"],
                                 already_at_destination_count=str(scope["already"]), undo_id=undo_id)
@@ -282,11 +290,12 @@ def apply_selection(manifest_id, command, user_id):
                 source_count,already_at_destination_count) VALUES (%s,%s,%s,%s,%s,%s)""",
                          (user_id, command.idempotency_key, summary["editions"], summary["copies"],
                           summary["sources"], scope["already"]))
-            items = conn.execute("""SELECT jsonb_agg(jsonb_build_object(
-                'source_id',source_id,'edition_id',edition_id,'quantity',quantity::text))::text AS items
-              FROM move_work""").fetchone()["items"]
-            record_undo(conn, user_id, undo_id, payload["action"], destination, sources, items,
-                        returns_as_surplus=command.put_away)
+            if command.undo:
+                items = conn.execute("""SELECT jsonb_agg(jsonb_build_object(
+                    'source_id',source_id,'edition_id',edition_id,'quantity',quantity::text))::text AS items
+                  FROM move_work""").fetchone()["items"]
+                record_undo(conn, user_id, undo_id, payload["action"], destination, sources, items,
+                            returns_as_surplus=command.put_away)
             conn.execute("DELETE FROM move_manifest WHERE owner_id=%s", (user_id,))
             return result
     except psycopg.Error:

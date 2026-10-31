@@ -17,7 +17,7 @@ export type MoveErrorDetail = { source_id?: string; edition_id?: string; destina
 export const startMove = (source_id?: string) => request<MoveManifest>('/api/moves/manifests', 'POST', source_id ? { source_id } : {});
 export const stageMove = (id: string, items: MoveItem[]) => request<MoveManifest>(`/api/moves/manifests/${encodeURIComponent(id)}/items`, 'PUT', { items });
 // put_away marks the deck builder's Put away, whose Undo returns the copies to the Deck as surplus (migration 047).
-export const commitMove = (id: string, destination_id: string, idempotency_key: string, put_away = false) => request<MoveResult>(`/api/moves/manifests/${encodeURIComponent(id)}/commit`, 'POST', put_away ? { destination_id, idempotency_key, put_away } : { destination_id, idempotency_key });
+export const commitMove = (id: string, destination_id: string, idempotency_key: string, put_away = false, undo = true) => request<MoveResult>(`/api/moves/manifests/${encodeURIComponent(id)}/commit`, 'POST', { destination_id, idempotency_key, ...(put_away ? { put_away } : {}), ...(!undo ? { undo: false } : {}) });
 """
 
 

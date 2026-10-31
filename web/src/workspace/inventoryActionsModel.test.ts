@@ -7,7 +7,6 @@ import {
   describeFailure,
   movePreview,
   partialMoveFailure,
-  discardPendingFailure,
 } from "./inventoryActionsModel";
 const names = { place: () => "Box", card: () => "Iono", edition: () => "Iono" };
 for (const [code, text] of [
@@ -110,15 +109,6 @@ for (const code of ["MOVE_MANIFEST_NOT_FOUND", "REPLAY_OUTCOME_UNAVAILABLE"])
     expect(partial.text).not.toContain("didn't move");
     expect(partial.toastText).not.toContain("Nothing moved");
   });
-test("unconfirmed Undo discard reports that all copies moved and keeps recovery pending", () => {
-  expect(discardPendingFailure(3, "Box")).toEqual({
-    text: "Moved 3 copies to Box. Try again to finish safely.",
-    toastText: "Moved 3 copies to Box. Try again to finish safely.",
-    reloadGallery: true,
-    reloadTree: true,
-    retrySame: true,
-  });
-});
 
 test("the unavailable-outcome message cannot become a definite partial refusal", () => {
   const failure = describeFailure(
