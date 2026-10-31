@@ -1,14 +1,17 @@
 """Pin the owned gallery before #473 extracts its shared listing SQL.
 
-Capture once with GOLDEN_UPDATE=1 on the base implementation, then commit the JSON.
-The verification runner must forward that variable; capture also writes to TEST_LOG_DIR
-because the runner deletes its copied checkout. Never update after the extraction.
+When the expected JSON is missing, write a candidate to TEST_LOG_DIR and fail.
+Capture on the base implementation, then copy and commit the candidate as the expected
+JSON. Every later run compares strictly; this test never overwrites the expected file.
 """
+import hashlib
 import json
 import os
 from pathlib import Path
 from urllib.parse import urlencode
 from uuid import uuid4
+
+import pytest
 
 from app import collection
 from app.main import connect
@@ -22,6 +25,9 @@ from test_holdings import call
 from test_loans import accept, pair, sent, view
 
 GOLDEN = Path(__file__).parent / 'fixtures' / 'collection_listing_golden.json'
+ART_BASE = 'https://assets.tcgdex.net/en/golden/under-score'
+ART_UPGRADE = 'https://tcgplayer-cdn.tcgplayer.com/product/473_in_1000x1000.jpg'
+ART_EDITION = 'sv01/004'
 CARDS = (
     printed('sv02', 'Paldea Evolved', '001', 'Abra', 'Pokemon', types=['Psychic']),
     printed('sv01', 'Scarlet & Violet', '002', 'Alpha', 'Pokemon', types=['Fire']),
@@ -50,6 +56,17 @@ def world():
         editions = {f"{row['set_id']}/{row['collector_number']}": str(row['id']) for row in conn.execute(
             '''SELECT e.id,pd.set_id,pd.collector_number FROM catalog_edition e
                JOIN catalog_printing_display pd ON pd.printing_id=e.printing_id''').fetchall()}
+        # Preserve current dev's set-code join, art-upgrade version and shared nested Location paths.
+        printing = conn.execute('SELECT printing_id FROM catalog_edition WHERE id=%s',
+                                (editions[ART_EDITION],)).fetchone()['printing_id']
+        conn.execute('''UPDATE catalog_generation_printing SET image_url=%s
+                        WHERE printing_id=%s AND generation_id=(SELECT active_generation FROM catalog_state)''',
+                     (ART_BASE, printing))
+        conn.execute('INSERT INTO catalog_printing_art_product(printing_id,product_id) VALUES (%s,473)',
+                     (printing,))
+        conn.execute('''INSERT INTO art_large_upgrade
+                        (printing_id,candidate_url,base_url,outcome,width,height)
+                        VALUES (%s,%s,%s,'won',1000,1400)''', (printing, ART_UPGRADE, ART_BASE + '/high.webp'))
         unsorted = node(owner, 'Unsorted')['id']
         binder = location(conn, owner, 'Binder')
         shelf = location(conn, owner, 'Shelf', 'organization')
@@ -85,6 +102,9 @@ def normalise(body, labels, editions, first):
         row['edition_id'] = edition_labels[row['edition_id']]
         row['printing_id'] = row['edition_id']  # exactly one Edition per Printing in this fixture
         row['location_id'] = labels[row['location_id']]
+        if row['edition_id'] == ART_EDITION:
+            version = hashlib.sha256((ART_BASE + '/low.webp\n' + ART_UPGRADE).encode()).hexdigest()[:8]
+            assert raw['image_url'] == f"/api/art/{raw['printing_id']}/small?v={version}"
         row['image_url'] = row['image_url'] is not None
         result['holdings'].append(row)
     return result
@@ -93,6 +113,9 @@ def normalise(body, labels, editions, first):
 def cases(owner, labels, editions, box, monkeypatch):
     first = read(owner)
     assert first['lent'] == '1'
+    assert any(row['edition_id'] == editions[ART_EDITION] and row['set_code'] == 'SVI'
+               and row['location_path'] == 'Shelf / Box' and row['image_url']
+               for row in first['holdings'])
     assert first['totals']['holdings'] >= 12
     result = {}
     queries = {}
@@ -133,20 +156,23 @@ def cases(owner, labels, editions, box, monkeypatch):
     return result
 
 
-def assert_golden(actual, update=False):
-    if update and os.environ.get('GOLDEN_UPDATE') == '1':
-        content = json.dumps(actual, indent=2, ensure_ascii=False) + '\n'
-        GOLDEN.parent.mkdir(parents=True, exist_ok=True)
-        GOLDEN.write_text(content)
-        if os.environ.get('TEST_LOG_DIR'):
-            (Path(os.environ['TEST_LOG_DIR']) / GOLDEN.name).write_text(content)
-    assert GOLDEN.is_file(), 'Capture on base with GOLDEN_UPDATE=1 before extracting collection.py'
+def assert_golden(actual, artifact_name=GOLDEN.name):
+    if not GOLDEN.is_file():
+        artifact_dir = Path(os.environ.get('TEST_LOG_DIR', str(GOLDEN.parent)))
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        candidate = artifact_dir / artifact_name
+        # Never turn a missing expectation into a pass, or replace a committed expectation.
+        if candidate.resolve() == GOLDEN.resolve():
+            candidate = candidate.with_name('collection_listing_golden.actual.json')
+        candidate.write_text(json.dumps(actual, indent=2, ensure_ascii=False) + '\n')
+        pytest.fail(f'Expected golden JSON is missing. Base capture written to {candidate}. '
+                    f'Copy it to {GOLDEN} and commit it before extraction.')
     assert actual == json.loads(GOLDEN.read_text())
 
 
 def test_owned_listing_matches_the_base_golden(monkeypatch, store):
     owner, _, editions, labels, box, _ = world()
-    assert_golden(cases(owner, labels, editions, box, monkeypatch), update=True)
+    assert_golden(cases(owner, labels, editions, box, monkeypatch))
 
 
 def test_owned_listing_still_matches_with_borrowed_copies(monkeypatch, store):
@@ -163,4 +189,5 @@ def test_owned_listing_still_matches_with_borrowed_copies(monkeypatch, store):
         'loan_id': loan['id'], 'edition_id': edition, 'from_location_id': source,
         'to_location_id': box, 'quantity': '1', 'idempotency_key': str(uuid4())}))
     hand_over(owner, friend, edition, 1, deck)
-    assert_golden(cases(owner, labels, editions, box, monkeypatch))
+    assert_golden(cases(owner, labels, editions, box, monkeypatch),
+                  artifact_name='collection_listing_golden.borrowed.actual.json')
