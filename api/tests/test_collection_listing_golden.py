@@ -17,7 +17,6 @@ from app import collection
 from app.main import connect
 from deck_import_fixtures import _seed, printed
 from test_catalog_targets import isolated_rules  # noqa: F401
-from test_collection_holdings import location
 from test_deck_cost import launches, store  # noqa: F401
 from test_friend_copies import node, ok
 from test_handover import handover
@@ -47,6 +46,14 @@ def hand_over(borrower, lender, edition, count, deck_id=None):
     ok(handover(lender, loan))
     ok(handover(borrower, loan))
     return loan
+
+
+
+def location(conn, owner, name, kind='storage_leaf', parent=None):
+    """Seed a Location using the dict rows returned by app.main.connect."""
+    return str(conn.execute(
+        'INSERT INTO location(id,owner_id,name,kind,parent_id) VALUES (%s,%s,%s,%s,%s) RETURNING id',
+        (uuid4(), owner, name, kind, parent)).fetchone()['id'])
 
 
 def world():
