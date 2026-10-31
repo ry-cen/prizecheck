@@ -144,7 +144,7 @@ export function describeFailure(
   target: ActionTarget,
   error: unknown,
   names: Names,
-  options: { omitNothing?: boolean } = {}
+  options: { omitNothing?: boolean; unknown?: boolean } = {}
 ): Failure {
   const move = target.kind === "move";
   const noun = move ? "Move" : "Inventory Removal";
@@ -156,7 +156,12 @@ export function describeFailure(
   const kept = "Your selection is kept";
   const refreshed = `${kept} and the cards have been refreshed; review it and try again.`;
   const destination = move ? names.place(target.destinationId) : "";
-  if (!(error instanceof MoveError) || error.status >= 500)
+  if (
+    options.unknown ||
+    !(error instanceof MoveError) ||
+    error.status >= 500 ||
+    error.code === "REPLAY_OUTCOME_UNAVAILABLE"
+  )
     return {
       text: `The ${noun} may not have finished. Try again to check safely; ${kept.toLowerCase()}.`,
       toastText: `The ${noun} may not have finished. Check your cards before trying again.`,
@@ -237,16 +242,6 @@ export function describeFailure(
         `This ${noun} took too long to prepare. ${nothing}`,
         `Try again; ${kept.toLowerCase()}.`
       );
-    case "REPLAY_OUTCOME_UNAVAILABLE": {
-      const replayUnavailable = `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`;
-      return {
-        text: replayUnavailable,
-        toastText: replayUnavailable,
-        reloadGallery: true,
-        reloadTree: true,
-        retrySame: false,
-      };
-    }
     default:
       return result(
         `The ${noun} couldn't be completed. ${nothing}`,
@@ -300,14 +295,28 @@ export function partialMoveFailure(
   unknown: boolean
 ): Failure {
   const lead = `Moved ${plural(n, "borrowed copy", "borrowed copies")} to ${place}`;
-  const text = unknown
+  const uncertain = unknown || failure.retrySame;
+  const text = uncertain
     ? `${lead}. Moving your own copies may not have finished. Try again to check safely.`
     : `${lead}; your own copies didn't move: ${failure.toastText.replace(" The cards have been refreshed.", "").trim()}`;
   return {
     ...failure,
+    retrySame: uncertain,
     text,
     toastText: text,
     reloadGallery: true,
     reloadTree: true,
+  };
+}
+
+/** Copies moved, but their non-undoable operation must remain held until server discard is confirmed. */
+export function discardPendingFailure(copies: number, place: string): Failure {
+  const text = `Moved ${plural(copies, "copy", "copies")} to ${place}. Try again to finish safely.`;
+  return {
+    text,
+    toastText: text,
+    reloadGallery: true,
+    reloadTree: true,
+    retrySame: true,
   };
 }

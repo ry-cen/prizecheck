@@ -4,6 +4,7 @@ import {
   moveApi,
   createRemoval,
   operationFor,
+  offerableUndo,
   type HeldOperation,
 } from "./moveOperation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,6 +32,7 @@ import {
   describeBorrowedFailure,
   borrowedUnknownFailure,
   partialMoveFailure,
+  discardPendingFailure,
   trimOldest,
   type ActionTarget,
   type CardLabel,
@@ -109,6 +111,8 @@ export function useInventoryActions({
   toastLive.current = toast;
   const toastId = useRef(0);
   const operation = useRef<HeldOperation | null>(null);
+  // Also reject stale in-flight stack responses received after a confirmed discard.
+  const suppressedUndo = useRef(new Set<string>());
   const undoKeys = useRef(new Map<string, string>());
   const focusAfter = useRef<FocusTarget | null>(null);
   const carried = useRef<Carried | null>(null);
@@ -192,6 +196,17 @@ export function useInventoryActions({
     setProgress("");
   };
 
+  // The operation owns suppression until its DELETE is confirmed; every Undo stack lookup uses this filter.
+  const readUndo = useCallback(
+    async () =>
+      offerableUndo(
+        await listUndo(),
+        operation.current,
+        suppressedUndo.current
+      ),
+    []
+  );
+
   const run = useCallback(
     async (
       target: ActionTarget,
@@ -224,6 +239,12 @@ export function useInventoryActions({
       try {
         const outcome = await advance(held.op, held.state, {
           ...moveApi,
+          commitMove: async (...args) => {
+            const result = await moveApi.commitMove(...args);
+            if (held.op.noUndo && result.undo_id)
+              suppressedUndo.current.add(result.undo_id);
+            return result;
+          },
           moveBorrowedCopies: async (body) => {
             const result = await moveApi.moveBorrowedCopies(body);
             // Remove confirmed Borrowed entries before preparing or committing the owned stage.
@@ -253,10 +274,10 @@ export function useInventoryActions({
           showToast({ message, entry: null, unavailable: false });
           live.current.reloadGallery();
           void live.current.reloadTree();
-          if (!op.borrowed.length && op.stayed === 0 && state.ownedResult) {
+          if (!op.noUndo && state.ownedResult) {
             const result = state.ownedResult;
             const id = toastId.current;
-            const entries = await listUndo().catch(() => [] as UndoEntry[]);
+            const entries = await readUndo().catch(() => [] as UndoEntry[]);
             const newest = entries[0];
             const mine =
               newest &&
@@ -275,16 +296,25 @@ export function useInventoryActions({
           return;
         }
         let failure =
-          outcome.stage === "borrowed"
-            ? outcome.kind === "unknown"
-              ? borrowedUnknownFailure()
-              : describeBorrowedFailure(outcome.error, destination)
-            : describeFailure(
-                op.target,
-                outcome.error,
-                { place, card, edition },
-                { omitNothing: !!state.borrowedResult }
-              );
+          outcome.stage === "discard"
+            ? discardPendingFailure(
+                Number(state.borrowedResult?.copy_count ?? 0) +
+                  Number(state.ownedResult?.copy_count ?? 0),
+                destination
+              )
+            : outcome.stage === "borrowed"
+              ? outcome.kind === "unknown"
+                ? borrowedUnknownFailure()
+                : describeBorrowedFailure(outcome.error, destination)
+              : describeFailure(
+                  op.target,
+                  outcome.error,
+                  { place, card, edition },
+                  {
+                    omitNothing: !!state.borrowedResult,
+                    unknown: outcome.kind === "unknown",
+                  }
+                );
         if (outcome.stage === "owned" && state.borrowedResult)
           failure = partialMoveFailure(
             Number(state.borrowedResult.copy_count),
@@ -308,7 +338,7 @@ export function useInventoryActions({
         finish();
       }
     },
-    [place, card, edition, showToast]
+    [place, card, edition, showToast, readUndo]
   );
 
   const openMove = useCallback(() => {
@@ -376,13 +406,13 @@ export function useInventoryActions({
       live.current.reloadGallery();
       void live.current.reloadTree();
       const id = toastId.current;
-      const entries = await listUndo().catch(() => [] as UndoEntry[]);
+      const entries = await readUndo().catch(() => [] as UndoEntry[]);
       const mine = entries[0]?.id === result.undoId ? entries[0] : null;
       setToast((current) =>
         current && current.id === id ? { ...current, entry: mine } : current
       );
     },
-    [showToast]
+    [showToast, readUndo]
   );
   // A Lend Offer (#258): the selected copies with their cards' names, as the offer dialog lists them.
   const lendRows = useCallback(
@@ -465,7 +495,7 @@ export function useInventoryActions({
         code === "UNDO_NOT_NEWEST"
       ) {
         undoKeys.current.delete(entry.id);
-        const entries = await listUndo().catch(() => [] as UndoEntry[]);
+        const entries = await readUndo().catch(() => [] as UndoEntry[]);
         showToast({
           message: entries[0]
             ? "That Undo is no longer available. The newest action can still be undone."
@@ -503,7 +533,7 @@ export function useInventoryActions({
       busyRef.current = false;
       setBusy(false);
     }
-  }, [place, card, showToast]);
+  }, [place, card, showToast, readUndo]);
 
   const dismiss = useCallback(async () => {
     const current = toastLive.current;
@@ -523,7 +553,7 @@ export function useInventoryActions({
           return;
         }
       }
-      const entries = await listUndo().catch(() => [] as UndoEntry[]);
+      const entries = await readUndo().catch(() => [] as UndoEntry[]);
       const next = entries[0] ?? null;
       showToast({
         message: next
@@ -537,7 +567,7 @@ export function useInventoryActions({
       busyRef.current = false;
       setBusy(false);
     }
-  }, [showToast]);
+  }, [showToast, readUndo]);
 
   // Dismiss is pressed inside the toast, which goes away with this. The heading takes focus now, while
   // the toast is still there, rather than in an effect that can run before the toast is removed.

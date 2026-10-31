@@ -7,6 +7,7 @@ import {
   describeFailure,
   movePreview,
   partialMoveFailure,
+  discardPendingFailure,
 } from "./inventoryActionsModel";
 const names = { place: () => "Box", card: () => "Iono", edition: () => "Iono" };
 for (const [code, text] of [
@@ -89,4 +90,44 @@ test("Move preview includes stayed borrowed copies", () => {
       ]
     )
   ).toEqual({ moving: 2, alreadyThere: 3 });
+});
+
+for (const code of ["MOVE_MANIFEST_NOT_FOUND", "REPLAY_OUTCOME_UNAVAILABLE"])
+  test(`unknown ${code} never claims the owned copies did not move`, () => {
+    const failure = describeFailure(
+      { kind: "move", destinationId: "box" },
+      new MoveError(409, code),
+      names,
+      { unknown: true, omitNothing: true }
+    );
+    expect(failure.retrySame).toBe(true);
+    expect(failure.text).not.toContain("Nothing moved");
+    const partial = partialMoveFailure(1, "Box", failure, true);
+    expect(partial.retrySame).toBe(true);
+    expect(partial.text).toContain(
+      "Moving your own copies may not have finished"
+    );
+    expect(partial.text).not.toContain("didn't move");
+    expect(partial.toastText).not.toContain("Nothing moved");
+  });
+test("unconfirmed Undo discard reports that all copies moved and keeps recovery pending", () => {
+  expect(discardPendingFailure(3, "Box")).toEqual({
+    text: "Moved 3 copies to Box. Try again to finish safely.",
+    toastText: "Moved 3 copies to Box. Try again to finish safely.",
+    reloadGallery: true,
+    reloadTree: true,
+    retrySame: true,
+  });
+});
+
+test("the unavailable-outcome message cannot become a definite partial refusal", () => {
+  const failure = describeFailure(
+    { kind: "move", destinationId: "box" },
+    new MoveError(409, "REPLAY_OUTCOME_UNAVAILABLE"),
+    names
+  );
+  const partial = partialMoveFailure(1, "Box", failure, false);
+  expect(partial.retrySame).toBe(true);
+  expect(partial.text).not.toContain("didn't move");
+  expect(partial.text).toContain("may not have finished");
 });
