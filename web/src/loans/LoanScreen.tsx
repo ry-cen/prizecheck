@@ -852,7 +852,8 @@ export function LoanScreen({
         </Button>
       </div>
     ) : handing ? (
-      <div className="flex flex-wrap items-center gap-2">
+      // The label wraps rather than overflow a 320 px screen at 200% text; the button keeps its touch-sized height.
+      <div className="flex flex-wrap items-center gap-2 [&>button]:h-auto [&>button]:min-h-control [&>button]:max-w-full [&>button]:py-1 [&>button]:whitespace-normal phone:[&>button]:min-h-control-phone">
         <Button
           variant="primary"
           aria-disabled={busy || undefined}
@@ -1061,12 +1062,13 @@ const RELOAD = new Set([
   "PICKS_UP_TO_DATE",
 ]);
 
-/** Where the lender takes a line's copies from: "From Binder 1", or each place with its count. */
+/** Where the lender takes a line's copies from: "From Shelf / Binder 1", or each place with its count. Full paths:
+ * Location names are unique only among siblings. */
 function pickText(places: LoanPickPlace[], editionId: string): string | null {
   const found = places.filter((place) => place.edition_id === editionId);
   if (found.length === 0) return null;
-  if (found.length === 1) return `From ${found[0].name}`;
-  return `From ${found.map((place) => `${place.name} (${place.copies})`).join(" · ")}`;
+  if (found.length === 1) return `From ${found[0].path}`;
+  return `From ${found.map((place) => `${place.path} (${place.copies})`).join(" · ")}`;
 }
 
 /**
@@ -1088,8 +1090,8 @@ function staleText(
         key: place.location_id ?? `place-${index}`,
         text:
           left > 0
-            ? `${place.name} has only ${left} ${line.name} now`
-            : `${place.name} has no ${line.name} now`,
+            ? `${place.path} has only ${left} ${line.name} now`
+            : `${place.path} has no ${line.name} now`,
       };
     });
 }

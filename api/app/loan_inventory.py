@@ -71,7 +71,7 @@ from pydantic import BaseModel, Field
 from .deck_deletion import unsorted_leaf
 from .copy_picks import suggest_picks
 from .loan_picks import pick_shortfalls
-from .location_tree import error, refuse, replay
+from .location_tree import error, location_paths, refuse, replay
 from .db import connect
 from .identity import verified_user
 from .inventory_core import MAX_QUANTITY, first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
@@ -188,6 +188,9 @@ class LoanPickPlace(BaseModel):
     edition_id: UUID
     location_id: UUID | None
     name: str
+    # The Location's full path, such as "Shelf / Binder 2" (names are unique only among siblings); "Unsorted" too
+    # when the Location was deleted.
+    path: str
     copies: str
     short: str
 
@@ -615,8 +618,11 @@ def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
         if row['borrower_id'] == user_id:
             deck = conn.execute("SELECT id, name FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
                                 (user_id, row['deck_id'])).fetchone() if row['deck_id'] else None
-            awaiting = [LoanPickPlace(edition_id=edition, location_id=location, name=name, copies=str(copies), short='0')
-                        for edition, location, name, copies in awaiting_places(conn, user_id, loan_id)]
+            found = awaiting_places(conn, user_id, loan_id)
+            paths = location_paths(conn, user_id) if found else {}
+            awaiting = [LoanPickPlace(edition_id=edition, location_id=location, name=name,
+                                      path=paths.get(location, name), copies=str(copies), short='0')
+                        for edition, location, name, copies in found]
             return LoanSide(loan_id=loan_id, deck=LoanDeck(**deck) if deck else None, can_promise=[], picks=[],
                             suggested=[], awaiting_choice=awaiting)
         limits = []
@@ -627,6 +633,7 @@ def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
             limits = [PromiseLimit(edition_id=edition, available=str(available[edition])) for edition in editions]
         names = {location['id']: location['name'] for location in conn.execute(
             'SELECT id, name FROM location WHERE owner_id=%s', (user_id,))}
+        paths = location_paths(conn, user_id)
         position = {edition: index for index, edition in enumerate(editions)}
 
         def places(found: dict, short: dict) -> list[LoanPickPlace]:
@@ -634,7 +641,7 @@ def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
                                                                names.get(item[0][1], 'Unsorted').casefold(),
                                                                str(item[0][1])))
             return [LoanPickPlace(edition_id=edition, location_id=location, name=names.get(location, 'Unsorted'),
-                                  copies=str(copies), short=str(short.get((edition, location), 0)))
+                                  path=paths.get(location, names.get(location, 'Unsorted')), copies=str(copies), short=str(short.get((edition, location), 0)))
                     for (edition, location), copies in ordered]
 
         mine: dict = {}
