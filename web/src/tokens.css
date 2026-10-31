@@ -127,8 +127,8 @@
   /* The overlay scroll bar (#399): the rail that takes the pointer, and the gap that leaves the thumb 6 px wide in it. */
   --scroll-rail-size: 12px;
   --scroll-thumb-gap: 3px;
-  /* What a sticky element clears at the top of the viewport: the shell's sticky desktop header; nothing on
-     a phone, where the header scrolls away. */
+  /* What a sticky element clears at the top of the viewport: the shell's sticky desktop header; zero on
+     phones by default. Collection scopes its pinned phone header offset locally. */
   --layout-sticky-top: var(--layout-header-height);
 
   /* Sign-in provider buttons (app redesign, sign-in decision): each company's own button colours, the same in
