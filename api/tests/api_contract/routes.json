@@ -4,6 +4,8 @@
 [["GET", "HEAD"], "/docs/oauth2-redirect", "swagger_ui_redirect"],
 [["GET", "HEAD"], "/redoc", "redoc_html"],
 [["GET"], "/api/health", "health"],
+[["GET"], "/api/collection/borrowed", "borrowed_gallery"],
+[["POST"], "/api/collection/borrowed/moves", "move_borrowed_copies"],
 [["GET"], "/api/locations", "locations"],
 [["GET"], "/api/locations/{location_id}", "location"],
 [["GET"], "/api/catalog/status", "catalog_status"],

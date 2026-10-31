@@ -1387,6 +1387,218 @@
     "title": "BorrowedCopies",
     "type": "object"
    },
+   "BorrowedGalleryPage": {
+    "properties": {
+     "catalog_revision": {
+      "title": "Catalog Revision",
+      "type": "integer"
+     },
+     "copies": {
+      "items": {
+       "$ref": "#/components/schemas/BorrowedGalleryView"
+      },
+      "title": "Copies",
+      "type": "array"
+     },
+     "owner_revision": {
+      "title": "Owner Revision",
+      "type": "integer"
+     },
+     "snapshot": {
+      "title": "Snapshot",
+      "type": "string"
+     },
+     "total": {
+      "title": "Total",
+      "type": "string"
+     }
+    },
+    "required": [
+     "copies",
+     "total",
+     "owner_revision",
+     "catalog_revision",
+     "snapshot"
+    ],
+    "title": "BorrowedGalleryPage",
+    "type": "object"
+   },
+   "BorrowedGalleryView": {
+    "properties": {
+     "category": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Category"
+     },
+     "collector_number": {
+      "title": "Collector Number",
+      "type": "string"
+     },
+     "descriptor": {
+      "additionalProperties": true,
+      "title": "Descriptor",
+      "type": "object"
+     },
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "elemental_types": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Elemental Types",
+      "type": "array"
+     },
+     "image_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Image Url"
+     },
+     "lender": {
+      "title": "Lender",
+      "type": "string"
+     },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
+     "location_id": {
+      "format": "uuid",
+      "title": "Location Id",
+      "type": "string"
+     },
+     "location_name": {
+      "title": "Location Name",
+      "type": "string"
+     },
+     "location_path": {
+      "title": "Location Path",
+      "type": "string"
+     },
+     "printing_id": {
+      "format": "uuid",
+      "title": "Printing Id",
+      "type": "string"
+     },
+     "printing_name": {
+      "title": "Printing Name",
+      "type": "string"
+     },
+     "quantity": {
+      "title": "Quantity",
+      "type": "string"
+     },
+     "set_code": {
+      "title": "Set Code",
+      "type": "string"
+     },
+     "set_id": {
+      "title": "Set Id",
+      "type": "string"
+     },
+     "set_name": {
+      "title": "Set Name",
+      "type": "string"
+     },
+     "trainer_type": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trainer Type"
+     }
+    },
+    "required": [
+     "loan_id",
+     "lender",
+     "edition_id",
+     "location_id",
+     "location_name",
+     "location_path",
+     "quantity",
+     "printing_id",
+     "printing_name",
+     "set_id",
+     "set_name",
+     "set_code",
+     "collector_number",
+     "descriptor",
+     "image_url",
+     "category",
+     "elemental_types",
+     "trainer_type"
+    ],
+    "title": "BorrowedGalleryView",
+    "type": "object"
+   },
+   "BorrowedMoveItem": {
+    "properties": {
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "from_location_id": {
+      "format": "uuid",
+      "title": "From Location Id",
+      "type": "string"
+     },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
+     "quantity": {
+      "title": "Quantity",
+      "type": "string"
+     }
+    },
+    "required": [
+     "loan_id",
+     "edition_id",
+     "from_location_id",
+     "quantity"
+    ],
+    "title": "BorrowedMoveItem",
+    "type": "object"
+   },
+   "BorrowedMoveResult": {
+    "properties": {
+     "copy_count": {
+      "title": "Copy Count",
+      "type": "string"
+     },
+     "owner_revision": {
+      "title": "Owner Revision",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "copy_count",
+     "owner_revision"
+    ],
+    "title": "BorrowedMoveResult",
+    "type": "object"
+   },
    "BrowseEdition": {
     "properties": {
      "art_url": {
@@ -2997,6 +3209,10 @@
       "title": "Owner Revision",
       "type": "integer"
      },
+     "snapshot": {
+      "title": "Snapshot",
+      "type": "string"
+     },
      "totals": {
       "anyOf": [
        {
@@ -3009,6 +3225,7 @@
      }
     },
     "required": [
+     "snapshot",
      "holdings",
      "owner_revision",
      "catalog_revision"
@@ -11119,6 +11336,36 @@
      "idempotency_key"
     ],
     "title": "MoveBorrowed",
+    "type": "object"
+   },
+   "MoveBorrowedCopies": {
+    "properties": {
+     "idempotency_key": {
+      "format": "uuid",
+      "title": "Idempotency Key",
+      "type": "string"
+     },
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/BorrowedMoveItem"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+     },
+     "to_location_id": {
+      "format": "uuid",
+      "title": "To Location Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "to_location_id",
+     "items",
+     "idempotency_key"
+    ],
+    "title": "MoveBorrowedCopies",
     "type": "object"
    },
    "MoveItem": {
@@ -24847,6 +25094,307 @@
     "summary": "Skipped Rows",
     "tags": [
      "collection-imports"
+    ]
+   }
+  },
+  "/api/collection/borrowed": {
+   "get": {
+    "operationId": "borrowed_gallery_api_collection_borrowed_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "location_id",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Location Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "sort",
+      "required": false,
+      "schema": {
+       "default": "name-asc",
+       "enum": [
+        "name-asc",
+        "name-desc",
+        "set-asc",
+        "set-desc",
+        "quantity-asc",
+        "quantity-desc"
+       ],
+       "title": "Sort",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "name",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 120,
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "set_id",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 80,
+       "title": "Set Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "category",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "enum": [
+          "Pokemon",
+          "Trainer",
+          "Energy"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Category"
+      }
+     },
+     {
+      "in": "query",
+      "name": "trainer_type",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "enum": [
+          "supporter",
+          "item",
+          "tool",
+          "stadium"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Trainer Type"
+      }
+     },
+     {
+      "in": "query",
+      "name": "elemental_type",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "enum": [
+          "Colorless",
+          "Darkness",
+          "Dragon",
+          "Fairy",
+          "Fighting",
+          "Fire",
+          "Grass",
+          "Lightning",
+          "Metal",
+          "Psychic",
+          "Water"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Elemental Type"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BorrowedGalleryPage"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Borrowed Gallery",
+    "tags": [
+     "collection"
+    ]
+   }
+  },
+  "/api/collection/borrowed/moves": {
+   "post": {
+    "operationId": "move_borrowed_copies_api_collection_borrowed_moves_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/MoveBorrowedCopies"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BorrowedMoveResult"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Move Borrowed Copies",
+    "tags": [
+     "collection"
     ]
    }
   },
