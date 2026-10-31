@@ -6808,7 +6808,7 @@
     "type": "object"
    },
    "FriendCopy": {
-    "description": "One Friend's copies of one Card Edition that matches what the viewer asked about. ``other_printing``: the\nEdition is of another Card Printing of the wanted card's Reprint Group, so its set and number are worth showing.\n``collector_id`` addresses the Friend in commands (Ask to borrow, #252) and is never shown.",
+    "description": "One Friend's copies of one Card Edition that matches what the viewer asked about. ``other_printing``: the\nEdition is of another Card Printing, so its set and number are worth showing.\n``collector_id`` addresses the Friend in commands (Ask to borrow, #252) and is never shown.",
     "properties": {
      "collector_id": {
       "title": "Collector Id",
@@ -39438,7 +39438,7 @@
   },
   "/api/social/want-list-matches": {
    "get": {
-    "description": "Friends' cards for the Want List (#251): for each card the Want List still needs, over every Deck or the one in\n``deck`` and under the account's counting setting, the Friends' copies it reaches under ``printings``. Its own\nread, apart from the Want List's: a Friend's change never moves the Want List's revisions. 404 DECK_NOT_FOUND for a\nDeck that isn't the viewer's.",
+    "description": "Friends' cards for the Want List (#251): for each card the Want List still needs, over every Deck or the one in\n``deck`` and under the account's counting setting, the Friends' copies allowed by each card's Will accept choice.\nIts own read, apart from the Want List's: a Friend's change never moves the Want List's revisions. 404 DECK_NOT_FOUND for a\nDeck that isn't the viewer's.",
     "operationId": "want_list_matches_api_social_want_list_matches_get",
     "parameters": [
      {
@@ -39456,20 +39456,6 @@
         }
        ],
        "title": "Deck"
-      }
-     },
-     {
-      "in": "query",
-      "name": "printings",
-      "required": false,
-      "schema": {
-       "default": "reprint_group",
-       "enum": [
-        "exact",
-        "reprint_group"
-       ],
-       "title": "Printings",
-       "type": "string"
       }
      },
      {

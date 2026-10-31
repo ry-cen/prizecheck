@@ -92,7 +92,7 @@ The design rests on a few rules:
 
 ### Friends' cards on the Want List and in search
 
-42. As a collector, I want each Want List line that a Friend can cover to show a "Friends:" row of chips, one per Friend with their spare and in-Deck counts, so that I see who can help at a glance.
+42. As a collector, I want each Want List line that a Friend can cover to show a "Friends:" row of chips, one per Friend with copies allowed by the card’s Will accept choice and their spare and in-Deck counts, so that I see who can help at a glance.
 43. As a collector, I want tapping a chip to add one copy to that Friend's draft Borrow Request and tick the chip, so that asking is one tap.
 44. As a collector, I want a Buy / Get from Friends switch in the Want List summary, so that I can look at the list as a shopping list or as a borrowing list.
 45. As a collector, I want the Get from Friends view to show one panel per card I need that at least one Friend can lend, with the card image on the left, so that I can ask card by card.
@@ -100,7 +100,7 @@ The design rests on a few rules:
 47. As a collector, I want one row per Friend in each panel with their Display Name, Handle, spare and in-Deck counts and an **Ask** button that becomes a stepper, so that I can choose how many from whom.
 48. As a collector, I want cards no Friend can lend summed up in one line under the panels, so that I know what still needs buying.
 49. As a collector, I want a Friend's spare copies listed before their in-Deck copies, so that I ask for the copies that cost them nothing first.
-50. As a collector, I want a Friend's copy of another Printing in the Reprint Group to count only when my counting setting allows it, and to be labelled with its set and number, so that matches follow the same rule as my own Want List.
+50. As a collector, I want Friend chips to follow each card's Will accept choice: This exact card accepts only that Edition, Any finish accepts every Edition of its Printing, and Any card with the same name accepts every Edition sharing its Card Identity. Copies of another Printing show their set and number. Want List counts stay unchanged.
 51. As a collector, I want the catalog card popup to list "Friends who have this" with **Ask to borrow**, so that I can ask from a card I am looking at, including a card that is not on my Want List.
 52. As a collector, I want to open a Friend's Collection from their name, filtered to **On my Want List** by default, with **All cards** and a search, and **Ask to borrow** on each card, so that I can browse what they could lend.
 53. As a collector, I want asking in any place to add to the same per-Friend draft, so that I build one Borrow Request per Friend however I find the cards.
@@ -345,7 +345,7 @@ Where two sources differ, the later one is followed. All are listed here so that
 
   It never returns a Location or Deck name or id.
 - It is batched across all of the viewer's Friends and requested Editions. The `holding` primary key already leads with `owner_id`, so the read is one index range per Friend, paired in memory. It does not run `allocate` once per Friend.
-- **Friend matches** are a separate, unpinned read. `/api/social/want-list-matches` takes the viewer's Want List Editions and expands them by the viewer's counting setting (other Printings in the Reprint Group under Use cards I own). The Want List response, its revision pin and its Mass Entry 409 do not depend on other collectors' revisions. The chips and the Get from Friends view read it.
+- **Friend matches** are a separate, unpinned read. `/api/social/want-list-matches` takes the viewer's Want List Editions and expands each by its Will accept choice (exact Edition by default, any finish of its Printing, or every Edition sharing its Card Identity). The Want List response, its revision pin and its Mass Entry 409 do not depend on other collectors' revisions. The chips and the Get from Friends view read it.
 - A Friend's Collection view uses the same function with `edition_ids=None` and pages by Card Identity. Card search (the catalog card popup, and ad-hoc search for any card) uses it for that card's Editions, expanded by the counting setting in the same way.
 - **Contract test.** A test walks the generated OpenAPI schema for every `/api/social` response and fails on any field named for a Location or Deck.
 
