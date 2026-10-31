@@ -206,6 +206,7 @@
 [["POST"], "/api/loans/offers", "send_lend_offer"],
 [["POST"], "/api/loans/{loan_id}/accept-offer", "accept_offer"],
 [["GET"], "/api/loans/lent-out", "lent_out"],
+[["GET"], "/api/loans/pending", "pending_loans"],
 [["GET"], "/api/loans/borrowed", "list_borrowed"],
 [["POST"], "/api/loans/borrowed/move", "move_borrowed"],
 [["GET"], "/api/loans/{loan_id}/side", "loan_side"],

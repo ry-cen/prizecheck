@@ -13,6 +13,7 @@ import {
 } from "react";
 import { X } from "lucide-react";
 import { getDecks, type DeckIndexEntry } from "../decks_generated";
+import { useNoteLoansChanged } from "../inbox/Inbox";
 import { CardImage } from "../social/FriendCollectionPage";
 import {
   sendBorrowRequest,
@@ -564,6 +565,8 @@ function BorrowComposer({
   returnFocus: RefObject<HTMLElement | null>;
 }) {
   const toast = useToast();
+  // A sent request is a Loan changed outside the Loans tab: a Deck's pending requests read again.
+  const noteLoansChanged = useNoteLoansChanged();
   const [decks, setDecks] = useState<DecksLoad>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [message, setMessage] = useState("");
@@ -606,6 +609,7 @@ function BorrowComposer({
       });
       onChange(() => null);
       onClose();
+      noteLoansChanged();
       toast.show({
         message: `Borrow Request sent to ${endSentence(name)}`,
         action: { label: "View", onAction: () => onOpenLoan(loan.id) },
