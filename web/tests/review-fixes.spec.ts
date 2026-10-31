@@ -37,6 +37,32 @@ async function sessionFixture(
       });
       return;
     }
+    if (path === "/api/collection/holdings") {
+      await route.fulfill({
+        json: {
+          holdings: [],
+          totals: { holdings: 0, editions: 0, copies: "0" },
+          lent: "0",
+          owner_revision: 1,
+          catalog_revision: 0,
+          snapshot: "1.0.0",
+          next_cursor: null,
+        },
+      });
+      return;
+    }
+    if (path === "/api/collection/borrowed") {
+      await route.fulfill({
+        json: {
+          copies: [],
+          total: "0",
+          owner_revision: 1,
+          catalog_revision: 0,
+          snapshot: "1.0.0",
+        },
+      });
+      return;
+    }
     if (path === "/api/social/friends") {
       // The shell reads the Friends badge on every page (social network #247): no Friends.
       await route.fulfill({ json: { received: [], friends: [], sent: [] } });
