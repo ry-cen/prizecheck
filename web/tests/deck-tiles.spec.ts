@@ -424,7 +424,8 @@ test("Deck layout stays readable through desktop and phone resizing", async ({
     await expect(
       decksMain
         .getByRole("region", { name: built.deckName, exact: true })
-        .getByText("Basic Grass Energy", { exact: true })
+        .getByRole("paragraph")
+        .filter({ hasText: /^Basic Grass Energy$/ })
     ).toBeVisible();
     for (const width of widths) {
       await page.setViewportSize({
