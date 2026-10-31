@@ -73,8 +73,9 @@ const VIEWS = [
 /**
  * The deck builder (#176): opening a Deck on the Decks page shows its Deck List as the main area, with every
  * copy's ownership state and the cost, in Spread, Stacked and List, and the card library in a column on the right
- * that scrolls on its own (#177). On a phone, Deck and Library tabs switch between the two, Library first, with the
- * live count on the Deck tab; both stay mounted, so the library keeps its search and results.
+ * that scrolls on its own (#177). On a phone, Deck and Library tabs switch between the two, with the live count on the
+ * Deck tab: a Deck that lists cards opens on Deck and an empty one on Library. Both stay mounted, so the library keeps
+ * its search and results.
  *
  * Editing (#177): dragging a library tile onto the Deck List adds a copy, and the card popup's ±1 does too; a copy's
  * sheet has ±1 and Swap this copy for; dragging a copy onto the library, or Delete or Backspace on it, takes it off.
@@ -107,7 +108,8 @@ export function DeckBuilderPage({
   const [view, setView] = useState<DeckView>(() =>
     window.matchMedia(MOBILE_QUERY).matches ? "stacked" : "spread"
   );
-  const [pane, setPane] = useState<Pane>("library");
+  // The phone's tab: null until the first read picks it, then whatever the collector chooses.
+  const [chosenPane, setPane] = useState<Pane | null>(null);
   const [sheet, setSheet] = useState<{
     editionId: string;
     ordinal: number | null;
@@ -281,6 +283,11 @@ export function DeckBuilderPage({
   useDeckListChanged(deckId, () => void read());
 
   const detail = load.kind === "ready" ? load.detail : null;
+  // A Deck that already lists cards opens on its Deck tab and an empty one on Library, picked once from the first read,
+  // so adding the first card from Library doesn't switch tabs and a tab the collector chose stays.
+  if (chosenPane === null && detail)
+    setPane(detail.deck_list.lines.length > 0 ? "deck" : "library");
+  const pane = chosenPane ?? "library";
   const edits = useDeckListEdits({
     deckId,
     deckList: detail?.deck_list ?? null,
