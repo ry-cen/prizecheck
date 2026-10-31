@@ -395,6 +395,9 @@ function App() {
             loanId={sectionAt(address)}
             onOpenLoan={(id) => navigate(loanPath(id))}
             onAllLoans={() => navigate(pageDef("loans").path)}
+            onOpenDeck={(id) =>
+              navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
+            }
           />
         );
       case "trades":

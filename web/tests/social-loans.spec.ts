@@ -16,6 +16,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+import { expectTouchTarget } from "./support/touch-target";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const PHONE = { width: 390, height: 844 };
@@ -41,7 +42,7 @@ function seedCatalog(): Editions {
 
 async function api(
   page: Page,
-  method: "GET" | "POST" | "PUT",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   data?: object
 ) {
@@ -144,6 +145,14 @@ const tray = (page: Page) =>
 const notifications = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 const title = (page: Page) => page.getByRole("heading", { level: 1 });
+/** The Loan screen's facts line ("You're borrowing · For … · Due back …"), and any link in the main area to a Deck. */
+const facts = (page: Page) =>
+  page
+    .getByRole("main")
+    .locator("p")
+    .filter({ hasText: /^You're (borrowing|lending)/ });
+const deckLinks = (page: Page) =>
+  page.getByRole("main").locator('a[href^="/decks/"]');
 const loanCards = (page: Page) =>
   page.getByRole("list", { name: "Cards", exact: true }).getByRole("listitem");
 const view = (page: Page) =>
@@ -284,6 +293,28 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
     "Waiting for Misty W to answer"
   );
   const loanUrl = page.url();
+  // The Deck's name opens that Deck: a link, reached and followed by keyboard, with a visible focus ring.
+  const deckLink = facts(page).getByRole("link", {
+    name: deckName,
+    exact: true,
+  });
+  await expect(deckLinks(page)).toHaveCount(1);
+  await expect(deckLink).toHaveAttribute("href", `/decks/${charizard}`);
+  await page.getByRole("button", { name: "More for this Loan" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(deckLink).toBeFocused();
+  expect(
+    await deckLink.evaluate((link) => ({
+      visible: link.matches(":focus-visible"),
+      style: getComputedStyle(link).outlineStyle,
+    }))
+  ).toEqual({ visible: true, style: "solid" });
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(`${ORIGIN}/decks/${charizard}`);
+  await expect(title(page)).toHaveText(deckName);
+  await page.goBack();
+  await expect(page).toHaveURL(loanUrl);
+  await expect(title(page)).toHaveText("You asked Misty W for 3 cards");
 
   // Misty: Needs you lists it; she leaves Boss's Orders out and accepts the rest.
   const lender = misty.page;
@@ -298,6 +329,9 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await needsYou.getByRole("link").click();
   await expect(title(lender)).toHaveText("Ash K wants to borrow 3 cards");
   await expect(lender.getByRole("main")).not.toContainText(deckName);
+  await expect(facts(lender)).toHaveCount(1);
+  await expect(facts(lender)).not.toContainText("For ");
+  await expect(deckLinks(lender)).toHaveCount(0);
   await lender
     .getByRole("button", { name: /^Decrease Copies of Boss's Orders,/ })
     .click();
@@ -328,6 +362,8 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expect(page.getByRole("main")).not.toContainText("From ");
   await page.setViewportSize(PHONE);
   await expectPageChecks(page, "a Loan on a phone");
+  // The page check leaves links inside a paragraph out, so the Deck link's 44 px phone target is measured here.
+  await expectTouchTarget(deckLinks(page));
   await page
     .getByRole("navigation", { name: "Main views" })
     .getByRole("button", { name: "Loans", exact: true })
@@ -342,6 +378,18 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
     page.getByRole("list", { name: `What ${deckName} needs` })
   ).toContainText("Iono");
   await expect(chips(page, "Iono")).toHaveCount(0);
+
+  // Once Ash deletes the Deck, the Loan is for Unsorted, with no link.
+  const deckDetail = await api(page, "GET", `/api/decks/${charizard}`);
+  await api(page, "DELETE", `/api/decks/${charizard}`, {
+    name: deckName,
+    version: deckDetail.deck.version,
+    idempotency_key: randomUUID(),
+  });
+  await page.goto(loanUrl);
+  await expect(title(page)).toHaveText("Misty W is lending you 2 cards");
+  await expect(facts(page)).toContainText("You're borrowing · For Unsorted");
+  await expect(deckLinks(page)).toHaveCount(0);
 
   // Misty can't remove copies she promised.
   await lender.goto(`${ORIGIN}/collection`);
@@ -540,6 +588,9 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   await composer.getByRole("button", { name: "Send Borrow Request" }).click();
   await view(page).click();
   await expect(title(page)).toHaveText("You asked Misty W for 2 cards");
+  // For Unsorted is plain text.
+  await expect(facts(page)).toContainText("You're borrowing · For Unsorted");
+  await expect(deckLinks(page)).toHaveCount(0);
 
   // And withdraws it: Keep it returns focus to ⋯, and the step moves it to the heading.
   const more = page.getByRole("button", { name: "More for this Loan" });
@@ -557,6 +608,10 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   await expect(title(page)).toHaveText("You withdrew your request to Misty W");
   await expect(title(page)).toBeFocused();
   await expect(more).toBeVisible();
+  // A closed Loan names no Deck.
+  await expect(facts(page)).toHaveCount(1);
+  await expect(facts(page)).not.toContainText("For ");
+  await expect(deckLinks(page)).toHaveCount(0);
 
   // Keep draft keeps an edited request as a draft; signing out forgets it.
   await more.click();

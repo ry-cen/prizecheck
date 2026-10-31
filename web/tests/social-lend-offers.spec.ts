@@ -107,6 +107,16 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await page
     .getByRole("combobox", { name: "Put them in" })
     .selectOption({ label: "Charizard" });
+  // An offer names no Deck in its facts and links none until it's accepted.
+  const offerFacts = page
+    .getByRole("main")
+    .locator("p")
+    .filter({ hasText: /^You're borrowing/ });
+  await expect(offerFacts).toHaveCount(1);
+  await expect(offerFacts).not.toContainText("For ");
+  await expect(
+    page.getByRole("main").locator('a[href^="/decks/"]')
+  ).toHaveCount(0);
   await expectPageChecks(page, "answering a Lend Offer");
   await page.setViewportSize(PHONE);
   await expectPageChecks(page, "answering a Lend Offer on a phone");
@@ -114,6 +124,9 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await page.getByRole("button", { name: "Accept" }).click();
   await expect(title(page)).toHaveText("Misty W is lending you 1 card");
   await expect(page.getByRole("main")).toContainText("For Charizard");
+  await expect(
+    page.getByRole("main").getByRole("link", { name: "Charizard", exact: true })
+  ).toHaveAttribute("href", /^\/decks\/[0-9a-f-]+$/);
   await lender.reload();
   await expect(title(lender)).toHaveText("You're lending Ash K 1 card");
 
