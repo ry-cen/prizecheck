@@ -17,13 +17,13 @@ that.
 
 **Friends' cards for the Want List** (``GET /api/social/want-list-matches``, #251) answers, for each card the viewer's
 Want List still needs (every Deck, or the one in ``deck``, under the account's counting setting), the Friends' copies
-that match it. It is its own read, never part of ``GET /api/want-list``: it carries no need and no Deck, and the page
-takes both from the Want List's combined total. **Friends who have this** (``GET /api/social/card-matches``, #251)
+allowed by each card's Will accept choice (``card_accepts.accepts``). It is its own read, never part of
+``GET /api/want-list``: it carries no need and no Deck, and the page takes both from the Want List's combined total. **Friends who have this** (``GET /api/social/card-matches``, #251)
 answers the Friends' copies of one Card Printing for the card popup. Both read every Friend's copies with one
 ``friend_copies`` call, and list spare copies before copies in a Deck.
 
-**Matching** (``reach``) follows the viewer's choice of printings, the one Decklist Import calls Exact printings and Use
-cards I own: ``exact`` reaches every Edition of the wanted card's own Card Printing (any finish); ``reprint_group`` also
+**Collection and card-popup matching** (``reach``) follows the viewer's choice of printings, the one Decklist Import
+calls Exact printings and Use cards I own: ``exact`` reaches every Edition of the wanted card's own Card Printing (any finish); ``reprint_group`` also
 reaches every Edition of the other Card Printings in its effective Reprint Group (``catalog_reprint_group_member``),
 whose copies are marked ``other_printing``. A Printing in no Reprint Group, every Basic Energy among them, reaches only
 itself: Decklist Import's Basic Energy grouping doesn't apply, as for the Want List's Swap hint.
@@ -38,6 +38,8 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from ..core.catalog.card_facts import Card, card_facts
+from ..card_accepts import accepts
+from ..core.trading.trade_wants import own_rules
 from ..location_tree import error
 from ..db import connect
 from ..identity import verified_user
@@ -169,7 +171,7 @@ def friend_collection(handle: str, show: Literal['wanted', 'all'] = 'wanted', q:
 
 class FriendCopy(BaseModel):
     """One Friend's copies of one Card Edition that matches what the viewer asked about. ``other_printing``: the
-    Edition is of another Card Printing of the wanted card's Reprint Group, so its set and number are worth showing.
+    Edition is of another Card Printing, so its set and number are worth showing.
     ``collector_id`` addresses the Friend in commands (Ask to borrow, #252) and is never shown."""
     collector_id: str
     handle: str
@@ -241,15 +243,19 @@ def friend_copy(friend, card: Card, copy, other: bool) -> FriendCopy:
 
 
 @router.get('/want-list-matches', response_model=WantListMatches)
-def want_list_matches(deck: UUID | None = None, printings: Printings = 'reprint_group',
-                      user_id: str = Depends(verified_user)):
+def want_list_matches(deck: UUID | None = None, user_id: str = Depends(verified_user)):
     """Friends' cards for the Want List (#251): for each card the Want List still needs, over every Deck or the one in
-    ``deck`` and under the account's counting setting, the Friends' copies it reaches under ``printings``. Its own
-    read, apart from the Want List's: a Friend's change never moves the Want List's revisions. 404 DECK_NOT_FOUND for a
+    ``deck`` and under the account's counting setting, the Friends' copies allowed by each card's Will accept choice.
+    Its own read, apart from the Want List's: a Friend's change never moves the Want List's revisions. 404 DECK_NOT_FOUND for a
     Deck that isn't the viewer's."""
     wanted = wanted_editions(user_id, deck)
     with connect() as conn:
-        has_friends, found = matches(conn, user_id, reach(conn, wanted, printings))
+        rules = own_rules(conn, user_id)
+        accepted = accepts(conn, {edition: rules.get(edition, 'edition') for edition in wanted})
+        cards = card_facts(conn, {edition for editions in accepted.values() for edition in editions})
+        reached = {wanted: {edition: cards[edition].printing_id != cards[wanted].printing_id
+                            for edition in editions} for wanted, editions in accepted.items()}
+        has_friends, found = matches(conn, user_id, reached)
     return WantListMatches(has_friends=has_friends, cards=[WantedCard(edition_id=edition, copies=found[edition])
                                                            for edition in sorted(found)])
 

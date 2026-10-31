@@ -55,11 +55,28 @@ test("a Friend chip in the deck builder's panel asks the Friend through the Borr
   await befriend(page, brock.page);
 
   await page.goto(`${ORIGIN}/decks/${deck}`);
+  const firstMatches = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname === "/api/social/want-list-matches" &&
+      url.searchParams.get("deck") === deck
+    );
+  });
   await page.getByRole("button", { name: "Ways to get missing cards" }).click();
   const panel = page.getByRole("region", { name: "Ways to get missing cards" });
   const chip = panel
     .getByRole("list", { name: "Friends who can lend Iono" })
     .getByRole("button", { name: "Brock S · 1 spare · PAL 254" });
+  // Wait for the exact-Edition read so absence cannot pass just because chips are still loading.
+  const firstAnswer = await (await firstMatches).json();
+  expect(firstAnswer.cards).toEqual([]);
+  const willAccept = panel.getByRole("combobox", {
+    name: /^Will accept for Iono/,
+  });
+  await expect(willAccept).toHaveValue("edition");
+  await expect(chip).toHaveCount(0);
+  // Widening the choice refetches Friends in this panel without a page reload.
+  await willAccept.selectOption("identity");
   await expect(chip).toHaveAttribute("aria-pressed", "false");
   await expectPageChecks(page, "the deck builder's panel with Friend chips");
 
