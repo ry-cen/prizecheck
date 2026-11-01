@@ -14,6 +14,14 @@ export default defineConfig({
   use: {
     browserName: "chromium",
     headless: true,
+    launchOptions: process.env.TEST_FONTCONFIG_FILE
+      ? {
+          env: {
+            ...process.env,
+            FONTCONFIG_FILE: process.env.TEST_FONTCONFIG_FILE,
+          },
+        }
+      : undefined,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

@@ -21,6 +21,10 @@ from test_catalog_targets import card
 from app.main import connect
 from app.catalog_targets import MATCHING, activate_rule
 reset_catalog()
+# reset_catalog replaces card data, but intentionally preserves application rule activation.
+# This fixture owns its initial rule state before importing the first record, too.
+with connect() as conn:
+    conn.execute("UPDATE catalog_rule_state SET activation_id=NULL")
 run(Records(card(1)))
 if ${quarantine ? "True" : "False"}:
     with connect() as conn, conn.transaction():
@@ -130,159 +134,183 @@ test.afterAll(async () => {
   await pool.end();
 });
 
-test("collector reports an Edition mapping, nothing changes until the maintainer approves it", async ({
-  page,
-}) => {
-  seed(false);
-  await signIn(page);
-  await setMaintainer(false);
-  const before = await normal();
-  const outboxBefore = (
-    await pool.query("SELECT count(*)::int AS n FROM catalog_public_outbox")
-  ).rows[0].n;
-
-  await page.reload();
-  await page.getByRole("button", { name: "Catalog", exact: true }).click();
-  // A Catalog tile opens the card popup (#174): pick the Edition, then the footer's "Report: this Edition".
-  await page
-    .getByRole("searchbox", { name: "Search the catalog" })
-    .fill("Furret");
-  await page
-    .getByRole("region", { name: "Catalog results" })
-    .getByRole("button", { name: /^Furret,/ })
-    .first()
-    .click();
-  const popup = page.getByRole("dialog", { name: "Furret" });
-  await popup
-    .getByRole("group", { name: "Editions" })
-    .getByRole("button", { name: /^Normal/ })
-    .click();
-  await popup.getByRole("button", { name: "Report this Edition" }).click();
-  const form = page.getByRole("region", { name: "Report card metadata" });
-  await form.getByLabel("What needs fixing").selectOption("marketplace");
-  await form.getByLabel("Correct product number").fill("4321");
-  await form.getByLabel("Correct price variant").fill("normal");
-  await form.getByLabel("Evidence link").fill(EVIDENCE);
-  await form.getByLabel("Note").fill("Wrong product listed");
-  await form.getByRole("button", { name: "Send report" }).click();
-  await expect(form.getByRole("status")).toContainText(
-    "Submitted for maintainer review; nothing changes until approved."
+test("the metadata fixture starts unverified after a predecessor activated matching", async () => {
+  // Model a preceding spec on the same stack, without relying on a lucky file/worker order.
+  execFileSync(
+    ".venv/bin/python",
+    ["-c", "from test_prices import ui_world\nui_world()"],
+    {
+      env: { ...process.env, PYTHONPATH: "api:api/tests" },
+    }
   );
-  // My metadata reports opens from Catalog's header (#173).
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Furret" })).toBeHidden();
-  await page.getByRole("button", { name: "My metadata reports" }).click();
-  const mine = page.getByRole("region", { name: "My metadata reports" });
-  await expect(mine).toContainText("pending");
-  await expect(mine).toContainText("product id 4321");
-
-  // The report is unapproved input: no state, revision or delivery changed.
-  expect(await normal()).toEqual(before);
-  expect(
-    (await pool.query("SELECT count(*)::int AS n FROM catalog_public_outbox"))
-      .rows[0].n
-  ).toBe(outboxBefore);
-
-  // Escape closes My metadata reports (#173). A collector can neither see nor call the review surface.
-  await page.keyboard.press("Escape");
-  await expect(
-    page.getByRole("dialog", { name: "My metadata reports" })
-  ).toBeHidden();
-  await page.getByRole("button", { name: "Account" }).click();
-  await expect(
-    page.getByRole("menuitem", { name: "Owner controls" })
-  ).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await page.goto(`${ORIGIN}/owner`);
-  await expect(
-    page.getByRole("navigation", { name: "Main views" })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: "Catalog metadata review" })
-  ).toHaveCount(0);
   expect(
     (
-      await page.request.get(`${ORIGIN}/api/admin/catalog-metadata/queue`)
-    ).status()
-  ).toBe(403);
+      await pool.query(
+        "SELECT activation_id FROM catalog_rule_state WHERE kind='marketplace_matching'"
+      )
+    ).rows[0].activation_id
+  ).not.toBeNull();
+  seed(false);
+  expect((await normal()).mapping_state).toBe("unverified");
+});
 
-  // The maintainer reviews it and approves a mapping.
-  await setMaintainer(true);
-  const review = await openOwnerReview(page);
-  const item = await openItem(review, "Furret", "normal");
-  await expect(item).toContainText("unverified");
-  await expect(item).toContainText("1 linked report");
-  await item
-    .getByRole("combobox", { name: /^Decision/ })
-    .selectOption("correct");
-  await item.getByLabel("Product ID", { exact: true }).fill("4321");
-  await item.getByLabel("Quote variant", { exact: true }).fill("normal");
-  await item.getByLabel("Review evidence URL").fill(EVIDENCE);
-  await item.getByLabel("Review reason").fill("Product page matches the card");
-  const decided = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      response.url().includes("catalog-metadata/decisions")
-  );
-  await item.getByRole("button", { name: "Confirm decision" }).click();
-  // A confirmed decision removes the row and says what happened in a toast (#168).
-  await expect(notifications(page)).toContainText(
-    "Decision recorded: verified"
-  );
-  const decision = await (await decided).json();
-  // Publication is best effort within a two-second request budget. The toast must report the actual result,
-  // and the detached delivery must still finish; a pending response is not a different decision.
-  await expect(notifications(page)).toContainText(
-    `Public delivery: ${decision.public_delivery}`
-  );
-  await expect
-    .poll(
-      async () =>
-        (
-          await pool.query(
-            "SELECT count(*)::int AS n FROM catalog_public_outbox WHERE delivered_at IS NULL"
-          )
-        ).rows[0].n
-    )
-    .toBe(0);
-  await expect(item).toHaveCount(0);
+test.describe("collector report and approval", () => {
+  test.beforeAll(() => seed(false));
+  test("collector reports an Edition mapping, nothing changes until the maintainer approves it", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await setMaintainer(false);
+    const before = await normal();
+    const outboxBefore = (
+      await pool.query("SELECT count(*)::int AS n FROM catalog_public_outbox")
+    ).rows[0].n;
 
-  const after = await normal();
-  expect(after).toMatchObject({
-    mapping_state: "verified",
-    product_id: "4321",
-    quote_variant: null, // the source's "normal" block holds another product, so the correction is unpriced
+    await page.reload();
+    await page.getByRole("button", { name: "Catalog", exact: true }).click();
+    // A Catalog tile opens the card popup (#174): pick the Edition, then the footer's "Report: this Edition".
+    await page
+      .getByRole("searchbox", { name: "Search the catalog" })
+      .fill("Furret");
+    await page
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", { name: /^Furret,/ })
+      .first()
+      .click();
+    const popup = page.getByRole("dialog", { name: "Furret" });
+    await popup
+      .getByRole("group", { name: "Editions" })
+      .getByRole("button", { name: /^Normal/ })
+      .click();
+    await popup.getByRole("button", { name: "Report this Edition" }).click();
+    const form = page.getByRole("region", { name: "Report card metadata" });
+    await form.getByLabel("What needs fixing").selectOption("marketplace");
+    await form.getByLabel("Correct product number").fill("4321");
+    await form.getByLabel("Correct price variant").fill("normal");
+    await form.getByLabel("Evidence link").fill(EVIDENCE);
+    await form.getByLabel("Note").fill("Wrong product listed");
+    await form.getByRole("button", { name: "Send report" }).click();
+    await expect(form.getByRole("status")).toContainText(
+      "Submitted for maintainer review; nothing changes until approved."
+    );
+    // My metadata reports opens from Catalog's header (#173).
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Furret" })).toBeHidden();
+    await page.getByRole("button", { name: "My metadata reports" }).click();
+    const mine = page.getByRole("region", { name: "My metadata reports" });
+    await expect(mine).toContainText("pending");
+    await expect(mine).toContainText("product id 4321");
+
+    // The report is unapproved input: no state, revision or delivery changed.
+    expect(await normal()).toEqual(before);
+    expect(
+      (await pool.query("SELECT count(*)::int AS n FROM catalog_public_outbox"))
+        .rows[0].n
+    ).toBe(outboxBefore);
+
+    // Escape closes My metadata reports (#173). A collector can neither see nor call the review surface.
+    await page.keyboard.press("Escape");
+    await expect(
+      page.getByRole("dialog", { name: "My metadata reports" })
+    ).toBeHidden();
+    await page.getByRole("button", { name: "Account" }).click();
+    await expect(
+      page.getByRole("menuitem", { name: "Owner controls" })
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.goto(`${ORIGIN}/owner`);
+    await expect(
+      page.getByRole("navigation", { name: "Main views" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Catalog metadata review" })
+    ).toHaveCount(0);
+    expect(
+      (
+        await page.request.get(`${ORIGIN}/api/admin/catalog-metadata/queue`)
+      ).status()
+    ).toBe(403);
+
+    // The maintainer reviews it and approves a mapping.
+    await setMaintainer(true);
+    const review = await openOwnerReview(page);
+    const item = await openItem(review, "Furret", "normal");
+    await expect(item).toContainText("unverified");
+    await expect(item).toContainText("1 linked report");
+    await item
+      .getByRole("combobox", { name: /^Decision/ })
+      .selectOption("correct");
+    await item.getByLabel("Product ID", { exact: true }).fill("4321");
+    await item.getByLabel("Quote variant", { exact: true }).fill("normal");
+    await item.getByLabel("Review evidence URL").fill(EVIDENCE);
+    await item
+      .getByLabel("Review reason")
+      .fill("Product page matches the card");
+    const decided = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().includes("catalog-metadata/decisions")
+    );
+    await item.getByRole("button", { name: "Confirm decision" }).click();
+    // A confirmed decision removes the row and says what happened in a toast (#168).
+    await expect(notifications(page)).toContainText(
+      "Decision recorded: verified"
+    );
+    const decision = await (await decided).json();
+    // Publication is best effort within a two-second request budget. The toast must report the actual result,
+    // and the detached delivery must still finish; a pending response is not a different decision.
+    await expect(notifications(page)).toContainText(
+      `Public delivery: ${decision.public_delivery}`
+    );
+    await expect
+      .poll(
+        async () =>
+          (
+            await pool.query(
+              "SELECT count(*)::int AS n FROM catalog_public_outbox WHERE delivered_at IS NULL"
+            )
+          ).rows[0].n
+      )
+      .toBe(0);
+    await expect(item).toHaveCount(0);
+
+    const after = await normal();
+    expect(after).toMatchObject({
+      mapping_state: "verified",
+      product_id: "4321",
+      quote_variant: null, // the source's "normal" block holds another product, so the correction is unpriced
+    });
+    expect(
+      (await pool.query("SELECT status FROM catalog_metadata_report")).rows
+    ).toEqual([{ status: "approved" }]);
+
+    // The history panel carries the provenance of the decision. The decided Edition left the queue, so a
+    // follow-up report brings it back.
+    await reportEdition(page, after, "Follow-up");
+    const reopened = await openItem(
+      await openOwnerReview(page),
+      "Furret",
+      "normal"
+    );
+    await reopened.getByRole("button", { name: "Show history" }).click();
+    const history = reopened.getByRole("region", { name: "Decision history" });
+    await expect(history).toContainText("correct");
+    await expect(history).toContainText(await userId());
+    await expect(history).toContainText(EVIDENCE);
+    await expect(history).toContainText("Product page matches the card");
+    await expect(history).toContainText("product id 4321");
+    // No matching rule was active, so the decision retains none.
+    await expect(history).toContainText("No rule");
+
+    // The collector now sees the outcome on their report.
+    await setMaintainer(false);
+    await page.reload();
+    await page.getByRole("button", { name: "Catalog", exact: true }).click();
+    await page.getByRole("button", { name: "My metadata reports" }).click();
+    await expect(
+      page.getByRole("region", { name: "My metadata reports" })
+    ).toContainText("approved");
   });
-  expect(
-    (await pool.query("SELECT status FROM catalog_metadata_report")).rows
-  ).toEqual([{ status: "approved" }]);
-
-  // The history panel carries the provenance of the decision. The decided Edition left the queue, so a
-  // follow-up report brings it back.
-  await reportEdition(page, after, "Follow-up");
-  const reopened = await openItem(
-    await openOwnerReview(page),
-    "Furret",
-    "normal"
-  );
-  await reopened.getByRole("button", { name: "Show history" }).click();
-  const history = reopened.getByRole("region", { name: "Decision history" });
-  await expect(history).toContainText("correct");
-  await expect(history).toContainText(await userId());
-  await expect(history).toContainText(EVIDENCE);
-  await expect(history).toContainText("Product page matches the card");
-  await expect(history).toContainText("product id 4321");
-  // No matching rule was active, so the decision retains none.
-  await expect(history).toContainText("No rule");
-
-  // The collector now sees the outcome on their report.
-  await setMaintainer(false);
-  await page.reload();
-  await page.getByRole("button", { name: "Catalog", exact: true }).click();
-  await page.getByRole("button", { name: "My metadata reports" }).click();
-  await expect(
-    page.getByRole("region", { name: "My metadata reports" })
-  ).toContainText("approved");
 });
 
 test("a stale evidence digest is refused, then succeeds after reloading the evidence", async ({

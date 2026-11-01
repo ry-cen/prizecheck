@@ -249,6 +249,14 @@ class GateLifecycleTest(unittest.TestCase):
         self.assertEqual([key for key in environment if key.startswith('GIT_')], ['GIT_CEILING_DIRECTORIES'])
         self.assertEqual(environment['GIT_CEILING_DIRECTORIES'], os.path.realpath(directory))
 
+    def test_font_diagnostics_are_opt_in_and_do_not_inherit_host_fontconfig(self):
+        with mock.patch.dict(os.environ, {'FONT_EVIDENCE': '1', 'TEST_FONTCONFIG_FILE': '/local/diagnostic.conf',
+                                         'FONTCONFIG_FILE': '/host/config'}):
+            environment = verify.inherited_environment()
+        self.assertEqual(environment['FONT_EVIDENCE'], '1')
+        self.assertEqual(environment['TEST_FONTCONFIG_FILE'], '/local/diagnostic.conf')
+        self.assertNotIn('FONTCONFIG_FILE', environment)
+
     def test_the_ceiling_keeps_git_in_a_copied_checkout_out_of_the_repository_around_it(self):
         # TMPDIR=<checkout>/.scratch/tmp puts the copied checkout and the tests' temporary directories inside a repository.
         with tempfile.TemporaryDirectory() as directory:

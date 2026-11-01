@@ -528,6 +528,24 @@ test.describe("desktop", () => {
 test.describe("mobile", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
+  for (const width of [320, 375])
+    test(`Search and Filters keep a usable gap and touch targets at ${width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 812 });
+      promoteCatalog();
+      await signIn(page);
+      const header = page.getByRole("banner");
+      const search = await expectTouchTarget(
+        header.getByRole("searchbox", { name: "Search cards" })
+      );
+      const filters = await expectTouchTarget(
+        header.getByRole("button", { name: /^Filters & display/ })
+      );
+      expect(filters.x).toBeGreaterThan(search.x + search.width);
+      expect(filters.x + filters.width).toBeLessThanOrEqual(width);
+    });
+
   test("the Filters & display drawer opens from the right and applies changes at once, which stay after it closes", async ({
     page,
   }) => {

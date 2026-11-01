@@ -1,3 +1,4 @@
+import { captureFontEvidence } from "./support/font-evidence";
 // The slim public header fits the page at every width down to 320 px (WCAG 1.4.10 Reflow), on the landing page and
 // Discover: under 360 px its Discover decks link shows Discover and keeps Discover decks as its name, and the header
 // is one 64 px row at the usual text size. It also fits with the page zoomed to 200% (a 1280 px window is 640 px wide)
@@ -161,4 +162,9 @@ test.describe("public header", () => {
         path: testInfo.outputPath(`header-focus-200-${width}.png`),
       });
     });
+});
+
+// Opt-in capture runs even when a geometry assertion fails.
+test.afterEach(async ({ page }, info) => {
+  await captureFontEvidence(page, info);
 });
