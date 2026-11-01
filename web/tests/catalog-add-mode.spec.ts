@@ -625,38 +625,75 @@ test.describe("desktop", () => {
     expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
   });
 
-  test("an Undo that finishes after a newer toast came leaves the newer toast alone (#177)", async ({
-    page,
-  }) => {
-    seedPopup();
-    await signIn(page);
-    await mode(page, "Add to a Location").click();
-    await more(page, BULBASAUR).click();
-    await addBar(page).getByRole("button", { name: "Add 1 card" }).click();
-    await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+  test.describe("delayed Undo", () => {
+    // Catalog generation is setup, separate from the response-order scenario.
+    test.beforeAll(() => seedPopup());
+    test("an Undo that finishes after a newer toast came leaves the newer toast alone (#177)", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      await addBar(page).getByRole("button", { name: "Add 1 card" }).click();
+      await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
 
-    // The Undo is applied, but its answer waits until another add has shown its own toast.
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
-    await page.route("**/api/moves/undo/**", async (route) => {
-      const response = await route.fetch();
-      await held;
-      await route.fulfill({ response });
+      // The Undo is applied, but its answer waits until another add has shown its own toast.
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let applied!: () => void;
+      const undoApplied = new Promise<void>((resolve) => (applied = resolve));
+      await page.route("**/api/moves/undo/**", async (route) => {
+        const response = await route.fetch();
+        applied();
+        await held;
+        await route.fulfill({ response });
+      });
+      let releaseAdd!: () => void;
+      const heldAdd = new Promise<void>((resolve) => (releaseAdd = resolve));
+      let added!: () => void;
+      const addCommitted = new Promise<void>((resolve) => (added = resolve));
+      await page.route("**/api/holdings/batch", async (route) => {
+        const response = await route.fetch();
+        added();
+        await heldAdd;
+        await route.fulfill({ response });
+      });
+      const firstUndo = (await undo(page).elementHandle())!;
+      await undo(page).click();
+      await undoApplied;
+      await more(page, CANDY).click();
+      await addBar(page).getByRole("button", { name: "Add 1 card" }).click();
+      await addCommitted;
+      await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+      await expect(undo(page)).toBeVisible();
+      try {
+        // The identical old toast is still present while the second add's answer is held.
+        // Deliver the add, then observe its new toast before allowing Undo to finish.
+        releaseAdd();
+        await expect
+          .poll(() => firstUndo.evaluate((el) => el.isConnected))
+          .toBe(false);
+        await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+        await expect(undo(page)).not.toHaveAttribute("aria-disabled", "true");
+        await expect(
+          tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal")
+        ).toHaveAccessibleName(
+          "Bulbasaur, MEG 001, Mega Evolution, Normal, 1 owned"
+        );
+        release();
+        // The Undo's result reaches the tiles but not the toast.
+        await expect(
+          tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal")
+        ).toHaveAccessibleName(
+          "Bulbasaur, MEG 001, Mega Evolution, Normal, not owned"
+        );
+        await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+        await expect(undo(page)).toBeVisible();
+      } finally {
+        releaseAdd();
+        release();
+      }
     });
-    await undo(page).click();
-    await more(page, CANDY).click();
-    await addBar(page).getByRole("button", { name: "Add 1 card" }).click();
-    await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
-    await expect(undo(page)).toBeVisible();
-    release();
-    // The Undo's result reaches the tiles but not the toast.
-    await expect(
-      tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal")
-    ).toHaveAccessibleName(
-      "Bulbasaur, MEG 001, Mega Evolution, Normal, not owned"
-    );
-    await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
-    await expect(undo(page)).toBeVisible();
   });
 
   test("from All owned, Add cards asks for a Location and leaves you in it", async ({
