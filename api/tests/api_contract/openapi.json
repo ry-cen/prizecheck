@@ -3,6 +3,17 @@
   "schemas": {
    "AcceptBorrowRequest": {
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "idempotency_key": {
       "format": "uuid",
       "title": "Idempotency Key",
@@ -46,6 +57,17 @@
    "AcceptLendOffer": {
     "description": "The borrower's answer to a Lend Offer (#258): the copies taken per line (\"0\" leaves a line out; the rest is\nreleased) and one of their Decks for the cards (None for Unsorted).",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "deck_id": {
       "anyOf": [
        {
@@ -308,6 +330,17 @@
    "AskForMoreTime": {
     "description": "The later return-by date the borrower asks for (#256).",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "idempotency_key": {
       "format": "uuid",
       "title": "Idempotency Key",
@@ -2795,6 +2828,17 @@
    "ChangeReturnBy": {
     "description": "The lender's new return-by date (#256), or None to clear it.",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "idempotency_key": {
       "format": "uuid",
       "title": "Idempotency Key",
@@ -4026,6 +4070,28 @@
      "decks"
     ],
     "title": "CombinedRow",
+    "type": "object"
+   },
+   "CommandKeyOutcome": {
+    "properties": {
+     "account_id": {
+      "title": "Account Id",
+      "type": "string"
+     },
+     "outcome": {
+      "enum": [
+       "applied",
+       "void"
+      ],
+      "title": "Outcome",
+      "type": "string"
+     }
+    },
+    "required": [
+     "outcome",
+     "account_id"
+    ],
+    "title": "CommandKeyOutcome",
     "type": "object"
    },
    "CommitMove": {
@@ -9358,6 +9424,17 @@
    },
    "LoanStep": {
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "idempotency_key": {
       "format": "uuid",
       "title": "Idempotency Key",
@@ -10992,6 +11069,17 @@
    "MoveBorrowed": {
     "description": "Moves ``quantity`` of one Loan's Borrowed Copies of a card from one of the collector's Locations to another.",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "edition_id": {
       "format": "uuid",
       "title": "Edition Id",
@@ -15464,6 +15552,17 @@
    "SendBorrowRequest": {
     "description": "A Borrow Request to a Friend (``lender_id``, a ``collector_id`` the Friends list or a Friend read gave).",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "deck_id": {
       "anyOf": [
        {
@@ -15553,6 +15652,17 @@
    "SendLendOffer": {
     "description": "A Lend Offer to a Friend (``borrower_id``, a ``collector_id`` the Friends list gave) of the copies the lender\nselected in their Collection (#258).",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "borrower_id": {
       "maxLength": 200,
       "minLength": 1,
@@ -16296,6 +16406,17 @@
    "StartReturn": {
     "description": "A return of some of the copies out from the caller's side (#255).",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "idempotency_key": {
       "format": "uuid",
       "title": "Idempotency Key",
@@ -18498,6 +18619,28 @@
     "title": "VisibilityCommand",
     "type": "object"
    },
+   "VoidCommandKey": {
+    "additionalProperties": false,
+    "properties": {
+     "account_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Account Id",
+      "type": "string"
+     },
+     "idempotency_key": {
+      "format": "uuid",
+      "title": "Idempotency Key",
+      "type": "string"
+     }
+    },
+    "required": [
+     "idempotency_key",
+     "account_id"
+    ],
+    "title": "VoidCommandKey",
+    "type": "object"
+   },
    "WantList": {
     "properties": {
      "combined": {
@@ -19126,6 +19269,17 @@
    "WriteOff": {
     "description": "The lender writes off some of the copies out (#257). Final: there is no Undo.",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "idempotency_key": {
       "format": "uuid",
       "title": "Idempotency Key",
@@ -19176,6 +19330,17 @@
    "WrittenOffChoice": {
     "description": "The borrower's choice for the written-off copies they hold (#257): ``keep`` them as their own or ``remove``\nthem. ``places``: where those copies are, as ``LoanSide.awaiting_choice`` lists them.",
     "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
      "choice": {
       "enum": [
        "keep",
@@ -28719,6 +28884,97 @@
      }
     },
     "summary": "Move Borrowed",
+    "tags": [
+     "loans"
+    ]
+   }
+  },
+  "/api/loans/command-keys/void": {
+   "post": {
+    "operationId": "void_command_key_api_loans_command_keys_void_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/VoidCommandKey"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CommandKeyOutcome"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Void Command Key",
     "tags": [
      "loans"
     ]
