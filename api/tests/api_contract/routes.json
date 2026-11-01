@@ -201,6 +201,7 @@
 [["POST"], "/api/social/conversations/{conversation_id}/archive", "archive_conversation"],
 [["POST"], "/api/social/conversations/{conversation_id}/unarchive", "unarchive_conversation"],
 [["POST"], "/api/social/traders/{trader_id}/messages", "send_trader_message"],
+[["POST"], "/api/loans/command-keys/void", "void_command_key"],
 [["POST"], "/api/loans", "send_borrow_request"],
 [["POST"], "/api/loans/{loan_id}/accept", "accept"],
 [["POST"], "/api/loans/offers", "send_lend_offer"],
