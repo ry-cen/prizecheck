@@ -1,3 +1,4 @@
+import { captureFontEvidence } from "./support/font-evidence";
 // Full Location paths on the Loan and Trade screens' pick lines, at 320 and 375 px with text enlarged to 200%. Location
 // names are unique only among siblings, so Misty keeps cards in Shelf / Binder A / Page 1 and Shelf / Binder B /
 // Page 1: her Loan and Trade picks must name both pages apart, and an out-of-date pick and its suggestion name full
@@ -112,6 +113,7 @@ async function readAt200(
     const box = await line.boundingBox();
     expect(box && box.x >= 0 && box.x + box.width <= width, label).toBe(true);
   }
+  await captureFontEvidence(page, test.info());
   expect(
     await page.evaluate(
       () =>

@@ -321,7 +321,7 @@ def inherited_environment():
     """The few host variables the gate inherits, and a git ceiling at the temporary directory. The copied checkout lies
     under it; when TMPDIR is inside a repository (`<checkout>/.scratch/tmp`, for a slow /tmp), git run in the copy or in
     a test's temporary directory would otherwise walk up and find that repository, where under /tmp it finds none."""
-    inherited = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'LANG', 'PLAYWRIGHT_BROWSERS_PATH') if key in os.environ}
+    inherited = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'LANG', 'PLAYWRIGHT_BROWSERS_PATH', 'FONT_EVIDENCE', 'TEST_FONTCONFIG_FILE') if key in os.environ}
     return dict(inherited, GIT_CEILING_DIRECTORIES=os.path.realpath(tempfile.gettempdir()))
 
 
