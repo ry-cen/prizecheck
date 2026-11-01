@@ -186,6 +186,7 @@ class LoansView(BaseModel):
 
 
 class LoanStep(BaseModel):
+    account_id: str | None = None
     revision: int = Field(ge=1)
     idempotency_key: UUID
 
@@ -515,6 +516,12 @@ def store(conn, user_id: str, key: UUID, digest: str, loan_id: UUID) -> dict:
     return stored
 
 
+def assert_account(command_account_id: str | None, user_id: str) -> None:
+    """Refuses a Loan command intended for a different signed-in account."""
+    if command_account_id is not None and command_account_id != user_id:
+        error(409, 'ACCOUNT_CHANGED')
+
+
 def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, locks, extra: dict | None = None) -> dict:
     """Runs one step on an existing Loan: ``begin_owner_command``, the owners ``locks(role, row)`` names locked in ascending
     order, then the Loan row, its revision and ``allowed`` checked, then ``apply(conn, row)``, then the Loan row written
@@ -528,6 +535,7 @@ def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, lo
     cascades into this Loan row) and closed a cycle. The Loan row is locked ``FOR NO KEY UPDATE``, like the owners
     (``lock_owners`` says why). A deadlock the database ends anyway leaves nothing changed and answers 503
     INVENTORY_TEMPORARILY_UNAVAILABLE, which the client retries with the same key."""
+    assert_account(step.account_id, user_id)
     payload = {'action': f'loan_{action}', 'loan_id': str(loan_id), 'revision': step.revision, **(extra or {})}
     try:
         with connect() as conn, conn.transaction():

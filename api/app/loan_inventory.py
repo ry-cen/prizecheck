@@ -69,27 +69,61 @@ from datetime import date
 from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+import psycopg
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from .deck_deletion import unsorted_leaf
 from .copy_picks import suggest_picks
 from .loan_picks import pick_shortfalls
-from .location_tree import error, location_paths, refuse, replay
+from .location_tree import VOID_DIGEST, error, location_paths, refuse, replay
 from .db import connect
 from .identity import verified_user
 from .inventory_core import MAX_QUANTITY, first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
-from .social import counts
+from .social import counts, loans
 from .social.friend_copies import friend_copies
 from .core.catalog.card_facts import card_facts
 from .social.discovery import require_not_suspended
 from .social.friends import friend_ids
 from .social.loans import LoanStep, LoanView, close, record_update, return_by_columns, run_step, store, today, write_loan
-from .social.owners import NOW, advance_revision, begin_owner_command, ensure_owner, lock_owners
+from .social.owners import NOW, advance_revision, begin_owner_command, count_owner_command, ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
 
 MAX_LOAN_LINES = 50
+
+
+class VoidCommandKey(BaseModel):
+    model_config = {"extra": "forbid"}
+    idempotency_key: UUID
+    account_id: str = Field(min_length=1, max_length=200)
+
+
+class CommandKeyOutcome(BaseModel):
+    outcome: Literal['applied', 'void']
+    account_id: str
+
+
+@router.post('/command-keys/void', response_model=CommandKeyOutcome)
+def void_command_key(command: VoidCommandKey, user_id: str = Depends(verified_user)):
+    loans.assert_account(command.account_id, user_id)
+    try:
+        with connect() as conn, conn.transaction():
+            ensure_owner(conn, user_id)
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.loan_command:' || %s))", (user_id,))
+            lock_owners(conn, user_id)
+            row = conn.execute('SELECT request_digest FROM location_command WHERE owner_id=%s AND request_key=%s',
+                               (user_id, command.idempotency_key)).fetchone()
+            if row is not None:
+                outcome = 'void' if row['request_digest'] == VOID_DIGEST else 'applied'
+            else:
+                count_owner_command(conn, user_id, 'loan_command')
+                conn.execute("INSERT INTO location_command(owner_id,request_key,request_digest,response) "
+                             "VALUES (%s,%s,%s,'{}'::jsonb)", (user_id, command.idempotency_key, VOID_DIGEST))
+                outcome = 'void'
+    except psycopg.errors.DeadlockDetected:
+        error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
+    return CommandKeyOutcome(outcome=outcome, account_id=user_id)
 
 
 class LoanLineRequest(BaseModel):
@@ -106,6 +140,7 @@ class SendBorrowRequest(BaseModel):
     return_by: date | None = None
     # A Borrow Request of the caller's to the same Friend, still unanswered, that this one replaces.
     replaces: UUID | None = None
+    account_id: str | None = None
     idempotency_key: UUID
 
 
@@ -128,6 +163,7 @@ class SendLendOffer(BaseModel):
     borrower_id: str = Field(min_length=1, max_length=200)
     copies: list[OfferedCopies] = Field(min_length=1, max_length=200)
     return_by: date | None = None
+    account_id: str | None = None
     idempotency_key: UUID
 
 
@@ -267,6 +303,7 @@ class MoveBorrowed(BaseModel):
     from_location_id: UUID
     to_location_id: UUID
     quantity: str
+    account_id: str | None = None
     idempotency_key: UUID
 
 
@@ -347,12 +384,13 @@ def replacement_picks(conn, lender_id: str, loan_id: UUID) -> dict[tuple[UUID, U
 
 @router.post('', response_model=LoanView, status_code=201)
 def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verified_user)):
+    loans.assert_account(command.account_id, user_id)
     if command.lender_id == user_id:
         error(409, 'OWN_ACCOUNT')
     lines = [(line.edition_id, quantity(line.quantity)) for line in command.lines]
     if len({edition for edition, _ in lines}) != len(lines):
         error(422, 'DUPLICATE_EDITION')
-    payload = {'action': 'loan_send', **command.model_dump(mode='json', exclude={'idempotency_key'})}
+    payload = {'action': 'loan_send', **command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'})}
     with connect() as conn, conn.transaction():
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
@@ -447,6 +485,7 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
     fewer free copies than selected, or the lender fewer copies of an Edition than all open Loans and this offer
     need. Each line is offered and promised in full until the borrower answers. 403 ACCOUNT_SUSPENDED for a suspended
     sender, after their lock."""
+    loans.assert_account(command.account_id, user_id)
     if command.borrower_id == user_id:
         error(409, 'OWN_ACCOUNT')
     places: dict[tuple[UUID, UUID], int] = {}
@@ -458,7 +497,7 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
         lines[edition] = lines.get(edition, 0) + copies
     if len(lines) > MAX_LOAN_LINES:
         error(422, 'TOO_MANY_LINES')
-    payload = {'action': 'loan_offer', **command.model_dump(mode='json', exclude={'idempotency_key'})}
+    payload = {'action': 'loan_offer', **command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'})}
     with connect() as conn, conn.transaction():
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
@@ -656,8 +695,9 @@ def move_borrowed(command: MoveBorrowed, user_id: str = Depends(verified_user)):
     advances their revision. No Undo record: Undo never touches a Borrowed Copy. Answers the Borrowed list as it now
     stands; the same key replays it. 404 LOCATION_NOT_FOUND for a destination that isn't one of the borrower's Storage
     Leaves or Decks, 409 NOT_ENOUGH_BORROWED when the source holds fewer of the Loan's copies."""
+    loans.assert_account(command.account_id, user_id)
     copies = quantity(command.quantity)
-    payload = {'action': 'move_borrowed', **command.model_dump(mode='json', exclude={'idempotency_key'})}
+    payload = {'action': 'move_borrowed', **command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'})}
     with connect() as conn, conn.transaction():
         ensure_owner(conn, user_id)
         lock_owners(conn, user_id)

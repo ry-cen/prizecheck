@@ -21,11 +21,13 @@ export type ReturnLine = { edition_id: string; copies: string };
 export type PendingReturn = { started_by: "you" | "them"; lines: ReturnLine[]; you_confirmed: boolean; they_confirmed: boolean };
 export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[]; waiting?: "answer" | "fix_picks" | "choose" | "confirm_return" | "finish_return" | "hand_over" | "receive" | "return" | "more_time" | null };
 export type LoansView = { loans: LoanView[]; needs_you: number };
-export type LoanStep = { revision: number; idempotency_key: string };
+export type VoidCommandKey = { idempotency_key: string; account_id: string };
+export type CommandKeyOutcome = { outcome: "applied" | "void"; account_id: string };
+export type LoanStep = { account_id?: string | null; revision: number; idempotency_key: string };
 export type LoanLineRequest = { edition_id: string; quantity: string };
-export type SendBorrowRequest = { lender_id: string; lines: LoanLineRequest[]; deck_id?: string | null; return_by?: string | null; replaces?: string | null; idempotency_key: string };
+export type SendBorrowRequest = { lender_id: string; lines: LoanLineRequest[]; deck_id?: string | null; return_by?: string | null; replaces?: string | null; account_id?: string | null; idempotency_key: string };
 export type PromisedLine = { edition_id: string; promised: string };
-export type AcceptBorrowRequest = { revision: number; idempotency_key: string; lines: PromisedLine[]; return_by?: string | null };
+export type AcceptBorrowRequest = { account_id?: string | null; revision: number; idempotency_key: string; lines: PromisedLine[]; return_by?: string | null };
 export type PromiseLimit = { edition_id: string; available: string };
 export type LoanPickPlace = { edition_id: string; location_id: string | null; name: string; path: string; copies: string; short: string };
 export type LoanDeck = { id: string; name: string };
@@ -34,22 +36,22 @@ export type LentCard = { loan_id: string; edition_id: string; name: string; set_
 export type LentOut = { cards: LentCard[]; copies: string };
 export type BorrowedCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; copies: string; lender: string };
 export type BorrowedCopies = { cards: BorrowedCard[]; copies: string };
-export type MoveBorrowed = { loan_id: string; edition_id: string; from_location_id: string; to_location_id: string; quantity: string; idempotency_key: string };
+export type MoveBorrowed = { loan_id: string; edition_id: string; from_location_id: string; to_location_id: string; quantity: string; account_id?: string | null; idempotency_key: string };
 export type PendingLender = { lender: string; state: "requested" | "accepted"; copies: string };
 export type PendingLine = { edition_id: string; requested: string; accepted: string; lenders: PendingLender[] };
 export type PendingLoans = { deck_id: string; lines: PendingLine[] };
 export type ReturnedLine = { edition_id: string; quantity: string };
-export type StartReturn = { revision: number; idempotency_key: string; lines: ReturnedLine[] };
+export type StartReturn = { account_id?: string | null; revision: number; idempotency_key: string; lines: ReturnedLine[] };
 export type WriteOffLine = { edition_id: string; quantity: string };
-export type WriteOff = { revision: number; idempotency_key: string; lines: WriteOffLine[] };
+export type WriteOff = { account_id?: string | null; revision: number; idempotency_key: string; lines: WriteOffLine[] };
 export type ChosenPlace = { location_id: string; edition_id: string; copies: string };
-export type WrittenOffChoice = { revision: number; idempotency_key: string; choice: "keep" | "remove"; places: ChosenPlace[] };
-export type ChangeReturnBy = { revision: number; idempotency_key: string; return_by: string | null };
-export type AskForMoreTime = { revision: number; idempotency_key: string; return_by: string };
+export type WrittenOffChoice = { account_id?: string | null; revision: number; idempotency_key: string; choice: "keep" | "remove"; places: ChosenPlace[] };
+export type ChangeReturnBy = { account_id?: string | null; revision: number; idempotency_key: string; return_by: string | null };
+export type AskForMoreTime = { account_id?: string | null; revision: number; idempotency_key: string; return_by: string };
 export type SeenNotices = { kinds: ("overdue" | "nudge_answer" | "nudge_handover")[] };
 export type OfferedCopies = { location_id: string; edition_id: string; quantity: string };
-export type SendLendOffer = { borrower_id: string; copies: OfferedCopies[]; return_by?: string | null; idempotency_key: string };
-export type AcceptLendOffer = { revision: number; idempotency_key: string; lines: PromisedLine[]; deck_id?: string | null };
+export type SendLendOffer = { borrower_id: string; copies: OfferedCopies[]; return_by?: string | null; account_id?: string | null; idempotency_key: string };
+export type AcceptLendOffer = { account_id?: string | null; revision: number; idempotency_key: string; lines: PromisedLine[]; deck_id?: string | null };
 export type InboxUpdate = { id: string; kind: "accepted" | "partly_accepted" | "declined" | "cancelled" | "withdrawn" | "return_by_changed" | "overdue" | "nudge_answer" | "nudge_handover"; loan_id: string; loan_kind: "borrow_request" | "lend_offer"; loan_state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; role: "lender" | "borrower"; other_name: string; read: boolean; at: string; return_by?: string | null };
 export type InboxWaiting = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[]; waiting?: "answer" | "fix_picks" | "choose" | "confirm_return" | "finish_return" | "hand_over" | "receive" | "return" | "more_time" | null; since: string };
 export type InboxView = { waiting: InboxWaiting[]; updates: InboxUpdate[]; trade_waiting: InboxTradeWaiting[]; trade_updates: InboxTradeUpdate[] };
@@ -186,6 +188,9 @@ export const getLoan = (id: string, signal?: AbortSignal) =>
 // Your own side of a Loan: the Deck the cards go to, or what you could promise and where you take the cards from.
 export const getLoanSide = (id: string, signal?: AbortSignal) =>
   request<LoanSide>(`/api/loans/${at(id)}/side`, 'GET', undefined, signal);
+// Check or permanently cancel a command whose answer was lost.
+export const voidCommandKey = (body: VoidCommandKey) =>
+  request<CommandKeyOutcome>('/api/loans/command-keys/void', 'POST', body);
 // Loan steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Loan as it now stands.
 export const sendBorrowRequest = (body: SendBorrowRequest) => request<LoanView>('/api/loans', 'POST', body);
 export const acceptBorrowRequest = (id: string, body: AcceptBorrowRequest) =>

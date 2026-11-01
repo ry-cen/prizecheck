@@ -10,7 +10,7 @@ NAMES = ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "Look
          "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
          "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "ReturnLine",
          "PendingReturn", "LoanView",
-         "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
+         "LoansView", "VoidCommandKey", "CommandKeyOutcome", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
          "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
          "BorrowedCopies", "MoveBorrowed", "PendingLender", "PendingLine", "PendingLoans", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
          "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
@@ -96,6 +96,9 @@ export const getLoan = (id: string, signal?: AbortSignal) =>
 // Your own side of a Loan: the Deck the cards go to, or what you could promise and where you take the cards from.
 export const getLoanSide = (id: string, signal?: AbortSignal) =>
   request<LoanSide>(`/api/loans/${at(id)}/side`, 'GET', undefined, signal);
+// Check or permanently cancel a command whose answer was lost.
+export const voidCommandKey = (body: VoidCommandKey) =>
+  request<CommandKeyOutcome>('/api/loans/command-keys/void', 'POST', body);
 // Loan steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Loan as it now stands.
 export const sendBorrowRequest = (body: SendBorrowRequest) => request<LoanView>('/api/loans', 'POST', body);
 export const acceptBorrowRequest = (id: string, body: AcceptBorrowRequest) =>

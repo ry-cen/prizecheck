@@ -138,3 +138,10 @@ live derivation and marketplace matching rules; it does not refresh Reprint Grou
 an import when source IDs change, so a release alone does not guarantee regrouping. The derivation refreshes groups,
 advances the attribute revision for changed membership, publishes changed public format facts and rebuilds stale Format
 Standing best effort. Run it in a quiet window: derivation holds the public catalog clock in one transaction.
+
+## Loan recovery rollback floor
+
+Deploy all three S1 server parts together: the command-key void route, the cancelled-key check in replay, and the
+account checks on Loan changes. Ship that server release at least one deploy before the C1 client change. Once any
+C1 bundle has been served, never roll back to a server missing any of these three parts. Keep command receipts and
+cancellation records indefinitely; deleting them would remove the protection against a delayed request.
