@@ -52,7 +52,7 @@ export function PublicLayout({ current, onNavigate, children }: Props) {
         <Wordmark />
         <nav
           aria-label="Public pages"
-          className="ml-auto flex items-center gap-2"
+          className="ml-auto flex max-w-full flex-wrap items-center gap-2 phone:[&>a]:px-2"
         >
           <a
             href={DISCOVER_PATH}
