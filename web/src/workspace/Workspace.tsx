@@ -608,7 +608,7 @@ export function Workspace({
           onClick={() => setDrawerOpen(true)}
         />
         <span className="sr-only">Collection</span>
-        <div className="min-w-0 flex-1">{search}</div>
+        <div className="mr-1 min-w-0 flex-1">{search}</div>
         <FiltersDrawerButton
           ref={filtersOpener}
           filters={prefs.filters}

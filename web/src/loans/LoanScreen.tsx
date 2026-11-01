@@ -810,7 +810,7 @@ export function LoanScreen({
         </Button>
       </div>
     ) : stale ? (
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 [&>button]:h-auto [&>button]:min-h-control [&>button]:max-w-full [&>button]:py-1 [&>button]:whitespace-normal phone:[&>button]:min-h-control-phone">
         <Button
           variant="primary"
           aria-disabled={busy || undefined}
