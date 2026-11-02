@@ -417,7 +417,7 @@ export function DecksIndexPage({ active, onOpenDeck, onNavigate }: Props) {
           </p>
         ) : (
           <nav aria-label="Deck index">
-            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-4 p-0 phone:grid-cols-2">
+            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(224px,1fr))] gap-4 p-0 phone:grid-cols-2">
               {decks.map((deck) => (
                 <DeckTile
                   key={deck.id}
@@ -466,8 +466,12 @@ function DeckTile({
   const factsId = useId();
   return (
     // One 12 px step for the tile's inset and between its parts.
-    <li className="relative flex min-w-0 flex-col gap-3 rounded-card border border-border bg-surface p-3 hover:border-control-outline">
-      <CopyArt name={cover?.name ?? ""} imageUrl={cover?.image_url ?? null} />
+    <li className="relative grid min-w-0 grid-cols-[64px_minmax(0,1fr)] content-start gap-3 rounded-card border border-border bg-surface p-3 hover:border-control-outline phone:flex phone:flex-col">
+      <CopyArt
+        name={cover?.name ?? ""}
+        imageUrl={cover?.image_url ?? null}
+        className="row-span-3 self-start phone:self-stretch"
+      />
       <a
         href={`/decks/${encodeURIComponent(deck.id)}`}
         onClick={(event) => {
@@ -508,7 +512,7 @@ function DeckTile({
       </a>
       <span
         aria-hidden="true"
-        className="h-1 overflow-hidden rounded-round bg-border"
+        className="col-start-2 h-1 overflow-hidden rounded-round bg-border"
       >
         <span
           className="block h-full bg-accent"
@@ -517,7 +521,7 @@ function DeckTile({
           }}
         />
       </span>
-      <span className="flex min-w-0 [&>span]:h-auto [&>span]:min-h-6 [&>span]:whitespace-normal [&>span>span]:overflow-visible [&>span>span]:whitespace-normal [&>span>span]:text-clip">
+      <span className="col-start-2 flex min-w-0 [&>span]:h-auto [&>span]:min-h-6 [&>span]:whitespace-normal [&>span>span]:overflow-visible [&>span>span]:whitespace-normal [&>span>span]:text-clip">
         <Pill tone={status?.tone === "ok" ? "ok" : "neutral"}>
           {status ? (
             <>
