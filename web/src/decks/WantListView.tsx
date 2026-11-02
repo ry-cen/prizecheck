@@ -284,7 +284,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
       <div
         role="group"
         aria-label="Show Decks"
-        className="flex flex-wrap items-center gap-1 border-b border-border pb-3"
+        className="flex flex-wrap items-center gap-1 border-b border-border pb-3 [&>button]:max-w-full [&>button>span]:min-w-0 [&>button>span]:max-w-full"
       >
         <Chip selected={scope === null} onChange={() => choose(null)}>
           All Decks
@@ -295,7 +295,9 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
             selected={scope === deck.id}
             onChange={() => choose(deck.id)}
           >
-            {deck.name}
+            <span className="truncate" title={deck.name}>
+              {deck.name}
+            </span>
           </Chip>
         ))}
       </div>
