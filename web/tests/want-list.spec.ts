@@ -421,6 +421,17 @@ test.describe("on a phone", () => {
           "title",
           name
         );
+        const deckName = deckChip.locator("[title]");
+        await expect(deckName).toHaveCSS("text-overflow", "ellipsis");
+        await expect(deckName).toHaveCSS("overflow-x", "hidden");
+        await expect(deckName).toHaveCSS("white-space", "nowrap");
+        await expect
+          .poll(() =>
+            deckName.evaluate(
+              (element) => element.scrollWidth > element.clientWidth
+            )
+          )
+          .toBe(true);
         await expect.soft
           .poll(() =>
             page.evaluate(
