@@ -342,11 +342,83 @@ for (const height of [800, 600]) {
     const aside = page.getByRole("complementary", { name: /^Combined total/ });
     const rows = aside.getByRole("listitem");
     await expect(rows).toHaveCount(8);
-    const last = rows.last();
-    await page.evaluate(() =>
-      window.scrollTo(0, document.documentElement.scrollHeight)
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+    // Keyboard reachability: N/A while the desktop aside and its regions are
+    // not focusable. Fail if row controls are added, forcing a real keyboard check.
+    await expect(
+      rows.locator(
+        "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])"
+      )
+    ).toHaveCount(0);
+    const panelBox = await aside.boundingBox();
+    if (!panelBox) throw new Error("Combined total has no bounding box");
+    await page.mouse.move(
+      panelBox.x + panelBox.width / 2,
+      Math.min(panelBox.y + 20, height - 1)
     );
-    await expect(last).toBeInViewport({ ratio: 1 });
+    const seen = new Set<number>();
+    const checkVisibleRows = async () => {
+      for (let index = 0; index < 8; index++) {
+        const row = rows.nth(index);
+        const fullyVisible = await row.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return (
+            box.top >= 0 &&
+            box.bottom <= innerHeight &&
+            box.left >= 0 &&
+            box.right <= innerWidth
+          );
+        });
+        if (!fullyVisible) continue;
+        await expect(row).toBeInViewport({ ratio: 1 });
+        await expect
+          .poll(() =>
+            row.evaluate((element) => {
+              if (typeof document.elementFromPoint !== "function") return true;
+              const box = element.getBoundingClientRect();
+              return [box.top + box.height / 2, box.bottom - 1].every((y) => {
+                const hit = document.elementFromPoint(
+                  box.left + box.width / 2,
+                  y
+                );
+                return hit !== null && element.contains(hit);
+              });
+            })
+          )
+          .toBe(true);
+        seen.add(index);
+      }
+    };
+    const position = () =>
+      page.evaluate(() => ({
+        y: scrollY,
+        atEnd:
+          scrollY + innerHeight >= document.documentElement.scrollHeight - 1,
+      }));
+    await checkVisibleRows();
+    let stoppedAtEnd = false;
+    for (let step = 0; step < 80; step++) {
+      const before = await position();
+      await page.mouse.wheel(0, 120);
+      // Wheel dispatch is asynchronous: wait for movement or the page boundary.
+      await expect
+        .poll(async () => {
+          const after = await position();
+          return after.y > before.y || after.atEnd;
+        })
+        .toBe(true);
+      await checkVisibleRows();
+      const after = await position();
+      if (after.y === before.y) {
+        stoppedAtEnd = after.atEnd;
+        break;
+      }
+    }
+    expect(stoppedAtEnd, "wheel scrolling stopped at the page end").toBe(true);
+    expect([...seen].sort(), "every summary row was fully visible").toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7,
+    ]);
+    await expect(rows.last()).toBeInViewport({ ratio: 1 });
     const evidence = await aside.evaluate((element) => {
       const last = element
         .querySelector("li:last-child")!
@@ -357,18 +429,9 @@ for (const height of [800, 600]) {
         finalRow: { top: last.top, bottom: last.bottom, height: last.height },
       };
     });
-    console.log("Sticky summary reachability", JSON.stringify(evidence));
     await test.info().attach("reachability", {
       body: JSON.stringify(evidence),
       contentType: "application/json",
     });
-    // Summary rows currently contain no controls. Guard keyboard reachability if controls are added later.
-    for (const control of await last
-      .locator("a, button, input, select, [tabindex='0']")
-      .all()) {
-      await control.focus();
-      await expect(control).toBeFocused();
-      await expect(control).toBeInViewport();
-    }
   });
 }
