@@ -87,13 +87,15 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await expect(
     page.getByRole("region", { name: "Needs you" }).getByRole("link")
   ).toContainText("Misty W offered to lend you 1 card");
-  await page.route(/\/api\/decks(\?.*)?$/, (route) => route.abort(), {
-    times: 1,
-  });
+  // The kept /loans page may warm Decks while this navigation starts. Keep the failure active until
+  // the Loan screen shows its own error, so an earlier warm read cannot consume the injection.
+  const decksRead = /\/api\/decks(\?.*)?$/;
+  await page.route(decksRead, (route) => route.abort());
   await page.goto(`${ORIGIN}${loanPath}`);
   await expect(page.getByRole("main")).toContainText(
     "Your Decks couldn't be loaded."
   );
+  await page.unroute(decksRead);
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(
     page.getByRole("combobox", { name: "Put them in" })

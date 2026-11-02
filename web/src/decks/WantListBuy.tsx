@@ -50,7 +50,7 @@ export function WantListBuy({
     <>
       <Button
         ref={button}
-        variant="primary"
+        variant="secondary"
         className="self-center"
         disabled={list.to_get === "0"}
         onClick={() => setOpen(true)}
