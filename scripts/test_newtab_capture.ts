@@ -117,7 +117,8 @@ test("ignored events, malformed data and size/record bounds do not throw or hide
   assert.equal(capture.unparseable, 1);
   capture.protocol("x".repeat(128 * 1024 + 1));
   assert.equal(capture.oversized, 1);
-  for (let index = 0; index < 12001; index++) capture.record("synthetic");
+  for (let index = 0; index < 12001; index++)
+    capture.record("browser-disconnected");
   assert.ok(capture.entries.length <= 4000);
   assert.ok(capture.dropped > 0);
 });
@@ -278,10 +279,10 @@ test("public and protocol capture ignore both sides of the click window", () => 
 test("public records obey field, event and total UTF-8 output budgets", () => {
   const capture = new Capture();
   capture.start();
-  capture.record("synthetic", { reason: "🧪".repeat(36000) });
+  capture.record("request", { method: "🧪".repeat(36000) });
   assert.ok(Buffer.byteLength(JSON.stringify(capture.entries)) < 8192);
   for (let i = 0; i < 12000; i++)
-    capture.record("synthetic", { reason: "x".repeat(256) });
+    capture.record("request", { method: "x".repeat(256) });
   const output = capture.serialize();
   assert.ok(Buffer.byteLength(output) <= 512 * 1024);
   for (const entry of capture.entries)
@@ -346,10 +347,10 @@ test("field byte boundary is exact for ASCII and multibyte strings", () => {
     "🧪".repeat(64),
     "🧪".repeat(65),
   ])
-    capture.record("synthetic", { reason });
+    capture.record("request", { method: reason });
   for (const entry of capture.entries)
     assert.equal(
-      Buffer.byteLength((entry as { data: { reason: string } }).data.reason),
+      Buffer.byteLength((entry as { data: { method: string } }).data.method),
       256
     );
   assert.equal(capture.oversized, 2);
@@ -358,14 +359,14 @@ test("field byte boundary is exact for ASCII and multibyte strings", () => {
 test("oversized events are dropped rather than bypassing the total budget", () => {
   const capture = new Capture();
   capture.start();
-  capture.record("synthetic", {
+  capture.record("before-click", {
     pending: Array.from({ length: LIMITS.items }, () => ({
-      reason: "x".repeat(LIMITS.fieldBytes),
+      method: "x".repeat(LIMITS.fieldBytes),
     })),
   });
   assert.equal(capture.entries.length, 0);
   assert.equal(capture.dropped, 1);
-  capture.record("synthetic", { reason: "retained" });
+  capture.record("request", { method: "retained" });
   assert.equal(capture.entries.length, 1);
 });
 
@@ -373,9 +374,9 @@ test("total attachment limit includes counters and event separators", () => {
   const capture = new Capture();
   capture.start();
   for (let i = 0; i < 12000; i++)
-    capture.record("synthetic", { reason: "x".repeat(LIMITS.fieldBytes) });
+    capture.record("request", { method: "x".repeat(LIMITS.fieldBytes) });
   const count = capture.entries.length;
-  capture.record("synthetic", { reason: "x".repeat(LIMITS.fieldBytes) });
+  capture.record("request", { method: "x".repeat(LIMITS.fieldBytes) });
   assert.equal(capture.entries.length, count);
   assert.ok(Buffer.byteLength(capture.serialize()) <= LIMITS.totalBytes);
   assert.ok(Buffer.byteLength(capture.serialize()) > LIMITS.totalBytes - 2048);
@@ -394,7 +395,7 @@ test("retained requests/pages/commands and marker snapshots stay bounded", () =>
   capture.snapshot("before-window", {});
   capture.start();
   for (let i = 0; i < LIMITS.snapshots + 1; i++)
-    capture.snapshot("marker", {
+    capture.snapshot("before-click", {
       pages: Array.from({ length: 1000 }, () => ({
         url: "https://example.test/invite/secret",
       })),
@@ -439,11 +440,11 @@ test("pending protocol keys cannot retain oversized identifiers", () => {
 test("public output also excludes header/body fields and sanitizes URL strings in arrays", () => {
   const capture = new Capture();
   capture.start();
-  capture.record("synthetic", {
+  capture.record("before-click", {
     headers: { "Set-Cookie": "cookie-secret" },
     body: "body-secret",
     serviceWorkers: ["https://example.test/invite/worker-secret"],
-    url: "https://example.test/published/publication-secret",
+    expectedUrl: "https://example.test/published/publication-secret",
   });
   for (const secret of [
     "Set-Cookie",
@@ -462,4 +463,270 @@ test("protocol field projection cannot retain nested arbitrary payload objects",
     '◀ RECV {"method":"Target.targetCreated","params":{"targetInfo":{"targetId":{"secret":"nested-secret"}}}}'
   );
   assert.equal(capture.serialize().includes("nested-secret"), false);
+});
+
+test("unknown public events are dropped without retaining names or values", () => {
+  const capture = new Capture();
+  capture.start();
+  capture.record("unlisted-event-secret", { token: "unlisted-event-value" });
+  assert.equal(capture.entries.length, 0);
+  assert.equal(capture.rejectedEvents, 1);
+  assert.equal(capture.dropped, 1);
+  assert.equal(capture.serialize().includes("unlisted-event-secret"), false);
+  assert.equal(capture.serialize().includes("unlisted-event-value"), false);
+});
+
+test("public schemas retain allowed fields and reject all unlisted names and values", () => {
+  const capture = new Capture();
+  capture.start();
+  const unexpected = {
+    authorization: "authorization-secret",
+    token: "token-secret",
+    responseBody: "response-body-secret",
+    credential: "credential-secret",
+    arbitraryExtra: "extra-secret",
+  };
+  capture.record("request", {
+    id: 7,
+    page: "page-0",
+    url: "http://localhost:5173/loans/private-id",
+    method: "GET",
+    navigation: true,
+    type: "document",
+    ...unexpected,
+  });
+  const serialized = capture.serialize();
+  for (const [key, value] of Object.entries(unexpected)) {
+    assert.equal(serialized.includes(key), false, key);
+    assert.equal(serialized.includes(value), false, value);
+  }
+  assert.deepEqual(JSON.parse(serialized).events[0].data, {
+    id: 7,
+    page: "page-0",
+    url: "http://localhost:5173/loans/:id",
+    method: "GET",
+    navigation: true,
+    type: "document",
+  });
+  assert.equal(capture.rejectedFields, 5);
+});
+
+test("nested public fields have exact schemas and reject wrong types", () => {
+  const capture = new Capture();
+  capture.start();
+  capture.snapshot("before-click", {
+    openerClosed: "invalid-boolean-secret",
+    viewport: { width: 1440, height: 1000, token: "viewport-secret" },
+    cpu: {
+      user: 10,
+      system: "invalid-number-secret",
+      credential: "cpu-secret",
+    },
+    pending: [{ id: 8, method: "GET", authorization: "pending-secret" }],
+    pages: [
+      { id: "page-0", url: "about:blank", arbitraryExtra: "page-secret" },
+    ],
+    serviceWorkers: [
+      "http://localhost:5173/worker-secret",
+      { token: "worker-object-secret" },
+    ],
+  });
+  const serialized = capture.serialize();
+  for (const secret of [
+    "invalid-boolean-secret",
+    "viewport-secret",
+    "invalid-number-secret",
+    "cpu-secret",
+    "pending-secret",
+    "page-secret",
+    "worker-secret",
+    "worker-object-secret",
+    "authorization",
+    "credential",
+    "arbitraryExtra",
+    "token",
+  ])
+    assert.equal(serialized.includes(secret), false, secret);
+  assert.equal(capture.rejectedFields, 4);
+  assert.equal(capture.rejectedValues, 3);
+  assert.deepEqual(JSON.parse(serialized).events[0].data, {
+    viewport: { width: 1440, height: 1000 },
+    cpu: { user: 10 },
+    pending: [{ id: 8, method: "GET" }],
+    pages: [{ id: "page-0", url: "about:blank" }],
+    serviceWorkers: ["http://localhost:5173/<redacted>"],
+  });
+});
+
+test("every permitted public event preserves its schema and rejects extra fields", () => {
+  const request = {
+    id: 7,
+    page: "page-0",
+    url: "about:blank",
+    method: "GET",
+    navigation: true,
+    type: "document",
+  };
+  const snapshot = {
+    expectedUrl: "about:blank",
+    openerUrl: "about:blank",
+    openerClosed: false,
+    viewport: { width: 1440, height: 1000 },
+    cpu: { user: 10, system: 2 },
+    eventLoop: { idle: 3, active: 4, utilization: 0.5 },
+    pending: [request],
+    pages: [{ id: "page-0", url: "about:blank" }],
+    serviceWorkers: ["about:blank"],
+  };
+  const events: Record<string, object> = {
+    "context.page": { page: "page-0", url: "about:blank", opener: true },
+    framenavigated: { page: "page-0", main: true, url: "about:blank" },
+    load: { page: "page-0", url: "about:blank" },
+    domcontentloaded: { page: "page-0", url: "about:blank" },
+    close: { page: "page-0" },
+    crash: { page: "page-0" },
+    request,
+    requestfinished: { id: 7 },
+    requestfailed: { id: 7 },
+    response: { id: 7, status: 200, url: "about:blank" },
+    serviceworker: { url: "about:blank" },
+    "browser-disconnected": {},
+    start: {
+      pid: 1,
+      workerIndex: 0,
+      parallelIndex: 0,
+      repeatEachIndex: 0,
+      retry: 0,
+      workers: 2,
+    },
+    "protocol-unavailable": { reason: "logger enable failed" },
+    "protocol-window-start": { version: "1.63.0" },
+    "before-click": snapshot,
+    "click-completed": snapshot,
+    "page-event-delivered": snapshot,
+    "url-assertions-passed": snapshot,
+    "window-ended": { ...snapshot, viewport: null },
+    end: {
+      status: "failed",
+      dropped: 0,
+      oversized: 0,
+      unparseable: 0,
+      pendingProtocolCommands: [{ id: "session:1", method: "Page.enable" }],
+      pendingRequests: [request],
+      cpu: { user: 10, system: 2 },
+      eventLoop: { idle: 3, active: 4, utilization: 0.5 },
+    },
+  };
+  const unexpected = {
+    authorization: "authorization-secret",
+    token: "token-secret",
+    responseBody: "response-body-secret",
+    credential: "credential-secret",
+    arbitraryExtra: "extra-secret",
+  };
+  for (const [event, data] of Object.entries(events)) {
+    const capture = new Capture();
+    capture.start();
+    capture.record(event, { ...data, ...unexpected });
+    const output = capture.serialize();
+    assert.deepEqual(JSON.parse(output).events[0].data, data, event);
+    assert.equal(capture.rejectedFields, 5, event);
+    assert.equal(capture.rejectedValues, 0, event);
+    for (const [key, value] of Object.entries(unexpected)) {
+      assert.equal(output.includes(key), false, `${event}: ${key}`);
+      assert.equal(output.includes(value), false, `${event}: ${value}`);
+    }
+  }
+});
+
+test("protocol recording boundary enforces method-specific typed field schemas", () => {
+  const capture = new Capture();
+  capture.start();
+  capture.record("protocol", {
+    method: "Runtime.unreviewedDiagnosticMethod",
+    token: "method-secret",
+  });
+  assert.equal(capture.entries.length, 0);
+  assert.equal(capture.rejectedValues, 1);
+  capture.record("protocol", {
+    method: "Page.enable",
+    direction: "send",
+    id: 1,
+    targetUrl: "unlisted-command-field-secret",
+    credential: "credential-secret",
+  });
+  capture.record("protocol", {
+    method: "Network.responseReceived",
+    direction: "receive",
+    requestId: "request-1",
+    status: 200,
+    timestamp: 12,
+    responseBody: "response-body-secret",
+    frameId: "unlisted-event-field-secret",
+    requestUrl: "http://localhost:5173/published/publication-secret",
+  });
+  const output = capture.serialize();
+  for (const secret of [
+    "method-secret",
+    "unlisted-command-field-secret",
+    "credential-secret",
+    "response-body-secret",
+    "unlisted-event-field-secret",
+    "publication-secret",
+    "credential",
+    "responseBody",
+  ])
+    assert.equal(output.includes(secret), false, secret);
+  const events = JSON.parse(output).events;
+  assert.deepEqual(events[0].data, {
+    direction: "send",
+    id: 1,
+    method: "Page.enable",
+  });
+  assert.deepEqual(events[1].data, {
+    direction: "receive",
+    method: "Network.responseReceived",
+    requestId: "request-1",
+    status: 200,
+    timestamp: 12,
+    requestUrl: "http://localhost:5173/published/:token",
+  });
+  assert.equal(capture.rejectedFields, 4);
+});
+
+test("schema rejection does not read unlisted values or retain invalid typed values", () => {
+  const capture = new Capture();
+  capture.start();
+  const data = Object.defineProperty(
+    {
+      id: "invalid-id-secret",
+      navigation: { token: "invalid-navigation-secret" },
+      method: "GET",
+    },
+    "authorization",
+    {
+      enumerable: true,
+      get() {
+        throw new Error("must not read unlisted value");
+      },
+    }
+  );
+  capture.record("request", data);
+  assert.equal(capture.rejectedFields, 1);
+  assert.equal(capture.rejectedValues, 2);
+  capture.record("protocol-unavailable", { reason: "unlisted-reason-secret" });
+  capture.record("protocol-window-start", {
+    version: "unlisted-version-secret",
+  });
+  assert.equal(capture.rejectedValues, 4);
+  const output = capture.serialize();
+  for (const secret of [
+    "authorization",
+    "invalid-id-secret",
+    "invalid-navigation-secret",
+    "unlisted-reason-secret",
+    "unlisted-version-secret",
+  ])
+    assert.equal(output.includes(secret), false, secret);
+  assert.deepEqual(JSON.parse(output).events[0].data, { method: "GET" });
 });

@@ -240,12 +240,148 @@ export function remember<K, V>(
   return true;
 }
 
+// Every recording path, including nested snapshots and protocol projections, passes through
+// an exact schema. Schema keys are trusted constants; rejected names/values are counted, never echoed.
+type Fields = Readonly<Record<string, Field>>;
+type Field =
+  | { kind: "text" | "url" | "number" | "boolean" }
+  | { kind: "enum"; values: readonly string[] }
+  | { kind: "object"; fields: Fields; nullable?: boolean }
+  | { kind: "array"; item: Field };
+const text: Field = { kind: "text" };
+const url: Field = { kind: "url" };
+const number: Field = { kind: "number" };
+const boolean: Field = { kind: "boolean" };
+const enumeration = (...values: string[]): Field => ({ kind: "enum", values });
+const object = (fields: Fields, nullable = false): Field => ({
+  kind: "object",
+  fields,
+  nullable,
+});
+const array = (item: Field): Field => ({ kind: "array", item });
+const cpuFields = { user: number, system: number };
+const loopFields = { idle: number, active: number, utilization: number };
+const requestFields = {
+  id: number,
+  page: text,
+  url,
+  method: text,
+  navigation: boolean,
+  type: text,
+};
+const commandMethod = enumeration(...Object.keys(COMMAND_FIELDS));
+const snapshotFields = {
+  expectedUrl: url,
+  openerUrl: url,
+  openerClosed: boolean,
+  viewport: object({ width: number, height: number }, true),
+  cpu: object(cpuFields),
+  eventLoop: object(loopFields),
+  pending: array(object(requestFields)),
+  pages: array(object({ id: text, url })),
+  serviceWorkers: array(url),
+};
+const PUBLIC_FIELDS: Readonly<Record<string, Fields>> = {
+  "context.page": { page: text, url, opener: boolean },
+  framenavigated: { page: text, main: boolean, url },
+  load: { page: text, url },
+  domcontentloaded: { page: text, url },
+  close: { page: text },
+  crash: { page: text },
+  request: requestFields,
+  requestfinished: { id: number },
+  requestfailed: { id: number },
+  response: { id: number, status: number, url },
+  serviceworker: { url },
+  "browser-disconnected": {},
+  start: {
+    pid: number,
+    workerIndex: number,
+    parallelIndex: number,
+    repeatEachIndex: number,
+    retry: number,
+    workers: number,
+  },
+  "protocol-unavailable": {
+    reason: enumeration(
+      "existing debug namespaces; left untouched",
+      "logger enable failed",
+      "unsupported installed adapter"
+    ),
+  },
+  "protocol-window-start": { version: enumeration("1.63.0") },
+  "before-click": snapshotFields,
+  "click-completed": snapshotFields,
+  "page-event-delivered": snapshotFields,
+  "url-assertions-passed": snapshotFields,
+  "window-ended": snapshotFields,
+  end: {
+    status: enumeration(
+      "url-assertions-passed",
+      "window-ended",
+      "passed",
+      "failed",
+      "timedOut",
+      "skipped",
+      "interrupted"
+    ),
+    dropped: number,
+    oversized: number,
+    unparseable: number,
+    pendingProtocolCommands: array(object({ id: text, method: commandMethod })),
+    pendingRequests: array(object(requestFields)),
+    cpu: object(cpuFields),
+    eventLoop: object(loopFields),
+  },
+};
+// The event-method allowlist above selects a subset of these exact, typed output fields.
+const PROTOCOL_FIELDS: Fields = {
+  childSessionId: text,
+  targetId: text,
+  browserContextId: text,
+  openerId: text,
+  targetType: text,
+  targetUrl: url,
+  frameId: text,
+  parentFrameId: text,
+  waitingForDebugger: boolean,
+  disposition: text,
+  executionContextId: number,
+  loaderId: text,
+  frameUrl: url,
+  requestId: text,
+  requestUrl: url,
+  requestMethod: text,
+  resourceType: text,
+  status: number,
+  timestamp: number,
+  wallTime: number,
+  lifecycle: text,
+  encodedDataLength: number,
+  canceled: boolean,
+};
+const protocolEnvelope: Fields = {
+  direction: enumeration("send", "receive"),
+  id: number,
+  method: enumeration(
+    ...Object.keys(COMMAND_FIELDS),
+    ...Object.keys(EVENT_FIELDS)
+  ),
+  sessionId: text,
+  errorCode: number,
+  hasError: boolean,
+  reply: boolean,
+};
+
 export class Capture {
   entries: object[] = [];
   pending = new Map<string, string>();
   dropped = 0;
   oversized = 0;
   unparseable = 0;
+  rejectedEvents = 0;
+  rejectedFields = 0;
+  rejectedValues = 0;
   active = false;
   finished = false;
   private bytes = 0;
@@ -257,57 +393,113 @@ export class Capture {
     this.active = false;
     this.finished = true;
   }
-  private bounded(value: unknown, depth = 0): unknown {
-    if (typeof value === "string") {
-      const text = /^(https?:|data:|javascript:|about:)/i.test(value)
-        ? safeUrl(value)!
-        : value;
-      if (Buffer.byteLength(text) <= LIMITS.fieldBytes) return text;
+  private project(value: unknown, field: Field, depth = 0): unknown {
+    if (value === undefined) return undefined; // Optional fields are omitted, not rejected.
+    if (depth >= 5) {
+      this.oversized++;
+      return undefined;
+    }
+    if (field.kind === "object" && field.nullable && value === null)
+      return null;
+    if (
+      (field.kind === "text" || field.kind === "url") &&
+      typeof value === "string"
+    ) {
+      const projected =
+        field.kind === "url" ||
+        /^(https?:|data:|javascript:|about:)/i.test(value)
+          ? safeUrl(value)!
+          : value;
+      if (Buffer.byteLength(projected) <= LIMITS.fieldBytes) return projected;
       this.oversized++;
       let result = "";
-      for (const char of text) {
+      for (const char of projected) {
         if (Buffer.byteLength(result + char) > LIMITS.fieldBytes) break;
         result += char;
       }
       return result;
     }
-    if (typeof value === "number")
-      return Number.isFinite(value) ? value : undefined;
-    if (typeof value === "boolean" || value === null) return value;
-    if (depth >= 5) {
-      this.oversized++;
-      return undefined;
-    }
-    if (Array.isArray(value)) {
+    if (
+      field.kind === "number" &&
+      typeof value === "number" &&
+      Number.isFinite(value)
+    )
+      return value;
+    if (field.kind === "boolean" && typeof value === "boolean") return value;
+    if (
+      field.kind === "enum" &&
+      typeof value === "string" &&
+      field.values.includes(value)
+    )
+      return value;
+    if (field.kind === "array" && Array.isArray(value)) {
       if (value.length > LIMITS.items) this.oversized++;
-      return value
-        .slice(0, LIMITS.items)
-        .map((v) => this.bounded(v, depth + 1));
+      return value.slice(0, LIMITS.items).flatMap((item) => {
+        const projected = this.project(item, field.item, depth + 1);
+        return projected === undefined ? [] : [projected];
+      });
     }
-    if (typeof value === "object" && value) {
-      const entries = Object.entries(value);
-      if (entries.length > LIMITS.items) this.oversized++;
+    if (
+      field.kind === "object" &&
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      const data = value as Record<string, unknown>;
+      // Do not read unlisted values, including accessors. Never retain rejected names.
+      for (const key of Object.keys(data))
+        if (!Object.hasOwn(field.fields, key)) this.rejectedFields++;
       return Object.fromEntries(
-        entries.slice(0, LIMITS.items).flatMap(([key, v]) => {
-          // Defense in depth for public records as well as protocol projections.
-          if (/^(headers?|cookies?|body|postData|source|title)$/i.test(key))
-            return [];
-          const safe = /url$/i.test(key) ? safeUrl(v) : v;
-          return [
-            [this.bounded(key, depth + 1), this.bounded(safe, depth + 1)],
-          ];
+        Object.entries(field.fields).flatMap(([key, schema]) => {
+          if (!Object.hasOwn(data, key)) return [];
+          const projected = this.project(data[key], schema, depth + 1);
+          return projected === undefined ? [] : [[key, projected]];
         })
       );
     }
+    this.rejectedValues++;
     return undefined;
   }
   record(event: string, data: object = {}) {
     if (!this.active) return;
+    let fields: Fields;
+    if (event === "protocol") {
+      const method = (data as { method?: unknown }).method;
+      if (
+        typeof method !== "string" ||
+        (!Object.hasOwn(COMMAND_FIELDS, method) &&
+          !Object.hasOwn(EVENT_FIELDS, method))
+      ) {
+        this.rejectedValues++;
+        this.dropped++;
+        return;
+      }
+      const selected = Object.hasOwn(EVENT_FIELDS, method)
+        ? EVENT_FIELDS[method]
+        : [];
+      fields = {
+        ...protocolEnvelope,
+        ...Object.fromEntries(
+          selected.map((key) => [key, PROTOCOL_FIELDS[key]])
+        ),
+      };
+    } else if (Object.hasOwn(PUBLIC_FIELDS, event))
+      fields = PUBLIC_FIELDS[event];
+    else {
+      this.rejectedEvents++;
+      this.dropped++;
+      return;
+    }
+    const projected = this.project(data, object(fields));
+    if (projected === undefined) {
+      this.dropped++;
+      return;
+    }
     const entry = {
       atMs: Date.now(),
       monotonicMs: performance.now(),
-      event: this.bounded(event),
-      data: this.bounded(data),
+      event,
+      data: projected,
     };
     const bytes = Buffer.byteLength(JSON.stringify(entry)) + 1;
     // Reserve 1 KiB for the fixed envelope/counters; compact serialization uses this same encoding.
@@ -337,6 +529,9 @@ export class Capture {
       dropped: this.dropped,
       oversized: this.oversized,
       unparseable: this.unparseable,
+      rejectedEvents: this.rejectedEvents,
+      rejectedFields: this.rejectedFields,
+      rejectedValues: this.rejectedValues,
       events: this.entries,
     });
   }
