@@ -593,6 +593,7 @@ export function Workspace({
     // as the workspace CSS gave it (Preflight does the same since #184).
     <div
       data-collection-page=""
+      data-phone-search-header={active ? "" : undefined}
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
       <p className="sr-only" role="status" data-testid="location-announcement">

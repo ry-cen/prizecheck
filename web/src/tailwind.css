@@ -120,7 +120,7 @@
 @custom-variant collection-pinned (@media (max-width: 760px) and (min-height: 481px));
 
 @media (max-width: 760px) {
-  :root:has(#main-content [data-collection-page]) {
+  :root:has(#main-content [data-collection-page][data-phone-search-header]) {
     scroll-padding-top: calc(
       var(--collection-header-clearance, 0px) +
         var(--collection-stale-height, 0px)
@@ -129,16 +129,20 @@
   }
   /* Header controls already occupy the pinned area. Applying its clearance to them can make
      native input focus scroll the header's original flow position back into view. */
-  :root:has(#main-content [data-collection-page] > header:focus-within) {
+  :root:has(
+    #main-content
+      [data-collection-page][data-phone-search-header]
+      > header:focus-within
+  ) {
     scroll-padding-top: 0px;
   }
 }
 @variant collection-pinned {
   /* Collection's phone header reserves one row for controls and one for Search. */
-  [data-collection-page] {
+  [data-collection-page][data-phone-search-header] {
     --layout-sticky-top: calc(2 * var(--layout-header-height));
   }
-  :root:has(#main-content [data-collection-page]) {
+  :root:has(#main-content [data-collection-page][data-phone-search-header]) {
     --collection-header-clearance: calc(2 * var(--layout-header-height));
   }
 }

@@ -303,7 +303,7 @@ function ShellFrame({
       >
         <div
           data-app-shell=""
-          className="min-h-dvh bg-bg font-sans text-text scheme-dark"
+          className="min-h-dvh bg-bg font-sans text-text scheme-dark phone:pb-tabbar"
         >
           <a
             href="#main-content"

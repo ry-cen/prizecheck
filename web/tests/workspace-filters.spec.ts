@@ -560,7 +560,10 @@ test.describe("mobile", () => {
     const searchBox = (await header
       .getByRole("searchbox", { name: "Search cards" })
       .boundingBox())!;
-    expect(openerBox.x).toBeGreaterThan(searchBox.x + searchBox.width);
+    // Search has its own full-width second row on phones (#500).
+    expect(searchBox.y).toBeGreaterThanOrEqual(openerBox.y + openerBox.height);
+    expect(searchBox.x).toBeGreaterThanOrEqual(0);
+    expect(searchBox.x + searchBox.width).toBeLessThanOrEqual(375);
     expect(openerBox.x + openerBox.width).toBeLessThanOrEqual(375);
     expect(
       await page.evaluate(
