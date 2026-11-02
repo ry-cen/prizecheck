@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { expect, test } from "./support/collectors";
+import { expect } from "./support/collectors";
+import { test } from "./support/newtab-capture";
 import {
   ORIGIN,
   PHONE,
@@ -21,6 +22,7 @@ import { expectPageChecks } from "./support/page-check";
 test("Loans keep a stable queue, canonical selection and open forms across widths", async ({
   page,
   collectors,
+  newTabCapture,
 }, testInfo) => {
   test.slow();
   // Role locators omit hidden kept pages; raw selectors must start from this main.
@@ -148,11 +150,15 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   expect(listReads).toBe(initialReads);
   // Modified clicks retain native new-tab navigation without changing this entry.
   await expect(secondRow).toHaveAttribute("href", `/loans/${pending.id}`);
+  newTabCapture.mark("before-click", `${ORIGIN}/loans/${pending.id}`);
   const newTab = page.context().waitForEvent("page");
   await secondRow.click({ modifiers: ["ControlOrMeta"] });
+  newTabCapture.mark("click-completed");
   const tab = await newTab;
+  newTabCapture.mark("page-event-delivered");
   await expect(tab).toHaveURL(`${ORIGIN}/loans/${pending.id}`);
   await expect(page).toHaveURL(`${ORIGIN}/loans`);
+  newTabCapture.mark("url-assertions-passed");
   await tab.close();
   await page.goForward();
   await expect(heading).toHaveText("Ash K wants to borrow 3 cards");
