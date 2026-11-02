@@ -500,7 +500,7 @@ export function Workspace({
   const search = (
     <SearchField
       label="Search cards"
-      placeholder="Search your cards…"
+      placeholder={mobile ? "Search cards" : "Search your cards…"}
       autoComplete="off"
       maxLength={120}
       value={query}

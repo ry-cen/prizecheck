@@ -174,7 +174,7 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   test.slow();
   const ids = seedCatalog();
   const misty = await collectors.signIn({ next: "/loans" });
-  await nameCollector(misty.page, "Misty W");
+  await nameCollector(misty.page, "Jordan Reyes");
   await hold(misty.page, await unsorted(misty.page), ids["PAL 185"], 2);
   await signInAsOwner(page, "/collection");
   await nameCollector(page, "Ash K");
@@ -211,13 +211,13 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   await expect(tiles).toHaveCount(3);
   await expect(main).toContainText("1 copy · 1 edition · 2 borrowed");
   await expect(tiles.nth(0)).not.toHaveAccessibleName(/borrowed from/);
-  await expect(tiles.nth(1)).toHaveAccessibleName(/borrowed from Misty W/);
-  await expect(tiles.nth(2)).toHaveAccessibleName(/borrowed from Misty W/);
+  await expect(tiles.nth(1)).toHaveAccessibleName(/borrowed from Jordan Reyes/);
+  await expect(tiles.nth(2)).toHaveAccessibleName(/borrowed from Jordan Reyes/);
   await sidebar.getByRole("button", { name: boxName, exact: true }).click();
   await expect(tiles).toHaveCount(2);
   await expect(main).toContainText("1 copy · 1 edition · 1 borrowed");
   await expect(
-    tiles.nth(1).getByText("From Misty W", { exact: true })
+    tiles.nth(1).getByText("From Jordan Reyes", { exact: true })
   ).toBeVisible();
   await tiles.nth(0).click();
   await tiles.nth(1).click({ modifiers: ["ControlOrMeta"] });
@@ -252,7 +252,7 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   await expect(tiles).toHaveCount(2);
   // The gallery implements pointer dragging, not native HTML drag and drop.
   const from = await main
-    .getByRole("button", { name: /Iono,.*borrowed from Misty W/ })
+    .getByRole("button", { name: /Iono,.*borrowed from Jordan Reyes/ })
     .boundingBox();
   const to = await sidebar
     .getByRole("button", { name: boxName, exact: true })
@@ -270,9 +270,33 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   ).toBeVisible();
   await sidebar.getByRole("button", { name: boxName, exact: true }).click();
   await expect(tiles).toHaveCount(1);
-  await expect(tiles.first()).toHaveAccessibleName(/borrowed from Misty W/);
+  await expect(tiles.first()).toHaveAccessibleName(
+    /borrowed from Jordan Reyes/
+  );
   await page.setViewportSize(DESKTOP);
+  await expect(
+    page.getByRole("searchbox", { name: "Search cards" })
+  ).toHaveAttribute("placeholder", "Search your cards…");
   await expectPageChecks(page, "borrowed Location gallery on desktop");
-  await page.setViewportSize(PHONE);
-  await expectPageChecks(page, "borrowed Location gallery on phone");
+  for (const viewport of [PHONE, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const search = page.getByRole("searchbox", { name: "Search cards" });
+    await expect(search).toHaveAttribute("placeholder", "Search cards");
+    const mark = tiles.first().getByText("From Jordan Reyes", { exact: true });
+    await expect(mark).toBeVisible();
+    await expect(mark).toHaveCSS("-webkit-line-clamp", "2");
+    await expect
+      .poll(() =>
+        mark.evaluate(
+          (element) =>
+            element.scrollHeight <= element.clientHeight &&
+            element.scrollWidth <= element.clientWidth
+        )
+      )
+      .toBe(true);
+    await expectPageChecks(
+      page,
+      `borrowed Location gallery on phone at ${viewport.width}px`
+    );
+  }
 });

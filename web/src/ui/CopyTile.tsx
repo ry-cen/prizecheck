@@ -44,7 +44,8 @@ type Props = Omit<
 
 // The tile's height is fixed by the page's layout model (tokens.css: the art's aspect ratio and
 // --tile-names-height, --tile-price-height and --tile-caption-height), so every line here has a fixed
-// height and cuts its text with an ellipsis instead of wrapping. Those heights include each line's top padding
+// height and cuts its text with an ellipsis instead of wrapping. The phone lender mark wraps inside the art,
+// absolutely positioned so it cannot change the tile height. Those heights include each line's top padding
 // (box-border), set here rather than left to Preflight's reset.
 // A selected tile's focus ring sits outside its selection ring. The ring itself is base.css's.
 // ROOT, ART and LINE are exported for EditionTile (#173), which shares the button, the art frame and the Names line.
@@ -113,7 +114,7 @@ export function CopyTile({
         {borrowedFrom && (
           <span
             aria-hidden="true"
-            className="absolute bottom-1 left-1 max-w-[calc(100%-var(--space-2))] truncate rounded-round border-2 border-solid border-bg bg-surface-raised px-2 text-caption leading-5 text-text shadow-[0_1px_var(--space-1)_var(--color-shadow-strong)]"
+            className="absolute bottom-1 left-1 max-w-[calc(100%-var(--space-2))] truncate rounded-round phone:line-clamp-2 phone:rounded-control phone:whitespace-normal phone:text-clip phone:wrap-anywhere border-2 border-solid border-bg bg-surface-raised px-2 text-caption leading-5 text-text shadow-[0_1px_var(--space-1)_var(--color-shadow-strong)]"
           >
             From {borrowedFrom}
           </span>
