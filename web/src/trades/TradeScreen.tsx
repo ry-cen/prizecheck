@@ -29,6 +29,7 @@ import {
   type TradeStep,
   type TradeView,
   type TraderMatchRow,
+  type OwnTradeNeed,
 } from "../social_generated";
 import {
   acceptTrade,
@@ -42,7 +43,7 @@ import {
 } from "../trades_generated";
 import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
-import { tradeDeckNeed } from "./tradeDeckNeed";
+import { ownTradeDeckNeed, tradeDeckNeed } from "./tradeDeckNeed";
 import { useIncomingTradeMatch } from "./useIncomingTradeMatch";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
@@ -729,7 +730,8 @@ export function TradeScreen({
         <TradeSide
           title="You get"
           cards={trade.you_get}
-          match={incomingMatch}
+          match={incomingMatch.match}
+          ownNeeds={incomingMatch.needs}
           total={
             trade.state === "proposed"
               ? sideValueText(value, "you_get", trade.you_get.length > 0)
@@ -1021,10 +1023,12 @@ function TradeSide({
   side,
   total,
   match,
+  ownNeeds,
 }: {
   title: string;
   cards: TradeCard[];
   match?: TraderMatchRow | null;
+  ownNeeds?: OwnTradeNeed[];
   side?: OwnTradeSide;
   /** The side's estimated total while the Trade is waiting for an answer, or null. */
   total?: string | null;
@@ -1032,11 +1036,16 @@ function TradeSide({
   const headingId = useId();
   const [selected, setSelected] = useState<TradeCard | null>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const hint = (card: TradeCard) =>
-    tradeDeckNeed(
-      match?.you_get.find((row) => row.edition_id === card.edition_id),
-      match?.you_get_groups
+  const hint = (card: TradeCard) => {
+    const listed = match?.you_get.find(
+      (row) => row.edition_id === card.edition_id
     );
+    return listed
+      ? tradeDeckNeed(listed, match?.you_get_groups)
+      : ownTradeDeckNeed(
+          ownNeeds?.find((row) => row.edition_id === card.edition_id)
+        );
+  };
   return (
     <section
       aria-labelledby={headingId}

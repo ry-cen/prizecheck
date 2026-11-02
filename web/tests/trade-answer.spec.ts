@@ -459,10 +459,11 @@ test.describe("phone", () => {
   });
 });
 
-test("incoming Trade cards open details and show shared Deck need at phone widths", async ({
-  page,
-  collectors,
-}) => {
+/** The same incoming swap, with own Deck need and two offered Iono printings, shared by the detail and fallback cases. */
+async function incomingTradeExample(
+  page: Page,
+  collectors: { signIn: () => Promise<{ page: Page }> }
+) {
   const ids = seedCatalog();
   const ash = await collectors.signIn();
   await nameCollector(ash.page, "Ash K");
@@ -490,7 +491,7 @@ test("incoming Trade cards open details and show shared Deck need at phone width
   await nameCollector(page, "Misty W");
   const binder = await forTradeBinder(page, "Misty's private binder");
   // Leave offered copies on the Trade List as well as those promised by this proposal, so the existing match read
-  // can describe both printings. A card no longer offered by the trader has no match context, and shows no hint.
+  // can describe both printings. The separate unlisted-card case below exercises the own-only fallback.
   for (const key of ["PAL 185", "PAL 254", "PAL 172"] as const)
     await hold(page, binder, ids[key], 3);
   await befriend(page, ash.page);
@@ -505,6 +506,14 @@ test("incoming Trade cards open details and show shared Deck need at phone width
     [[ids["SVI 166"], 1]]
   );
   await noArtwork(ash.page);
+  return { ids, ash, id };
+}
+
+test("incoming Trade cards open details and show shared Deck need at phone widths", async ({
+  page,
+  collectors,
+}) => {
+  const { ids, ash, id } = await incomingTradeExample(page, collectors);
   await ash.page.goto(`${ORIGIN}/trades/${id}`);
   const gets = ash.page.getByRole("list", { name: "You get", exact: true });
   const gives = ash.page.getByRole("list", { name: "You give", exact: true });
@@ -547,5 +556,66 @@ test("incoming Trade cards open details and show shared Deck need at phone width
   }
   await ash.page.getByRole("button", { name: "Accept", exact: true }).click();
   await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
+  await expect(gets).not.toContainText("Your Decks need");
+});
+
+test("unlisted incoming cards retain own Deck context and failed reads stay silent", async ({
+  page,
+  collectors,
+}) => {
+  const { ids, ash } = await incomingTradeExample(page, collectors);
+  const gets = ash.page.getByRole("list", { name: "You get", exact: true });
+  // Promise every remaining copy. Neither Iono printing is now on Misty's Trade List: the own-only fallback must
+  // still explain Ash's need, including widening, without putting a collector id in that read.
+  const unlisted = await propose(
+    page,
+    await accountId(ash.page),
+    [
+      [ids["PAL 185"], 2],
+      [ids["PAL 254"], 2],
+      [ids["PAL 172"], 2],
+    ],
+    []
+  );
+  const ownRead = ash.page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === "/api/social/trade-matches/needs"
+  );
+  await ash.page.goto(`${ORIGIN}/trades/${unlisted}`);
+  const request = await ownRead;
+  const query = new URL(request.url()).searchParams;
+  expect([...query.keys()]).toEqual(["edition_id", "edition_id", "edition_id"]);
+  expect(query.getAll("edition_id")).toEqual([
+    ids["PAL 185"],
+    ids["PAL 254"],
+    ids["PAL 172"],
+  ]);
+  const exact = gets.getByRole("listitem").filter({ hasText: "PAL 185" });
+  const widened = gets.getByRole("listitem").filter({ hasText: "PAL 254" });
+  await expect(exact).toContainText("Your Decks need 2.");
+  await expect(widened).toContainText(
+    "Your Decks need 2, including need shared across accepted printings."
+  );
+  await expect(
+    gets.getByRole("listitem").filter({ hasText: "Boss's Orders" })
+  ).not.toContainText("Your Decks need");
+  for (const width of [320, 375, 390]) {
+    await ash.page.setViewportSize({ width, height: 844 });
+    await expectPageChecks(ash.page, `unlisted incoming cards at ${width}`);
+  }
+  // A failed optional own read leaves answering available and makes no claim about need.
+  await ash.page.route("**/api/social/trade-matches/needs?*", (route) =>
+    route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+  );
+  const failed = ash.page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/social/trade-matches/needs" &&
+      response.status() === 503
+  );
+  await ash.page.reload();
+  await failed;
+  await expect(
+    ash.page.getByRole("button", { name: "Accept", exact: true })
+  ).toBeVisible();
   await expect(gets).not.toContainText("Your Decks need");
 });

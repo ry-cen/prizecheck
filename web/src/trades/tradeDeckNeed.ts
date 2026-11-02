@@ -16,3 +16,12 @@ export function tradeDeckNeed(
   const shared = referenced.some((group) => Number(group?.cards) > 1);
   return `Your Decks need ${need} ${card.name}${shared ? ", including need shared across printings." : "."}`;
 }
+
+/** Own-only fallback for an unlisted incoming card. Widening is shared need, never a per-printing instruction. */
+export function ownTradeDeckNeed(
+  row: { want_list_need: string; widened: boolean } | undefined
+): string | null {
+  const need = Number(row?.want_list_need);
+  if (!Number.isSafeInteger(need) || need <= 0) return null;
+  return `Your Decks need ${need}${row?.widened ? ", including need shared across accepted printings." : "."}`;
+}

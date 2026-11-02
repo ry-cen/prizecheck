@@ -53,6 +53,7 @@ import {
   lineEdition,
   lineOut,
   loanHeadline,
+  loanDeckUseHint,
   loanRoleFact,
   loanStepMessage,
   LOANS_PATH,
@@ -1148,6 +1149,13 @@ function LoanLine({
   counting: { value: number; max: number; verb: "return" | "write off" } | null;
   onCounting: (value: number) => void;
 }) {
+  const deckUse =
+    loan.role === "lender" &&
+    (loan.state === "requested" || loan.state === "offered")
+      ? loanDeckUseHint(
+          side.deck_use?.find((use) => use.edition_id === line.edition_id)
+        )
+      : null;
   const edition = lineEdition(line);
   const requested = Number(line.requested);
   const available = Number(
@@ -1245,6 +1253,11 @@ function LoanLine({
       <div className="min-w-0">
         <p className="m-0 text-body font-medium wrap-anywhere">{line.name}</p>
         <p className="m-0 text-meta text-text-muted wrap-anywhere">{edition}</p>
+        {deckUse && (
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {deckUse}
+          </p>
+        )}
         {pick && (
           <p className="m-0 text-meta text-text-muted wrap-anywhere">{pick}</p>
         )}
