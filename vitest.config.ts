@@ -6,6 +6,7 @@ export default defineConfig({
       "web/src/shell/**/*.test.ts",
       "web/src/catalog/**/*.test.ts",
       "web/src/decks/**/*.test.ts",
+      "web/src/loans/**/*.test.ts",
       "web/src/scanner/**/*.test.ts",
       "web/src/trades/**/*.test.ts",
       "web/src/ui/**/*.test.ts",

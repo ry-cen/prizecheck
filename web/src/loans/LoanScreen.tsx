@@ -53,6 +53,7 @@ import {
   lineEdition,
   lineOut,
   loanHeadline,
+  loanRoleFact,
   loanStepMessage,
   LOANS_PATH,
   outcomeUnknown,
@@ -534,7 +535,7 @@ export function LoanScreen({
 
   const deck = side.deck;
   const facts: ReactNode[] = [
-    loan.role === "lender" ? "You're lending" : "You're borrowing",
+    loanRoleFact(loan),
     loan.role === "borrower" &&
     loan.state !== "closed" &&
     loan.state !== "offered" ? (
@@ -554,7 +555,7 @@ export function LoanScreen({
           </a>
         </>
       ) : (
-        "For Unsorted"
+        "Goes to Unsorted"
       )
     ) : null,
     loan.overdue_since
