@@ -142,6 +142,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo env HOME=/root npm_config_cache=/root/.npm PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright "$(command -v node)" node_modules/@playwright/test/cli.js install --with-deps chromium
+          sudo chmod -R go-w "$PLAYWRIGHT_BROWSERS_PATH"
           for ownership_path in "$GITHUB_WORKSPACE" node_modules "$HOME/.npm"; do
             stat -c 'Ownership: %n uid=%u gid=%g mode=%a' "$ownership_path"
             root_owned=$(find "$ownership_path" -user root -print -quit)
@@ -207,6 +208,7 @@ jobs:
       - run: |
           set -euo pipefail
           sudo env HOME=/root npm_config_cache=/root/.npm PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright "$(command -v node)" node_modules/@playwright/test/cli.js install --with-deps chromium
+          sudo chmod -R go-w "$PLAYWRIGHT_BROWSERS_PATH"
           for ownership_path in "$GITHUB_WORKSPACE" node_modules "$HOME/.npm"; do
             stat -c 'Ownership: %n uid=%u gid=%g mode=%a' "$ownership_path"
             root_owned=$(find "$ownership_path" -user root -print -quit)

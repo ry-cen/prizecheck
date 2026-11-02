@@ -150,6 +150,7 @@ class DeployPipelineTest(unittest.TestCase):
             steps = re.split(r'(?m)^      - ', job)[1:]
             install = next(i for i, step in enumerate(steps)
                            if install_command in step)
+            self.assertIn(install_command + '\n          sudo chmod -R go-w "$PLAYWRIGHT_BROWSERS_PATH"\n', steps[install])
             profile, preflight, verify = steps[install + 1:install + 4]
             self.assertNotIn('npx playwright install', job)
             self.assertIn('for ownership_path in "$GITHUB_WORKSPACE" node_modules "$HOME/.npm"; do', steps[install])
@@ -190,7 +191,8 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertIn('binary=$(readlink -f -- "$candidate")', script)
         self.assertIn('[[ "$binary" =~ ^/opt/ms-playwright/chromium_headless_shell-[0-9]+/chrome-headless-shell-linux64/chrome-headless-shell$ ]]', script)
         self.assertIn('[[ -f "$binary" && ! -L "$binary" ]]', script)
-        for required in ('stat -c %u', 'stat -c %a', '[[ "$uid" == 0 ]]', '(8#$mode & 0022) == 0',
+        for required in ('stat -c %u', 'stat -c %a', '[[ "$uid" == 0 ]]',
+                         '(( (8#$mode & 0022) == 0 )) || fail "Path must not be group- or other-writable: $checked_path (mode=$mode)"',
                          'check_root_path "$binary"', 'check_root_path "$directory"', '[[ "$directory" == / ]]'):
             self.assertIn(required, script)
         self.assertIn('profile=/etc/apparmor.d/prizecheck-playwright-chromium', script)
