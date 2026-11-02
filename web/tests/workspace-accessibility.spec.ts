@@ -421,7 +421,7 @@ test.describe("desktop", () => {
       "Collection",
       "Decks",
       "Catalog",
-      "Missing cards",
+      "Card reports",
       "Account",
       "Add location",
       "Manage locations",

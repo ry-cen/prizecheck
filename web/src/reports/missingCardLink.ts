@@ -1,8 +1,8 @@
 import type { MissingCardPrefill } from "../decks_generated";
 
-/** The Missing cards report link, /reports?report=printing&name=…&number=…&set_id=…&set_name=…&note=…, opens Missing
- * cards on Report a card with the form filled in. Decklist Import's Not found lines link here (#213), with the values
- * the review chose (the API's MissingCardPrefill). Missing cards reads the link once and then removes it from the
+/** The Card reports link, /reports?report=printing&name=…&number=…&set_id=…&set_name=…&note=…, opens Card reports
+ * on Report a card with the form filled in. Decklist Import's Not found lines link here (#213), with the values
+ * the review chose (the API's MissingCardPrefill). Card reports reads the link once and then removes it from the
  * address. */
 const KIND = "report";
 const FIELDS = {
@@ -43,7 +43,7 @@ export function readMissingCardLink(): MissingCardLink | null {
   };
 }
 
-/** Removes the link from the address, keeping the path, other parameters and hash, so a reload opens Missing cards
+/** Removes the link from the address, keeping the path, other parameters and hash, so a reload opens Card reports
  * as usual. */
 export function clearMissingCardLink(): void {
   const params = new URLSearchParams(window.location.search);

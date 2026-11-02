@@ -191,9 +191,14 @@ async function conversationStory(
   await expect(
     misty.getByText("This collector is no longer available")
   ).toBeVisible();
-  const mistyText = await misty.locator("body").innerText();
-  expect(mistyText).not.toMatch(/report/i);
-  expect(mistyText).not.toMatch(/block/i);
+  // Exclude global navigation's "Card reports"; include conversation content and toasts.
+  for (const content of [
+    misty.getByRole("main"),
+    misty.getByRole("region", { name: "Notifications", exact: true }),
+  ]) {
+    await expect(content).not.toContainText(/report/i);
+    await expect(content).not.toContainText(/block/i);
+  }
 
   // 5. Ash's screen leaks nothing.
   await expectNoLeaks(page);
