@@ -592,10 +592,12 @@ test("unlisted incoming cards retain own Deck context and failed reads stay sile
   ]);
   const exact = gets.getByRole("listitem").filter({ hasText: "PAL 185" });
   const widened = gets.getByRole("listitem").filter({ hasText: "PAL 254" });
-  await expect(exact).toContainText("Your Decks need 2.");
-  await expect(widened).toContainText(
-    "Your Decks need 2, including need shared across accepted printings."
-  );
+  // The wanted Edition and its alternative share the same need, although only the alternative is widened.
+  const sharedNeed =
+    "Your Decks need 2, including need shared across accepted printings.";
+  await expect(exact).toContainText(sharedNeed);
+  await expect(widened).toContainText(sharedNeed);
+  await expect(gets.getByText(sharedNeed, { exact: true })).toHaveCount(2);
   await expect(
     gets.getByRole("listitem").filter({ hasText: "Boss's Orders" })
   ).not.toContainText("Your Decks need");

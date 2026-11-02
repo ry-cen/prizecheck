@@ -682,11 +682,14 @@ def nearby_matches(user_id: str = Depends(verified_user)):
 
 
 class OwnTradeNeed(BaseModel):
-    """The viewer's own need accepting an Edition, never another collector's identity, Deck or Location."""
+    """The viewer's own need accepting an Edition, never another collector's identity, Deck or Location.
+    shared means a counted Want List part accepts alternatives, even for the wanted Edition itself. widened only
+    says that this Edition matched a different wanted Edition. Exact Trade Wants never make need shared."""
     edition_id: UUID
     want_list_need: str
     trade_wants_quantity: str
     widened: bool
+    shared: bool
 
 
 @router.get('/trade-matches/needs', response_model=list[OwnTradeNeed])
@@ -706,7 +709,8 @@ def own_trade_needs(edition_id: list[UUID] = Query(default=[], max_length=50),
         return [OwnTradeNeed(edition_id=edition,
                              want_list_need=str(sum(needs[wanted] for wanted in reached.get(edition, ()))),
                              trade_wants_quantity=str(trade.get(edition, 0)),
-                             widened=any(wanted != edition for wanted in reached.get(edition, ())))
+                             widened=any(wanted != edition for wanted in reached.get(edition, ())),
+                             shared=any(wants[wanted].rule != 'edition' for wanted in reached.get(edition, ())))
                 for edition in dict.fromkeys(edition_id)]
 
 

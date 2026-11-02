@@ -17,12 +17,14 @@ def read(viewer, *editions):
     return call('GET', '/api/social/trade-matches/needs' + (f'?{query}' if query else ''), viewer)
 
 
-def context(edition, want='0', trade='0', widened=False):
-    return {'edition_id': edition, 'want_list_need': want, 'trade_wants_quantity': trade, 'widened': widened}
+def context(edition, want='0', trade='0', widened=False, shared=False):
+    return {'edition_id': edition, 'want_list_need': want, 'trade_wants_quantity': trade, 'widened': widened, 'shared': shared}
 
 
 @pytest.mark.parametrize('rule,wanted,received,widened', [
     ('edition', 'PAL 185', 'PAL 185', False),
+    ('printing', 'PAL 172', 'PAL 172', False),
+    ('identity', 'PAL 185', 'PAL 185', False),
     ('printing', 'PAL 172', 'PAL 172 Reverse Holo', True),
     ('identity', 'PAL 185', 'PAF 80', True)])
 def test_exact_and_widened_own_need_without_any_other_collector(store, rule, wanted, received, widened):
@@ -31,7 +33,7 @@ def test_exact_and_widened_own_need_without_any_other_collector(store, rule, wan
     own = deck(viewer, 'Private own Deck', 0)
     line(viewer, own, ids[wanted], 3)
     ok(set_rule(viewer, ids[wanted], rule))
-    assert ok(read(viewer, ids[received])) == [context(ids[received], '3', widened=widened)]
+    assert ok(read(viewer, ids[received])) == [context(ids[received], '3', widened=widened, shared=rule != 'edition')]
 
 
 def test_trade_wants_only_do_not_widen_or_become_deck_need(store):
@@ -55,7 +57,7 @@ def test_mixed_exact_widened_and_trade_need_agrees_with_discovery(store):
     ok(set_want(viewer, ids['PAF 80'], 4))
     hold(other, binder(other), ids['PAF 80'], 6)
     result = ok(read(viewer, ids['PAF 80']))
-    assert result == [context(ids['PAF 80'], '3', '4', True)]
+    assert result == [context(ids['PAF 80'], '3', '4', widened=True, shared=True)]
     matched = ok(one(viewer, other))['you_get'][0]
     assert matched['want_list_need'] == result[0]['want_list_need']
     assert int(matched['need']) == int(result[0]['want_list_need']) + int(result[0]['trade_wants_quantity'])
@@ -93,7 +95,7 @@ def test_other_collectors_cannot_affect_or_appear_in_the_response(store):
     hold(other, binder(other, 'Other secret Location'), ids['PAL 185'], 50)
     assert ok(read(viewer, ids['PAL 185'], ids['SVI 166'])) == before
     assert before == [context(ids['PAL 185'], '2'), context(ids['SVI 166'])]
-    assert all(set(row) == {'edition_id', 'want_list_need', 'trade_wants_quantity', 'widened'} for row in before)
+    assert all(set(row) == {'edition_id', 'want_list_need', 'trade_wants_quantity', 'widened', 'shared'} for row in before)
     for private in [other, secret, 'Other private collector', 'Other secret Deck', 'Other secret Location']:
         assert private not in str(before)
 

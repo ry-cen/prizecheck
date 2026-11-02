@@ -17,11 +17,12 @@ export function tradeDeckNeed(
   return `Your Decks need ${need} ${card.name}${shared ? ", including need shared across printings." : "."}`;
 }
 
-/** Own-only fallback for an unlisted incoming card. Widening is shared need, never a per-printing instruction. */
+/** Own-only fallback: Will accept can share need even for the wanted Edition itself. widened describes how this
+ * Edition matched; only shared says other printings can satisfy a counted Want List part. */
 export function ownTradeDeckNeed(
-  row: { want_list_need: string; widened: boolean } | undefined
+  row: { want_list_need: string; widened: boolean; shared: boolean } | undefined
 ): string | null {
   const need = Number(row?.want_list_need);
   if (!Number.isSafeInteger(need) || need <= 0) return null;
-  return `Your Decks need ${need}${row?.widened ? ", including need shared across accepted printings." : "."}`;
+  return `Your Decks need ${need}${row?.shared ? ", including need shared across accepted printings." : "."}`;
 }
