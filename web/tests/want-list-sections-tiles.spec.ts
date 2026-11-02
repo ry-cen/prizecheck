@@ -360,32 +360,29 @@ for (const height of [800, 600]) {
     const checkVisibleRows = async () => {
       for (let index = 0; index < 8; index++) {
         const row = rows.nth(index);
-        const fullyVisible = await row.evaluate((element) => {
+        const sample = await row.evaluate((element) => {
           const box = element.getBoundingClientRect();
-          return (
+          const fullyVisible =
             box.top >= 0 &&
             box.bottom <= innerHeight &&
             box.left >= 0 &&
-            box.right <= innerWidth
-          );
+            box.right <= innerWidth;
+          const uncovered =
+            typeof document.elementFromPoint !== "function" ||
+            [box.top + box.height / 2, box.bottom - 1].every((y) => {
+              const hit = document.elementFromPoint(
+                box.left + box.width / 2,
+                y
+              );
+              return hit !== null && element.contains(hit);
+            });
+          return { fullyVisible, uncovered };
         });
-        if (!fullyVisible) continue;
+        if (!sample.fullyVisible) continue;
+        expect(sample.uncovered, `summary row ${index + 1} is uncovered`).toBe(
+          true
+        );
         await expect(row).toBeInViewport({ ratio: 1 });
-        await expect
-          .poll(() =>
-            row.evaluate((element) => {
-              if (typeof document.elementFromPoint !== "function") return true;
-              const box = element.getBoundingClientRect();
-              return [box.top + box.height / 2, box.bottom - 1].every((y) => {
-                const hit = document.elementFromPoint(
-                  box.left + box.width / 2,
-                  y
-                );
-                return hit !== null && element.contains(hit);
-              });
-            })
-          )
-          .toBe(true);
         seen.add(index);
       }
     };
@@ -407,6 +404,23 @@ for (const height of [800, 600]) {
           return after.y > before.y || after.atEnd;
         })
         .toBe(true);
+      // Movement alone is insufficient: sample only after two consecutive
+      // animation-frame intervals have unchanged scrollY, with a finite budget.
+      const settled = await page.evaluate(async () => {
+        let previous = scrollY;
+        let stableFrames = 0;
+        for (let frame = 0; frame < 120; frame++) {
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve())
+          );
+          const current = scrollY;
+          stableFrames = current === previous ? stableFrames + 1 : 0;
+          if (stableFrames >= 2) return true;
+          previous = current;
+        }
+        return false;
+      });
+      expect(settled, "wheel scrolling settled within 120 frames").toBe(true);
       await checkVisibleRows();
       const after = await position();
       if (after.y === before.y) {
