@@ -1,6 +1,11 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { proposalPath } from "./tradeListModel";
-import { toProposalCard, type ProposalCard } from "./proposalModel";
+import {
+  matchedProposal,
+  seededProposal,
+  type Proposal,
+  type ProposalCard,
+} from "./proposalModel";
 
 /**
  * Opens a Friend's proposal builder (through the Handle redirect, #299) from outside the Trades tab (Trading #284): Ask to trade in Catalog's card popup,
@@ -16,7 +21,7 @@ export const OpenProposalContext = createContext<
 // memory, from the click until the builder mounts, so a reload never brings them back: that is why they are not in the
 // address or in history.state, which survives a reload. The builder reads the notes without changing them while it
 // renders and clears them once it has mounted, so a render React repeats or throws away still finds them.
-let seed: { key: string; card: ProposalCard } | null = null;
+let seed: { key: string; proposal: Proposal; match?: boolean } | null = null;
 let origin: { key: string; back: string } | null = null;
 
 export function OpenProposalProvider({
@@ -27,7 +32,7 @@ export function OpenProposalProvider({
   children: ReactNode;
 }) {
   const open = (handle: string, card?: ProposalCard) => {
-    seed = card ? { key: handle, card: toProposalCard(card) } : null;
+    seed = card ? { key: handle, proposal: seededProposal(card) } : null;
     origin = null;
     onNavigate(proposalPath(handle));
   };
@@ -56,11 +61,25 @@ export function proposeFromTradeList(key: string, back: string): void {
   origin = { key, back };
 }
 
-/** The card Ask to trade opened this collector's builder with, or null. Changes nothing; see `clearProposalNotes`. */
-export function peekProposalSeed(key: string): ProposalCard | null {
+/** Seeds the same in-memory handoff as Ask to trade, with only the match currently visible in the row. */
+export function proposeFromMatch(
+  key: string,
+  row: Parameters<typeof matchedProposal>[0]
+): void {
+  seed = { key, proposal: matchedProposal(row), match: true };
+  origin = null;
+}
+
+/** The proposal Ask to trade or a match opened this collector's builder with, or null. Changes nothing; see `clearProposalNotes`. */
+export function peekProposalSeed(key: string): Proposal | null {
   return seed && seed.key.toLowerCase() === key.toLowerCase()
-    ? seed.card
+    ? seed.proposal
     : null;
+}
+
+/** Whether this builder came from a match; no group ids are carried into another response. */
+export function peekMatchProposal(key: string): boolean {
+  return seed?.key.toLowerCase() === key.toLowerCase() && seed.match === true;
 }
 
 /** The Trade List page this collector's builder was opened from, or null. Changes nothing; see `clearProposalNotes`. */

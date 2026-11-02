@@ -16,7 +16,7 @@ NAMES = ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "Look
          "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
          "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
          "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
-         "InboxTradeWaiting", "InboxTradeUpdate", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
+         "InboxTradeWaiting", "InboxTradeUpdate", "NeedGroup", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
          "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings", "DiscoverySettings",
          "SetDiscovery", "ConversationParty", "Message", "TimelineItem", "ConversationView", "LastMessage",
          "NearbyMatchRow", "NearbyMatches", "CardHolder", "TradeCardSearch",

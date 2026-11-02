@@ -38,10 +38,13 @@ import {
   clearProposalNotes,
   peekFromTradeList,
   peekProposalSeed,
+  peekMatchProposal,
 } from "./openProposal";
+import { MatchPrintingChoices } from "./MatchPrintingChoices";
 import { LiabilityNotice } from "./LiabilityNotice";
 import {
   centsAmount,
+  chooseMatchedPrinting,
   counterProposal,
   termsKey,
   EMPTY_PROPOSAL,
@@ -51,7 +54,6 @@ import {
   proposalCopies,
   quantityIn,
   requestLines,
-  seededProposal,
   setQuantity,
   toProposalCard,
   valueLines,
@@ -110,8 +112,8 @@ const BACK =
  * and **Send Trade Proposal**. The card library (ProposalLibrary) is the narrow right column. On a phone a Proposal
  * and Cards switch shows one pane at a time, Cards first; both stay mounted.
  *
- * The proposal starts empty (or, from Ask to trade, with one copy of that card in You get) and lives only in this
- * page: nothing is kept, so leaving ends it. Once the collector has changed it, leaving through the shell, a link,
+ * The proposal starts empty, with one copy in You get from Ask to trade, or with the visible match cards from Find
+ * trades. It lives only in this page: nothing is kept, so leaving ends it. Once the collector has changed it, leaving through the shell, a link,
  * the back link or the browser's Back and Forward asks "Discard this proposal to <name>?" (the router's leave guard),
  * and a reload or close shows the browser's own warning. Nothing is asked for a proposal that holds no cards, for one
  * left as it opened, when the collector didn't load, or after a successful send. A card can't be on both sides; a
@@ -146,9 +148,9 @@ export function ProposalBuilderPage({
   const phone = useMediaQuery(MOBILE_QUERY);
   const [proposal, setProposal] = useState<Proposal>(() => {
     if (counter) return counterProposal(counter);
-    const card = peekProposalSeed(traderId);
-    return card ? seededProposal(card) : EMPTY_PROPOSAL;
+    return peekProposalSeed(traderId) ?? EMPTY_PROPOSAL;
   });
+  const [fromMatch] = useState(() => !counter && peekMatchProposal(traderId));
   const [listBack] = useState(() =>
     counter ? null : peekFromTradeList(traderId)
   );
@@ -689,7 +691,31 @@ export function ProposalBuilderPage({
   const proposalPane = (
     <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
       {sideSection("get")}
+      {fromMatch && match.kind === "ready" && (
+        <MatchPrintingChoices
+          side="get"
+          row={match.row}
+          proposal={proposal}
+          onChoose={(groupId, editionId) =>
+            change((p) =>
+              chooseMatchedPrinting(p, "get", match.row, groupId, editionId)
+            )
+          }
+        />
+      )}
       {sideSection("give")}
+      {fromMatch && match.kind === "ready" && (
+        <MatchPrintingChoices
+          side="give"
+          row={match.row}
+          proposal={proposal}
+          onChoose={(groupId, editionId) =>
+            change((p) =>
+              chooseMatchedPrinting(p, "give", match.row, groupId, editionId)
+            )
+          }
+        />
+      )}
       <section
         aria-labelledby={cashHeadingId}
         className="flex min-w-0 flex-col gap-2"
