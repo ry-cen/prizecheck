@@ -139,6 +139,24 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertEqual(len(re.findall(r'(?m)^          - leg: ', legs)), 14)
         self.assertIn('run: npm run verify\n', job_body('integration-full'))
 
+    def test_browser_integration_requires_a_sandbox_preflight_before_verification(self):
+        for name in ('integration-legs', 'integration-full'):
+            steps = re.split(r'(?m)^      - ', job_body(name))[1:]
+            install = next(i for i, step in enumerate(steps)
+                           if 'run: npx playwright install --with-deps chromium' in step)
+            preflight, verify = steps[install + 1:install + 3]
+            self.assertIn('name: Chromium sandbox preflight (fail closed)', preflight)
+            self.assertIn('run: node scripts/browser_sandbox_preflight.mjs', preflight)
+            self.assertTrue(verify.startswith('run: npm run verify'), name)
+            for step in (preflight, verify):
+                self.assertNotIn('continue-on-error:', step)
+                self.assertNotIn('always()', step)
+            self.assertNotIn('if:', verify)
+            if name == 'integration-legs':
+                self.assertIn('if: ${{ matrix.browsers }}', preflight)
+            else:
+                self.assertNotIn('if:', preflight)
+
     def test_the_verify_aggregator_requires_the_default_checks_and_every_requested_job(self):
         verify = job_body('verify')
         jobs = ['checks', 'scanner-index-image', 'integration-legs', 'integration-full', 'integration-scanner-model']
