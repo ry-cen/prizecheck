@@ -141,22 +141,85 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertIn('run: npm run verify\n', job_body('integration-full'))
 
     def test_browser_integration_requires_a_sandbox_preflight_before_verification(self):
+        install_command = ('sudo env HOME=/root npm_config_cache=/root/.npm PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright '
+                           '"$(command -v node)" node_modules/@playwright/test/cli.js install --with-deps chromium')
         for name in ('integration-legs', 'integration-full'):
-            steps = re.split(r'(?m)^      - ', job_body(name))[1:]
+            job = job_body(name)
+            self.assertRegex(job, r'(?m)^    env:\n      PLAYWRIGHT_BROWSERS_PATH: /opt/ms-playwright$')
+            self.assertNotIn('continue-on-error:', job)
+            steps = re.split(r'(?m)^      - ', job)[1:]
             install = next(i for i, step in enumerate(steps)
-                           if 'run: npx playwright install --with-deps chromium' in step)
-            preflight, verify = steps[install + 1:install + 3]
+                           if install_command in step)
+            profile, preflight, verify = steps[install + 1:install + 4]
+            self.assertNotIn('npx playwright install', job)
+            self.assertIn('for ownership_path in "$GITHUB_WORKSPACE" node_modules "$HOME/.npm"; do', steps[install])
+            self.assertIn("stat -c 'Ownership: %n uid=%u gid=%g mode=%a'", steps[install])
+            self.assertIn('root_owned=$(find "$ownership_path" -user root -print -quit)', steps[install])
+            self.assertIn('if [[ -n "$root_owned" ]]; then', steps[install])
+            self.assertIn('exit 1', steps[install])
+            self.assertIn("name: Allow user namespaces for Playwright's headless Chromium only (AppArmor)", profile)
+            self.assertIn('run: bash scripts/ci_chromium_userns_profile.sh', profile)
             self.assertIn('name: Chromium sandbox preflight (fail closed)', preflight)
             self.assertIn('run: node scripts/browser_sandbox_preflight.mjs', preflight)
             self.assertTrue(verify.startswith('run: npm run verify'), name)
-            for step in (preflight, verify):
+            for step in (steps[install], profile, preflight, verify):
                 self.assertNotIn('continue-on-error:', step)
                 self.assertNotIn('always()', step)
             self.assertNotIn('if:', verify)
-            if name == 'integration-legs':
-                self.assertIn('if: ${{ matrix.browsers }}', preflight)
-            else:
-                self.assertNotIn('if:', preflight)
+            for step in (steps[install], profile, preflight):
+                if name == 'integration-legs':
+                    self.assertIn('if: ${{ matrix.browsers }}', step)
+                else:
+                    self.assertNotIn('if:', step)
+
+    def test_chromium_userns_profile_is_exact_root_owned_and_does_not_relax_other_policy(self):
+        script = (ROOT / 'scripts/ci_chromium_userns_profile.sh').read_text()
+        self.assertIn('set -euo pipefail', script)
+        self.assertEqual(script.count('/proc/sys/kernel/apparmor_restrict_unprivileged_userns'), 1)
+        self.assertIn('restriction=$(cat "$restriction_file")', script)
+        self.assertIn('[[ "$restriction" == 1 ]] || fail', script)
+        self.assertIn('AppArmor userns restriction not present', script)
+        self.assertIn('restriction not active: proposal prerequisite not met; cause remains unconfirmed', script)
+        self.assertNotRegex(script, r'(?m)^\s*(?:sudo\s+)?sysctl\b')
+        self.assertNotRegex(script, r'(?:>|tee\s+)[^\n]*(?:/proc/sys|restriction_file)')
+        for forbidden in ('include if exists', 'aa-complain', 'aa-disable'):
+            self.assertNotIn(forbidden, script)
+        self.assertIn('find "$PLAYWRIGHT_BROWSERS_PATH" -path \'*/chrome-headless-shell-linux64/chrome-headless-shell\' -type f', script)
+        self.assertIn('${#candidates[@]} -eq 1', script)
+        self.assertIn('[[ ! -L "$candidate" ]]', script)
+        self.assertIn('binary=$(readlink -f -- "$candidate")', script)
+        self.assertIn('[[ "$binary" =~ ^/opt/ms-playwright/chromium_headless_shell-[0-9]+/chrome-headless-shell-linux64/chrome-headless-shell$ ]]', script)
+        self.assertIn('[[ -f "$binary" && ! -L "$binary" ]]', script)
+        for required in ('stat -c %u', 'stat -c %a', '[[ "$uid" == 0 ]]', '(8#$mode & 0022) == 0',
+                         'check_root_path "$binary"', 'check_root_path "$directory"', '[[ "$directory" == / ]]'):
+            self.assertIn(required, script)
+        self.assertIn('profile=/etc/apparmor.d/prizecheck-playwright-chromium', script)
+        template = re.search(r'sudo tee "\$profile" > /dev/null <<EOF\n(.*?)\nEOF', script, re.S).group(1)
+        self.assertEqual(template, 'abi <abi/4.0>,\ninclude <tunables/global>\n\n'
+                         'profile prizecheck-playwright-chromium $binary flags=(unconfined) {\n  userns,\n}')
+        self.assertNotRegex(template, r'[*?\[\]]')
+        for required in ('sudo chown root:root "$profile"', 'sudo chmod 0644 "$profile"',
+                         'sudo apparmor_parser -r "$profile"', 'sudo cat /sys/kernel/security/apparmor/profiles',
+                         "grep -Fx 'prizecheck-playwright-chromium (unconfined)'", 'sha256sum "$binary"', 'cat "$profile"',
+                         'for ownership_path in "$GITHUB_WORKSPACE" node_modules "$HOME/.npm"; do',
+                         "stat -c 'Ownership: %n uid=%u gid=%g mode=%a'", 'find "$ownership_path" -user root -print -quit',
+                         '[[ -z "$root_owned" ]] || fail'):
+            self.assertIn(required, script)
+
+    def test_sandbox_preflight_requires_apparmor_user_namespace_and_both_seccomp_states(self):
+        script = (ROOT / 'scripts/browser_sandbox_preflight.mjs').read_text()
+        for required in ('chromiumSandbox: true', '"--no-sandbox"', '"--disable-setuid-sandbox"',
+                         '/attr/apparmor/current', '/attr/current', '/ns/user',
+                         'if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;',
+                         'const expectedLabel = "prizecheck-playwright-chromium (unconfined)";',
+                         'const differentUser = rendererUserNamespace !== browserUserNamespace;',
+                         'if (differentUser && rendererSeccomp === 2) sandboxedRenderers.push(pid);',
+                         'if (browserLabel !== expectedLabel)', 'if (browserSeccomp !== 0)',
+                         'if (!sandboxedRenderers.length)', 'if (failures.length) throw new Error(failures.join("; "));',
+                         'Seccomp field missing for PID', '} finally {', 'await browserServer?.close();'):
+            self.assertIn(required, script)
+        self.assertNotIn('differentPid', script)
+        self.assertNotIn('?? "unknown"', script)
 
     def test_all_browser_launch_options_use_the_shared_sandbox_helper(self):
         paths = [ROOT / 'playwright.config.ts', *sorted((ROOT / 'web/tests').rglob('*.ts'))]

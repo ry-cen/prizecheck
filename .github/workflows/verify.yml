@@ -62,6 +62,8 @@ jobs:
     name: ${{ matrix.leg }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /opt/ms-playwright
     strategy:
       # Every leg runs to the end, so one leg's failure doesn't hide another's.
       fail-fast: false
@@ -137,7 +139,20 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       # The api legs start no browser, so they skip the download.
       - if: ${{ matrix.browsers }}
-        run: npx playwright install --with-deps chromium
+        run: |
+          set -euo pipefail
+          sudo env HOME=/root npm_config_cache=/root/.npm PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright "$(command -v node)" node_modules/@playwright/test/cli.js install --with-deps chromium
+          for ownership_path in "$GITHUB_WORKSPACE" node_modules "$HOME/.npm"; do
+            stat -c 'Ownership: %n uid=%u gid=%g mode=%a' "$ownership_path"
+            root_owned=$(find "$ownership_path" -user root -print -quit)
+            if [[ -n "$root_owned" ]]; then
+              printf 'Root-owned path is forbidden: %s\n' "$root_owned" >&2
+              exit 1
+            fi
+          done
+      - name: Allow user namespaces for Playwright's headless Chromium only (AppArmor)
+        if: ${{ matrix.browsers }}
+        run: bash scripts/ci_chromium_userns_profile.sh
       - name: Chromium sandbox preflight (fail closed)
         if: ${{ matrix.browsers }}
         run: node scripts/browser_sandbox_preflight.mjs
@@ -158,6 +173,8 @@ jobs:
     # Well above the unsharded fast tier's 32 minutes on a hosted runner, since the full gate adds the slow tests and
     # the operations suite.
     timeout-minutes: 75
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /opt/ms-playwright
     services:
       postgres:
         image: postgres:16
@@ -187,7 +204,19 @@ jobs:
       - run: npm ci
       - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
-      - run: npx playwright install --with-deps chromium
+      - run: |
+          set -euo pipefail
+          sudo env HOME=/root npm_config_cache=/root/.npm PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright "$(command -v node)" node_modules/@playwright/test/cli.js install --with-deps chromium
+          for ownership_path in "$GITHUB_WORKSPACE" node_modules "$HOME/.npm"; do
+            stat -c 'Ownership: %n uid=%u gid=%g mode=%a' "$ownership_path"
+            root_owned=$(find "$ownership_path" -user root -print -quit)
+            if [[ -n "$root_owned" ]]; then
+              printf 'Root-owned path is forbidden: %s\n' "$root_owned" >&2
+              exit 1
+            fi
+          done
+      - name: Allow user namespaces for Playwright's headless Chromium only (AppArmor)
+        run: bash scripts/ci_chromium_userns_profile.sh
       - name: Chromium sandbox preflight (fail closed)
         run: node scripts/browser_sandbox_preflight.mjs
       - run: npm run verify
