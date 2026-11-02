@@ -31,7 +31,8 @@ export type AcceptBorrowRequest = { account_id?: string | null; revision: number
 export type PromiseLimit = { edition_id: string; available: string };
 export type LoanPickPlace = { edition_id: string; location_id: string | null; name: string; path: string; copies: string; short: string };
 export type LoanDeck = { id: string; name: string };
-export type LoanSide = { loan_id: string; deck: LoanDeck | null; can_promise: PromiseLimit[]; picks: LoanPickPlace[]; suggested: LoanPickPlace[]; awaiting_choice?: LoanPickPlace[] };
+export type DeckUse = { edition_id: string; for_decks: string; need: string };
+export type LoanSide = { loan_id: string; deck: LoanDeck | null; can_promise: PromiseLimit[]; picks: LoanPickPlace[]; suggested: LoanPickPlace[]; awaiting_choice?: LoanPickPlace[]; deck_use?: DeckUse[] | null };
 export type LentCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; image_url: string | null; copies: string; borrower: string };
 export type LentOut = { cards: LentCard[]; copies: string };
 export type BorrowedCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; copies: string; lender: string };
@@ -66,6 +67,7 @@ export type TradesView = { trades: TradeView[]; needs_you: number };
 export type TradeStep = { revision: number; idempotency_key: string };
 export type InboxTradeWaiting = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; conversation_id?: string | null; since: string };
 export type InboxTradeUpdate = { id: string; kind: "accepted" | "declined" | "cancelled" | "withdrawn" | "swapped"; trade_id: string; trade_state: "proposed" | "accepted" | "closed"; role: "proposer" | "recipient"; other_name: string; read: boolean; at: string };
+export type OwnTradeNeed = { edition_id: string; want_list_need: string; trade_wants_quantity: string; widened: boolean };
 export type NeedGroup = { id: string; need: string; cards: string };
 export type TradeMatchCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string; need: string; want_list_need: string; origin: "want_list" | "trade_wants" | "both"; accepts_as: "exact" | "any_finish" | "same_name" | null; need_groups: string[] };
 export type TradeMatchRow = { collector_id: string; trader_id: string; handle: string; display_name: string; completed_trades: number | null; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number; you_get_groups: NeedGroup[]; you_give_groups: NeedGroup[] };
@@ -267,6 +269,12 @@ export const getTradeMatches = (signal?: AbortSignal) =>
   request<TradeMatches>('/api/social/trade-matches', 'GET', undefined, signal);
 export const getTradeMatch = (collectorId: string, signal?: AbortSignal) =>
   request<TradeMatchRow>(`/api/social/trade-matches/${at(collectorId)}`, 'GET', undefined, signal);
+// Own Deck need accepting each Edition, even when it is no longer offered. No other collector is addressed.
+export const getOwnTradeNeeds = (editions: readonly string[], signal?: AbortSignal) => {
+  const params = new URLSearchParams();
+  for (const edition of editions) params.append('edition_id', edition);
+  return request<OwnTradeNeed[]>(`/api/social/trade-matches/needs?${params}`, 'GET', undefined, signal);
+};
 // Ask to trade (trading #276): Friends' Trade List copies of one Card Printing, for the card popup.
 export const getTradeCardMatches = (printingId: string, signal?: AbortSignal) =>
   request<TradeCardMatches>(`/api/social/trade-card-matches${query({ printing_id: printingId })}`, 'GET', undefined,
