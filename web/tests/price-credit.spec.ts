@@ -1,13 +1,13 @@
-// Ticket P4b (#350): the "Prices from TCGCSV" footer credit. The owner's exception to AGENTS.md's no-provenance rule
-// (ADR 0019): one line at the end of the signed-in shell and of the public layout, none on the scanner page, no date or
-// time, and the only collector-visible mention of TCGCSV. TCGplayer is named elsewhere by the Published Deck page's
-// "Buy on TCGplayer" export, which this ticket leaves alone; the text scan below allows exactly that and nothing else.
+// Ticket #467: the price credit lives only in the Settings footer (owner decision 2026-10-31).
+// Collection, Catalog, public pages and the scanner show none. The Published Deck's existing
+// not-endorsed notice and Buy on TCGplayer export remain unchanged.
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { signInAsOwner } from "./support/sign-in";
 import { startAsNewOwner } from "./support/owner";
+import { expectTouchTarget } from "./support/touch-target";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const CREDIT = "Prices from TCGCSV";
@@ -83,7 +83,7 @@ for (const viewport of [
   test.describe(`at ${viewport.width}×${viewport.height}`, () => {
     test.use({ viewport });
 
-    test("the Collection, catalog, Published Deck and sign-in pages each end with one credit and name no other source", async ({
+    test("only Settings ends with one credit; Collection, catalog and public pages show none", async ({
       page,
     }) => {
       const token = publishedToken(`credit-owner-${randomUUID()}`);
@@ -96,18 +96,16 @@ for (const viewport of [
       await expect(
         page.getByRole("navigation", { name: "Public pages" })
       ).toBeVisible();
-      await expectOneCredit(page);
+      await expect(credit(page)).toHaveCount(0);
       expect(await otherSourceMentions(page)).toEqual([]);
 
       await page.goto(`${ORIGIN}/published/${token}`);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-      await expectOneCredit(page);
-      // It comes after the TCGdex not-endorsed note.
+      await expect(credit(page)).toHaveCount(0);
+      // The existing not-endorsed note remains visible.
       const note = page.getByText(/Not endorsed by Nintendo/);
       await expect(note).toHaveCount(1);
-      const noteBox = (await note.boundingBox())!;
-      const creditBox = (await credit(page).boundingBox())!;
-      expect(creditBox.y).toBeGreaterThan(noteBox.y + noteBox.height - 1);
+      await expect(note).toBeVisible();
       // The page's existing Buy on TCGplayer export is the only other mention, and TCGCSV is in none.
       const published = await otherSourceMentions(page);
       expect(published.length).toBeGreaterThan(0);
@@ -119,7 +117,22 @@ for (const viewport of [
       await expect(
         page.getByRole("navigation", { name: "Main views" })
       ).toBeVisible();
+      await expect(credit(page)).toHaveCount(0);
+      expect(await otherSourceMentions(page)).toEqual([]);
+
+      await page.goto(`${ORIGIN}/catalog`);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await expect(credit(page)).toHaveCount(0);
+      expect(await otherSourceMentions(page)).toEqual([]);
+
+      await page.goto(`${ORIGIN}/settings`);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "Settings"
+      );
       await expectOneCredit(page);
+      await expect(page.getByRole("main").locator("footer")).toContainText(
+        CREDIT
+      );
       expect(await otherSourceMentions(page)).toEqual([]);
       if (viewport.width <= 760) {
         // Scrolled to the end, the credit sits above the fixed tab bar.
@@ -131,10 +144,11 @@ for (const viewport of [
         expect(box.y + box.height).toBeLessThanOrEqual(tabs.y + 0.5);
       }
 
-      await page.goto(`${ORIGIN}/catalog`);
-      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-      await expectOneCredit(page);
-      expect(await otherSourceMentions(page)).toEqual([]);
+      if (viewport.width <= 760) {
+        await expectTouchTarget(
+          credit(page).getByRole("link", { name: "TCGCSV" })
+        );
+      }
     });
 
     test("the scanner page shows no credit", async ({ page }) => {

@@ -58,11 +58,14 @@ export function StaleBanner({
       data-collection-stale-banner=""
       className={
         text
-          ? "sticky top-(--layout-sticky-top) z-(--layer-sticky) mt-3 box-border flex items-center gap-3 rounded-panel border border-accent-border bg-surface-raised py-1 pr-1 pl-4 phone:pl-3"
+          ? "sticky top-(--layout-sticky-top) z-(--layer-sticky) mt-3 box-border flex items-center gap-3 rounded-panel border border-accent-border bg-surface-raised py-1 pr-1 pl-4 phone:flex-wrap phone:gap-1 phone:pl-3"
           : "flex items-center gap-3"
       }
     >
-      <p className="m-0 flex-auto text-meta empty:sr-only" role="status">
+      <p
+        className="m-0 flex-auto text-meta empty:sr-only phone:basis-full"
+        role="status"
+      >
         {text}
       </p>
       {stale ? (
