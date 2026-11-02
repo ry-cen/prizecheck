@@ -29,7 +29,7 @@ type Props = {
 };
 
 /**
- * Missing cards (#169, variant A of the Missing cards and Owner controls decision): sub-tabs for My reports
+ * Card reports (#169, variant A of the Missing cards and Owner controls decision): sub-tabs for My reports
  * and Report a card. The page stays mounted when the collector leaves it, so the sub-tab, the form and
  * reply drafts are kept; the reports are read again each time the page is shown, as they were when it
  * remounted on every visit. Only missing-card reports are listed: metadata reports stay in Catalog. A report link
@@ -168,9 +168,9 @@ export function MissingCardsPage({ active, message }: Props) {
   const panelId = `${idBase}-panel-${section}`;
   return (
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-7 phone:px-4 phone:py-5">
-      <PageHeader title="Missing cards" />
+      <PageHeader title="Card reports" />
       <Segmented
-        label="Missing cards sections"
+        label="Card reports sections"
         idBase={idBase}
         panelId={panelId}
         value={section}

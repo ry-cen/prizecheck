@@ -75,7 +75,7 @@ export const PAGES: readonly PageDef[] = [
   {
     id: "reports",
     path: "/reports",
-    label: "Missing cards",
+    label: "Card reports",
   },
   {
     id: "settings",
@@ -99,7 +99,7 @@ export const DESKTOP_TABS: readonly PageId[] = [
   "trades",
   "reports",
 ];
-/** Phone bottom tab bar (#252: Loans took the More slot; Missing cards moved to the account sheet; Trading #269:
+/** Phone bottom tab bar (#252: Loans took the More slot; Card reports moved to the account sheet; Trading #269:
  * Trades is the fifth). */
 export const PHONE_TABS: readonly PageId[] = [
   "collection",

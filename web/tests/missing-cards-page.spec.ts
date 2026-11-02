@@ -1,4 +1,4 @@
-// Ticket #169: the Missing cards page (spec "Missing cards and Owner controls"). The My reports and Report a
+// Ticket #169: the Card reports page (spec "Missing cards and Owner controls"). The My reports and Report a
 // card sub-tabs; My reports as a table whose Reply opens the conversation in a row under the report, pinned to
 // the table's visible width while it scrolls sideways; the page keeping its sub-tab and draft across a tab
 // switch and reading the reports again when shown; the shared page check at 1280×800 and 375×812. The owner's
@@ -23,7 +23,7 @@ async function query<T = Record<string, unknown>>(
   }
 }
 
-/** Signs in at /reports as a new user, so My reports holds only this test's reports, and lands on Missing cards. */
+/** Signs in at /reports as a new user, so My reports holds only this test's reports, and lands on Card reports. */
 async function signIn(page: Page) {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
@@ -35,7 +35,7 @@ async function signIn(page: Page) {
   await signInAsOwner(page, "/reports");
   await expect(page).toHaveURL(/\/reports$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "Missing cards"
+    "Card reports"
   );
 }
 
@@ -74,7 +74,7 @@ const mainTab = (page: Page, name: string) =>
     .getByRole("navigation", { name: "Main views" })
     .getByRole("button", { name, exact: true });
 const sections = (page: Page) =>
-  page.getByRole("tablist", { name: "Missing cards sections" });
+  page.getByRole("tablist", { name: "Card reports sections" });
 const sectionTab = (page: Page, name: string) =>
   sections(page).getByRole("tab", { name, exact: true });
 const statusLine = (page: Page) => page.getByRole("main").getByRole("status");
@@ -90,7 +90,7 @@ const conversation = (page: Page, card: string) =>
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("Missing cards has My reports and Report a card sub-tabs, keeps its draft across a tab switch, and lists a sent report as Pending", async ({
+  test("Card reports has My reports and Report a card sub-tabs, keeps its draft across a tab switch, and lists a sent report as Pending", async ({
     page,
   }) => {
     await signIn(page);
@@ -110,7 +110,7 @@ test.describe("desktop", () => {
       await expect(mine).toContainText("No reports yet.");
       // Metadata reports stay in Catalog.
       await expect(mine).toContainText("open the card in Catalog");
-      await expectPageChecks(page, "Missing cards, no reports (desktop)");
+      await expectPageChecks(page, "Card reports, no reports (desktop)");
 
       await sectionTab(page, "Report a card").click();
       await expect(page).toHaveURL(/\/reports$/);
@@ -134,7 +134,7 @@ test.describe("desktop", () => {
       await expect(rail).toBeHidden();
       await expectPageChecks(
         page,
-        "Missing cards, Report a card, Missing Printing (desktop)"
+        "Card reports, Report a card, Missing Printing (desktop)"
       );
       await form.getByLabel("Report type").selectOption("edition");
       await expect(form.getByLabel("Printing ID")).toBeVisible();
@@ -142,7 +142,7 @@ test.describe("desktop", () => {
       await expect(form.getByLabel("Set ID")).toHaveCount(0);
       await expectPageChecks(
         page,
-        "Missing cards, Report a card, Missing Edition (desktop)"
+        "Card reports, Report a card, Missing Edition (desktop)"
       );
       await form.getByLabel("Report type").selectOption("printing");
       await form.getByLabel("Set ID").fill(setId);
@@ -150,7 +150,7 @@ test.describe("desktop", () => {
       // The page stays mounted: leaving it and coming back keeps the sub-tab and the draft.
       await mainTab(page, "Decks").click();
       await expect(page).toHaveURL(/\/decks$/);
-      await mainTab(page, "Missing cards").click();
+      await mainTab(page, "Card reports").click();
       await expect(page).toHaveURL(/\/reports$/);
       await expect(sectionTab(page, "Report a card")).toHaveAttribute(
         "aria-selected",
@@ -191,7 +191,7 @@ test.describe("desktop", () => {
         "",
       ]);
       await expect(row.getByRole("button")).toHaveCount(0);
-      await expectPageChecks(page, "Missing cards, My reports (desktop)");
+      await expectPageChecks(page, "Card reports, My reports (desktop)");
 
       // As before, the card stays filled in for a next report, and the evidence and note are cleared.
       await sectionTab(page, "Report a card").click();
@@ -227,11 +227,11 @@ test.describe("desktop", () => {
         collector_number: "2",
         note: "Holo from a 2026 tin",
       });
-      // The owner asks while the collector is on another page; showing Missing cards again reads the reports.
+      // The owner asks while the collector is on another page; showing Card reports again reads the reports.
       await mainTab(page, "Decks").click();
       await expect(page).toHaveURL(/\/decks$/);
       await askForInformation(id, reason);
-      await mainTab(page, "Missing cards").click();
+      await mainTab(page, "Card reports").click();
       const row = reportRow(page, card);
       await expect(row.getByRole("cell").nth(2)).toHaveText(
         "Needs information"
@@ -254,7 +254,7 @@ test.describe("desktop", () => {
       await expect(box).toBeFocused();
       const send = thread.getByRole("button", { name: "Send information" });
       await expect(send).toBeDisabled();
-      await expectPageChecks(page, "Missing cards, Reply open (desktop)");
+      await expectPageChecks(page, "Card reports, Reply open (desktop)");
 
       // Close folds the row and keeps the draft; focus stays on the button.
       await box.fill(reply);
@@ -267,7 +267,7 @@ test.describe("desktop", () => {
 
       // Leaving and coming back remounts the open row; that must not pull focus off the tab.
       const sections = page.getByRole("tablist", {
-        name: "Missing cards sections",
+        name: "Card reports sections",
       });
       await sections
         .getByRole("tab", { name: "Report a card", exact: true })
@@ -308,7 +308,7 @@ test.describe("desktop", () => {
 test.describe("phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-  test("on a phone Missing cards opens from the account sheet, its table and pinned Reply row scroll inside the table, and the page check passes", async ({
+  test("on a phone Card reports opens from the account sheet, its table and pinned Reply row scroll inside the table, and the page check passes", async ({
     page,
   }) => {
     await signIn(page);
@@ -328,10 +328,10 @@ test.describe("phone", () => {
       );
       await mainTab(page, "Collection").tap();
       await expect(page).toHaveURL(/\/collection$/);
-      // Loans took the More slot (#252): Missing cards is in the account sheet.
+      // Loans took the More slot (#252): Card reports is in the account sheet.
       await page.getByRole("button", { name: "Account", exact: true }).tap();
       const sheet = page.getByRole("dialog", { name: "Account" });
-      await sheet.getByRole("button", { name: "Missing cards" }).tap();
+      await sheet.getByRole("button", { name: "Card reports" }).tap();
       await expect(page).toHaveURL(/\/reports$/);
       await expect(sheet).toBeHidden();
 
@@ -342,7 +342,7 @@ test.describe("phone", () => {
       await expect
         .poll(() => table.evaluate((box) => box.scrollWidth > box.clientWidth))
         .toBe(true);
-      await expectPageChecks(page, "Missing cards, My reports (phone)");
+      await expectPageChecks(page, "Card reports, My reports (phone)");
 
       await reportRow(page, card).getByRole("button").tap();
       const thread = conversation(page, card);
@@ -374,20 +374,20 @@ test.describe("phone", () => {
       await table.evaluate((box) => {
         box.scrollLeft = 0;
       });
-      await expectPageChecks(page, "Missing cards, Reply open (phone)");
+      await expectPageChecks(page, "Card reports, Reply open (phone)");
 
       await sectionTab(page, "Report a card").tap();
       await expect(
         page.getByRole("tabpanel", { name: "Report a card" })
       ).toBeVisible();
-      await expectPageChecks(page, "Missing cards, Report a card (phone)");
+      await expectPageChecks(page, "Card reports, Report a card (phone)");
 
       await page.getByRole("button", { name: "Account", exact: true }).tap();
       await expect(sheet).toBeVisible();
       await expect(
-        sheet.getByRole("button", { name: "Missing cards" })
+        sheet.getByRole("button", { name: "Card reports" })
       ).toHaveAttribute("aria-current", "page");
-      await expectPageChecks(page, "Account sheet over Missing cards (phone)");
+      await expectPageChecks(page, "Account sheet over Card reports (phone)");
       await page.keyboard.press("Escape");
       await expect(sheet).toBeHidden();
     } finally {

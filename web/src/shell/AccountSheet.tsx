@@ -19,8 +19,8 @@ import { Icon } from "../ui/Icon";
 
 /**
  * The phone account sheet (social network #246, spec "Web screens"): the avatar button in the phone header opens a
- * sheet with Settings, Sign-ins, Missing cards, Owner controls (the owner only) and Sign out: the account items the
- * desktop avatar menu has, and Missing cards, whose desktop tab has no phone tab since Loans took the More slot (#252).
+ * sheet with Settings, Sign-ins, Card reports, Owner controls (the owner only) and Sign out: the account items the
+ * desktop avatar menu has, and Card reports, whose desktop tab has no phone tab since Loans took the More slot (#252).
  * The shell provides it; the phone headers (the shell's and Collection's own) draw the button through
  * PhoneHeaderActions.
  */
@@ -42,9 +42,9 @@ type ProviderProps = {
   onSettings: () => void;
   onSignIns: () => void;
   onOwner: () => void;
-  /** Opens Missing cards (/reports). */
+  /** Opens Card reports (/reports). */
   onReports: () => void;
-  /** The page shown, so the sheet marks Settings, Missing cards or Owner controls when it is one of them. */
+  /** The page shown, so the sheet marks Settings, Card reports or Owner controls when it is one of them. */
   current: string | null;
   onSignOut: () => void;
   children: ReactNode;
@@ -83,7 +83,7 @@ export function AccountSheetProvider({
     },
     { label: "Sign-ins", icon: KeyRound, onSelect: choose(onSignIns) },
     {
-      label: "Missing cards",
+      label: "Card reports",
       icon: Flag,
       onSelect: choose(onReports),
       current: current === "reports",

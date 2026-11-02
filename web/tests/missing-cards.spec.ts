@@ -35,9 +35,9 @@ promote({'fixture-1': 'Pikachu'})`,
       page.getByRole("menuitem", { name: "Owner controls" })
     ).toBeVisible();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Missing cards" }).click();
+    await page.getByRole("button", { name: "Card reports" }).click();
     await page
-      .getByRole("tablist", { name: "Missing cards sections" })
+      .getByRole("tablist", { name: "Card reports sections" })
       .getByRole("tab", { name: "Report a card", exact: true })
       .click();
     const report = page.getByRole("tabpanel", { name: "Report a card" });

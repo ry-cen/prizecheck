@@ -295,7 +295,7 @@ test.describe("desktop", () => {
       "Catalog",
       "Loans",
       "Trades",
-      "Missing cards",
+      "Card reports",
     ]);
     // A marker on the window survives only if no page load happens.
     await page.evaluate(() => {
@@ -306,7 +306,7 @@ test.describe("desktop", () => {
       ["Catalog", "/catalog", "Catalog"],
       ["Loans", "/loans", "Loans"],
       ["Trades", "/trades", "Trades"],
-      ["Missing cards", "/reports", "Missing cards"],
+      ["Card reports", "/reports", "Card reports"],
       ["Collection", "/collection", "All owned"],
     ]) {
       await tab(page, name).click();
@@ -325,7 +325,7 @@ test.describe("desktop", () => {
     // History moves between pages in the app too.
     await page.goBack();
     await expect(page).toHaveURL(/\/reports$/);
-    await expect(tab(page, "Missing cards")).toHaveAttribute(
+    await expect(tab(page, "Card reports")).toHaveAttribute(
       "aria-current",
       "page"
     );
@@ -598,7 +598,7 @@ test.describe("phone", () => {
     hasTouch: true,
   });
 
-  test("the bottom tab bar switches pages, Loans has the old More slot, and the account sheet holds Missing cards, Settings, Owner controls for the owner and Sign out", async ({
+  test("the bottom tab bar switches pages, Loans has the old More slot, and the account sheet holds Card reports, Settings, Owner controls for the owner and Sign out", async ({
     page,
   }) => {
     await signIn(page);
@@ -654,7 +654,7 @@ test.describe("phone", () => {
       await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
         "Settings",
         "Sign-ins",
-        "Missing cards",
+        "Card reports",
         "Owner controls",
         "Sign out",
       ]);
@@ -672,17 +672,17 @@ test.describe("phone", () => {
       await expect(avatar).toBeFocused();
 
       await avatar.tap();
-      await sheet.getByRole("button", { name: "Missing cards" }).tap();
+      await sheet.getByRole("button", { name: "Card reports" }).tap();
       await expect(page).toHaveURL(/\/reports$/);
       await expect(sheet).toBeHidden();
-      await expect(heading(page)).toHaveText("Missing cards");
-      // No tab is current on Missing cards; the sheet marks it.
+      await expect(heading(page)).toHaveText("Card reports");
+      // No tab is current on Card reports; the sheet marks it.
       await expect(
         mainViews(page).locator('[aria-current="page"]')
       ).toHaveCount(0);
       await avatar.tap();
       await expect(
-        sheet.getByRole("button", { name: "Missing cards" })
+        sheet.getByRole("button", { name: "Card reports" })
       ).toHaveAttribute("aria-current", "page");
 
       // The scrim closes it.
@@ -700,7 +700,7 @@ test.describe("phone", () => {
       await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
         "Settings",
         "Sign-ins",
-        "Missing cards",
+        "Card reports",
         "Sign out",
       ]);
       await sheet.getByRole("button", { name: "Sign out" }).tap();
@@ -884,7 +884,7 @@ test.describe("phone", () => {
         ["/catalog", null],
         ["/loans", "Loans"],
         ["/trades", null],
-        ["/reports", "Missing cards"],
+        ["/reports", "Card reports"],
         ["/settings", "Settings"],
       ] as const) {
         await page.goto(`${ORIGIN}${path}`);
