@@ -39,6 +39,17 @@ export function loanLines(loan: LoanView): LoanView["lines"] {
     : loan.lines;
 }
 
+/** The reader's role, omitting Loans closed before the cards were handed over. */
+export function loanRoleFact(
+  loan: Pick<LoanView, "state" | "role" | "closed_reason">
+): string | null {
+  if (loan.state !== "closed")
+    return loan.role === "lender" ? "You're lending" : "You're borrowing";
+  if (loan.closed_reason === "returned" || loan.closed_reason === "written_off")
+    return loan.role === "lender" ? "You lent" : "You borrowed";
+  return null;
+}
+
 /**
  * The plain-language headline from the reader's side (Loans verdict, variant E): "Ash K. wants to borrow 3 cards",
  * "You asked Misty W. for 3 cards", "You're lending Ash K. 2 cards". It names no Location, Deck or reason: a cancel
