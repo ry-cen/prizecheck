@@ -379,7 +379,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   ).toContainText("Iono");
   await expect(chips(page, "Iono")).toHaveCount(0);
 
-  // Once Ash deletes the Deck, the Loan is for Unsorted, with no link.
+  // Once Ash deletes the Deck, the cards go to Unsorted, with no link.
   const deckDetail = await api(page, "GET", `/api/decks/${charizard}`);
   await api(page, "DELETE", `/api/decks/${charizard}`, {
     name: deckName,
@@ -388,7 +388,9 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   });
   await page.goto(loanUrl);
   await expect(title(page)).toHaveText("Misty W is lending you 2 cards");
-  await expect(facts(page)).toContainText("You're borrowing · For Unsorted");
+  await expect(facts(page)).toContainText(
+    "You're borrowing · Goes to Unsorted"
+  );
   await expect(deckLinks(page)).toHaveCount(0);
 
   // Misty can't remove copies she promised.
@@ -588,8 +590,10 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   await composer.getByRole("button", { name: "Send Borrow Request" }).click();
   await view(page).click();
   await expect(title(page)).toHaveText("You asked Misty W for 2 cards");
-  // For Unsorted is plain text.
-  await expect(facts(page)).toContainText("You're borrowing · For Unsorted");
+  // Goes to Unsorted is plain text.
+  await expect(facts(page)).toContainText(
+    "You're borrowing · Goes to Unsorted"
+  );
   await expect(deckLinks(page)).toHaveCount(0);
 
   // And withdraws it: Keep it returns focus to ⋯, and the step moves it to the heading.
@@ -608,9 +612,8 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   await expect(title(page)).toHaveText("You withdrew your request to Misty W");
   await expect(title(page)).toBeFocused();
   await expect(more).toBeVisible();
-  // A closed Loan names no Deck.
-  await expect(facts(page)).toHaveCount(1);
-  await expect(facts(page)).not.toContainText("For ");
+  // A withdrawn Loan has no role fact and names no Deck.
+  await expect(facts(page)).toHaveCount(0);
   await expect(deckLinks(page)).toHaveCount(0);
 
   // Keep draft keeps an edited request as a draft; signing out forgets it.
