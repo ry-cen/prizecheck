@@ -40,9 +40,9 @@ from want_list_swap_fixtures import seed_swap_catalog
 
 UNKNOWN = b'{"detail":{"code":"FRIEND_NOT_FOUND"}}'
 ROW_FIELDS = {'collector_id', 'trader_id', 'handle', 'display_name', 'completed_trades', 'open_to_cash_offers', 'match',
-              'you_get', 'you_give', 'more_you_get', 'more_you_give'}
+              'you_get', 'you_give', 'more_you_get', 'more_you_give', 'you_get_groups', 'you_give_groups'}
 CARD_FIELDS = {'edition_id', 'name', 'set_code', 'set_name', 'collector_number', 'descriptor', 'image_url', 'copies',
-               'need', 'want_list_need', 'origin', 'accepts_as'}
+               'need', 'want_list_need', 'origin', 'accepts_as', 'need_groups'}
 
 
 def matches(viewer):
@@ -456,7 +456,8 @@ def test_a_friend_who_matches_nothing_has_no_row_and_their_read_says_so(store):
     assert matches(viewer) == {'has_friends': True, 'rows': []}
     assert ok(one(viewer, friend)) == {
         'collector_id': friend, 'trader_id': trader_of(friend), 'handle': handle, 'display_name': 'Ash K.',
-        'completed_trades': 0, 'open_to_cash_offers': False, 'match': None, 'you_get': [], 'you_give': [], 'more_you_get': 0, 'more_you_give': 0}
+        'completed_trades': 0, 'open_to_cash_offers': False, 'match': None, 'you_get': [], 'you_give': [], 'more_you_get': 0, 'more_you_give': 0,
+        'you_get_groups': [], 'you_give_groups': []}
     # Discovery reads the current Trade List and wants on every open.
     ok(set_want(viewer, ids['PAL 185'], 1))
     shelf = binder(friend)
@@ -559,7 +560,17 @@ def test_open_to_cash_offers_from_its_route_marks_one_way_rows_only_while_on(sto
     def flags():
         rows = {row['collector_id']: row for row in matches(viewer)['rows']}
         single = {friend: ok(one(viewer, friend)) for friend in (seller, buyer)}
-        assert all(rows[friend] == single[friend] for friend in (seller, buyer))
+        # Group ids are local to a response. Compare every field and membership after giving ids canonical names.
+        def canonical(row):
+            row = json.loads(json.dumps(row))
+            for side in ('you_get', 'you_give'):
+                ids = {group['id']: str(index) for index, group in enumerate(row[side + '_groups'])}
+                for card in row[side]:
+                    card['need_groups'] = [ids[key] for key in card['need_groups']]
+                for group in row[side + '_groups']:
+                    group['id'] = ids[group['id']]
+            return row
+        assert all(canonical(rows[friend]) == canonical(single[friend]) for friend in (seller, buyer))
         return [rows[seller]['open_to_cash_offers'], rows[buyer]['open_to_cash_offers']]
     assert flags() == [False, False]
     open_to_cash(seller)
@@ -686,7 +697,7 @@ def test_the_friend_wants_statements_never_name_a_location_or_deck_in_what_they_
 # Trader reads (Trading #299): the match row of a collector in reach, by trader id.
 
 TRADER_FIELDS = {'trader_id', 'display_name', 'band', 'completed_trades', 'open_to_cash_offers', 'match', 'you_get',
-                 'you_give', 'more_you_get', 'more_you_give'}
+                 'you_give', 'more_you_get', 'more_you_give', 'you_get_groups', 'you_give_groups'}
 COLLECTOR_UNKNOWN = b'{"detail":{"code":"COLLECTOR_NOT_FOUND"}}'
 
 

@@ -75,7 +75,7 @@ Deck, by name or by id.
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -196,6 +196,14 @@ AcceptsAs = Literal['exact', 'any_finish', 'same_name']
 KIND_ORDER = {'two_way': 0, 'has_what_you_want': 1, 'wants_what_you_have': 2}
 
 
+class NeedGroup(BaseModel):
+    """An opaque part of a receiving side's need. ``cards`` counts offered member Editions over the whole side,
+    including members beyond the carried slice. Ids live only in this response and side."""
+    id: str
+    need: str
+    cards: str
+
+
 class TradeMatchCard(BaseModel):
     """One card on one side of a discovery row. ``copies``: how many the giving side offers now. ``need``: how many the
     receiving side wants in total; ``want_list_need``: the part their Want List needs ("6 wanted (2 for Decks)").
@@ -213,6 +221,7 @@ class TradeMatchCard(BaseModel):
     want_list_need: str
     origin: Origin
     accepts_as: AcceptsAs | None
+    need_groups: list[str]
 
 
 class TradeMatchRow(BaseModel):
@@ -232,6 +241,8 @@ class TradeMatchRow(BaseModel):
     you_give: list[TradeMatchCard]
     more_you_get: int
     more_you_give: int
+    you_get_groups: list[NeedGroup]
+    you_give_groups: list[NeedGroup]
 
 
 class TraderView(BaseModel):
@@ -278,6 +289,8 @@ class TraderMatchRow(BaseModel):
     you_give: list[TradeMatchCard]
     more_you_get: int
     more_you_give: int
+    you_get_groups: list[NeedGroup]
+    you_give_groups: list[NeedGroup]
 
 
 class TradeMatches(BaseModel):
@@ -323,6 +336,8 @@ class NearbyMatchRow(BaseModel):
     you_give: list[TradeMatchCard]
     more_you_get: int
     more_you_give: int
+    you_get_groups: list[NeedGroup]
+    you_give_groups: list[NeedGroup]
 
 
 class NearbyMatches(BaseModel):
@@ -455,13 +470,42 @@ def accepts_as(edition: UUID, wants: dict[UUID, Want], reached: dict[UUID, list[
     return 'same_name'
 
 
-def match_card(card, matched: Matched, accepted_as: AcceptsAs | None) -> TradeMatchCard:
+def match_card(card, matched: Matched, accepted_as: AcceptsAs | None, groups: list[str]) -> TradeMatchCard:
     trade = matched.need - matched.want_list_need
     origin = 'both' if matched.want_list_need and trade else 'want_list' if matched.want_list_need else 'trade_wants'
     return TradeMatchCard(edition_id=card.edition_id, name=card.name, set_code=card.set_code, set_name=card.set_name,
                           collector_number=card.collector_number, descriptor=card.descriptor,
                           image_url=card.image_url, copies=str(matched.copies), need=str(matched.need),
-                          want_list_need=str(matched.want_list_need), origin=origin, accepts_as=accepted_as)
+                          want_list_need=str(matched.want_list_need), origin=origin, accepts_as=accepted_as, need_groups=groups)
+
+
+def match_groups(wants: dict[UUID, Want], reached: dict[UUID, list[UUID]],
+                 whole: list[Matched], carried: list[Matched]) -> tuple[list[NeedGroup], dict[UUID, list[str]]]:
+    """Split exactly the terms pair() sums, without another read. Count members before truncation; emit only groups
+    a carried card references, in carried card order. Internal want keys never leave this function."""
+    members: dict[tuple[str, UUID], set[UUID]] = {}
+    quantities: dict[tuple[str, UUID], int] = {}
+    references: dict[UUID, list[tuple[str, UUID]]] = {}
+    for card in whole:
+        edition = card.edition_id
+        parts = [('want_list', wanted) for wanted in sorted(reached.get(edition, ()))]
+        if edition in wants and wants[edition].trade_wants_quantity > 0:
+            parts.append(('trade_wants', edition))
+        references[edition] = parts
+        for kind, wanted in parts:
+            key = (kind, wanted)
+            members.setdefault(key, set()).add(edition)
+            quantities[key] = (wants[wanted].want_list_need if kind == 'want_list'
+                               else wants[wanted].trade_wants_quantity)
+    emitted: dict[tuple[str, UUID], NeedGroup] = {}
+    ids: dict[UUID, list[str]] = {}
+    for card in carried:
+        ids[card.edition_id] = []
+        for key in references[card.edition_id]:
+            if key not in emitted:
+                emitted[key] = NeedGroup(id=uuid4().hex, need=str(quantities[key]), cards=str(len(members[key])))
+            ids[card.edition_id].append(emitted[key].id)
+    return list(emitted.values()), ids
 
 
 @dataclass(frozen=True)
@@ -477,6 +521,8 @@ class PartyMatch:
     you_give: list[TradeMatchCard]
     more_you_get: int
     more_you_give: int
+    you_get_groups: list[NeedGroup]
+    you_give_groups: list[NeedGroup]
 
 
 # Who discover matches with: called once inside its read-only snapshot, it answers each party's user id and band.
@@ -545,11 +591,13 @@ def discover(user_id: str, parties: Parties, among: Literal['friends', 'reach'] 
                                             for edition, want in found.items()
                                             if want.rule == rule and want.want_list_need > 0})
         matched: dict[str, tuple[list[Matched], list[Matched]]] = {}
+        their_reaches: dict[str, dict[UUID, list[UUID]]] = {}
         for friend in scope:
             found = theirs.get(friend, {})
             their_reach = reaching(found, {
                 edition: expanded[want.rule].get(edition, {edition}) if want.rule in expanded else {edition}
                 for edition, want in found.items()})
+            their_reaches[friend] = their_reach
             gets = pair(mine, my_reach, offered.get(friend, {}))
             gives = pair(found, their_reach, listable) if found else []
             if gets or gives or whole:
@@ -568,13 +616,17 @@ def discover(user_id: str, parties: Parties, among: Literal['friends', 'reach'] 
         gives.sort(key=lambda item: cards[item.edition_id].order())
         kind = ('two_way' if gets and gives else 'has_what_you_want' if gets
                 else 'wants_what_you_have' if gives else None)
+        get_groups, get_ids = match_groups(mine, my_reach, gets, gets[:limit])
+        give_groups, give_ids = match_groups(theirs.get(friend, {}), their_reaches[friend], gives, gives[:limit])
         rows.append(PartyMatch(
             party_id=friend, profile=profile, completed_trades=counts.get(friend, 0), band=bands.get(friend),
             match=kind,
             you_get=[match_card(cards[item.edition_id], item,
-                                accepts_as(item.edition_id, mine, my_reach, printing_of)) for item in gets[:limit]],
-            you_give=[match_card(cards[item.edition_id], item, None) for item in gives[:limit]],
-            more_you_get=len(gets) - len(gets[:limit]), more_you_give=len(gives) - len(gives[:limit])))
+                                accepts_as(item.edition_id, mine, my_reach, printing_of),
+                                get_ids[item.edition_id]) for item in gets[:limit]],
+            you_give=[match_card(cards[item.edition_id], item, None, give_ids[item.edition_id]) for item in gives[:limit]],
+            more_you_get=len(gets) - len(gets[:limit]), more_you_give=len(gives) - len(gives[:limit]),
+            you_get_groups=get_groups, you_give_groups=give_groups))
     return True, rows
 
 
@@ -584,7 +636,8 @@ def friend_row(row: PartyMatch) -> TradeMatchRow:
         collector_id=row.party_id, trader_id=profile['trader_id'], handle=profile['handle'],
         display_name=profile['display_name'], completed_trades=row.completed_trades,
         open_to_cash_offers=bool(profile['open_to_cash_offers']), match=row.match, you_get=row.you_get,
-        you_give=row.you_give, more_you_get=row.more_you_get, more_you_give=row.more_you_give)
+        you_give=row.you_give, more_you_get=row.more_you_get, more_you_give=row.more_you_give,
+        you_get_groups=row.you_get_groups, you_give_groups=row.you_give_groups)
 
 
 @router.get('/trade-matches', response_model=TradeMatches)
@@ -603,7 +656,8 @@ def nearby_row(row: PartyMatch) -> NearbyMatchRow:
         trader_id=row.profile['trader_id'], display_name=row.profile['display_name'], band=row.band,
         completed_trades=row.completed_trades, open_to_cash_offers=bool(row.profile['open_to_cash_offers']),
         match=row.match, you_get=row.you_get, you_give=row.you_give, more_you_get=row.more_you_get,
-        more_you_give=row.more_you_give)
+        more_you_give=row.more_you_give,
+        you_get_groups=row.you_get_groups, you_give_groups=row.you_give_groups)
 
 
 @router.get('/trade-matches/near', response_model=NearbyMatches)
@@ -703,7 +757,8 @@ def trader_match(trader_id: UUID, user_id: str = Depends(verified_user)):
         trader_id=trader_id, display_name=row.profile['display_name'], band=row.band,
         completed_trades=row.completed_trades, open_to_cash_offers=bool(row.profile['open_to_cash_offers']),
         match=row.match, you_get=row.you_get, you_give=row.you_give, more_you_get=row.more_you_get,
-        more_you_give=row.more_you_give)
+        more_you_give=row.more_you_give,
+        you_get_groups=row.you_get_groups, you_give_groups=row.you_give_groups)
 
 
 @router.get('/trade-card-matches', response_model=TradeCardMatches)
