@@ -4,6 +4,7 @@ import {
   clearProposalNotes,
   peekFromTradeList,
   peekProposalSeed,
+  peekMatchProposal,
   proposeFromTradeList,
   proposeFromMatch,
   rekeyProposal,
@@ -75,7 +76,10 @@ describe("openProposal notes", () => {
     expect(peekProposalSeed("t1")).toEqual({ get: [], give: [] });
     expect(peekProposalSeed("t2")).toBeNull();
     expect(peekFromTradeList("t1")).toBeNull();
+    expect(peekMatchProposal("t1")).toBe(true);
+    expect(peekMatchProposal("t2")).toBe(false);
     clearProposalNotes();
+    expect(peekMatchProposal("t1")).toBe(false);
     expect(peekProposalSeed("t1")).toBeNull();
   });
   it("an unseeded open drops a prior match, and Ask to trade still seeds exactly one copy", () => {

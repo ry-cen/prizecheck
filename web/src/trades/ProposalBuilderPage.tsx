@@ -38,10 +38,13 @@ import {
   clearProposalNotes,
   peekFromTradeList,
   peekProposalSeed,
+  peekMatchProposal,
 } from "./openProposal";
+import { MatchPrintingChoices } from "./MatchPrintingChoices";
 import { LiabilityNotice } from "./LiabilityNotice";
 import {
   centsAmount,
+  chooseMatchedPrinting,
   counterProposal,
   termsKey,
   EMPTY_PROPOSAL,
@@ -147,6 +150,7 @@ export function ProposalBuilderPage({
     if (counter) return counterProposal(counter);
     return peekProposalSeed(traderId) ?? EMPTY_PROPOSAL;
   });
+  const [fromMatch] = useState(() => !counter && peekMatchProposal(traderId));
   const [listBack] = useState(() =>
     counter ? null : peekFromTradeList(traderId)
   );
@@ -687,7 +691,31 @@ export function ProposalBuilderPage({
   const proposalPane = (
     <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
       {sideSection("get")}
+      {fromMatch && match.kind === "ready" && (
+        <MatchPrintingChoices
+          side="get"
+          row={match.row}
+          proposal={proposal}
+          onChoose={(groupId, editionId) =>
+            change((p) =>
+              chooseMatchedPrinting(p, "get", match.row, groupId, editionId)
+            )
+          }
+        />
+      )}
       {sideSection("give")}
+      {fromMatch && match.kind === "ready" && (
+        <MatchPrintingChoices
+          side="give"
+          row={match.row}
+          proposal={proposal}
+          onChoose={(groupId, editionId) =>
+            change((p) =>
+              chooseMatchedPrinting(p, "give", match.row, groupId, editionId)
+            )
+          }
+        />
+      )}
       <section
         aria-labelledby={cashHeadingId}
         className="flex min-w-0 flex-col gap-2"

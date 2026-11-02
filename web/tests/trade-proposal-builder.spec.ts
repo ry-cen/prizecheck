@@ -246,7 +246,7 @@ async function story(
       return e.defaultPrevented;
     });
 
-  // 1: A match prefills the builder; removing its cards leaves the usual empty state.
+  // 1: Single-member need groups prefill both sides; removing their cards leaves the usual empty state.
   await page.goto(`${ORIGIN}/trades/find`);
   await page
     .getByRole("list", { name: "Matches" })
@@ -273,6 +273,9 @@ async function story(
   await expect(
     group(page, "Iono (PAL 254) you give").locator("output")
   ).toHaveText("1");
+  await expect(
+    page.getByRole("region", { name: /^Choose printings for You/ })
+  ).toHaveCount(0);
   await page
     .getByRole("button", { name: "Decrease Iono (PAL 185) you get" })
     .click();

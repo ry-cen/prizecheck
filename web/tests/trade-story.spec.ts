@@ -332,7 +332,7 @@ async function story(
   await expectCollectorCopy(main, ashPlace);
   await expectPageChecks(page, `an open two-way row at ${width}`);
 
-  // S5. Propose from the row, then remove its prefill to test a cash-only proposal refusal.
+  // S5. The unambiguous groups prefill the row; remove that draft to test a cash-only proposal refusal.
   await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
   await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
@@ -343,6 +343,9 @@ async function story(
   await expect(
     group(page, "Iono (PAL 185) you give").locator("output")
   ).toHaveText("1");
+  await expect(
+    page.getByRole("region", { name: /^Choose printings for You/ })
+  ).toHaveCount(0);
   for (const remaining of [2, 1, 0]) {
     await page
       .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })

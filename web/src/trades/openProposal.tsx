@@ -21,7 +21,7 @@ export const OpenProposalContext = createContext<
 // memory, from the click until the builder mounts, so a reload never brings them back: that is why they are not in the
 // address or in history.state, which survives a reload. The builder reads the notes without changing them while it
 // renders and clears them once it has mounted, so a render React repeats or throws away still finds them.
-let seed: { key: string; proposal: Proposal } | null = null;
+let seed: { key: string; proposal: Proposal; match?: boolean } | null = null;
 let origin: { key: string; back: string } | null = null;
 
 export function OpenProposalProvider({
@@ -66,7 +66,7 @@ export function proposeFromMatch(
   key: string,
   row: Parameters<typeof matchedProposal>[0]
 ): void {
-  seed = { key, proposal: matchedProposal(row) };
+  seed = { key, proposal: matchedProposal(row), match: true };
   origin = null;
 }
 
@@ -75,6 +75,11 @@ export function peekProposalSeed(key: string): Proposal | null {
   return seed && seed.key.toLowerCase() === key.toLowerCase()
     ? seed.proposal
     : null;
+}
+
+/** Whether this builder came from a match; no group ids are carried into another response. */
+export function peekMatchProposal(key: string): boolean {
+  return seed?.key.toLowerCase() === key.toLowerCase() && seed.match === true;
 }
 
 /** The Trade List page this collector's builder was opened from, or null. Changes nothing; see `clearProposalNotes`. */

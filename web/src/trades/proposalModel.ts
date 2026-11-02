@@ -1,4 +1,4 @@
-import type { TradeMatchCard } from "../social_generated";
+import type { NeedGroup, TradeMatchCard } from "../social_generated";
 import type { TradeValueLine } from "../trades_generated";
 
 /** A card on a proposal: the facts a line and its tile show, and the copies the library offered when it was added. */
@@ -45,29 +45,89 @@ export function seededProposal(card: ProposalCard): Proposal {
   return { get: [{ ...toProposalCard(card), quantity: 1 }], give: [] };
 }
 
-/** Only the match cards already shown. Each starts at the lesser of copies offered and total need;
- * the offered copies remain its editable cap. Use the usual one-side-only rule if an Edition matches both ways. */
-export function matchedProposal(row: {
-  you_get: readonly TradeMatchCard[];
-  you_give: readonly TradeMatchCard[];
-}): Proposal {
+/** One response's match data. Optional additions support an older server without guessing a quantity. */
+export type ProposalMatch = {
+  you_get: readonly (ProposalCard & { need_groups?: readonly string[] })[];
+  you_give: readonly (ProposalCard & { need_groups?: readonly string[] })[];
+  you_get_groups?: readonly NeedGroup[];
+  you_give_groups?: readonly NeedGroup[];
+};
+
+function count(value: string | undefined): number {
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+}
+
+export function matchSide(row: ProposalMatch, side: ProposalSide) {
+  return side === "get"
+    ? { cards: row.you_get, groups: row.you_get_groups ?? [] }
+    : { cards: row.you_give, groups: row.you_give_groups ?? [] };
+}
+
+/** Prefill only needs with exactly one offered member over the whole side. A truncated list never makes an
+ * ambiguous group unambiguous. Group ids are read only within this response; raw per-card need is never a fallback. */
+export function matchedProposal(row: ProposalMatch): Proposal {
   let proposal = EMPTY_PROPOSAL;
   for (const side of ["get", "give"] as const) {
-    for (const card of side === "get" ? row.you_get : row.you_give) {
-      const copies = Number(card.copies);
-      const need = Number(card.need);
-      // Never substitute a default for missing or unusable match quantities.
-      if (
-        !Number.isSafeInteger(copies) ||
-        !Number.isSafeInteger(need) ||
-        copies <= 0 ||
-        need <= 0
-      )
-        continue;
-      proposal = setQuantity(proposal, side, card, Math.min(copies, need));
+    const { cards, groups } = matchSide(row, side);
+    const indexed = new Map(groups.map((group) => [group.id, group]));
+    for (const card of cards) {
+      const references = [...new Set(card.need_groups ?? [])];
+      if (references.some((id) => !indexed.has(id))) continue;
+      const need = references.reduce((total, id) => {
+        const group = indexed.get(id)!;
+        return total + (count(group.cards) === 1 ? count(group.need) : 0);
+      }, 0);
+      const quantity = Math.min(count(card.copies), need);
+      if (quantity > 0) proposal = setQuantity(proposal, side, card, quantity);
     }
   }
   return proposal;
+}
+
+/** Already-added copies of any member count toward the group's shared total, including manual library edits. */
+export function remainingGroupNeed(
+  proposal: Proposal,
+  side: ProposalSide,
+  row: ProposalMatch,
+  groupId: string
+): number {
+  const { cards, groups } = matchSide(row, side);
+  const group = groups.find((group) => group.id === groupId);
+  const members = new Set(
+    cards
+      .filter((card) => card.need_groups?.includes(groupId))
+      .map((card) => card.edition_id)
+  );
+  const added = proposal[side].reduce(
+    (total, line) => total + (members.has(line.edition_id) ? line.quantity : 0),
+    0
+  );
+  return Math.max(0, count(group?.need) - added);
+}
+
+/** An explicit printing choice adds only the remaining shared need, bounded by that printing's offered copies.
+ * The normal one-side-only rule still applies. Every id and member comes from this one response. */
+export function chooseMatchedPrinting(
+  proposal: Proposal,
+  side: ProposalSide,
+  row: ProposalMatch,
+  groupId: string,
+  editionId: string
+): Proposal {
+  const card = matchSide(row, side).cards.find(
+    (card) =>
+      card.edition_id === editionId && card.need_groups?.includes(groupId)
+  );
+  if (!card) return proposal;
+  const current = quantityIn(proposal, side, editionId);
+  const added = Math.min(
+    count(card.copies) - current,
+    remainingGroupNeed(proposal, side, row, groupId)
+  );
+  return added > 0
+    ? setQuantity(proposal, side, card, current + added)
+    : proposal;
 }
 
 export function otherSide(side: ProposalSide): ProposalSide {
