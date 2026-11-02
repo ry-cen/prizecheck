@@ -319,6 +319,28 @@ const tile = (page: Page, name: string, edition: string, rest: string) =>
     exact: true,
   });
 
+/** One visible key explains the existing glyphs without changing any card control's accessible name. */
+async function expectCardStatusKey(page: Page) {
+  const key = page.getByRole("note", { name: "Card status key" });
+  await expect(key).toHaveCount(1);
+  await expect(key).toBeVisible();
+  for (const [mark, meaning] of [
+    ["✓", "In this Deck"],
+    ["↻", "Owned elsewhere"],
+    ["$", "Not owned"],
+    ["!", "Format issue"],
+    ["lent", "Lent out"],
+  ]) {
+    await expect(
+      key.getByRole("img", { name: meaning, exact: true })
+    ).toHaveText(mark);
+    await expect(key.getByText(meaning, { exact: true })).toBeVisible();
+  }
+  await expect
+    .poll(() => key.evaluate((node) => node.scrollWidth <= node.clientWidth))
+    .toBe(true);
+}
+
 test.describe("on a desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -384,6 +406,7 @@ test.describe("on a desktop", () => {
     await expect(
       deckList.getByRole("button", { name: /^Basic Fire Energy, / })
     ).toHaveCount(10);
+    await expectCardStatusKey(page);
     await expectPageChecks(page, "deck builder, Spread");
 
     // A copy's sheet says what and where it is; Escape closes it and returns focus to the copy.
@@ -420,6 +443,7 @@ test.describe("on a desktop", () => {
     await expect(
       deckList.getByRole("button", { name: /^Charizard ex, / })
     ).toContainText("×2 2$");
+    await expectCardStatusKey(page);
     await expectPageChecks(page, "deck builder, Stacked");
 
     // List: quantity, Edition, ownership counts and the price of the line's copies. The arrow keys move the view.
@@ -434,6 +458,7 @@ test.describe("on a desktop", () => {
     await expect(
       deckList.getByRole("listitem").filter({ hasText: "Pikachu" })
     ).toContainText("No price");
+    await expectCardStatusKey(page);
     await expectPageChecks(page, "deck builder, List");
 
     // The header's Export dialog (#181) replaces the old panels; it passes the page check open.
@@ -541,6 +566,7 @@ test.describe("on a phone", () => {
     await expect(page.getByRole("radio", { name: "Stacked" })).toBeChecked();
     const pile = page.getByRole("button", { name: /^Charmander, / });
     await expect(pile).toContainText("×3 1↻");
+    await expectCardStatusKey(page);
     await expectPageChecks(page, "phone deck builder, Stacked");
 
     await pile.tap();
@@ -566,13 +592,32 @@ test.describe("on a phone", () => {
     await expect(
       page.getByRole("button", { name: /^Basic Fire Energy, / })
     ).toHaveCount(10);
+    await expectCardStatusKey(page);
     await expectPageChecks(page, "phone deck builder, Spread");
 
     await page.getByRole("radio", { name: "List" }).tap();
     await expect(
       page.getByRole("listitem").filter({ hasText: "Professor's Research" })
     ).toContainText("$1.00");
+    await expectCardStatusKey(page);
     await expectPageChecks(page, "phone deck builder, List");
+
+    for (const width of [320, 375, 390]) {
+      await page.setViewportSize({ width, height: 812 });
+      for (const view of ["Spread", "Stacked", "List"]) {
+        await page.getByRole("radio", { name: view, exact: true }).tap();
+        await expectCardStatusKey(page);
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                document.documentElement.scrollWidth <=
+                document.documentElement.clientWidth
+            )
+          )
+          .toBe(true);
+      }
+    }
 
     // The old panels are gone (#181): the page header holds Export, Publish and Delete, and the page still passes.
     for (const name of ["Export", "Delete Deck"])

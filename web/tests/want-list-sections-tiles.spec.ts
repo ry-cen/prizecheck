@@ -94,11 +94,40 @@ async function sectionExample(
   return page;
 }
 
-for (const width of [320, 375, 390, 960, 1280]) {
+for (const width of [320, 375, 390, 960, 1024, 1280, 1440, 1920]) {
   test(`Combined total and Trade Wants preserve facts and controls at ${width}px`, async ({
     collectors,
   }) => {
     const page = await sectionExample(() => collectors.signIn(), width);
+    const summary = page.getByRole("region", {
+      name: "Want List",
+      exact: true,
+    });
+    await expect(summary.getByRole("heading")).toHaveCount(1);
+    await expect(summary.locator("dd")).toHaveText("3 cards");
+    const explanation = summary.locator("details");
+    await explanation.locator("summary").click();
+    await expect(explanation.locator("p")).toBeVisible();
+    const originalExplanation = await explanation.elementHandle();
+    await fits(summary);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth
+        )
+      )
+      .toBe(true);
+    if (width <= 760) {
+      await expectTouchTarget(
+        summary.getByRole("link", { name: "Change it in Settings" })
+      );
+      await expectTouchTarget(explanation.locator("summary"));
+      await expectTouchTarget(
+        summary.getByRole("button", { name: "Buy on TCGplayer" })
+      );
+    }
     const combined = page.getByRole("list", {
       name: "Cards to get",
       exact: true,
@@ -183,7 +212,17 @@ for (const width of [320, 375, 390, 960, 1280]) {
           .evaluate((node, original) => node === original, originalStepper)
       )
       .toBe(true);
+    await expect(explanation).toHaveJSProperty("open", true);
+    await expect
+      .poll(() =>
+        explanation.evaluate(
+          (node, original) => node === original,
+          originalExplanation
+        )
+      )
+      .toBe(true);
     await page.setViewportSize({ width, height: 900 });
+    await fits(summary);
     await fits(wants);
     await expect(
       page.getByRole("button", { name: "Add a card", exact: true })

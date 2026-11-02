@@ -22,6 +22,14 @@ import {
   type LineGroup,
 } from "./deckListModel";
 
+const CARD_STATUS_KEY = [
+  { mark: "✓", meaning: "In this Deck" },
+  { mark: "↻", meaning: "Owned elsewhere" },
+  { mark: "$", meaning: "Not owned" },
+  { mark: "!", meaning: "Format issue" },
+  { mark: "lent", meaning: "Lent out" },
+] as const;
+
 /** Opens the copy sheet for a line, on one copy (Spread) or the whole line (Stacked, List). `opener` is the
  * control that was pressed, for focus return. */
 export type OpenSheet = (
@@ -114,6 +122,24 @@ export function DeckListBody({
       <span id={issueId} hidden>
         Has a format issue: see the result next to the Target Format.
       </span>
+      <div
+        role="note"
+        aria-label="Card status key"
+        className="flex flex-wrap gap-x-4 gap-y-2 text-meta text-text-muted"
+      >
+        {CARD_STATUS_KEY.map(({ mark, meaning }) => (
+          <span key={mark} className="inline-flex items-center gap-1.5">
+            <span
+              role="img"
+              aria-label={meaning}
+              className="font-semibold text-text"
+            >
+              {mark}
+            </span>
+            <span aria-hidden="true">{meaning}</span>
+          </span>
+        ))}
+      </div>
       {groups.map((group, index) => (
         <section key={group.key} aria-labelledby={`${base}-group-${index}`}>
           <h3

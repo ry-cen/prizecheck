@@ -213,9 +213,11 @@ export function CostSummary() {
     }
   }
   return (
-    <p className="m-0 flex flex-col" aria-live="polite">
+    <p className="m-0 flex min-w-0 max-w-full flex-col" aria-live="polite">
       <span className="text-meta text-text-muted">Estimated cost</span>
-      <span className="text-display font-semibold tabular-nums">{value}</span>
+      <span className="text-heading font-semibold tabular-nums wrap-anywhere">
+        {value}
+      </span>
       {notes.map((note) => (
         <span key={note} className="text-meta tabular-nums text-text-muted">
           {note}
