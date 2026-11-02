@@ -18,7 +18,6 @@ import {
   computeLayout,
   readTileMetrics,
   tileAt,
-  tileKey,
   tileLabel,
   tileRect,
   tileTitle,
@@ -159,7 +158,7 @@ export function Gallery({
     const tiles = loading
       ? base.columns *
         Math.max(2, Math.ceil(window.innerHeight / base.rowHeight))
-      : (data.totals?.copies ?? 0);
+      : (data.totals?.copies ?? 0) + (data.totals?.borrowed ?? 0);
     return computeLayout(width, tiles, display, caption, metrics);
   }, [metrics, width, display, caption, loading, data.totals]);
   useEffect(() => {
@@ -437,7 +436,7 @@ export function Gallery({
     !!focused &&
     !!focusedTile &&
     focusedTile.holding.key === focused.key &&
-    focused.index < (data.totals?.copies ?? 0);
+    focused.index < (data.totals?.copies ?? 0) + (data.totals?.borrowed ?? 0);
   // A reload or view change can remove the focused copy; the browser doesn't blur an unmounted tile.
   useEffect(() => {
     if (focused && !focusRenderable) {
@@ -467,7 +466,7 @@ export function Gallery({
     const { holding } = tile.holding;
     return (
       <Tile
-        key={tileKey(holding.location_id, holding.edition_id, tile.ordinal)}
+        key={`${tile.holding.key}:${tile.ordinal}`}
         entry={tile.holding}
         ordinal={tile.ordinal}
         index={index}
@@ -496,7 +495,7 @@ export function Gallery({
   if (layout && !loading) {
     const start = rows.first * layout.columns;
     const end = Math.min(
-      data.totals?.copies ?? 0,
+      (data.totals?.copies ?? 0) + (data.totals?.borrowed ?? 0),
       (rows.last + 1) * layout.columns
     );
     const pinned = focusRenderable ? focused.index : -1;
@@ -506,7 +505,9 @@ export function Gallery({
     if (pinned >= end) cells.push(renderCell(pinned, layout));
   }
 
-  const empty = data.status === "ready" && (data.totals?.copies ?? 0) === 0;
+  const empty =
+    data.status === "ready" &&
+    (data.totals?.copies ?? 0) + (data.totals?.borrowed ?? 0) === 0;
   return (
     <section
       ref={sectionRef}
@@ -661,8 +662,9 @@ const Tile = memo(function Tile({
           : undefined
       }
       style={{ left, top, width }}
-      label={tileLabel(holding, ordinal, path)}
-      title={tileTitle(holding, ordinal, path)}
+      borrowedFrom={entry.borrowed?.lender}
+      label={tileLabel(holding, ordinal, path, entry.borrowed?.lender)}
+      title={tileTitle(holding, ordinal, path, entry.borrowed?.lender)}
       name={holding.printing_name}
       setName={holding.set_name}
       setCode={holding.set_code}

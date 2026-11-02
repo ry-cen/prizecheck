@@ -63,6 +63,7 @@ export function Menu({
   const wrapper = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const scrollViewport = useRef<HTMLDivElement>(null);
+  const lastViewportCap = useRef<number | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const triggerId = useId();
@@ -75,7 +76,10 @@ export function Menu({
     );
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      lastViewportCap.current = null;
+      return;
+    }
     let frame = 0;
     const position = () => {
       const node = panel.current;
@@ -147,8 +151,15 @@ export function Menu({
       node.style.left = `${placement.left}px`;
       node.style.top = `${placement.top}px`;
       node.style.maxHeight = `${placement.maxHeight}px`;
-      if (scrollViewport.current && list.current)
-        scrollViewport.current.style.maxHeight = `${Math.max(0, placement.maxHeight - (natural.height - list.current.getBoundingClientRect().height))}px`;
+      let viewportCap: number | null = null;
+      if (scrollViewport.current && list.current) {
+        viewportCap = Math.max(
+          0,
+          placement.maxHeight -
+            (natural.height - list.current.getBoundingClientRect().height)
+        );
+        scrollViewport.current.style.maxHeight = `${viewportCap}px`;
+      }
       // Correct translation introduced by a fixed containing block (including Tailwind's individual translate).
       const actual = node.getBoundingClientRect();
       node.style.left = `${placement.left + placement.left - actual.left}px`;
@@ -157,7 +168,15 @@ export function Menu({
       if (scrolling) {
         scrolling.scrollTop = savedScrollTop;
         const focused = document.activeElement;
-        if (focused instanceof HTMLElement && list.current?.contains(focused)) {
+        // Ignore up to half a CSS pixel of measurement noise at the same cap.
+        const revealFocus =
+          lastViewportCap.current === null ||
+          (viewportCap !== null && viewportCap < lastViewportCap.current - 0.5);
+        if (
+          revealFocus &&
+          focused instanceof HTMLElement &&
+          list.current?.contains(focused)
+        ) {
           const visible = scrolling.getBoundingClientRect();
           const item = focused.getBoundingClientRect();
           // Resize may cap a formerly unscrolled list. Reveal focus locally without moving the page.
@@ -166,6 +185,7 @@ export function Menu({
           else if (item.top < visible.top)
             scrolling.scrollTop -= visible.top - item.top;
         }
+        lastViewportCap.current = viewportCap;
       }
       node.style.visibility = "visible";
     };

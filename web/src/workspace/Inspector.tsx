@@ -177,7 +177,9 @@ export function CardDetails({
           {locationPath(holding.location_id) ?? holding.location_name}
         </p>
         <p className="m-0 pt-1 text-text-subtle tabular-nums">
-          {plural(card.holding.copies, "copy", "copies")} here
+          {card.holding.borrowed
+            ? `${card.holding.copies} borrowed from ${card.holding.borrowed.lender}`
+            : `${plural(card.holding.copies, "copy", "copies")} here`}
         </p>
         <p className="m-0 pt-1 text-text-subtle tabular-nums">
           {owned.state === "ready"
