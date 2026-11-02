@@ -16,9 +16,24 @@ async function signIn(page: Page) {
   } finally {
     await pool.end();
   }
+  const initialBorrowed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/collection/borrowed"
+  );
   await signInAsOwner(page, "/collection");
   await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
+  // Finish the real initial walk before the tests install their synthetic owned pages.
+  await initialBorrowed;
+  await page.route(/\/api\/collection\/borrowed(\?|$)/, (route) =>
+    ok(route, {
+      copies: [],
+      total: "0",
+      owner_revision: 1,
+      catalog_revision: 1,
+      snapshot: "1.1.1",
+    })
+  );
 }
 
 const LEAF = "00000000-0000-4000-8000-0000000000a1";
@@ -39,6 +54,9 @@ const row = (n: number, quantity: number) => ({
   location_id: LEAF,
   location_name: "Fake Binder",
   location_path: "Fake Shelf / Fake Binder",
+  category: null,
+  elemental_types: [],
+  trainer_type: null,
 });
 
 /** One page of the listing. The first page carries the totals for the whole listing, which
@@ -51,6 +69,8 @@ const pageBody = (
   holdings: rows,
   owner_revision: 1,
   catalog_revision: 1,
+  snapshot: "1.1.1",
+  lent: totalCopies === null ? null : "0",
   next_cursor: nextCursor,
   totals:
     totalCopies === null

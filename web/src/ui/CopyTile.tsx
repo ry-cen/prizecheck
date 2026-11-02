@@ -23,6 +23,7 @@ type Props = Omit<
   collectorNumber: string;
   /** The Variant Descriptor as words (ui/variantLabel), shown after set and number on the Names line. */
   variant: string;
+  borrowedFrom?: string | null;
   imageUrl: string | null;
   /** Draw the Names line: the name, then "Set · Number · Variant", each cut with an ellipsis. */
   names: boolean;
@@ -82,6 +83,7 @@ export function CopyTile({
   collectorNumber,
   variant,
   imageUrl,
+  borrowedFrom,
   names,
   selected,
   state = "here",
@@ -105,9 +107,17 @@ export function CopyTile({
     >
       <span
         aria-hidden="true"
-        className={`${ART} ${ART_SELECTED} ${ART_STATE[state]}`}
+        className={`relative ${ART} ${ART_SELECTED} ${ART_STATE[state]}`}
       >
         <TileArt name={name} imageUrl={imageUrl} />
+        {borrowedFrom && (
+          <span
+            aria-hidden="true"
+            className="absolute bottom-1 left-1 max-w-[calc(100%-var(--space-2))] truncate rounded-round border-2 border-solid border-bg bg-surface-raised px-2 text-caption leading-5 text-text shadow-[0_1px_var(--space-1)_var(--color-shadow-strong)]"
+          >
+            From {borrowedFrom}
+          </span>
+        )}
       </span>
       {names && (
         <span className="box-border block h-(--tile-names-height) overflow-hidden pt-1">

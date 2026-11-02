@@ -5,10 +5,15 @@ export type CollectionPage = { entries: CollectionEntry[]; owner_revision: numbe
 export type Distribution = { holdings: HoldingView[] };
 export type CollectionTotals = { holdings: number; editions: number; copies: string };
 export type CollectionHoldingView = { edition_id: string; quantity: string; version: number; printing_id: string; printing_name: string; set_id: string; set_name: string; set_code: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; location_path: string; category: string | null; elemental_types: string[]; trainer_type: string | null };
-export type CollectionHoldingPage = { holdings: CollectionHoldingView[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null; totals?: CollectionTotals | null; lent?: string | null };
+export type CollectionHoldingPage = { snapshot: string; holdings: CollectionHoldingView[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null; totals?: CollectionTotals | null; lent?: string | null };
 export type CollectionSet = { set_id: string; set_name: string };
 export type CollectionSetList = { sets: CollectionSet[]; owner_revision: number };
 export type CollectionRevision = { owner_revision: number };
+export type BorrowedGalleryView = { loan_id: string; lender: string; edition_id: string; location_id: string; location_name: string; location_path: string; quantity: string; printing_id: string; printing_name: string; set_id: string; set_name: string; set_code: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; category: string | null; elemental_types: string[]; trainer_type: string | null };
+export type BorrowedGalleryPage = { copies: BorrowedGalleryView[]; total: string; owner_revision: number; catalog_revision: number; snapshot: string };
+export type BorrowedMoveItem = { loan_id: string; edition_id: string; from_location_id: string; quantity: string };
+export type MoveBorrowedCopies = { to_location_id: string; items: BorrowedMoveItem[]; idempotency_key: string };
+export type BorrowedMoveResult = { copy_count: string; owner_revision: number };
 
 export type CollectionFilters = { name?: string; set_id?: string; collector_number?: string; sort?: 'name' | 'quantity'; location_id?: string };
 async function read<T>(path: string): Promise<T> {
@@ -31,5 +36,14 @@ export const getCollectionHoldings = (query: CollectionHoldingQuery={},cursor?: 
   return read<CollectionHoldingPage>(`/api/collection/holdings?${params}`);
 };
 export const getCollectionSets = (locationId?: string) => read<CollectionSetList>(`/api/collection/sets${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`);
+export const getBorrowedGallery = (query: CollectionHoldingQuery={}) => read<BorrowedGalleryPage>(`/api/collection/borrowed?${new URLSearchParams(Object.entries(query).filter(([,v])=>v !== undefined).map(([k,v])=>[k,String(v)]))}`);
+export class BorrowedMoveError extends Error {
+  constructor(public status: number, public code: string, public detail: Record<string, unknown> = {}) { super(code); }
+}
+export async function moveBorrowedCopies(body: MoveBorrowedCopies): Promise<BorrowedMoveResult> {
+  const response = await fetch('/api/collection/borrowed/moves', {method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  if (!response.ok) { const data=await response.json().catch(()=>({})); throw new BorrowedMoveError(response.status,data?.detail?.code ?? 'MOVE_UNAVAILABLE',data?.detail ?? {}); }
+  return response.json() as Promise<BorrowedMoveResult>;
+}
 export const getCollectionRevision = () => read<CollectionRevision>('/api/collection/revision');
 

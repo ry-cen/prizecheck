@@ -330,6 +330,7 @@ function App() {
           );
         return (
           <Workspace
+            key={userId}
             userId={userId}
             active={active}
             onImport={() => navigate(COLLECTION_IMPORT_PATH)}

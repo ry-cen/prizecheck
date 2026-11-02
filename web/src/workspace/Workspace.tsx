@@ -57,12 +57,17 @@ import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations, isFolder } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
 import { focusWorkspaceHeading, SelectionBar } from "./SelectionBar";
-import { selectedGroups, selectionScope } from "./selectionModel";
+import {
+  selectedBorrowed,
+  selectedGroups,
+  selectionScope,
+} from "./selectionModel";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
 import { useUndoToast } from "./UndoToast";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { useGalleryData } from "./useGalleryData";
+import { PendingMoveNotice } from "./PendingMoveNotice";
 import { useInventoryActions } from "./useInventoryActions";
 import { useOwnedSets } from "./useOwnedSets";
 import { useSelection } from "./useSelection";
@@ -245,6 +250,7 @@ export function Workspace({
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
+    userId,
     selection,
     holdings: gallery.holdings,
     byKey: gallery.byKey,
@@ -662,6 +668,8 @@ export function Workspace({
                 {plural(gallery.totals.editions, "edition", "editions")}
                 {gallery.totals.lent > 0 &&
                   ` · ${gallery.totals.lent} lent out`}
+                {gallery.totals.borrowed > 0 &&
+                  ` · ${gallery.totals.borrowed} borrowed`}
               </p>
             )}
             {/* The actions wrap as one group, and on a phone they always take their own row, so the totals
@@ -802,6 +810,18 @@ export function Workspace({
           </div>
         </main>
       </div>
+      {active && actions.pending && (
+        <PendingMoveNotice
+          key={actions.pending.id}
+          text={actions.pending.text}
+          blocked={actions.pending.blocked}
+          otherTab={actions.pending.otherTab}
+          onRefresh={() => void actions.refreshPending()}
+          busy={actions.busy}
+          onCheck={actions.checkPending}
+          onDismiss={actions.dismissPending}
+        />
+      )}
       {/* The selection bar (the Actions strip). It and the dialogs below draw outside the page
           (KitLayer, #165), so they are drawn only while Collection is the shown page; their state
           stays, and they show again when it does. */}
@@ -943,6 +963,7 @@ export function Workspace({
           index={index}
           initialExpanded={expanded}
           groups={selectedGroups(selection.selected)}
+          borrowed={selectedBorrowed(selection.selected)}
           copies={selection.summary.copies}
           busy={actions.busy}
           progress={actions.progress}

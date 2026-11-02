@@ -1,3 +1,4 @@
+import type { BorrowedMoveItem } from "../collection_generated";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { TileRef } from "./galleryModel";
 import { carriedText } from "./inventoryActionsModel";
@@ -6,6 +7,7 @@ import { isFolder, type LocationIndex } from "./locationTree";
 import {
   isTileSelected,
   selectedGroups,
+  selectedBorrowed,
   type SelectedGroup,
 } from "./selectionModel";
 import type { SelectionState } from "./useSelection";
@@ -22,7 +24,10 @@ type Options = {
   index: LocationIndex;
   selection: SelectionState;
   /** A drop on a valid Storage Leaf: move these groups there now. */
-  onDrop: (destinationId: string, groups: SelectedGroup[]) => void;
+  onDrop: (
+    destinationId: string,
+    carried: { groups: SelectedGroup[]; borrowed: BorrowedMoveItem[] }
+  ) => void;
 };
 
 type Dragging = {
@@ -79,6 +84,7 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
       const startX = event.clientX;
       const startY = event.clientY;
       let groups: SelectedGroup[] | null = null;
+      let borrowed: BorrowedMoveItem[] = [];
       let valid: ReadonlySet<string> = new Set();
       let over: string | null = null;
       let text = "";
@@ -103,24 +109,44 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
       const begin = () => {
         const { selection: current, index: tree } = live.current;
         const { holding } = tile.holding;
-        if (isTileSelected(current.selected, tile.holding.key, tile.ordinal))
+        if (isTileSelected(current.selected, tile.holding.key, tile.ordinal)) {
           groups = selectedGroups(current.selected);
-        else {
+          borrowed = selectedBorrowed(current.selected);
+        } else {
           current.activate(tile, {
             kind: "click",
             toggle: false,
             range: false,
           });
-          groups = [
+          groups = tile.holding.borrowed
+            ? []
+            : [
+                {
+                  source_id: holding.location_id,
+                  edition_id: holding.edition_id,
+                  quantity: "1",
+                  expected_version: holding.version,
+                },
+              ];
+        }
+        if (tile.holding.borrowed && !borrowed.length)
+          borrowed = [
             {
-              source_id: holding.location_id,
+              loan_id: tile.holding.borrowed.loanId,
               edition_id: holding.edition_id,
+              from_location_id: holding.location_id,
               quantity: "1",
-              expected_version: holding.version,
             },
           ];
-        }
-        const carried = groups;
+        const carried = [
+          ...groups,
+          ...borrowed.map((item) => ({
+            source_id: item.from_location_id,
+            edition_id: item.edition_id,
+            quantity: item.quantity,
+            expected_version: 0,
+          })),
+        ];
         // A Storage Leaf is a valid drop when at least one carried copy isn't already there.
         const sources = new Set(carried.map((group) => group.source_id));
         valid = new Set(
@@ -174,7 +200,7 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
         stop();
         if (!carried) return; // No drag happened: the click goes through.
         swallowNextClick();
-        if (target) live.current.onDrop(target, carried);
+        if (target) live.current.onDrop(target, { groups: carried, borrowed });
       };
       const onCancel = (cancel: PointerEvent) => {
         if (cancel.pointerId === pointerId) stop();

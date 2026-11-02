@@ -161,15 +161,17 @@ HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,coalesce
   coalesce(substring(pd.collector_number from '^[0-9]+')::numeric,0) AS number_value,
   lower(coalesce(pd.collector_number,'')) AS number_key,
   sum(h.quantity) OVER (PARTITION BY h.edition_id) AS edition_total"""
-HOLDING_FROM = """FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
-  LEFT JOIN paths lp ON lp.id=h.location_id
-  JOIN catalog_edition e ON e.id=h.edition_id
+# Shared listing joins preserve set codes, art upgrades and LOCATION_PATHS from current dev.
+CARD_JOINS = """  JOIN catalog_edition e ON e.id=h.edition_id
   JOIN catalog_printing p ON p.id=e.printing_id
   JOIN catalog_identity ci ON ci.id=p.identity_id
   JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
   LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
-  LEFT JOIN catalog_card_attribute ca ON ca.printing_id=p.id
+  LEFT JOIN catalog_card_attribute ca ON ca.printing_id=p.id"""
+HOLDING_FROM = f"""FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
+  LEFT JOIN paths lp ON lp.id=h.location_id
+{CARD_JOINS}
   WHERE h.owner_id=%s"""
 HoldingSort = Literal['name-asc', 'name-desc', 'set-asc', 'set-desc', 'quantity-asc', 'quantity-desc']
 CardCategory = Literal['Pokemon', 'Trainer', 'Energy']
@@ -243,6 +245,27 @@ def anchor_value(column, raw):
     return UUID(raw) if kind is UUID else raw
 
 
+def listing_conditions(name, set_id, category, trainer_type, elemental_type):
+    conditions, condition_params = "", []
+    if name:
+        conditions += " AND coalesce(lower(pd.display_name),lower(ci.display_name)) LIKE %s ESCAPE '!'"
+        condition_params.append('%' + name.replace('!', '!!').replace('%', '!%').replace('_', '!_') + '%')
+    if set_id:
+        conditions += ' AND pd.set_id=%s'; condition_params.append(set_id)
+    if category:
+        conditions += ' AND ca.card_kind=%s'; condition_params.append(CARD_KINDS[category])
+    if trainer_type:
+        # A Trainer whose Trainer Type is unknown matches no Trainer Type, only the Trainer category.
+        conditions += ' AND ca.trainer_type=%s'; condition_params.append(trainer_type)
+    if elemental_type:
+        conditions += ' AND %s=ANY(ca.types)'; condition_params.append(elemental_type)
+    return conditions, condition_params
+
+
+def listing_snapshot(owner_revision, catalog_revision, attribute_revision):
+    return f"{owner_revision}.{catalog_revision}.{attribute_revision}"
+
+
 class CollectionTotals(BaseModel):
     holdings: int
     editions: int
@@ -261,6 +284,7 @@ class CollectionHoldingView(HoldingView):
 
 
 class CollectionHoldingPage(BaseModel):
+    snapshot: str
     holdings: list[CollectionHoldingView]
     owner_revision: int
     catalog_revision: int
@@ -305,18 +329,9 @@ def collection_holdings(location_id: UUID | None = None,
         conditions, condition_params = '', []
         if location_id:
             conditions += ' AND h.location_id=%s'; condition_params.append(location_id)
-        if name:
-            conditions += " AND coalesce(lower(pd.display_name),lower(ci.display_name)) LIKE %s ESCAPE '!'"
-            condition_params.append('%' + name.replace('!', '!!').replace('%', '!%').replace('_', '!_') + '%')
-        if set_id:
-            conditions += ' AND pd.set_id=%s'; condition_params.append(set_id)
-        if category:
-            conditions += ' AND ca.card_kind=%s'; condition_params.append(CARD_KINDS[category])
-        if trainer_type:
-            # A Trainer whose Trainer Type is unknown matches no Trainer Type, only the Trainer category.
-            conditions += ' AND ca.trainer_type=%s'; condition_params.append(trainer_type)
-        if elemental_type:
-            conditions += ' AND %s=ANY(ca.types)'; condition_params.append(elemental_type)
+        filtered, values = listing_conditions(name, set_id, category, trainer_type, elemental_type)
+        conditions += filtered
+        condition_params.extend(values)
         base = [user_id, user_id, user_id, *condition_params]
         # Filters apply inside, so edition_total counts only the listed rows; anchors and pages filter outside.
         listed = f'SELECT {HOLDING_COLUMNS} {HOLDING_FROM}{conditions}'
@@ -356,7 +371,7 @@ def collection_holdings(location_id: UUID | None = None,
                                       copies=str(counted['copies']))
         next_cursor = (encode_cursor(context, [anchor_json(page[-1][column]) for column in anchor_columns(keys)])
                        if len(rows) > HOLDING_PAGE_SIZE else None)
-        return CollectionHoldingPage(holdings=views(page, CollectionHoldingView), owner_revision=revision,
+        return CollectionHoldingPage(snapshot=listing_snapshot(revision, state['revision'], attributes['revision']), holdings=views(page, CollectionHoldingView), owner_revision=revision,
                                      catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals,
                                      lent=None if totals is None else lent)
 
@@ -384,12 +399,13 @@ def collection_sets(location_id: UUID | None = None, user_id: str = Depends(veri
                 fail(404, 'LOCATION_NOT_FOUND')
             if leaf['kind'] not in ('storage_leaf', 'deck'):
                 fail(409, 'NOT_STORAGE_LEAF')
-        rows = conn.execute(f"""SELECT pd.set_id,min(pd.set_name) AS set_name FROM holding h
+        rows = conn.execute(f"""SELECT pd.set_id,min(pd.set_name) AS set_name FROM (SELECT location_id,edition_id FROM holding WHERE owner_id=%s
+            UNION SELECT location_id,edition_id FROM borrowed_holding WHERE borrower_id=%s) h
           JOIN catalog_edition e ON e.id=h.edition_id
           JOIN catalog_printing_display pd ON pd.printing_id=e.printing_id
-          WHERE h.owner_id=%s{' AND h.location_id=%s' if location_id else ''} AND pd.set_id<>''
+          WHERE true{' AND h.location_id=%s' if location_id else ''} AND pd.set_id<>''
           GROUP BY pd.set_id ORDER BY lower(min(pd.set_name)),pd.set_id""",
-                            [user_id, *([location_id] if location_id else [])]).fetchall()
+                            [user_id, user_id, *([location_id] if location_id else [])]).fetchall()
         return CollectionSetList(sets=[CollectionSet(**row) for row in rows],
                                  owner_revision=owner['revision'] if owner else 1)
 
