@@ -103,10 +103,13 @@ for (const width of [320, 375, 390, 960, 1280]) {
       name: "Cards to get",
       exact: true,
     });
-    if (width <= 760) await page.getByText(/^Combined total · 3 cards/).click();
+    if (width <= 760)
+      await page.getByText(/^Combined total \(Decks only\) · 3 cards/).click();
     else
       await expect(
-        page.getByRole("heading", { name: /^Combined total · 3 cards/ })
+        page.getByRole("heading", {
+          name: /^Combined total \(Decks only\) · 3 cards/,
+        })
       ).toBeVisible();
     await expect(combined.getByRole("listitem")).toHaveCount(2);
     const iono = combined.getByRole("listitem").filter({ hasText: "Iono" });
@@ -195,10 +198,19 @@ for (const width of [320, 375, 390, 960, 1280]) {
   }) => {
     const page = await sectionExample(() => collectors.signIn(), width);
     const main = page.getByRole("main").filter({ visible: true });
+    await expect(
+      main.getByRole("link", { name: /^Trade Wants ·/ })
+    ).toBeVisible();
     await main
       .getByRole("radiogroup", { name: "Show the Want List as" })
       .getByRole("radio", { name: "Get from Friends", exact: true })
       .check();
+    await expect(
+      main.getByRole("region", { name: "Trade Wants", exact: true })
+    ).toHaveCount(0);
+    await expect(
+      main.getByRole("link", { name: /^Trade Wants ·/ })
+    ).toHaveCount(0);
     const panel = main.getByRole("region", { name: /^Iono / });
     await expect(panel).toContainText("You need 2 · Tile sections");
     await expect(panel).toContainText("0 of 2 asked");
@@ -299,5 +311,64 @@ for (const width of [320, 375, 390, 960, 1280]) {
     await expectIdentityFits();
     await fits(panel);
     await expectPageChecks(page, `From Friends at ${width}px`);
+  });
+}
+
+for (const height of [800, 600]) {
+  test(`sticky Combined total final row remains reachable at 1280x${height}`, async ({
+    collectors,
+  }) => {
+    const page = (await collectors.signIn()).page;
+    const ids = seedCatalog();
+    const deck = await createDeck(page, "Long summary reachability Deck");
+    await setLine(page, deck, ids["PAL 185"], 1);
+    await page.route(
+      (url) => url.pathname === "/api/want-list",
+      async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        const row = body.combined[0];
+        body.combined = Array.from({ length: 8 }, (_, index) => ({
+          ...row,
+          edition_id: `${row.edition_id}-${index}`,
+          name: `Summary row ${index + 1} with a long identifiable card label for reachability`,
+          image_url: null,
+        }));
+        await route.fulfill({ response, json: body });
+      }
+    );
+    await page.setViewportSize({ width: 1280, height });
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    const aside = page.getByRole("complementary", { name: /^Combined total/ });
+    const rows = aside.getByRole("listitem");
+    await expect(rows).toHaveCount(8);
+    const last = rows.last();
+    await page.evaluate(() =>
+      window.scrollTo(0, document.documentElement.scrollHeight)
+    );
+    await expect(last).toBeInViewport({ ratio: 1 });
+    const evidence = await aside.evaluate((element) => {
+      const last = element
+        .querySelector("li:last-child")!
+        .getBoundingClientRect();
+      return {
+        panelHeight: element.getBoundingClientRect().height,
+        viewport: innerHeight,
+        finalRow: { top: last.top, bottom: last.bottom, height: last.height },
+      };
+    });
+    console.log("Sticky summary reachability", JSON.stringify(evidence));
+    await test.info().attach("reachability", {
+      body: JSON.stringify(evidence),
+      contentType: "application/json",
+    });
+    // Summary rows currently contain no controls. Guard keyboard reachability if controls are added later.
+    for (const control of await last
+      .locator("a, button, input, select, [tabindex='0']")
+      .all()) {
+      await control.focus();
+      await expect(control).toBeFocused();
+      await expect(control).toBeInViewport();
+    }
   });
 }

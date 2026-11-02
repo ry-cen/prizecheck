@@ -53,6 +53,7 @@ import { useWantListSwap, type WantListSwap } from "./useWantListSwap";
 import { CopyArt } from "../ui/CopyTile";
 import {
   TradeWantsPanel,
+  TradeWantsShortcut,
   WillAcceptSelect,
   WillAcceptRadios,
 } from "./TradeWantsPanel";
@@ -228,6 +229,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           No Decks yet. Create one on My Decks, and the Want List shows what it
           still needs.
         </p>
+        <TradeWantsShortcut api={trade} />
         <TradeWantsPanel api={trade} />
       </div>
     );
@@ -277,6 +279,9 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
             Change it in Settings
           </a>
         </p>
+        {!shownScope && shownView === "buy" && (
+          <TradeWantsShortcut api={trade} />
+        )}
       </section>
       <div
         role="group"
@@ -430,16 +435,22 @@ function DeckSection({
           <span aria-hidden="true">✓ </span>Nothing to get
         </p>
       ) : (
-        <NeededLines
-          layout="tiles"
-          section={section}
-          deckName={deckName}
-          swap={swap}
-          byCard={byCard}
-          trade={trade}
-          borrowFor={borrowFor}
-          pending={pending}
-        />
+        <>
+          <p className="m-0 px-4 py-2 text-meta text-text-muted">
+            Will accept controls Swap hints and trade matching, not the
+            quantities shown on this page.
+          </p>
+          <NeededLines
+            layout="tiles"
+            section={section}
+            deckName={deckName}
+            swap={swap}
+            byCard={byCard}
+            trade={trade}
+            borrowFor={borrowFor}
+            pending={pending}
+          />
+        </>
       )}
     </section>
   );
@@ -695,7 +706,7 @@ function CombinedTotal({
         ))}
       </ul>
     );
-  const title = `Combined total · ${cards(toGet)}${costSuffix}`;
+  const title = `Combined total (Decks only) · ${cards(toGet)}${costSuffix}`;
   if (phone)
     return (
       <details className="col-start-1 row-start-1 rounded-panel border border-border bg-surface">

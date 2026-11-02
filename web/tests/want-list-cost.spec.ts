@@ -228,7 +228,7 @@ test.describe("on a desktop", () => {
       needs(page, names.gardevoir).filter({ hasText: "No price" })
     ).toHaveCount(1);
     await expect(total(page)).toHaveAccessibleName(
-      "Combined total · 6 cards · $1.25 + 1 unpriced"
+      "Combined total (Decks only) · 6 cards · $1.25 + 1 unpriced"
     );
     await expect(
       total(page).getByRole("listitem").filter({ hasText: "$1.25" })
@@ -329,7 +329,9 @@ test.describe("on a phone", () => {
     await world(page);
     await page.goto(`${ORIGIN}/decks/want-list`);
     await expect(
-      page.getByText("Combined total · 6 cards · $1.25 + 1 unpriced")
+      page.getByText(
+        "Combined total (Decks only) · 6 cards · $1.25 + 1 unpriced"
+      )
     ).toBeVisible();
     const buy = page.getByRole("button", { name: "Buy on TCGplayer" });
     await expectTouchTarget(buy);

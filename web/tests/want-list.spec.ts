@@ -251,7 +251,7 @@ test.describe("on a desktop", () => {
       "Nothing to get"
     );
     await expect(total(page)).toHaveAccessibleName(
-      "Combined total · 5 cards · $1.25"
+      "Combined total (Decks only) · 5 cards · $1.25"
     );
     await expect(total(page).getByRole("listitem")).toHaveCount(1);
     await expect(total(page).getByRole("listitem")).toContainText(
@@ -359,7 +359,7 @@ test.describe("on a desktop", () => {
     await expect(needs(page, names.charizard)).toContainText("2 of 4");
     await expect(page.getByText("2 cards", { exact: true })).toBeVisible();
     await expect(total(page)).toHaveAccessibleName(
-      "Combined total · 2 cards · $0.50"
+      "Combined total (Decks only) · 2 cards · $0.50"
     );
     await expect(total(page).getByRole("listitem")).toContainText(
       `${names.charizard} 2 · ${names.gardevoir} 1`
@@ -414,7 +414,7 @@ test.describe("on a phone", () => {
 
     await views(page).getByRole("tab", { name: "Want List" }).tap();
     await expect(page).toHaveURL(`${ORIGIN}/decks/want-list`);
-    const row = page.getByText("Combined total · 5 cards");
+    const row = page.getByText("Combined total (Decks only) · 5 cards");
     await expect(row).toBeVisible();
     // Collapsed: the cards it lists are hidden until it is opened.
     await expect(page.getByRole("list", { name: "Cards to get" })).toBeHidden();
