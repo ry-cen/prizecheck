@@ -284,7 +284,7 @@ function ReviewDecision({
       {deprecating && (
         <>
           <p className="m-0 text-meta text-text-muted">
-            Create an evidenced replacement through Missing cards first if
+            Create an evidenced replacement through Card reports first if
             needed. Existing Holdings stay unchanged until their collector
             explicitly reassigns them.
           </p>

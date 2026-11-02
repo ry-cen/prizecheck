@@ -11,7 +11,7 @@ import { test, artUpstream } from "./support/art-upstream";
 // Importing a list into a new Deck (#212, #213): Decks' Import a list button opens /decks/import, where a pasted TCG Live
 // or Limitless list is read by the server (a live count of card lines and cards), named, and given a Target Format; the
 // review ("Check the list") opens on the lines that need the collector. There, Fix offers the cards a Pick one line
-// could mean, searches the catalog, links a Not found line to its Missing cards report (a new tab, with the form filled
+// could mean, searches the catalog, links a Not found line to its Card reports report (a new tab, with the form filled
 // in) or drops the line; Restore brings a dropped line back; Change picks another Basic Energy for a line matched by
 // type; and Edition chooses among a card's Editions. Create Deck then makes the Deck and its Deck List in one command
 // and lands in its builder, where Undo deletes it again. The shared page check runs on the paste screen and on the
@@ -153,13 +153,13 @@ test.describe("on a desktop", () => {
     await expect(chip(page, "Needs you")).toHaveText("Needs you 1");
     await expect(chip(page, "Changed")).toHaveText("Changed 4");
 
-    // Not found: the resolver links the line to its Missing cards report; the line is dropped and restored.
+    // Not found: the resolver links the line to its Card reports report; the line is dropped and restored.
     const judge = lineItem(page, "1 Judge POR 76");
     await expect(judge).toContainText("Judge POR 76 isn't in the catalog yet.");
     await judge.getByRole("button", { name: "Fix" }).click();
     await expect(
       judge.getByRole("link", {
-        name: "Report it on Missing cards (opens in a new tab)",
+        name: "Report it on Card reports (opens in a new tab)",
       })
     ).toHaveAttribute(
       "href",
@@ -272,7 +272,7 @@ test.describe("on a desktop", () => {
     expect(gone.status()).toBe(404);
   });
 
-  test("a Not found line's Missing cards link opens Report a card filled in: a mapped code as the set ID, an unmapped one as the set name and note", async ({
+  test("a Not found line's Card reports link opens Report a card filled in: a mapped code as the set ID, an unmapped one as the set name and note", async ({
     page,
   }) => {
     seedCatalog();
@@ -287,20 +287,20 @@ test.describe("on a desktop", () => {
     await page.getByRole("button", { name: "Review 2 lines" }).click();
     await expect(chip(page, "Needs you")).toHaveText("Needs you 2");
 
-    /** Fix on the line, then its report link, which opens Missing cards in a new tab. */
+    /** Fix on the line, then its report link, which opens Card reports in a new tab. */
     async function openReport(text: string) {
       await lineItem(page, text).getByRole("button", { name: "Fix" }).click();
       const [tab] = await Promise.all([
         page.context().waitForEvent("page"),
         lineItem(page, text)
-          .getByRole("link", { name: /^Report it on Missing cards/ })
+          .getByRole("link", { name: /^Report it on Card reports/ })
           .click(),
       ]);
-      // Missing cards reads the link, then leaves it out of the address.
+      // Card reports reads the link, then leaves it out of the address.
       await expect(tab).toHaveURL(/\/reports$/);
       await expect(
         tab
-          .getByRole("tablist", { name: "Missing cards sections" })
+          .getByRole("tablist", { name: "Card reports sections" })
           .getByRole("tab", { name: "Report a card", exact: true })
       ).toHaveAttribute("aria-selected", "true");
       return {
@@ -442,7 +442,7 @@ test.describe("on a phone", () => {
       .getByRole("button", { name: "Fix" })
       .tap();
     await expectTouchTarget(
-      page.getByRole("link", { name: /^Report it on Missing cards/ })
+      page.getByRole("link", { name: /^Report it on Card reports/ })
     );
     await page.getByRole("button", { name: "Drop line" }).tap();
     await expect(saveRegion(page)).toContainText(

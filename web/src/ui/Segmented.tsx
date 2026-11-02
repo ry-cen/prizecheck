@@ -42,7 +42,7 @@ export const segmentId = (idBase: string, value: string) =>
 /**
  * Segmented control (ADR 0012), in two modes:
  *
- * - "tabs" (the default): an ARIA tab list, used for a page's sections (Owner controls, Missing cards)
+ * - "tabs" (the default): an ARIA tab list, used for a page's sections (Owner controls, Card reports)
  *   and the deck builder's phone Deck and Library tabs. Only the selected tab is in the Tab order;
  *   ArrowLeft, ArrowRight, Home and End move focus between tabs, and Enter, Space or a click selects one
  *   (manual activation, because selecting can change the address).

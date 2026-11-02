@@ -256,7 +256,7 @@ test("on a phone the collector's own tap on Settings cancels the jump to Sign-in
   }
 });
 
-test("on a phone the header avatar opens Settings, Sign-ins, Missing cards, Owner controls for the owner, and Sign out", async ({
+test("on a phone the header avatar opens Settings, Sign-ins, Card reports, Owner controls for the owner, and Sign out", async ({
   page,
 }) => {
   await page.setViewportSize(PHONE);
@@ -270,7 +270,7 @@ test("on a phone the header avatar opens Settings, Sign-ins, Missing cards, Owne
   await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
     "Settings",
     "Sign-ins",
-    "Missing cards",
+    "Card reports",
     "Sign out",
   ]);
   await sheet.getByRole("button", { name: "Sign-ins" }).click();
@@ -294,7 +294,7 @@ test("on a phone the header avatar opens Settings, Sign-ins, Missing cards, Owne
   await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
     "Settings",
     "Sign-ins",
-    "Missing cards",
+    "Card reports",
     "Owner controls",
     "Sign out",
   ]);
