@@ -474,6 +474,9 @@ test.describe("phone", () => {
   }) => {
     seedImportCatalog();
     await signIn(page);
+    await expect(
+      page.getByRole("button", { name: "Import from another tracker" })
+    ).toBeVisible();
     const leaf = await longPathLeaf(page);
     await page
       .getByRole("button", { name: "Import from another tracker" })
