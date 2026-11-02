@@ -135,7 +135,7 @@ async function openActions(page: Page, item: string) {
 }
 
 // Ticket 113's copy.
-const STALE = "Your collection changed in another tab or session.";
+const STALE = "Your collection has changed since this view loaded.";
 const NOTE =
   "Collection reloaded. Your selection was cleared because some selected cards had changed.";
 const banner = (page: Page) =>
