@@ -25,7 +25,6 @@ import {
 import { BorrowDraftsProvider } from "../loans/BorrowDrafts";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
-import { PriceCredit } from "../ui/PriceCredit";
 import { takeLandingToast } from "../scanner/ui/landing";
 import { ToastProvider, useToast } from "../ui/Toast";
 import { FriendsButton, FriendsProvider } from "../social/FriendsDrawer";
@@ -302,9 +301,11 @@ function ShellFrame({
         current={showing}
         onSignOut={() => void signOut()}
       >
+        {/* Keep a touch row above the tab clearance for fixed feedback. The former price-credit
+            footer supplied that space; moving its text to Settings must not remove it. */}
         <div
           data-app-shell=""
-          className="min-h-dvh bg-bg font-sans text-text scheme-dark"
+          className="min-h-dvh bg-bg font-sans text-text scheme-dark phone:pb-[calc(var(--layout-tabbar-height)+var(--target-touch))]"
         >
           <a
             href="#main-content"
@@ -409,12 +410,6 @@ function ShellFrame({
               {other.content}
             </div>
           )}
-
-          {/* The price credit ends the page area on every shell page; on a phone the padding keeps it, and the last of
-          the page, clear of the fixed tab bar. */}
-          <div className="phone:pb-tabbar">
-            <PriceCredit />
-          </div>
 
           {/* Phone bottom tab bar. */}
           <nav

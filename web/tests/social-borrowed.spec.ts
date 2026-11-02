@@ -21,6 +21,7 @@ import {
   setLine,
   unsorted,
 } from "./support/loans";
+import { expectTouchTarget } from "./support/touch-target";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 
@@ -174,7 +175,7 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   test.slow();
   const ids = seedCatalog();
   const misty = await collectors.signIn({ next: "/loans" });
-  await nameCollector(misty.page, "Misty W");
+  await nameCollector(misty.page, "Jordan Reyes");
   await hold(misty.page, await unsorted(misty.page), ids["PAL 185"], 2);
   await signInAsOwner(page, "/collection");
   await nameCollector(page, "Ash K");
@@ -211,13 +212,13 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   await expect(tiles).toHaveCount(3);
   await expect(main).toContainText("1 copy · 1 edition · 2 borrowed");
   await expect(tiles.nth(0)).not.toHaveAccessibleName(/borrowed from/);
-  await expect(tiles.nth(1)).toHaveAccessibleName(/borrowed from Misty W/);
-  await expect(tiles.nth(2)).toHaveAccessibleName(/borrowed from Misty W/);
+  await expect(tiles.nth(1)).toHaveAccessibleName(/borrowed from Jordan Reyes/);
+  await expect(tiles.nth(2)).toHaveAccessibleName(/borrowed from Jordan Reyes/);
   await sidebar.getByRole("button", { name: boxName, exact: true }).click();
   await expect(tiles).toHaveCount(2);
   await expect(main).toContainText("1 copy · 1 edition · 1 borrowed");
   await expect(
-    tiles.nth(1).getByText("From Misty W", { exact: true })
+    tiles.nth(1).getByText("From Jordan Reyes", { exact: true })
   ).toBeVisible();
   await tiles.nth(0).click();
   await tiles.nth(1).click({ modifiers: ["ControlOrMeta"] });
@@ -252,7 +253,7 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   await expect(tiles).toHaveCount(2);
   // The gallery implements pointer dragging, not native HTML drag and drop.
   const from = await main
-    .getByRole("button", { name: /Iono,.*borrowed from Misty W/ })
+    .getByRole("button", { name: /Iono,.*borrowed from Jordan Reyes/ })
     .boundingBox();
   const to = await sidebar
     .getByRole("button", { name: boxName, exact: true })
@@ -270,9 +271,62 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   ).toBeVisible();
   await sidebar.getByRole("button", { name: boxName, exact: true }).click();
   await expect(tiles).toHaveCount(1);
-  await expect(tiles.first()).toHaveAccessibleName(/borrowed from Misty W/);
+  await expect(tiles.first()).toHaveAccessibleName(
+    /borrowed from Jordan Reyes/
+  );
   await page.setViewportSize(DESKTOP);
+  await expect(
+    page.getByRole("searchbox", { name: "Search cards" })
+  ).toHaveAttribute("placeholder", "Search your cards…");
   await expectPageChecks(page, "borrowed Location gallery on desktop");
-  await page.setViewportSize(PHONE);
-  await expectPageChecks(page, "borrowed Location gallery on phone");
+  for (const width of [320, 375, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    const search = page.getByRole("searchbox", { name: "Search cards" });
+    await expect(search).toHaveAttribute("placeholder", "Search cards");
+    await expectTouchTarget(search);
+    await expect
+      .poll(() =>
+        search.evaluate((element) => {
+          if (!(element instanceof HTMLInputElement))
+            throw new Error("Expected the search input");
+          const style = getComputedStyle(element);
+          const placeholder = getComputedStyle(element, "::placeholder");
+          const context = document.createElement("canvas").getContext("2d")!;
+          context.font = placeholder.font || style.font;
+          const spacing = parseFloat(placeholder.letterSpacing) || 0;
+          const textWidth =
+            context.measureText(element.placeholder).width +
+            spacing * Math.max(0, element.placeholder.length - 1);
+          const contentWidth =
+            element.clientWidth -
+            parseFloat(style.paddingLeft) -
+            parseFloat(style.paddingRight);
+          return contentWidth - textWidth;
+        })
+      )
+      .toBeGreaterThanOrEqual(0);
+    const controls = page.getByRole("banner").getByRole("button");
+    await expect(controls).toHaveCount(6);
+    for (const control of await controls.all()) {
+      const box = await expectTouchTarget(control);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+    }
+    const mark = tiles.first().getByText("From Jordan Reyes", { exact: true });
+    await expect(mark).toBeVisible();
+    await expect(mark).toHaveCSS("-webkit-line-clamp", "2");
+    await expect
+      .poll(() =>
+        mark.evaluate(
+          (element) =>
+            element.scrollHeight <= element.clientHeight &&
+            element.scrollWidth <= element.clientWidth
+        )
+      )
+      .toBe(true);
+    await expectPageChecks(
+      page,
+      `borrowed Location gallery on phone at ${width}px`
+    );
+  }
 });
