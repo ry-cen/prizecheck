@@ -138,6 +138,9 @@ jobs:
       # The api legs start no browser, so they skip the download.
       - if: ${{ matrix.browsers }}
         run: npx playwright install --with-deps chromium
+      - name: Chromium sandbox preflight (fail closed)
+        if: ${{ matrix.browsers }}
+        run: node scripts/browser_sandbox_preflight.mjs
       - run: npm run verify -- ${{ matrix.args }}
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
@@ -185,6 +188,8 @@ jobs:
       - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npx playwright install --with-deps chromium
+      - name: Chromium sandbox preflight (fail closed)
+        run: node scripts/browser_sandbox_preflight.mjs
       - run: npm run verify
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres

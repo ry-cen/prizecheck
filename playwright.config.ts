@@ -14,14 +14,18 @@ export default defineConfig({
   use: {
     browserName: "chromium",
     headless: true,
-    launchOptions: process.env.TEST_FONTCONFIG_FILE
-      ? {
-          env: {
-            ...process.env,
-            FONTCONFIG_FILE: process.env.TEST_FONTCONFIG_FILE,
-          },
-        }
-      : undefined,
+    launchOptions: {
+      // Browser specs must fail if Chromium cannot start with its sandbox.
+      chromiumSandbox: true,
+      ...(process.env.TEST_FONTCONFIG_FILE
+        ? {
+            env: {
+              ...process.env,
+              FONTCONFIG_FILE: process.env.TEST_FONTCONFIG_FILE,
+            },
+          }
+        : {}),
+    },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
