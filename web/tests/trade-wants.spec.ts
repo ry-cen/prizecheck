@@ -171,7 +171,7 @@ test.describe("on a desktop", () => {
     await page.goto(`${ORIGIN}/decks/want-list`);
     await expect(page.getByText(/^No Decks yet\./)).toBeVisible();
     await expect(panel(page)).toContainText(
-      "Cards you want in trades that no Deck names."
+      "Trade Wants match the exact card and are not included in Deck To get or Combined total."
     );
     await expect(panel(page)).toContainText("No Trade Wants yet.");
 
@@ -270,6 +270,12 @@ test.describe("on a desktop", () => {
     await setLine(page, newer, ids["SVE 13"], 1);
     await page.goto(`${ORIGIN}/decks/want-list`);
     await expect(energy(page)).toHaveCount(2);
+    await expect(
+      page.getByText(
+        "Will accept controls Swap hints and trade matching, not the quantities shown on this page.",
+        { exact: true }
+      )
+    ).toHaveCount(2);
     await expect(
       energy(page)
         .first()
@@ -613,4 +619,101 @@ test.describe("on a phone", () => {
     await decrease.tap();
     await expect(panel(page)).toContainText("No Trade Wants yet.");
   });
+});
+
+for (const width of [320, 375, 390, 1280]) {
+  test(`Trade Wants summary separates copies and entries and focuses its section at ${width}px`, async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    const deck = await createDeck(page, "Shortcut Deck", 1);
+    await setLine(page, deck, ids["SVE 13"], 2);
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    const shortcut = page.getByRole("link", { name: /^Trade Wants ·/ });
+    await expect(panel(page)).toContainText("No Trade Wants yet.");
+    await expect(shortcut).toHaveCount(0);
+    for (const [key, quantity] of [
+      ["PAL 185", 3],
+      ["PAL 254", 5],
+      ["PAF 80", 2],
+    ] as const)
+      await api(page, "PUT", `/api/trade-wants/${ids[key]}`, {
+        quantity: String(quantity),
+      });
+    await page.reload();
+    await expect(shortcut).toHaveText(
+      "Trade Wants · 10 copies across 3 entries"
+    );
+    await expectTouchTarget(shortcut);
+    const address = page.url();
+    const historyLength = await page.evaluate(() => history.length);
+    const heading = panel(page).getByRole("heading", {
+      name: "Trade Wants",
+      exact: true,
+    });
+    await shortcut.focus();
+    await shortcut.press("Enter");
+    await expect(heading).toBeFocused();
+    await expect(heading).toBeInViewport();
+    await shortcut.click();
+    await expect(heading).toBeFocused();
+    await expect(heading).toBeInViewport();
+    await expect(page).toHaveURL(address);
+    expect(await page.evaluate(() => history.length)).toBe(historyLength);
+    await heading.press("Tab");
+    await expect(heading).not.toBeFocused();
+    await expect(
+      page.getByText(
+        "Will accept controls Swap hints and trade matching, not the quantities shown on this page.",
+        { exact: true }
+      )
+    ).toHaveCount(1);
+    await expect(page.getByText("2 cards", { exact: true })).toBeVisible();
+    await energy(page)
+      .getByRole("radio", { name: "Any finish", exact: true })
+      .check();
+    await expect(energy(page)).not.toHaveAttribute("aria-disabled", "true");
+    await expect(page.getByText("2 cards", { exact: true })).toBeVisible();
+    await expect(shortcut).toHaveText(
+      "Trade Wants · 10 copies across 3 entries"
+    );
+    await expectPageChecks(page, `Trade Wants shortcut at ${width}px`);
+    await page.goto(`${ORIGIN}/decks/want-list?deck=${deck}`);
+    await expect(energy(page)).toHaveCount(1);
+    await expect(shortcut).toHaveCount(0);
+  });
+}
+
+test("Trade Wants summary hides counts while loading and after an error", async ({
+  page,
+}) => {
+  seedCatalog();
+  await signIn(page);
+  await createDeck(page, "Loading shortcut Deck", 1);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => url.pathname === "/api/trade-wants",
+    async (route) => {
+      await held;
+      await route.fulfill({
+        status: 500,
+        json: { detail: { code: "INTERNAL" } },
+      });
+    }
+  );
+  await page.goto(`${ORIGIN}/decks/want-list`);
+  await expect(panel(page)).toContainText("Loading your Trade Wants…");
+  await expect(page.getByRole("link", { name: /^Trade Wants ·/ })).toHaveCount(
+    0
+  );
+  release();
+  await expect(panel(page)).toContainText(
+    "Your Trade Wants couldn't be loaded."
+  );
+  await expect(page.getByRole("link", { name: /^Trade Wants ·/ })).toHaveCount(
+    0
+  );
 });

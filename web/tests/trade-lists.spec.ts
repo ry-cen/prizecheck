@@ -235,6 +235,23 @@ async function story(
     "Cards promised to a Trade or Loan leave this list until they're released."
   );
   await expectPageChecks(misty.page, `My Trade List at ${width}`);
+  const wanted = misty.page.getByRole("link", {
+    name: "Trade Wants on the Want List",
+  });
+  await expect(wanted).toBeVisible();
+  await wanted.click();
+  await expect(misty.page).toHaveURL(`${ORIGIN}/decks/want-list`);
+  await expect(
+    misty.page.getByRole("heading", { name: "Trade Wants", exact: true })
+  ).toBeVisible();
+  await misty.page.goBack();
+  await expect(misty.page).toHaveURL(`${ORIGIN}/trades/list`);
+  await misty.page.goForward();
+  await expect(
+    misty.page.getByRole("heading", { name: "Trade Wants", exact: true })
+  ).toBeVisible();
+  await misty.page.goBack();
+  await expect(misty.page).toHaveURL(`${ORIGIN}/trades/list`);
 
   // B: Ash, Misty's Friend, opens her Trade List from her Collection.
   await noArtwork(page);
@@ -315,6 +332,15 @@ async function story(
   await expect(page.getByRole("main")).toContainText(
     "Your Trade List is empty. Mark a Location For trade in Collection, and its cards show here."
   );
+  await page
+    .getByRole("link", { name: "Trade Wants on the Want List" })
+    .click();
+  await expect(page).toHaveURL(`${ORIGIN}/decks/want-list`);
+  await expect(
+    page.getByRole("heading", { name: "Trade Wants", exact: true })
+  ).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(`${ORIGIN}/trades/list`);
   await page
     .getByRole("main")
     .getByRole("button", { name: "Open Collection", exact: true })

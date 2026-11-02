@@ -103,10 +103,13 @@ for (const width of [320, 375, 390, 960, 1280]) {
       name: "Cards to get",
       exact: true,
     });
-    if (width <= 760) await page.getByText(/^Combined total · 3 cards/).click();
+    if (width <= 760)
+      await page.getByText(/^Combined total \(Decks only\) · 3 cards/).click();
     else
       await expect(
-        page.getByRole("heading", { name: /^Combined total · 3 cards/ })
+        page.getByRole("heading", {
+          name: /^Combined total \(Decks only\) · 3 cards/,
+        })
       ).toBeVisible();
     await expect(combined.getByRole("listitem")).toHaveCount(2);
     const iono = combined.getByRole("listitem").filter({ hasText: "Iono" });
@@ -195,10 +198,19 @@ for (const width of [320, 375, 390, 960, 1280]) {
   }) => {
     const page = await sectionExample(() => collectors.signIn(), width);
     const main = page.getByRole("main").filter({ visible: true });
+    await expect(
+      main.getByRole("link", { name: /^Trade Wants ·/ })
+    ).toBeVisible();
     await main
       .getByRole("radiogroup", { name: "Show the Want List as" })
       .getByRole("radio", { name: "Get from Friends", exact: true })
       .check();
+    await expect(
+      main.getByRole("region", { name: "Trade Wants", exact: true })
+    ).toHaveCount(0);
+    await expect(
+      main.getByRole("link", { name: /^Trade Wants ·/ })
+    ).toHaveCount(0);
     const panel = main.getByRole("region", { name: /^Iono / });
     await expect(panel).toContainText("You need 2 · Tile sections");
     await expect(panel).toContainText("0 of 2 asked");
@@ -299,5 +311,141 @@ for (const width of [320, 375, 390, 960, 1280]) {
     await expectIdentityFits();
     await fits(panel);
     await expectPageChecks(page, `From Friends at ${width}px`);
+  });
+}
+
+for (const height of [800, 600]) {
+  test(`sticky Combined total final row remains reachable at 1280x${height}`, async ({
+    collectors,
+  }) => {
+    const page = (await collectors.signIn()).page;
+    const ids = seedCatalog();
+    const deck = await createDeck(page, "Long summary reachability Deck");
+    await setLine(page, deck, ids["PAL 185"], 1);
+    await page.route(
+      (url) => url.pathname === "/api/want-list",
+      async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        const row = body.combined[0];
+        body.combined = Array.from({ length: 8 }, (_, index) => ({
+          ...row,
+          edition_id: `${row.edition_id}-${index}`,
+          name: `Summary row ${index + 1} with a long identifiable card label for reachability`,
+          image_url: null,
+        }));
+        await route.fulfill({ response, json: body });
+      }
+    );
+    await page.setViewportSize({ width: 1280, height });
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    const aside = page.getByRole("complementary", { name: /^Combined total/ });
+    const rows = aside.getByRole("listitem");
+    await expect(rows).toHaveCount(8);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+    // Keyboard reachability: N/A while the desktop aside and its regions are
+    // not focusable. Fail if row controls are added, forcing a real keyboard check.
+    await expect(
+      rows.locator(
+        "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])"
+      )
+    ).toHaveCount(0);
+    const panelBox = await aside.boundingBox();
+    if (!panelBox) throw new Error("Combined total has no bounding box");
+    await page.mouse.move(
+      panelBox.x + panelBox.width / 2,
+      Math.min(panelBox.y + 20, height - 1)
+    );
+    const seen = new Set<number>();
+    const checkVisibleRows = async () => {
+      for (let index = 0; index < 8; index++) {
+        const row = rows.nth(index);
+        const sample = await row.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const fullyVisible =
+            box.top >= 0 &&
+            box.bottom <= innerHeight &&
+            box.left >= 0 &&
+            box.right <= innerWidth;
+          const uncovered =
+            typeof document.elementFromPoint !== "function" ||
+            [box.top + box.height / 2, box.bottom - 1].every((y) => {
+              const hit = document.elementFromPoint(
+                box.left + box.width / 2,
+                y
+              );
+              return hit !== null && element.contains(hit);
+            });
+          return { fullyVisible, uncovered };
+        });
+        if (!sample.fullyVisible) continue;
+        expect(sample.uncovered, `summary row ${index + 1} is uncovered`).toBe(
+          true
+        );
+        await expect(row).toBeInViewport({ ratio: 1 });
+        seen.add(index);
+      }
+    };
+    const position = () =>
+      page.evaluate(() => ({
+        y: scrollY,
+        atEnd:
+          scrollY + innerHeight >= document.documentElement.scrollHeight - 1,
+      }));
+    await checkVisibleRows();
+    let stoppedAtEnd = false;
+    for (let step = 0; step < 80; step++) {
+      const before = await position();
+      await page.mouse.wheel(0, 120);
+      // Wheel dispatch is asynchronous: wait for movement or the page boundary.
+      await expect
+        .poll(async () => {
+          const after = await position();
+          return after.y > before.y || after.atEnd;
+        })
+        .toBe(true);
+      // Movement alone is insufficient: sample only after two consecutive
+      // animation-frame intervals have unchanged scrollY, with a finite budget.
+      const settled = await page.evaluate(async () => {
+        let previous = scrollY;
+        let stableFrames = 0;
+        for (let frame = 0; frame < 120; frame++) {
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve())
+          );
+          const current = scrollY;
+          stableFrames = current === previous ? stableFrames + 1 : 0;
+          if (stableFrames >= 2) return true;
+          previous = current;
+        }
+        return false;
+      });
+      expect(settled, "wheel scrolling settled within 120 frames").toBe(true);
+      await checkVisibleRows();
+      const after = await position();
+      if (after.y === before.y) {
+        stoppedAtEnd = after.atEnd;
+        break;
+      }
+    }
+    expect(stoppedAtEnd, "wheel scrolling stopped at the page end").toBe(true);
+    expect([...seen].sort(), "every summary row was fully visible").toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7,
+    ]);
+    await expect(rows.last()).toBeInViewport({ ratio: 1 });
+    const evidence = await aside.evaluate((element) => {
+      const last = element
+        .querySelector("li:last-child")!
+        .getBoundingClientRect();
+      return {
+        panelHeight: element.getBoundingClientRect().height,
+        viewport: innerHeight,
+        finalRow: { top: last.top, bottom: last.bottom, height: last.height },
+      };
+    });
+    await test.info().attach("reachability", {
+      body: JSON.stringify(evidence),
+      contentType: "application/json",
+    });
   });
 }

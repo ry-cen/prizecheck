@@ -29,6 +29,16 @@ export function MyTradeList({
   return (
     <>
       <OpenToCashOffers />
+      <p className="m-0 text-body text-text-muted">
+        This list shows cards you offer for trade. For cards you want, open{" "}
+        <a
+          href="/decks/want-list"
+          className="inline-flex min-h-tap items-center rounded-control text-accent-strong underline"
+        >
+          Trade Wants on the Want List
+        </a>
+        .
+      </p>
       <TradeListBody onOpenCollection={onOpenCollection} />
     </>
   );
