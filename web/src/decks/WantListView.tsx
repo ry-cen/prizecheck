@@ -241,26 +241,30 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     >
       <section
         aria-labelledby={`${idBase}-summary`}
-        className="flex flex-wrap items-end gap-x-8 gap-y-2 rounded-panel border border-border bg-surface p-4"
+        className="flex min-w-0 flex-col gap-3"
       >
         <h2
           id={`${idBase}-summary`}
-          className="m-0 basis-full text-heading font-semibold wrap-anywhere"
+          className="m-0 text-heading font-semibold wrap-anywhere"
         >
           {scoped ? `Want List · ${scoped}` : "Want List"}
         </h2>
-        <p className="m-0 flex flex-col">
-          <span className="text-meta text-text-muted wrap-anywhere">
-            {scoped ? `${scoped} needs` : "To get"}
-          </span>
-          <span className="text-display font-semibold tabular-nums">
-            {cards(list.to_get)}
-          </span>
-        </p>
-        <CostSummary />
-        <WantListBuy list={list} onChanged={reload} />
+        <div className="flex min-w-0 flex-wrap items-start gap-x-8 gap-y-3">
+          <dl className="m-0 flex min-w-0 max-w-full flex-col">
+            <dt className="text-meta text-text-muted wrap-anywhere">
+              {scoped ? `${scoped} needs` : "To get"}
+            </dt>
+            <dd className="m-0 text-display font-semibold tabular-nums wrap-anywhere">
+              {cards(list.to_get)}
+            </dd>
+          </dl>
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-4 gap-y-2">
+            <CostSummary />
+            <WantListBuy list={list} onChanged={reload} />
+          </div>
+        </div>
         {hasFriends && (
-          <div className="self-center phone:basis-full">
+          <div className="min-w-0 max-w-full self-start">
             <Segmented
               mode="choice"
               label="Show the Want List as"
@@ -270,18 +274,30 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
             />
           </div>
         )}
-        <p className="m-0 basis-full text-meta text-text-muted">
-          Counting:{" "}
-          <strong className="font-semibold text-text">{counting.label}</strong>.{" "}
-          {counting.explainer}{" "}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-meta text-text-muted">
+          <span>
+            Counting:{" "}
+            <strong className="font-semibold text-text">
+              {counting.label}
+            </strong>
+            .
+          </span>
           <a
             href="/settings"
             onClick={(event) => follow(event, () => onNavigate("/settings"))}
-            className="text-accent-strong underline"
+            className="inline-flex min-h-control max-w-full items-center rounded-control px-2 text-accent-strong underline phone:min-h-tap"
           >
             Change it in Settings
           </a>
-        </p>
+          <details className="min-w-0 max-w-full">
+            <summary className="min-h-control cursor-pointer rounded-control px-2 py-1 text-accent-strong phone:min-h-tap phone:py-3">
+              How it counts
+            </summary>
+            <p className="m-0 max-w-2xl pb-2 text-meta wrap-anywhere">
+              {counting.explainer}
+            </p>
+          </details>
+        </div>
         {!shownScope && shownView === "buy" && (
           <TradeWantsShortcut api={trade} />
         )}
