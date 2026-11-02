@@ -205,7 +205,18 @@ test("Collection's phone header while the gallery scrolls", async ({
 
       if (size.height > 480) {
         expect(scrolled.header?.top).toBeCloseTo(0, 0);
-        await expect(header).toHaveCSS("--layout-sticky-top", "64px");
+        // The browser's resolved focus clearance follows the rendered header, including both phone rows.
+        await expect
+          .poll(() =>
+            header.evaluate((element) =>
+              Math.abs(
+                parseFloat(
+                  getComputedStyle(document.documentElement).scrollPaddingTop
+                ) - element.getBoundingClientRect().bottom
+              )
+            )
+          )
+          .toBeLessThan(0.5);
       }
       // Keyboard: from that tile, focus Search (as Shift+Tab back up the page would) and see where the page goes.
       if (size.height > 480) {

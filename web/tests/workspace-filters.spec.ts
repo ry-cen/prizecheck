@@ -528,8 +528,8 @@ test.describe("desktop", () => {
 test.describe("mobile", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-  for (const width of [320, 375])
-    test(`Search and Filters keep a usable gap and touch targets at ${width}px`, async ({
+  for (const width of [320, 375, 390])
+    test(`Search and Filters keep separate rows and touch targets at ${width}px`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 812 });
@@ -542,7 +542,8 @@ test.describe("mobile", () => {
       const filters = await expectTouchTarget(
         header.getByRole("button", { name: /^Filters & display/ })
       );
-      expect(filters.x).toBeGreaterThan(search.x + search.width);
+      expect(search.y).toBeGreaterThanOrEqual(filters.y + filters.height);
+      expect(search.x + search.width).toBeLessThanOrEqual(width);
       expect(filters.x + filters.width).toBeLessThanOrEqual(width);
     });
 
@@ -559,7 +560,10 @@ test.describe("mobile", () => {
     const searchBox = (await header
       .getByRole("searchbox", { name: "Search cards" })
       .boundingBox())!;
-    expect(openerBox.x).toBeGreaterThan(searchBox.x + searchBox.width);
+    // Search has its own full-width second row on phones (#500).
+    expect(searchBox.y).toBeGreaterThanOrEqual(openerBox.y + openerBox.height);
+    expect(searchBox.x).toBeGreaterThanOrEqual(0);
+    expect(searchBox.x + searchBox.width).toBeLessThanOrEqual(375);
     expect(openerBox.x + openerBox.width).toBeLessThanOrEqual(375);
     expect(
       await page.evaluate(
