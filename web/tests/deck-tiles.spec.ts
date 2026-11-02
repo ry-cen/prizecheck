@@ -333,3 +333,148 @@ test.describe("on a phone", () => {
     );
   });
 });
+
+const decksMain = (page: Page) =>
+  page.getByRole("main").filter({
+    has: page.getByRole("heading", { name: "Decks", level: 1, exact: true }),
+  });
+
+const layoutWidths = [1024, 1280, 1440, 1920, 320, 375, 390];
+
+// Each fixture/route gets its own test budget; keep the full resize sequence in
+// one test so unsaved form state is still checked across the phone breakpoint.
+async function seedLayoutDecks(page: Page, count: number) {
+  promoteLegalCatalog();
+  await signIn(page);
+  await stubCost(page);
+  const built = await buildLegalDeck(
+    page,
+    "A long Deck name for checking compact cards and wrapping"
+  );
+  const published = await page.request.post(
+    `${ORIGIN}/api/decks/${built.deckId}/publication`,
+    {
+      headers: { origin: ORIGIN },
+      data: {
+        title:
+          "A long published Deck title for checking wrapping and readable publication controls",
+        idempotency_key: randomUUID(),
+      },
+    }
+  );
+  expect(published.status()).toBe(200);
+  for (let n = 1; n < count; n++) await emptyDeck(page);
+  return built;
+}
+
+for (const count of [1, 6, 22]) {
+  test(`Deck layout stays readable through desktop and phone resizing with ${count} Decks`, async ({
+    page,
+  }) => {
+    const built = await seedLayoutDecks(page, count);
+    const main = decksMain(page);
+    await page.goto(`${ORIGIN}/decks`);
+    await expect(deckIndex(page).getByRole("listitem")).toHaveCount(count);
+    await main
+      .getByRole("textbox", { name: "Deck name", exact: true })
+      .fill("Unsaved Deck name");
+    for (const width of layoutWidths) {
+      await page.setViewportSize({
+        width,
+        height: width === 1920 ? 1080 : 900,
+      });
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              document.documentElement.scrollWidth <=
+              document.documentElement.clientWidth
+          )
+        )
+        .toBe(true);
+      await expect(
+        main.getByRole("textbox", { name: "Deck name", exact: true })
+      ).toHaveValue("Unsaved Deck name");
+      await expectTouchTarget(
+        tile(page, built.deckName).getByRole("link", {
+          name: built.deckName,
+          exact: true,
+        })
+      );
+      await expect
+        .poll(() =>
+          main.evaluate((el) => Math.round(el.getBoundingClientRect().width))
+        )
+        .toBe(Math.min(width, 1536));
+      await expect
+        .poll(() =>
+          tile(page, built.deckName).evaluate((el) => {
+            const art = el.firstElementChild!.getBoundingClientRect();
+            const link = el.querySelector("a")!.getBoundingClientRect();
+            return {
+              artWidth: Math.round(art.width),
+              horizontal: link.x > art.x + art.width,
+            };
+          })
+        )
+        .toMatchObject(
+          width > 760
+            ? { artWidth: 64, horizontal: true }
+            : { horizontal: false }
+        );
+    }
+  });
+}
+
+for (const name of ["want-all", "want-scoped"]) {
+  test(`Want List layout stays readable through desktop and phone resizing: ${name}`, async ({
+    page,
+  }) => {
+    const built = await seedLayoutDecks(page, 22);
+    const main = decksMain(page);
+    const route =
+      name === "want-all"
+        ? "/decks/want-list"
+        : `/decks/want-list?deck=${built.deckId}`;
+    // Match the original test's phone viewport when first checking the Deck's card name.
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto(`${ORIGIN}${route}`);
+    await expect(
+      main
+        .getByRole("region", { name: built.deckName, exact: true })
+        .getByRole("paragraph")
+        .filter({ hasText: /^Basic Grass Energy$/ })
+    ).toBeVisible();
+    for (const width of layoutWidths) {
+      await page.setViewportSize({
+        width,
+        height: width === 1920 ? 1080 : 900,
+      });
+      if (width > 760) {
+        await expect
+          .poll(() =>
+            main.evaluate((el) => Math.round(el.getBoundingClientRect().width))
+          )
+          .toBe(Math.min(width, 1536));
+        if (name === "want-all") {
+          await expect
+            .poll(() =>
+              main
+                .getByRole("complementary", { name: /^Combined total/ })
+                .evaluate((el) => Math.round(el.getBoundingClientRect().width))
+            )
+            .toBe(352);
+        } else {
+          await expect
+            .poll(() =>
+              main
+                .getByRole("region", { name: /^Want List/ })
+                .locator("..")
+                .evaluate((el) => Math.round(el.getBoundingClientRect().width))
+            )
+            .toBe(Math.min(width - 56, 960));
+        }
+      }
+    }
+  });
+}

@@ -38,7 +38,7 @@ export function DecksPage({
   const idBase = useId();
   const panelId = `${idBase}-panel`;
   return (
-    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-[1536px] flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
       {/* The switch sits right under the title, closer than the page's sections are to each other. */}
       <div className="flex min-w-0 flex-col gap-2 border-b border-border pb-2 [&>div:first-child]:mb-0 phone:[&>div:first-child>div]:ml-auto phone:[&>div:first-child>div]:basis-auto">
         <PageHeader

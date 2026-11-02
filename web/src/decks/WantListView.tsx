@@ -233,7 +233,10 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     );
 
   const page = (
-    <div className="flex min-w-0 flex-col gap-4" aria-busy={!current}>
+    <div
+      className={`flex min-w-0 flex-col gap-4 ${shownScope || shownView === "friends" ? "w-full max-w-[960px] self-center" : ""}`}
+      aria-busy={!current}
+    >
       <section
         aria-labelledby={`${idBase}-summary`}
         className="flex flex-wrap items-end gap-x-8 gap-y-2 rounded-panel border border-border bg-surface p-4"
@@ -335,7 +338,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           className={
             shownScope
               ? "flex min-w-0 flex-col gap-4"
-              : "grid grid-cols-[minmax(0,1fr)_18rem] items-start gap-6 phone:grid-cols-1 phone:gap-4"
+              : "grid grid-cols-[minmax(0,1fr)_22rem] items-start gap-6 phone:grid-cols-1 phone:gap-4"
           }
         >
           {!shownScope && (
