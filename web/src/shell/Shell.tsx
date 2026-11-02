@@ -301,9 +301,11 @@ function ShellFrame({
         current={showing}
         onSignOut={() => void signOut()}
       >
+        {/* Keep a touch row above the tab clearance for fixed feedback. The former price-credit
+            footer supplied that space; moving its text to Settings must not remove it. */}
         <div
           data-app-shell=""
-          className="min-h-dvh bg-bg font-sans text-text scheme-dark phone:pb-tabbar"
+          className="min-h-dvh bg-bg font-sans text-text scheme-dark phone:pb-[calc(var(--layout-tabbar-height)+var(--target-touch))]"
         >
           <a
             href="#main-content"
