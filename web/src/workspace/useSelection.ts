@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GalleryHolding, GalleryStatus, TileRef } from "./galleryModel";
 import {
   addSpans,
+  dropBorrowedSelection,
   EMPTY_SELECTION,
   isOnlyTile,
   isTileSelected,
@@ -51,6 +52,7 @@ export type SelectionState = {
   selectMode: boolean;
   setSelectMode: (on: boolean) => void;
   clear: () => void;
+  dropBorrowed: () => void;
   activate: (tile: TileRef, gesture: TileGesture) => void;
   marquee: (event: MarqueeEvent) => void;
   /** Opens the details sheet for the inspected card (the mobile strip's Details). */
@@ -219,6 +221,7 @@ export function useSelection({
 
   return {
     selected,
+    dropBorrowed: () => commit(dropBorrowedSelection(latest.current.selected)),
     summary,
     inspected: fresh(selected.size ? focus : null),
     details: fresh(details),

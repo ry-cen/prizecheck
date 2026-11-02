@@ -1,3 +1,4 @@
+import type { BorrowedMoveItem } from "../collection_generated";
 import type { GalleryHolding, GalleryQuery, GridLayout } from "./galleryModel";
 
 /** Selected ordinals of one Holding: sorted, disjoint, non-touching half-open runs [from, to).
@@ -9,6 +10,7 @@ export type Runs = readonly (readonly [number, number])[];
 export type SelectedHolding = {
   /** `${location_id}:${edition_id}`, as GalleryHolding.key. */
   key: string;
+  loanId: string | null;
   locationId: string;
   editionId: string;
   /** The Holding's version when it was last added to; ticket 107 sends it as expected_version. */
@@ -36,6 +38,7 @@ export type SelectionSummary = {
   copies: number;
   editions: number;
   locations: number;
+  borrowed: number;
 };
 
 /** Inclusive display-index spans, such as one per grid row of a marquee. */
@@ -142,6 +145,7 @@ class Draft {
       }
       this.next.set(key, {
         key,
+        loanId: holding.borrowed?.loanId ?? null,
         locationId: holding.holding.location_id,
         editionId: holding.holding.edition_id,
         version: holding.holding.version,
@@ -268,24 +272,33 @@ export function reconcileSelection(
 
 export function summarizeSelection(selection: Selection): SelectionSummary {
   let copies = 0;
+  let borrowed = 0;
   const editions = new Set<string>();
   const locations = new Set<string>();
   for (const entry of selection.values()) {
     copies += entry.count;
+    if (entry.loanId) borrowed += entry.count;
     editions.add(entry.editionId);
     locations.add(entry.locationId);
   }
-  return { copies, editions: editions.size, locations: locations.size };
+  return {
+    copies,
+    borrowed,
+    editions: editions.size,
+    locations: locations.size,
+  };
 }
 
 /** The selection as manifest items, one per selected Holding (ticket 107 stages these). */
 export function selectedGroups(selection: Selection): SelectedGroup[] {
-  return Array.from(selection.values(), (entry) => ({
-    source_id: entry.locationId,
-    edition_id: entry.editionId,
-    quantity: String(entry.count),
-    expected_version: entry.version,
-  }));
+  return Array.from(selection.values())
+    .filter((entry) => !entry.loanId)
+    .map((entry) => ({
+      source_id: entry.locationId,
+      edition_id: entry.editionId,
+      quantity: String(entry.count),
+      expected_version: entry.version,
+    }));
 }
 
 /** A rectangle in grid coordinates (px from the grid's top-left corner). */
@@ -331,4 +344,26 @@ export function marqueeSpans(
     if (first <= last) spans.push([first, last]);
   }
   return spans;
+}
+
+export function selectedBorrowed(selection: Selection): BorrowedMoveItem[] {
+  return Array.from(selection.values()).flatMap((entry) =>
+    entry.loanId
+      ? [
+          {
+            loan_id: entry.loanId,
+            edition_id: entry.editionId,
+            from_location_id: entry.locationId,
+            quantity: String(entry.count),
+          },
+        ]
+      : []
+  );
+}
+
+/** Drop only Borrowed entries after their Move stage is confirmed. */
+export function dropBorrowedSelection(selection: Selection): Selection {
+  if (!Array.from(selection.values()).some((entry) => entry.loanId))
+    return selection;
+  return new Map(Array.from(selection).filter(([, entry]) => !entry.loanId));
 }

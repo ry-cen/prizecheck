@@ -137,6 +137,7 @@ export function SelectionBar({
           <span className="text-meta text-text-muted phone:text-micro">
             {plural(summary.editions, "edition", "editions")} ·{" "}
             {plural(summary.locations, "location", "locations")}
+            {summary.borrowed > 0 && ` · ${summary.borrowed} borrowed`}
           </span>
         </p>
         <span className="flex items-center gap-2">
@@ -170,20 +171,24 @@ export function SelectionBar({
                 >
                   Move…
                 </button>
-                <button
-                  type="button"
-                  className={LIST_ITEM}
-                  onClick={() => choose(onRemove)}
-                >
-                  Inventory Removal…
-                </button>
-                <button
-                  type="button"
-                  className={LIST_ITEM}
-                  onClick={() => choose(onLend)}
-                >
-                  Lend to a Friend…
-                </button>
+                {summary.borrowed === 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className={LIST_ITEM}
+                      onClick={() => choose(onRemove)}
+                    >
+                      Inventory Removal…
+                    </button>
+                    <button
+                      type="button"
+                      className={LIST_ITEM}
+                      onClick={() => choose(onLend)}
+                    >
+                      Lend to a Friend…
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   className={LIST_ITEM}

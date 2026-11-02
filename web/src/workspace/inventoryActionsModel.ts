@@ -1,3 +1,7 @@
+import {
+  BorrowedMoveError,
+  type BorrowedMoveItem,
+} from "../collection_generated";
 import { MoveError } from "../moves_generated";
 import type { CollectionHoldingView } from "../collection_generated";
 import { plural } from "./galleryModel";
@@ -42,10 +46,20 @@ export function countText(decimal: string, one: string, many: string) {
 }
 
 /** The spec's MovePreview: copies that move, and copies already at the destination that stay. */
-export function movePreview(groups: SelectedGroup[], destinationId: string) {
+export function movePreview(
+  groups: SelectedGroup[],
+  destinationId: string,
+  borrowed: readonly BorrowedMoveItem[] = []
+) {
   let moving = 0;
   let alreadyThere = 0;
-  for (const group of groups) {
+  for (const group of [
+    ...groups,
+    ...borrowed.map((item) => ({
+      source_id: item.from_location_id,
+      quantity: item.quantity,
+    })),
+  ]) {
     const copies = Number(group.quantity);
     if (group.source_id === destinationId) alreadyThere += copies;
     else moving += copies;
@@ -129,15 +143,29 @@ type Names = {
 export function describeFailure(
   target: ActionTarget,
   error: unknown,
-  names: Names
+  names: Names,
+  options: {
+    omitNothing?: boolean;
+    unknown?: boolean;
+    unsupported?: boolean;
+  } = {}
 ): Failure {
   const move = target.kind === "move";
   const noun = move ? "Move" : "Inventory Removal";
-  const nothing = move ? "Nothing moved." : "Nothing was removed.";
+  const nothing = options.omitNothing
+    ? ""
+    : move
+      ? "Nothing moved."
+      : "Nothing was removed.";
   const kept = "Your selection is kept";
   const refreshed = `${kept} and the cards have been refreshed; review it and try again.`;
   const destination = move ? names.place(target.destinationId) : "";
-  if (!(error instanceof MoveError) || error.status >= 500)
+  if (
+    options.unknown ||
+    !(error instanceof MoveError) ||
+    error.status >= 500 ||
+    error.code === "REPLAY_OUTCOME_UNAVAILABLE"
+  )
     return {
       text: `The ${noun} may not have finished. Try again to check safely; ${kept.toLowerCase()}.`,
       toastText: `The ${noun} may not have finished. Check your cards before trying again.`,
@@ -162,6 +190,11 @@ export function describeFailure(
     reloadTree,
     retrySame: false,
   });
+  if (options.unsupported)
+    return result(
+      `This Move is unavailable right now.${nothing ? ` ${nothing}` : ""} Try again later.`,
+      ""
+    );
   switch (error.code) {
     case "STALE_HOLDING":
       return result(
@@ -218,16 +251,6 @@ export function describeFailure(
         `This ${noun} took too long to prepare. ${nothing}`,
         `Try again; ${kept.toLowerCase()}.`
       );
-    case "REPLAY_OUTCOME_UNAVAILABLE": {
-      const replayUnavailable = `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`;
-      return {
-        text: replayUnavailable,
-        toastText: replayUnavailable,
-        reloadGallery: true,
-        reloadTree: true,
-        retrySame: false,
-      };
-    }
     default:
       return result(
         `The ${noun} couldn't be completed. ${nothing}`,
@@ -243,4 +266,66 @@ export function trimOldest<K, V>(map: Map<K, V>, limit: number) {
     if (map.size <= limit) return;
     map.delete(key);
   }
+}
+
+export function describeBorrowedFailure(
+  error: unknown,
+  place: string
+): Failure {
+  const code = error instanceof BorrowedMoveError ? error.code : "";
+  const lead =
+    code === "NOT_ENOUGH_BORROWED"
+      ? "Some borrowed copies aren't where you selected them any more."
+      : code === "LOCATION_NOT_FOUND"
+        ? `${place} can no longer hold cards.`
+        : "The Move was refused.";
+  return {
+    text: `${lead} Nothing moved.`,
+    toastText: `${lead} Nothing moved.`,
+    reloadGallery:
+      code === "NOT_ENOUGH_BORROWED" || code === "LOCATION_NOT_FOUND",
+    reloadTree: code === "LOCATION_NOT_FOUND",
+    retrySame: false,
+  };
+}
+export function borrowedUnknownFailure(): Failure {
+  return {
+    text: "The Move may not have finished. Try again to check safely; your selection is kept.",
+    toastText: "The Move may not have finished. Try again to check safely.",
+    reloadGallery: false,
+    reloadTree: false,
+    retrySame: true,
+  };
+}
+export function partialMoveFailure(
+  n: number,
+  place: string,
+  failure: Failure,
+  unknown: boolean
+): Failure {
+  const lead = `Moved ${plural(n, "borrowed copy", "borrowed copies")} to ${place}`;
+  const uncertain = unknown || failure.retrySame;
+  const text = uncertain
+    ? `${lead}. Moving your own copies may not have finished. Try again to check safely.`
+    : `${lead}; your own copies didn't move: ${failure.toastText.replace(" The cards have been refreshed.", "").trim()}`;
+  return {
+    ...failure,
+    retrySame: uncertain,
+    text,
+    toastText: text,
+    reloadGallery: true,
+    reloadTree: true,
+  };
+}
+
+/** The dedicated route returned a receipt that violates its no-Undo postcondition. */
+export function unsupportedUndoFailure(copies: number, place: string): Failure {
+  const text = `Moved ${plural(copies, "copy", "copies")} to ${place}. Undo unavailable. Refresh before continuing.`;
+  return {
+    text,
+    toastText: text,
+    reloadGallery: true,
+    reloadTree: true,
+    retrySame: true,
+  };
 }

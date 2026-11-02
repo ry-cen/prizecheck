@@ -9,7 +9,7 @@ import {
 } from "./support/loans";
 import { traderIdOf } from "./support/conversations";
 import { randomUUID } from "node:crypto";
-import { type Page } from "@playwright/test";
+import { type Page, type Response } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { test, expect } from "./support/collectors";
 import { signInAsOwner } from "./support/sign-in";
@@ -1010,19 +1010,35 @@ test("a new activation recovers while superseded format checks are still held", 
   const address = page.url();
   await page.goto("about:blank");
   const warmedCosts = new Set<string>();
-  page.on("response", async (response) => {
+  const pendingWarmCosts: Promise<PromiseSettledResult<void>[]>[] = [];
+  const recordWarmCost = (response: Response) => {
     const path = new URL(response.url()).pathname;
     if (
       response.ok() &&
       [first, second].some((id) => path === `/api/decks/${id}/cost`)
     ) {
-      await response.finished();
-      warmedCosts.add(path);
+      pendingWarmCosts.push(
+        // Observe immediately so a rejection before the drain remains available without becoming unhandled.
+        Promise.allSettled([
+          response.finished().then(() => {
+            warmedCosts.add(path);
+          }),
+        ])
+      );
     }
-  });
-  await page.goto(address);
-  await warmed(page);
-  await expect.poll(() => warmedCosts.size).toBe(2);
+  };
+  page.on("response", recordWarmCost);
+  try {
+    await page.goto(address);
+    await warmed(page);
+    await expect.poll(() => warmedCosts.size).toBe(2);
+  } finally {
+    page.off("response", recordWarmCost);
+  }
+  // Drain only after success so a stalled response cannot delay the original warm-up error.
+  const results = (await Promise.all(pendingWarmCosts)).flat();
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
   await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
   await tabs(page)
     .getByRole("button", { name: "Collection", exact: true })

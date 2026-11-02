@@ -3,7 +3,7 @@ import client_generator as gen
 
 TARGET = "web/src/collection_generated.ts"
 NAMES = ('CollectionEntry', 'CollectionPage', 'Distribution', 'CollectionTotals', 'CollectionHoldingView',
-         'CollectionHoldingPage', 'CollectionSet', 'CollectionSetList', 'CollectionRevision')
+         'CollectionHoldingPage', 'CollectionSet', 'CollectionSetList', 'CollectionRevision', 'BorrowedGalleryView', 'BorrowedGalleryPage', 'BorrowedMoveItem', 'MoveBorrowedCopies', 'BorrowedMoveResult')
 
 # Reads share the Holdings error (imported, not redefined): a refused read carries the same status and code.
 BODY = '''
@@ -28,6 +28,15 @@ export const getCollectionHoldings = (query: CollectionHoldingQuery={},cursor?: 
   return read<CollectionHoldingPage>(`/api/collection/holdings?${params}`);
 };
 export const getCollectionSets = (locationId?: string) => read<CollectionSetList>(`/api/collection/sets${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`);
+export const getBorrowedGallery = (query: CollectionHoldingQuery={}) => read<BorrowedGalleryPage>(`/api/collection/borrowed?${new URLSearchParams(Object.entries(query).filter(([,v])=>v !== undefined).map(([k,v])=>[k,String(v)]))}`);
+export class BorrowedMoveError extends Error {
+  constructor(public status: number, public code: string, public detail: Record<string, unknown> = {}) { super(code); }
+}
+export async function moveBorrowedCopies(body: MoveBorrowedCopies): Promise<BorrowedMoveResult> {
+  const response = await fetch('/api/collection/borrowed/moves', {method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  if (!response.ok) { const data=await response.json().catch(()=>({})); throw new BorrowedMoveError(response.status,data?.detail?.code ?? 'MOVE_UNAVAILABLE',data?.detail ?? {}); }
+  return response.json() as Promise<BorrowedMoveResult>;
+}
 export const getCollectionRevision = () => read<CollectionRevision>('/api/collection/revision');
 '''
 

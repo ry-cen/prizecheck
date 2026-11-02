@@ -193,7 +193,7 @@ A lender's proposal of a Loan to a Friend, with the same lines a Borrow Request 
 _Avoid_: Loan offer, gift
 
 **Borrowed Copy**:
-A copy, held by the borrower, that a Friend has lent and handed over. It sits in any of the borrower's Locations and can be moved like an owned copy; in a Deck it fills, or adds, a Deck List line and counts toward that Deck's Estimated Deck Cost. It is never part of the borrower's Collection, never a Spare Copy and never removable, and leaves when the Loan is returned or written off.
+A copy, held by the borrower, that a Friend has lent and handed over. It sits in any of the borrower's Locations, shows in the Collection's galleries marked with the lender's name, and moves with the usual Move, which offers no Undo for it; in a Deck it fills, or adds, a Deck List line and counts toward that Deck's Estimated Deck Cost. It is never counted in the borrower's Collection, never a Spare Copy and never removable, and leaves when the Loan is returned or written off.
 _Avoid_: Owned copy, temporary Holding
 
 **Write-off**:

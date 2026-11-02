@@ -1,3 +1,4 @@
+import type { BorrowedMoveItem } from "../collection_generated";
 import React, { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import type { TreeNode } from "../location_generated";
@@ -56,6 +57,7 @@ type MoveProps = {
   /** The sidebar's open folders; the explorer starts with the same ones open. */
   initialExpanded: ReadonlySet<string>;
   groups: SelectedGroup[];
+  borrowed?: BorrowedMoveItem[];
   copies: number;
   busy: boolean;
   progress: string;
@@ -87,6 +89,7 @@ export function MoveDialog({
   index,
   initialExpanded,
   groups,
+  borrowed = [],
   copies,
   busy,
   progress,
@@ -114,7 +117,9 @@ export function MoveDialog({
         index.path(node.id).toLocaleLowerCase().includes(needle)
       )
     : [];
-  const preview = destination ? movePreview(groups, destination) : null;
+  const preview = destination
+    ? movePreview(groups, destination, borrowed)
+    : null;
   const canConfirm = !!destination && !!preview && preview.moving > 0;
 
   function toggle(id: string) {

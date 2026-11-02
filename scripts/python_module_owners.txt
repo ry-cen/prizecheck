@@ -9,6 +9,7 @@ app core
 app.api_errors core
 app.art_storage core
 app.borrowed_copies core
+app.borrowed_gallery mixed
 app.bounded_work core
 app.card_accepts core
 app.collection mixed
