@@ -262,6 +262,15 @@ test.describe("on a desktop", () => {
     await expect(
       page.getByText("Counting: Every Deck built at once.")
     ).toBeVisible();
+    const countingDetails = page
+      .locator("details")
+      .filter({ has: page.locator("summary", { hasText: "How it counts" }) });
+    await countingDetails.locator("summary").click();
+    await expect(countingDetails).toContainText(
+      "Each spare copy counts toward one Deck only, oldest Deck first."
+    );
+    await expect(countingDetails.locator("p")).toBeVisible();
+    await countingDetails.locator("summary").click();
     await expect(
       page.getByRole("link", { name: "Change it in Settings" })
     ).toHaveAttribute("href", "/settings");
@@ -352,6 +361,12 @@ test.describe("on a desktop", () => {
 
     await page.goto(`${ORIGIN}/decks/want-list`);
     await expect(page.getByText("Counting: One Deck at a time.")).toBeVisible();
+    await page.locator("summary", { hasText: "How it counts" }).click();
+    await expect(
+      page.getByText(
+        "Every copy you own counts for every Deck, even copies sleeved in another Deck."
+      )
+    ).toBeVisible();
     await expect(needs(page, names.gardevoir)).toContainText("1 of 3");
     await expect(needs(page, names.gardevoir)).toContainText(
       `Have 1 spare · 1 in ${names.charizard}`
@@ -468,6 +483,12 @@ test.describe("on a phone", () => {
     await expect(total(page)).toHaveCount(0);
     await expectTouchTarget(row);
     await expectTouchTarget(chip(page, "All Decks"));
+    await expectTouchTarget(
+      page.getByRole("link", { name: "Change it in Settings" })
+    );
+    await expectTouchTarget(
+      page.locator("summary", { hasText: "How it counts" })
+    );
     await expectTouchTarget(
       page.getByRole("link", { name: `Open Deck ${names.charizard}` })
     );

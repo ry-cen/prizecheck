@@ -206,6 +206,18 @@ test.describe("on a desktop", () => {
     release();
 
     await expect(summary(page)).toContainText("Estimated cost$1.25");
+    // The copies to get lead the hierarchy; the identical cost remains readable but secondary.
+    await expect
+      .poll(async () => {
+        const primary = await summary(page)
+          .getByText("6 cards", { exact: true })
+          .evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+        const secondary = await summary(page)
+          .getByText("$1.25", { exact: true })
+          .evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+        return primary > secondary;
+      })
+      .toBe(true);
     await expect(summary(page)).toContainText("5/6 cards priced");
     // The unpriced card is reported on its own and never counted as $0.
     await expect(summary(page)).toContainText(
