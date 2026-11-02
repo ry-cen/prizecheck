@@ -1059,7 +1059,8 @@ function TradeSide({
             >
               <button
                 type="button"
-                aria-label={`Open card details: ${tradeCardName(card)}`}
+                aria-labelledby={`${headingId}-${card.edition_id}-name ${headingId}-${card.edition_id}-edition`}
+                aria-describedby={`${headingId}-${card.edition_id}-context`}
                 onClick={(event) => {
                   opener.current = event.currentTarget;
                   setSelected(card);
@@ -1070,20 +1071,29 @@ function TradeSide({
                   <CardImage url={card.image_url} />
                 </div>
                 <span className="flex min-w-0 flex-col">
-                  <span className="text-body font-semibold wrap-anywhere">
+                  <span
+                    id={`${headingId}-${card.edition_id}-name`}
+                    className="text-body font-semibold wrap-anywhere"
+                  >
                     {card.name}
                   </span>
-                  <span className="text-meta text-text-muted tabular-nums wrap-anywhere">
+                  <span
+                    id={`${headingId}-${card.edition_id}-edition`}
+                    className="text-meta text-text-muted tabular-nums wrap-anywhere"
+                  >
                     {lineEdition(card)}
                   </span>
-                  {side && (
-                    <PickLines side={side} editionId={card.edition_id} />
-                  )}
-                </span>
-                <span className="text-body font-semibold tabular-nums">
-                  ×{card.copies}
                 </span>
               </button>
+              <div
+                id={`${headingId}-${card.edition_id}-context`}
+                className="flex flex-col gap-2"
+              >
+                <p className="m-0 text-body font-semibold tabular-nums">
+                  ×{card.copies}
+                </p>
+                {side && <PickLines side={side} editionId={card.edition_id} />}
+              </div>
               {hint(card) && (
                 <p className="m-0 text-meta text-text-muted wrap-anywhere">
                   {hint(card)}

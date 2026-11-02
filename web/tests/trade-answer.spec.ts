@@ -521,7 +521,7 @@ test("incoming Trade cards open details and show shared Deck need at phone width
   for (const width of [1280, 320, 375, 390]) {
     await ash.page.setViewportSize({ width, height: 844 });
     const opener = gets.getByRole("button", {
-      name: "Open card details: Iono (PAL 185)",
+      name: "Iono PAL 185 · Normal",
       exact: true,
     });
     if (width < 760) await expectTouchTarget(opener);
@@ -535,7 +535,7 @@ test("incoming Trade cards open details and show shared Deck need at phone width
     await expect(opener).toBeFocused();
     await gives
       .getByRole("button", {
-        name: "Open card details: Arven (SVI 166)",
+        name: "Arven SVI 166 · Normal",
         exact: true,
       })
       .click();
