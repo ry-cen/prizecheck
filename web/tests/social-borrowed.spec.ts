@@ -21,6 +21,7 @@ import {
   setLine,
   unsorted,
 } from "./support/loans";
+import { expectTouchTarget } from "./support/touch-target";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 
@@ -278,10 +279,39 @@ test("Location galleries mark borrowed copies, append them in All owned and move
     page.getByRole("searchbox", { name: "Search cards" })
   ).toHaveAttribute("placeholder", "Search your cards…");
   await expectPageChecks(page, "borrowed Location gallery on desktop");
-  for (const viewport of [PHONE, { width: 390, height: 844 }]) {
-    await page.setViewportSize(viewport);
+  for (const width of [320, 375, 390]) {
+    await page.setViewportSize({ width, height: 844 });
     const search = page.getByRole("searchbox", { name: "Search cards" });
     await expect(search).toHaveAttribute("placeholder", "Search cards");
+    await expectTouchTarget(search);
+    await expect
+      .poll(() =>
+        search.evaluate((element) => {
+          if (!(element instanceof HTMLInputElement))
+            throw new Error("Expected the search input");
+          const style = getComputedStyle(element);
+          const placeholder = getComputedStyle(element, "::placeholder");
+          const context = document.createElement("canvas").getContext("2d")!;
+          context.font = placeholder.font || style.font;
+          const spacing = parseFloat(placeholder.letterSpacing) || 0;
+          const textWidth =
+            context.measureText(element.placeholder).width +
+            spacing * Math.max(0, element.placeholder.length - 1);
+          const contentWidth =
+            element.clientWidth -
+            parseFloat(style.paddingLeft) -
+            parseFloat(style.paddingRight);
+          return contentWidth - textWidth;
+        })
+      )
+      .toBeGreaterThanOrEqual(0);
+    const controls = page.getByRole("banner").getByRole("button");
+    await expect(controls).toHaveCount(6);
+    for (const control of await controls.all()) {
+      const box = await expectTouchTarget(control);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+    }
     const mark = tiles.first().getByText("From Jordan Reyes", { exact: true });
     await expect(mark).toBeVisible();
     await expect(mark).toHaveCSS("-webkit-line-clamp", "2");
@@ -296,7 +326,7 @@ test("Location galleries mark borrowed copies, append them in All owned and move
       .toBe(true);
     await expectPageChecks(
       page,
-      `borrowed Location gallery on phone at ${viewport.width}px`
+      `borrowed Location gallery on phone at ${width}px`
     );
   }
 });

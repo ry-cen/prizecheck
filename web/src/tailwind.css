@@ -134,10 +134,11 @@
   }
 }
 @variant collection-pinned {
+  /* Collection's phone header reserves one row for controls and one for Search. */
   [data-collection-page] {
-    --layout-sticky-top: var(--layout-header-height);
+    --layout-sticky-top: calc(2 * var(--layout-header-height));
   }
   :root:has(#main-content [data-collection-page]) {
-    --collection-header-clearance: var(--layout-header-height);
+    --collection-header-clearance: calc(2 * var(--layout-header-height));
   }
 }
