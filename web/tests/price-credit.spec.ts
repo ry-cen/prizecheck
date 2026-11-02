@@ -133,6 +133,20 @@ for (const viewport of [
       await expect(page.getByRole("main").locator("footer")).toContainText(
         CREDIT
       );
+      // The footer mounts before Settings' data-backed sections reach their final height. Discovery
+      // and Sign-ins have no loading text, so wait for their loaded controls as well.
+      const settings = page.getByRole("main");
+      await expect(settings.getByText("Loading…", { exact: true })).toHaveCount(
+        0
+      );
+      await expect(
+        settings.getByRole("switch", { name: "Open discovery", exact: true })
+      ).toBeVisible();
+      await expect(
+        settings
+          .getByRole("region", { name: "Your sign-ins", exact: true })
+          .getByRole("list")
+      ).toBeVisible();
       expect(await otherSourceMentions(page)).toEqual([]);
       if (viewport.width <= 760) {
         // Scrolled to the end, the credit sits above the fixed tab bar.
