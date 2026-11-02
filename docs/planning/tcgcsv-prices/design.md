@@ -38,6 +38,11 @@ with no TCGdex image shows the TCGplayer product image of its verified product.
 9. When the feature finishes, `price_runner`, `price_launcher`, `price_refresh`, `price_seed`, `price_source`,
    `scripts/price_runners.py`, `PRICE_RUNNER_LOCK_DIR` and the record-store `quote/result/fence/work/lease/admission/backoff`
    families are gone, and docs/ADRs say so.
+
+> **Superseded by #467 (owner decision 2026-10-31):** the price credit now appears only in the Settings footer.
+> TCGCSV's [FAQ](https://tcgcsv.com/faq) and [docs](https://tcgcsv.com/docs) were checked on 2026-11-02;
+> they require no mandatory per-page credit. The original decision below is retained as history.
+
 10. The signed-in shell and every public page (the public layout) end with one short footer line, "Prices from TCGCSV",
     linking https://tcgcsv.com. This is the owner's explicit exception to the AGENTS.md provenance rule (§8). No other
     collector-facing provenance is added.
@@ -974,6 +979,11 @@ Stop and report instead of improvising when any of these happen:
 
 1. **Price shown:** the TCGplayer **market price**. When market is empty the card shows **no price**, with no fallback to
    mid or low. Implemented by `chosen_amount` (§4.5).
+
+> **Superseded by #467 (owner decision 2026-10-31):** the price credit now appears only in the Settings footer.
+> TCGCSV's [FAQ](https://tcgcsv.com/faq) and [docs](https://tcgcsv.com/docs) were checked on 2026-11-02;
+> they require no mandatory per-page credit. The original decision below is retained as history.
+
 2. **Credit:** a small TCGCSV credit in the site footer, visible to collectors. This is the owner's explicit exception to
    AGENTS.md's no-provenance rule, and the only one.
    - **Text:** exactly `Prices from TCGCSV`, where "TCGCSV" links `https://tcgcsv.com` (`rel="noopener"`, same tab).

@@ -4,6 +4,7 @@ import {
   SettingsNavigationScope,
   SETTINGS_LOADING_SECTIONS,
 } from "./settingsNavigation";
+import { PriceCredit } from "../ui/PriceCredit";
 import { PageHeader } from "../shell/PageHeader";
 import { SignInsSection } from "../shell/SignInsSection";
 import { BlockedSection } from "./BlockedSection";
@@ -68,6 +69,7 @@ export function SettingsPage({
           </PrivacySection>
           <OpenDiscoverySection />
           <SignInsSection active={active} email={email} />
+          <PriceCredit className="phone:pb-tabbar" />
         </main>
       </FirstReadContext.Provider>
     </SettingsNavigationScope.Provider>
