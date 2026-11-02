@@ -20,36 +20,180 @@ type Debug = {
   log: (this: { namespace?: string }, ...args: unknown[]) => void;
 };
 
+// Bounds apply to retained state as well as the compact serialized attachment.
+export const LIMITS = {
+  fieldBytes: 256,
+  eventBytes: 8192,
+  totalBytes: 512 * 1024,
+  events: 4000,
+  pending: 256,
+  requests: 128,
+  pages: 16,
+  items: 32,
+  snapshots: 8,
+} as const;
+
 export function safeUrl(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   try {
     const url = new URL(value);
-    if (url.protocol === "http:" || url.protocol === "https:")
-      return url.origin + url.pathname;
-    return url.protocol === "about:"
-      ? `about:${url.pathname}`
-      : `[${url.protocol}]`;
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      // Only explicitly known static routes may survive; never echo an unknown path component.
+      const parts = url.pathname.split("/").filter(Boolean);
+      const first = parts[0] ?? "";
+      const staticRoutes = new Set([
+        "loans",
+        "published",
+        "invite",
+        "collection",
+        "decks",
+        "settings",
+        "friends",
+        "trades",
+        "catalog",
+        "sign-in",
+        "api",
+        "auth",
+        "assets",
+      ]);
+      let path = first
+        ? staticRoutes.has(first)
+          ? `/${first}`
+          : "/<redacted>"
+        : "/";
+      if (parts.length > 1 && staticRoutes.has(first)) {
+        path +=
+          first === "loans"
+            ? "/:id"
+            : first === "published" || first === "invite"
+              ? "/:token"
+              : "/<redacted>";
+      }
+      // Even a hostname can contain an invite/token. Keep only known local test origins.
+      const origin = [
+        "localhost",
+        "127.0.0.1",
+        "[::1]",
+        "redacted.invalid",
+      ].includes(url.hostname)
+        ? url.origin
+        : `${url.protocol}//redacted.invalid`;
+      return origin + path;
+    }
+    return value === "about:blank" ? value : `[${url.protocol}]`;
   } catch {
     return "[invalid URL]";
   }
 }
 
-/** Deliberately excludes headers, bodies, source, titles, console messages and arbitrary result objects. */
+// Commands have NO permitted parameter/result payload fields. Only the shared envelope below
+// (direction/id/method/sessionId/reply/hasError/errorCode) is retained for these exact methods.
+export const COMMAND_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  "Target.setAutoAttach": [],
+  "Target.attachToTarget": [],
+  "Target.detachFromTarget": [],
+  "Page.enable": [],
+  "Page.getFrameTree": [],
+  "Page.createIsolatedWorld": [],
+  "Page.setLifecycleEventsEnabled": [],
+  "Page.addScriptToEvaluateOnNewDocument": [],
+  "Page.setInterceptFileChooserDialog": [],
+  "Runtime.enable": [],
+  "Runtime.addBinding": [],
+  "Runtime.runIfWaitingForDebugger": [],
+  "Log.enable": [],
+  "Network.enable": [],
+  "Network.setCacheDisabled": [],
+  "Network.setExtraHTTPHeaders": [],
+  "Fetch.enable": [],
+  "Emulation.setFocusEmulationEnabled": [],
+  "Emulation.setDeviceMetricsOverride": [],
+  "Emulation.setTouchEmulationEnabled": [],
+  "Emulation.setUserAgentOverride": [],
+  "Emulation.setLocaleOverride": [],
+  "Emulation.setTimezoneOverride": [],
+  "Emulation.setEmulatedMedia": [],
+  "Emulation.setEmulatedVisionDeficiency": [],
+  "Emulation.setDefaultBackgroundColorOverride": [],
+  "Emulation.setFontFamilies": [],
+  "Browser.getWindowForTarget": [],
+};
+const EVENT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  "Target.targetCreated": [
+    "targetId",
+    "browserContextId",
+    "openerId",
+    "targetType",
+    "targetUrl",
+  ],
+  "Target.attachedToTarget": [
+    "childSessionId",
+    "targetId",
+    "browserContextId",
+    "openerId",
+    "targetType",
+    "targetUrl",
+    "waitingForDebugger",
+  ],
+  "Target.targetInfoChanged": [
+    "targetId",
+    "browserContextId",
+    "openerId",
+    "targetType",
+    "targetUrl",
+  ],
+  "Target.detachedFromTarget": ["childSessionId", "targetId"],
+  "Target.targetDestroyed": ["targetId"],
+  "Page.frameNavigated": ["frameId", "parentFrameId", "loaderId", "frameUrl"],
+  "Page.lifecycleEvent": ["frameId", "loaderId", "timestamp", "lifecycle"],
+  "Page.frameStartedLoading": ["frameId"],
+  "Page.frameStoppedLoading": ["frameId"],
+  "Page.frameRequestedNavigation": ["frameId", "disposition"],
+  "Network.requestWillBeSent": [
+    "requestId",
+    "frameId",
+    "loaderId",
+    "requestUrl",
+    "requestMethod",
+    "resourceType",
+    "timestamp",
+    "wallTime",
+  ],
+  "Network.responseReceived": [
+    "requestId",
+    "loaderId",
+    "requestUrl",
+    "resourceType",
+    "timestamp",
+    "status",
+  ],
+  "Network.loadingFinished": ["requestId", "timestamp", "encodedDataLength"],
+  "Network.loadingFailed": [
+    "requestId",
+    "timestamp",
+    "resourceType",
+    "canceled",
+  ],
+  "Runtime.executionContextCreated": ["executionContextId", "frameId"],
+  "Runtime.executionContextDestroyed": ["executionContextId"],
+  "Runtime.executionContextsCleared": [],
+};
+
+/** Deliberately excludes headers, bodies, source, titles, console messages and arbitrary results. */
 export function protocolFields(message: Message) {
   const p = message.params ?? {};
   const target = p.targetInfo ?? {};
   const frame = p.frame ?? {};
   const response = p.response ?? {};
   const request = p.request ?? {};
-  const aux = p.context?.auxData ?? {};
-  return {
+  const projected: Record<string, unknown> = {
     childSessionId: p.sessionId,
     targetId: target.targetId ?? p.targetId,
     browserContextId: target.browserContextId,
     openerId: target.openerId,
     targetType: target.type,
     targetUrl: safeUrl(target.url),
-    frameId: frame.id ?? p.frameId ?? aux.frameId,
+    frameId: frame.id ?? p.frameId ?? p.context?.auxData?.frameId,
     parentFrameId: frame.parentId,
     waitingForDebugger: p.waitingForDebugger,
     disposition: p.disposition,
@@ -63,18 +207,38 @@ export function protocolFields(message: Message) {
     status: response.status,
     timestamp: p.timestamp,
     wallTime: p.wallTime,
-    lifecycle: message.method === "Page.lifecycleEvent" ? p.name : undefined,
+    lifecycle: p.name,
     encodedDataLength: p.encodedDataLength,
     canceled: p.canceled,
-    errorCode: message.error?.code,
-    hasError: !!message.error,
-    reply: message.id !== undefined && message.method === undefined,
   };
+  const fields = Object.hasOwn(EVENT_FIELDS, message.method ?? "")
+    ? EVENT_FIELDS[message.method!]
+    : [];
+  return Object.fromEntries(
+    fields.map((key) => {
+      const value = projected[key];
+      return [
+        key,
+        typeof value === "string" ||
+        typeof value === "boolean" ||
+        (typeof value === "number" && Number.isFinite(value))
+          ? value
+          : undefined,
+      ];
+    })
+  );
 }
 
-const EVENTS =
-  /^(Target\.(targetCreated|attachedToTarget|targetInfoChanged|detachedFromTarget|targetDestroyed)|Page\.(frameNavigated|lifecycleEvent|frameStartedLoading|frameStoppedLoading|frameRequestedNavigation)|Network\.(requestWillBeSent|responseReceived|loadingFinished|loadingFailed)|Runtime\.(executionContextCreated|executionContextDestroyed|executionContextsCleared))$/;
-const COMMANDS = /^(Target|Page|Runtime|Emulation|Network|Fetch|Log|Browser)\./;
+export function remember<K, V>(
+  map: Map<K, V>,
+  key: K,
+  value: V,
+  limit: number
+): boolean {
+  if (!map.has(key) && map.size >= limit) return false;
+  map.set(key, value);
+  return true;
+}
 
 export class Capture {
   entries: object[] = [];
@@ -82,20 +246,103 @@ export class Capture {
   dropped = 0;
   oversized = 0;
   unparseable = 0;
+  active = false;
+  finished = false;
+  private bytes = 0;
+  private snapshots = 0;
+  start() {
+    if (!this.finished) this.active = true;
+  }
+  stop() {
+    this.active = false;
+    this.finished = true;
+  }
+  private bounded(value: unknown, depth = 0): unknown {
+    if (typeof value === "string") {
+      const text = /^(https?:|data:|javascript:|about:)/i.test(value)
+        ? safeUrl(value)!
+        : value;
+      if (Buffer.byteLength(text) <= LIMITS.fieldBytes) return text;
+      this.oversized++;
+      let result = "";
+      for (const char of text) {
+        if (Buffer.byteLength(result + char) > LIMITS.fieldBytes) break;
+        result += char;
+      }
+      return result;
+    }
+    if (typeof value === "number")
+      return Number.isFinite(value) ? value : undefined;
+    if (typeof value === "boolean" || value === null) return value;
+    if (depth >= 5) {
+      this.oversized++;
+      return undefined;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > LIMITS.items) this.oversized++;
+      return value
+        .slice(0, LIMITS.items)
+        .map((v) => this.bounded(v, depth + 1));
+    }
+    if (typeof value === "object" && value) {
+      const entries = Object.entries(value);
+      if (entries.length > LIMITS.items) this.oversized++;
+      return Object.fromEntries(
+        entries.slice(0, LIMITS.items).flatMap(([key, v]) => {
+          // Defense in depth for public records as well as protocol projections.
+          if (/^(headers?|cookies?|body|postData|source|title)$/i.test(key))
+            return [];
+          const safe = /url$/i.test(key) ? safeUrl(v) : v;
+          return [
+            [this.bounded(key, depth + 1), this.bounded(safe, depth + 1)],
+          ];
+        })
+      );
+    }
+    return undefined;
+  }
   record(event: string, data: object = {}) {
-    if (this.entries.length >= 12000) {
+    if (!this.active) return;
+    const entry = {
+      atMs: Date.now(),
+      monotonicMs: performance.now(),
+      event: this.bounded(event),
+      data: this.bounded(data),
+    };
+    const bytes = Buffer.byteLength(JSON.stringify(entry)) + 1;
+    // Reserve 1 KiB for the fixed envelope/counters; compact serialization uses this same encoding.
+    if (
+      bytes > LIMITS.eventBytes ||
+      this.bytes + bytes > LIMITS.totalBytes - 1024 ||
+      this.entries.length >= LIMITS.events
+    ) {
       this.dropped++;
       return;
     }
-    this.entries.push({
-      atMs: Date.now(),
-      monotonicMs: performance.now(),
-      event,
-      ...data,
+    this.entries.push(entry);
+    this.bytes += bytes;
+  }
+  snapshot(event: string, data: object) {
+    if (!this.active) return;
+    if (this.snapshots >= LIMITS.snapshots) {
+      this.dropped++;
+      return;
+    }
+    this.snapshots++;
+    this.record(event, data);
+  }
+  serialize() {
+    return JSON.stringify({
+      formatVersion: 2,
+      dropped: this.dropped,
+      oversized: this.oversized,
+      unparseable: this.unparseable,
+      events: this.entries,
     });
   }
   protocol(raw: string) {
-    if (raw.length > 128 * 1024) {
+    if (!this.active) return;
+    if (Buffer.byteLength(raw) > 128 * 1024) {
       this.oversized++;
       return;
     }
@@ -110,24 +357,38 @@ export class Capture {
     }
     const direction = match[1].startsWith("SEND") ? "send" : "receive";
     const key = `${message.sessionId ?? "root"}:${message.id}`;
+    if (Buffer.byteLength(key) > LIMITS.fieldBytes) {
+      this.oversized++;
+      return;
+    }
     const method = message.method ?? this.pending.get(key);
     if (!method) return;
     if (message.id !== undefined) {
-      if (direction === "send" && COMMANDS.test(method)) {
-        if (this.pending.size >= 12000) {
+      if (direction === "send" && Object.hasOwn(COMMAND_FIELDS, method)) {
+        if (!remember(this.pending, key, method, LIMITS.pending)) {
           this.dropped++;
           return;
         }
-        this.pending.set(key, method);
-      } else if (direction === "receive" && this.pending.has(key))
+      } else if (
+        direction === "receive" &&
+        !message.method &&
+        this.pending.has(key)
+      )
         this.pending.delete(key);
       else return;
-    } else if (!EVENTS.test(method)) return;
+    } else if (!Object.hasOwn(EVENT_FIELDS, method)) return;
     this.record("protocol", {
       direction,
-      id: message.id,
+      id: typeof message.id === "number" ? message.id : undefined,
       method,
-      sessionId: message.sessionId,
+      sessionId:
+        typeof message.sessionId === "string" ? message.sessionId : undefined,
+      errorCode:
+        typeof message.error?.code === "number"
+          ? message.error.code
+          : undefined,
+      hasError: !!message.error,
+      reply: message.id !== undefined && message.method === undefined,
       ...protocolFields(message),
     });
   }
@@ -199,12 +460,15 @@ export const test = base.extend<{ newTabCapture: Observation }>({
       const removers: (() => void)[] = [];
       let requestId = 0;
       let restore = () => {};
-      const cpu = process.cpuUsage();
-      const loop = performance.eventLoopUtilization();
+      let cpu = process.cpuUsage();
+      let loop = performance.eventLoopUtilization();
       const watch = (on: Page) => {
-        if (pages.has(on)) return;
+        if (capture.finished || pages.has(on)) return;
         const id = `page-${pages.size}`;
-        pages.set(on, id);
+        if (!remember(pages, on, id, LIMITS.pages)) {
+          if (capture.active) capture.dropped++;
+          return;
+        }
         capture.record("context.page", {
           page: id,
           url: safeUrl(on.url()),
@@ -239,6 +503,7 @@ export const test = base.extend<{ newTabCapture: Observation }>({
         });
       };
       const requested = (request: Request) => {
+        if (capture.finished) return;
         let owner: string | undefined;
         try {
           owner = pages.get(request.frame().page());
@@ -249,11 +514,14 @@ export const test = base.extend<{ newTabCapture: Observation }>({
           id: ++requestId,
           page: owner,
           url: safeUrl(request.url()),
-          method: request.method(),
+          method: request.method().slice(0, LIMITS.fieldBytes),
           navigation: request.isNavigationRequest(),
-          type: request.resourceType(),
+          type: request.resourceType().slice(0, LIMITS.fieldBytes),
         };
-        requests.set(request, data);
+        if (!remember(requests, request, data, LIMITS.requests)) {
+          if (capture.active) capture.dropped++;
+          return;
+        }
         capture.record("request", data);
       };
       const finished = (request: Request) => {
@@ -281,18 +549,26 @@ export const test = base.extend<{ newTabCapture: Observation }>({
       context.on("response", responded);
       context.on("serviceworker", worker);
       browser.on("disconnected", disconnected);
-      capture.record("start", {
+      const startData = {
         pid: process.pid,
         workerIndex: testInfo.workerIndex,
         parallelIndex: testInfo.parallelIndex,
         repeatEachIndex: testInfo.repeatEachIndex,
         retry: testInfo.retry,
         workers: testInfo.config.workers,
-      });
+      };
       try {
         await use({
           mark: (event, expectedUrl) => {
-            if (event === "before-click") {
+            if (
+              event === "before-click" &&
+              !capture.active &&
+              !capture.finished
+            ) {
+              capture.start();
+              cpu = process.cpuUsage();
+              loop = performance.eventLoopUtilization();
+              capture.record("start", startData);
               try {
                 const require = createRequire(import.meta.url);
                 const version = require("playwright-core/package.json").version;
@@ -312,22 +588,34 @@ export const test = base.extend<{ newTabCapture: Observation }>({
                 });
               }
             }
-            capture.record(event, {
+            capture.snapshot(event, {
               expectedUrl: safeUrl(expectedUrl),
               openerUrl: safeUrl(page.url()),
               openerClosed: page.isClosed(),
               viewport: page.viewportSize(),
               cpu: process.cpuUsage(cpu),
               eventLoop: performance.eventLoopUtilization(loop),
-              pending: [...requests.values()],
+              pending: [...requests.values()].slice(0, LIMITS.items),
               pages: context
                 .pages()
+                .slice(0, LIMITS.pages)
                 .map((p) => ({ id: pages.get(p), url: safeUrl(p.url()) })),
               serviceWorkers: context
                 .serviceWorkers()
+                .slice(0, LIMITS.items)
                 .map((w) => safeUrl(w.url())),
             });
-            if (event === "url-assertions-passed") restore();
+            if (event === "url-assertions-passed" || event === "window-ended") {
+              capture.snapshot("end", {
+                status: event,
+                pendingProtocolCommands: [...capture.pending]
+                  .slice(0, LIMITS.items)
+                  .map(([id, method]) => ({ id, method })),
+                pendingRequests: [...requests.values()].slice(0, LIMITS.items),
+              });
+              capture.stop();
+              restore();
+            }
           },
         });
       } finally {
@@ -340,38 +628,27 @@ export const test = base.extend<{ newTabCapture: Observation }>({
         context.off("serviceworker", worker);
         browser.off("disconnected", disconnected);
         removers.forEach((remove) => remove());
-        capture.record("end", {
+        capture.snapshot("end", {
           status: testInfo.status,
           dropped: capture.dropped,
           oversized: capture.oversized,
           unparseable: capture.unparseable,
-          pendingProtocolCommands: [...capture.pending].map(([id, method]) => ({
-            id,
-            method,
-          })),
-          pendingRequests: [...requests.values()],
+          pendingProtocolCommands: [...capture.pending]
+            .slice(0, LIMITS.items)
+            .map(([id, method]) => ({
+              id,
+              method,
+            })),
+          pendingRequests: [...requests.values()].slice(0, LIMITS.items),
           cpu: process.cpuUsage(cpu),
           eventLoop: performance.eventLoopUtilization(loop),
         });
+        capture.stop();
+        requests.clear();
+        pages.clear();
         try {
           const path = testInfo.outputPath("newtab-capture.json");
-          writeFileSync(
-            path,
-            JSON.stringify(
-              {
-                formatVersion: 1,
-                dropped: capture.dropped,
-                oversized: capture.oversized,
-                unparseable: capture.unparseable,
-                pendingProtocolCommands: [...capture.pending].map(
-                  ([id, method]) => ({ id, method })
-                ),
-                events: capture.entries,
-              },
-              null,
-              2
-            )
-          );
+          writeFileSync(path, capture.serialize());
           await testInfo.attach("newtab-capture", {
             path,
             contentType: "application/json",

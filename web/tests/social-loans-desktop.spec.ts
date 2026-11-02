@@ -151,15 +151,19 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   // Modified clicks retain native new-tab navigation without changing this entry.
   await expect(secondRow).toHaveAttribute("href", `/loans/${pending.id}`);
   newTabCapture.mark("before-click", `${ORIGIN}/loans/${pending.id}`);
-  const newTab = page.context().waitForEvent("page");
-  await secondRow.click({ modifiers: ["ControlOrMeta"] });
-  newTabCapture.mark("click-completed");
-  const tab = await newTab;
-  newTabCapture.mark("page-event-delivered");
-  await expect(tab).toHaveURL(`${ORIGIN}/loans/${pending.id}`);
-  await expect(page).toHaveURL(`${ORIGIN}/loans`);
-  newTabCapture.mark("url-assertions-passed");
-  await tab.close();
+  try {
+    const newTab = page.context().waitForEvent("page");
+    await secondRow.click({ modifiers: ["ControlOrMeta"] });
+    newTabCapture.mark("click-completed");
+    const tab = await newTab;
+    newTabCapture.mark("page-event-delivered");
+    await expect(tab).toHaveURL(`${ORIGIN}/loans/${pending.id}`);
+    await expect(page).toHaveURL(`${ORIGIN}/loans`);
+    newTabCapture.mark("url-assertions-passed");
+    await tab.close();
+  } finally {
+    newTabCapture.mark("window-ended");
+  }
   await page.goForward();
   await expect(heading).toHaveText("Ash K wants to borrow 3 cards");
   // 200% zoom at a 1440 physical-pixel window has a 720 CSS-pixel viewport.
