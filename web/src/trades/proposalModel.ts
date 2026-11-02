@@ -45,6 +45,31 @@ export function seededProposal(card: ProposalCard): Proposal {
   return { get: [{ ...toProposalCard(card), quantity: 1 }], give: [] };
 }
 
+/** Only the match cards already shown. Each starts at the lesser of copies offered and total need;
+ * the offered copies remain its editable cap. Use the usual one-side-only rule if an Edition matches both ways. */
+export function matchedProposal(row: {
+  you_get: readonly TradeMatchCard[];
+  you_give: readonly TradeMatchCard[];
+}): Proposal {
+  let proposal = EMPTY_PROPOSAL;
+  for (const side of ["get", "give"] as const) {
+    for (const card of side === "get" ? row.you_get : row.you_give) {
+      const copies = Number(card.copies);
+      const need = Number(card.need);
+      // Never substitute a default for missing or unusable match quantities.
+      if (
+        !Number.isSafeInteger(copies) ||
+        !Number.isSafeInteger(need) ||
+        copies <= 0 ||
+        need <= 0
+      )
+        continue;
+      proposal = setQuantity(proposal, side, card, Math.min(copies, need));
+    }
+  }
+  return proposal;
+}
+
 export function otherSide(side: ProposalSide): ProposalSide {
   return side === "get" ? "give" : "get";
 }

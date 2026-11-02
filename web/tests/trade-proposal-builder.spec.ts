@@ -1,5 +1,5 @@
 // Ticket #284: the proposal builder, one per Friend (Trading spec "Building a proposal"), laid out like the Deck
-// builder. Misty opens it empty from Find trades and from Ash's Trade List page, and with one Arven already in You get
+// builder. Misty opens it prefilled from Find trades, empty from Ash's Trade List page, and with one Arven already in You get
 // from Ask to trade. The library opens on Ash's Trade List with his matches first (his Iono, which Misty wants), flips
 // to Misty's own, and each list has its own search. One tap adds one copy, Details adds nothing, the steppers stop at
 // the copies available, and a card can't be on both sides. Leaving with cards added asks "Discard this proposal to Ash
@@ -246,7 +246,7 @@ async function story(
       return e.defaultPrevented;
     });
 
-  // 1: Propose trade on Find trades opens the builder empty, with Ash's matches first.
+  // 1: A match prefills the builder; removing its cards leaves the usual empty state.
   await page.goto(`${ORIGIN}/trades/find`);
   await page
     .getByRole("list", { name: "Matches" })
@@ -267,6 +267,18 @@ async function story(
     /^Add to You get, Arven, SVI 166,/
   );
   await show(page, "Proposal");
+  await expect(
+    group(page, "Iono (PAL 185) you get").locator("output")
+  ).toHaveText("1");
+  await expect(
+    group(page, "Iono (PAL 254) you give").locator("output")
+  ).toHaveText("1");
+  await page
+    .getByRole("button", { name: "Decrease Iono (PAL 185) you get" })
+    .click();
+  await page
+    .getByRole("button", { name: "Decrease Iono (PAL 254) you give" })
+    .click();
   await expect(lists(page).get).toHaveText("Nothing yet");
   await expect(lists(page).give).toHaveText("Nothing yet");
   await expect(

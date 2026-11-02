@@ -5,9 +5,10 @@ import {
   peekFromTradeList,
   peekProposalSeed,
   proposeFromTradeList,
+  proposeFromMatch,
   rekeyProposal,
 } from "./openProposal";
-import { toProposalCard, type ProposalCard } from "./proposalModel";
+import { seededProposal, type ProposalCard } from "./proposalModel";
 
 const card: ProposalCard = {
   edition_id: "e1",
@@ -32,18 +33,18 @@ function openFn(): (handle: string, card?: ProposalCard) => void {
 describe("openProposal notes", () => {
   beforeEach(() => clearProposalNotes());
 
-  it("peeking the seed twice returns the same card", () => {
+  it("peeking the seed twice returns the same proposal", () => {
     openFn()("Ash", card);
     rekeyProposal("ash", "t1");
-    expect(peekProposalSeed("t1")).toEqual(toProposalCard(card));
-    expect(peekProposalSeed("t1")).toEqual(toProposalCard(card));
+    expect(peekProposalSeed("t1")).toEqual(seededProposal(card));
+    expect(peekProposalSeed("t1")).toEqual(seededProposal(card));
   });
 
   it("a seed for another collector is not returned", () => {
     openFn()("Ash", card);
     rekeyProposal("Ash", "t1");
     expect(peekProposalSeed("t2")).toBeNull();
-    expect(peekProposalSeed("t1")).toEqual(toProposalCard(card));
+    expect(peekProposalSeed("t1")).toEqual(seededProposal(card));
   });
 
   it("clearing removes the seed and the origin", () => {
@@ -66,6 +67,23 @@ describe("openProposal notes", () => {
 
   it("Handle keys match case-insensitively", () => {
     openFn()("Ash", card);
-    expect(peekProposalSeed("ASH")).toEqual(toProposalCard(card));
+    expect(peekProposalSeed("ASH")).toEqual(seededProposal(card));
+  });
+  it("a match uses the same keyed handoff and clears a prior Trade List origin", () => {
+    proposeFromTradeList("t1", "/back");
+    proposeFromMatch("t1", { you_get: [], you_give: [] });
+    expect(peekProposalSeed("t1")).toEqual({ get: [], give: [] });
+    expect(peekProposalSeed("t2")).toBeNull();
+    expect(peekFromTradeList("t1")).toBeNull();
+    clearProposalNotes();
+    expect(peekProposalSeed("t1")).toBeNull();
+  });
+  it("an unseeded open drops a prior match, and Ask to trade still seeds exactly one copy", () => {
+    proposeFromMatch("Ash", { you_get: [], you_give: [] });
+    openFn()("Ash");
+    expect(peekProposalSeed("Ash")).toBeNull();
+    openFn()("Ash", card);
+    expect(peekProposalSeed("Ash")?.get[0].quantity).toBe(1);
+    expect(peekProposalSeed("Ash")?.give).toEqual([]);
   });
 });

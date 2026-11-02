@@ -4,8 +4,7 @@
 // two-way row, first. Brock has the Iono PAF 80 on her Trade Wants and wants nothing of hers: a one-way row with no
 // sale tag, since he isn't Open to cash offers. The open row shows both sides with their counts and tags. A list read
 // that cut Ash's side short shows the header from the per-Friend read once Show 1 more loads, and focus moves to that
-// side's heading. Propose trade opens an empty proposal builder with the matched cards first, two are added with one
-// tap each and the proposal is sent. In the card popup, Ask to trade opens Brock's builder with the card in You get;
+// side's heading. Propose trade prefills the visible matched cards on both sides; quantities are edited before sending. In the card popup, Ask to trade opens Brock's builder with the card in You get;
 // leaving untouched asks nothing, and leaving after one more tap asks first. A collector with no Friends is told that
 // matching needs Friends. Nothing that reaches the browser names a Location or a Deck. At desktop width and at 375 px.
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py). The other collectors sign in first, so the
@@ -318,7 +317,7 @@ async function story(
   await expect(ashHeader).toContainText("Two-way match");
   await page.unroute(listRead);
 
-  // B: Propose trade opens an empty proposal builder with the matched cards first in Ash's Trade List.
+  // B: Propose trade prefills the visible match, including the cards loaded by Show more.
   await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
   await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
@@ -329,11 +328,24 @@ async function story(
   ).toHaveAttribute("href", "/trades/find");
   await show(page, "Proposal");
   await expect(
-    page.getByRole("list", { name: "You get", exact: true })
-  ).toHaveText("Nothing yet");
+    page
+      .getByRole("list", { name: "You get", exact: true })
+      .getByRole("listitem")
+  ).toHaveCount(2);
   await expect(
-    page.getByRole("list", { name: "You give", exact: true })
-  ).toHaveText("Nothing yet");
+    page
+      .getByRole("list", { name: "You give", exact: true })
+      .getByRole("listitem")
+  ).toHaveCount(1);
+  await expect(
+    group(page, "Arven (SVI 166) you get").locator("output")
+  ).toHaveText("2");
+  await expect(
+    group(page, "Boss's Orders (PAL 172) you get").locator("output")
+  ).toHaveText("1");
+  await expect(
+    group(page, "Iono (PAL 185) you give").locator("output")
+  ).toHaveText("2");
   await show(page, "Cards");
   const theirList = page.getByRole("list", { name: "Ash K's Trade List" });
   const adds = theirList.getByRole("button", { name: /^Add to You get/ });
@@ -349,9 +361,11 @@ async function story(
     page,
     `the proposal builder from Find trades at ${width}`
   );
-  // One tap is one copy.
-  await tile(theirList, "get", "Arven, SVI 166, .+?, Normal").click();
+  // The prefill is editable: reduce Arven, and add one more Iono from the library.
   await show(page, "Proposal");
+  await page
+    .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+    .click();
   await expect(group(page, "Arven (SVI 166) you get")).toContainText("1");
   await expect(group(page, "Arven (SVI 166) you get")).not.toContainText("2");
   await show(page, "Cards");
@@ -362,7 +376,9 @@ async function story(
     "Iono, PAL 185, .+?, Normal"
   ).click();
   await show(page, "Proposal");
-  await expect(group(page, "Iono (PAL 185) you give")).toContainText("1");
+  await expect(
+    group(page, "Iono (PAL 185) you give").locator("output")
+  ).toHaveText("3");
   await page.getByRole("button", { name: "Send Trade Proposal" }).click();
   await expect(page).toHaveURL(new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`));
   await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
