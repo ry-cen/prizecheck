@@ -61,7 +61,7 @@ export function MatchPrintingChoices({
                     available
                   </span>
                   <Button
-                    aria-label={`Choose ${tradeCardName(card)} · ${lineEdition(card)} for ${label}`}
+                    aria-label={`Choose this printing: ${tradeCardName(card)} · ${lineEdition(card)} for ${label}`}
                     disabled={
                       chooseMatchedPrinting(
                         proposal,

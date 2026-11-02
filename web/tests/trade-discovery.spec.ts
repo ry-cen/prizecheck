@@ -362,7 +362,7 @@ async function story(
   await expectPageChecks(page, `an explicit printing choice at ${width}`);
   await printingChoices
     .getByRole("button", {
-      name: /^Choose Boss's Orders \(PAL 172\).*Reverse Holo for You get$/,
+      name: /^Choose this printing: Boss's Orders \(PAL 172\).*Reverse Holo for You get$/,
     })
     .click();
   await expect(
@@ -371,7 +371,7 @@ async function story(
   await expect(printingChoices).toContainText("0 left to choose");
   await expect(
     printingChoices.getByRole("button", {
-      name: /^Choose Boss's Orders \(PAL 172\).*Normal for You get$/,
+      name: /^Choose this printing: Boss's Orders \(PAL 172\).*Normal for You get$/,
     })
   ).toBeDisabled();
   await expect(
