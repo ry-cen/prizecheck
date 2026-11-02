@@ -11568,11 +11568,25 @@
       "title": "You Get",
       "type": "array"
      },
+     "you_get_groups": {
+      "items": {
+       "$ref": "#/components/schemas/NeedGroup"
+      },
+      "title": "You Get Groups",
+      "type": "array"
+     },
      "you_give": {
       "items": {
        "$ref": "#/components/schemas/TradeMatchCard"
       },
       "title": "You Give",
+      "type": "array"
+     },
+     "you_give_groups": {
+      "items": {
+       "$ref": "#/components/schemas/NeedGroup"
+      },
+      "title": "You Give Groups",
       "type": "array"
      }
     },
@@ -11586,7 +11600,9 @@
      "you_get",
      "you_give",
      "more_you_get",
-     "more_you_give"
+     "more_you_give",
+     "you_get_groups",
+     "you_give_groups"
     ],
     "title": "NearbyMatchRow",
     "type": "object"
@@ -11628,6 +11644,30 @@
      "rows"
     ],
     "title": "NearbyMatches",
+    "type": "object"
+   },
+   "NeedGroup": {
+    "description": "An opaque part of a receiving side's need. ``cards`` counts offered member Editions over the whole side,\nincluding members beyond the carried slice. Ids live only in this response and side.",
+    "properties": {
+     "cards": {
+      "title": "Cards",
+      "type": "string"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "need": {
+      "title": "Need",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "need",
+     "cards"
+    ],
+    "title": "NeedGroup",
     "type": "object"
    },
    "NewInviteLink": {
@@ -17482,6 +17522,13 @@
       "title": "Need",
       "type": "string"
      },
+     "need_groups": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Need Groups",
+      "type": "array"
+     },
      "origin": {
       "enum": [
        "want_list",
@@ -17516,7 +17563,8 @@
      "need",
      "want_list_need",
      "origin",
-     "accepts_as"
+     "accepts_as",
+     "need_groups"
     ],
     "title": "TradeMatchCard",
     "type": "object"
@@ -17587,11 +17635,25 @@
       "title": "You Get",
       "type": "array"
      },
+     "you_get_groups": {
+      "items": {
+       "$ref": "#/components/schemas/NeedGroup"
+      },
+      "title": "You Get Groups",
+      "type": "array"
+     },
      "you_give": {
       "items": {
        "$ref": "#/components/schemas/TradeMatchCard"
       },
       "title": "You Give",
+      "type": "array"
+     },
+     "you_give_groups": {
+      "items": {
+       "$ref": "#/components/schemas/NeedGroup"
+      },
+      "title": "You Give Groups",
       "type": "array"
      }
     },
@@ -17606,7 +17668,9 @@
      "you_get",
      "you_give",
      "more_you_get",
-     "more_you_give"
+     "more_you_give",
+     "you_get_groups",
+     "you_give_groups"
     ],
     "title": "TradeMatchRow",
     "type": "object"
@@ -18434,11 +18498,25 @@
       "title": "You Get",
       "type": "array"
      },
+     "you_get_groups": {
+      "items": {
+       "$ref": "#/components/schemas/NeedGroup"
+      },
+      "title": "You Get Groups",
+      "type": "array"
+     },
      "you_give": {
       "items": {
        "$ref": "#/components/schemas/TradeMatchCard"
       },
       "title": "You Give",
+      "type": "array"
+     },
+     "you_give_groups": {
+      "items": {
+       "$ref": "#/components/schemas/NeedGroup"
+      },
+      "title": "You Give Groups",
       "type": "array"
      }
     },
@@ -18452,7 +18530,9 @@
      "you_get",
      "you_give",
      "more_you_get",
-     "more_you_give"
+     "more_you_give",
+     "you_get_groups",
+     "you_give_groups"
     ],
     "title": "TraderMatchRow",
     "type": "object"

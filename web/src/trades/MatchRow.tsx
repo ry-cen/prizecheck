@@ -21,6 +21,7 @@ import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Pill } from "../ui/Pill";
 import { MessageLink } from "./MessageLink";
+import { proposeFromMatch } from "./openProposal";
 import { proposalPath } from "./tradeListModel";
 import {
   acceptsText,
@@ -194,7 +195,10 @@ export function MatchRow({
             <Button
               variant="primary"
               aria-label={`Propose trade to ${name}`}
-              onClick={() => onNavigate(proposalPath(row.trader_id))}
+              onClick={() => {
+                proposeFromMatch(row.trader_id, shown);
+                onNavigate(proposalPath(row.trader_id));
+              }}
             >
               Propose trade
             </Button>
