@@ -103,10 +103,13 @@ for (const width of [320, 375, 390, 960, 1280]) {
       name: "Cards to get",
       exact: true,
     });
-    if (width <= 760) await page.getByText(/^Combined total · 3 cards/).click();
+    if (width <= 760)
+      await page.getByText(/^Combined total \(Decks only\) · 3 cards/).click();
     else
       await expect(
-        page.getByRole("heading", { name: /^Combined total · 3 cards/ })
+        page.getByRole("heading", {
+          name: /^Combined total \(Decks only\) · 3 cards/,
+        })
       ).toBeVisible();
     await expect(combined.getByRole("listitem")).toHaveCount(2);
     const iono = combined.getByRole("listitem").filter({ hasText: "Iono" });
@@ -195,10 +198,19 @@ for (const width of [320, 375, 390, 960, 1280]) {
   }) => {
     const page = await sectionExample(() => collectors.signIn(), width);
     const main = page.getByRole("main").filter({ visible: true });
+    await expect(
+      main.getByRole("link", { name: /^Trade Wants ·/ })
+    ).toBeVisible();
     await main
       .getByRole("radiogroup", { name: "Show the Want List as" })
       .getByRole("radio", { name: "Get from Friends", exact: true })
       .check();
+    await expect(
+      main.getByRole("region", { name: "Trade Wants", exact: true })
+    ).toHaveCount(0);
+    await expect(
+      main.getByRole("link", { name: /^Trade Wants ·/ })
+    ).toHaveCount(0);
     const panel = main.getByRole("region", { name: /^Iono / });
     await expect(panel).toContainText("You need 2 · Tile sections");
     await expect(panel).toContainText("0 of 2 asked");
@@ -299,5 +311,330 @@ for (const width of [320, 375, 390, 960, 1280]) {
     await expectIdentityFits();
     await fits(panel);
     await expectPageChecks(page, `From Friends at ${width}px`);
+  });
+}
+
+for (const height of [800, 600]) {
+  test(`sticky Combined total final row remains reachable at 1280x${height}`, async ({
+    collectors,
+  }) => {
+    const page = (await collectors.signIn()).page;
+    const ids = seedCatalog();
+    const deck = await createDeck(page, "Long summary reachability Deck");
+    await setLine(page, deck, ids["PAL 185"], 1);
+    await page.route(
+      (url) => url.pathname === "/api/want-list",
+      async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        const row = body.combined[0];
+        body.combined = Array.from({ length: 8 }, (_, index) => ({
+          ...row,
+          edition_id: `${row.edition_id}-${index}`,
+          name: `Summary row ${index + 1} with a long identifiable card label for reachability`,
+          image_url: null,
+        }));
+        await route.fulfill({ response, json: body });
+      }
+    );
+    await page.setViewportSize({ width: 1280, height });
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    const aside = page.getByRole("complementary", { name: /^Combined total/ });
+    const rows = aside.getByRole("listitem");
+    await expect(rows).toHaveCount(8);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+    // Keyboard reachability: N/A while the desktop aside and its regions are
+    // not focusable. Fail if row controls are added, forcing a real keyboard check.
+    await expect(
+      rows.locator(
+        "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])"
+      )
+    ).toHaveCount(0);
+    const panelBox = await aside.boundingBox();
+    if (!panelBox) throw new Error("Combined total has no bounding box");
+    await page.mouse.move(
+      panelBox.x + panelBox.width / 2,
+      Math.min(panelBox.y + 20, height - 1)
+    );
+    const seen = new Set<number>();
+    const seenUncovered = new Set<number>();
+    const collectRows = (step: number, diagnosticOnly: boolean) =>
+      rows.evaluateAll(
+        async (elements, { step, earlier, diagnosticOnly }) => {
+          // Record the ratio as diagnostic data; the live Playwright matcher
+          // below retains its own retries and numerical tolerance.
+          const ratios = await new Promise<Map<Element, number>>((resolve) => {
+            const values = new Map<Element, number>();
+            const observer = new IntersectionObserver((entries) => {
+              for (const entry of entries)
+                values.set(entry.target, entry.intersectionRatio);
+              if (values.size === elements.length) {
+                observer.disconnect();
+                resolve(values);
+              }
+            });
+            for (const element of elements) observer.observe(element);
+          });
+          const describe = (element: Element | null) => {
+            if (!element) return null;
+            const style = getComputedStyle(element);
+            return {
+              tagName: element.tagName,
+              id: element.id,
+              classList: [...element.classList],
+              role: element.getAttribute("role"),
+              ariaLabel: element.getAttribute("aria-label"),
+              dataAttributes: Object.fromEntries(
+                [...element.attributes]
+                  .filter((attribute) => attribute.name.startsWith("data-"))
+                  .map((attribute) => [attribute.name, attribute.value])
+              ),
+              rect: element.getBoundingClientRect().toJSON(),
+              position: style.position,
+              zIndex: style.zIndex,
+            };
+          };
+          return elements.map((element, index) => {
+            const box = element.getBoundingClientRect();
+            const fullyVisible =
+              box.top >= 0 &&
+              box.bottom <= innerHeight &&
+              box.left >= 0 &&
+              box.right <= innerWidth;
+            const points = [box.top + box.height / 2, box.bottom - 1].map(
+              (y) => {
+                const x = box.left + box.width / 2;
+                if (typeof document.elementFromPoint !== "function")
+                  return {
+                    x,
+                    y,
+                    uncovered: true,
+                    hit: null,
+                    closestAncestor: null,
+                  };
+                const hit = document.elementFromPoint(x, y);
+                let ancestor = hit?.parentElement ?? null;
+                while (
+                  ancestor &&
+                  !ancestor.matches(
+                    "header, main, nav, aside, footer, section[aria-label], section[aria-labelledby], form[aria-label], [role='banner'], [role='main'], [role='navigation'], [role='complementary'], [role='contentinfo'], [role='region'], [role='search']"
+                  ) &&
+                  ![...ancestor.attributes].some((attribute) =>
+                    attribute.name.startsWith("data-")
+                  )
+                )
+                  ancestor = ancestor.parentElement;
+                return {
+                  x,
+                  y,
+                  uncovered: hit !== null && element.contains(hit),
+                  hit: describe(hit),
+                  closestAncestor: describe(ancestor),
+                };
+              }
+            );
+            const panel = element.closest("aside")!;
+            const panelStyle = getComputedStyle(panel);
+            return {
+              index,
+              step,
+              diagnosticOnly,
+              fullyVisible,
+              ratio: ratios.get(element),
+              uncovered: points.every((point) => point.uncovered),
+              failingPoints: points.filter((point) => !point.uncovered),
+              rowRect: box.toJSON(),
+              aside: {
+                rect: panel.getBoundingClientRect().toJSON(),
+                position: panelStyle.position,
+                top: panelStyle.top,
+              },
+              // Shell.tsx: desktop sticky app header, distinct from phone headers.
+              appHeader: describe(
+                document.querySelector("[data-app-shell] > header.sticky")
+              ),
+              scrollY,
+              innerHeight,
+              scrollHeight: document.documentElement.scrollHeight,
+              seenUncoveredEarlier: earlier.includes(index),
+            };
+          });
+        },
+        { step, earlier: [...seenUncovered], diagnosticOnly }
+      );
+    const samples: Awaited<ReturnType<typeof collectRows>> = [];
+    let lastAttemptedWheelStep = -1;
+    let phase = "initial collection";
+    const failures: {
+      error: unknown;
+      step: number;
+      phase: string;
+      rowIndex?: number;
+      ratio?: number;
+    }[] = [];
+    const rememberFailure = (
+      error: unknown,
+      sample?: (typeof samples)[number]
+    ) => {
+      failures.push({
+        error,
+        step: lastAttemptedWheelStep,
+        phase,
+        rowIndex: sample?.index,
+        ratio: sample?.ratio,
+      });
+    };
+    const collectVisibleRows = async (step: number) => {
+      phase = "row collection";
+      const current = await collectRows(step, failures.length > 0);
+      samples.push(...current);
+      for (const sample of current) {
+        if (!sample.fullyVisible) continue;
+        seen.add(sample.index);
+        if (sample.uncovered) seenUncovered.add(sample.index);
+        // After the first verdict failure, retain only diagnostic samples.
+        if (failures.length > 0) continue;
+        // Preserve failures at this position, even if the row is readable later.
+        phase = "row occlusion assertion";
+        try {
+          expect(
+            sample.uncovered,
+            `summary row ${sample.index + 1} is uncovered: ${JSON.stringify(sample)}`
+          ).toBe(true);
+        } catch (error) {
+          rememberFailure(error, sample);
+        }
+        if (failures.length > 0) continue;
+        phase = "row viewport assertion";
+        try {
+          await expect(rows.nth(sample.index)).toBeInViewport({ ratio: 1 });
+        } catch (error) {
+          rememberFailure(error, sample);
+        }
+      }
+    };
+    const position = () =>
+      page.evaluate(() => ({
+        y: scrollY,
+        atEnd:
+          scrollY + innerHeight >= document.documentElement.scrollHeight - 1,
+      }));
+    try {
+      await collectVisibleRows(-1);
+      let stoppedAtEnd = false;
+      for (let step = 0; step < 80; step++) {
+        lastAttemptedWheelStep = step;
+        phase = "wheel position";
+        const before = await position();
+        phase = "wheel dispatch";
+        await page.mouse.wheel(0, 120);
+        if (failures.length === 0) {
+          // Wheel dispatch is asynchronous: wait for movement or the page boundary.
+          phase = "wheel movement poll";
+          await expect
+            .poll(async () => {
+              const after = await position();
+              return after.y > before.y || after.atEnd;
+            })
+            .toBe(true);
+          // Movement alone is insufficient: sample only after two consecutive
+          // animation-frame intervals have unchanged scrollY, with a finite budget.
+          phase = "wheel settling";
+          const settled = await page.evaluate(async () => {
+            let previous = scrollY;
+            let stableFrames = 0;
+            for (let frame = 0; frame < 120; frame++) {
+              await new Promise<void>((resolve) =>
+                requestAnimationFrame(() => resolve())
+              );
+              const current = scrollY;
+              stableFrames = current === previous ? stableFrames + 1 : 0;
+              if (stableFrames >= 2) return true;
+              previous = current;
+            }
+            return false;
+          });
+          expect(settled, "wheel scrolling settled within 120 frames").toBe(
+            true
+          );
+        } else {
+          // No retry budget after a verdict failure: allow one pair of frames
+          // for wheel dispatch, then take cheap samples even if still moving.
+          phase = "diagnostic wheel frames";
+          await page.evaluate(
+            () =>
+              new Promise<void>((resolve) =>
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => resolve())
+                )
+              )
+          );
+        }
+        await collectVisibleRows(step);
+        phase = "page-end detection";
+        const after = await position();
+        if (after.y === before.y) {
+          stoppedAtEnd = after.atEnd;
+          break;
+        }
+      }
+      if (failures.length === 0) {
+        phase = "page-end assertion";
+        expect(stoppedAtEnd, "wheel scrolling stopped at the page end").toBe(
+          true
+        );
+        phase = "all-rows assertion";
+        expect([...seen].sort(), "every summary row was fully visible").toEqual(
+          [0, 1, 2, 3, 4, 5, 6, 7]
+        );
+        phase = "final-row viewport assertion";
+        await expect(rows.last()).toBeInViewport({ ratio: 1 });
+      }
+      phase = "final evidence collection";
+      const evidence = await aside.evaluate((element) => {
+        const last = element
+          .querySelector("li:last-child")!
+          .getBoundingClientRect();
+        return {
+          panelHeight: element.getBoundingClientRect().height,
+          viewport: innerHeight,
+          finalRow: { top: last.top, bottom: last.bottom, height: last.height },
+        };
+      });
+      phase = "final evidence attachment";
+      await test.info().attach("reachability", {
+        body: JSON.stringify(evidence),
+        contentType: "application/json",
+      });
+    } catch (error) {
+      rememberFailure(error);
+    } finally {
+      // Persist partial evidence even when scrolling or collection fails. Keep
+      // the first failure ahead of later collection or attachment errors.
+      const diagnostics = {
+        lastAttemptedWheelStep,
+        phase,
+        samples,
+        failures: failures.map(({ error, ...context }) => ({
+          ...context,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        })),
+        everUncoveredFullyVisible: Array.from({ length: 8 }, (_, index) => ({
+          index,
+          ever: seenUncovered.has(index),
+        })),
+      };
+      try {
+        await test.info().attach("reachability-diagnostics", {
+          body: JSON.stringify(diagnostics),
+          contentType: "application/json",
+        });
+      } catch (error) {
+        phase = "diagnostic attachment";
+        rememberFailure(error);
+      }
+    }
+    if (failures.length > 0) throw failures[0].error;
   });
 }
