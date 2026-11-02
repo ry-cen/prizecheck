@@ -1,6 +1,7 @@
 // #399: no browser scroll bar takes width on desktop; the app draws an overlay bar for the page instead.
 // Signed out, the sign-in page is enough: the page's own scroller is what is under test.
 import { test, expect, type Page } from "@playwright/test";
+import { sandboxedLaunchOptions } from "./support/launch-options";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const DESKTOP = { width: 1280, height: 800 };
@@ -10,7 +11,11 @@ const RAIL = "[data-overlay-scrollbar='page']";
 
 // Playwright's Chromium hides scroll bars by default (--hide-scrollbars), which would make the width checks pass
 // whatever the CSS does. Keep the browser's real ones.
-test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } });
+test.use({
+  launchOptions: sandboxedLaunchOptions({
+    ignoreDefaultArgs: ["--hide-scrollbars"],
+  }),
+});
 
 /** The width the layout has: the viewport minus any scroll bar the browser draws. */
 function layoutWidth(page: Page) {

@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 import { applyBrowserStack } from "./web/tests/support/browser-stack";
+import { sandboxedLaunchOptions } from "./web/tests/support/launch-options";
 
 // In the verification gate each worker gets its own stack; see web/tests/support/browser-stack.ts.
 applyBrowserStack();
@@ -14,18 +15,7 @@ export default defineConfig({
   use: {
     browserName: "chromium",
     headless: true,
-    launchOptions: {
-      // Browser specs must fail if Chromium cannot start with its sandbox.
-      chromiumSandbox: true,
-      ...(process.env.TEST_FONTCONFIG_FILE
-        ? {
-            env: {
-              ...process.env,
-              FONTCONFIG_FILE: process.env.TEST_FONTCONFIG_FILE,
-            },
-          }
-        : {}),
-    },
+    launchOptions: sandboxedLaunchOptions(),
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

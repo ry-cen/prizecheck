@@ -1,12 +1,13 @@
 """The deployment pipeline's wiring (spec: docs/deployment-oracle.md, docs/deployment-unraid.md): one shared build
 checks the commit, builds each architecture natively and joins them, dev deploys only by hand, production reuses a dev
 build or runs the same shared build itself, and the addresses that make
-up the client-IP chain (compose.prod.yml, deploy/docker/nginx.conf, deploy/oracle/Caddyfile) agree. Text and regex only:
-no YAML library is available to the tooling tests."""
+up the client-IP chain (compose.prod.yml, deploy/docker/nginx.conf, deploy/oracle/Caddyfile) agree. Workflow assertions
+use text and regex: no YAML library is available. The launch-options helper is tested without starting a browser."""
 import ipaddress
 import json
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -156,6 +157,68 @@ class DeployPipelineTest(unittest.TestCase):
                 self.assertIn('if: ${{ matrix.browsers }}', preflight)
             else:
                 self.assertNotIn('if:', preflight)
+
+    def test_all_browser_launch_options_use_the_shared_sandbox_helper(self):
+        paths = [ROOT / 'playwright.config.ts', *sorted((ROOT / 'web/tests').rglob('*.ts'))]
+        occurrences = 0
+        for path in paths:
+            source = path.read_text()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                for forbidden in ('--no-sandbox', '--disable-setuid-sandbox'):
+                    self.assertNotIn(forbidden, source)
+                self.assertNotRegex(source, r'\bchromiumSandbox\s*:\s*false\b')
+                matches = list(re.finditer(r'\blaunchOptions\b', source))
+                occurrences += len(matches)
+                for match in matches:
+                    self.assertRegex(source[match.end():], r'^\s*:\s*sandboxedLaunchOptions\s*\(')
+                if matches:
+                    self.assertRegex(source, r'import\s*\{\s*sandboxedLaunchOptions\s*\}\s*from\s*[\'\"][^\'\"]*/launch-options[\'\"]')
+        self.assertGreaterEqual(occurrences, 3)
+
+    def test_launch_options_enforce_sandbox_and_preserve_arguments_and_font_environment(self):
+        script = r'''
+import assert from "node:assert/strict";
+import { sandboxedLaunchOptions } from "./web/tests/support/launch-options.ts";
+
+delete process.env.TEST_FONTCONFIG_FILE;
+assert.equal(sandboxedLaunchOptions().chromiumSandbox, true);
+assert.equal(Object.hasOwn(sandboxedLaunchOptions(), "env"), false);
+process.env.TEST_FONTCONFIG_FILE = "";
+assert.equal(Object.hasOwn(sandboxedLaunchOptions(), "env"), false);
+
+const extra = Object.freeze({
+  chromiumSandbox: false,
+  args: Object.freeze([
+    "--use-fake-ui-for-media-stream",
+    "--use-fake-device-for-media-stream",
+    "--use-file-for-fake-video-capture=/fixtures/camera.mjpeg",
+  ]),
+  ignoreDefaultArgs: Object.freeze(["--hide-scrollbars"]),
+  env: Object.freeze({ SANDBOX_HELPER_TEST: "extra" }),
+});
+const options = sandboxedLaunchOptions(extra);
+assert.equal(options.chromiumSandbox, true);
+assert.equal(options.args, extra.args);
+assert.equal(options.ignoreDefaultArgs, extra.ignoreDefaultArgs);
+assert.equal(options.env, extra.env);
+assert.equal(extra.chromiumSandbox, false);
+
+process.env.TEST_FONTCONFIG_FILE = "/fixtures/fonts.conf";
+for (const input of [undefined, extra]) {
+  const actual = sandboxedLaunchOptions(input).env;
+  const expected = { ...process.env, ...input?.env, FONTCONFIG_FILE: process.env.TEST_FONTCONFIG_FILE };
+  assert.deepEqual(Object.keys(actual).sort(), Object.keys(expected).sort());
+  for (const key of Object.keys(expected))
+    assert.equal(actual[key] === expected[key], true, `environment mismatch for ${key}`);
+}
+for (const flag of ["--no-sandbox", "--disable-setuid-sandbox"]) {
+  for (const arg of [flag, `${flag}=true`])
+    assert.throws(() => sandboxedLaunchOptions({ args: [arg] }), /sandbox/i);
+}
+'''
+        result = subprocess.run(['node', '--import', 'tsx', '--input-type=module', '-'], input=script,
+                                cwd=ROOT, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_the_verify_aggregator_requires_the_default_checks_and_every_requested_job(self):
         verify = job_body('verify')

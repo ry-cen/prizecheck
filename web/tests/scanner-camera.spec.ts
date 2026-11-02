@@ -6,6 +6,7 @@ import { test } from "./support/art-upstream";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
 import { installScript, openScanner, signInFresh } from "./support/scanner";
+import { sandboxedLaunchOptions } from "./support/launch-options";
 
 const CLIP = fileURLToPath(
   new URL("./fixtures/scanner/synthetic-card.mjpeg", import.meta.url)
@@ -14,13 +15,13 @@ const CLIP = fileURLToPath(
 test.use({
   viewport: { width: 1280, height: 800 },
   permissions: ["camera"],
-  launchOptions: {
+  launchOptions: sandboxedLaunchOptions({
     args: [
       "--use-fake-ui-for-media-stream",
       "--use-fake-device-for-media-stream",
       `--use-file-for-fake-video-capture=${CLIP}`,
     ],
-  },
+  }),
 });
 
 type Hook = { played?: number; delivered?: number };
