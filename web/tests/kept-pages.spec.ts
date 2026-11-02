@@ -159,7 +159,7 @@ test("idle sign-in warms populated roots and their first opens never show loadin
     "Decks",
     "Loans",
     "Trades",
-    "Missing cards",
+    "Card reports",
     "Catalog",
     "Settings",
   ]) {
@@ -189,7 +189,7 @@ test("idle sign-in warms populated roots and their first opens never show loadin
       await expect(
         content.getByRole("link", { name: /Warm lender/ })
       ).toBeVisible({ timeout: 0 });
-    else if (label === "Missing cards")
+    else if (label === "Card reports")
       await expect(
         content.getByRole("row").filter({ hasText: "Warm report" })
       ).toBeVisible({ timeout: 0 });

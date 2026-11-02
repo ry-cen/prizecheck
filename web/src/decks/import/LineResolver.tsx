@@ -29,7 +29,7 @@ const RESULTS = 8;
 /**
  * The inline resolver under a flagged line (#212, #213): the cards the line could mean (Pick one: one per code and
  * number, or one per Reprint Group of its name), a catalog search that starts on the pasted name and follows typing,
- * Drop line, and for a Not found line the link that reports it on Missing cards with the form filled in. The link opens
+ * Drop line, and for a Not found line the link that reports it on Card reports with the form filled in. The link opens
  * a new tab, so the review stays as it is. A pick is any Edition of the card by the add-by-Printing rule; the Edition
  * chooser changes it afterwards.
  */
@@ -145,7 +145,7 @@ export function LineResolver({
           target="_blank"
           rel="noopener noreferrer"
         >
-          Report it on Missing cards
+          Report it on Card reports
           <Icon icon={ExternalLinkIcon} size={14} className="ml-1" />
           <span className="sr-only"> (opens in a new tab)</span>
         </a>
