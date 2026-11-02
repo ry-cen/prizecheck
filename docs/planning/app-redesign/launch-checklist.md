@@ -149,7 +149,7 @@ On a desktop (a window at least 1280 px wide):
 - [ ] 3. Select a card and drag it onto another Storage Leaf in the sidebar: every Leaf it can go to shows a dashed outline, the one under the pointer a solid gold ring, and the drop moves the card with an Undo message.
 - [ ] 4. Open Manage locations with the gear. It opens centred, and the page behind doesn't scroll. Drag a Location by its ☰ handle onto another row: valid rows are outlined, the one under the pointer ringed, the rest dimmed. Confirm with Move here. Rename one, and delete an empty one by typing its name. Escape closes the panel and returns focus to the gear.
 - [ ] 5. Open a Deck: the heading shows Estimated Deck Cost and Export. Export opens a menu (arrow keys move through it); Pokémon TCG Live opens its panel, and Escape returns focus to Export.
-- [ ] 6. Change something in another tab (add or move a card). Back here, a slim banner reads "Your collection changed in another tab or session." with Reload; Reload brings the change in.
+- [ ] 6. Change something in another tab (add or move a card). Back here, a slim banner reads "Your collection has changed since this view loaded." with Reload; Reload brings the change in.
 
 On a phone (iOS Safari or Android Chrome):
 

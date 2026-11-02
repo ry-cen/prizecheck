@@ -5,7 +5,7 @@ import { focusWorkspaceHeading } from "./SelectionBar";
 import { reconcileSelection, type Selection } from "./selectionModel";
 
 export const STALE_MESSAGE =
-  "Your collection changed in another tab or session.";
+  "Your collection has changed since this view loaded.";
 export const RELOAD_NOTE =
   "Collection reloaded. Your selection was cleared because some selected cards had changed.";
 

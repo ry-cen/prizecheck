@@ -991,7 +991,7 @@ test.describe("desktop", () => {
     await expect(tiles(page)).toHaveCount(2);
     await expect(
       page.getByRole("status").filter({
-        hasText: "Your collection changed in another tab or session.",
+        hasText: "Your collection has changed since this view loaded.",
       })
     ).toHaveCount(0);
     await expect(bar(page)).toContainText("1 copy selected");
