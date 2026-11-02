@@ -410,16 +410,32 @@ test.describe("on a desktop", () => {
     expect(writes).toEqual(["printing"]);
 
     // A failed PUT puts the saved choice back.
-    await page.route(held, (route) =>
-      route.fulfill({
+    let releaseFailure: () => void = () => {};
+    const failureGate = new Promise<void>(
+      (resolve) => (releaseFailure = resolve)
+    );
+    await page.route(held, async (route) => {
+      await failureGate;
+      await route.fulfill({
         status: 500,
         contentType: "application/json",
         body: JSON.stringify({ detail: { code: "INTERNAL" } }),
-      })
-    );
-    await energy(page)
-      .getByRole("radio", { name: "This exact card", exact: true })
-      .check();
+      });
+    });
+    try {
+      await energy(page)
+        .getByRole("radio", { name: "This exact card", exact: true })
+        .check();
+      await expect(
+        energy(page).getByRole("radio", {
+          name: "This exact card",
+          exact: true,
+        })
+      ).toBeChecked();
+      await expect(group).toHaveAttribute("aria-disabled", "true");
+    } finally {
+      releaseFailure();
+    }
     await expect(notifications(page)).toContainText(
       "That choice couldn't be saved. Please try again."
     );
