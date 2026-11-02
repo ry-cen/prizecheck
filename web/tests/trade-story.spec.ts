@@ -332,11 +332,35 @@ async function story(
   await expectCollectorCopy(main, ashPlace);
   await expectPageChecks(page, `an open two-way row at ${width}`);
 
-  // S5. Propose from the row: cash only, refused.
+  // S5. The unambiguous groups prefill the row; remove that draft to test a cash-only proposal refusal.
   await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
   await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
   await show(page, "Proposal");
+  await expect(
+    group(page, "Arven (SVI 166) you get").locator("output")
+  ).toHaveText("3");
+  await expect(
+    group(page, "Iono (PAL 185) you give").locator("output")
+  ).toHaveText("1");
+  await expect(
+    page.getByRole("region", { name: /^Choose printings for You/ })
+  ).toHaveCount(0);
+  for (const remaining of [2, 1, 0]) {
+    await page
+      .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+      .click();
+    if (remaining > 0)
+      await expect(
+        group(page, "Arven (SVI 166) you get").locator("output")
+      ).toHaveText(String(remaining));
+  }
+  await page
+    .getByRole("button", { name: "Decrease Iono (PAL 185) you give" })
+    .click();
+  await expect(
+    page.getByRole("list", { name: "You give", exact: true })
+  ).toHaveText("Nothing yet");
   await expect(
     page.getByRole("list", { name: "You get", exact: true })
   ).toHaveText("Nothing yet");

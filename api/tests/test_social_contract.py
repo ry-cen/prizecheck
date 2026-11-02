@@ -287,7 +287,7 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
         'trader_id', 'display_name', 'band', 'completed_trades', 'cards', 'next_page'}
     assert set(schemas['TraderMatchRow']['properties']) == {
         'trader_id', 'display_name', 'band', 'completed_trades', 'open_to_cash_offers', 'match', 'you_get',
-        'you_give', 'more_you_get', 'more_you_give'}
+        'you_give', 'more_you_get', 'more_you_give', 'you_get_groups', 'you_give_groups'}
     assert 'trader_id' in schemas['TradeMatchRow']['properties']
     assert 'trader_id' in schemas['FriendTradeList']['properties']
     for route in ('GET /api/social/traders/{trader_id}', 'GET /api/social/traders/{trader_id}/trade-list',
@@ -303,7 +303,7 @@ def test_near_you_and_card_search_answer_exactly_these_fields():
             routes[route] = {field for _, field, _ in fields(schema, components)}
     assert set(components['NearbyMatchRow']['properties']) == {
         'trader_id', 'display_name', 'band', 'completed_trades', 'open_to_cash_offers', 'match', 'you_get', 'you_give',
-        'more_you_get', 'more_you_give'}
+        'more_you_get', 'more_you_give', 'you_get_groups', 'you_give_groups'}
     assert set(components['NearbyMatches']['properties']) == {'status', 'radius_mi', 'rows'}
     assert set(components['CardHolder']['properties']) == {
         'trader_id', 'display_name', 'friend', 'band', 'completed_trades', 'open_to_cash_offers', 'cards',

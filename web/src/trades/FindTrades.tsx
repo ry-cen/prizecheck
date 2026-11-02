@@ -33,8 +33,8 @@ type Load =
  * or Same name) and **You give**, each with the copies offered and how many are wanted ("6 wanted (2 for Decks)") and
  * whether the want is for Decks, for Trade Wants or both. A side past 20 cards has **Show N more**, which reads that
  * collector's whole row, moves focus to that side's heading when it arrives, and from then on the row's header and
- * counts come from that read. **Propose trade** opens the proposal builder to that collector empty (Trading #284),
- * where the matched cards are listed first; **Message** opens the conversation. A Near you row's ⋯ menu
+ * counts come from that read. **Propose trade** prefills the proposal builder from the visible matched cards,
+ * only where the need has one offered printing; ambiguous needs wait for an explicit printing choice; **Message** opens the conversation. A Near you row's ⋯ menu
  * (`NearRowMenu`) offers Block (Trading #302) and Report (#303). Nothing shows a price, a Location or a Deck, or a
  * Handle, zip code or distance of anyone who is not a Friend. It reads again each time it opens.
  */
