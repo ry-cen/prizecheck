@@ -622,10 +622,8 @@ test.describe("desktop", () => {
       await expect(
         page.getByRole("navigation", { name: "Main views" })
       ).toBeVisible();
-      // The footer credit is the one allowed mention of the source (#350); price-credit.spec.ts checks it.
-      const text = (await page.locator("body").innerText())
-        .toLowerCase()
-        .replace("prices from tcgcsv", "");
+      // The price credit lives only in Settings (#467), so Catalog names no price source.
+      const text = (await page.locator("body").innerText()).toLowerCase();
       for (const word of [
         "tcgcsv",
         "price import",

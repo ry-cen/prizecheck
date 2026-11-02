@@ -500,7 +500,7 @@ export function Workspace({
   const search = (
     <SearchField
       label="Search cards"
-      placeholder="Search your cards…"
+      placeholder={mobile ? "Search cards" : "Search your cards…"}
       autoComplete="off"
       maxLength={120}
       value={query}
@@ -593,46 +593,46 @@ export function Workspace({
     // as the workspace CSS gave it (Preflight does the same since #184).
     <div
       data-collection-page=""
+      data-phone-search-header={active ? "" : undefined}
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
       <p className="sr-only" role="status" data-testid="location-announcement">
         {announcement}
       </p>
-      {/* The phone header (the shell draws the desktop one, and the skip link): ☰ for the Location
-          drawer, the page title (for screen readers only: the tab bar marks the section, and Search needs the room
-          once the bell joins the header actions, #259), then Search, Filters & display and the shell's phone header
-          actions (#246). */}
-      <header className="box-border hidden h-header items-center gap-0 border-b border-border px-0 phone:flex collection-pinned:sticky collection-pinned:top-0 collection-pinned:z-(--layer-sticky) collection-pinned:bg-bg">
-        <Button
-          ref={drawerOpener}
-          variant="quiet"
-          icon={MenuIcon}
-          label="Open locations"
-          className="shrink-0"
-          aria-haspopup="dialog"
-          aria-expanded={drawerOpen}
-          onClick={() => setDrawerOpen(true)}
-        />
-        <span className="sr-only">Collection</span>
-        <div className="mr-1 min-w-0 flex-1">{search}</div>
-        <FiltersDrawerButton
-          ref={filtersOpener}
-          filters={prefs.filters}
-          open={filtersDrawerOpen}
-          onOpen={() => setFiltersDrawerOpen(true)}
-        />
-        {/* The camera button sits with the header actions (one gap, 4 px, not two): Search needs 44 px at 375. */}
-        <div className="flex shrink-0 items-center gap-0 [&>div]:gap-0">
+      {/* Reserve two rows from the first render: the phone controls stay reachable and Search never competes
+          with them for width. The fixed height also keeps the gallery stable while its data arrives. */}
+      <header className="box-border hidden h-[calc(2*var(--layout-header-height))] grid-rows-2 items-center border-b border-border phone:grid collection-pinned:sticky collection-pinned:top-0 collection-pinned:z-(--layer-sticky) collection-pinned:bg-bg">
+        <div className="flex min-w-0 items-center">
           <Button
+            ref={drawerOpener}
             variant="quiet"
-            icon={CameraIcon}
-            label="Scan cards"
-            onClick={openScanner}
+            icon={MenuIcon}
+            label="Open locations"
+            className="shrink-0"
+            aria-haspopup="dialog"
+            aria-expanded={drawerOpen}
+            onClick={() => setDrawerOpen(true)}
           />
-          <PhoneHeaderActions />
+          <span className="sr-only">Collection</span>
+          <FiltersDrawerButton
+            ref={filtersOpener}
+            filters={prefs.filters}
+            open={filtersDrawerOpen}
+            onOpen={() => setFiltersDrawerOpen(true)}
+          />
+          <div className="ml-auto flex shrink-0 items-center gap-0 [&>div]:gap-0">
+            <Button
+              variant="quiet"
+              icon={CameraIcon}
+              label="Scan cards"
+              onClick={openScanner}
+            />
+            <PhoneHeaderActions />
+          </div>
         </div>
+        <div className="min-w-0 px-4">{search}</div>
       </header>
-      <div className="grid min-h-[calc(100dvh-var(--layout-header-height))] grid-cols-[var(--layout-sidebar-width)_minmax(0,1fr)] phone:block">
+      <div className="grid min-h-[calc(100dvh-var(--layout-header-height))] grid-cols-[var(--layout-sidebar-width)_minmax(0,1fr)] phone:block phone:min-h-[calc(100dvh-2*var(--layout-header-height))]">
         <aside
           className="box-border min-w-0 border-r border-border px-4 py-7 phone:hidden"
           aria-label="Sidebar"
