@@ -32,11 +32,28 @@ function processTree(browserPid) {
   return pids;
 }
 
-function namespaces(pid) {
-  return {
-    pid: readlinkSync(`/proc/${pid}/ns/pid`),
-    user: readlinkSync(`/proc/${pid}/ns/user`),
-  };
+function userNamespace(pid) {
+  return readlinkSync(`/proc/${pid}/ns/user`);
+}
+
+function seccomp(pid) {
+  const status = readFileSync(`/proc/${pid}/status`, "utf8");
+  const match = /^Seccomp:\s+(\d+)$/m.exec(status);
+  if (!match) throw new Error(`Seccomp field missing for PID ${pid}`);
+  return Number(match[1]);
+}
+
+function appArmorLabel(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/attr/apparmor/current`, "utf8").replace(
+      /\n$/,
+      ""
+    );
+  } catch (error) {
+    // Older kernels expose only attr/current; other read failures stay fatal.
+    if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+    return readFileSync(`/proc/${pid}/attr/current`, "utf8").replace(/\n$/, "");
+  }
 }
 
 async function main() {
@@ -78,31 +95,42 @@ async function main() {
       }
       if (cmdline.split("\0").includes("--type=renderer")) renderers.push(pid);
     }
-    const browserNamespaces = namespaces(browserPid);
+    const browserUserNamespace = userNamespace(browserPid);
+    const browserLabel = appArmorLabel(browserPid);
+    const browserSeccomp = seccomp(browserPid);
+    const expectedLabel = "prizecheck-playwright-chromium (unconfined)";
     console.log(
-      `Browser PID=${browserPid} pid_ns=${browserNamespaces.pid} user_ns=${browserNamespaces.user}; inspected PIDs=${pids.join(",")}; no forbidden flags`
+      `Browser PID=${browserPid} AppArmor=${JSON.stringify(browserLabel)} user_ns=${browserUserNamespace} Seccomp=${browserSeccomp}; inspected PIDs=${pids.join(",")}; no forbidden flags`
     );
     if (!renderers.length) throw new Error("No renderer descendant found");
 
-    const evidence = [];
+    const sandboxedRenderers = [];
     for (const pid of renderers) {
-      const rendererNamespaces = namespaces(pid);
-      const differentPid = rendererNamespaces.pid !== browserNamespaces.pid;
-      const differentUser = rendererNamespaces.user !== browserNamespaces.user;
-      const status = readFileSync(`/proc/${pid}/status`, "utf8");
-      const seccomp = /^Seccomp:\s+(\d+)$/m.exec(status)?.[1] ?? "unknown";
+      const rendererUserNamespace = userNamespace(pid);
+      const differentUser = rendererUserNamespace !== browserUserNamespace;
+      const rendererSeccomp = seccomp(pid);
       console.log(
-        `Renderer PID=${pid} pid_ns=${rendererNamespaces.pid} (different=${differentPid}) user_ns=${rendererNamespaces.user} (different=${differentUser}) Seccomp=${seccomp}`
+        `Renderer PID=${pid} user_ns=${rendererUserNamespace} (different=${differentUser}) Seccomp=${rendererSeccomp}`
       );
-      if (differentPid) evidence.push(`PID ${pid}: different PID namespace`);
-      if (differentUser) evidence.push(`PID ${pid}: different user namespace`);
-      if (seccomp === "2") evidence.push(`PID ${pid}: Seccomp=2`);
+      if (differentUser && rendererSeccomp === 2) sandboxedRenderers.push(pid);
     }
-    if (!evidence.length)
-      throw new Error(
-        "No positive renderer sandbox evidence: namespaces match and Seccomp is not 2"
+    const failures = [];
+    if (browserLabel !== expectedLabel)
+      failures.push(
+        `AppArmor label condition failed: expected ${JSON.stringify(expectedLabel)}, got ${JSON.stringify(browserLabel)}`
       );
-    console.log(`Chromium sandbox preflight passed: ${evidence.join("; ")}`);
+    if (browserSeccomp !== 0)
+      failures.push(
+        `Browser Seccomp prerequisite failed: expected 0, got ${browserSeccomp}; an inherited filter is not accepted`
+      );
+    if (!sandboxedRenderers.length)
+      failures.push(
+        "Renderer condition failed: no single renderer has both a different user namespace and Seccomp=2"
+      );
+    if (failures.length) throw new Error(failures.join("; "));
+    console.log(
+      `Chromium sandbox preflight passed: AppArmor label matched; browser Seccomp=0; renderer PIDs=${sandboxedRenderers.join(",")} have a different user namespace AND Seccomp=2; no forbidden flags`
+    );
   } finally {
     // Closing the server also closes the connected browser and its descendants.
     await browserServer?.close();
