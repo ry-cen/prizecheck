@@ -106,6 +106,44 @@ export function WillAcceptRadios({
   );
 }
 
+export const TRADE_WANTS_HEADING = "trade-wants";
+
+export function focusTradeWants() {
+  const heading = document.getElementById(TRADE_WANTS_HEADING);
+  heading?.focus({ preventScroll: true });
+  heading?.scrollIntoView({ block: "start" });
+}
+
+export function tradeWantCounts(lines: readonly { quantity: string }[]) {
+  return {
+    copies: lines.reduce((sum, line) => sum + Number(line.quantity), 0),
+    entries: lines.length,
+  };
+}
+
+export function TradeWantsShortcut({ api }: { api: TradeWantsApi }) {
+  if (api.state.kind !== "ready" || api.state.wants.lines.length === 0)
+    return null;
+  const lines = api.state.wants.lines;
+  const { copies, entries } = tradeWantCounts(lines);
+  return (
+    <p className="m-0 basis-full text-meta text-text-muted">
+      <a
+        href="#trade-wants"
+        className="inline-flex min-h-tap max-w-full items-center rounded-control text-accent-strong underline wrap-anywhere"
+        onClick={(event) => {
+          event.preventDefault();
+          focusTradeWants();
+        }}
+      >
+        Trade Wants · {copies} {copies === 1 ? "copy" : "copies"} across{" "}
+        {entries} {entries === 1 ? "entry" : "entries"}
+      </a>
+      <span className="block">Separate from Deck To get quantities.</span>
+    </p>
+  );
+}
+
 /**
  * Trade Wants, the panel after the Decks on the Want List (Trading #275; prototype variant A): the exact cards the
  * collector wants in trades that no Deck names, each with a stepper (0 removes it), and **Add a card**, which searches
@@ -113,25 +151,35 @@ export function WillAcceptRadios({
  * is a part of the page beside the Want List, not one of its Deck sections (h3).
  */
 export function TradeWantsPanel({ api }: { api: TradeWantsApi }) {
-  const idBase = useId();
   const [adding, setAdding] = useState(false);
   const { state } = api;
+  const { copies, entries } = tradeWantCounts(
+    state.kind === "ready" ? state.wants.lines : []
+  );
   return (
     <section
-      aria-labelledby={`${idBase}-title`}
+      aria-labelledby={TRADE_WANTS_HEADING}
       className="rounded-panel border border-border bg-surface"
     >
       <div className="flex flex-col gap-1 px-4 py-2">
         <h2
-          id={`${idBase}-title`}
-          className="m-0 text-body font-semibold wrap-anywhere"
+          id={TRADE_WANTS_HEADING}
+          tabIndex={-1}
+          className="m-0 scroll-mt-[calc(var(--layout-sticky-top)+var(--space-4))] text-body font-semibold wrap-anywhere"
         >
           Trade Wants
         </h2>
         <p className="m-0 text-meta text-text-muted">
-          Cards you want in trades that no Deck names.
+          Trade Wants match the exact card and are not included in Deck To get
+          or Combined total.
         </p>
       </div>
+      {state.kind === "ready" && state.wants.lines.length > 0 && (
+        <p className="m-0 px-4 pb-2 text-meta text-text-muted">
+          {copies} {copies === 1 ? "copy" : "copies"} across {entries}{" "}
+          {entries === 1 ? "entry" : "entries"}
+        </p>
+      )}
       {state.kind === "loading" ? (
         <p
           role="status"
