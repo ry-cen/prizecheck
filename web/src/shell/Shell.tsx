@@ -25,7 +25,6 @@ import {
 import { BorrowDraftsProvider } from "../loans/BorrowDrafts";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
-import { PriceCredit } from "../ui/PriceCredit";
 import { takeLandingToast } from "../scanner/ui/landing";
 import { ToastProvider, useToast } from "../ui/Toast";
 import { FriendsButton, FriendsProvider } from "../social/FriendsDrawer";
@@ -409,12 +408,6 @@ function ShellFrame({
               {other.content}
             </div>
           )}
-
-          {/* The price credit ends the page area on every shell page; on a phone the padding keeps it, and the last of
-          the page, clear of the fixed tab bar. */}
-          <div className="phone:pb-tabbar">
-            <PriceCredit />
-          </div>
 
           {/* Phone bottom tab bar. */}
           <nav

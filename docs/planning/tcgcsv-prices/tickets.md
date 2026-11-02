@@ -246,6 +246,10 @@ web/tests/deck-cost.spec.ts web/tests/want-list-cost.spec.ts`.
 
 ## P4b. "Prices from TCGCSV" footer credit (owner decision; release B) (#350)
 
+> **Superseded by #467 (owner decision 2026-10-31):** the price credit now appears only in the Settings footer.
+> TCGCSV's [FAQ](https://tcgcsv.com/faq) and [docs](https://tcgcsv.com/docs) were checked on 2026-11-02;
+> they require no mandatory per-page credit. The original decision below is retained as history.
+
 **What to build.**
 
 - `web/src/ui/PriceCredit.tsx` renders one line: `Prices from <a href="https://tcgcsv.com" rel="noopener">TCGCSV</a>`,
