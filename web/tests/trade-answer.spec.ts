@@ -12,6 +12,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
+import { expectTouchTarget } from "./support/touch-target";
 import { signInAsOwner } from "./support/sign-in";
 import { bodyOf } from "./support/trades";
 
@@ -456,4 +457,95 @@ test.describe("phone", () => {
     test.slow();
     await story(page, collectors, size, "375 px", "recipient");
   });
+});
+
+test("incoming Trade cards open details and show shared Deck need at phone widths", async ({
+  page,
+  collectors,
+}) => {
+  const ids = seedCatalog();
+  const ash = await collectors.signIn();
+  await nameCollector(ash.page, "Ash K");
+  const shelf = await forTradeBinder(ash.page, "Ash's cards");
+  await hold(ash.page, shelf, ids["SVI 166"], 2);
+  const deck = await api(ash.page, "POST", "/api/decks", {
+    name: "Ash's Deck",
+    idempotency_key: randomUUID(),
+  });
+  const detail = await api(ash.page, "GET", `/api/decks/${deck.location.id}`);
+  await api(
+    ash.page,
+    "POST",
+    `/api/decks/${deck.location.id}/deck-list/changes`,
+    {
+      revision: detail.deck_list.revision,
+      idempotency_key: randomUUID(),
+      changes: [{ edition_id: ids["PAL 185"], quantity: "2" }],
+    }
+  );
+  await api(ash.page, "PUT", `/api/trade-wants/will-accept/${ids["PAL 185"]}`, {
+    rule: "identity",
+  });
+  await signInAsOwner(page, "/collection");
+  await nameCollector(page, "Misty W");
+  const binder = await forTradeBinder(page, "Misty's private binder");
+  // Leave offered copies on the Trade List as well as those promised by this proposal, so the existing match read
+  // can describe both printings. A card no longer offered by the trader has no match context, and shows no hint.
+  for (const key of ["PAL 185", "PAL 254", "PAL 172"] as const)
+    await hold(page, binder, ids[key], 3);
+  await befriend(page, ash.page);
+  const id = await propose(
+    page,
+    await accountId(ash.page),
+    [
+      [ids["PAL 185"], 1],
+      [ids["PAL 254"], 1],
+      [ids["PAL 172"], 1],
+    ],
+    [[ids["SVI 166"], 1]]
+  );
+  await noArtwork(ash.page);
+  await ash.page.goto(`${ORIGIN}/trades/${id}`);
+  const gets = ash.page.getByRole("list", { name: "You get", exact: true });
+  const gives = ash.page.getByRole("list", { name: "You give", exact: true });
+  const hint =
+    "Your Decks need 2 Iono, including need shared across printings.";
+  await expect(gets.getByText(hint, { exact: true })).toHaveCount(2);
+  await expect(
+    gets.getByRole("listitem").filter({ hasText: "Boss's Orders" })
+  ).not.toContainText("Your Decks need");
+  await expect(gives).not.toContainText("Your Decks need");
+  await expect(ash.page.getByRole("main")).not.toContainText(
+    "Misty's private binder"
+  );
+  for (const width of [1280, 320, 375, 390]) {
+    await ash.page.setViewportSize({ width, height: 844 });
+    const opener = gets.getByRole("button", {
+      name: "Open card details: Iono (PAL 185)",
+      exact: true,
+    });
+    if (width < 760) await expectTouchTarget(opener);
+    await opener.focus();
+    await ash.page.keyboard.press("Enter");
+    const popup = ash.page.getByRole("dialog", { name: "Iono", exact: true });
+    await expect(popup).toContainText("PAL 185");
+    await expect(popup).toContainText(hint);
+    await expectPageChecks(ash.page, `incoming card details at ${width}`);
+    await popup.getByRole("button", { name: "Close card details" }).click();
+    await expect(opener).toBeFocused();
+    await gives
+      .getByRole("button", {
+        name: "Open card details: Arven (SVI 166)",
+        exact: true,
+      })
+      .click();
+    const given = ash.page.getByRole("dialog", { name: "Arven", exact: true });
+    await expect(given).toContainText("SVI 166");
+    await expect(given).not.toContainText("Your Decks need");
+    await given.getByRole("button", { name: "Close card details" }).click();
+    await expectPageChecks(ash.page, `incoming Trade at ${width}`);
+  }
+  await ash.page.getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
+  await expect(gets).not.toContainText("Your Decks need");
 });

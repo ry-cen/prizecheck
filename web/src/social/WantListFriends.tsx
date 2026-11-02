@@ -1,6 +1,14 @@
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { editionText } from "../decks/wantListModel";
-import type { FriendCopy } from "../social_generated";
+import {
+  getTradeMatches,
+  getTradeMatch,
+  type FriendCopy,
+  type TradeMatchCard,
+} from "../social_generated";
+import { Button } from "../ui/Button";
+import { useOpenProposal } from "../trades/openProposal";
+import { tradeCardName } from "../trades/tradeText";
 import { Pill } from "../ui/Pill";
 import type { CombinedRow } from "../want_list_generated";
 import { CopyArt } from "../ui/CopyTile";
@@ -61,8 +69,9 @@ export function FriendChips({
  * no Friend can lend are summed up in one line under the panels. The need and the Decks are the Want List's combined
  * total for the scope on the page, so they follow the counting setting and the Deck chips.
  *
- * Borrow Requests (#252) pass `action` for each Friend's row (Ask, then a stepper) and `asked`, the copies of a card
- * the drafts ask for, which the panel's heading shows as "3 of 4 asked".
+ * Borrow Requests (#252) pass `action` for each Friend's row (Ask to borrow, then a stepper) and `asked`, the copies of a card
+ * the drafts ask for, which the panel's heading shows as "3 of 4 asked". An offered Edition also has Trade for it,
+ * using the existing Friend matches and Ask to trade handoff.
  */
 export function GetFromFriends({
   rows,
@@ -84,6 +93,7 @@ export function GetFromFriends({
   /** Copies of the row's card the Borrow Request drafts ask Friends for. */
   asked?: (row: CombinedRow, copies: FriendCopy[]) => number;
 }) {
+  const offers = useTradeOffers(byCard);
   if (rows.length === 0)
     return (
       <p className="m-0 text-body text-text-muted">
@@ -111,6 +121,7 @@ export function GetFromFriends({
           deckName={deckName}
           action={action}
           asked={asked}
+          offers={offers}
         />
       ))}
       {!pending && missing > 0 && (
@@ -130,8 +141,10 @@ function CardPanel({
   deckName,
   action,
   asked,
+  offers,
 }: {
   row: CombinedRow;
+  offers: Map<string, TradeMatchCard>;
   copies: FriendCopy[];
   deckName: (id: string) => string;
   action?: (row: CombinedRow, copy: FriendCopy) => ReactNode;
@@ -201,10 +214,76 @@ function CardPanel({
                 {other && <Pill>{other}</Pill>}
               </span>
               {action?.(row, copy)}
+              <TradeForIt
+                copy={copy}
+                card={offers.get(`${copy.collector_id}:${copy.edition_id}`)}
+              />
             </li>
           );
         })}
       </ul>
     </section>
+  );
+}
+
+/** FriendCopy describes lending, not trade availability. Use the existing batched Friend match read, expanding only
+ * truncated receiving sides. An action still requires an exact offered Edition in the current lending row; no new
+ * read model or identity is introduced. This optional read never holds up the Want List or Borrow Requests. */
+function useTradeOffers(byCard: Map<string, FriendCopy[]>) {
+  const signedIn = useOpenProposal() !== null;
+  const [answer, setAnswer] = useState<{
+    source: typeof byCard;
+    offers: Map<string, TradeMatchCard>;
+  } | null>(null);
+  useEffect(() => {
+    if (!signedIn || byCard.size === 0) return;
+    const controller = new AbortController();
+    async function read() {
+      const result = await getTradeMatches(controller.signal);
+      const rows = await Promise.all(
+        result.rows.map((row) =>
+          row.more_you_get > 0
+            ? getTradeMatch(row.collector_id, controller.signal).catch(
+                () => null
+              )
+            : row
+        )
+      );
+      const offers = new Map<string, TradeMatchCard>();
+      for (const row of rows)
+        if (row)
+          for (const card of row.you_get) {
+            if (Number(card.copies) > 0)
+              offers.set(`${row.collector_id}:${card.edition_id}`, card);
+          }
+      if (!controller.signal.aborted) setAnswer({ source: byCard, offers });
+    }
+    void read().catch(() => {
+      /* No confirmed trade offers: borrowing stays available. */
+    });
+    return () => controller.abort();
+  }, [byCard, signedIn]);
+  return answer?.source === byCard
+    ? answer.offers
+    : new Map<string, TradeMatchCard>();
+}
+
+/** Reuses Ask to trade's editable one-copy draft, never presenting it as a matched quantity. */
+function TradeForIt({
+  copy,
+  card,
+}: {
+  copy: FriendCopy;
+  card: TradeMatchCard | undefined;
+}) {
+  const open = useOpenProposal();
+  if (!open || !card) return null;
+  return (
+    <Button
+      aria-label={`Trade for it: ${tradeCardName(card)} from ${copy.display_name}`}
+      onClick={() => open(copy.handle, card)}
+    >
+      Trade for it
+    </Button>
   );
 }

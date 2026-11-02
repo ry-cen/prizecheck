@@ -225,7 +225,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expect(more).toBeDisabled();
   const boss = page.getByRole("region", { name: "Boss's Orders" });
   await boss
-    .getByRole("button", { name: "Ask Misty W for Boss's Orders" })
+    .getByRole("button", { name: "Ask to borrow Boss's Orders from Misty W" })
     .click();
   await expect(
     boss.getByRole("group", {

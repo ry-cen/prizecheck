@@ -274,7 +274,7 @@ for (const width of [320, 375, 390, 960, 1280]) {
     };
     await expectIdentityFits();
     const ask = friends.getByRole("button", {
-      name: "Ask Misty W for Iono",
+      name: "Ask to borrow Iono from Misty W",
       exact: true,
     });
     if (width <= 760) await expectTouchTarget(ask);

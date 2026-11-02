@@ -28,6 +28,7 @@ import {
   type TradeCard,
   type TradeStep,
   type TradeView,
+  type TraderMatchRow,
 } from "../social_generated";
 import {
   acceptTrade,
@@ -40,6 +41,9 @@ import {
   type OwnTradeSide,
 } from "../trades_generated";
 import { Button } from "../ui/Button";
+import { CardArt, CardPopup } from "../ui/CardPopup";
+import { tradeDeckNeed } from "./tradeDeckNeed";
+import { useIncomingTradeMatch } from "./useIncomingTradeMatch";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
@@ -177,6 +181,9 @@ export function TradeScreen({
     tradeId === null ? { kind: "missing" } : { kind: "loading" }
   );
   const [attempt, setAttempt] = useState(0);
+  const incomingMatch = useIncomingTradeMatch(
+    load.kind === "ready" ? load.trade : null
+  );
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState<Asking | null>(null);
@@ -722,6 +729,7 @@ export function TradeScreen({
         <TradeSide
           title="You get"
           cards={trade.you_get}
+          match={incomingMatch}
           total={
             trade.state === "proposed"
               ? sideValueText(value, "you_get", trade.you_get.length > 0)
@@ -1012,14 +1020,23 @@ function TradeSide({
   cards,
   side,
   total,
+  match,
 }: {
   title: string;
   cards: TradeCard[];
+  match?: TraderMatchRow | null;
   side?: OwnTradeSide;
   /** The side's estimated total while the Trade is waiting for an answer, or null. */
   total?: string | null;
 }) {
   const headingId = useId();
+  const [selected, setSelected] = useState<TradeCard | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const hint = (card: TradeCard) =>
+    tradeDeckNeed(
+      match?.you_get.find((row) => row.edition_id === card.edition_id),
+      match?.you_get_groups
+    );
   return (
     <section
       aria-labelledby={headingId}
@@ -1040,25 +1057,76 @@ function TradeSide({
               key={card.edition_id}
               className="flex min-w-0 flex-col items-start gap-2"
             >
-              <div className="w-full max-w-[145px] self-center">
-                <CardImage url={card.image_url} />
-              </div>
-              <span className="flex min-w-0 flex-col">
-                <span className="text-body font-semibold wrap-anywhere">
-                  {card.name}
+              <button
+                type="button"
+                aria-label={`Open card details: ${tradeCardName(card)}`}
+                onClick={(event) => {
+                  opener.current = event.currentTarget;
+                  setSelected(card);
+                }}
+                className="flex min-h-tap w-full cursor-pointer flex-col items-start gap-2 rounded-control border-0 bg-transparent p-0 text-left font-sans text-text focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <div className="w-full max-w-[145px] self-center">
+                  <CardImage url={card.image_url} />
+                </div>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-body font-semibold wrap-anywhere">
+                    {card.name}
+                  </span>
+                  <span className="text-meta text-text-muted tabular-nums wrap-anywhere">
+                    {lineEdition(card)}
+                  </span>
+                  {side && (
+                    <PickLines side={side} editionId={card.edition_id} />
+                  )}
                 </span>
-                <span className="text-meta text-text-muted tabular-nums wrap-anywhere">
-                  {lineEdition(card)}
+                <span className="text-body font-semibold tabular-nums">
+                  ×{card.copies}
                 </span>
-                {side && <PickLines side={side} editionId={card.edition_id} />}
-              </span>
-              <span className="text-body font-semibold tabular-nums">
-                ×{card.copies}
-              </span>
+              </button>
+              {hint(card) && (
+                <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                  {hint(card)}
+                </p>
+              )}
             </li>
           ))
         )}
       </ul>
+      <CardPopup
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        title={selected?.name ?? ""}
+        position={null}
+        canPrevious={false}
+        canNext={false}
+        onPrevious={() => {}}
+        onNext={() => {}}
+        cardKey={selected?.edition_id ?? ""}
+        returnFocus={opener}
+        art={
+          selected && <CardArt url={selected.image_url} name={selected.name} />
+        }
+      >
+        {selected && (
+          <>
+            <p className="m-0 text-body wrap-anywhere">
+              {lineEdition(selected)}
+            </p>
+            <p className="m-0 text-meta text-text-muted wrap-anywhere">
+              {selected.set_name}
+            </p>
+            <p className="m-0 text-body">
+              ×{selected.copies} · {title}
+            </p>
+            {hint(selected) && (
+              <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                {hint(selected)}
+              </p>
+            )}
+          </>
+        )}
+      </CardPopup>
       {total && (
         <p className="m-0 text-meta text-text-muted tabular-nums">{total}</p>
       )}
