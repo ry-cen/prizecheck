@@ -114,7 +114,7 @@ test("a Borrow Request sent from the Want List shows under its line without a re
 
   await lines
     .getByRole("list", { name: "Friends who can lend Iono" })
-    .getByRole("button", { name: /^Misty W · / })
+    .getByRole("button", { name: /^Borrow from Misty W · / })
     .click();
   await page
     .getByRole("region", { name: "Borrow Request drafts" })

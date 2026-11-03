@@ -29,7 +29,7 @@ const needs = (page: Page, deckName: string) =>
 const chip = (page: Page, deckName: string, card: string) =>
   needs(page, deckName)
     .getByRole("list", { name: `Friends who can lend ${card}` })
-    .getByRole("button", { name: /^Misty W/ });
+    .getByRole("button", { name: /^Borrow from Misty W/ });
 const isPending = (url: string) => url.includes("/api/loans/pending");
 
 async function review(page: Page) {
