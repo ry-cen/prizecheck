@@ -59,6 +59,23 @@ for (const viewport of [DESKTOP, PHONE]) {
     });
     await loanStep(friend.page, loan.id, `/api/loans/${loan.id}/handover`);
 
+    // A real small/large art pair makes mounting unopened full artwork observable.
+    const art = "/api/art/trade-popup-fixture/small?v=1";
+    await page.route(`**/api/social/trades/${swap}`, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.you_get[0].image_url = art;
+      await route.fulfill({ response, json: body });
+    });
+    await page.route(
+      /\/api\/art\/trade-popup-fixture\/(small|large)\?v=1$/,
+      (route) =>
+        route.fulfill({
+          contentType: "image/svg+xml",
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="245" height="342"><title>Synthetic card art</title><rect width="245" height="342" fill="white"/></svg>',
+        })
+    );
+
     await page.goto(`${ORIGIN}/trades/${swap}`);
     const main = page.getByRole("main");
     const give = main.getByRole("list", { name: "You give", exact: true });
@@ -78,13 +95,20 @@ for (const viewport of [DESKTOP, PHONE]) {
       name: "Arven SVI 166 · Normal",
       exact: true,
     });
+    await expect(get.locator("dialog img")).toHaveCount(0);
     await card.focus();
     await page.keyboard.press("Enter");
+    const cardDetails = page.getByRole("dialog", {
+      name: "Arven",
+      exact: true,
+    });
+    await expect(cardDetails).toBeVisible();
     await expect(
-      page.getByRole("dialog", { name: "Arven", exact: true })
-    ).toBeVisible();
+      cardDetails.getByRole("img", { name: "Arven card art" })
+    ).toHaveAttribute("src", "/api/art/trade-popup-fixture/large?v=1");
     await page.keyboard.press("Escape");
     await expect(card).toBeFocused();
+    await expect(get.locator("dialog img")).toHaveCount(0);
     await expectPageChecks(page, "compact one-for-one terms");
     await main
       .getByRole("button", { name: "Confirm swap", exact: true })

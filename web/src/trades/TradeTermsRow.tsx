@@ -76,13 +76,17 @@ export function TradeTermsRow({
         onNext={() => {}}
         cardKey={card.edition_id}
         returnFocus={opener}
-        art={<CardArt url={card.image_url} name={card.name} />}
+        art={open ? <CardArt url={card.image_url} name={card.name} /> : null}
       >
-        <p className="m-0 text-body wrap-anywhere">{lineEdition(card)}</p>
-        <p className="m-0 text-meta text-text-muted wrap-anywhere">
-          {card.set_name}
-        </p>
-        {details}
+        {open && (
+          <>
+            <p className="m-0 text-body wrap-anywhere">{lineEdition(card)}</p>
+            <p className="m-0 text-meta text-text-muted wrap-anywhere">
+              {card.set_name}
+            </p>
+            {details}
+          </>
+        )}
       </CardPopup>
     </li>
   );
