@@ -144,6 +144,18 @@ async function story(
   await expect(timelineTrades(misty)).toHaveText([
     /Ash K sent you a Trade Proposal/,
   ]);
+  const proposal = misty.getByRole("button", {
+    name: "Propose trade to Ash K",
+  });
+  await expect(proposal).toHaveClass(/bg-surface-raised/);
+  await expect(proposal).not.toHaveClass(/bg-accent(?:\s|$)/);
+  await expect(timelineTrades(misty).locator("..")).toHaveClass(
+    /bg-surface-selected/
+  );
+  await expectPageChecks(
+    misty,
+    `an incoming offer above a secondary proposal action at ${width}`
+  );
   await misty.getByRole("link", { name: "All conversations" }).click();
   const archive = misty.getByRole("button", {
     name: "Archive conversation with Ash K",

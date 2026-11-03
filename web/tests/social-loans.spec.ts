@@ -225,7 +225,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expect(more).toBeDisabled();
   const boss = page.getByRole("region", { name: "Boss's Orders" });
   await boss
-    .getByRole("button", { name: "Ask Misty W for Boss's Orders" })
+    .getByRole("button", { name: "Ask to borrow Boss's Orders from Misty W" })
     .click();
   await expect(
     boss.getByRole("group", {
@@ -286,6 +286,9 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await view(page).click();
   await expect(page).toHaveURL(/\/loans\/[0-9a-f-]+$/);
   await expect(title(page)).toHaveText("You asked Misty W for 3 cards");
+  await expect(
+    page.getByRole("list", { name: "Cards", exact: true })
+  ).not.toContainText("Your Decks count on");
   await expect(page.getByRole("main")).toContainText(
     `You're borrowing · For ${deckName} · Due back Jan 31, 2099`
   );
@@ -332,6 +335,17 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expect(facts(lender)).toHaveCount(1);
   await expect(facts(lender)).not.toContainText("For ");
   await expect(deckLinks(lender)).toHaveCount(0);
+  await expect(loanCards(lender).nth(0)).toContainText(
+    "Your Decks count on 1 copy."
+  );
+  await expect(loanCards(lender).nth(1)).not.toContainText(
+    "Your Decks count on"
+  );
+  for (const width of [320, 375, 390]) {
+    await lender.setViewportSize({ width, height: 844 });
+    await expectPageChecks(lender, `lender Deck context at ${width}`);
+  }
+  await lender.setViewportSize(DESKTOP);
   await lender
     .getByRole("button", { name: /^Decrease Copies of Boss's Orders,/ })
     .click();

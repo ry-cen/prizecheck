@@ -12,6 +12,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
+import { expectTouchTarget } from "./support/touch-target";
 import { signInAsOwner } from "./support/sign-in";
 import { bodyOf } from "./support/trades";
 
@@ -456,4 +457,167 @@ test.describe("phone", () => {
     test.slow();
     await story(page, collectors, size, "375 px", "recipient");
   });
+});
+
+/** The same incoming swap, with own Deck need and two offered Iono printings, shared by the detail and fallback cases. */
+async function incomingTradeExample(
+  page: Page,
+  collectors: { signIn: () => Promise<{ page: Page }> }
+) {
+  const ids = seedCatalog();
+  const ash = await collectors.signIn();
+  await nameCollector(ash.page, "Ash K");
+  const shelf = await forTradeBinder(ash.page, "Ash's cards");
+  await hold(ash.page, shelf, ids["SVI 166"], 2);
+  const deck = await api(ash.page, "POST", "/api/decks", {
+    name: "Ash's Deck",
+    idempotency_key: randomUUID(),
+  });
+  const detail = await api(ash.page, "GET", `/api/decks/${deck.location.id}`);
+  await api(
+    ash.page,
+    "POST",
+    `/api/decks/${deck.location.id}/deck-list/changes`,
+    {
+      revision: detail.deck_list.revision,
+      idempotency_key: randomUUID(),
+      changes: [{ edition_id: ids["PAL 185"], quantity: "2" }],
+    }
+  );
+  await api(ash.page, "PUT", `/api/trade-wants/will-accept/${ids["PAL 185"]}`, {
+    rule: "identity",
+  });
+  await signInAsOwner(page, "/collection");
+  await nameCollector(page, "Misty W");
+  const binder = await forTradeBinder(page, "Misty's private binder");
+  // Leave offered copies on the Trade List as well as those promised by this proposal, so the existing match read
+  // can describe both printings. The separate unlisted-card case below exercises the own-only fallback.
+  for (const key of ["PAL 185", "PAL 254", "PAL 172"] as const)
+    await hold(page, binder, ids[key], 3);
+  await befriend(page, ash.page);
+  const id = await propose(
+    page,
+    await accountId(ash.page),
+    [
+      [ids["PAL 185"], 1],
+      [ids["PAL 254"], 1],
+      [ids["PAL 172"], 1],
+    ],
+    [[ids["SVI 166"], 1]]
+  );
+  await noArtwork(ash.page);
+  return { ids, ash, id };
+}
+
+test("incoming Trade cards open details and show shared Deck need at phone widths", async ({
+  page,
+  collectors,
+}) => {
+  const { ids, ash, id } = await incomingTradeExample(page, collectors);
+  await ash.page.goto(`${ORIGIN}/trades/${id}`);
+  const gets = ash.page.getByRole("list", { name: "You get", exact: true });
+  const gives = ash.page.getByRole("list", { name: "You give", exact: true });
+  const hint =
+    "Your Decks need 2 Iono, including need shared across printings.";
+  await expect(gets.getByText(hint, { exact: true })).toHaveCount(2);
+  await expect(
+    gets.getByRole("listitem").filter({ hasText: "Boss's Orders" })
+  ).not.toContainText("Your Decks need");
+  await expect(gives).not.toContainText("Your Decks need");
+  await expect(ash.page.getByRole("main")).not.toContainText(
+    "Misty's private binder"
+  );
+  for (const width of [1280, 320, 375, 390]) {
+    await ash.page.setViewportSize({ width, height: 844 });
+    const opener = gets.getByRole("button", {
+      name: "Iono PAL 185 · Normal",
+      exact: true,
+    });
+    if (width < 760) await expectTouchTarget(opener);
+    await opener.focus();
+    await ash.page.keyboard.press("Enter");
+    const popup = ash.page.getByRole("dialog", { name: "Iono", exact: true });
+    await expect(popup).toContainText("PAL 185");
+    await expect(popup).toContainText(hint);
+    await expectPageChecks(ash.page, `incoming card details at ${width}`);
+    await popup.getByRole("button", { name: "Close card details" }).click();
+    await expect(opener).toBeFocused();
+    await gives
+      .getByRole("button", {
+        name: "Arven SVI 166 · Normal",
+        exact: true,
+      })
+      .click();
+    const given = ash.page.getByRole("dialog", { name: "Arven", exact: true });
+    await expect(given).toContainText("SVI 166");
+    await expect(given).not.toContainText("Your Decks need");
+    await given.getByRole("button", { name: "Close card details" }).click();
+    await expectPageChecks(ash.page, `incoming Trade at ${width}`);
+  }
+  await ash.page.getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
+  await expect(gets).not.toContainText("Your Decks need");
+});
+
+test("unlisted incoming cards retain own Deck context and failed reads stay silent", async ({
+  page,
+  collectors,
+}) => {
+  const { ids, ash } = await incomingTradeExample(page, collectors);
+  const gets = ash.page.getByRole("list", { name: "You get", exact: true });
+  // Promise every remaining copy. Neither Iono printing is now on Misty's Trade List: the own-only fallback must
+  // still explain Ash's need, including widening, without putting a collector id in that read.
+  const unlisted = await propose(
+    page,
+    await accountId(ash.page),
+    [
+      [ids["PAL 185"], 2],
+      [ids["PAL 254"], 2],
+      [ids["PAL 172"], 2],
+    ],
+    []
+  );
+  const ownRead = ash.page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === "/api/social/trade-matches/needs"
+  );
+  await ash.page.goto(`${ORIGIN}/trades/${unlisted}`);
+  const request = await ownRead;
+  const query = new URL(request.url()).searchParams;
+  expect([...query.keys()]).toEqual(["edition_id", "edition_id", "edition_id"]);
+  expect(query.getAll("edition_id")).toEqual([
+    ids["PAL 185"],
+    ids["PAL 254"],
+    ids["PAL 172"],
+  ]);
+  const exact = gets.getByRole("listitem").filter({ hasText: "PAL 185" });
+  const widened = gets.getByRole("listitem").filter({ hasText: "PAL 254" });
+  // The wanted Edition and its alternative share the same need, although only the alternative is widened.
+  const sharedNeed =
+    "Your Decks need 2, including need shared across accepted printings.";
+  await expect(exact).toContainText(sharedNeed);
+  await expect(widened).toContainText(sharedNeed);
+  await expect(gets.getByText(sharedNeed, { exact: true })).toHaveCount(2);
+  await expect(
+    gets.getByRole("listitem").filter({ hasText: "Boss's Orders" })
+  ).not.toContainText("Your Decks need");
+  for (const width of [320, 375, 390]) {
+    await ash.page.setViewportSize({ width, height: 844 });
+    await expectPageChecks(ash.page, `unlisted incoming cards at ${width}`);
+  }
+  // A failed optional own read leaves answering available and makes no claim about need.
+  await ash.page.route("**/api/social/trade-matches/needs?*", (route) =>
+    route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+  );
+  const failed = ash.page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/social/trade-matches/needs" &&
+      response.status() === 503
+  );
+  await ash.page.reload();
+  await failed;
+  await expect(
+    ash.page.getByRole("button", { name: "Accept", exact: true })
+  ).toBeVisible();
+  await expect(gets).not.toContainText("Your Decks need");
 });

@@ -167,6 +167,7 @@
 [["GET"], "/api/social/trade-lists/{handle}", "friend_trade_list"],
 [["GET"], "/api/social/trade-matches", "trade_matches"],
 [["GET"], "/api/social/trade-matches/near", "nearby_matches"],
+[["GET"], "/api/social/trade-matches/needs", "own_trade_needs"],
 [["GET"], "/api/social/trade-matches/{collector_id}", "friend_trade_match"],
 [["GET"], "/api/social/traders/{trader_id}", "trader_view"],
 [["GET"], "/api/social/traders/{trader_id}/trade-list", "trader_trade_list"],

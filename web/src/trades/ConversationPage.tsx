@@ -410,7 +410,7 @@ export function ConversationPage({
         <div className="flex flex-wrap items-center gap-3">
           {view.can_propose && other.trader_id !== null && (
             <Button
-              variant="primary"
+              variant="secondary"
               aria-label={`Propose trade to ${name}`}
               onClick={() => onNavigate(proposalPath(other.trader_id!))}
             >
@@ -460,7 +460,7 @@ export function ConversationPage({
             item.kind === "trade" && item.trade ? (
               <li
                 key={itemKey(item)}
-                className="overflow-hidden rounded-panel border border-border bg-surface"
+                className={`overflow-hidden rounded-panel border ${item.trade.role === "recipient" && item.trade.actions.includes("accept") ? "border-accent-border bg-surface-selected" : "border-border bg-surface"}`}
               >
                 <TradeCardLink
                   trade={item.trade}
