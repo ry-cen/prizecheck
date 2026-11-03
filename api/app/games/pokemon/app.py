@@ -6,7 +6,7 @@ from app.games.pokemon.catalog.catalog_browse import router as catalog_browse_ro
 from app.games.pokemon.catalog.catalog_reconciliation import router as catalog_reconciliation_router
 from app.games.pokemon.catalog.catalog_search import router as catalog_search_router
 from app.games.pokemon.catalog.catalog_status import router as catalog_status_router
-from app.collection import router as collection_router
+from app.games.pokemon.inventory.collection import router as collection_router
 from app.games.pokemon.imports.collection_import import router as collection_import_router
 from app.games.pokemon.decks.cost import router as deck_cost_router
 from app.deck_deletion import router as deck_deletion_router

@@ -171,7 +171,7 @@ def test_a_cursor_carries_its_anchor_so_the_next_page_does_not_reread_it():
     assert second.status_code == 200, second.text
     assert [row['edition_id'] for row in second.json()['holdings']] == editions[PAGE:]
     # A cursor in the earlier shape (the anchor's Edition and Location only), correctly signed, is refused.
-    from app.collection import encode_cursor
+    from app.core.inventory.cursors import encode_cursor
     context = ['collection-holdings', owner, None, 'name-asc', '', '', None, None, None,
                first['owner_revision'], [catalog_revision, attribute_revision]]
     legacy = listing(owner, cursor=encode_cursor(context, [anchor['edition_id'], anchor['location_id']]))

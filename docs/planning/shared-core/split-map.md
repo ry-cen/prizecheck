@@ -1,7 +1,7 @@
 # Split map: backend and auth gateway
 
-**Status:** draft for the owner's review, 2026-10-29. Branch `refactor/shared-core`, HEAD 2f335c7. Nothing here is
-implemented.
+**Status:** historical plan from 2026-10-29, branch `refactor/shared-core`, HEAD 2f335c7. Section 10 records the
+implemented boundaries, including the Collection extraction in #521; the original tables retain their planning scope.
 
 **Scope.** This map covers `api/app`, `migrations/`, `auth/src`, `scripts/`, `deploy/` and the tooling tests. `web/` is
 out of scope and stays untouched.
@@ -1096,3 +1096,23 @@ below says where each group ended up; the module map in section 1 stays the plan
 - **Docs.** `docs/prices.md`, `docs/price-refresh.md` and `docs/public-projections.md` name the final module paths,
   and ADR 0020's guardrail line names the two moved modules it allows. Otherwise dated records (ADRs 0001 to 0022,
   release notes and the planning docs) still name the paths of their day.
+
+**2026-11-03 — Collection facets (#521), stacked on the catalog contract (#520)**
+
+- `core/inventory/collection.py` holds the generic Collection SQL, paging and sort mechanics, totals, revisions,
+  display conversion and game-free models. Facet columns, joins, conditions, bound values and cursor-context values
+  are required keyword-only arguments. There are no game defaults or game imports.
+- `games/pokemon/inventory/collection.py` owns the entire five-route Collection router in its previous order,
+  `CARD_KINDS`, category/Trainer Type/elemental type literals and SQL, and `CollectionHoldingView` and
+  `CollectionHoldingPage`. It supplies the effective attribute columns, join and predicates at the core call site.
+  Class/component names and request signatures stay the same.
+- `core/inventory/cursors.py` holds the unchanged signed cursor codec and carried anchor conversions. Holdings and
+  Catalog Browse now import these helpers directly, rather than importing the mixed Collection module. The existing
+  context layout, revision checks and token bytes are preserved.
+- The Borrowed gallery was another direct consumer of the same facet SQL and query types. Its whole router moves
+  to `games/pokemon/inventory/borrowed_gallery.py`, sharing the Pokémon facet wiring and core listing SQL builders.
+  `main.py` still mounts it before the app's router tuple, preserving global match order. Its Move command is unchanged.
+- The mixed root `collection.py` and `borrowed_gallery.py` are removed; no remaining caller needs an alias shim.
+  No unrelated root module moves, migration, rule/pin, frontend, identity or allow-list change is part of this extraction.
+  The [catalog contract inventory](catalog-data-contract.md) records the resulting shared Collection reads, with
+  #521 attribution; #520's contract tests remain unchanged.
