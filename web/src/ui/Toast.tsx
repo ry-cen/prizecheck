@@ -24,6 +24,8 @@ export type ToastAction = {
 
 export type ToastInput = {
   message: string;
+  /** Optional route lifetime for plain informational feedback. Other toasts (especially Undo) stay persistent. */
+  route?: string;
   /** One action on the thing the message names, for example Undo. */
   action?: ToastAction;
   /** A second, quieter action after it, for example Dismiss Undo. */
@@ -89,11 +91,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     null
   );
   const [lifts, setLifts] = useState<Lifts>({});
+  // Shell renders this provider on navigation. Only callers that explicitly opt in lose their feedback on leaving.
+  const path = window.location.pathname;
+  const visible =
+    toast && (!toast.route || toast.route === path) ? toast : null;
   const lift = Object.values(lifts).reduce((sum, px) => sum + (px ?? 0), 0);
   const next = useRef(0);
   const host = useRef<HTMLElement>(null);
   const shownId = useRef<number | null>(null);
-  shownId.current = toast?.id ?? null;
+  shownId.current = visible?.id ?? null;
   const api = useMemo<ToastApi>(() => {
     const firstButton = () =>
       host.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
@@ -127,13 +133,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (toast?.route && toast.route !== path) setToast(null);
+  }, [toast, path]);
+
   // A new toast that asked for focus (or replaced one that had it) takes it as soon as it is drawn.
   useLayoutEffect(() => {
-    if (toast?.focus)
+    if (visible?.focus)
       host.current
         ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
         ?.focus();
-  }, [toast?.id]);
+  }, [visible?.id]);
 
   const press = (action: ToastAction) => {
     if (action.disabled || action.busy) return;
@@ -151,7 +161,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         style={{ "--toast-lift": `${lift}px` } as CSSProperties}
         className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--space-6)+var(--toast-lift))] z-(--layer-toast) flex justify-center px-4 font-sans phone:bottom-[calc(var(--layout-tabbar-height)+var(--space-2)+var(--toast-lift))] phone:px-2"
       >
-        {toast && (
+        {visible && toast && (
           <div
             key={toast.id}
             className="pointer-events-auto box-border flex min-h-control max-w-140 items-center gap-2 rounded-panel border border-border-strong bg-surface-raised py-1 pl-4 pr-1 text-control text-text phone:w-full phone:max-w-full phone:flex-wrap phone:pl-3"

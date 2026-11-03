@@ -16,9 +16,7 @@ import {
 } from "lucide-react";
 import { getLocationTree, type TreeLocation } from "../location_generated";
 import { useInboxRefresh, useOpenedFromInbox } from "../inbox/Inbox";
-import { lineEdition } from "../loans/loanText";
 import { PageHeader } from "../shell/PageHeader";
-import { CardImage } from "../social/FriendCollectionPage";
 import {
   cancelTrade,
   declineTrade,
@@ -42,7 +40,7 @@ import {
   type OwnTradeSide,
 } from "../trades_generated";
 import { Button } from "../ui/Button";
-import { CardArt, CardPopup } from "../ui/CardPopup";
+import { TradeTermsRow } from "./TradeTermsRow";
 import { ownTradeDeckNeed, tradeDeckNeed } from "./tradeDeckNeed";
 import { useIncomingTradeMatch } from "./useIncomingTradeMatch";
 import { Dialog } from "../ui/Dialog";
@@ -70,6 +68,7 @@ import {
   switchDoneText,
   tradeCardName,
   tradeHeadline,
+  tradeNeedsPartyLabel,
   tradeNote,
   tradeOutcomeUnknown,
   tradePickText,
@@ -382,7 +381,7 @@ export function TradeScreen({
     actions?: ReactNode,
     dialog?: ReactNode
   ) => (
-    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-4 px-7 py-5 phone:px-4 phone:py-3">
       {back}
       <div className="[&>div]:mb-0 [&>div]:flex-nowrap [&>div]:items-start [&_h1]:min-w-0 [&_h1]:flex-1 phone:[&>div>div]:basis-auto">
         <PageHeader title={title} actions={actions} headingRef={heading} />
@@ -470,7 +469,7 @@ export function TradeScreen({
       setConfirming(false);
       setLoad({ kind: "ready", trade: next, side: nextSide });
       if (announce) announce(next, done(next));
-      else toast.show({ message: done(next) });
+      else toast.show({ message: done(next), route: tradePath(trade.id) });
       refreshInbox();
     } catch (cause) {
       if (!tradeOutcomeUnknown(cause)) {
@@ -599,7 +598,8 @@ export function TradeScreen({
           toast,
           message,
           sent,
-          answered.current?.switched_decks ?? []
+          answered.current?.switched_decks ?? [],
+          tradePath(trade.id)
         )
     );
   }
@@ -680,15 +680,24 @@ export function TradeScreen({
     </div>
   ) : null;
   const note = tradeNote(trade, stale);
+  const headline = tradeHeadline(trade);
+  // Most state headlines already name the other collector. Own closed actions ("You declined") still need context.
+  const needsParty = tradeNeedsPartyLabel(trade);
   return frame(
-    tradeHeadline(trade),
+    headline,
     <>
-      <p className="m-0 text-body">
-        <span className="font-semibold">Trade with {name}</span>
-        {trade.other.friend && trade.other.handle && (
-          <span className="text-text-muted"> @{trade.other.handle}</span>
-        )}
-      </p>
+      {(needsParty || (trade.other.friend && trade.other.handle)) && (
+        <p className="m-0 text-body">
+          {needsParty && (
+            <span className="font-semibold">Trade with {name}</span>
+          )}
+          {trade.other.friend && trade.other.handle && (
+            <span className="text-text-muted">
+              {needsParty && " "}@{trade.other.handle}
+            </span>
+          )}
+        </p>
+      )}
       {trade.countered_from && (
         <p className="m-0 text-body wrap-anywhere">
           {trade.role === "recipient"
@@ -781,11 +790,15 @@ export function TradeScreen({
             Keep it
           </Button>
         </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+      ) : answers ? (
+        <div
+          role="group"
+          aria-label="Trade actions"
+          className="flex flex-wrap items-center gap-3 border-t border-border pt-4"
+        >
           {answers}
         </div>
-      )}
+      ) : null}
       {showsAddFriend(trade) && (
         <AddAsFriend
           tradeId={trade.id}
@@ -1034,8 +1047,6 @@ function TradeSide({
   total?: string | null;
 }) {
   const headingId = useId();
-  const [selected, setSelected] = useState<TradeCard | null>(null);
-  const opener = useRef<HTMLElement | null>(null);
   const hint = (card: TradeCard) => {
     const listed = match?.you_get.find(
       (row) => row.edition_id === card.edition_id
@@ -1056,96 +1067,48 @@ function TradeSide({
       </h2>
       <ul
         aria-label={title}
-        className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-4 rounded-panel border border-border bg-surface p-4"
+        className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0"
       >
         {cards.length === 0 ? (
           <li className="px-4 py-3 text-body text-text-muted">Nothing</li>
         ) : (
           cards.map((card) => (
-            <li
+            <TradeTermsRow
               key={card.edition_id}
-              className="flex min-w-0 flex-col items-start gap-2"
-            >
-              <button
-                type="button"
-                aria-labelledby={`${headingId}-${card.edition_id}-name ${headingId}-${card.edition_id}-edition`}
-                aria-describedby={`${headingId}-${card.edition_id}-context`}
-                onClick={(event) => {
-                  opener.current = event.currentTarget;
-                  setSelected(card);
-                }}
-                className="flex min-h-tap w-full cursor-pointer flex-col items-start gap-2 rounded-control border-0 bg-transparent p-0 text-left font-sans text-text focus-visible:outline-2 focus-visible:outline-accent"
-              >
-                <div className="w-full max-w-[145px] self-center">
-                  <CardImage url={card.image_url} />
-                </div>
-                <span className="flex min-w-0 flex-col">
-                  <span
-                    id={`${headingId}-${card.edition_id}-name`}
-                    className="text-body font-semibold wrap-anywhere"
-                  >
-                    {card.name}
-                  </span>
-                  <span
-                    id={`${headingId}-${card.edition_id}-edition`}
-                    className="text-meta text-text-muted tabular-nums wrap-anywhere"
-                  >
-                    {lineEdition(card)}
-                  </span>
-                </span>
-              </button>
-              <div
-                id={`${headingId}-${card.edition_id}-context`}
-                className="flex flex-col gap-2"
-              >
+              card={card}
+              quantity={
                 <p className="m-0 text-body font-semibold tabular-nums">
                   ×{card.copies}
                 </p>
-                {side && <PickLines side={side} editionId={card.edition_id} />}
-              </div>
-              {hint(card) && (
-                <p className="m-0 text-meta text-text-muted wrap-anywhere">
-                  {hint(card)}
-                </p>
-              )}
-            </li>
+              }
+              context={
+                <>
+                  {side && (
+                    <PickLines side={side} editionId={card.edition_id} />
+                  )}
+                  {hint(card) && (
+                    <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                      {hint(card)}
+                    </p>
+                  )}
+                </>
+              }
+              details={
+                <>
+                  <p className="m-0 text-body">
+                    ×{card.copies} · {title}
+                  </p>
+                  {hint(card) && (
+                    <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                      {hint(card)}
+                    </p>
+                  )}
+                </>
+              }
+            />
           ))
         )}
       </ul>
-      <CardPopup
-        open={selected !== null}
-        onClose={() => setSelected(null)}
-        title={selected?.name ?? ""}
-        position={null}
-        canPrevious={false}
-        canNext={false}
-        onPrevious={() => {}}
-        onNext={() => {}}
-        cardKey={selected?.edition_id ?? ""}
-        returnFocus={opener}
-        art={
-          selected && <CardArt url={selected.image_url} name={selected.name} />
-        }
-      >
-        {selected && (
-          <>
-            <p className="m-0 text-body wrap-anywhere">
-              {lineEdition(selected)}
-            </p>
-            <p className="m-0 text-meta text-text-muted wrap-anywhere">
-              {selected.set_name}
-            </p>
-            <p className="m-0 text-body">
-              ×{selected.copies} · {title}
-            </p>
-            {hint(selected) && (
-              <p className="m-0 text-meta text-text-muted wrap-anywhere">
-                {hint(selected)}
-              </p>
-            )}
-          </>
-        )}
-      </CardPopup>
       {total && (
         <p className="m-0 text-meta text-text-muted tabular-nums">{total}</p>
       )}

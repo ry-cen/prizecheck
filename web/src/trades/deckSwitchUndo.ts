@@ -15,10 +15,11 @@ export function offerSwitchUndo(
   toast: ReturnType<typeof useToast>,
   message: string,
   sent: DeckSwitchOffer[],
-  switched: SwitchedDeck[]
+  switched: SwitchedDeck[],
+  route?: string
 ): void {
   if (switched.length === 0) {
-    toast.show({ message });
+    toast.show({ message, route });
     return;
   }
   // One key per batch, fixed now, so pressing Undo again after no answer applies each batch once.

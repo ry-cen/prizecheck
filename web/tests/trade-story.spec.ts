@@ -587,9 +587,7 @@ async function story(
   await waitingOn(page).click();
   await expect(page).toHaveURL(counterAddress);
   await expect(heading(page)).toHaveText("Ash K confirmed the swap");
-  await expect(main).toContainText(
-    "Ash K confirmed the swap. Confirm yours once you have the cards."
-  );
+  await expect(main).toContainText("Confirm yours once you have the cards.");
   await expectCollectorCopy(main, ashPlace);
   await expectPageChecks(page, `a half-confirmed Trade at ${width}`);
   await main.getByRole("button", { name: "Confirm swap" }).click();

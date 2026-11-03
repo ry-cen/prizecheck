@@ -75,7 +75,9 @@ test("after both confirm a Trade, Ash adds Misty as a Friend and Misty accepts i
   );
   await tradeStep(misty, id, "accept");
   await page.goto(`${ORIGIN}/trades/${id}`);
-  await expect(page.getByText("Trade with Misty W")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Ready to swap with Misty W"
+  );
   await expect(addFriend).toHaveCount(0);
   await tradeStep(page, id, "confirm-swap");
   await tradeStep(misty, id, "confirm-swap");
