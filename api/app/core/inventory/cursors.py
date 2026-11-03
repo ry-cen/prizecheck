@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from app.api_errors import api_error as fail
+from app.core.ops.api_errors import api_error as fail
 
 
 def encode_cursor(context, key):

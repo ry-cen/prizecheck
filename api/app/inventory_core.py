@@ -6,7 +6,7 @@ newest ``UNDO_LIMIT`` records, and only the newest can be undone.
 """
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from .api_errors import api_error
+from app.core.ops.api_errors import api_error
 from .social import counts
 
 MAX_QUANTITY = 2**63 - 1
