@@ -1116,3 +1116,15 @@ below says where each group ended up; the module map in section 1 stays the plan
   No unrelated root module moves, migration, rule/pin, frontend, identity or allow-list change is part of this extraction.
   The [catalog contract inventory](catalog-data-contract.md) records the resulting shared Collection reads, with
   #521 attribution; #520's contract tests remain unchanged.
+
+**2026-11-03 — API error helper (#527)**
+
+- The existing error raiser moved unchanged from `app.api_errors` to `core/ops/api_errors.py`.
+  Its status codes, detail keys, string conversions and omission of `None` values are unchanged.
+- Nine existing import sites now use `app.core.ops.api_errors`, including the Collection and publication
+  core modules. Core's helper imports only FastAPI; it imports no root or game module.
+- The root-level `app.api_errors` remains a thin compatibility re-export for `app.location_tree`, whose import
+  stays unchanged because #478 reserves that file alongside Trade/social and the architecture rules. The shim
+  retains its original core ownership: it is game-free library compatibility, not a composition root.
+  Once #478 releases `location_tree.py`, a follow-up can migrate that remaining consumer and remove the shim.
+  Trade/social files, architecture rules and pins, and API snapshots are unchanged.
