@@ -306,6 +306,16 @@ async function story(
   );
   await expectPageChecks(page, `the Trade screen at ${width}`);
 
+  // #514: the sent success belongs to that proposal, not a different incoming offer in the same conversation.
+  await page
+    .getByRole("link", { name: "Conversation with Ash K", exact: true })
+    .click();
+  await page
+    .getByRole("link", { name: /Ash K wants to give you 1 card/ })
+    .click();
+  await expect(heading(page)).toHaveText("Ash K wants to give you 1 card");
+  await expect(toast(page)).not.toContainText("Trade Proposal sent to Ash K");
+
   // B: a gift, from an empty builder: Send waits for a card.
   await page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
   await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
@@ -427,7 +437,8 @@ async function story(
     "Misty W sent you a Trade Proposal"
   );
   const ashMain = ash.page.getByRole("main");
-  await expect(ashMain).toContainText(`Trade with Misty W @${mistyHandle}`);
+  await expect(ashMain).toContainText(`@${mistyHandle}`);
+  await expect(heading(ash.page)).toContainText("Misty W");
   await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
     "Arven"
   );

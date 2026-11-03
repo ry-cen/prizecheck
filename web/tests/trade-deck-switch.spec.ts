@@ -132,6 +132,16 @@ async function story(
   );
   await expect.poll(lines).toEqual({ [arven]: "1" });
   await expectPageChecks(page, `a Deck switch toast at ${width}`);
+  // Actionable Undo belongs to the Deck switch even after leaving this Trade and crossing breakpoints.
+  await page.getByRole("link", { name: "All Trades", exact: true }).click();
+  await page.setViewportSize(
+    width === "desktop width"
+      ? { width: 390, height: 844 }
+      : { width: 1280, height: 800 }
+  );
+  await expect(
+    toast(page).getByRole("button", { name: "Undo switch" })
+  ).toBeVisible();
   await toast(page).getByRole("button", { name: "Undo switch" }).click();
   await expect(toast(page)).toContainText(
     `${secret} Deck uses Arven (SVI 166, Reverse Holo) again.`
