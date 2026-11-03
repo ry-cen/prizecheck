@@ -28,7 +28,7 @@ const chip = (page: Page, deckName: string, card: string, friend: string) =>
   page
     .getByRole("list", { name: `What ${deckName} needs` })
     .getByRole("list", { name: `Friends who can lend ${card}` })
-    .getByRole("button", { name: new RegExp(`^${friend}`) });
+    .getByRole("button", { name: new RegExp(`^Borrow from ${friend}`) });
 
 /** Opens the composer on the Friend's draft from the tray. */
 async function review(page: Page, friend: string) {

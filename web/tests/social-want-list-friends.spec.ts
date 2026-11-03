@@ -190,7 +190,7 @@ for (const width of [1280, 320, 375, 390]) {
     await page.reload();
     // Exact Edition is the default: Misty's PAL 185 matches, Brock's PAL 254 does not.
     await expect(chips(page, "Iono").getByRole("listitem")).toHaveText([
-      "Misty W · 1 in a Deck",
+      "Borrow from Misty W · 1 in a Deck",
     ]);
     const accept = page
       .getByRole("list", { name: `What ${deckName} needs` })
@@ -204,8 +204,8 @@ for (const width of [1280, 320, 375, 390]) {
     // Widening from the tile updates its Friend chips without a reload.
     // Spare copies first: Brock's spare PAL 254 (another Printing, so it says which), then Misty's copy in a Deck.
     await expect(chips(page, "Iono").getByRole("listitem")).toHaveText([
-      "Brock S · 1 spare · PAL 254",
-      "Misty W · 1 in a Deck",
+      "Borrow from Brock S · 1 spare · PAL 254",
+      "Borrow from Misty W · 1 in a Deck",
     ]);
     await expect(chips(page, "Boss's Orders")).toHaveCount(0);
     await expect(views(page).getByRole("radio", { name: "Buy" })).toBeChecked();
@@ -300,7 +300,7 @@ for (const width of [1280, 320, 375, 390]) {
       .getByRole("radio", { name: "This exact card", exact: true })
       .check();
     await expect(chips(page, "Iono").getByRole("listitem")).toHaveText([
-      "Misty W · 1 in a Deck",
+      "Borrow from Misty W · 1 in a Deck",
     ]);
     await views(page).getByRole("radio", { name: "Get from Friends" }).click();
     await expect(iono).toContainText(`You need 2 · ${deckName}`);

@@ -205,8 +205,10 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
 
   // A chip asks for one copy and ticks; the tray names the draft.
   await page.goto(`${ORIGIN}/decks/want-list`);
-  const chip = chips(page, "Iono").getByRole("button", { name: /^Misty W/ });
-  await expect(chip).toHaveText("Misty W · 1 spare · 1 in a Deck");
+  const chip = chips(page, "Iono").getByRole("button", {
+    name: /^Borrow from Misty W/,
+  });
+  await expect(chip).toHaveText("Borrow from Misty W · 1 spare · 1 in a Deck");
   await expect(chip).toHaveAttribute("aria-pressed", "false");
   await chip.click();
   await expect(chip).toHaveAttribute("aria-pressed", "true");
