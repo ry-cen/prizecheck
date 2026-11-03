@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { Pool } from "pg";
+import { randomUUID } from "node:crypto";
 import { startAsNewOwner } from "./support/owner";
 
 // The listing endpoint is faked here: these tests are about how the gallery reacts to failures,
@@ -160,3 +161,94 @@ test("a failed later page keeps the loaded tiles and says some cards couldn't be
   await expect(tiles(page)).toHaveCount(2);
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 });
+
+test("first-load collection changes remain recoverable across repeated Retry", async ({
+  page,
+}) => {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    await pool.query("DELETE FROM auth_send_event");
+    await startAsNewOwner(pool);
+  } finally {
+    await pool.end();
+  }
+  let changes = 0;
+  // Hold each real holdings response while a real write advances the inventory.
+  // The subsequent borrowed read must therefore disagree, without timing sleeps.
+  await page.route(LISTING, async (route) => {
+    const response = await route.fetch();
+    if (changes < 6) {
+      const origin = new URL(route.request().url()).origin;
+      const created = await page.request.post(`${origin}/api/location-tree`, {
+        headers: { origin },
+        data: {
+          name: `Concurrent Location ${++changes}`,
+          parent_id: null,
+          parent_version: null,
+          idempotency_key: randomUUID(),
+        },
+      });
+      expect(created.status(), await created.text()).toBe(201);
+    }
+    await route.fulfill({ response });
+  });
+  await signInAsOwner(page, "/collection");
+  const reason = page.getByText(
+    "Your collection changed while loading. Retry to load your latest cards."
+  );
+  await expect(reason).toBeVisible();
+  expect(changes).toBe(3);
+  await expect(
+    page.getByRole("button", {
+      name: "Import from another tracker",
+      exact: true,
+    })
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(reason).toBeVisible();
+  expect(changes).toBe(6);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(reason).toHaveCount(0);
+  await expect(
+    page.getByRole("button", {
+      name: "Import from another tracker",
+      exact: true,
+    })
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/collection$/);
+});
+
+for (const code of ["INVENTORY_CHANGED", "CATALOG_CHANGED"]) {
+  test(`exhausted ${code} pages discard incomplete tiles and Retry starts at page one`, async ({
+    page,
+  }) => {
+    await signIn(page);
+    let recovering = false;
+    let firstPages = 0;
+    await page.route(LISTING, (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor");
+      if (cursor) return fail(route, 409, { code });
+      firstPages++;
+      return ok(
+        route,
+        pageBody([row(recovering ? 2 : 1, 1)], recovering ? null : "next", 1)
+      );
+    });
+    await page.reload();
+    await expect(
+      page.getByText(
+        "Your collection changed while loading. Retry to load your latest cards."
+      )
+    ).toBeVisible();
+    expect(firstPages).toBe(3);
+    await expect(tiles(page)).toHaveCount(0);
+    recovering = true;
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(tiles(page)).toHaveCount(1);
+    await expect(
+      cards(page).getByRole("button", { name: /^Fake Card 2/ })
+    ).toBeVisible();
+    expect(firstPages).toBe(4);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  });
+}
