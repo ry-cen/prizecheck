@@ -41,6 +41,7 @@ import {
   type LoanView,
 } from "../social_generated";
 import { Button } from "../ui/Button";
+import { CardArt, CardPopup } from "../ui/CardPopup";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { Select } from "../ui/Select";
@@ -1149,6 +1150,8 @@ function LoanLine({
   counting: { value: number; max: number; verb: "return" | "write off" } | null;
   onCounting: (value: number) => void;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsButton = useRef<HTMLButtonElement>(null);
   const deckUse =
     loan.role === "lender" &&
     (loan.state === "requested" || loan.state === "offered")
@@ -1162,6 +1165,10 @@ function LoanLine({
     side.can_promise.find((limit) => limit.edition_id === line.edition_id)
       ?.available ?? 0
   );
+  const eligibility =
+    loan.role === "lender" && loan.state === "requested"
+      ? `${available} ${available === 1 ? "copy" : "copies"} available to lend.`
+      : null;
   const accepted =
     loan.state !== "requested" &&
     loan.lines.some((item) => item.promised !== "0");
@@ -1224,9 +1231,7 @@ function LoanLine({
           onChange={onValue}
         />
         <span className="text-meta text-text-muted">
-          {value === 0
-            ? "Not lent"
-            : `of ${requested} asked${available < requested ? ` · you have ${available}` : ""}`}
+          {value === 0 ? "Not lent" : `of ${requested} asked`}
         </span>
       </div>
     );
@@ -1247,12 +1252,30 @@ function LoanLine({
     );
   return (
     <li className="flex min-w-0 flex-col items-start gap-2">
-      <div className="w-full max-w-[145px]">
-        <CardImage url={line.image_url} />
-      </div>
+      <button
+        ref={detailsButton}
+        type="button"
+        aria-label={`Card details for ${line.name}, ${edition}`}
+        onClick={() => setDetailsOpen(true)}
+        className="flex min-h-tap w-full cursor-pointer flex-col items-start gap-2 rounded-control border-0 bg-transparent p-0 text-left font-sans text-text focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <span className="w-full max-w-[145px]">
+          <CardImage url={line.image_url} />
+        </span>
+        <span className="text-body font-medium wrap-anywhere">{line.name}</span>
+        <span className="text-meta text-text-muted wrap-anywhere">
+          {edition}
+        </span>
+        <span className="text-meta text-accent-strong underline">
+          Card details
+        </span>
+      </button>
       <div className="min-w-0">
-        <p className="m-0 text-body font-medium wrap-anywhere">{line.name}</p>
-        <p className="m-0 text-meta text-text-muted wrap-anywhere">{edition}</p>
+        {eligibility && (
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {eligibility}
+          </p>
+        )}
         {deckUse && (
           <p className="m-0 text-meta text-text-muted wrap-anywhere">
             {deckUse}
@@ -1288,6 +1311,46 @@ function LoanLine({
         )}
       </div>
       <div className="min-w-0 text-left">{count}</div>
+      {detailsOpen && (
+        <CardPopup
+          open
+          onClose={() => setDetailsOpen(false)}
+          title={line.name}
+          position={null}
+          canPrevious={false}
+          canNext={false}
+          onPrevious={() => {}}
+          onNext={() => {}}
+          cardKey={line.edition_id}
+          returnFocus={detailsButton}
+          art={<CardArt url={line.image_url} name={line.name} />}
+        >
+          <p className="m-0 text-body wrap-anywhere">{edition}</p>
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {line.set_name}
+          </p>
+          <p className="m-0 text-body">
+            {line.requested} {loan.kind === "lend_offer" ? "offered" : "asked"}
+            {accepted && ` · ${line.promised} agreed`}
+          </p>
+          {answering && (
+            <p className="m-0 text-body">
+              {value} selected to {loan.role === "lender" ? "lend" : "borrow"}
+            </p>
+          )}
+          {eligibility && (
+            <p className="m-0 text-body wrap-anywhere">
+              {eligibility} Available copies may also count toward your Decks.
+            </p>
+          )}
+          {deckUse && <p className="m-0 text-body wrap-anywhere">{deckUse}</p>}
+          {returned > 0 && <p className="m-0 text-body">{returned} returned</p>}
+          {coming > 0 && <p className="m-0 text-body">{coming} coming back</p>}
+          {writtenOff > 0 && (
+            <p className="m-0 text-body">{writtenOff} written off</p>
+          )}
+        </CardPopup>
+      )}
     </li>
   );
 }

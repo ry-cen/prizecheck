@@ -13,6 +13,7 @@ import {
 } from "./support/loans";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+import { expectTouchTarget } from "./support/touch-target";
 
 // The deck builder's Ways to get missing cards uses the Want List's Friend chips (#251): a chip there asks the Friend
 // through the same Borrow Request drafts (#252) as the Want List page, so asking needs no trip to that page, and a new
@@ -66,7 +67,7 @@ test("a Friend chip in the deck builder's panel asks the Friend through the Borr
   const panel = page.getByRole("region", { name: "Ways to get missing cards" });
   const chip = panel
     .getByRole("list", { name: "Friends who can lend Iono" })
-    .getByRole("button", { name: "Brock S · 1 spare · PAL 254" });
+    .getByRole("button", { name: "Borrow from Brock S · 1 spare · PAL 254" });
   // Wait for the exact-Edition read so absence cannot pass just because chips are still loading.
   const firstAnswer = await (await firstMatches).json();
   expect(firstAnswer.cards).toEqual([]);
@@ -78,13 +79,32 @@ test("a Friend chip in the deck builder's panel asks the Friend through the Borr
   // Widening the choice refetches Friends in this panel without a page reload.
   await willAccept.selectOption("identity");
   await expect(chip).toHaveAttribute("aria-pressed", "false");
+  await expect(chip).toHaveText("Borrow from Brock S · 1 spare · PAL 254");
   await expectPageChecks(page, "the deck builder's panel with Friend chips");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectTouchTarget(chip);
+  await expect(chip).toHaveText("Borrow from Brock S · 1 spare · PAL 254");
+  await expectPageChecks(page, "the deck builder's borrowing chip on a phone");
 
   await chip.click();
   await expect(chip).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("region", { name: "Borrow Request drafts" })
   ).toContainText("1 card");
+  // A second activation deselects, and reselecting starts exactly one unsent line again.
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "false");
+  await expect(
+    page.getByRole("region", { name: "Borrow Request drafts" })
+  ).toHaveCount(0);
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("region", { name: "Borrow Request drafts" })
+  ).toContainText("1 card");
+  const loans = await api(page, "GET", "/api/social/loans");
+  expect(loans.loans).toEqual([]);
   // The ask changes no count: the line still needs both copies.
   await expect(
     panel.getByRole("list", { name: `What ${deckName} needs` })

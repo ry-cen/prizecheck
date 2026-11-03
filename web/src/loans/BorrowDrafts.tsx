@@ -918,7 +918,7 @@ export function AskChip({
     >
       <span className="box-border inline-flex min-h-chip max-w-full items-center gap-1 rounded-round border border-border-strong px-2.5 text-meta text-text-muted wrap-anywhere group-hover:border-control-outline group-aria-pressed:border-accent-border group-aria-pressed:bg-accent-wash group-aria-pressed:text-accent-strong phone:min-h-control">
         {asked && <span aria-hidden="true">✓</span>}
-        {text}
+        Borrow from {text}
       </span>
     </button>
   );
