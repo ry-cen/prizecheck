@@ -119,12 +119,15 @@ def test_a_location_inside_a_marked_one_cannot_be_unmarked_on_its_own():
     storage = created(owner, 'Storage')
     binder = created(owner, 'Binder', node(owner, storage['id']))
     ok(mark(owner, storage['id']))
+    assert node(owner, storage['id'])['own_for_trade'] is True
+    assert node(owner, binder['id'])['own_for_trade'] is False
     refused = mark(owner, binder['id'], for_trade=False)
     assert refused.status_code == 409
     assert refused.json()['detail'] == {'code': 'LOCATION_FOR_TRADE_BY_PARENT', 'for_trade_by': storage['id']}
     assert marks(owner)['Binder'] == (True, 'Storage')
     # Marking it too is allowed; it reads as covered while the parent is marked, and stays For trade after.
     marked = ok(mark(owner, binder['id']))
+    assert node(owner, binder['id'])['own_for_trade'] is True
     assert (marked['for_trade'], marked['for_trade_by']) == (True, storage['id'])
     assert marks(owner)['Binder'] == (True, 'Storage')
     ok(mark(owner, storage['id'], for_trade=False))
@@ -132,6 +135,7 @@ def test_a_location_inside_a_marked_one_cannot_be_unmarked_on_its_own():
     unmarked = ok(mark(owner, binder['id'], for_trade=False))
     assert (unmarked['for_trade'], unmarked['for_trade_by']) == (False, None)
     assert marks(owner)['Binder'] == (False, None)
+    assert node(owner, binder['id'])['own_for_trade'] is False
 
 
 def test_a_deck_cannot_be_marked_and_a_deck_inside_a_marked_box_is_left_out():

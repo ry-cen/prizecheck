@@ -173,8 +173,12 @@ export function LocationSettings({
           ? `${hidden}. ${ALSO_HIDDEN}`
           : hidden
         : undefined;
-    // The tree read's for_trade is also true when only a parent marks the Location, so its own mark can't be told apart.
-    const tradeReason = forTrade.kind === "parent" ? trading : undefined;
+    const tradeReason =
+      forTrade.kind === "parent"
+        ? node.own_for_trade
+          ? `${trading} It's also For trade on its own.`
+          : trading
+        : undefined;
     // A reason from a parent is in the setting's row note; the caption keeps the Location's own marks.
     const captionHidden = hiding.kind === "parent" ? "" : hidden;
     const captionTrading = forTrade.kind === "parent" ? "" : trading;

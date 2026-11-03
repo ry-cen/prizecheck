@@ -31,12 +31,13 @@ class TreeLocation(TreeNode):
     from Friends; ``hidden_by``: the nearest Location above it the collector hid, which hides it too
     (social network #249). ``for_trade``: its cards are offered for trade, because the collector marked it
     or a Location above it (Trading #267); unlike ``hidden`` it is the effective answer, not only the
-    collector's own mark. ``for_trade_by``: the nearest marked Location above it, or None. A Deck is never
+    collector's own mark. ``own_for_trade``: the collector's own mark. ``for_trade_by``: the nearest marked Location above it, or None. A Deck is never
     For trade, even inside a marked Location: False and None. Only the tree read carries these; stored
     command answers keep ``TreeNode``."""
     copy_count: str
     hidden: bool
     hidden_by: UUID | None
+    own_for_trade: bool
     for_trade: bool
     for_trade_by: UUID | None
 
@@ -277,6 +278,7 @@ def tree(user_id: str = Depends(verified_user)):
         trade_above = hidden_by(parents, marked)
         return TreeResponse(locations=[TreeLocation(**row, depth=depth_of(row["id"], rows), copy_count=copies.get(row["id"], "0"),
                                                     hidden=row["id"] in hidden, hidden_by=above[row["id"]],
+                                                    own_for_trade=row["id"] in marked and row["kind"] != "deck",
                                                     **for_trade_fields(row, marked, trade_above))
                                        for row in sorted(rows.values(), key=lambda r: (depth_of(r["id"], rows), r["name"].casefold(), str(r["id"])))],
                             owner_revision=revision, lent_copies=str(sum(counts.lent_counts(conn, user_id, None).values())),
