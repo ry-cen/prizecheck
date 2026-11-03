@@ -18804,7 +18804,7 @@
     "type": "object"
    },
    "TreeLocation": {
-    "description": "A tree row with the copies stored directly in it: the sum of its Holdings' quantities as a\ndecimal string, \"0\" for Organizational Locations and empty leaves. ``hidden``: the collector hid it\nfrom Friends; ``hidden_by``: the nearest Location above it the collector hid, which hides it too\n(social network #249). ``for_trade``: its cards are offered for trade, because the collector marked it\nor a Location above it (Trading #267); unlike ``hidden`` it is the effective answer, not only the\ncollector's own mark. ``for_trade_by``: the nearest marked Location above it, or None. A Deck is never\nFor trade, even inside a marked Location: False and None. Only the tree read carries these; stored\ncommand answers keep ``TreeNode``.",
+    "description": "A tree row with the copies stored directly in it: the sum of its Holdings' quantities as a\ndecimal string, \"0\" for Organizational Locations and empty leaves. ``hidden``: the collector hid it\nfrom Friends; ``hidden_by``: the nearest Location above it the collector hid, which hides it too\n(social network #249). ``for_trade``: its cards are offered for trade, because the collector marked it\nor a Location above it (Trading #267); unlike ``hidden`` it is the effective answer, not only the\ncollector's own mark. ``own_for_trade``: the collector's own mark. ``for_trade_by``: the nearest marked Location above it, or None. A Deck is never\nFor trade, even inside a marked Location: False and None. Only the tree read carries these; stored\ncommand answers keep ``TreeNode``.",
     "properties": {
      "copy_count": {
       "title": "Copy Count",
@@ -18859,6 +18859,10 @@
       "title": "Name",
       "type": "string"
      },
+     "own_for_trade": {
+      "title": "Own For Trade",
+      "type": "boolean"
+     },
      "parent_id": {
       "anyOf": [
        {
@@ -18886,6 +18890,7 @@
      "copy_count",
      "hidden",
      "hidden_by",
+     "own_for_trade",
      "for_trade",
      "for_trade_by"
     ],
