@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from .borrowed_gallery import router as borrowed_gallery_router
+from app.games.pokemon.inventory.borrowed_gallery import router as borrowed_gallery_router
 from .db import connect
 from .operation_counts import Count, DatabaseWriter, counter as operation_counter
 from .price_budget import is_budgeted
