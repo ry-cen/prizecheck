@@ -5,9 +5,9 @@ import time
 import pytest
 
 from app.main import app  # noqa: F401
-from app import bounded_work
+from app.core.inventory import bounded_work
 from app.games.pokemon.prices import prices
-from app.bounded_work import Lane, Late
+from app.core.inventory.bounded_work import Lane, Late
 
 
 def drain(lane):
