@@ -1128,3 +1128,15 @@ below says where each group ended up; the module map in section 1 stays the plan
   retains its original core ownership: it is game-free library compatibility, not a composition root.
   Once #478 releases `location_tree.py`, a follow-up can migrate that remaining consumer and remove the shim.
   Trade/social files, architecture rules and pins, and API snapshots are unchanged.
+
+**2026-11-03 — Bounded work relocation (#528)**
+
+- The stdlib-only helper moved byte-for-byte from `app.bounded_work` to
+  `app.core.inventory.bounded_work`, the destination planned in section 1. Its `Lane` limits, deadlines,
+  semaphore cleanup and `Late` identity are unchanged.
+- The two production callers, `games/pokemon/prices/prices.py` and
+  `games/pokemon/publications/public_deck.py`, and four test modules import the core module directly.
+  Test assertions and monkeypatch behavior are unchanged.
+- A repository-wide caller scan found no script, deploy or unedited consumer requiring the old import path.
+  The root module and its ownership entry are removed without a compatibility shim.
+  Price runner/admission/seeding work remains outside this relocation.
