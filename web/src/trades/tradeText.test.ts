@@ -1,6 +1,55 @@
 import { describe, expect, it } from "vitest";
 import type { TradePickPlace } from "../trades_generated";
-import { tradePickText, tradeStaleText } from "./tradeText";
+import {
+  tradeNeedsPartyLabel,
+  tradePickText,
+  tradeStaleText,
+} from "./tradeText";
+
+describe("Trade detail counterpart context", () => {
+  it.each(["withdrawn", "declined", "countered"] as const)(
+    "keeps the party label for your %s headline, even when a Display Name could occur in the status words",
+    (closed_reason) => {
+      expect(
+        tradeNeedsPartyLabel({
+          state: "closed",
+          closed_reason,
+          closed_by: "you",
+        })
+      ).toBe(true);
+      expect(
+        tradeNeedsPartyLabel({
+          state: "closed",
+          closed_reason,
+          closed_by: "them",
+        })
+      ).toBe(false);
+    }
+  );
+  it("keeps counterpart context for system cancellations but avoids repeating name-bearing headlines", () => {
+    expect(
+      tradeNeedsPartyLabel({
+        state: "closed",
+        closed_reason: "cancelled",
+        closed_by: null,
+      })
+    ).toBe(true);
+    expect(
+      tradeNeedsPartyLabel({
+        state: "closed",
+        closed_reason: "swapped",
+        closed_by: "you",
+      })
+    ).toBe(false);
+    expect(
+      tradeNeedsPartyLabel({
+        state: "accepted",
+        closed_reason: null,
+        closed_by: null,
+      })
+    ).toBe(false);
+  });
+});
 
 const place = (fields: Partial<TradePickPlace>): TradePickPlace => ({
   edition_id: "e",

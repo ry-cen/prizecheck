@@ -102,6 +102,23 @@ export function tradeHeadline(trade: TradeView): string {
   }
 }
 
+/** Own closed actions have a state-only headline; their detail header still needs the other collector's name. */
+export function tradeNeedsPartyLabel(
+  trade: Pick<TradeView, "state" | "closed_reason" | "closed_by">
+): boolean {
+  if (trade.state !== "closed") return false;
+  switch (trade.closed_reason) {
+    case "withdrawn":
+    case "declined":
+    case "countered":
+      return trade.closed_by === "you";
+    case "cancelled":
+      return trade.closed_by !== "them";
+    default:
+      return false;
+  }
+}
+
 /**
  * The one note under the person row, or "" (prototype "Proposed wording"): an out-of-date pick first, then what the
  * swap waits on. `stale`: one of the reader's own picks is out of date.
@@ -111,7 +128,7 @@ export function tradeNote(trade: TradeView, stale: boolean): string {
   if (stale) return "A pick is out of date.";
   if (trade.state !== "accepted" || trade.you_confirmed_swap) return "";
   if (trade.they_confirmed_swap)
-    return `${trade.other.display_name} confirmed the swap. Confirm yours once you have the cards.`;
+    return "Confirm yours once you have the cards.";
   return "Swap the cards in person, then confirm.";
 }
 
