@@ -119,6 +119,16 @@
 /* Collection pins controls only when a phone has enough vertical room. */
 @custom-variant collection-pinned (@media (max-width: 760px) and (min-height: 481px));
 
+/* Native focus scrolling clears the desktop header and the existing focus ring. */
+@media (width > 760px) {
+  :root[data-app-shell]:has(#main-content :focus-visible) {
+    scroll-padding-top: calc(
+      var(--layout-header-height) + var(--focus-width) + var(--focus-offset)
+    );
+    scroll-padding-bottom: calc(var(--focus-width) + var(--focus-offset));
+  }
+}
+
 @media (max-width: 760px) {
   :root:has(#main-content [data-collection-page][data-phone-search-header]) {
     scroll-padding-top: calc(
