@@ -486,3 +486,37 @@ test.describe("sidebar marks, mobile", () => {
     ).toBeLessThanOrEqual(375);
   });
 });
+
+// #406: the own mark remains visible while a parent also covers the Location.
+test("settings distinguish own and inherited For trade marks", async ({
+  page,
+}) => {
+  await signIn(page);
+  const storage = await create(page, "Storage");
+  const binder = await create(page, "Binder 1", storage);
+  const also = "It's also For trade on its own.";
+  const ui = desktopUi(page);
+  async function inspect(inherited: boolean, both: boolean) {
+    await page.reload();
+    const tree = await ui.tree();
+    await button(tree, "Storage").click();
+    await gear(tree, "Storage / Binder 1").click();
+    const settings = settingsOf(page, "Storage / Binder 1");
+    if (inherited)
+      await expect(settings).toContainText("For trade because Storage is.");
+    else
+      await expect(settings).not.toContainText("For trade because Storage is.");
+    if (both) await expect(settings).toContainText(also);
+    else await expect(settings).not.toContainText(also);
+  }
+  await inspect(false, false);
+  await setFlag(page, binder, "for-trade");
+  await inspect(false, false);
+  await setFlag(page, storage, "for-trade");
+  await inspect(true, true);
+  await setFlag(page, storage, "for-trade", false);
+  await inspect(false, false);
+  await setFlag(page, binder, "for-trade", false);
+  await setFlag(page, storage, "for-trade");
+  await inspect(true, false);
+});

@@ -187,6 +187,7 @@ describe("swap choices after a revision conflict", () => {
     hidden_by: null,
     for_trade: false,
     for_trade_by: null,
+    own_for_trade: false,
   };
   const choice = {
     deck_id: "deck",
