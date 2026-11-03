@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 
-from app import borrowed_gallery
+from app.games.pokemon.inventory import borrowed_gallery
 from app.main import connect
 from test_catalog_targets import isolated_rules  # noqa: F401
 from test_deck_cost import launches, store  # noqa: F401

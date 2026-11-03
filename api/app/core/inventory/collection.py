@@ -1,18 +1,21 @@
-"""Derived Collection totals; no mutable summary inventory."""
-from decimal import Decimal
-from uuid import UUID
-from fastapi import APIRouter, Depends, Query, HTTPException
-from typing import Literal
-import base64, hashlib, hmac, json, os
-from pydantic import BaseModel
-from .core.art.urls import route_address
-from .db import connect
-from .identity import verified_user
-from .holdings import HoldingView, fail
-from .location_tree import LOCATION_PATHS
-from .social import counts
+"""Game-free Collection reads, keyset paging, totals and revision snapshots.
 
-router = APIRouter(prefix='/api/collection', tags=['collection'])
+The game supplies facet columns, joins, predicates and cursor context at each listing call.
+Catalog relation shapes follow docs/planning/shared-core/catalog-data-contract.md.
+"""
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel
+
+from app.api_errors import api_error as fail
+from app.core.art.urls import route_address
+from app.db import connect
+from app.holdings import HoldingView
+from app.location_tree import LOCATION_PATHS
+from app.social import counts
+from .cursors import anchor_columns, anchor_json, anchor_value, cursor_key, decode_cursor, encode_cursor
+
 
 class CollectionEntry(BaseModel):
     edition_id: UUID
@@ -25,14 +28,17 @@ class CollectionEntry(BaseModel):
     descriptor: dict
     image_url: str | None
 
+
 class CollectionPage(BaseModel):
     entries: list[CollectionEntry]
     owner_revision: int
     catalog_revision: int
     next_cursor: str | None = None
 
+
 class Distribution(BaseModel):
     holdings: list[HoldingView]
+
 
 COLUMNS = """e.id AS edition_id,e.printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
  coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
@@ -44,50 +50,15 @@ JOINS = """JOIN catalog_edition e ON e.id=h.edition_id
  LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
  LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s"""
 
+
 def views(rows, model=HoldingView):
     """The page's rows as views. Rows carry the art source, not the address: the route address (ADR 0020) is built here,
     for the page only, so a large Collection does not hash a version for every catalog row."""
     return [model(**{**{key:value for key,value in row.items() if key not in ('art_source','art_upgrade')},'quantity':str(row['quantity']),
              'image_url':route_address(row['printing_id'],row['art_source'],upgrade=row['art_upgrade'])}) for row in rows]
 
-def encode_cursor(context, key):
-    data=json.dumps({'context':context,'key':key},separators=(',',':')).encode()
-    signature=hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(),data,hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(data+signature).decode().rstrip('=')
 
-
-def cursor_key(token,context):
-    """The key of a cursor signed for this context. 409 when only a revision moved; otherwise 400 INVALID_CURSOR."""
-    try:
-        raw=base64.urlsafe_b64decode(token+'='*(-len(token)%4))
-        data,signature=raw[:-32],raw[-32:]
-        if not hmac.compare_digest(signature,hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(),data,hashlib.sha256).digest()):
-            raise ValueError
-        payload=json.loads(data)
-        old=payload['context']
-        if old[:-2]!=context[:-2]: raise ValueError
-        if old[-2]!=context[-2]: fail(409,'INVENTORY_CHANGED')
-        if old[-1]!=context[-1]: fail(409,'CATALOG_CHANGED')
-        return payload['key']
-    except HTTPException: raise
-    except (ValueError,KeyError,TypeError,UnicodeDecodeError): fail(400,'INVALID_CURSOR')
-
-
-def decode_cursor(token,context):
-    """The Collection page cursor: [sort value, Edition id]."""
-    key=cursor_key(token,context)
-    try:
-        if not isinstance(key,list) or len(key)!=2: raise ValueError
-        UUID(key[1])
-        return key
-    except (ValueError,TypeError,AttributeError): fail(400,'INVALID_CURSOR')
-
-
-@router.get('',response_model=CollectionPage)
-def collection(name: str=Query(default='',max_length=120),set_id: str=Query(default='',max_length=80),
-               collector_number: str=Query(default='',max_length=40),
-               sort: Literal['name','quantity']='name',location_id: UUID | None=None,
-               cursor: str | None=Query(default=None,max_length=2048),user_id: str=Depends(verified_user)):
+def collection(name, set_id, collector_number, sort, location_id, cursor, user_id):
     with connect() as conn, conn.transaction():
         # A repeatable snapshot binds metadata, totals, and revisions to one view.
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
@@ -130,8 +101,8 @@ def collection(name: str=Query(default='',max_length=120),set_id: str=Query(defa
         next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>30 else None
         return CollectionPage(entries=views(page,CollectionEntry),owner_revision=revision,catalog_revision=state['revision'],next_cursor=next_cursor)
 
-@router.get('/editions/{edition_id}',response_model=Distribution)
-def distribution(edition_id: UUID,user_id: str=Depends(verified_user)):
+
+def distribution(edition_id, user_id):
     with connect() as conn:
         state=conn.execute('SELECT active_generation FROM catalog_state WHERE singleton').fetchone()
         rows=conn.execute(f"""SELECT {COLUMNS},h.quantity,h.version,h.location_id,l.name AS location_name
@@ -148,39 +119,43 @@ HOLDING_PAGE_SIZE = 500
 HOLDING_PATHS = LOCATION_PATHS
 # Every sort key is NOT NULL: a NULL would drop rows from the keyset comparison.
 # edition_total is the Card Edition's copies within the listed rows (the view after search and filters).
-HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,coalesce(lp.path,l.name) AS location_path,h.quantity,h.version,
-  p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
-  coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
-  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade,
-  CASE ca.card_kind WHEN 'pokemon' THEN 'Pokemon' WHEN 'trainer' THEN 'Trainer' WHEN 'energy' THEN 'Energy' END AS category,
-  coalesce(ca.types,'{}') AS elemental_types,ca.trainer_type,
-  coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
-  lower(coalesce(lp.path,l.name)) AS location_key,
-  lower(coalesce(pd.set_name,'')) AS set_key,
-  substring(coalesce(pd.collector_number,'') from '^[0-9]+') IS NULL AS number_missing,
-  coalesce(substring(pd.collector_number from '^[0-9]+')::numeric,0) AS number_value,
-  lower(coalesce(pd.collector_number,'')) AS number_key,
-  sum(h.quantity) OVER (PARTITION BY h.edition_id) AS edition_total"""
-# Shared listing joins preserve set codes, art upgrades and LOCATION_PATHS from current dev.
-CARD_JOINS = """  JOIN catalog_edition e ON e.id=h.edition_id
-  JOIN catalog_printing p ON p.id=e.printing_id
-  JOIN catalog_identity ci ON ci.id=p.identity_id
-  JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
-  LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
-  LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
-  LEFT JOIN catalog_card_attribute ca ON ca.printing_id=p.id"""
-HOLDING_FROM = f"""FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
+
+
+def holding_columns(*, facet_columns):
+    """Listing display and sort columns, extended by the game's facet expressions."""
+    return f"""h.edition_id,h.location_id,l.name AS location_name,coalesce(lp.path,l.name) AS location_path,h.quantity,h.version,
+      p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
+      coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
+      coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade,
+      {facet_columns},
+      coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
+      lower(coalesce(lp.path,l.name)) AS location_key,
+      lower(coalesce(pd.set_name,'')) AS set_key,
+      substring(coalesce(pd.collector_number,'') from '^[0-9]+') IS NULL AS number_missing,
+      coalesce(substring(pd.collector_number from '^[0-9]+')::numeric,0) AS number_value,
+      lower(coalesce(pd.collector_number,'')) AS number_key,
+      sum(h.quantity) OVER (PARTITION BY h.edition_id) AS edition_total"""
+
+
+def card_joins(*, facet_joins):
+    """Retained display/art/set-code joins plus the game's facet relation."""
+    return f"""  JOIN catalog_edition e ON e.id=h.edition_id
+      JOIN catalog_printing p ON p.id=e.printing_id
+      JOIN catalog_identity ci ON ci.id=p.identity_id
+      JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
+      LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
+      LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
+    {facet_joins}"""
+
+
+def holding_from(*, facet_joins):
+    return f"""FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
   LEFT JOIN paths lp ON lp.id=h.location_id
-{CARD_JOINS}
+{card_joins(facet_joins=facet_joins)}
   WHERE h.owner_id=%s"""
+
+
 HoldingSort = Literal['name-asc', 'name-desc', 'set-asc', 'set-desc', 'quantity-asc', 'quantity-desc']
-CardCategory = Literal['Pokemon', 'Trainer', 'Energy']
-# Card kind and type come from the effective card attributes, the one source of card type (migration 041), never the
-# metadata columns of migration 027.
-CARD_KINDS = {'Pokemon': 'pokemon', 'Trainer': 'trainer', 'Energy': 'energy'}
-TrainerType = Literal['supporter', 'item', 'tool', 'stadium']
-ElementalType = Literal['Colorless', 'Darkness', 'Dragon', 'Fairy', 'Fighting', 'Fire', 'Grass', 'Lightning',
-                        'Metal', 'Psychic', 'Water']
 # Copies of one Card Edition stay together and in source Location order, whatever the sort and direction.
 LOCATION_KEYS = (('location_key', False), ('location_id', False))
 
@@ -212,53 +187,13 @@ def keyset_after(keys):
     return 'WHERE ' + ' OR '.join(terms), columns
 
 
-# A holding cursor carries the last row's sort values, so the next page never re-runs the listing to find
-# its anchor. The signed context binds both revisions, so the values are still current when it returns.
-# The Location path is left out (up to 12 × 120 characters); the next page re-reads it for one Location.
-ANCHOR_TYPES = {'edition_id': UUID, 'location_id': UUID, 'number_missing': bool,
-                'number_value': Decimal, 'edition_total': Decimal}
-
-
-def anchor_columns(keys):
-    """The sort columns a holding cursor carries, in key order."""
-    return [column for column, _ in keys if column != 'location_key']
-
-
-def anchor_json(value):
-    return value if isinstance(value, (bool, str)) else str(value)
-
-
-def anchor_value(column, raw):
-    """One carried sort value, back in the type the listing compares it as. Raises on a wrong shape."""
-    kind = ANCHOR_TYPES.get(column, str)
-    if kind is bool:
-        if not isinstance(raw, bool):
-            raise ValueError
-        return raw
-    if not isinstance(raw, str):
-        raise ValueError
-    if kind is Decimal:
-        value = Decimal(raw)
-        if not value.is_finite():
-            raise ValueError
-        return value
-    return UUID(raw) if kind is UUID else raw
-
-
-def listing_conditions(name, set_id, category, trainer_type, elemental_type):
+def listing_conditions(name, set_id):
     conditions, condition_params = "", []
     if name:
         conditions += " AND coalesce(lower(pd.display_name),lower(ci.display_name)) LIKE %s ESCAPE '!'"
         condition_params.append('%' + name.replace('!', '!!').replace('%', '!%').replace('_', '!_') + '%')
     if set_id:
         conditions += ' AND pd.set_id=%s'; condition_params.append(set_id)
-    if category:
-        conditions += ' AND ca.card_kind=%s'; condition_params.append(CARD_KINDS[category])
-    if trainer_type:
-        # A Trainer whose Trainer Type is unknown matches no Trainer Type, only the Trainer category.
-        conditions += ' AND ca.trainer_type=%s'; condition_params.append(trainer_type)
-    if elemental_type:
-        conditions += ' AND %s=ANY(ca.types)'; condition_params.append(elemental_type)
     return conditions, condition_params
 
 
@@ -272,40 +207,8 @@ class CollectionTotals(BaseModel):
     copies: str
 
 
-class CollectionHoldingView(HoldingView):
-    # Full Location path such as "Shelf / Binder 2"; listing-only, other endpoints keep HoldingView.
-    location_path: str
-    # From the effective card attributes. Pokemon, Trainer or Energy; null when the card kind is unknown.
-    category: str | None
-    # A Pokémon's types in printed order; empty for a Trainer or Energy card and when unknown.
-    elemental_types: list[str]
-    # supporter, item, tool or stadium for a Trainer whose Trainer Type is known; otherwise null.
-    trainer_type: str | None
-
-
-class CollectionHoldingPage(BaseModel):
-    snapshot: str
-    holdings: list[CollectionHoldingView]
-    owner_revision: int
-    catalog_revision: int
-    next_cursor: str | None = None
-    totals: CollectionTotals | None = None
-    # With ``totals``: copies lent to Friends (social network #253), in no Location and still the collector's, so the
-    # whole Collection's count adds them. "0" for a listing of one Location or with a search or filter, which only
-    # Holdings can match.
-    lent: str | None = None
-
-
-@router.get('/holdings', response_model=CollectionHoldingPage)
-def collection_holdings(location_id: UUID | None = None,
-                        sort: HoldingSort = 'name-asc',
-                        name: str = Query(default='', max_length=120),
-                        set_id: str = Query(default='', max_length=80),
-                        category: CardCategory | None = None,
-                        trainer_type: TrainerType | None = None,
-                        elemental_type: ElementalType | None = None,
-                        cursor: str | None = Query(default=None, max_length=4096),
-                        user_id: str = Depends(verified_user)):
+def collection_holdings(location_id, sort, name, set_id, cursor, user_id, *,
+                        facet_columns, facet_joins, facet_conditions, facet_params, facet_context):
     with connect() as conn, conn.transaction():
         # One repeatable snapshot binds rows, totals and both revisions.
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
@@ -324,17 +227,18 @@ def collection_holdings(location_id: UUID | None = None,
         # catalog and the card attribute revisions together: an attribute decision moves cards between filters, so a
         # cursor from before it answers 409 CATALOG_CHANGED and the gallery starts again.
         context = ['collection-holdings', user_id, str(location_id) if location_id else None, sort,
-                   name, set_id, category, trainer_type, elemental_type, revision,
+                   name, set_id, *facet_context, revision,
                    [state['revision'], attributes['revision']]]
         conditions, condition_params = '', []
         if location_id:
             conditions += ' AND h.location_id=%s'; condition_params.append(location_id)
-        filtered, values = listing_conditions(name, set_id, category, trainer_type, elemental_type)
-        conditions += filtered
-        condition_params.extend(values)
+        filtered, values = listing_conditions(name, set_id)
+        conditions += filtered + facet_conditions
+        condition_params.extend([*values, *facet_params])
         base = [user_id, user_id, user_id, *condition_params]
         # Filters apply inside, so edition_total counts only the listed rows; anchors and pages filter outside.
-        listed = f'SELECT {HOLDING_COLUMNS} {HOLDING_FROM}{conditions}'
+        source = holding_from(facet_joins=facet_joins)
+        listed = f'SELECT {holding_columns(facet_columns=facet_columns)} {source}{conditions}'
         keys = holding_keys(sort)
         order = ','.join(f"{column} {'DESC' if descending else 'ASC'}" for column, descending in keys)
         after, after_params = '', []
@@ -364,16 +268,16 @@ def collection_holdings(location_id: UUID | None = None,
         if not cursor:
             counted = conn.execute(f"""{HOLDING_PATHS} SELECT count(*) AS holdings,
               count(DISTINCT h.edition_id) AS editions,coalesce(sum(h.quantity),0) AS copies
-              {HOLDING_FROM}{conditions}""", base).fetchone()
-            whole = location_id is None and not (name or set_id or category or trainer_type or elemental_type)
+              {source}{conditions}""", base).fetchone()
+            whole = location_id is None and not (name or set_id or any(facet_context))
             lent = str(sum(counts.lent_counts(conn, user_id, None).values()) if whole else 0)
             totals = CollectionTotals(holdings=counted['holdings'], editions=counted['editions'],
                                       copies=str(counted['copies']))
         next_cursor = (encode_cursor(context, [anchor_json(page[-1][column]) for column in anchor_columns(keys)])
                        if len(rows) > HOLDING_PAGE_SIZE else None)
-        return CollectionHoldingPage(snapshot=listing_snapshot(revision, state['revision'], attributes['revision']), holdings=views(page, CollectionHoldingView), owner_revision=revision,
-                                     catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals,
-                                     lent=None if totals is None else lent)
+        return dict(snapshot=listing_snapshot(revision, state['revision'], attributes['revision']), holdings=page,
+                    owner_revision=revision, catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals,
+                    lent=None if totals is None else lent)
 
 
 class CollectionSet(BaseModel):
@@ -386,8 +290,7 @@ class CollectionSetList(BaseModel):
     owner_revision: int
 
 
-@router.get('/sets', response_model=CollectionSetList)
-def collection_sets(location_id: UUID | None = None, user_id: str = Depends(verified_user)):
+def collection_sets(location_id, user_id):
     """The sets of the cards in All owned or one Storage Leaf, once each, for the workspace Set filter.
     Search and filters don't narrow it, so every choice stays offered."""
     with connect() as conn, conn.transaction():
@@ -414,8 +317,7 @@ class CollectionRevision(BaseModel):
     owner_revision: int
 
 
-@router.get('/revision', response_model=CollectionRevision)
-def collection_revision(user_id: str = Depends(verified_user)):
+def collection_revision(user_id):
     """The owner revision alone: one row, no lock. The workspace reads it when a tab regains focus to
     notice changes made elsewhere."""
     with connect() as conn:

@@ -9,10 +9,8 @@ app core
 app.api_errors core
 app.art_storage core
 app.borrowed_copies core
-app.borrowed_gallery mixed
 app.bounded_work core
 app.card_accepts core
-app.collection mixed
 app.copy_allocation core
 app.copy_picks core
 app.db core
@@ -96,5 +94,9 @@ app.games.pokemon.publications.public_deck pokemon
 app.games.pokemon.publications.publications pokemon
 app.games.pokemon.publications.discovery pokemon
 app.core.catalog.card_facts core
+app.core.inventory.collection core
+app.core.inventory.cursors core
+app.games.pokemon.inventory.collection pokemon
+app.games.pokemon.inventory.borrowed_gallery pokemon
 app.core.ops.readiness core
 app.games.pokemon.ops.readiness pokemon
