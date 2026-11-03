@@ -202,14 +202,16 @@ def test_only_the_anonymous_reads_the_art_route_and_the_paged_lists_select_the_s
     other signed-in read selects ``small_art_url`` or ``large_art_url``. The anonymous reads, the art route's resolver and
     the fallback chooser read the source columns by design."""
     root = Path(__file__).resolve().parents[1] / "app"
-    anonymous = {"public_catalog.py", "publications.py", "art_store.py", "card_art.py"}
-    paged = {"collection.py", "holdings.py", "catalog_browse.py"}
+    anonymous = {"games/pokemon/catalog/public_catalog.py", "games/pokemon/publications/publications.py",
+                 "core/art/store.py", "games/pokemon/prices/card_art.py"}
+    paged = {"core/inventory/collection.py", "holdings.py", "games/pokemon/catalog/catalog_browse.py"}
     offenders = [str(path.relative_to(root)) for path in root.rglob("*.py")
-                 if path.name not in anonymous | paged and re.search(r"\bart\.(low|high)_image_url\b", path.read_text())]
+                 if path.relative_to(root).as_posix() not in anonymous | paged
+                 and re.search(r"\bart\.(low|high)_image_url\b", path.read_text())]
     assert offenders == []
-    for name in paged:
-        text = next(root.rglob(name)).read_text()
-        assert "route_address(" in text and "art.small_art_url" not in text, name
+    for reader in sorted(paged):
+        text = (root / reader).read_text()
+        assert "route_address(" in text and "art.small_art_url" not in text, reader
 
 
 @pytest.mark.parametrize("upgrade", [None, "https://example.org/large.jpg"])

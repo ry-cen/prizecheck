@@ -6,6 +6,10 @@ Issue [#520](https://github.com/ry-cen/prizecheck/issues/520), inspected at
 It defines neither an adapter nor a schema for another game. Migrations remain one
 track, and these relation names still belong to the existing Pokémon catalog.
 
+**#521 extraction update (2026-11-03).** Collection's generic reads now join the shared inventory below; its facets
+and whole router are game-owned. The updates attributed to #521 record moved SQL, not a new schema requirement or
+an expansion of #520's tests.
+
 ## Scope and consumers
 
 The inventory covers SQL in every `api/app/core/**/*.py` and every module marked
@@ -18,7 +22,8 @@ The direct shared catalog readers are:
 | Source under `api/app/` | SQL seam and purpose |
 | --- | --- |
 | `core/catalog/card_facts.py` | `CARD_FACTS`, `card_facts`: retained card display, search keys and `Card.order`. Used by social reads, Loans, Trades and Trade Lists. |
-| `holdings.py` | `add_holding`, `add_holdings`: active-generation availability; `leaf_holdings`: retained display, name/set/number filters and ordering. Still imports cursor helpers from the mixed root `collection.py`; this issue does not remove that dependency. |
+| `holdings.py` | `add_holding`, `add_holdings`: active-generation availability; `leaf_holdings`: retained display, name/set/number filters and ordering. #521 moves its shared cursor dependency to `core/inventory/cursors.py`. |
+| `core/inventory/collection.py` (#521) | Aggregate Collection, Edition distribution, Holding paging/totals, set choices and revision reads. Uses the retained display/art/set-code joins and catalog generation/revision reads below. Reads the effective attribute revision; facet columns, joins, predicates, values and cursor context are supplied by Pokémon. `/sets` inner joins retained display, so bare Printings supply no set choice. |
 | `card_accepts.py` | `ACCEPTED`, `accepts`: widen an Edition to its Printing's Editions or its current Card Identity's Editions. |
 | `core/trading/trade_wants.py` | `AVAILABLE`: whether an Edition may start a new Trade Wants line. |
 | `core/decks/contents.py`, `deck_list_capture.py` | `capture_deck_contents`, `capture_deck_list`: lock and capture the catalog revision before detaching inventory. |
@@ -47,6 +52,7 @@ Migration numbers refer to files under `migrations/`.
 | Relation | Required columns and types | Consumers and semantics | Defining migrations |
 | --- | --- | --- | --- |
 | `catalog_state` | `singleton boolean`, `active_generation uuid`, `revision bigint` | Holdings, Trade Wants, Deck captures. Exactly one true singleton row; active generation can be NULL, revision cannot. Captures use `FOR SHARE`; holdings mutations fence activation the same way. | `003_catalog.sql` |
+| `catalog_attribute_state` (#521 extraction) | `singleton boolean`, `revision bigint` | Collection reads the singleton revision in the same repeatable snapshot as catalog/owner revisions, totals and rows. Its cursor binds `[catalog revision, attribute revision]`; either change invalidates it with `CATALOG_CHANGED`. | `030_card_attributes.sql` |
 | `catalog_edition` | `id uuid`, `printing_id uuid`, `descriptor jsonb` | Facts, holdings, acceptance expansion, art warming. ID is unique, Printing FK is non-null and immutable. Many Editions can belong to one Printing. Readers expect descriptors to decode as objects; JSONB alone does not enforce that shape. | `003_catalog.sql`; correspondence immutability in `021_edition_metadata.sql` |
 | `catalog_printing` | `id uuid`, `identity_id uuid`, `public_ref text` | Facts/holdings join through the non-null Identity FK; acceptance follows current identity. Art resolves the immutable unique 48-character lowercase hex public reference. | `003_catalog.sql`, `021_edition_metadata.sql`; surviving Identity handling in `037_reviewed_reprint_groups.sql` |
 | `catalog_identity` | `id uuid`, `display_name text` | Facts and holdings require a unique Identity and non-null fallback name. Multiple Printings can share one Identity. Acceptance uses identity ID, never name equality. | `003_catalog.sql` |
@@ -115,11 +121,11 @@ placeholder URL; store host validation is supplied by game composition.
 ## Remaining mixed and game-owned dependencies
 
 These are **not** newly claimed as game-free shared facets. They explain current
-coupling and delimit the follow-up [#521](https://github.com/ry-cen/prizecheck/issues/521).
+coupling, including the game-owned half of [#521](https://github.com/ry-cen/prizecheck/issues/521).
 
 | Mixed source under `api/app/` | Additional concrete catalog dependencies |
 | --- | --- |
-| `collection.py` | Still contains routes, models, listing SQL **and cursor helpers at the root**. Uses the same retained display/art/set-code joins and `catalog_state(singleton boolean, active_generation uuid, revision bigint)`. Its Holding listing additionally reads `catalog_attribute_state(singleton boolean, revision bigint)` (030) and `catalog_card_attribute(printing_id uuid, card_kind text, types text[], trainer_type text)` (030/033/038/041). Optional attributes give NULL category/Trainer Type and empty elemental types. Filters use equality and `ANY(types)`; unknowns do not match a requested facet. Pokémon category/type literals belong here today. `/sets` inner joins retained display, so bare Printings supply no set choice. |
+| `games/pokemon/inventory/{collection,borrowed_gallery}.py` (#521 extraction) | Pokémon owns the Collection router, typed facet models and `catalog_card_attribute(printing_id uuid, card_kind text, types text[], trainer_type text)` join/expressions (030/033/038/041). Optional attributes give NULL category/Trainer Type and empty elemental types. Filters use equality and `ANY(types)`; unknowns do not match a requested facet. The Borrowed gallery shares these facets. Generic Collection SQL and cursors have moved to `core/inventory/`; this effective facet relation remains game-supplied SQL, not a shared default. |
 | `swap_hints.py` | `GROUPS`/`MEMBERS` read `catalog_reprint_group_member(printing_id uuid, group_id uuid)`, one effective group at most per Printing, possibly absent (035; stored membership/view replaced by 037). `MEMBERS`/`FACTS` read Edition `id,printing_id,descriptor`, Printing `id,identity_id`, Identity `id,display_name`, display `printing_id,display_name,set_id,set_name,collector_number`, set-code `printing_id,set_code`. Active-generation Edition/Printing predicates are returned as an **available flag**, not a filter on all facts. |
 | `social/friend_reads.py` | `REACH` joins Edition `id,printing_id` and reprint membership `printing_id,group_id`; missing groups reach only the original Printing. Expands every finish and excludes the original Printing in the other-printing arm. No active-generation filter at this seam. Query normalization invokes `catalog_search_words(text)`; rendering uses shared card facts. |
 | `social/trade_matches.py` | Edition `id,printing_id`, Printing `id,identity_id`, display `printing_id,set_id`: expands same Printing, same Identity or same Identity+retained set. Set matching inner joins display. No active-generation filter in these expansion statements. |

@@ -10,15 +10,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from .api_errors import api_error
-from .collection import (CARD_JOINS, HOLDING_COLUMNS, HOLDING_PATHS, CardCategory,
-                         ElementalType, HoldingSort, TrainerType, holding_keys, listing_conditions,
-                         listing_snapshot, views)
-from .db import connect
-from .identity import verified_user
-from .inventory_core import first_non_leaf, quantity
-from .location_tree import record_response, replay
-from .social.owners import advance_revision, ensure_owner, lock_owners
+from app.api_errors import api_error
+from app.core.inventory.collection import (HOLDING_PATHS, card_joins, holding_columns, holding_keys,
+                                           listing_snapshot, views)
+from .collection import (FACET_COLUMNS, FACET_JOINS, CardCategory, ElementalType, HoldingSort, TrainerType,
+                         listing_conditions)
+from app.db import connect
+from app.identity import verified_user
+from app.inventory_core import first_non_leaf, quantity
+from app.location_tree import record_response, replay
+from app.social.owners import advance_revision, ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/collection/borrowed', tags=['collection'])
 BORROWED_GALLERY_CAP = 2000
@@ -73,13 +74,13 @@ def borrowed_gallery(location_id: UUID | None = None, sort: HoldingSort = 'name-
                 api_error(409, 'NOT_STORAGE_LEAF')
             conditions += ' AND h.location_id=%s'
             params.append(location_id)
-        columns = HOLDING_COLUMNS.replace('h.version', '0 AS version')
+        columns = holding_columns(facet_columns=FACET_COLUMNS).replace('h.version', '0 AS version')
         order = ','.join(f"{key} {'DESC' if down else 'ASC'}" for key, down in holding_keys(sort))
         rows = conn.execute(f'''{HOLDING_PATHS} SELECT * FROM (
           SELECT {columns},h.loan_id,o.lender_name AS lender,lower(o.lender_name) AS lender_key
           FROM borrowed_holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.borrower_id
           JOIN loan o ON o.id=h.loan_id LEFT JOIN paths lp ON lp.id=h.location_id
-          {CARD_JOINS} WHERE h.borrower_id=%s {conditions}) listed
+          {card_joins(facet_joins=FACET_JOINS)} WHERE h.borrower_id=%s {conditions}) listed
           ORDER BY {order},lender_key,loan_id LIMIT %s''',
                             [user_id, user_id, user_id, *params, BORROWED_GALLERY_CAP + 1]).fetchall()
         if len(rows) > BORROWED_GALLERY_CAP:

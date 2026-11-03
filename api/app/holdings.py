@@ -269,7 +269,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
                   name: str=Query(default='',max_length=120),set_id: str=Query(default='',max_length=80),
                   collector_number: str=Query(default='',max_length=40),sort: Literal['name','quantity']='name',
                   user_id: str = Depends(verified_user)):
-    from .collection import decode_cursor, encode_cursor
+    from .core.inventory.cursors import decode_cursor, encode_cursor
     with connect() as conn, conn.transaction():
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
         owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()

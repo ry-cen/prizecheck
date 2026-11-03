@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from app import collection
+from app.core.inventory import collection
 from app.main import connect
 from deck_import_fixtures import _seed, printed
 from test_catalog_targets import isolated_rules  # noqa: F401
