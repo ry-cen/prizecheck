@@ -210,6 +210,21 @@ async function story(
   await expect(
     ashMain.getByRole("button", { name: "Confirm swap" })
   ).toHaveCount(0);
+  // The detail control names the visible card and Edition, including Normal. Its separate description announces
+  // both the quantity and the stale-pick instruction before the collector opens the card popup.
+  const staleCard = ashMain
+    .getByRole("list", { name: "You give", exact: true })
+    .getByRole("button", { name: "Arven SVI 166 · Normal", exact: true });
+  await expect(staleCard.getByText("Arven", { exact: true })).toBeVisible();
+  await expect(
+    staleCard.getByText("SVI 166 · Normal", { exact: true })
+  ).toBeVisible();
+  await expect(staleCard).toHaveAccessibleName("Arven SVI 166 · Normal");
+  await expect(staleCard).toHaveAccessibleDescription(
+    `×1 ${secret} Binder has none now · take it from ${secret} Box`
+  );
+  await staleCard.focus();
+  await expect(staleCard).toBeFocused();
   await expectPageChecks(ash.page, `an out-of-date pick at ${width}`);
   await ashMain.getByRole("button", { name: "Use suggested picks" }).click();
   await expect(toast(ash.page)).toContainText("Picks updated");

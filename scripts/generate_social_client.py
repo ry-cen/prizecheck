@@ -11,12 +11,12 @@ NAMES = ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "Look
          "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "ReturnLine",
          "PendingReturn", "LoanView",
          "LoansView", "VoidCommandKey", "CommandKeyOutcome", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
-         "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
+         "PromiseLimit", "LoanPickPlace", "LoanDeck", "DeckUse", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
          "BorrowedCopies", "MoveBorrowed", "PendingLender", "PendingLine", "PendingLoans", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
          "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
          "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
          "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
-         "InboxTradeWaiting", "InboxTradeUpdate", "NeedGroup", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
+         "InboxTradeWaiting", "InboxTradeUpdate", "OwnTradeNeed", "NeedGroup", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
          "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings", "DiscoverySettings",
          "SetDiscovery", "ConversationParty", "Message", "TimelineItem", "ConversationView", "LastMessage",
          "NearbyMatchRow", "NearbyMatches", "CardHolder", "TradeCardSearch",
@@ -174,6 +174,12 @@ export const getTradeMatches = (signal?: AbortSignal) =>
   request<TradeMatches>('/api/social/trade-matches', 'GET', undefined, signal);
 export const getTradeMatch = (collectorId: string, signal?: AbortSignal) =>
   request<TradeMatchRow>(`/api/social/trade-matches/${at(collectorId)}`, 'GET', undefined, signal);
+// Own Deck need accepting each Edition, even when it is no longer offered. No other collector is addressed.
+export const getOwnTradeNeeds = (editions: readonly string[], signal?: AbortSignal) => {
+  const params = new URLSearchParams();
+  for (const edition of editions) params.append('edition_id', edition);
+  return request<OwnTradeNeed[]>(`/api/social/trade-matches/needs?${params}`, 'GET', undefined, signal);
+};
 // Ask to trade (trading #276): Friends' Trade List copies of one Card Printing, for the card popup.
 export const getTradeCardMatches = (printingId: string, signal?: AbortSignal) =>
   request<TradeCardMatches>(`/api/social/trade-card-matches${query({ printing_id: printingId })}`, 'GET', undefined,

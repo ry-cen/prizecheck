@@ -66,6 +66,8 @@ ALLOWED_IMPORTS = {
         ('app.social.friend_reads', 'PAGE_IDENTITIES'), ('app.core.catalog.card_facts', 'card_facts'), ('app.social.friend_reads', 'search_key'),
         ('app.trade_list', 'own_trade_copies'), ('app.core.trading.trade_wants', 'own_wants'), ('app.core.trading.trade_wants', 'own_rules'),
         ('app.want_list', 'capture_want_list'), ('app.social.friend_copies', 'friend_wants'), ('app.card_accepts', 'accepts'),
+        # WP3b, owner-approved: own needs by Edition stays under one viewer lock, using the existing Want List fold.
+        ('app.want_list', 'edition_needs'), ('app.social.owners', 'ensure_owner'), ('app.social.owners', 'lock_owners'),
         ('app.social.friends', 'friend_ids'),
         # Each Friend's completed-Trade count on their row and Trade List (trading #298), one read for all of them.
         ('app.social.trades', 'completed_trades'),

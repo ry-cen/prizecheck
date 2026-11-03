@@ -73,6 +73,9 @@ import psycopg
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from .copy_allocation import allocate
+from .settings import read_settings
+from .want_list import allocation_needs
 from .deck_deletion import unsorted_leaf
 from .copy_picks import suggest_picks
 from .loan_picks import pick_shortfalls
@@ -240,6 +243,14 @@ class LoanDeck(BaseModel):
     name: str
 
 
+class DeckUse(BaseModel):
+    """The lender's currently held own copies counted for Deck lines (loose copies included), and uncovered need.
+    Shared copies count once under One Deck at a time; Borrowed and already lent copies are not held own copies."""
+    edition_id: UUID
+    for_decks: str
+    need: str
+
+
 class LoanSide(BaseModel):
     """One side's own view of a Loan. The borrower's: ``deck``, the Deck the cards go to (None for Unsorted). The
     lender's: ``can_promise`` while the request is unanswered, ``picks``, the Loan Pick List, once accepted, and
@@ -251,6 +262,7 @@ class LoanSide(BaseModel):
     picks: list[LoanPickPlace]
     suggested: list[LoanPickPlace]
     awaiting_choice: list[LoanPickPlace] = []
+    deck_use: list[DeckUse] | None = None
 
 
 class LentCard(BaseModel):
@@ -735,6 +747,8 @@ def move_borrowed(command: MoveBorrowed, user_id: str = Depends(verified_user)):
 @router.get('/{loan_id}/side', response_model=LoanSide)
 def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
+        # All own inventory and allocation below is read under the same owner lock, before any Loan row lock.
+        lock_owners(conn, user_id)
         row = conn.execute('SELECT id, state, lender_id, borrower_id, deck_id, lender_handover_at FROM loan '
                            'WHERE id=%s AND (lender_id=%s OR borrower_id=%s)', (loan_id, user_id, user_id)).fetchone()
         if row is None:
@@ -785,8 +799,19 @@ def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
                 key = (pick['edition_id'], pick['source_location_id'])
                 mine[key] = mine.get(key, 0) + int(pick['quantity'])
             replaced = None
+        allocation = allocate(conn, user_id, editions, read_settings(conn, user_id).want_list_counting)
+        needs = allocation_needs(allocation)
+        deck_use = []
+        for edition in editions:
+            lines = [line for (_, found), line in allocation.lines.items() if found == edition]
+            # held copies belong to one Deck each. Spare Copies are handed out once under all_at_once, or reused
+            # across Decks under one_at_a_time: take the largest share, never sum those reused copies or other_decks.
+            spare = (sum(line.spare for line in lines) if allocation.counting == 'all_at_once'
+                     else max((line.spare for line in lines), default=0))
+            allocated = sum(line.held for line in lines) + spare
+            deck_use.append(DeckUse(edition_id=edition, for_decks=str(allocated), need=str(needs.get(edition, 0))))
         return LoanSide(loan_id=loan_id, deck=None, can_promise=limits, picks=places(mine, shortfall),
-                        suggested=places(replaced, {}) if replaced else [])
+                        suggested=places(replaced, {}) if replaced else [], deck_use=deck_use)
 
 
 def _locations(conn, user_id: str) -> dict:
