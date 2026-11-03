@@ -174,6 +174,17 @@ export function useGalleryData(
             cache.delete(key);
             return;
           }
+          if (stale(error)) {
+            // No page from an exhausted walk is a current complete listing. Retry uses
+            // reload's fresh generation and a new bounded walk from the first page.
+            setData(() => ({
+              ...EMPTY_GALLERY,
+              status: "error",
+              error:
+                "Your collection changed while loading. Retry to load your latest cards.",
+            }));
+            return;
+          }
           setData((previous) =>
             previous.totals
               ? {
