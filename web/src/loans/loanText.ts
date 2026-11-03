@@ -82,20 +82,33 @@ export function loanHeadline(loan: LoanView): string {
       const awaiting = Number(loan.awaiting_choice ?? "0");
       if (!lender && awaiting > 0)
         return `${other} wrote off ${cardCount(awaiting)} you have`;
-      // A return the other side confirmed and the reader hasn't (#255).
-      const pending = loan.pending_return;
-      if (pending && pending.they_confirmed && !pending.you_confirmed) {
-        const back = cardCount(
-          pending.lines.reduce((sum, line) => sum + Number(line.copies), 0)
-        );
-        return lender
-          ? `${other} says they gave back ${back}`
-          : `${other} says they got ${back} back`;
-      }
       const copies = loanLines(loan).reduce(
         (sum, line) => sum + lineOut(line),
         0
       );
+      // Describe the pending claim without treating it as a completed inventory return.
+      const pending = loan.pending_return;
+      if (pending && pending.you_confirmed !== pending.they_confirmed) {
+        const returning = pending.lines.reduce(
+          (sum, line) => sum + Number(line.copies),
+          0
+        );
+        const back = cardCount(returning);
+        const claim = pending.you_confirmed
+          ? lender
+            ? `You recorded ${back} back`
+            : `You recorded giving back ${back}`
+          : lender
+            ? `${other} says they gave back ${back}`
+            : `${other} says they got ${back} back`;
+        const next = pending.you_confirmed
+          ? loan.other.collector_id === null
+            ? "Finish the return"
+            : `Waiting for ${other} to confirm`
+          : "Waiting for you to confirm";
+        const remaining = Math.max(0, copies - returning);
+        return `${claim} · ${next}${remaining > 0 ? ` · ${cardCount(remaining)} still out` : ""}`;
+      }
       // Everything written off while the borrower still answers for it (#257).
       if (copies === 0)
         return lender

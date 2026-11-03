@@ -61,6 +61,9 @@ test("a return started by either side moves on once the other side confirms, and
   await expectPageChecks(page, "choosing the cards to give back on a phone");
   await page.setViewportSize(DESKTOP);
   await page.getByRole("button", { name: "Give these back" }).click();
+  await expect(title(page)).toHaveText(
+    "You recorded giving back 2 cards · Waiting for Misty W to confirm · 1 card still out"
+  );
   await expect(page.getByRole("main")).toContainText(
     "Waiting for Misty W to confirm"
   );
@@ -70,7 +73,9 @@ test("a return started by either side moves on once the other side confirms, and
   await lender.goto(`${ORIGIN}/loans`);
   await expect(
     lender.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText("Ash K says they gave back 2 cards");
+  ).toContainText(
+    "Ash K says they gave back 2 cards · Waiting for you to confirm · 1 card still out"
+  );
   await lender.goto(`${ORIGIN}/loans/${loanId}`);
   await expectPageChecks(lender, "a return to confirm");
   await lender.getByRole("button", { name: "Yes, they're back" }).click();
@@ -80,11 +85,16 @@ test("a return started by either side moves on once the other side confirms, and
   // Misty records the last one, and Ash confirms it: the Loan ends.
   await lender.getByRole("button", { name: "Record a return" }).click();
   await lender.getByRole("button", { name: "Record return" }).click();
+  await expect(title(lender)).toHaveText(
+    "You recorded 1 card back · Waiting for Ash K to confirm"
+  );
   await expect(lender.getByRole("main")).toContainText(
     "Waiting for Ash K to confirm"
   );
   await page.reload();
-  await expect(title(page)).toHaveText("Misty W says they got 1 card back");
+  await expect(title(page)).toHaveText(
+    "Misty W says they got 1 card back · Waiting for you to confirm"
+  );
   await page.setViewportSize(PHONE);
   await expectPageChecks(page, "a return to confirm on a phone");
   await page.getByRole("button", { name: "Yes, I gave them back" }).click();
