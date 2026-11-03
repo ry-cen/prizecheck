@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api_errors import api_error
+from app.core.ops.api_errors import api_error
 from app.core.inventory.collection import (HOLDING_PATHS, card_joins, holding_columns, holding_keys,
                                            listing_snapshot, views)
 from .collection import (FACET_COLUMNS, FACET_JOINS, CardCategory, ElementalType, HoldingSort, TrainerType,

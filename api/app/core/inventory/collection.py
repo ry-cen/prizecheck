@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.api_errors import api_error as fail
+from app.core.ops.api_errors import api_error as fail
 from app.core.art.urls import route_address
 from app.db import connect
 from app.holdings import HoldingView
