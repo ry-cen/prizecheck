@@ -9,10 +9,9 @@ import {
   type ReactNode,
 } from "react";
 import { useInboxRefresh } from "../inbox/Inbox";
-import { lineEdition } from "../loans/loanText";
 import { PageHeader } from "../shell/PageHeader";
 import { useLeaveGuard, type LeaveGuard } from "../shell/useRoute";
-import { CardImage } from "../social/FriendCollectionPage";
+import { TradeTermsRow } from "./TradeTermsRow";
 import {
   getTrade,
   getTraderMatch,
@@ -451,7 +450,11 @@ export function ProposalBuilderPage({
         cash: cashBody,
       });
       sent.current = true;
-      toast.show({ message: `Counter sent to ${name}` });
+      if (mounted.current)
+        toast.show({
+          message: `Counter sent to ${name}`,
+          route: tradePath(trade.id),
+        });
       refreshInbox();
       if (mounted.current) onNavigate(tradePath(trade.id));
     } catch (cause) {
@@ -525,7 +528,11 @@ export function ProposalBuilderPage({
         idempotency_key: key.current,
       });
       sent.current = true;
-      toast.show({ message: `Trade Proposal sent to ${name}` });
+      if (mounted.current)
+        toast.show({
+          message: `Trade Proposal sent to ${name}`,
+          route: tradePath(trade.id),
+        });
       // Leaving while the send was out is the collector's choice; the Trade is theirs to find in Trades.
       if (mounted.current) onNavigate(tradePath(trade.id));
     } catch (cause) {
@@ -912,23 +919,10 @@ function ProposalSideSection({
           lines.map((line) => {
             const cap = Number(line.copies);
             return (
-              <li
+              <TradeTermsRow
                 key={line.edition_id}
-                className="grid grid-cols-[3.5rem_minmax(0,1fr)] phone:grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
-              >
-                <CardImage url={line.image_url} />
-                <span className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                  <span className="flex min-w-0 flex-col">
-                    <span className="text-body font-semibold wrap-anywhere">
-                      {line.name}
-                    </span>
-                    <span className="text-meta text-text-muted tabular-nums wrap-anywhere">
-                      {lineEdition(line)}
-                    </span>
-                    <span className="text-meta text-text-subtle tabular-nums">
-                      Up to {cap}
-                    </span>
-                  </span>
+                card={line}
+                quantity={
                   <Stepper
                     label={`${tradeCardName(line)} ${side === "get" ? "you get" : "you give"}`}
                     value={line.quantity}
@@ -936,8 +930,18 @@ function ProposalSideSection({
                     max={cap}
                     onChange={(value) => onChange(line, value)}
                   />
-                </span>
-              </li>
+                }
+                context={
+                  <span className="text-meta text-text-subtle tabular-nums">
+                    Up to {cap}
+                  </span>
+                }
+                details={
+                  <p className="m-0 text-body">
+                    ×{line.quantity} · {SIDE_LABEL[side]}
+                  </p>
+                }
+              />
             );
           })
         )}
