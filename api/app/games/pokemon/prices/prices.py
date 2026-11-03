@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from psycopg.rows import dict_row
 
-from app.bounded_work import Lane, Late
+from app.core.inventory.bounded_work import Lane, Late
 from .catalog_targets import is_unspecified
 from app.core.prices import quote_contract
 from app.price_reads import price_reads_enabled

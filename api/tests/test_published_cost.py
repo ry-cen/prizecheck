@@ -20,7 +20,7 @@ from app.main import app, connect  # noqa: F401
 from app import price_launcher
 from app.games.pokemon.publications import public_deck
 from app.games.pokemon.publications import published_cost
-from app.bounded_work import Lane, Late
+from app.core.inventory.bounded_work import Lane, Late
 from app.public_projection import FilePublicProjection, ProjectionUnavailable
 from app.public_records import price_key, public_record_store, quarantine_key
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
