@@ -28,6 +28,8 @@ import {
   type TradeCard,
   type TradeStep,
   type TradeView,
+  type TraderMatchRow,
+  type OwnTradeNeed,
 } from "../social_generated";
 import {
   acceptTrade,
@@ -40,6 +42,9 @@ import {
   type OwnTradeSide,
 } from "../trades_generated";
 import { Button } from "../ui/Button";
+import { CardArt, CardPopup } from "../ui/CardPopup";
+import { ownTradeDeckNeed, tradeDeckNeed } from "./tradeDeckNeed";
+import { useIncomingTradeMatch } from "./useIncomingTradeMatch";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
@@ -177,6 +182,9 @@ export function TradeScreen({
     tradeId === null ? { kind: "missing" } : { kind: "loading" }
   );
   const [attempt, setAttempt] = useState(0);
+  const incomingMatch = useIncomingTradeMatch(
+    load.kind === "ready" ? load.trade : null
+  );
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState<Asking | null>(null);
@@ -722,6 +730,8 @@ export function TradeScreen({
         <TradeSide
           title="You get"
           cards={trade.you_get}
+          match={incomingMatch.match}
+          ownNeeds={incomingMatch.needs}
           total={
             trade.state === "proposed"
               ? sideValueText(value, "you_get", trade.you_get.length > 0)
@@ -1012,14 +1022,30 @@ function TradeSide({
   cards,
   side,
   total,
+  match,
+  ownNeeds,
 }: {
   title: string;
   cards: TradeCard[];
+  match?: TraderMatchRow | null;
+  ownNeeds?: OwnTradeNeed[];
   side?: OwnTradeSide;
   /** The side's estimated total while the Trade is waiting for an answer, or null. */
   total?: string | null;
 }) {
   const headingId = useId();
+  const [selected, setSelected] = useState<TradeCard | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const hint = (card: TradeCard) => {
+    const listed = match?.you_get.find(
+      (row) => row.edition_id === card.edition_id
+    );
+    return listed
+      ? tradeDeckNeed(listed, match?.you_get_groups)
+      : ownTradeDeckNeed(
+          ownNeeds?.find((row) => row.edition_id === card.edition_id)
+        );
+  };
   return (
     <section
       aria-labelledby={headingId}
@@ -1040,25 +1066,86 @@ function TradeSide({
               key={card.edition_id}
               className="flex min-w-0 flex-col items-start gap-2"
             >
-              <div className="w-full max-w-[145px] self-center">
-                <CardImage url={card.image_url} />
-              </div>
-              <span className="flex min-w-0 flex-col">
-                <span className="text-body font-semibold wrap-anywhere">
-                  {card.name}
+              <button
+                type="button"
+                aria-labelledby={`${headingId}-${card.edition_id}-name ${headingId}-${card.edition_id}-edition`}
+                aria-describedby={`${headingId}-${card.edition_id}-context`}
+                onClick={(event) => {
+                  opener.current = event.currentTarget;
+                  setSelected(card);
+                }}
+                className="flex min-h-tap w-full cursor-pointer flex-col items-start gap-2 rounded-control border-0 bg-transparent p-0 text-left font-sans text-text focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <div className="w-full max-w-[145px] self-center">
+                  <CardImage url={card.image_url} />
+                </div>
+                <span className="flex min-w-0 flex-col">
+                  <span
+                    id={`${headingId}-${card.edition_id}-name`}
+                    className="text-body font-semibold wrap-anywhere"
+                  >
+                    {card.name}
+                  </span>
+                  <span
+                    id={`${headingId}-${card.edition_id}-edition`}
+                    className="text-meta text-text-muted tabular-nums wrap-anywhere"
+                  >
+                    {lineEdition(card)}
+                  </span>
                 </span>
-                <span className="text-meta text-text-muted tabular-nums wrap-anywhere">
-                  {lineEdition(card)}
-                </span>
+              </button>
+              <div
+                id={`${headingId}-${card.edition_id}-context`}
+                className="flex flex-col gap-2"
+              >
+                <p className="m-0 text-body font-semibold tabular-nums">
+                  ×{card.copies}
+                </p>
                 {side && <PickLines side={side} editionId={card.edition_id} />}
-              </span>
-              <span className="text-body font-semibold tabular-nums">
-                ×{card.copies}
-              </span>
+              </div>
+              {hint(card) && (
+                <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                  {hint(card)}
+                </p>
+              )}
             </li>
           ))
         )}
       </ul>
+      <CardPopup
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        title={selected?.name ?? ""}
+        position={null}
+        canPrevious={false}
+        canNext={false}
+        onPrevious={() => {}}
+        onNext={() => {}}
+        cardKey={selected?.edition_id ?? ""}
+        returnFocus={opener}
+        art={
+          selected && <CardArt url={selected.image_url} name={selected.name} />
+        }
+      >
+        {selected && (
+          <>
+            <p className="m-0 text-body wrap-anywhere">
+              {lineEdition(selected)}
+            </p>
+            <p className="m-0 text-meta text-text-muted wrap-anywhere">
+              {selected.set_name}
+            </p>
+            <p className="m-0 text-body">
+              ×{selected.copies} · {title}
+            </p>
+            {hint(selected) && (
+              <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                {hint(selected)}
+              </p>
+            )}
+          </>
+        )}
+      </CardPopup>
       {total && (
         <p className="m-0 text-meta text-text-muted tabular-nums">{total}</p>
       )}

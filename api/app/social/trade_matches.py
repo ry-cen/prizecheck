@@ -86,7 +86,8 @@ from ..db import connect
 from ..identity import verified_user
 from ..trade_list import own_trade_copies
 from app.core.trading.trade_wants import own_rules, own_wants
-from ..want_list import capture_want_list
+from ..want_list import capture_want_list, edition_needs
+from .owners import ensure_owner, lock_owners
 from ..core.catalog.card_facts import card_facts
 from . import name_rules
 from .conversations import pair_row, standings
@@ -411,10 +412,13 @@ class Matched:
     want_list_need: int
 
 
-def viewer_needs(user_id: str) -> dict[UUID, int]:
+def viewer_needs(user_id: str, conn=None) -> dict[UUID, int]:
     """The viewer's Want List need per Card Edition over every Deck, hidden ones included, combined as the Want List's
     total combines it: the sum of the lines' needs under Every Deck built at once, the largest under One Deck at a time.
     One capture under the viewer's own owner lock."""
+    if conn is not None:
+        # Own-only reads can keep allocation, Trade Wants and Will accept in one transaction under one owner lock.
+        return edition_needs(conn, user_id)
     capture = capture_want_list(user_id)
     lines: dict[UUID, list[int]] = {}
     for (_, edition), line in capture.allocation.lines.items():
@@ -675,6 +679,39 @@ def nearby_matches(user_id: str = Depends(verified_user)):
     rows.sort(key=lambda row: (KIND_ORDER[row.match], BAND_ORDER[row.band], row.display_name.casefold(),
                                str(row.trader_id)))
     return NearbyMatches(status=setting.status, radius_mi=setting.radius_mi, rows=rows[:NEAR_ROWS])
+
+
+class OwnTradeNeed(BaseModel):
+    """The viewer's own need accepting an Edition, never another collector's identity, Deck or Location.
+    shared means a counted Want List part accepts alternatives, even for the wanted Edition itself. widened only
+    says that this Edition matched a different wanted Edition. Exact Trade Wants never make need shared."""
+    edition_id: UUID
+    want_list_need: str
+    trade_wants_quantity: str
+    widened: bool
+    shared: bool
+
+
+@router.get('/trade-matches/needs', response_model=list[OwnTradeNeed])
+def own_trade_needs(edition_id: list[UUID] = Query(default=[], max_length=50),
+                    user_id: str = Depends(verified_user)):
+    """Own-only context even when an incoming card is no longer on a trader's Trade List. No party parameter.
+    Declared before the per-Friend route so needs is never interpreted as a collector id."""
+    with connect() as conn, conn.transaction():
+        ensure_owner(conn, user_id)
+        lock_owners(conn, user_id)
+        needs = viewer_needs(user_id, conn)
+        trade = own_wants(conn, user_id)
+        rules = own_rules(conn, user_id)
+        wants = {edition: Want(want_list_need=need, trade_wants_quantity=trade.get(edition, 0),
+                               rule=rules.get(edition, 'edition')) for edition, need in needs.items()}
+        reached = reaching(wants, widen(conn, wants))
+        return [OwnTradeNeed(edition_id=edition,
+                             want_list_need=str(sum(needs[wanted] for wanted in reached.get(edition, ()))),
+                             trade_wants_quantity=str(trade.get(edition, 0)),
+                             widened=any(wanted != edition for wanted in reached.get(edition, ())),
+                             shared=any(wants[wanted].rule != 'edition' for wanted in reached.get(edition, ())))
+                for edition in dict.fromkeys(edition_id)]
 
 
 @router.get('/trade-matches/{collector_id}', response_model=TradeMatchRow)

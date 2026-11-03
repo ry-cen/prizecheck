@@ -424,3 +424,20 @@ export function sendMessage(
       return "The request couldn't be sent. Check it and try again.";
   }
 }
+
+/** Own held copies the lender's Decks count on, including allocated loose copies; never Borrowed Copies. */
+export function loanDeckUseHint(
+  use: { for_decks: string; need: string } | undefined
+): string | null {
+  if (!use) return null;
+  const allocated = Number(use.for_decks);
+  const need = Number(use.need);
+  const parts: string[] = [];
+  if (Number.isSafeInteger(allocated) && allocated > 0)
+    parts.push(
+      `Your Decks count on ${allocated} ${allocated === 1 ? "copy" : "copies"}.`
+    );
+  if (Number.isSafeInteger(need) && need > 0)
+    parts.push(`Your Decks still need ${need}.`);
+  return parts.join(" ") || null;
+}

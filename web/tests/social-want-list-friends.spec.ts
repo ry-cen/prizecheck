@@ -11,6 +11,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
+import { expectTouchTarget } from "./support/touch-target";
 import type {
   OtherCollector,
   OtherCollectorOptions,
@@ -168,7 +169,7 @@ async function wantListFriendsExample(
   return { misty, brock, secret, brockHandle, deckName };
 }
 
-for (const width of [1280, 390]) {
+for (const width of [1280, 320, 375, 390]) {
   test(`Friend chips and Get from Friends preserve facts and fit ${width}px`, async ({
     page,
     collectors,
@@ -210,6 +211,21 @@ for (const width of [1280, 390]) {
     await expect(views(page).getByRole("radio", { name: "Buy" })).toBeChecked();
     await expectPageChecks(page, "the Want List with Friend chips");
 
+    // Brock offers his spare copy for trade; Misty's Deck copy remains lendable only. This changes no lending counts.
+    const brockTree = await api(brock.page, "GET", "/api/location-tree");
+    const brockPlace = brockTree.locations.find(
+      (node: { name: string }) => node.name === "Unsorted"
+    );
+    await api(
+      brock.page,
+      "PUT",
+      `/api/location-tree/${brockPlace.id}/for-trade`,
+      {
+        for_trade: true,
+        version: brockPlace.version,
+        idempotency_key: randomUUID(),
+      }
+    );
     // Get from Friends: one panel per card a Friend can lend, and one line for the rest.
     await views(page).getByRole("radio", { name: "Get from Friends" }).click();
     const iono = page.getByRole("region", { name: "Iono" });
@@ -229,6 +245,21 @@ for (const width of [1280, 390]) {
     );
     await expect(page.getByRole("main")).not.toContainText(secret);
     await expectPageChecks(page, "Get from Friends");
+    const borrow = rows
+      .nth(0)
+      .getByRole("button", { name: "Ask to borrow Iono from Brock S" });
+    const trade = rows
+      .nth(0)
+      .getByRole("button", { name: /^Trade for it: Iono/ });
+    await expect(borrow).toHaveText("Ask to borrow");
+    await expect(trade).toHaveText("Trade for it");
+    await expect(
+      rows.nth(1).getByRole("button", { name: /^Trade for it/ })
+    ).toHaveCount(0);
+    if (width < 760) {
+      await expectTouchTarget(borrow);
+      await expectTouchTarget(trade);
+    }
 
     if (width <= 760) {
       await views(page).getByRole("radio", { name: "Buy" }).click();
@@ -239,6 +270,30 @@ for (const width of [1280, 390]) {
       );
     }
 
+    // The trade action uses the existing Ask to trade handoff: one editable copy, no send.
+    await views(page).getByRole("radio", { name: "Get from Friends" }).click();
+    await trade.click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Trade Proposal to Brock S"
+    );
+    if (width < 760)
+      await page
+        .getByRole("tablist", { name: "Proposal builder" })
+        .getByRole("tab", { name: /^Proposal/ })
+        .click();
+    const get = page.getByRole("list", { name: "You get", exact: true });
+    await expect(get).toContainText("Iono");
+    await expect(get).toContainText("PAL 254");
+    await expect(
+      get
+        .getByRole("group", { name: "Iono (PAL 254) you get", exact: true })
+        .locator("output")
+    ).toHaveText("1");
+    await expect(get.getByRole("button", { name: /^Increase/ })).toBeDisabled();
+    await expect(
+      page.getByRole("list", { name: "You give", exact: true })
+    ).toContainText("Nothing yet");
+    await page.goto(`${ORIGIN}/decks/want-list`);
     // Narrowing from the tile refetches chips and the Friends view too, without changing the need.
     await views(page).getByRole("radio", { name: "Buy" }).click();
     await accept

@@ -112,7 +112,7 @@ test("Ask on a Deck's Want List starts the draft For that Deck and never changes
     .click();
   await page
     .getByRole("region", { name: "Iono" })
-    .getByRole("button", { name: "Ask Misty W for Iono" })
+    .getByRole("button", { name: "Ask to borrow Iono from Misty W" })
     .click();
   let mistyDraft = await review(page, "Misty W");
   await expect(mistyDraft.getByLabel("For Deck")).toHaveValue(lugia);

@@ -334,6 +334,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           pending={pending}
           action={(row, copy) => (
             <AskControl
+              text="Ask to borrow"
               friend={copy}
               card={copyCard(
                 copy,
