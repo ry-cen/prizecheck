@@ -10,7 +10,7 @@ from uuid import UUID
 import psycopg
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
-from app.api_errors import api_error
+from app.core.ops.api_errors import api_error
 from app.db import connect
 from app.public_projection import public_projection_store, ProjectionUnavailable
 

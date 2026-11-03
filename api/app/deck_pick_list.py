@@ -29,7 +29,7 @@ import psycopg
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from .api_errors import api_error
+from app.core.ops.api_errors import api_error
 from .copy_allocation import spare_rule
 from app.core.decks.ownership import CompetitionWarning, read_ownership
 from app.core.decks.store import check_revision, read_deck_list_revision, require_deck

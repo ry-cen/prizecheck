@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.imports.collection_draft import storage_leaf
-from app.api_errors import api_error
+from app.core.ops.api_errors import api_error
 from app.holdings import MAX_BATCH_EDITIONS
 from app.db import connect
 from app.identity import verified_user
