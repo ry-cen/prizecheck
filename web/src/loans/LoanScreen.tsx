@@ -339,6 +339,7 @@ export function LoanScreen({
             active={active}
             kind="loan"
             id={load.loan.thread_id}
+            revision={`${load.loan.loan_id}:${load.loan.revision}`}
             editionNames={Object.fromEntries(
               load.loan.lines.map((card) => [card.edition_id, card.name])
             )}

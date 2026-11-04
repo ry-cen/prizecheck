@@ -27,12 +27,14 @@ export function ThreadTimeline({
   active = true,
   editionNames = {},
   onChanged,
+  revision,
 }: {
   kind: "trade" | "loan";
   id: string;
   active?: boolean;
   editionNames?: Record<string, string>;
   onChanged?: () => void;
+  revision?: string;
 }) {
   const [log, setLog] = useState<Timeline | null>(null),
     [failed, setFailed] = useState(false),
@@ -110,7 +112,7 @@ export function ThreadTimeline({
       ++epoch.current;
       controller.abort();
     };
-  }, [kind, id, changed, attempt, active]);
+  }, [kind, id, changed, attempt, active, revision]);
   useEffect(() => {
     const show = () => {
       if (active && document.visibilityState === "visible")

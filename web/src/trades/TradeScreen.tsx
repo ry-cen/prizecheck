@@ -370,6 +370,7 @@ export function TradeScreen({
               }
             }}
             id={load.trade.thread_id}
+            revision={`${load.trade.offer_id}:${load.trade.revision}`}
             editionNames={Object.fromEntries(
               [...load.trade.you_give, ...load.trade.you_get].map((card) => [
                 card.edition_id,
