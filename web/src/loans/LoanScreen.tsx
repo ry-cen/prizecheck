@@ -1,3 +1,4 @@
+import { ItemThreadLayout } from "../threads/ItemThreadLayout";
 import { threadVersionChanged } from "../threads/commandChanges";
 import { usePulseChanged } from "../inbox/Inbox";
 import { LoanTermsEditor } from "./LoanTermsEditor";
@@ -322,7 +323,21 @@ export function LoanScreen({
     </a>
   );
   const frame = (title: string, children: ReactNode, actions?: ReactNode) => (
-    <div className="flex w-full min-w-0 flex-col gap-6">
+    <ItemThreadLayout
+      label="Loan details"
+      timeline={
+        load.kind === "ready" ? (
+          <ThreadTimeline
+            active={active}
+            kind="loan"
+            id={load.loan.thread_id}
+            editionNames={Object.fromEntries(
+              load.loan.lines.map((card) => [card.edition_id, card.name])
+            )}
+          />
+        ) : null
+      }
+    >
       {back}
       <div className="relative flex min-w-0 items-start gap-3 pr-10">
         {load.kind === "ready" && (
@@ -334,16 +349,6 @@ export function LoanScreen({
         {actions && <div className="absolute top-0 right-0">{actions}</div>}
       </div>
       {children}
-      {load.kind === "ready" && (
-        <ThreadTimeline
-          active={active}
-          kind="loan"
-          id={load.loan.thread_id}
-          editionNames={Object.fromEntries(
-            load.loan.lines.map((card) => [card.edition_id, card.name])
-          )}
-        />
-      )}
       {load.kind === "ready" && editingTerms && (
         <LoanTermsEditor
           loan={load.loan}
@@ -356,7 +361,7 @@ export function LoanScreen({
           }}
         />
       )}
-    </div>
+    </ItemThreadLayout>
   );
 
   if (load.kind === "loading")

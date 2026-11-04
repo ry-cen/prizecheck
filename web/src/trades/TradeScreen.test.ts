@@ -3,19 +3,21 @@ import { act, createElement as h, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { TradeView } from "../social_generated";
-import { getTrade } from "../social_generated";
-import { acceptTrade, getTradeSide } from "../trades_generated";
+import { getTrade, declineTrade } from "../social_generated";
+import { acceptTrade, confirmSwap, getTradeSide } from "../trades_generated";
 import { ListDetailLayout } from "../ui/ListDetailLayout";
 import { ToastProvider } from "../ui/Toast";
 import { TradeScreen } from "./TradeScreen";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
   getTrade: vi.fn(),
+  declineTrade: vi.fn(),
 }));
 vi.mock("../trades_generated", async (original) => ({
   ...(await original<typeof import("../trades_generated")>()),
   getTradeSide: vi.fn(),
   acceptTrade: vi.fn(),
+  confirmSwap: vi.fn(),
 }));
 vi.mock("./useIncomingTradeMatch", () => ({
   useIncomingTradeMatch: () => ({ match: null, needs: [] }),
@@ -129,4 +131,85 @@ it("canonicalizes an old round URL before acceptance so route-scoped feedback st
   expect(
     host.querySelector('[aria-label="Notifications"]')?.textContent
   ).toContain("Accepted. Swap the cards in person, then confirm.");
+});
+
+it("declines a proposal in one press without a redundant confirmation", async () => {
+  vi.mocked(getTrade).mockResolvedValue({ ...trade, actions: ["decline"] });
+  vi.mocked(declineTrade).mockResolvedValue({
+    ...trade,
+    state: "closed",
+    actions: [],
+    closed_reason: "declined",
+  });
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  const decline = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent === "Decline"
+  )!;
+  await act(async () => decline.click());
+  expect(declineTrade).toHaveBeenCalledTimes(1);
+  expect(declineTrade).toHaveBeenCalledWith(
+    "item",
+    expect.objectContaining({ offer_id: "old-round", revision: 1 })
+  );
+  expect(host.querySelector('[role="group"][aria-label="Decline"]')).toBeNull();
+});
+it("shows the physical swap disclosure before its single confirmation control", async () => {
+  const agreed: TradeView = {
+    ...trade,
+    state: "accepted",
+    actions: ["confirm_swap"],
+  };
+  vi.mocked(getTrade).mockResolvedValue(agreed);
+  vi.mocked(confirmSwap).mockResolvedValue({
+    ...agreed,
+    state: "closed",
+    closed_reason: "swapped",
+    actions: [],
+    switched_decks: [],
+  });
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  const disclosure = host.querySelector(
+    '[aria-label="Confirm swap with Misty"]'
+  )!;
+  expect(disclosure.textContent).toContain(
+    "Only confirm after the physical swap"
+  );
+  expect(disclosure.textContent).toContain("can't be undone");
+  expect(disclosure.textContent).toContain("are private");
+  const buttons = [...host.querySelectorAll("button")].filter(
+    (button) => button.textContent === "Confirm swap"
+  );
+  expect(buttons).toHaveLength(1);
+  await act(async () => buttons[0].click());
+  expect(confirmSwap).toHaveBeenCalledTimes(1);
+  expect(confirmSwap).toHaveBeenCalledWith(
+    "item",
+    expect.objectContaining({
+      offer_id: "old-round",
+      revision: 1,
+      destination_id: null,
+      deck_switches: [],
+    })
+  );
 });

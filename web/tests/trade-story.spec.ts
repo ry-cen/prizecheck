@@ -112,7 +112,7 @@ const waitingOn = (on: Page) =>
 const earlierOn = (on: Page) =>
   drawer(on).getByRole("region", { name: "Earlier" });
 const confirmDialog = (page: Page, other: string) =>
-  page.getByRole("dialog", { name: `Confirm swap with ${other}?` });
+  page.getByRole("region", { name: `Confirm swap with ${other}` });
 const NOTICE = "only records the cash amount you agree on";
 
 /** Opens a Location's settings from its gear in the sidebar, or on a phone in the Locations drawer. The drawer
@@ -549,12 +549,14 @@ async function story(
   await expect(ash.page).toHaveURL(counterAddress);
   await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
   await expectCollectorCopy(ashMain, mistyPlace);
-  await ashMain.getByRole("button", { name: "Confirm swap" }).click();
   const ashDialog = confirmDialog(ash.page, "Misty W");
+  await expect(
+    ashMain.getByRole("list", { name: "You give", exact: true })
+  ).toContainText(`From ${ashPlace} Binder`);
   await expect(ashDialog).toContainText(
-    `Arven (SVI 166) ×2 · from ${ashPlace} Binder`
+    "Leaves your Collection: 2 Arven (SVI 166)"
   );
-  await expect(ashDialog).toContainText("Iono (PAL 185) ×1");
+  await expect(ashDialog).toContainText("1 Iono (PAL 185)");
   await expect(ashDialog).toContainText("The swap can't be undone.");
   const destination = ashDialog.getByRole("combobox", {
     name: "Put the cards you get in",
@@ -601,12 +603,14 @@ async function story(
   await expect(main).toContainText("Confirm yours once you have the cards.");
   await expectCollectorCopy(main, ashPlace);
   await expectPageChecks(page, `a half-confirmed Trade at ${width}`);
-  await main.getByRole("button", { name: "Confirm swap" }).click();
   const dialog = confirmDialog(page, "Ash K");
+  await expect(
+    main.getByRole("list", { name: "You give", exact: true })
+  ).toContainText(`From ${mistyPlace} Shelf`);
   await expect(dialog).toContainText(
-    `Iono (PAL 185) ×1 · from ${mistyPlace} Shelf`
+    "Leaves your Collection: 1 Iono (PAL 185)"
   );
-  await expect(dialog).toContainText("Arven (SVI 166) ×2");
+  await expect(dialog).toContainText("2 Arven (SVI 166)");
   await dialog
     .getByRole("combobox", { name: "Put the cards you get in" })
     .selectOption({ label: `${mistyPlace} Deck (Deck)` });
