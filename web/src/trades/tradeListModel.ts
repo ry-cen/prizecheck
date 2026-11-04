@@ -39,17 +39,6 @@ export const TRADE_WITH_SEGMENT = "with";
 /** The section name before a conversation id in a conversation's address. */
 export const TRADE_CONVERSATION_SEGMENT = "conversation";
 
-/** The conversation with one collector, by trader id (Trading #298): /trades/with/<trader id>. */
-export function traderConversationPath(traderId: string): string {
-  return `${TRADES_PATH}/${TRADE_WITH_SEGMENT}/${encodeURIComponent(traderId)}`;
-}
-
-/** One conversation by its id: /trades/conversation/<conversation id>. It exists because a conversation whose other
- * side is deleted has no trader id, and because a Trade knows only the conversation's id. */
-export function conversationPath(id: string): string {
-  return `${TRADES_PATH}/${TRADE_CONVERSATION_SEGMENT}/${encodeURIComponent(id)}`;
-}
-
 /** The address of one of the Trades tab's views. */
 export function tradesViewPath(view: TradesTabView): string {
   switch (view) {

@@ -495,7 +495,11 @@ def loan_view(conn, user_id: str, loan_id: UUID) -> LoanView:
     return loan_views(conn, user_id, [row])[0]
 
 
-@router.get('/resolve/{identifier}')
+class LoanResolution(BaseModel):
+    thread_id: UUID
+
+
+@router.get('/resolve/{identifier}', response_model=LoanResolution)
 def resolve_loan(identifier: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn:
         found = conn.execute("""SELECT t.id FROM thread t WHERE t.kind='loan'
