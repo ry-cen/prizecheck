@@ -272,7 +272,6 @@ export function ThreadTimeline({
             value={body}
             disabled={busy || pending.current !== null}
             onChange={(event) => setBody(event.target.value)}
-            maxLength={4000}
           />
           <Button
             type="submit"

@@ -253,3 +253,40 @@ it("S2-03: removed Editions and same-name variants keep public identities across
     vi.clearAllMocks();
   }
 });
+
+it("keeps an oversized pasted draft intact for explicit validation without posting a truncated message", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(h(ThreadTimeline, { kind: "trade", id: "item" }))
+    );
+    const field = host.querySelector("textarea")!;
+    expect(field.maxLength < 0 || field.maxLength >= 4001).toBe(true);
+    const oversized = "é".repeat(4001);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      )!.set!.call(field, oversized);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () =>
+      host
+        .querySelector("form")!
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+    );
+    expect(field.value).toBe(oversized);
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      "Messages can be up to 1,000 characters."
+    );
+    expect(sendThreadMessage).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
