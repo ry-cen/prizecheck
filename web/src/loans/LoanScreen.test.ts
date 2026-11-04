@@ -6,6 +6,7 @@ import {
   getLoan,
   getLoanSide,
   startReturn,
+  acceptBorrowRequest,
   type LoanView,
 } from "../social_generated";
 import { LoanScreen } from "./LoanScreen";
@@ -14,6 +15,7 @@ vi.mock("../social_generated", async (original) => ({
   getLoan: vi.fn(),
   getLoanSide: vi.fn(),
   startReturn: vi.fn(),
+  acceptBorrowRequest: vi.fn(),
 }));
 vi.mock("../threads/ThreadTimeline", () => ({ ThreadTimeline: () => null }));
 const loan: LoanView = {
@@ -253,6 +255,57 @@ it("Some back opens quantities without posting a return", async () => {
     expect(
       host.querySelector('[role="group"][aria-label^="Copies of Iono"]')
     ).not.toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});
+it("previews a partial acceptance without presenting draft quantities as agreed terms", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.mocked(getLoan).mockResolvedValue({
+    ...loan,
+    state: "requested",
+    role: "lender",
+    closed_reason: null,
+    closed_by: null,
+    lines: [{ ...loan.lines[0], requested: "3", promised: "0" }],
+    section: "needs_you",
+    needs_you: true,
+    actions: ["accept", "decline"],
+  });
+  vi.mocked(getLoanSide).mockResolvedValue({
+    loan_id: "round",
+    deck: null,
+    can_promise: [{ edition_id: "iono", available: "2" }],
+    picks: [],
+    suggested: [],
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        h(LoanScreen, {
+          loanId: "item",
+          onCanonicalLoan: vi.fn(),
+          onLoanChanged: vi.fn(),
+          onAllLoans: vi.fn(),
+          onOpenDeck: vi.fn(),
+        })
+      )
+    );
+    expect(host.querySelector("h1")?.textContent).toBe(
+      "Misty wants to borrow 3 cards"
+    );
+    const preview = host.querySelector('[aria-label="Acceptance preview"]')!;
+    expect(preview.textContent).toContain("2 to lend; 1 not lent.");
+    expect(preview.textContent).toContain(
+      "No return date. Accepting agrees to these quantities and this return date."
+    );
+    expect(acceptBorrowRequest).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());
     host.remove();
