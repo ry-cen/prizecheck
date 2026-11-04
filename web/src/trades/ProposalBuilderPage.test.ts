@@ -212,7 +212,10 @@ it("recovers a failed replacement fresh read without hiding Retry, the preserved
   expect(button("I reviewed the current offer").disabled).toBe(false);
   expect(counterTrade).toHaveBeenCalledTimes(1);
   await click(button("I reviewed the current offer"));
-  expect(host.querySelector("output")?.textContent).toBe("2");
+  expect(
+    host.querySelector('[role="group"][aria-label="Iono (PAL 185) you get"]')
+      ?.textContent
+  ).toBe("2");
   await click(decrease());
   await click(send());
   expect(vi.mocked(counterTrade).mock.calls[1][1].offer_id).toBe("B");
@@ -230,7 +233,10 @@ it("fences OFFER_CHANGED after Send until actual confirmation and submits only t
   await click(send());
   expect(counterTrade).toHaveBeenCalledTimes(1);
   await click(button("I reviewed the current offer"));
-  expect(host.querySelector("output")?.textContent).toBe("2");
+  expect(
+    host.querySelector('[role="group"][aria-label="Iono (PAL 185) you get"]')
+      ?.textContent
+  ).toBe("2");
   await click(decrease());
   await click(send());
   expect(vi.mocked(counterTrade).mock.calls[1][1]).toMatchObject({
@@ -306,7 +312,10 @@ it("freezes draft controls while sending, then exposes the identical-key retry a
   expect(send().disabled).toBe(true);
   expect(increase().matches(":disabled")).toBe(true);
   await click(increase());
-  expect(host.querySelector("output")?.textContent).toBe("2");
+  expect(
+    host.querySelector('[role="group"][aria-label="Iono (PAL 185) you get"]')
+      ?.textContent
+  ).toBe("2");
   await act(async () => reject(new TypeError("lost response")));
   expect(send().disabled).toBe(false);
   await click(send());
@@ -349,7 +358,11 @@ it("keeps one outcome announcement when an unavailable replay replaces the mount
     )
   );
   expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
-  expect(host.querySelector("output")?.getAttribute("role")).toBe("none");
+  expect(host.querySelector("output")).toBeNull();
+  expect(
+    host.querySelector('[role="group"][aria-label="Iono (PAL 185) you get"]')
+      ?.textContent
+  ).toBe("1");
   const submit = button("Send Trade Proposal");
   await act(async () => {
     submit.click();
@@ -652,9 +665,10 @@ it.each(
     expect(finish).toBeTypeOf("function");
     expect(send().disabled).toBe(true);
     expect(counterTrade).toHaveBeenCalledTimes(1);
-    expect(host.querySelector("output")?.textContent).toBe(
-      outcome === "refusal" ? "2" : "3"
-    );
+    expect(
+      host.querySelector('[role="group"][aria-label="Iono (PAL 185) you get"]')
+        ?.textContent
+    ).toBe(outcome === "refusal" ? "2" : "3");
     if (retryCheck) {
       await act(async () => failFresh(new TypeError("fresh check offline")));
       expect(button("Retry current offer").disabled).toBe(false);
