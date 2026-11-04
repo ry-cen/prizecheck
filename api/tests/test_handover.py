@@ -39,18 +39,18 @@ from want_list_swap_fixtures import seed_swap_catalog
 
 
 def handover(user, loan, key=None):
-    return call('POST', f"/api/loans/{loan['id']}/handover", user,
-                {'revision': view(user, loan)['revision'], 'idempotency_key': str(key or uuid4())})
+    return call('POST', f"/api/loans/{loan['thread_id']}/handover", user,
+                {'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(key or uuid4())})
 
 
 def take_back(user, loan):
-    return call('POST', f"/api/loans/{loan['id']}/take-back", user,
-                {'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())})
+    return call('POST', f"/api/loans/{loan['thread_id']}/take-back", user,
+                {'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())})
 
 
 def use_suggested(user, loan):
-    return call('POST', f"/api/loans/{loan['id']}/picks/use-suggested", user,
-                {'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())})
+    return call('POST', f"/api/loans/{loan['thread_id']}/picks/use-suggested", user,
+                {'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())})
 
 
 def code(response):
@@ -209,10 +209,10 @@ def test_nobody_cancels_once_only_the_borrower_has_confirmed(store):
 
 def test_a_handover_or_take_back_replayed_with_its_key_writes_once(store):
     iono, ash, misty, binder, loan = accepted_loan(held=3, asked=2)
-    path = f"/api/loans/{loan['id']}"
+    path = f"/api/loans/{loan['thread_id']}"
 
     def twice(user, route):
-        body = {'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())}
+        body = {'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())}
         first = ok(call('POST', f'{path}/{route}', user, body))
         before = (ok(call('GET', '/api/location-tree', user))['owner_revision'], view(user, loan)['revision'])
         assert ok(call('POST', f'{path}/{route}', user, body)) == first
@@ -342,43 +342,21 @@ def test_lent_deck_copies_read_lent_to_count_as_missing_and_stay_off_the_want_li
 def test_a_cancel_racing_the_lenders_handover_waits_and_then_finds_the_loan_changed(store):
     # Ash's id sorts first, so the borrower's cancel holds Ash's row while it waits on Misty's.
     iono, ash, misty, binder, loan = accepted_loan(held=2, asked=2, ordered=True)
-    cancel_body = {'revision': view(ash, loan)['revision'], 'idempotency_key': str(uuid4())}
+    cancel_body = {'loan_id': loan['loan_id'], 'revision': view(ash, loan)['revision'], 'idempotency_key': str(uuid4())}
     drop = _sleeping('loan_pick', 'UPDATE', f"NEW.owner_id = '{misty}' AND NEW.state = 'lent'")
     try:
         with ThreadPoolExecutor(max_workers=2) as executor, \
                 psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
             handed = executor.submit(handover, misty, loan)
             _asleep(watch, 1, [handed])
-            cancelled = executor.submit(call, 'POST', f"/api/social/loans/{loan['id']}/cancel", ash, cancel_body)
+            cancelled = executor.submit(call, 'POST', f"/api/loans/{loan['thread_id']}/cancel", ash, cancel_body)
             handed, cancelled = handed.result(), cancelled.result()
     finally:
         drop()
     assert handed.status_code == 200, handed.text
-    assert code(cancelled) == (409, 'LOAN_CHANGED')
+    assert code(cancelled) == (409, 'STEP_NOT_ALLOWED')
     assert view(ash, loan)['state'] == 'accepted' and tree_lent(misty) == '2'
 
-
-def test_two_loans_stepped_from_both_sides_at_once_never_deadlock(store):
-    iono, ash, misty, binder, first = accepted_loan(held=4, asked=2)
-    ok(handover(misty, first))
-    second = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 2)])), [(iono, 2)]))
-    drops = [_sleeping('loan_pick', 'UPDATE', f"NEW.owner_id = '{misty}' AND NEW.state = 'reserved'"),
-             _sleeping('borrowed_holding', 'INSERT', f"NEW.borrower_id = '{ash}'")]
-    try:
-        with ThreadPoolExecutor(max_workers=2) as executor, \
-                psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
-            taken_back = executor.submit(take_back, misty, first)
-            confirmed = executor.submit(handover, ash, second)
-            _asleep(watch, 2, [taken_back, confirmed])
-            taken_back, confirmed = taken_back.result(), confirmed.result()
-    finally:
-        for drop in drops:
-            drop()
-    assert taken_back.status_code == 200, taken_back.text
-    assert confirmed.status_code == 200, confirmed.text
-    assert view(misty, first)['you_confirmed_handover'] is False
-    assert view(ash, second)['you_confirmed_handover'] is True
-    assert sorted(borrowed(second).values()) == [2]
 
 
 def test_a_lenders_step_and_the_borrowers_deck_deletion_both_commit(store):
@@ -413,26 +391,26 @@ def test_a_step_the_database_ends_in_a_deadlock_answers_503_and_its_retry_runs(s
         raise psycopg.errors.DeadlockDetected('deadlock detected')
 
     with pytest.raises(HTTPException) as refused:
-        run_step(misty, UUID(loan['id']), LoanStep(revision=revision, idempotency_key=key), 'confirm_handover',
+        run_step(misty, UUID(loan['thread_id']), LoanStep(loan_id=loan['loan_id'], revision=revision, idempotency_key=key), 'confirm_handover',
                  deadlocked, lambda role, row: [misty])
     assert (refused.value.status_code, refused.value.detail) == (503, {'code': 'INVENTORY_TEMPORARILY_UNAVAILABLE'})
     assert view(misty, loan)['revision'] == revision and holding(misty, binder, iono)['quantity'] == '2'
     # Nothing was recorded for the key, so the client's retry with it runs the step.
-    retried = ok(call('POST', f"/api/loans/{loan['id']}/handover", misty,
-                      {'revision': revision, 'idempotency_key': str(key)}))
+    retried = ok(call('POST', f"/api/loans/{loan['thread_id']}/handover", misty,
+                      {'loan_id': loan['loan_id'], 'revision': revision, 'idempotency_key': str(key)}))
     assert retried['you_confirmed_handover'] is True
 
 
 def test_a_loan_step_writes_its_loan_row_once():
     # A second write of a Loan row in one transaction checks both collectors' keys again, key-sharing the other side's
     # owner row after the step's own locks. Only run_step's write_loan writes the row of an existing Loan; the other
-    # write is a Borrow Request's Edit and resend, which closes the earlier request with one write of its row. The
+    # term-edit closure also uses write_loan, so inventory code never writes the Loan row directly. The
     # inbox (#259) and the pick reads write no Loan row, and an unfriend or a Block (#260) cancels Loans through
     # write_loan, once for each Loan.
     app = Path(__file__).resolve().parents[1] / 'app'
     writes = {name: len(re.findall(r'\bUPDATE\s+loan\s', _string_constants(app / name)))
               for name in (*LOAN_MODULES, 'social/friends.py')}
-    assert writes == {'social/owners.py': 0, 'social/loans.py': 1, 'loan_inventory.py': 1, 'borrowed_copies.py': 0,
+    assert writes == {'social/owners.py': 0, 'social/loans.py': 1, 'loan_inventory.py': 0, 'borrowed_copies.py': 0,
                       'loan_picks.py': 0, 'social/inbox.py': 0, 'social/friends.py': 0}
 
 

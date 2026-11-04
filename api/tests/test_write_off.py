@@ -27,8 +27,8 @@ from want_list_swap_fixtures import seed_swap_catalog
 
 
 def write_off(user, loan, lines):
-    return call('POST', f"/api/loans/{loan['id']}/write-off", user, {
-        'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4()),
+    return call('POST', f"/api/loans/{loan['thread_id']}/write-off", user, {
+        'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4()),
         'lines': [{'edition_id': edition, 'quantity': str(copies)} for edition, copies in lines]})
 
 
@@ -36,8 +36,8 @@ def choose(user, loan, choice, places=None):
     if places is None:
         places = [{key: entry[key] for key in ('location_id', 'edition_id', 'copies')}
                   for entry in side(user, loan)['awaiting_choice']]
-    return call('POST', f"/api/loans/{loan['id']}/written-off", user, {
-        'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4()), 'choice': choice,
+    return call('POST', f"/api/loans/{loan['thread_id']}/written-off", user, {
+        'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4()), 'choice': choice,
         'places': places})
 
 
@@ -179,14 +179,14 @@ def test_a_write_off_racing_the_borrowers_deck_deletion_never_deadlocks(store):
     # The Write-off locks only the lender and writes the Loan row once; Ash's Deck deletion holds his owner row and
     # sets the Loan's Deck to NULL. A second write of the Loan row would key-share that Deck and close a cycle.
     iono, ash, misty, binders, loan, charizard = lent_loan({'Binder': 2}, 2, 'Charizard')
-    body = {'revision': view(misty, loan)['revision'], 'idempotency_key': str(uuid4()),
+    body = {'loan_id': loan['loan_id'], 'revision': view(misty, loan)['revision'], 'idempotency_key': str(uuid4()),
             'lines': [{'edition_id': iono, 'quantity': '1'}]}
     found = node(ash, charizard)
     drop = _sleeping('loan_line', 'UPDATE', 'NEW.written_off > 0')
     try:
         with ThreadPoolExecutor(max_workers=2) as executor, \
                 psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
-            written = executor.submit(call, 'POST', f"/api/loans/{loan['id']}/write-off", misty, body)
+            written = executor.submit(call, 'POST', f"/api/loans/{loan['thread_id']}/write-off", misty, body)
             _asleep(watch, 1, [written])
             deleted = executor.submit(call, 'DELETE', f'/api/decks/{charizard}', ash,
                                       {'name': found['name'], 'version': found['version'],

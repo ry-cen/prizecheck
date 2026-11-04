@@ -3,8 +3,8 @@ import { useNoteLoansChanged, usePollPulse } from "../inbox/Inbox";
 import { CANCEL } from "../social/blockMessages";
 import { endingText, traderEnding } from "../social/friendshipEnding";
 import {
-  getLoans,
-  getTrades,
+  getLoanViews,
+  getTradeViews,
   reportCollector,
   type ReportCollector,
 } from "../social_generated";
@@ -94,19 +94,14 @@ export function useTraderReport(
     reading.current = controller;
     setEnding("");
     Promise.all([
-      getTrades(controller.signal),
-      who.handle ? getLoans(controller.signal) : Promise.resolve(null),
+      getTradeViews(controller.signal),
+      who.handle ? getLoanViews(controller.signal) : Promise.resolve(null),
     ])
       .then(([trades, loans]) => {
         if (controller.signal.aborted) return;
         setEnding(
           endingText(
-            traderEnding(
-              loans ? loans.loans : null,
-              trades.trades,
-              who.traderId,
-              who.handle
-            )
+            traderEnding(loans ? loans : null, trades, who.traderId, who.handle)
           )
         );
       })

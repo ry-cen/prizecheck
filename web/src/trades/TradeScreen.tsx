@@ -1,3 +1,4 @@
+import { usePulseChanged } from "../inbox/Inbox";
 import { canKeepSwapChoices, canRetrySwap } from "../social/confirmationRetry";
 import {
   useEffect,
@@ -56,13 +57,8 @@ import { useTraderReport } from "./TraderReport";
 import { LiabilityNotice } from "./LiabilityNotice";
 import { MeetInPublicTip } from "./MeetInPublicTip";
 import { valueLines } from "./proposalModel";
-import { conversationLinkText } from "./conversationMessages";
-import {
-  conversationPath,
-  counterPath,
-  TRADES_PATH,
-  tradePath,
-} from "./tradeListModel";
+import { ThreadTimeline } from "../threads/ThreadTimeline";
+import { counterPath, TRADES_PATH, tradePath } from "./tradeListModel";
 import {
   swapDoneMessage,
   switchDoneText,
@@ -164,10 +160,12 @@ const DONE: Record<Asking | "accept" | "use_suggested", string> = {
  */
 export function TradeScreen({
   tradeId,
+  active = true,
   onAllTrades,
   onNavigate,
 }: {
   /** The Trade's id, or null for an address that names no Trade: it shows the same not-found as a missing Trade. */
+  active?: boolean;
   tradeId: string | null;
   onAllTrades: () => void;
   /** Goes to another address in the app: the Counter builder, or the proposal a Counter answers. */
@@ -180,6 +178,7 @@ export function TradeScreen({
   const [load, setLoad] = useState<Load>(
     tradeId === null ? { kind: "missing" } : { kind: "loading" }
   );
+  const pulseChanged = usePulseChanged();
   const [attempt, setAttempt] = useState(0);
   const incomingMatch = useIncomingTradeMatch(
     load.kind === "ready" ? load.trade : null
@@ -194,7 +193,7 @@ export function TradeScreen({
   const places = useSwapPlaces(confirming);
   // The Deck switches Confirm swap offers for the place chosen; read only while the dialog is open and they get cards.
   const switches = useDeckSwitchOffers(
-    load.kind === "ready" ? load.trade.id : "",
+    load.kind === "ready" ? load.trade.thread_id : "",
     load.kind === "ready" && confirming && load.trade.you_get.length > 0,
     destination
   );
@@ -204,7 +203,7 @@ export function TradeScreen({
           traderId: load.trade.other.trader_id,
           name: load.trade.other.display_name,
           handle: load.trade.other.friend ? load.trade.other.handle : null,
-          tradeId: load.trade.id,
+          tradeId: load.trade.thread_id,
         }
       : null,
     {
@@ -244,7 +243,9 @@ export function TradeScreen({
     const controller = new AbortController();
     Promise.all([
       getTrade(tradeId, controller.signal),
-      getTradeSide(tradeId, controller.signal),
+      getTrade(tradeId, controller.signal).then((view) =>
+        getTradeSide(view.thread_id, controller.signal)
+      ),
     ]).then(
       ([trade, side]) => {
         if (controller.signal.aborted) return;
@@ -269,7 +270,7 @@ export function TradeScreen({
       }
     );
     return () => controller.abort();
-  }, [tradeId, attempt]);
+  }, [tradeId, attempt, pulseChanged]);
 
   // Refresh an idle view when returning to it. An open consent dialog or unsettled command keeps its snapshot.
   useEffect(() => {
@@ -283,7 +284,9 @@ export function TradeScreen({
       controller = request;
       Promise.all([
         getTrade(tradeId, request.signal),
-        getTradeSide(tradeId, request.signal),
+        getTrade(tradeId, request.signal).then((view) =>
+          getTradeSide(view.thread_id, request.signal)
+        ),
       ])
         .then(([trade, side]) => {
           if (!request.signal.aborted) setLoad({ kind: "ready", trade, side });
@@ -354,27 +357,7 @@ export function TradeScreen({
       All Trades
     </a>
   );
-  // A Trade of a pair with a conversation links to it (Trading #298).
-  const conversationId =
-    load.kind === "ready" ? load.trade.conversation_id : null;
-  const back = (
-    <div className="flex flex-wrap items-center gap-2">
-      {allTrades}
-      {conversationId && load.kind === "ready" && (
-        <a
-          href={conversationPath(conversationId)}
-          onClick={(event) => {
-            if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-            event.preventDefault();
-            onNavigate(conversationPath(conversationId));
-          }}
-          className="inline-flex h-control items-center gap-1 self-start rounded-control px-2 text-control font-medium text-text-muted no-underline hover:bg-surface-raised hover:text-text phone:h-control-phone"
-        >
-          {conversationLinkText(load.trade.other.display_name)}
-        </a>
-      )}
-    </div>
-  );
+  const back = allTrades;
   const frame = (
     title: string,
     children: ReactNode,
@@ -387,6 +370,19 @@ export function TradeScreen({
         <PageHeader title={title} actions={actions} headingRef={heading} />
       </div>
       {children}
+      {load.kind === "ready" && (
+        <ThreadTimeline
+          active={active}
+          kind="trade"
+          id={load.trade.thread_id}
+          editionNames={Object.fromEntries(
+            [...load.trade.you_give, ...load.trade.you_get].map((card) => [
+              card.edition_id,
+              card.name,
+            ])
+          )}
+        />
+      )}
       {dialog}
     </main>
   );
@@ -458,18 +454,20 @@ export function TradeScreen({
     keys.current.set(action, key);
     try {
       const next = await call({
+        offer_id: trade.offer_id,
         revision: trade.revision,
         idempotency_key: key,
       });
       keys.current.delete(action);
       if (action === "confirm") held.current = null;
-      const nextSide = await getTradeSide(trade.id).catch(() => side);
+      const nextSide = await getTradeSide(trade.thread_id).catch(() => side);
       focusNext.current = "heading";
       setAsking(null);
       setConfirming(false);
       setLoad({ kind: "ready", trade: next, side: nextSide });
       if (announce) announce(next, done(next));
-      else toast.show({ message: done(next), route: tradePath(trade.id) });
+      else
+        toast.show({ message: done(next), route: tradePath(trade.thread_id) });
       refreshInbox();
     } catch (cause) {
       if (!tradeOutcomeUnknown(cause)) {
@@ -502,19 +500,19 @@ export function TradeScreen({
     decline: () =>
       void step(
         "decline",
-        (body) => declineTrade(trade.id, body),
+        (body) => declineTrade(trade.thread_id, body),
         () => DONE.decline
       ),
     withdraw: () =>
       void step(
         "withdraw",
-        (body) => withdrawTrade(trade.id, body),
+        (body) => withdrawTrade(trade.thread_id, body),
         () => DONE.withdraw
       ),
     cancel: () =>
       void step(
         "cancel",
-        (body) => cancelTrade(trade.id, body),
+        (body) => cancelTrade(trade.thread_id, body),
         () => DONE.cancel
       ),
   };
@@ -556,7 +554,10 @@ export function TradeScreen({
           })),
         };
         try {
-          return (answered.current = await confirmSwap(trade.id, command));
+          return (answered.current = await confirmSwap(
+            trade.thread_id,
+            command
+          ));
         } catch (cause) {
           if (
             !(cause instanceof TradesError || cause instanceof SocialError) ||
@@ -564,8 +565,8 @@ export function TradeScreen({
           )
             throw cause;
           const [fresh, freshSide, tree] = await Promise.all([
-            getTrade(trade.id),
-            getTradeSide(trade.id, undefined, command.destination_id),
+            getTrade(trade.thread_id),
+            getTradeSide(trade.thread_id, undefined, command.destination_id),
             getLocationTree(),
           ]);
           if (
@@ -580,8 +581,9 @@ export function TradeScreen({
             throw cause;
           // Keep the revision with the held key if this retry's outcome is unknown.
           setLoad({ kind: "ready", trade: fresh, side: freshSide });
-          return (answered.current = await confirmSwap(trade.id, {
+          return (answered.current = await confirmSwap(trade.thread_id, {
             ...command,
+            offer_id: fresh.offer_id,
             revision: fresh.revision,
           }));
         }
@@ -599,7 +601,7 @@ export function TradeScreen({
           message,
           sent,
           answered.current?.switched_decks ?? [],
-          tradePath(trade.id)
+          tradePath(trade.thread_id)
         )
     );
   }
@@ -609,6 +611,14 @@ export function TradeScreen({
     trade.actions.includes("decline") ||
     trade.actions.includes("counter");
   const menu: MenuItem[] = [
+    ...(trade.actions.includes("change_offer")
+      ? [
+          {
+            label: "Change offer",
+            onSelect: () => onNavigate(counterPath(trade.thread_id)),
+          },
+        ]
+      : []),
     ...(trade.actions.includes("withdraw")
       ? [{ label: "Withdraw", onSelect: () => ask("withdraw") }]
       : []),
@@ -627,7 +637,7 @@ export function TradeScreen({
           onClick={() =>
             void step(
               "accept",
-              (body) => acceptTrade(trade.id, body),
+              (body) => acceptTrade(trade.thread_id, body),
               () => DONE.accept
             )
           }
@@ -635,11 +645,12 @@ export function TradeScreen({
           Accept
         </Button>
       )}
-      {trade.actions.includes("counter") && (
+      {(trade.actions.includes("counter") ||
+        trade.actions.includes("change_offer")) && (
         <Button
           aria-disabled={busy || undefined}
           onClick={() => {
-            if (!busy) onNavigate(counterPath(trade.id));
+            if (!busy) onNavigate(counterPath(trade.thread_id));
           }}
         >
           Counter
@@ -659,7 +670,7 @@ export function TradeScreen({
         onClick={() =>
           void step(
             "use_suggested",
-            (body) => useSuggestedTradePicks(trade.id, body),
+            (body) => useSuggestedTradePicks(trade.thread_id, body),
             () => DONE.use_suggested
           )
         }
@@ -801,7 +812,7 @@ export function TradeScreen({
       ) : null}
       {showsAddFriend(trade) && (
         <AddAsFriend
-          tradeId={trade.id}
+          tradeId={trade.thread_id}
           traderId={trade.other.trader_id!}
           name={name}
         />

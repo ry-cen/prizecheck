@@ -35,6 +35,12 @@ def nearby_pair():
     return ids, ash, misty, conversation, proposal['id']
 
 
+def thread_of(trade_id):
+    """A seeded round's durable thread; Add Friend still names the completed round."""
+    with connect() as conn:
+        return conn.execute('SELECT thread_id FROM trade WHERE id=%s', (trade_id,)).fetchone()['thread_id']
+
+
 def handle_of(user):
     with connect() as conn:
         return conn.execute('SELECT handle FROM collector_profile WHERE user_id = %s', (user,)).fetchone()['handle']
@@ -82,9 +88,9 @@ def test_no_stranger_response_carries_a_zip_coordinate_distance_handle_or_user_i
     handle = handle_of(misty).lower()
     paths = ['/api/social/discovery', f'/api/social/traders/{trader_of(misty)}',
              f'/api/social/traders/{trader_of(misty)}/trade-list', f'/api/social/traders/{trader_of(misty)}/matches',
-             '/api/social/conversations', f'/api/social/conversations/{conversation}',
-             f'/api/social/conversations/with/{trader_of(misty)}', '/api/social/conversations/pulse',
-             '/api/social/trades', f'/api/social/trades/{trade}', '/api/social/inbox', '/api/social/blocks',
+             '/api/trades?group=done', f'/api/trades/{conversation}',
+             f'/api/trades/{conversation}/timeline', '/api/threads/pulse',
+             '/api/trades', f'/api/trades/{thread_of(trade)}', '/api/social/inbox', '/api/social/blocks',
              '/api/social/friends']
     for path in paths:
         response = call('GET', path, ash)
@@ -129,8 +135,8 @@ def test_a_handle_lookup_never_leads_to_a_trader_id(store):
     sent = call('POST', f'/api/social/trades/{trade}/add-friend', ash, {'idempotency_key': str(uuid4())})
     assert sent.status_code == 200 and sent.json() == {'relation': 'request_sent'}, sent.text
     assert handle_of(misty).lower() not in sent.text.lower() and misty not in sent.text
-    reads = ['/api/social/friends', f'/api/social/traders/{trader_of(misty)}', f'/api/social/trades/{trade}',
-             '/api/social/conversations']
+    reads = ['/api/social/friends', f'/api/social/traders/{trader_of(misty)}', f'/api/trades/{thread_of(trade)}',
+             '/api/trades?group=done']
 
     def holds_neither():
         for path in reads:
@@ -190,10 +196,12 @@ def test_a_block_reads_like_a_suspension_to_the_blocked_side(store):
         conn.execute('UPDATE collector_profile SET suspended_at = now() WHERE user_id = %s', (other_b,))
 
     def alike(seen):
-        return {**{key: value for key, value in seen.items()
-                   if key not in ('id', 'items', 'trader_id', 'display_name', 'conversation_id')},
-                'other': {key: value for key, value in seen.get('other', {}).items()
-                          if key not in ('display_name', 'trader_id')}}
+        if isinstance(seen, dict):
+            return {key: alike(value) for key, value in seen.items() if key not in
+                    ('id', 'thread_id', 'offer_id', 'items', 'trader_id', 'display_name', 'conversation_id', 'created_at')}
+        if isinstance(seen, list):
+            return [alike(value) for value in seen]
+        return seen
 
     header_a = ok(call('GET', f'/api/social/traders/{trader_of(other_a)}', viewer_a))
     header_b = ok(call('GET', f'/api/social/traders/{trader_of(other_b)}', viewer_b))
@@ -207,16 +215,17 @@ def test_no_band_while_either_side_has_discovery_off(store):
     def bands():
         header = ok(call('GET', f'/api/social/traders/{trader_of(misty)}', ash))['band']
         listed = ok(call('GET', f'/api/social/traders/{trader_of(misty)}/trade-list', ash))['band']
-        talking = ok(view(ash, conversation))['other']['band']
-        return header, listed, talking
+        talking = ok(view(ash, conversation))
+        assert 'band' not in talking['live_offer']['other']
+        return header, listed
 
-    assert bands() == ('5_to_10',) * 3
+    assert bands() == ('5_to_10',) * 2
     ok(put(misty, {'enabled': False}))
-    assert bands() == (None, None, None)
+    assert bands() == (None, None)
     ok(put(misty, {'enabled': True}))
-    assert bands() == ('5_to_10',) * 3
+    assert bands() == ('5_to_10',) * 2
     ok(put(ash, {'enabled': False}))
-    assert bands() == (None, None, None)
+    assert bands() == (None, None)
 
 
 def test_near_you_and_card_search_carry_no_zip_coordinate_distance_handle_or_user_id(store):
@@ -258,11 +267,15 @@ def test_a_refused_first_contact_names_only_its_code_and_wait(store):
     with connect() as conn:
         conn.execute("""INSERT INTO handle_lookup_event(user_id, kind, created_at)
           SELECT %s, 'new_conversation', now() - interval '1 hour' FROM generate_series(1, 10)""", (ash,))
-    response = call('POST', f'/api/social/traders/{trader_of(other)}/messages', ash,
-                    {'body': 'Hi', 'idempotency_key': str(uuid4())})
+    # First contact is now a Trade opening; the optional message shares its transaction and quotas.
+    response = call('POST', '/api/trades', ash,
+                    {'recipient_trader_id': trader_of(other), 'message': 'Hi',
+                     'you_give': [{'edition_id': ids['SVI 166'], 'quantity': '1'}], 'you_get': [],
+                     'idempotency_key': str(uuid4())})
     assert response.status_code == 429, response.text
     assert set(response.json()['detail']) == {'code', 'retry_after_minutes'}
     assert response.json()['detail']['code'] == 'TOO_MANY_NEW_CONVERSATIONS'
+    assert 0 < response.json()['detail']['retry_after_minutes'] <= 23 * 60
     for where, key, leaf in walk(response.json()):
         assert key not in FORBIDDEN_KEYS | {'handle', 'user_id', 'collector_id'}, where
 
@@ -299,10 +312,12 @@ def test_a_trader_block_reads_like_a_suspension_to_the_blocked_side(store):
         conn.execute('UPDATE collector_profile SET suspended_at = now() WHERE user_id = %s', (other_b,))
 
     def alike(seen):
-        return {**{key: value for key, value in seen.items()
-                   if key not in ('id', 'items', 'trader_id', 'display_name', 'conversation_id')},
-                'other': {key: value for key, value in seen.get('other', {}).items()
-                          if key not in ('display_name', 'trader_id')}}
+        if isinstance(seen, dict):
+            return {key: alike(value) for key, value in seen.items() if key not in
+                    ('id', 'thread_id', 'offer_id', 'items', 'trader_id', 'display_name', 'conversation_id', 'created_at')}
+        if isinstance(seen, list):
+            return [alike(value) for value in seen]
+        return seen
 
     header_a = ok(call('GET', f'/api/social/traders/{trader_of(other_a)}', viewer_a))
     header_b = ok(call('GET', f'/api/social/traders/{trader_of(other_b)}', viewer_b))
@@ -314,9 +329,8 @@ def test_the_blocked_list_and_friends_carry_no_zip_handle_or_user_id_after_a_tra
     from test_stranger_blocks import block_trader
     ids, ash, misty, conversation, trade = nearby_pair()
     ok(block_trader(ash, trader_of(misty)))
-    no_leaks(ash, misty, ['/api/social/blocks', '/api/social/friends', '/api/social/conversations',
-                          f'/api/social/conversations/{conversation}',
-                          f'/api/social/conversations/with/{trader_of(misty)}',
+    no_leaks(ash, misty, ['/api/social/blocks', '/api/social/friends', '/api/trades?group=done',
+                          f'/api/trades/{conversation}', f'/api/trades/{conversation}/timeline',
                           f'/api/social/traders/{trader_of(misty)}'])
     [row] = ok(call('GET', '/api/social/blocks', ash))['blocked']
     assert row['trader_id'] == trader_of(misty) and row['handle'] is None
@@ -346,9 +360,9 @@ def test_add_as_friend_shows_the_requester_no_handle_or_user_id_before_acceptanc
         holds_neither('add-friend', answer)
     paths = ['/api/social/discovery', f'/api/social/traders/{trader_of(misty)}',
              f'/api/social/traders/{trader_of(misty)}/trade-list', f'/api/social/traders/{trader_of(misty)}/matches',
-             '/api/social/conversations', f'/api/social/conversations/{conversation}',
-             f'/api/social/conversations/with/{trader_of(misty)}', '/api/social/conversations/pulse',
-             '/api/social/trades', f'/api/social/trades/{trade}', '/api/social/inbox', '/api/social/blocks',
+             '/api/trades?group=done', f'/api/trades/{conversation}',
+             f'/api/trades/{conversation}/timeline', '/api/threads/pulse',
+             '/api/trades', f'/api/trades/{thread_of(trade)}', '/api/social/inbox', '/api/social/blocks',
              '/api/social/friends']
     for path in paths:
         response = call('GET', path, ash)

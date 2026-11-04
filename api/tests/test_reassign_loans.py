@@ -83,8 +83,8 @@ def test_the_lenders_reassignment_carries_a_request_and_an_accepted_loan_and_not
     assert [(pick['edition_id'], pick['location_id'], pick['short']) for pick in side(misty, loan)['picks']] == [
         (fixed, binder, '0')]
     assert view(ash, loan)['revision'] > stale['revision']
-    assert code(call('POST', f"/api/social/loans/{loan['id']}/cancel", ash,
-                     {'revision': stale['revision'], 'idempotency_key': str(uuid4())})) == (409, 'LOAN_CHANGED')
+    assert code(call('POST', f"/api/loans/{loan['thread_id']}/cancel", ash,
+                     {'loan_id': loan['loan_id'], 'revision': stale['revision'], 'idempotency_key': str(uuid4())})) == (409, 'LOAN_CHANGED')
     assert revision_of(ash) == before[ash] + 1 and revision_of(misty) == before[misty] + 1
     # Ash reads no Location of Misty's on either Loan.
     for found in (asked, loan):
@@ -228,20 +228,24 @@ def test_a_reassignment_racing_the_borrowers_edit_and_resend_waits_and_never_dea
     try:
         with ThreadPoolExecutor(max_workers=2) as executor, \
                 psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
-            resent = executor.submit(call, 'POST', '/api/loans', misty, {
-                'lender_id': ash, 'lines': [{'edition_id': iono, 'quantity': '1'}], 'replaces': earlier['id'],
-                'deck_id': None, 'idempotency_key': str(uuid4())})
+            from test_loan_threads import terms
+            resent = executor.submit(terms, misty, earlier, iono, 1)
             _asleep(watch, 1, [resent])
             moved = executor.submit(reassign, ash, binder, iono, fixed, 1)
             _waiting_on_a_lock(watch, [resent, moved])
             resent, moved = resent.result(), moved.result()
     finally:
         drop()
-    assert resent.status_code == 201, resent.text
+    assert resent.status_code == 200, resent.text
     assert moved.status_code == 200, moved.text
     # The reassignment read the Loans once Misty's request was in, and carried it.
     assert lines(misty, resent.json()) == [(fixed, '1', '0')]
-    assert view(misty, earlier)['closed_reason'] == 'withdrawn'
+    with connect() as conn:
+        original = conn.execute('SELECT state, closed_reason FROM loan WHERE id=%s',
+                                (earlier['loan_id'],)).fetchone()
+    assert original == {'state': 'closed', 'closed_reason': 'withdrawn'}
+    assert resent.json()['thread_id'] == earlier['thread_id']
+    assert resent.json()['loan_id'] != earlier['loan_id']
 
 
 def test_a_reassignment_never_deadlocks_with_a_request_or_offer_naming_the_reassigner(store):
