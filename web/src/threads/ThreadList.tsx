@@ -1,5 +1,5 @@
 import { TradingAvailability } from "./TradingAvailability";
-import { itemState } from "./threadText";
+import { itemState, timelineText } from "./threadText";
 import { waitingAction } from "./threadPresentation";
 import { useEffect, useRef, useState } from "react";
 import { getLoans, getTrades, type ThreadItem } from "../social_generated";
@@ -128,6 +128,21 @@ export function ThreadList({
                   .map((card) => `${card.copies} ${card.name}`)
                   .join(" · ")}
               </span>
+              {row.latest && (
+                <span className="line-clamp-2 text-meta text-text-muted whitespace-pre-wrap wrap-anywhere">
+                  {timelineText(
+                    row.latest,
+                    row.you_are,
+                    row.other.display_name,
+                    Object.fromEntries(
+                      row.summary.cards.map((card) => [
+                        card.edition_id,
+                        card.name,
+                      ])
+                    )
+                  )}
+                </span>
+              )}
               <span>
                 {row.waiting && (
                   <span>↗ {waitingAction(kind, row.waiting)} </span>
