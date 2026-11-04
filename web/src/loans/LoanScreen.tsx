@@ -143,6 +143,7 @@ export function LoanScreen({
   active = true,
   focusOnOpen = false,
   onLoanChanged,
+  onCanonicalLoan,
   onAllLoans,
   onOpenDeck,
 }: {
@@ -150,6 +151,7 @@ export function LoanScreen({
   loanId: string;
   focusOnOpen?: boolean;
   onLoanChanged: () => void;
+  onCanonicalLoan: (id: string) => void;
   onAllLoans: () => void;
   onOpenDeck: (id: string) => void;
 }) {
@@ -212,6 +214,10 @@ export function LoanScreen({
     ]).then(
       ([loan, side]) => {
         if (controller.signal.aborted) return;
+        if (loanId !== loan.thread_id) {
+          onCanonicalLoan(loan.thread_id);
+          return;
+        }
         if (reloading.current) {
           reloading.current = false;
           focusNext.current = "heading";
