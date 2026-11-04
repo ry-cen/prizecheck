@@ -83,8 +83,8 @@ ROUTERS = (
     format_standing_router, collection_import_router, scanner_router, art_router, public_art_router, scanner_save_router,
     # social and trading
     threads_router, trade_threads_router, loan_threads_router,
-    profile_router, public_invite_router, friends_router, friend_reads_router, trade_matches_router, loans_router,
-    inbox_router, trades_router, trade_settings_router, open_discovery_router, loan_inventory_router, trade_list_router, trade_inventory_router, trade_value_router,
+    profile_router, public_invite_router, friends_router, friend_reads_router, trade_matches_router, loan_inventory_router, loans_router,
+    inbox_router, trade_list_router, trade_inventory_router, trade_value_router, trades_router, trade_settings_router, open_discovery_router,
     trade_wants_router, reports_router, trade_reports_admin_router,
 )
 

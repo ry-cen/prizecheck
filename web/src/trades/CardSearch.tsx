@@ -16,7 +16,6 @@ import { Pill } from "../ui/Pill";
 import { SearchField } from "../ui/SearchField";
 import { Segmented } from "../ui/Segmented";
 import { RETRY } from "./conversationMessages";
-import { MessageLink } from "./MessageLink";
 import {
   CARD_OPTIONS_LABEL,
   CARD_SEARCH_HEADING,
@@ -395,11 +394,6 @@ function Holder({
         >
           Propose trade
         </Button>
-        <MessageLink
-          traderId={holder.trader_id}
-          name={name}
-          onNavigate={onNavigate}
-        />
       </div>
     </li>
   );

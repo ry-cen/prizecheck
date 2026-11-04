@@ -203,7 +203,7 @@ export function TradeScreen({
           traderId: load.trade.other.trader_id,
           name: load.trade.other.display_name,
           handle: load.trade.other.friend ? load.trade.other.handle : null,
-          tradeId: load.trade.thread_id,
+          tradeId: load.trade.offer_id,
         }
       : null,
     {
@@ -812,7 +812,7 @@ export function TradeScreen({
       ) : null}
       {showsAddFriend(trade) && (
         <AddAsFriend
-          tradeId={trade.thread_id}
+          tradeId={trade.offer_id}
           traderId={trade.other.trader_id!}
           name={name}
         />

@@ -1,5 +1,6 @@
 import type { FriendTradeCard } from "../social_generated";
 import { Button } from "../ui/Button";
+import { proposeFromCard } from "./openProposal";
 import { prefilledMessagePath } from "./messagePrefill";
 import {
   CARD_MESSAGE,
@@ -31,7 +32,10 @@ export function CardMessageButton({
   return (
     <Button
       aria-label={cardMessageLabel(name, tradeCardName(card))}
-      onClick={() => onNavigate(cardMessagePath(traderId, card))}
+      onClick={() => {
+        proposeFromCard(traderId, card);
+        onNavigate(cardMessagePath(traderId, card));
+      }}
     >
       {CARD_MESSAGE}
     </Button>

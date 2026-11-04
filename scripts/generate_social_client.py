@@ -6,7 +6,7 @@ offers, trading #277, Open discovery, trading #297, and Conversations, trading #
 import client_generator as gen
 
 TARGET = "web/src/social_generated.ts"
-NAMES = ('OfferSummary', 'SummaryCard', 'SummaryCash', 'PulseCount', 'EventView', '_EventData', '_EventLine', '_CashChange', '_Cash', '_DateChange', '_Quantity', "EditTerms", "ThreadItem", "ThreadParty", "TradeDetail", "LoanDetail", "Timeline", "Pulse", "ReadResult", "ConfirmReturn", "Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
+NAMES = ("TradeResolution", "LoanResolution", 'OfferSummary', 'SummaryCard', 'SummaryCash', 'PulseCount', 'EventView', '_EventData', '_EventLine', '_CashChange', '_Cash', '_DateChange', '_Quantity', "EditTerms", "ThreadItem", "ThreadParty", "TradeDetail", "LoanDetail", "Timeline", "Pulse", "ReadResult", "ConfirmReturn", "Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
          "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
          "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "ReturnLine",
          "PendingReturn", "LoanView",
@@ -92,16 +92,16 @@ export const getFriendTradeList = (handle: string, params: { q?: string; page?: 
 // Loans (#252): the Loans tab and one Loan, as both sides read them.
 export const getLoans = (signal?: AbortSignal) => getItemGroups('loan', signal);
 export const getLoan = (id: string, signal?: AbortSignal) =>
-  request<{thread_id: string}>(`/api/loans/resolve/${at(id)}`, 'GET', undefined, signal).then(found => request<LoanDetail>(`/api/loans/${at(found.thread_id)}`, 'GET', undefined, signal)).then(detail => detail.live_terms);
+  request<LoanResolution>(`/api/loans/resolve/${at(id)}`, 'GET', undefined, signal).then(found => request<LoanDetail>(`/api/loans/${at(found.thread_id)}`, 'GET', undefined, signal)).then(detail => detail.live_terms);
 const getItemGroups = async (kind: 'trade' | 'loan', signal?: AbortSignal) => {
   const groups = kind === 'trade' ? ['needs_you', 'open', 'done'] : ['needs_you', 'open', 'out_now', 'pending', 'done'];
   const pages = await Promise.all(groups.map(async group => {
     const rows: ThreadItem[] = [];
     let before: string | undefined;
     for (;;) {
-      const page = await request<ThreadItem[]>(`/api/${kind}s?${query({group,before})}`, 'GET', undefined, signal);
+      const page = await request<ThreadItem[]>(`/api/${kind}s${query({group,before})}`, 'GET', undefined, signal);
       rows.push(...page);
-      if(page.length < 50) break;
+      if(group === 'needs_you' || page.length < 50) break;
       const last = page[page.length-1];
       const cursor = btoa(`${last.last_activity_at}|thread|${last.id}`).replaceAll('+','-').replaceAll('/','_').replace(/=+$/, '');
       if(cursor === before) throw new Error('List did not advance');
@@ -184,7 +184,7 @@ export const clearInbox = (body: InboxIds) => request<InboxView>('/api/social/in
 // Trades (trading #270): the Trades list and one Trade, as both sides read them. Sending one is in the Trades client.
 export const getTrades = (signal?: AbortSignal) => getItemGroups('trade', signal);
 export const getTrade = (id: string, signal?: AbortSignal) =>
-  request<{thread_id: string}>(`/api/trades/resolve/${at(id)}`, 'GET', undefined, signal).then(found => request<TradeDetail>(`/api/trades/${at(found.thread_id)}`, 'GET', undefined, signal)).then(detail => detail.live_offer);
+  request<TradeResolution>(`/api/trades/resolve/${at(id)}`, 'GET', undefined, signal).then(found => request<TradeDetail>(`/api/trades/${at(found.thread_id)}`, 'GET', undefined, signal)).then(detail => detail.live_offer);
 // Trade steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Trade as it now stands.
 export const withdrawTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/trades/${at(id)}/withdraw`, 'POST', body);
