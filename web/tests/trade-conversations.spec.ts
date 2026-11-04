@@ -142,7 +142,15 @@ async function story(
   await expect(row).toBeVisible();
   await page.goto(address);
   await composer(page).fill("Any news?");
+  // A click starts the POST; only its successful response makes the next pulse meaningful.
+  const sent = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === `/api/trades/${thread}/messages` &&
+      response.request().method() === "POST" &&
+      response.status() === 201
+  );
   await sendButton(page).click();
+  await sent;
   await focusPulse(misty);
   await expect(tradesTab(misty)).toHaveAccessibleName(
     "Trades, 1 need you: 0 waiting on you, 1 with new messages"
