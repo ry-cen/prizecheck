@@ -22,7 +22,7 @@ from app.games.pokemon.formats.format_standing import rebuild_on_startup as rebu
 from app.holdings import router as holdings_router
 from app.loan_inventory import router as loan_inventory_router
 from app.location_tree import router as location_tree_router
-from app.locations import router as locations_router
+from app.core.inventory.locations import router as locations_router
 from app.games.pokemon.prices.metadata_reviews import router as metadata_reviews_router
 from app.games.pokemon.catalog.missing_cards import router as missing_cards_router
 from app.moves import router as moves_router
