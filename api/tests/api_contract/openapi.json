@@ -9493,10 +9493,14 @@
      },
      "live_terms": {
       "$ref": "#/components/schemas/LoanView"
+     },
+     "other": {
+      "$ref": "#/components/schemas/ThreadParty"
      }
     },
     "required": [
      "id",
+     "other",
      "live_terms",
      "can_message",
      "can_report"
