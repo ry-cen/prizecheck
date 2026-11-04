@@ -721,7 +721,9 @@ export function TradeScreen({
       {record && <p className="m-0 text-meta text-text-muted">{record}</p>}
       {note && <p className="m-0 text-body text-text-muted">{note}</p>}
       <MeetInPublicTip trade={trade} />
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 phone:grid-cols-1">
+      <div
+        className={`grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 ${trade.you_give.length <= 1 && trade.you_get.length <= 1 ? "phone:grid-cols-2 phone:gap-3" : "phone:grid-cols-1"}`}
+      >
         <TradeSide
           title="You give"
           cards={trade.you_give}
@@ -824,10 +826,10 @@ export function TradeScreen({
     confirming ? (
       <section
         aria-label={`Confirm swap with ${name}`}
-        className="rounded-panel border border-border bg-surface p-4"
+        className="rounded-panel border border-border bg-surface p-4 phone:p-3"
       >
         <h2 className="m-0 text-heading">Confirm swap</h2>
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 phone:gap-2">
           {gets && (
             <div className="flex flex-col gap-1">
               <Select
@@ -883,7 +885,7 @@ export function TradeScreen({
               <Button onClick={switches.reload}>Retry</Button>
             </div>
           )}
-          <p className="m-0 text-body">
+          <p className="m-0 text-body phone:text-meta">
             {trade.you_give.length
               ? `Leaves your Collection: ${trade.you_give.map((card) => `${card.copies} ${tradeCardName(card)}`).join(" · ")}. `
               : "No cards leave your Collection. "}
@@ -891,10 +893,9 @@ export function TradeScreen({
               ? `Arrives in ${chosen?.path ?? "Unsorted"}: ${trade.you_get.map((card) => `${card.copies} ${tradeCardName(card)}`).join(" · ")}.`
               : "No cards arrive in your Collection."}
           </p>
-          <p className="m-0 text-body">
-            Only confirm after the physical swap. The cards you give leave your
-            Collection and the cards you get arrive in your chosen destination,
-            with the selected Deck switches. The swap can't be undone.
+          <p className="m-0 text-body phone:text-meta">
+            Only confirm after the physical swap. The selected Deck switches
+            apply. The swap can't be undone.
           </p>
           <p className="m-0 text-meta text-text-muted">
             Your destination, picks and Deck switches are private.
