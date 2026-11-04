@@ -98,7 +98,7 @@ const tile = (scope: Locator, side: "get" | "give", card: string) =>
     name: new RegExp(`^Add to You ${side}, ${card}, `),
   });
 const group = (page: Page, name: string | RegExp) =>
-  page.getByRole("group", { name });
+  page.getByRole("group", { name, exact: true });
 const noArtwork = (page: Page) =>
   page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => route.abort());
 const results = (page: Page) =>
@@ -339,10 +339,10 @@ async function story(
   await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
   await show(page, "Proposal");
   await expect(
-    group(page, "Arven (SVI 166) you get").locator("output")
+    group(page, "Arven (SVI 166) you get").getByText("3", { exact: true })
   ).toHaveText("3");
   await expect(
-    group(page, "Iono (PAL 185) you give").locator("output")
+    group(page, "Iono (PAL 185) you give").getByText("1", { exact: true })
   ).toHaveText("1");
   await expect(
     page.getByRole("region", { name: /^Choose printings for You/ })
@@ -353,7 +353,9 @@ async function story(
       .click();
     if (remaining > 0)
       await expect(
-        group(page, "Arven (SVI 166) you get").locator("output")
+        group(page, "Arven (SVI 166) you get").getByText(String(remaining), {
+          exact: true,
+        })
       ).toHaveText(String(remaining));
   }
   await page

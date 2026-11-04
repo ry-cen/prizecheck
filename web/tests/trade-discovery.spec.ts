@@ -182,7 +182,7 @@ const tile = (scope: Locator, side: "get" | "give", card: string) =>
     name: new RegExp(`^Add to You ${side}, ${card}, `),
   });
 const group = (page: Page, name: string | RegExp) =>
-  page.getByRole("group", { name });
+  page.getByRole("group", { name, exact: true });
 const noArtwork = (page: Page) =>
   page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => route.abort());
 const results = (page: Page) =>
@@ -348,7 +348,7 @@ async function story(
       .getByRole("listitem")
   ).toHaveCount(1);
   await expect(
-    group(page, "Arven (SVI 166) you get").locator("output")
+    group(page, "Arven (SVI 166) you get").getByText("2", { exact: true })
   ).toHaveText("2");
   // Both finishes share one remaining need: neither is picked, including the exact Edition.
   await expect(group(page, "Boss's Orders (PAL 172) you get")).toHaveCount(0);
@@ -378,7 +378,7 @@ async function story(
     })
   ).toBeDisabled();
   await expect(
-    group(page, "Iono (PAL 185) you give").locator("output")
+    group(page, "Iono (PAL 185) you give").getByText("2", { exact: true })
   ).toHaveText("2");
   await show(page, "Cards");
   const theirList = page.getByRole("list", { name: "Ash K's Trade List" });
@@ -413,7 +413,7 @@ async function story(
   ).click();
   await show(page, "Proposal");
   await expect(
-    group(page, "Iono (PAL 185) you give").locator("output")
+    group(page, "Iono (PAL 185) you give").getByText("3", { exact: true })
   ).toHaveText("3");
   await page.getByRole("button", { name: "Send Trade Proposal" }).click();
   await expect(page).toHaveURL(new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`));
