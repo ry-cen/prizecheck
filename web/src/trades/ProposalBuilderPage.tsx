@@ -1,3 +1,4 @@
+import { OfferReview, offerChanges } from "./offerReview";
 import { offerLibrary, offerCopyMap } from "./offerCopies";
 import { useMessagePrefill } from "./messagePrefill";
 import { ArrowRight, ChevronLeft } from "lucide-react";
@@ -191,11 +192,20 @@ export function ProposalBuilderPage({
     useMemo(() => valueLines(proposal.give, proposal.get), [proposal])
   );
 
-  const released = useMemo(() => offerCopyMap(counter, "get"), [counter]);
-  const releasedOwn = useMemo(() => offerCopyMap(counter, "give"), [counter]);
-  const revision = useRef(counter?.revision ?? 0);
-  // The terms the Counter answers: the Trade as read, or as read again after a refusal that took a new revision.
+  const [offerReview] = useState(() =>
+    counter ? new OfferReview(counter) : null
+  );
+  const [reviewNeeded, setReviewNeeded] = useState(false);
   const [answered, setAnswered] = useState(counter);
+  const reviewedOffer = offerReview?.reviewed;
+  const released = useMemo(
+    () => offerCopyMap(reviewedOffer, "get"),
+    [reviewedOffer]
+  );
+  const releasedOwn = useMemo(
+    () => offerCopyMap(reviewedOffer, "give"),
+    [reviewedOffer]
+  );
   const [gone, setGone] = useState(false);
   const goneRef = useRef(false);
   const refreshInbox = useInboxRefresh();
@@ -303,12 +313,12 @@ export function ProposalBuilderPage({
       theirs.kind === "ready"
         ? {
             ...theirs,
-            cards: offerLibrary(theirs.cards, counter, "get", theirs.q),
+            cards: offerLibrary(theirs.cards, reviewedOffer, "get", theirs.q),
           }
         : theirs.kind === "loading"
           ? { kind: "loading" }
           : { kind: "failed" }, // a missing Friend shows its own frame, never the library
-    [theirs, released, counter]
+    [theirs, released, reviewedOffer]
   );
   const libraryMatch = useMemo<MatchLoad>(
     () =>
@@ -328,9 +338,9 @@ export function ProposalBuilderPage({
   const libraryMine = useMemo<MineLoad>(
     () =>
       mine.kind === "ready"
-        ? { ...mine, cards: offerLibrary(mine.cards, counter, "give") }
+        ? { ...mine, cards: offerLibrary(mine.cards, reviewedOffer, "give") }
         : mine,
-    [mine, counter]
+    [mine, reviewedOffer]
   );
 
   // A Counter's lines start at the countered copies as their cap; each library that lists more raises it. Only the caps
@@ -438,67 +448,81 @@ export function ProposalBuilderPage({
     if (side) sideHeading[side].current?.focus();
   }, [proposal]);
 
+  async function checkCurrentOffer() {
+    if (!offerReview) return;
+    setReviewNeeded(true);
+    try {
+      const fresh = await offerReview.refresh(getTrade);
+      setGone(!offerReview.canEdit(fresh));
+      setMessage(
+        "The offer changed. Your draft is kept. Review the current cards and cash below before sending again."
+      );
+    } catch {
+      setGone(offerReview.unavailable);
+      if (offerReview.unavailable) {
+        setMessage(COUNTER_GONE_TEXT);
+        return;
+      }
+      setMessage(
+        "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
+      );
+    }
+  }
   async function sendCounter(
-    target: TradeView,
     current: Proposal,
     name: string,
     cashBody: { cents: string; payer: "you" | "them" } | null
   ) {
+    if (!offerReview || offerReview.required) return;
     try {
       key.current ??= crypto.randomUUID();
-      const trade = await counterTrade(target.thread_id, {
-        offer_id: target.offer_id,
-        revision: revision.current,
-        idempotency_key: key.current,
-        you_give: requestLines(current.give),
-        you_get: requestLines(current.get),
-        cash: cashBody,
-      });
+      const trade = await offerReview.submit(
+        {
+          you_give: requestLines(current.give),
+          you_get: requestLines(current.get),
+          cash: cashBody,
+        },
+        key.current,
+        counterTrade,
+        getTrade
+      );
+      if (!trade) {
+        key.current = null;
+        setReviewNeeded(true);
+        setGone(
+          offerReview.unavailable ||
+            (offerReview.candidate
+              ? !offerReview.canEdit(offerReview.candidate)
+              : false)
+        );
+        setMessage(
+          "The offer changed. Your draft is kept. Review the current cards and cash below before sending again."
+        );
+        refreshInbox();
+        return;
+      }
       sent.current = true;
-      if (mounted.current)
+      if (mounted.current) {
         toast.show({
-          message: target.actions.includes("change_offer")
-            ? `Offer updated for ${name}`
-            : `Counter sent to ${name}`,
+          message: `Offer sent to ${name}`,
           route: tradePath(trade.thread_id),
         });
+        onNavigate(tradePath(trade.thread_id));
+      }
       refreshInbox();
-      if (mounted.current) onNavigate(tradePath(trade.thread_id));
     } catch (cause) {
-      if (!tradeOutcomeUnknown(cause)) key.current = null;
-      const other = () =>
+      if (offerReview.required) {
+        setGone(offerReview.unavailable);
+        key.current = null;
+        setReviewNeeded(true);
+        setMessage(
+          "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
+        );
+      } else {
+        if (!tradeOutcomeUnknown(cause)) key.current = null;
         setMessage(
           sendTradeMessage(cause, name, current.give, current.get, "counter")
         );
-      if (!(
-        cause instanceof TradesError &&
-        ["TRADE_CHANGED", "STEP_NOT_ALLOWED", "TRADE_NOT_FOUND"].includes(
-          cause.code
-        )
-      )) {
-        other();
-        return;
-      }
-      refreshInbox();
-      const settleGone = () => {
-        goneRef.current = true;
-        setGone(true);
-        setMessage(COUNTER_GONE_TEXT);
-      };
-      try {
-        const fresh = await getTrade(target.thread_id);
-        if (
-          fresh.actions.includes("counter") ||
-          fresh.actions.includes("change_offer")
-        ) {
-          revision.current = fresh.revision;
-          setAnswered(fresh);
-          setMessage(COUNTER_CHANGED_TEXT);
-        } else settleGone();
-      } catch (readCause) {
-        if (readCause instanceof SocialError && readCause.status === 404)
-          settleGone();
-        else other();
       }
     }
   }
@@ -521,7 +545,7 @@ export function ProposalBuilderPage({
     setMessage("");
     if (counter) {
       try {
-        await sendCounter(counter, current, name, cashBody);
+        await sendCounter(current, name, cashBody);
       } finally {
         sending.current = false;
         setBusy(false);
@@ -780,6 +804,67 @@ export function ProposalBuilderPage({
   );
   const proposalPane = (
     <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
+      {reviewNeeded && (
+        <section
+          aria-label="Current offer to review"
+          className="flex flex-col gap-2 rounded-panel border border-border p-3"
+        >
+          <p role="status">The offer changed. Your draft is kept.</p>
+          {offerReview?.candidate ? (
+            <>
+              <h2>Current offer</h2>
+              <ul>
+                {offerChanges(offerReview.reviewed, offerReview.candidate).map(
+                  (text) => (
+                    <li key={text}>{text}</li>
+                  )
+                )}
+              </ul>
+              <p>
+                You give:{" "}
+                {offerReview.candidate.you_give
+                  .map((card) => `${card.copies} ${tradeCardName(card)}`)
+                  .join(", ") || "Nothing"}
+              </p>
+              <p>
+                You get:{" "}
+                {offerReview.candidate.you_get
+                  .map((card) => `${card.copies} ${tradeCardName(card)}`)
+                  .join(", ") || "Nothing"}
+              </p>
+              <p>
+                {offerReview.candidate.cash
+                  ? `${offerReview.candidate.cash.payer === "you" ? "You pay" : "They pay"} $${(Number(offerReview.candidate.cash.cents) / 100).toFixed(2)}`
+                  : "No cash"}
+              </p>
+              <Button
+                disabled={!offerReview.canEdit(offerReview.candidate)}
+                onClick={() => {
+                  if (!offerReview.confirm()) return;
+                  setAnswered(offerReview.reviewed);
+                  setReviewNeeded(false);
+                  setGone(false);
+                  key.current = null;
+                  setMineAttempt((n) => n + 1);
+                  setAttempt((n) => n + 1);
+                  setMatchAttempt((n) => n + 1);
+                  setMessage(
+                    "Current offer reviewed. Check your draft before sending."
+                  );
+                }}
+              >
+                I reviewed the current offer
+              </Button>
+              {gone && <p>This Trade no longer accepts an offer change.</p>}
+            </>
+          ) : (
+            <p>The current offer has not been loaded.</p>
+          )}
+          <Button onClick={() => void checkCurrentOffer()}>
+            Check current offer
+          </Button>
+        </section>
+      )}
       {sideSection("get")}
       {fromMatch && match.kind === "ready" && (
         <MatchPrintingChoices
@@ -846,7 +931,9 @@ export function ProposalBuilderPage({
         <Button
           variant="primary"
           className="disabled:opacity-45"
-          disabled={empty || gone || unchanged || terminal !== null}
+          disabled={
+            empty || gone || unchanged || reviewNeeded || terminal !== null
+          }
           aria-disabled={busy || undefined}
           aria-describedby={reason ? reasonId : undefined}
           onClick={() => void send()}

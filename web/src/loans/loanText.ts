@@ -354,6 +354,8 @@ export function loanStepMessage(
     return "The Loan may not have been updated. Check your connection and try again.";
   const error = cause as SocialError;
   switch (error.code) {
+    case "OFFER_CHANGED":
+      return "The Loan terms changed. Review the current terms before trying again.";
     case "LOAN_CHANGED":
     case "STEP_NOT_ALLOWED":
       return "This Loan has changed. Check it and try again.";
@@ -425,6 +427,8 @@ export function sendMessage(
       return "That Deck is gone. Choose another, or none.";
     case "INVALID_RETURN_BY":
       return "Choose a return-by date from today on.";
+    case "OFFER_CHANGED":
+      return "The Loan terms changed. Review the current terms before trying again.";
     case "LOAN_CHANGED":
       return `${friend} already answered your earlier request. Send this one as a new request?`;
     case "TOO_MANY_CHANGES":

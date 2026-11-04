@@ -1,3 +1,7 @@
+import {
+  threadVersionChanged,
+  sameLoanTermsVersion,
+} from "../threads/commandChanges";
 import { useEffect, useRef, useState } from "react";
 import {
   editLoanTerms,
@@ -10,7 +14,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/TextField";
 export function LoanTermsEditor({
-  loan,
+  loan: incomingLoan,
   deckId,
   onClose,
   onSaved,
@@ -20,6 +24,7 @@ export function LoanTermsEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const loan = useRef(incomingLoan).current;
   const [counts, setCounts] = useState(() =>
     loan.lines.map((line) => line.requested)
   );
@@ -30,12 +35,7 @@ export function LoanTermsEditor({
   const [attempt, setAttempt] = useState(0);
   const pending = useRef<EditTerms | null>(null);
   function matches(fresh: LoanView) {
-    return (
-      fresh.loan_id === loan.loan_id &&
-      fresh.revision === loan.revision &&
-      fresh.state === "requested" &&
-      fresh.actions.includes("edit_and_resend")
-    );
+    return sameLoanTermsVersion(loan, fresh);
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -87,6 +87,15 @@ export function LoanTermsEditor({
       await editLoanTerms(loan.thread_id, pending.current);
       onSaved();
     } catch (cause) {
+      if (cause instanceof SocialError && threadVersionChanged(cause.code)) {
+        pending.current = null;
+        setReady(false);
+        setAttempt((n) => n + 1);
+        setMessage(
+          "The Loan terms changed. Your changes are kept. Review the current Loan before trying again."
+        );
+        return;
+      }
       if (cause instanceof SocialError && cause.status < 500)
         pending.current = null;
       setMessage(
