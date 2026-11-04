@@ -393,6 +393,10 @@ async function storyTwo(
   await discoverable(cara, "00012");
   await say(brock, w.ashTrader, "Hi Ash, is your Arven available?");
   await say(ash, w.brockTrader, "Yes, it is.");
+  // Cara owns no listed cards. Ash establishes and withdraws their exact item
+  // with his real Arven before Cara messages, leaving no extra open promise.
+  const caraThread = await tradeThreadFor(ash, w.caraTrader!);
+  expect(await tradeThreadFor(cara, w.ashTrader)).toBe(caraThread);
   await say(cara, w.ashTrader, "Send me your cards first.");
   await say(ash, w.caraTrader!, "No.");
   await api(ash, "POST", `/api/social/traders/${w.caraTrader}/block`, {
