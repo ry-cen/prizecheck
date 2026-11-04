@@ -18,8 +18,8 @@ export type PendingApi = { state: PendingState; retry: () => void };
  * request this tab sent), and on Retry. `deckId` null (All Decks) reads nothing. The reader is the instance's: the
  * shell unmounts on sign-out, which drops any answer still in flight, so nothing reaches the next account.
  *
- * It isn't live: a change that moves neither the pulse nor this tab (a Friend's write-off, or the collector's own
- * step on another device) shows at the next focus, visibility change or visit.
+ * It isn't live: Loan commands move the thread pulse, while an unsignalled Deck List change on another device
+ * shows at the next focus, visibility change or visit.
  */
 export function usePendingLoans(
   deckId: string | null,
