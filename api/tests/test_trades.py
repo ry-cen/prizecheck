@@ -444,7 +444,7 @@ def test_allowed_lists_each_sides_steps_row_by_row(state, reader, swaps, gives, 
 @pytest.mark.parametrize('state, reader, swaps, waiting, section', [
     ('proposed', 'recipient', (None, None), 'answer', 'needs_you'),
     ('proposed', 'proposer', (None, None), None, 'pending'),
-    ('accepted', 'proposer', (None, None), None, 'to_swap'),
+    ('accepted', 'proposer', (None, None), 'confirm_swap', 'needs_you'),
     ('accepted', 'proposer', (None, 'now'), 'confirm_swap', 'needs_you'),
     ('accepted', 'proposer', ('now', None), None, 'pending'),
     ('closed', 'recipient', (None, None), None, 'history'),
@@ -722,7 +722,7 @@ def test_accept_reserves_the_recipients_copies_at_once_and_a_cancel_releases_bot
     accepted = ok(accept_trade(ash, ok(read(ash, trade))))
     assert (accepted['state'], accepted['role'], accepted['section'], accepted['waiting'], accepted['needs_you'],
             accepted['actions'], accepted['revision']) == (
-        'accepted', 'recipient', 'to_swap', None, False, ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer'],
+        'accepted', 'recipient', 'needs_you', 'confirm_swap', True, ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer'],
         trade['revision'] + 1)
     assert sides(accepted) == ([(arven, '1')], [(iono, '2')])
     assert row_of(trade)['accepted_at'] is not None
@@ -738,7 +738,7 @@ def test_accept_reserves_the_recipients_copies_at_once_and_a_cancel_releases_bot
     assert updates(trade) == [(misty, 'accepted', 'Ash K.')]
     seen = ok(read(misty, trade))
     assert (seen['state'], seen['section'], seen['actions'], seen['needs_you']) == (
-        'accepted', 'to_swap', ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer'], False)
+        'accepted', 'needs_you', ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer'], True)
     # Either side may cancel while nobody has confirmed: Misty does, and both sides' copies come back at once.
     cancelled = ok(trade_step(misty, seen, 'cancel'))
     assert (cancelled['state'], cancelled['closed_reason'], cancelled['closed_by'], cancelled['section'],

@@ -17,3 +17,10 @@ export const WAITING_LABELS: Record<string, string> = {
   confirm_handover: "Confirm you have them",
   answer_more_time: "Answer more time request",
 };
+
+/** Loan requests are answered without offering the Trade counter action. */
+export function waitingAction(kind: "trade" | "loan", step: string): string {
+  return kind === "loan" && step === "answer"
+    ? "Answer Loan"
+    : (WAITING_LABELS[step] ?? "Review agreement");
+}
