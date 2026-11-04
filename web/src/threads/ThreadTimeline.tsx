@@ -1,3 +1,4 @@
+import { TradingAvailability } from "./TradingAvailability";
 import { ThreadMenu } from "./ThreadMenu";
 import { MESSAGE_LENGTH_TEXT, threadMessageError } from "./threadMessage";
 import { mergeTimeline } from "./timelineHistory";
@@ -47,6 +48,7 @@ export function ThreadTimeline({
   const pending = useRef<{ body: string; idempotency_key: string } | null>(
     null
   );
+  const title = useRef<HTMLHeadingElement>(null);
   const epoch = useRef(0);
   const changed = usePulseChanged(),
     poll = usePollPulse();
@@ -163,7 +165,9 @@ export function ThreadTimeline({
       className="flex min-w-0 flex-col gap-3 border-t border-border pt-4"
     >
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-heading">Chat and changes</h2>
+        <h2 ref={title} tabIndex={-1} className="text-heading">
+          Chat and changes
+        </h2>
         {tradeDetail?.live_offer.other.trader_id && (
           <ThreadMenu
             target={{
@@ -177,12 +181,17 @@ export function ThreadTimeline({
             canReport={tradeDetail.can_report}
             offerId={tradeDetail.live_offer.offer_id}
             onChanged={() => {
+              title.current?.focus();
               setAttempt((n) => n + 1);
               onChanged?.();
             }}
           />
         )}
       </div>
+      <TradingAvailability
+        enabled={canMessage === false}
+        revision={`${attempt}:${changed}`}
+      />
       {ownBlock && <a href="/settings">You blocked {name}.</a>}
       {failed && (
         <p role="status">
