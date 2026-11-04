@@ -76,7 +76,7 @@ type InboxApi = {
   loansChanged: number;
   noteLoansChanged: () => void;
   /** Whether the drawer just opened this Loan or Trade; true once, for its screen to focus its heading. */
-  takeOpened: (id: string) => boolean;
+  takeOpened: (id: string, canonicalId?: string) => boolean;
   /** Conversations with unread messages (Trading #298), from the pulse; 0 until the first read. */
   threadCounts: {
     trades: import("../social_generated").PulseCount;
@@ -144,8 +144,11 @@ export function useConversationOpen(active = true): void {
   );
 }
 
-/** Whether the inbox's drawer just opened this Loan or Trade, true once; false outside the shell. */
-export function useOpenedFromInbox(): (id: string) => boolean {
+/** Consumes the drawer focus intent, or transfers it to a canonical item without consuming it. */
+export function useOpenedFromInbox(): (
+  id: string,
+  canonicalId?: string
+) => boolean {
   return useContext(InboxContext)?.takeOpened ?? (() => false);
 }
 
@@ -265,9 +268,9 @@ export function InboxProvider({
           refresh();
           pulse.poll();
         },
-        takeOpened: (id) => {
+        takeOpened: (id, canonicalId) => {
           if (opened.current !== id) return false;
-          opened.current = null;
+          opened.current = canonicalId ?? null;
           return true;
         },
         threadCounts: { trades: pulse.trades, loans: pulse.loans },
