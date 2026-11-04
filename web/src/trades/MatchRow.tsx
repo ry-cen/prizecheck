@@ -150,20 +150,19 @@ export function MatchRow({
           />
         </button>
       </h3>
-      {open && (
-        <div className="flex flex-wrap items-center gap-3 px-4 pb-3">
-          <Button
-            variant="primary"
-            aria-label={`Propose trade to ${name}`}
-            onClick={() => {
-              proposeFromMatch(row.trader_id, shown);
-              onNavigate(proposalPath(row.trader_id));
-            }}
-          >
-            Propose trade
-          </Button>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-3 px-4 pb-3">
+        <Button
+          variant="primary"
+          aria-label={`Propose trade to ${name}`}
+          onClick={() => {
+            proposeFromMatch(row.trader_id, shown);
+            onNavigate(proposalPath(row.trader_id));
+          }}
+        >
+          Propose trade
+        </Button>
+      </div>
+
       {open && (
         <div
           id={panelId}
@@ -205,14 +204,6 @@ export function MatchRow({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3">
-            <Button
-              onClick={() => {
-                proposeFromMatch(row.trader_id, shown);
-                onNavigate(proposalPath(row.trader_id));
-              }}
-            >
-              Propose trade
-            </Button>
             <a href={list} onClick={go} className={LINK}>
               See all of {name}'s Trade List
             </a>
