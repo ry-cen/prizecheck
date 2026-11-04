@@ -16,7 +16,7 @@ export function ThreadMenu({
   target: BlockTarget;
   canMessage: boolean;
   canReport: boolean;
-  offerId: string;
+  offerId?: string;
   onChanged: () => void;
 }) {
   const anchor = useRef<HTMLDivElement>(null);
@@ -28,7 +28,11 @@ export function ThreadMenu({
   });
   const report = useTraderReport(
     canReport ? { ...target, tradeId: offerId } : null,
-    { source: "trade", onReported: onChanged, returnFocus }
+    {
+      source: offerId ? "trade" : "conversation",
+      onReported: onChanged,
+      returnFocus,
+    }
   );
   const items = [
     ...(block.item ? [block.item] : []),

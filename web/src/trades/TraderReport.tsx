@@ -31,6 +31,8 @@ export type ReportTarget = {
   traderId: string;
   name: string;
   handle: string | null;
+  /** An already-known Friend address from Loan terms, only for the ending summary. */
+  collectorId?: string | null;
   tradeId?: string;
 };
 
@@ -96,8 +98,10 @@ export function useTraderReport(
     setEnding("");
     Promise.all([
       getTradeViews(controller.signal),
-      who.handle ? getLoanViews(controller.signal) : Promise.resolve(null),
-      who.handle ? getFriends() : Promise.resolve(null),
+      who.handle || who.collectorId
+        ? getLoanViews(controller.signal)
+        : Promise.resolve(null),
+      who.handle || who.collectorId ? getFriends() : Promise.resolve(null),
     ])
       .then(([trades, loans, friends]) => {
         if (controller.signal.aborted) return;
@@ -110,6 +114,7 @@ export function useTraderReport(
               who.handle,
               friends?.friends.find(
                 (friend) =>
+                  friend.collector_id === who.collectorId ||
                   friend.handle.toLowerCase() === who.handle?.toLowerCase()
               )?.collector_id ?? null
             )

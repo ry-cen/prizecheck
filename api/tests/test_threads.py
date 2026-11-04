@@ -331,3 +331,34 @@ def test_loan_list_summary_orients_requested_and_promised_quantities(store, clos
         assert summary[side] == quantity
         assert summary['you_get' if side == 'you_give' else 'you_give'] == '0'
         assert summary['cash'] is None and summary['cards'][0]['side'] == side
+
+
+@pytest.mark.parametrize('viewer_role', ['lender', 'borrower'])
+@pytest.mark.parametrize('condition', ['active', 'closed', 'blocked_by_viewer', 'blocked_by_other',
+                                       'suspended_viewer', 'suspended_other', 'deleted_other'])
+def test_loan_detail_public_party_never_reveals_more_than_its_list(store, viewer_role, condition):
+    a, _ = collector('Ash')
+    b, _ = collector('Misty')
+    tid, _ = thread(a, b, kind='loan', closed=condition == 'closed')
+    viewer, other = (a, b) if viewer_role == 'lender' else (b, a)
+    with connect() as conn:
+        if condition.startswith('blocked_'):
+            blocker, blocked = (viewer, other) if condition == 'blocked_by_viewer' else (other, viewer)
+            conn.execute('INSERT INTO block(blocker_id,blocked_id) VALUES (%s,%s)', (blocker, blocked))
+        elif condition.startswith('suspended_'):
+            suspended = viewer if condition == 'suspended_viewer' else other
+            conn.execute('UPDATE collector_profile SET suspended_at=now() WHERE user_id=%s', (suspended,))
+        elif condition == 'deleted_other':
+            conn.execute('DELETE FROM inventory_owner WHERE user_id=%s', (other,))
+    listed = [item for group in ('needs_you', 'open', 'out_now', 'pending', 'done')
+              for item in ok(call('GET', f'/api/loans?group={group}', viewer)) if item['id'] == str(tid)]
+    assert listed
+    detail = ok(call('GET', f'/api/loans/{tid}', viewer))
+    assert detail['other'] == listed[0]['other']
+    assert set(detail['other']) == {'trader_id', 'display_name', 'friend', 'available'}
+    assert detail['live_terms']['other']['collector_id'] == (None if condition == 'deleted_other' else other)
+    assert (detail['other']['trader_id'] is None) == (condition == 'deleted_other')
+    if condition.startswith(('blocked_', 'suspended_')) or condition == 'deleted_other':
+        assert detail['other']['available'] is False
+        assert detail['other']['friend'] is False
+    assert not {'collector_id', 'user_id', 'handle', 'location_id', 'deck_id'} & detail['other'].keys()
