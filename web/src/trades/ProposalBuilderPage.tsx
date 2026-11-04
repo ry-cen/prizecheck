@@ -5,7 +5,12 @@ import {
   OfferInventoryChanged,
 } from "./offerInventory";
 import { OfferReview, offerChanges } from "./offerReview";
-import { offerCaps, offerControls, reviewRequired } from "./offerLifecycle";
+import {
+  offerCaps,
+  offerControls,
+  reviewRequired,
+  type OfferRead,
+} from "./offerLifecycle";
 import { offerVersion } from "./offerInventory";
 import { offerLibrary, offerCopyMap } from "./offerCopies";
 import { useMessagePrefill } from "./messagePrefill";
@@ -332,12 +337,7 @@ export function ProposalBuilderPage({
   useEffect(() => {
     const controller = new AbortController();
     setMine({ kind: "loading" });
-    if (reviewedOffer)
-      offerReview?.dispatch({
-        type: "inventory_requested",
-        side: "give",
-        version: offerVersion(reviewedOffer)!,
-      });
+    const read = offerReview?.beginInventory("give", reviewedOffer) ?? null;
     readOfferInventory(
       reviewedOffer,
       () => getTradeList(controller.signal),
@@ -346,23 +346,23 @@ export function ProposalBuilderPage({
       ({ value: list, offerVersion }) => {
         if (!controller.signal.aborted) {
           setMine({ kind: "ready", cards: list.cards, offerVersion });
-          if (offerVersion)
-            offerReview?.dispatch({
-              type: "inventory_received",
-              side: "give",
-              version: offerVersion,
-              cards: list.cards,
-            });
+          offerReview?.completeRead(read, {
+            kind: "inventory",
+            cards: list.cards,
+          });
         }
       },
       (cause) => {
         if (!controller.signal.aborted) {
           setMine({ kind: "failed" });
-          inventoryFailed(cause, reviewedOffer, true);
+          inventoryFailed(cause, reviewedOffer, read);
         }
       }
     );
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      offerReview?.cancelRead(read);
+    };
   }, [mineAttempt, reviewedOffer]);
 
   // Selected caps must not depend on a library search or its currently visible page.
@@ -374,11 +374,7 @@ export function ProposalBuilderPage({
   useEffect(() => {
     if (!reviewedOffer) return;
     const controller = new AbortController();
-    offerReview?.dispatch({
-      type: "inventory_requested",
-      side: "get",
-      version: offerVersion(reviewedOffer)!,
-    });
+    const read = offerReview?.beginInventory("get", reviewedOffer) ?? null;
     readOfferInventory(
       reviewedOffer,
       () =>
@@ -389,20 +385,18 @@ export function ProposalBuilderPage({
       (id) => getTrade(id, controller.signal)
     ).then(
       ({ value: cards, offerVersion }) => {
-        if (!controller.signal.aborted && offerVersion)
-          offerReview?.dispatch({
-            type: "inventory_received",
-            side: "get",
-            version: offerVersion,
-            cards,
-          });
+        if (!controller.signal.aborted)
+          offerReview?.completeRead(read, { kind: "inventory", cards });
       },
       (cause) => {
         if (controller.signal.aborted) return;
-        inventoryFailed(cause, reviewedOffer, true);
+        inventoryFailed(cause, reviewedOffer, read);
       }
     );
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      offerReview?.cancelRead(read);
+    };
   }, [traderId, reviewedOffer, selectedGet, attempt]);
   const currentTheirs = currentOfferRead(theirs, reviewedOffer);
   const currentMatch = currentOfferRead(match, reviewedOffer);
@@ -456,6 +450,8 @@ export function ProposalBuilderPage({
   const capsReady = caps.ready;
   const displayedProposal = caps.proposal;
   const overCap = caps.overCap;
+  const replaying =
+    lifecycle?.phase === "retry_send" && lifecycle.pending !== null;
 
   async function showMore() {
     if (
@@ -557,25 +553,26 @@ export function ProposalBuilderPage({
   function inventoryFailed(
     cause: unknown,
     expected: TradeView | undefined,
-    required = false
+    read: OfferRead | null = null
   ) {
-    if (
-      !offerReview ||
-      !expected ||
-      offerVersion(expected) !== offerVersion(offerReview.reviewed)
-    )
-      return;
-    if (
+    if (!offerReview) return;
+    const changed =
       cause instanceof OfferInventoryChanged ||
-      (cause instanceof SocialError && cause.status === 404)
-    ) {
-      offerReview.dispatch({
-        type: "inventory_obsolete",
-        version: offerVersion(expected)!,
-      });
+      (cause instanceof SocialError && cause.status === 404);
+    offerReview.completeRead(read, {
+      kind:
+        cause instanceof OfferInventoryChanged
+          ? "obsolete"
+          : changed
+            ? "not_found"
+            : "failed",
+    });
+    if (
+      changed &&
+      expected &&
+      offerVersion(expected) === offerVersion(offerReview.reviewed)
+    )
       void checkCurrentOffer();
-    } else if (required)
-      offerReview.dispatch({ type: "read_failed", stage: "inventory" });
   }
   async function checkCurrentOffer() {
     if (!offerReview) return;
@@ -640,9 +637,8 @@ export function ProposalBuilderPage({
       sending.current ||
       busy ||
       !party ||
-      !capsReady ||
-      (controls !== null && !controls.send) ||
-      overCap
+      (!replaying && (!capsReady || overCap)) ||
+      (controls !== null && !controls.send)
     )
       return;
     const current = proposal;
@@ -1077,8 +1073,7 @@ export function ProposalBuilderPage({
               unchanged ||
               reviewNeeded ||
               (controls !== null && !controls.send) ||
-              !capsReady ||
-              overCap ||
+              (!replaying && (!capsReady || overCap)) ||
               terminal !== null
             }
             aria-disabled={busy || undefined}

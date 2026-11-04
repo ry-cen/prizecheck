@@ -19,15 +19,15 @@ const offeredCard = (edition_id: string, name: string) => ({
   image_url: null,
 });
 function loadedInventory(review: OfferReview) {
-  for (const side of ["give", "get"] as const)
-    review.dispatch({
-      type: "inventory_received",
-      version: `${review.reviewed.thread_id}/${review.reviewed.offer_id}/${review.reviewed.revision}`,
-      side,
+  for (const side of ["give", "get"] as const) {
+    const read = review.beginInventory(side);
+    review.completeRead(read, {
+      kind: "inventory",
       cards: review.reviewed[side === "give" ? "you_give" : "you_get"].map(
         (card) => ({ ...card, copies: "3" })
       ),
     });
+  }
 }
 function loadedReview(offer: TradeView) {
   const review = new OfferReview(offer);
@@ -200,3 +200,48 @@ it("names changed quantities and the new agreement state in plain words", () => 
     "private-edition-id"
   );
 });
+
+it.each(["get-first", "post-first"])(
+  "a current-version GET404 cannot settle an unknown POST (%s)",
+  async (order) => {
+    const review = loadedReview(original);
+    let failPost!: (cause: Error) => void, failRead!: (cause: Error) => void;
+    const post = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<TradeView>((_, no) => {
+            failPost = no;
+          })
+      )
+      .mockResolvedValue(original);
+    const pending = review.submit({}, "retained-key", post, vi.fn());
+    // Install rejection handling before releasing either transport boundary.
+    const lost = expect(pending).rejects.toThrow("lost response");
+    const read = review
+      .refresh(
+        () =>
+          new Promise<TradeView>((_, no) => {
+            failRead = no;
+          })
+      )
+      .catch(() => null);
+    await Promise.resolve();
+    if (order === "post-first") {
+      failPost(new TypeError("lost response"));
+      await lost;
+    }
+    failRead(new SocialError(404, "TRADE_NOT_FOUND"));
+    await read;
+    if (order === "get-first") {
+      failPost(new TypeError("lost response"));
+      await lost;
+    }
+    expect(review.getSnapshot().phase).toBe("retry_send");
+    expect(review.getSnapshot().pending?.idempotency_key).toBe("retained-key");
+    await review.submit({}, "unused-key", post, vi.fn());
+    expect(JSON.stringify(post.mock.calls[1])).toBe(
+      JSON.stringify(post.mock.calls[0])
+    );
+  }
+);

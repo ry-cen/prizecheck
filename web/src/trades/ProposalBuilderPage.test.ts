@@ -381,3 +381,45 @@ it("keeps one outcome announcement when an unavailable replay replaces the mount
     )
   ).toBe(false);
 });
+
+it.each(["sending", "retry_send"])(
+  "S1-07: late GET404 during %s preserves byte-identical replay",
+  async (phase) => {
+    await mount();
+    await click(increase());
+    current = replacement;
+    vi.mocked(counterTrade).mockRejectedValueOnce(
+      new TradesError(409, "OFFER_CHANGED")
+    );
+    await click(send());
+    let failCheck!: (cause: Error) => void;
+    vi.mocked(getTrade).mockImplementationOnce(
+      () =>
+        new Promise<TradeView>((_, no) => {
+          failCheck = no;
+        })
+    );
+    await click(button("Check current offer"));
+    await click(button("I reviewed the current offer"));
+    await click(decrease());
+    let failPost!: (cause: Error) => void;
+    vi.mocked(counterTrade).mockReturnValueOnce(
+      new Promise<TradeView>((_, no) => {
+        failPost = no;
+      })
+    );
+    await click(send());
+    const bytes = JSON.stringify(vi.mocked(counterTrade).mock.calls[1]);
+    if (phase === "retry_send")
+      await act(async () => failPost(new TypeError("lost response")));
+    await act(async () => failCheck(new SocialError(404, "TRADE_NOT_FOUND")));
+    if (phase === "sending")
+      await act(async () => failPost(new TypeError("lost response")));
+    expect(send().disabled).toBe(false);
+    expect(host.textContent).not.toContain(
+      "This Trade no longer accepts an offer change"
+    );
+    await click(send());
+    expect(JSON.stringify(vi.mocked(counterTrade).mock.calls[2])).toBe(bytes);
+  }
+);
