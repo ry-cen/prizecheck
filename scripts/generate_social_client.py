@@ -6,7 +6,7 @@ offers, trading #277, Open discovery, trading #297, and Conversations, trading #
 import client_generator as gen
 
 TARGET = "web/src/social_generated.ts"
-NAMES = ("TradeResolution", "LoanResolution", 'OfferSummary', 'SummaryCard', 'SummaryCash', 'PulseCount', 'EventView', '_EventData', '_EventLine', '_CashChange', '_Cash', '_DateChange', '_Quantity', "EditTerms", "ThreadItem", "ThreadParty", "TradeDetail", "LoanDetail", "Timeline", "Pulse", "ReadResult", "ConfirmReturn", "Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
+NAMES = ("TradeResolution", "LoanResolution", 'OfferSummary', 'SummaryCard', 'SummaryCash', 'PulseCount', 'EventEdition', 'EventView', '_EventData', '_EventLine', '_CashChange', '_Cash', '_DateChange', '_Quantity', "EditTerms", "ThreadItem", "ThreadParty", "TradeDetail", "LoanDetail", "Timeline", "Pulse", "ReadResult", "ConfirmReturn", "Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
          "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
          "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "ReturnLine",
          "PendingReturn", "LoanView",

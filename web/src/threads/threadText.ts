@@ -1,3 +1,4 @@
+import { tradeCardName } from "../trades/tradeText";
 import type { ThreadItem, Timeline, TimelineItem } from "../social_generated";
 
 const EVENTS: Record<string, string> = {
@@ -65,10 +66,13 @@ export function timelineText(
     return `${item.message.from === "you" ? "You" : name}: ${item.message.body}`;
   const event = item.event;
   if (!event) return "";
+  const labels = { ...editionNames };
+  for (const edition of event.editions ?? [])
+    labels[edition.edition_id] = tradeCardName(edition);
   const actor = event.actor ? `${event.actor === youAre ? "You" : name}: ` : "";
   const changes = (event.data?.lines ?? []).map(
     (line) =>
-      `${line.giver === youAre ? "You give" : "They give"} ${editionNames[line.edition_id] ?? "copies"}: ${line.from_qty} → ${line.to_qty}`
+      `${line.giver === youAre ? "You give" : "They give"} ${labels[line.edition_id] ?? "copies"}: ${line.from_qty} → ${line.to_qty}`
   );
   const cash = (value: {
     cents?: number | null;
@@ -94,7 +98,7 @@ export function timelineText(
   ] as const)
     for (const line of event.data?.[field] ?? [])
       changes.push(
-        `${label}: ${line.quantity} ${editionNames[line.edition_id] ?? "copies"}`
+        `${label}: ${line.quantity} ${labels[line.edition_id] ?? "copies"}`
       );
   return `${actor}${EVENTS[event.kind] ?? "Agreement updated"}${changes.map((change) => ` · ${change}`).join("")}`;
 }
