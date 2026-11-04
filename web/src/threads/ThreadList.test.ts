@@ -254,3 +254,58 @@ it("S2-16: an item's latest log summary projects only public terms and its parti
     vi.clearAllMocks();
   }
 });
+
+it("S2-09: Done keeps a full tap target and native folded history without marking it read", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.mocked(getLoans).mockResolvedValue([
+    {
+      id: "done-item",
+      kind: "loan",
+      other: {
+        trader_id: null,
+        display_name: "Misty",
+        friend: false,
+        available: false,
+      },
+      you_are: "low",
+      summary: { cards: [], you_give: "0", you_get: "1" },
+      section: "done",
+      state: "closed",
+      waiting: null,
+      unread: 0,
+      needs_you: false,
+      last_activity_at: "2026-11-04T12:00:00Z",
+    },
+  ]);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        h(ThreadList, { kind: "loan", active: true, onOpen: vi.fn() })
+      )
+    );
+    const summary = host.querySelector("summary")!,
+      disclosure = host.querySelector("details")!;
+    expect(summary.textContent).toBe("Done");
+    expect(summary.classList.contains("min-h-tap")).toBe(true);
+    expect(disclosure.open).toBe(false);
+    summary.focus();
+    expect(document.activeElement).toBe(summary);
+    await act(async () => summary.click());
+    expect(disclosure.open).toBe(true);
+    expect(
+      disclosure.querySelector('a[data-thread="done-item"]')
+    ).not.toBeNull();
+    await act(async () => summary.click());
+    expect(disclosure.open).toBe(false);
+    expect(document.activeElement).toBe(summary);
+    expect(readThread).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
