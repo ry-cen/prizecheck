@@ -156,7 +156,9 @@ export function ThreadList({
     );
     return group === "done" ? (
       <details key={group}>
-        <summary>Done</summary>
+        <summary className="min-h-tap cursor-pointer rounded-control px-3 py-3 text-control font-medium hover:bg-surface-raised">
+          Done
+        </summary>
         {content}
       </details>
     ) : (
