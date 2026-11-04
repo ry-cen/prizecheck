@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
+import { BorrowedDialog } from "./BorrowedDialog";
+import { indexLocations } from "../workspace/locationTree";
 import { act, createElement as h, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { BorrowDraftsProvider, useBorrowDrafts } from "./BorrowDrafts";
 import { LendOfferDialog } from "./LendOfferDialog";
 import {
+  getBorrowed,
+  moveBorrowed,
   getFriends,
   sendBorrowRequest,
   sendLendOffer,
@@ -15,6 +19,8 @@ import { ToastProvider } from "../ui/Toast";
 import { useRoute } from "../shell/useRoute";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
+  getBorrowed: vi.fn(),
+  moveBorrowed: vi.fn(),
   getFriends: vi.fn(),
   sendBorrowRequest: vi.fn(),
   sendLendOffer: vi.fn(),
@@ -27,8 +33,8 @@ vi.mock("../workspace/media", () => ({
   MOBILE_QUERY: "(max-width: 760px)",
   useMediaQuery: () => false,
 }));
-for (const kind of ["borrow", "lend"] as const)
-  it(`keeps the complete initial ${kind} command through close, edits and navigation until exact replay settles`, async () => {
+for (const kind of ["borrow", "lend", "borrowed move"] as const)
+  it(`keeps the complete ${kind} command through close, edits and navigation until exact replay settles`, async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("scrollTo", vi.fn());
     vi.stubGlobal(
@@ -69,14 +75,35 @@ for (const kind of ["borrow", "lend"] as const)
       owner_revision: 0,
       next_cursor: null,
     });
+    vi.mocked(getBorrowed).mockResolvedValue({
+      copies: "3",
+      cards: [
+        {
+          loan_id: "round",
+          edition_id: "iono",
+          name: "Iono",
+          set_code: "PAL",
+          set_name: "Paldea Evolved",
+          collector_number: "185",
+          descriptor: { finish: "normal" },
+          image_url: null,
+          location_id: "one",
+          location_name: "Box",
+          copies: "3",
+          lender: "Misty",
+        },
+      ],
+    });
     const send =
       kind === "borrow"
         ? vi.mocked(sendBorrowRequest)
-        : vi.mocked(sendLendOffer);
+        : kind === "lend"
+          ? vi.mocked(sendLendOffer)
+          : vi.mocked(moveBorrowed);
     let lose!: (error: Error) => void;
     send
       .mockReturnValueOnce(
-        new Promise((_, reject) => {
+        new Promise<never>((_, reject) => {
           lose = reject;
         })
       )
@@ -125,42 +152,73 @@ for (const kind of ["borrow", "lend"] as const)
         ToastProvider,
         null,
         h("button", { onClick: () => route.navigate("/decks") }, "Navigate"),
-        kind === "lend"
-          ? h(LendOfferDialog, {
+        kind === "borrowed move"
+          ? h(BorrowedDialog, {
               open,
-              rows: [
-                {
-                  key: "line",
-                  locationId: "place",
-                  editionId: "iono",
-                  count: 3,
-                  card: "Iono",
-                },
-              ],
               onClose: () => setOpen(false),
-              onSent: vi.fn(),
-              onOpenLoan: vi.fn(),
+              onMoved: vi.fn(),
+              index: indexLocations([
+                {
+                  id: "one",
+                  name: "Box",
+                  kind: "storage",
+                  parent_id: null,
+                  version: 1,
+                  depth: 0,
+                },
+                {
+                  id: "two",
+                  name: "Binder",
+                  kind: "storage",
+                  parent_id: null,
+                  version: 1,
+                  depth: 0,
+                },
+              ]),
             })
-          : h(BorrowDraftsProvider, {
-              userId: "authority-test",
-              onOpenLoan: vi.fn(),
-              children: h(BorrowOpener),
-            })
+          : kind === "lend"
+            ? h(LendOfferDialog, {
+                open,
+                rows: [
+                  {
+                    key: "line",
+                    locationId: "place",
+                    editionId: "iono",
+                    count: 3,
+                    card: "Iono",
+                  },
+                ],
+                onClose: () => setOpen(false),
+                onSent: vi.fn(),
+                onOpenLoan: vi.fn(),
+              })
+            : h(BorrowDraftsProvider, {
+                userId: "authority-test",
+                onOpenLoan: vi.fn(),
+                children: h(BorrowOpener),
+              })
       );
     }
     try {
       await act(async () => root.render(h(View)));
       if (kind === "borrow")
         await act(async () => button("Open Borrow").click());
-      else
+      else {
+        if (kind === "borrowed move")
+          await act(async () => button("Move…").click());
         await act(async () => {
           const field = host.querySelector("select")!;
-          field.value = "friend";
+          field.value = kind === "lend" ? "friend" : "two";
           field.dispatchEvent(new Event("change", { bubbles: true }));
         });
+      }
       await act(async () =>
         button(
-          kind === "borrow" ? "Send Borrow Request" : "Send offer of 3 cards"
+          kind === "borrow"
+            ? "Send Borrow Request"
+            : kind === "lend"
+              ? "Send offer of 3 cards"
+              : "Move"
         ).click()
       );
       const original = JSON.stringify(send.mock.calls[0]);
@@ -169,6 +227,14 @@ for (const kind of ["borrow", "lend"] as const)
         await act(async () =>
           button(kind === "borrow" ? "Keep draft" : "Cancel").click()
         );
+        if (kind === "borrowed move")
+          await act(async () =>
+            host
+              .querySelector<HTMLButtonElement>(
+                '[aria-label="Close Borrowed"]'
+              )!
+              .click()
+          );
         expect(
           host.querySelector<HTMLDialogElement>("dialog[open]")?.open
         ).toBe(true);
@@ -185,11 +251,18 @@ for (const kind of ["borrow", "lend"] as const)
             host.querySelector<HTMLDialogElement>("dialog[open]")?.open
           ).toBe(true);
         } else expect(host.querySelector("select")?.disabled).toBe(true);
-        expect(
-          host
-            .querySelector<HTMLInputElement>('input[type="date"]')
-            ?.matches(":disabled")
-        ).toBe(true);
+        if (kind !== "borrowed move")
+          expect(
+            host
+              .querySelector<HTMLInputElement>('input[type="date"]')
+              ?.matches(":disabled")
+          ).toBe(true);
+        else
+          expect(
+            host.querySelector<HTMLButtonElement>(
+              '[aria-label="Decrease Copies"]'
+            )?.disabled
+          ).toBe(true);
         await act(async () => button("Navigate").click());
         expect(window.location.pathname).toBe("/collection");
         expect(
@@ -204,6 +277,12 @@ for (const kind of ["borrow", "lend"] as const)
       await act(async () =>
         button(kind === "borrow" ? "Keep draft" : "Cancel").click()
       );
+      if (kind === "borrowed move")
+        await act(async () =>
+          host
+            .querySelector<HTMLButtonElement>('[aria-label="Close Borrowed"]')!
+            .click()
+        );
       expect(host.querySelector<HTMLDialogElement>("dialog[open]")).toBeNull();
       await act(async () => button("Navigate").click());
       expect(window.location.pathname).toBe("/decks");

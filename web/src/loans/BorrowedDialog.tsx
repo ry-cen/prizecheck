@@ -1,3 +1,4 @@
+import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
 import {
   useEffect,
   useLayoutEffect,
@@ -74,7 +75,14 @@ export function BorrowedDialog({
   const [copies, setCopies] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const pending = useRef<string | null>(null);
+  const pending = useRef<{
+    card: BorrowedCard;
+    body: Parameters<typeof moveBorrowed>[0];
+  } | null>(null);
+  const [retained, setRetained] = useState(false);
+  const surface = useRef<HTMLDivElement>(null);
+  const close = () =>
+    closeLoanRequest(surface.current, pending.current !== null, onClose);
   const leaves = useMemo(() => leavesOf(index), [index]);
   const focusNext = useRef<FocusNext | null>(null);
   const moveButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -84,7 +92,7 @@ export function BorrowedDialog({
 
   // Each opening starts afresh; a refusal that reads the list again keeps its message.
   useEffect(() => {
-    if (!open) return;
+    if (!open || pending.current) return;
     setMoving(null);
     setMessage("");
   }, [open]);
@@ -121,6 +129,7 @@ export function BorrowedDialog({
   });
 
   function startMove(card: BorrowedCard) {
+    if (pending.current) return;
     focusNext.current = { to: "form" };
     setMoving(rowKey(card));
     setDestination("");
@@ -133,24 +142,32 @@ export function BorrowedDialog({
     if (busy || !destination) return;
     setBusy(true);
     setMessage("");
-    const key = pending.current ?? crypto.randomUUID();
-    pending.current = key;
-    try {
-      const view = await moveBorrowed({
+    const command = pending.current ?? {
+      card,
+      body: {
         loan_id: card.loan_id,
         edition_id: card.edition_id,
         from_location_id: card.location_id,
         to_location_id: destination,
         quantity: String(copies),
-        idempotency_key: key,
-      });
+        idempotency_key: crypto.randomUUID(),
+      },
+    };
+    pending.current = command;
+    setRetained(true);
+    try {
+      const view = await moveBorrowed(command.body);
       pending.current = null;
+      setRetained(false);
       focusNext.current = { to: "row", key: rowKey(card) };
       setMoving(null);
       setLoad({ kind: "ready", view });
       onMoved();
     } catch (cause) {
-      if (!outcomeUnknown(cause)) pending.current = null;
+      if (!outcomeUnknown(cause)) {
+        pending.current = null;
+        setRetained(false);
+      }
       setMessage(moveMessage(cause));
       if (
         cause instanceof SocialError &&
@@ -239,6 +256,7 @@ export function BorrowedDialog({
                       if (element) moveButtons.current.set(key, element);
                       else moveButtons.current.delete(key);
                     }}
+                    disabled={retained}
                     onClick={() => startMove(card)}
                     aria-label={`Move ${card.name} from ${card.location_name}`}
                   >
@@ -259,7 +277,9 @@ export function BorrowedDialog({
                     ref={destinationField}
                     label="Move to"
                     value={destination}
+                    disabled={retained}
                     onChange={(event) => {
+                      if (pending.current) return;
                       setDestination(event.target.value);
                       pending.current = null;
                     }}
@@ -275,10 +295,12 @@ export function BorrowedDialog({
                   </Select>
                   <Stepper
                     label="Copies"
+                    disabled={retained}
                     value={copies}
                     min={1}
                     max={Number(card.copies)}
                     onChange={(value) => {
+                      if (pending.current) return;
                       setCopies(value);
                       pending.current = null;
                     }}
@@ -289,17 +311,18 @@ export function BorrowedDialog({
                     <Button
                       type="submit"
                       variant="primary"
-                      disabled={!destination}
+                      disabled={retained || !destination}
                       aria-disabled={busy || undefined}
                     >
                       Move
                     </Button>
                     <Button
                       onClick={() => {
+                        if (pending.current) return;
                         focusNext.current = { to: "row", key };
                         setMoving(null);
                       }}
-                      disabled={busy}
+                      disabled={retained || busy}
                     >
                       Cancel
                     </Button>
@@ -315,12 +338,12 @@ export function BorrowedDialog({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={close}
       title="Borrowed"
       closeLabel="Close Borrowed"
       returnFocus={returnFocus}
     >
-      <div className="flex flex-col gap-3">
+      <div ref={surface} className="flex flex-col gap-3">
         {message && (
           <p
             ref={alert}
@@ -332,6 +355,15 @@ export function BorrowedDialog({
           </p>
         )}
         {body}
+        {retained && (
+          <PendingLoanRequest
+            busy={busy}
+            onRetry={() => {
+              const command = pending.current;
+              if (command) void confirmMove(command.card);
+            }}
+          />
+        )}
       </div>
     </Dialog>
   );
