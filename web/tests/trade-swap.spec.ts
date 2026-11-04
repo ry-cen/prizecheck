@@ -1,3 +1,4 @@
+import { tradeView } from "./support/trades";
 // Ticket #272: Confirm swap (Trading spec "Confirm swap and ownership transfer", prototype verdict variant A: received
 // cards go to Unsorted by default, changeable in the confirm dialog). Misty sends Ash a swap and a gift through the
 // API. Ash accepts the swap in the browser, and his open screen finds his pick out of date once his Arven moved to
@@ -321,8 +322,9 @@ async function story(
   // Stock a fresh Arven in Ash's For trade Binder: his remaining copy is in the unlisted Box after the first swap.
   await hold(ash.page, ashBinder, arven, 1);
   const review = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
-  const offered = await api(ash.page, "GET", `/api/social/trades/${review}`);
+  const offered = await tradeView(ash.page, review);
   const accepted = await api(ash.page, "POST", `/api/trades/${review}/accept`, {
+    offer_id: offered.offer_id,
     revision: offered.revision,
     idempotency_key: randomUUID(),
   });
@@ -330,18 +332,22 @@ async function story(
   await main.getByRole("button", { name: "Confirm swap" }).click();
   await expect(dialog).toBeVisible();
   await api(ash.page, "POST", `/api/trades/${review}/confirm-swap`, {
+    offer_id: accepted.offer_id,
     revision: accepted.revision,
     idempotency_key: randomUUID(),
   });
-  const changedPath = `**/api/social/trades/${review}`;
+  const changedPath = `**/api/trades/${review}`;
   await page.route(changedPath, async (route) => {
     const response = await route.fetch();
     await route.fulfill({
       response,
-      json: {
-        ...(await response.json()),
-        cash: { cents: "200", payer: "you" },
-      },
+      json: await response.json().then((detail) => ({
+        ...detail,
+        live_offer: {
+          ...detail.live_offer,
+          cash: { cents: "200", payer: "you" },
+        },
+      })),
     });
   });
   let reviewConfirmations = 0;
@@ -362,8 +368,9 @@ async function story(
   await page.unroute(changedPath);
 
   // F: Ash accepts the gift through the API. Misty's confirm gets her nothing, so it asks nowhere to put cards.
-  const read = await api(ash.page, "GET", `/api/social/trades/${gift}`);
+  const read = await tradeView(ash.page, gift);
   await api(ash.page, "POST", `/api/trades/${gift}/accept`, {
+    offer_id: read.offer_id,
     revision: read.revision,
     idempotency_key: randomUUID(),
   });
