@@ -5,12 +5,7 @@
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
-import {
-  discoverable,
-  seedZips,
-  timeline,
-  traderIdOf,
-} from "./support/conversations";
+import { discoverable, seedZips, traderIdOf } from "./support/conversations";
 import {
   accountId,
   hold,
@@ -104,9 +99,11 @@ test("after both confirm a Trade, Ash adds Misty as a Friend and Misty accepts i
   await expect(page.locator("#main-content")).not.toContainText(mistyHandle);
 
   // The conversation shows the same state.
-  await page.goto(`${ORIGIN}/trades/with/${mistyTrader}`);
+  await page.goto(`${ORIGIN}/trades/${id}`);
   await expect(
-    timeline(page).getByText("You've sent Misty W a Friend Request.")
+    page
+      .getByRole("region", { name: "Trade details" })
+      .getByText("You've sent Misty W a Friend Request.")
   ).toBeVisible();
   await expect(page.locator("#main-content")).not.toContainText(mistyHandle);
 
