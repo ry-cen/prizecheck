@@ -483,6 +483,7 @@ it.each(["refusal", "edit-after-unknown"])(
     // The obsolete selected read reuses the already-outstanding version check. Its result is newer
     // than the obsolete completion, but its request ID predates the selected-inventory request.
     await act(async () => finishCheck(original));
+    const readsBeforeRelease = vi.mocked(getTrade).mock.calls.length;
     if (outcome === "refusal")
       await act(async () =>
         refusePost(
@@ -496,12 +497,17 @@ it.each(["refusal", "edit-after-unknown"])(
     else {
       await act(async () => refusePost(new TypeError("lost response")));
       expect(send().disabled).toBe(false);
-      await click(decrease()); // Explicit edit abandons the exact replay and applies deferred observations.
+      await click(decrease()); // Explicit edit abandons exact replay and starts a fresh check.
     }
-    // Settlement discards all retained payloads and issues a new current-offer read.
-    expect(button("I reviewed the current offer").disabled).toBe(false);
-    expect(send().disabled).toBe(true);
-    await click(button("I reviewed the current offer"));
+    expect(vi.mocked(getTrade).mock.calls.length).toBeGreaterThan(
+      readsBeforeRelease
+    );
+    // A fresh same-version observation now returns through matching inventory without another confirmation.
+    expect(
+      [...host.querySelectorAll("button")].some(
+        (b) => b.textContent?.trim() === "I reviewed the current offer"
+      )
+    ).toBe(false);
     if (outcome === "refusal") await click(decrease());
     expect(send().disabled).toBe(false);
     const calls = vi.mocked(counterTrade).mock.calls.length;
@@ -603,5 +609,109 @@ it.each([false, true])(
       else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
       vi.useRealTimers();
     }
+  }
+);
+
+it.each(
+  ["refusal", "edit-after-unknown"].flatMap((outcome) => [
+    { outcome, changed: false, retryCheck: false },
+    { outcome, changed: true, retryCheck: false },
+    { outcome, changed: false, retryCheck: true },
+  ])
+)(
+  "S1-09: quiet $outcome refreshes before Send (changed=$changed, retry=$retryCheck)",
+  async ({ outcome, changed, retryCheck }) => {
+    await mount();
+    await click(increase());
+    const reads = vi.mocked(getTrade).mock.calls.length;
+    const ownReads = vi.mocked(getTradeList).mock.calls.length;
+    let finish!: (offer: TradeView) => void;
+    let failFresh!: (cause: Error) => void;
+    vi.mocked(getTrade).mockImplementationOnce(
+      () =>
+        new Promise<TradeView>((resolve, reject) => {
+          finish = resolve;
+          failFresh = reject;
+        })
+    );
+    vi.mocked(counterTrade).mockRejectedValueOnce(
+      outcome === "refusal"
+        ? new TradesError(409, "NOT_TRADEABLE", {
+            edition_id: "Iono",
+            side: "you_get",
+            available: "1",
+          })
+        : new TypeError("lost response")
+    );
+    await click(send());
+    if (outcome === "edit-after-unknown") {
+      expect(send().disabled).toBe(false);
+      await click(increase()); // explicit edit, still the same selected edition
+    } else expect(host.textContent).toContain("can trade only 1 Iono");
+    expect(vi.mocked(getTrade).mock.calls.length).toBeGreaterThan(reads);
+    expect(finish).toBeTypeOf("function");
+    expect(send().disabled).toBe(true);
+    expect(counterTrade).toHaveBeenCalledTimes(1);
+    expect(host.querySelector("output")?.textContent).toBe(
+      outcome === "refusal" ? "2" : "3"
+    );
+    if (retryCheck) {
+      await act(async () => failFresh(new TypeError("fresh check offline")));
+      expect(button("Retry current offer").disabled).toBe(false);
+      vi.mocked(getTrade).mockImplementationOnce(
+        () =>
+          new Promise<TradeView>((resolve) => {
+            finish = resolve;
+          })
+      );
+      await click(button("Retry current offer"));
+      expect(send().disabled).toBe(true);
+    }
+    current = changed ? replacement : original;
+    if (!changed && outcome === "refusal")
+      vi.mocked(getTraderTradeList).mockResolvedValue({
+        trader_id: "misty",
+        display_name: "Misty",
+        band: null,
+        completed_trades: 0,
+        cards: [{ ...card, copies: "1" }],
+        next_page: null,
+      });
+    await act(async () => finish(current));
+    if (changed) {
+      expect(send().disabled).toBe(true);
+      expect(button("I reviewed the current offer").disabled).toBe(false);
+      await click(send());
+      expect(counterTrade).toHaveBeenCalledTimes(1);
+      await click(button("I reviewed the current offer"));
+      if (outcome === "refusal") await click(decrease()); // draft quantity 2 equals B; make a changed Counter
+    } else {
+      expect(
+        [...host.querySelectorAll("button")].some(
+          (b) => b.textContent?.trim() === "I reviewed the current offer"
+        )
+      ).toBe(false);
+      if (outcome === "refusal") expect(increase().disabled).toBe(true); // refreshed cap is 2, not the previous 3
+    }
+    expect(vi.mocked(getTradeList).mock.calls.length).toBeGreaterThan(ownReads);
+    expect(send().disabled).toBe(false);
+    await click(send());
+    const [first, retry] = vi.mocked(counterTrade).mock.calls;
+    expect(retry[1]).toMatchObject({
+      offer_id: current.offer_id,
+      revision: current.revision,
+      you_get: [
+        {
+          edition_id: "Iono",
+          quantity:
+            changed && outcome === "refusal"
+              ? "1"
+              : outcome === "refusal"
+                ? "2"
+                : "3",
+        },
+      ],
+    });
+    expect(retry[1].idempotency_key).not.toBe(first[1].idempotency_key);
   }
 );

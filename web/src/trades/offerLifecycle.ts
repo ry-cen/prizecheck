@@ -16,7 +16,11 @@ export type OfferPhase =
   | "sent";
 export type InventorySide = "give" | "get";
 export type ReadSource = "version" | InventorySide;
-export type OfferRead = { id: number; source: ReadSource; version: string };
+export type OfferRead = {
+  id: number;
+  source: ReadSource;
+  version: string;
+};
 export type ReadResult =
   | { kind: "version"; offer: TradeView }
   | { kind: "inventory"; cards: readonly ProposalCard[] }
@@ -40,11 +44,11 @@ export type OfferLifecycle = {
   candidate: TradeView | null;
   inventory: Record<InventorySide, readonly ProposalCard[] | null>;
   failure: "version" | "inventory" | null;
+  checkConsent: "required" | "if_changed";
   pending: ChangeOffer | null;
   nextRead: number;
   reads: Record<number, OfferRead>;
   latestRead: Partial<Record<ReadSource, number>>;
-  observed: boolean;
   selected: readonly string[];
   nextPost: number;
   activePost: OfferPost | null;
@@ -73,11 +77,11 @@ export function initialOfferLifecycle(reviewed: TradeView): OfferLifecycle {
     candidate: null,
     inventory: EMPTY,
     failure: null,
+    checkConsent: "required",
     pending: null,
     nextRead: 0,
     reads: {},
     latestRead: {},
-    observed: false,
     selected: reviewed.you_get.map((card) => card.edition_id).sort(),
     nextPost: 0,
     activePost: null,
@@ -144,16 +148,20 @@ export function transitionOffer(
       latestRead: { ...next.latestRead, [source]: read.id },
     };
   }
-  function check(model: OfferLifecycle, keepCandidate = false) {
+  function check(
+    model: OfferLifecycle,
+    consent: "required" | "if_changed" = "required",
+    keepCandidate = false
+  ) {
     // Start a NEW observation; no previously completed or delayed reply can become the candidate.
     return issue(
       {
         ...cancel(model),
         phase: "checking",
         candidate: keepCandidate ? model.candidate : null,
+        checkConsent: consent,
         inventory: EMPTY,
         failure: null,
-        observed: false,
       },
       "version"
     );
@@ -171,9 +179,7 @@ export function transitionOffer(
     return next;
   }
   function release(model: OfferLifecycle) {
-    const next = { ...model, pending: null, activePost: null };
-    if (next.observed || Object.keys(next.reads).length) return check(next);
-    return inventories({ ...next, phase: afterInventory(next) });
+    return check({ ...model, pending: null, activePost: null }, "if_changed");
   }
   if (event.type === "read_completed") {
     const outstanding = before.reads[event.read.id];
@@ -188,7 +194,7 @@ export function transitionOffer(
     const model = { ...before, reads };
     if (terminal(model) || !currentRead(model, event.read)) return done(model);
     // A retained command has sole authority. Store no reply payload or ordering to replay later.
-    if (model.pending) return done({ ...model, observed: true });
+    if (model.pending) return done(model);
     const result = event.result;
     if (event.read.source === "version") {
       if (result.kind === "not_found")
@@ -208,6 +214,19 @@ export function transitionOffer(
           inventory: EMPTY,
           failure: null,
         });
+      if (
+        model.checkConsent === "if_changed" &&
+        offerVersion(result.offer) === offerVersion(model.reviewed)
+      )
+        return done(
+          inventories({
+            ...cancel(model),
+            phase: "loading",
+            candidate: null,
+            inventory: EMPTY,
+            failure: null,
+          })
+        );
       return done({
         ...cancel(model),
         phase: "changed",
@@ -237,9 +256,17 @@ export function transitionOffer(
       if (event.version && event.version !== offerVersion(before.reviewed))
         return done(before);
       if (event.source === "version" && !before.pending)
-        return done(check(before, true));
+        return done(
+          check(
+            before,
+            before.phase === "read_failed" && before.failure === "version"
+              ? before.checkConsent
+              : "required",
+            true
+          )
+        );
       const model = issue(before, event.source);
-      if (before.pending) return done({ ...model, observed: true });
+      if (before.pending) return done(model);
       if (reviewRequired(before) || before.phase === "read_failed")
         return done(model);
       return done({
@@ -273,9 +300,7 @@ export function transitionOffer(
     }
     case "invalidated":
       if (event.version !== offerVersion(before.reviewed)) return done(before);
-      return done(
-        before.pending ? { ...before, observed: true } : check(before)
-      );
+      return done(before.pending ? before : check(before));
     case "review_confirmed":
       if (
         !before.candidate ||
@@ -291,7 +316,6 @@ export function transitionOffer(
           candidate: null,
           inventory: EMPTY,
           failure: null,
-          observed: false,
         })
       );
     case "send_requested": {
@@ -353,14 +377,13 @@ export function transitionOffer(
           ...cancel(model),
           phase: event.result === "success" ? "sent" : "gone",
           inventory: event.result === "success" ? model.inventory : EMPTY,
-          observed: false,
           failure: null,
         });
       return done(event.result === "changed" ? check(model) : release(model));
     }
     case "retry":
       if (before.phase === "read_failed" && before.failure === "version")
-        return done(check(before));
+        return done(check(before, before.checkConsent));
       if (before.phase === "read_failed" || before.phase === "loading")
         return done(
           inventories({ ...before, phase: "loading", failure: null })
