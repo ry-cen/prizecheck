@@ -414,7 +414,10 @@ def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verif
     lines = [(line.edition_id, quantity(line.quantity)) for line in command.lines]
     if len({edition for edition, _ in lines}) != len(lines):
         error(422, 'DUPLICATE_EDITION')
-    payload = {'action': 'loan_send', **command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'})}
+    # The retired nullable field is still part of historical send fingerprints.
+    # It is canonical data only: strict request bodies continue to reject replaces.
+    payload = {'action': 'loan_send', 'replaces': None,
+               **command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'})}
     with connect() as conn, conn.transaction():
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:

@@ -10,6 +10,7 @@ from datetime import date
 from uuid import UUID, uuid4
 
 import psycopg
+from psycopg import sql
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -26,6 +27,7 @@ from test_deck_cost import launches, store  # noqa: F401
 from test_deck_counting import hold
 from test_friend_copies import node, ok, place
 from test_holdings import call
+from test_operation_counts import writer  # noqa: F401
 from test_loans import accept, pair, sent, view
 from test_borrowed_copies import lend
 from want_list_swap_fixtures import seed_swap_catalog
@@ -34,15 +36,20 @@ MAX_LOAN_LINES = 50
 connect = loan_inventory.connect
 
 
+@pytest.fixture(autouse=True)
+def quiet_request_telemetry(writer):
+    # Drain/disable/restore only the independent operational telemetry writer.
+    # Domain, receipt and quota operations remain real; no table is excluded.
+    writer(None)
+
+
 def snapshot():
-    """Every no-write check covers all B.13 tables, including owner revisions."""
+    """Every persisted public row/value, including receipts, quotas and inventory."""
     with connect() as conn:
-        result = {}
-        for table in ('loan', 'loan_line', 'borrowed_holding', 'location_command'):
-            rows = conn.execute(f'SELECT row_to_json(t) AS row FROM {table} t').fetchall()
-            result[table] = sorted(json.dumps(row['row'], sort_keys=True) for row in rows)
-        result['revisions'] = conn.execute('SELECT user_id,revision FROM inventory_owner ORDER BY user_id').fetchall()
-        return result
+        tables = [row['tablename'] for row in conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")]
+        return {table: conn.execute(sql.SQL('SELECT to_jsonb(t) AS row FROM {} t ORDER BY to_jsonb(t)::text')
+                                   .format(sql.Identifier(table))).fetchall() for table in tables}
 
 
 def refused(response, code, status=409):
@@ -224,12 +231,12 @@ def test_the_receipt_key_alone_fences_an_original_past_its_lookup(store, monkeyp
 
 ROUTES = ['borrow', 'offer', 'move', 'accept', 'accept-offer', 'decline', 'withdraw', 'cancel', 'handover',
           'picks/use-suggested', 'take-back', 'returns', 'returns/confirm', 'write-off', 'written-off',
-          'return-by', 'extension', 'extension/approve', 'extension/decline']
+          'return-by', 'extension', 'extension/approve', 'extension/decline', 'terms']
 
 
 def route_body(route, lender, edition, source, key):
     loan_id = str(uuid4())
-    body = {'revision': 1, 'idempotency_key': str(key)}
+    body = {'loan_id': str(uuid4()), 'revision': 1, 'idempotency_key': str(key)}
     if route == 'borrow':
         return '/api/loans', borrow_body(lender, edition, key)
     if route == 'offer':
@@ -246,8 +253,11 @@ def route_body(route, lender, edition, source, key):
         body.update(choice='keep', places=[{'location_id': source, 'edition_id': edition, 'copies': '1'}])
     if route in ('return-by', 'extension'):
         body['return_by'] = '2099-01-31'
-    social = route in ('decline', 'withdraw', 'cancel', 'return-by', 'extension', 'extension/approve', 'extension/decline')
-    return f"/api/{'social/loans' if social else 'loans'}/{loan_id}/{route}", body
+    if route == 'returns/confirm':
+        body['return_id'] = str(uuid4())
+    if route == 'terms':
+        body['lines'] = [{'edition_id': edition, 'quantity': '1'}]
+    return f'/api/loans/{loan_id}/{route}', body
 
 
 @pytest.mark.parametrize('route', ROUTES)
@@ -357,8 +367,8 @@ def test_a_refusal_and_a_deadlock_leave_no_receipt(store, monkeypatch):
     with monkeypatch.context() as patch:
         patch.setattr(loans, 'lock_owners', deadlock)
         key = uuid4()
-        refused(call('POST', f"/api/social/loans/{loan['id']}/decline", lender,
-                     {'revision': loan['revision'], 'idempotency_key': str(key)}), 'INVENTORY_TEMPORARILY_UNAVAILABLE', 503)
+        refused(call('POST', f"/api/loans/{loan['thread_id']}/decline", lender,
+                     {'loan_id': loan['loan_id'], 'revision': loan['revision'], 'idempotency_key': str(key)}), 'INVENTORY_TEMPORARILY_UNAVAILABLE', 503)
         assert receipt(lender, key) is None
     assert snapshot() == before
 
@@ -379,7 +389,7 @@ def test_void_under_another_cookie_does_not_fence_the_first_accounts_key(store):
     ok(send(borrower, borrow_body(lender, edition, key)), 201)
 
 
-@pytest.mark.parametrize('route', ['borrow', 'offer', 'move', 'decline'])
+@pytest.mark.parametrize('route', ROUTES)
 def test_a_loan_mutation_naming_another_account_is_refused_before_any_write(store, route):
     borrower, lender, edition, source = setup_send()
     path, body = route_body(route, lender, edition, source, uuid4())
@@ -617,3 +627,52 @@ def test_void_of_an_existing_row_at_the_limit_answers(store, applied):
 def test_database_isolation_is_read_committed():
     with connect() as conn:
         assert conn.execute('SHOW default_transaction_isolation').fetchone()['default_transaction_isolation'] == 'read committed'
+
+
+@pytest.mark.parametrize('route', ROUTES)
+@pytest.mark.parametrize('retained', ['void', 'different_command'])
+def test_account_binding_precedes_existing_receipt_validation(store, route, retained):
+    borrower, lender, edition, source = setup_send()
+    key = uuid4()
+    if retained == 'void':
+        ok(void(borrower, key))
+    else:
+        ok(send(borrower, borrow_body(lender, edition, key)), 201)
+    path, body = route_body(route, lender, edition, source, key)
+    body['account_id'] = lender
+    before = snapshot()
+    refused(call('POST', path, borrower, body), 'ACCOUNT_CHANGED')
+    assert snapshot() == before
+
+
+@pytest.mark.parametrize('route', ROUTES)
+def test_command_collision_refuses_before_membership_and_preserves_every_table(store, route):
+    borrower, lender, edition, source = setup_send()
+    key = uuid4()
+    # This is a successful real POST for a different action, not a mocked gate.
+    ok(call('POST', '/api/location-tree', borrower,
+            {'name': 'Receipt holder', 'kind': 'storage_leaf', 'idempotency_key': str(key)}), 201)
+    path, body = route_body(route, lender, edition, source, key)
+    before = snapshot()
+    refused(call('POST', path, borrower, body), 'IDEMPOTENCY_KEY_REUSED')
+    assert snapshot() == before
+
+
+@pytest.mark.parametrize('route', ['decline', 'withdraw', 'cancel', 'return-by', 'extension',
+                                  'extension/approve', 'extension/decline'])
+def test_retired_social_loan_commands_stay_rejected(store, route):
+    borrower, lender, edition, source = setup_send()
+    key = uuid4()
+    ok(void(borrower, key))
+    path, body = route_body(route, lender, edition, source, key)
+    before = snapshot()
+    assert call('POST', path.replace('/api/loans/', '/api/social/loans/', 1), borrower, body).status_code == 404
+    assert snapshot() == before
+
+
+def test_retired_borrow_replacement_field_stays_rejected(store):
+    borrower, lender, edition, _ = setup_send()
+    body = {**borrow_body(lender, edition), 'replaces': None}
+    before = snapshot()
+    assert send(borrower, body).status_code == 422
+    assert snapshot() == before
