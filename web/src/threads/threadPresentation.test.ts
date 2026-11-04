@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { itemTabName } from "./threadPresentation";
+import { itemTabName, waitingAction } from "./threadPresentation";
 describe("item badge accessible names", () => {
   it("keeps the server union separate from overlapping waiting and unread counts", () => {
     expect(itemTabName("Trades", { needs_you: 3, waiting: 2, unread: 2 })).toBe(
@@ -18,4 +18,9 @@ describe("item badge accessible names", () => {
       itemTabName("Trades", { needs_you: 0, waiting: 0, unread: 0 })
     ).toBeUndefined();
   });
+});
+
+it("keeps Trade counter wording out of Loan actions", () => {
+  expect(waitingAction("loan", "answer")).toBe("Answer Loan");
+  expect(waitingAction("trade", "answer")).toBe("Accept or counter");
 });

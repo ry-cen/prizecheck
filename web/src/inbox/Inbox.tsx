@@ -136,9 +136,12 @@ export function usePollPulse(): () => void {
 }
 
 /** Called by a mounted conversation page: the pulse is read every 15 s while it is. */
-export function useConversationOpen(): void {
+export function useConversationOpen(active = true): void {
   const register = useContext(InboxContext)?.openConversation;
-  useEffect(() => (register ? register() : undefined), [register]);
+  useEffect(
+    () => (active && register ? register() : undefined),
+    [register, active]
+  );
 }
 
 /** Whether the inbox's drawer just opened this Loan or Trade, true once; false outside the shell. */
@@ -302,25 +305,6 @@ export function InboxProvider({
 /** "Inbox", or "Inbox, 2 waiting" when Loans or Trades wait on the collector. */
 function inboxName(waiting: number): string {
   return waiting ? `Inbox, ${waiting} waiting` : "Inbox";
-}
-
-/** "Loans, 1 needs you", "Loans, 2 need you"; undefined when nothing does, so the tab's name is its label. */
-export function loansTabName(waiting: number): string | undefined {
-  if (!waiting) return undefined;
-  return `Loans, ${waiting} ${waiting === 1 ? "needs" : "need"} you`;
-}
-
-/** "Trades, 1 needs you", "Trades, 2 need you", "Trades, 1 unread conversation", or both parts ("Trades, 1 needs you,
- * 2 unread conversations"); undefined when neither is above zero, so the tab's name is its label. */
-export function tradesTabName(waiting: number, unread = 0): string | undefined {
-  const parts: string[] = [];
-  if (waiting > 0)
-    parts.push(`${waiting} ${waiting === 1 ? "needs" : "need"} you`);
-  if (unread > 0)
-    parts.push(
-      `${unread} unread ${unread === 1 ? "conversation" : "conversations"}`
-    );
-  return parts.length ? `Trades, ${parts.join(", ")}` : undefined;
 }
 
 /** A count drawn over a header button or a tab's icon; hidden from assistive technology, which reads the name. */

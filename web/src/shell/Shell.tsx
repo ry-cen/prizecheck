@@ -33,11 +33,7 @@ import {
   Badge,
   InboxButton,
   InboxProvider,
-  loansTabName,
-  tradesTabName,
-  useInboxTradesWaiting,
   useThreadCounts,
-  useInboxWaiting,
 } from "../inbox/Inbox";
 import {
   SettingsNavigationScope,

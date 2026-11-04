@@ -3,6 +3,7 @@ import { useNoteLoansChanged, usePollPulse } from "../inbox/Inbox";
 import { CANCEL } from "../social/blockMessages";
 import { endingText, traderEnding } from "../social/friendshipEnding";
 import {
+  getFriends,
   getLoanViews,
   getTradeViews,
   reportCollector,
@@ -96,12 +97,22 @@ export function useTraderReport(
     Promise.all([
       getTradeViews(controller.signal),
       who.handle ? getLoanViews(controller.signal) : Promise.resolve(null),
+      who.handle ? getFriends() : Promise.resolve(null),
     ])
-      .then(([trades, loans]) => {
+      .then(([trades, loans, friends]) => {
         if (controller.signal.aborted) return;
         setEnding(
           endingText(
-            traderEnding(loans ? loans : null, trades, who.traderId, who.handle)
+            traderEnding(
+              loans,
+              trades,
+              who.traderId,
+              who.handle,
+              friends?.friends.find(
+                (friend) =>
+                  friend.handle.toLowerCase() === who.handle?.toLowerCase()
+              )?.collector_id ?? null
+            )
           )
         );
       })

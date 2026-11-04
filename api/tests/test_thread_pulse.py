@@ -157,3 +157,76 @@ def test_pulse_and_needs_you_list_use_the_same_lightweight_seam(store, monkeypat
     calls.clear()
     assert ok(call('GET', '/api/threads/pulse', b))['trades']['needs_you'] == 1
     assert calls == [(b, 'trade', True), (b, 'loan', True)]
+
+
+def badge_fixture():
+    reader, _ = collector('Reader')
+    ash, _ = collector('Ash')
+    brock, _ = collector('Brock')
+    misty, _ = collector('Misty')
+    ash_thread, ash_offer = thread(ash, reader)
+    brock_thread, brock_offer = thread(brock, reader)
+    misty_thread, _ = thread(misty, reader, closed=True)
+    with connect() as conn:
+        conn.execute("UPDATE trade SET state='accepted',accepted_at=now() WHERE id=%s", (brock_offer,))
+    ok(message(ash, ash_thread), 201)
+    ok(message(misty, misty_thread), 201)
+    return reader, ash_thread, ash_offer, brock, brock_thread, misty_thread
+
+
+def badge_counts(reader, waiting, unread, union):
+    counts = ok(call('GET', '/api/threads/pulse', reader))['trades']
+    rows = ok(call('GET', '/api/trades?group=needs_you', reader))
+    assert counts == {'waiting': waiting, 'unread': unread, 'needs_you': union}
+    assert len(rows) == union
+    assert sum(row['waiting'] is not None for row in rows) == waiting
+    assert sum(row['unread'] > 0 for row in rows) == unread
+    # Same wording used by the web's itemTabName, with independent subtotals.
+    return rows, f'Trades, {union} need you: {waiting} waiting on you, {unread} with new messages'
+
+
+def open_badge_item(reader, tid):
+    cursor = timeline(reader, tid)['items'][0]['cursor']
+    ok(call('POST', f'/api/trades/{tid}/read', reader, {'through': cursor}))
+
+
+def test_three_item_badge_walkthrough_keeps_waiting_after_open_and_refusal(store):
+    from uuid import uuid4
+    reader, ash, offer, brock, brock_thread, misty = badge_fixture()
+    rows, label = badge_counts(reader, 2, 2, 3)
+    assert {row['other']['display_name'] for row in rows} == {'Ash', 'Brock', 'Misty'}
+    assert label == 'Trades, 3 need you: 2 waiting on you, 2 with new messages'
+    # Both eligible participants of the agreed Brock item wait before either confirms.
+    other_rows = ok(call('GET', '/api/trades?group=needs_you', brock))
+    assert next(row for row in other_rows if row['id'] == str(brock_thread))['waiting'] == 'confirm_swap'
+    open_badge_item(reader, ash)
+    _, label = badge_counts(reader, 2, 1, 3)
+    assert label == 'Trades, 3 need you: 2 waiting on you, 1 with new messages'
+    bad = call('POST', f'/api/trades/{ash}/decline', reader,
+               {'offer_id': str(offer), 'revision': 999, 'idempotency_key': str(uuid4())})
+    assert bad.status_code == 409 and bad.json()['detail']['code'] == 'TRADE_CHANGED'
+    badge_counts(reader, 2, 1, 3)
+    ok(call('POST', f'/api/trades/{ash}/decline', reader,
+            {'offer_id': str(offer), 'revision': 1, 'idempotency_key': str(uuid4())}))
+    badge_counts(reader, 1, 1, 2)
+    open_badge_item(reader, misty)
+    rows, _ = badge_counts(reader, 1, 0, 1)
+    assert rows[0]['other']['display_name'] == 'Brock'
+
+
+def test_already_read_agreed_erika_is_a_fourth_distinct_item(store):
+    reader, ash, _, _, _, _ = badge_fixture()
+    erika, _ = collector('Erika')
+    tid, rid = thread(erika, reader)
+    ok(message(erika, tid), 201)
+    open_badge_item(reader, tid)
+    with connect() as conn:
+        conn.execute("UPDATE trade SET state='accepted',accepted_at=now() WHERE id=%s", (rid,))
+    rows, label = badge_counts(reader, 3, 2, 4)
+    assert {row['other']['display_name'] for row in rows} == {'Ash', 'Brock', 'Misty', 'Erika'}
+    assert label == 'Trades, 4 need you: 3 waiting on you, 2 with new messages'
+    erika_row = next(row for row in rows if row['id'] == str(tid))
+    assert erika_row['waiting'] == 'confirm_swap' and erika_row['unread'] == 0
+    assert not any(row['id'] == str(tid) for row in ok(call('GET', '/api/trades?group=open', reader)))
+    open_badge_item(reader, ash)
+    badge_counts(reader, 3, 1, 4)
