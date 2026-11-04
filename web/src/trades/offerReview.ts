@@ -2,41 +2,79 @@ import { tradeCardName } from "./tradeText";
 import { SocialError, type TradeView } from "../social_generated";
 import { TradesError, type ChangeOffer } from "../trades_generated";
 import { threadVersionChanged } from "../threads/commandChanges";
-export type OfferTerms = Pick<ChangeOffer, "you_give" | "you_get" | "cash">;
-/** Own the reviewed identity/revision together; a fresh read alone never consents to new terms. */
+import {
+  canEditOffer,
+  canSendOffer,
+  initialOfferLifecycle,
+  reviewRequired,
+  transitionOffer,
+  type OfferEvent,
+  type OfferLifecycle,
+  type OfferTerms,
+} from "./offerLifecycle";
+import { tradeOutcomeUnknown } from "./tradeText";
+export type { OfferTerms } from "./offerLifecycle";
+/** I/O adapter only. The pure model owns consent, inventory readiness and retained commands. */
 export class OfferReview {
-  reviewed: TradeView;
-  candidate: TradeView | null = null;
-  required = false;
-  unavailable = false;
+  private model: OfferLifecycle;
+  private listeners = new Set<() => void>();
+  private checking: Promise<TradeView> | null = null;
   constructor(offer: TradeView) {
-    this.reviewed = offer;
+    this.model = initialOfferLifecycle(offer);
   }
-  async refresh(read: (id: string) => Promise<TradeView>) {
-    this.required = true;
-    this.candidate = null;
-    this.unavailable = false;
-    try {
-      this.candidate = await read(this.reviewed.thread_id);
-    } catch (cause) {
-      if (cause instanceof SocialError && cause.status === 404)
-        this.unavailable = true;
-      throw cause;
-    }
-    return this.candidate;
+  getSnapshot = () => this.model;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  dispatch = (event: OfferEvent) => {
+    const next = transitionOffer(this.model, event);
+    if (next === this.model) return;
+    this.model = next;
+    for (const listener of this.listeners) listener();
+  };
+  get reviewed() {
+    return this.model.reviewed;
+  }
+  get candidate() {
+    return this.model.candidate;
+  }
+  get required() {
+    return reviewRequired(this.model);
+  }
+  get unavailable() {
+    return this.model.phase === "gone";
+  }
+  canEdit = canEditOffer;
+  refresh(read: (id: string) => Promise<TradeView>): Promise<TradeView> {
+    if (this.checking) return this.checking;
+    this.dispatch({ type: "check_requested" });
+    this.checking = read(this.reviewed.thread_id)
+      .then(
+        (offer) => {
+          this.dispatch({ type: "version_seen", offer });
+          return offer;
+        },
+        (cause) => {
+          this.dispatch(
+            cause instanceof SocialError && cause.status === 404
+              ? { type: "unavailable" }
+              : { type: "read_failed", stage: "version" }
+          );
+          throw cause;
+        }
+      )
+      .finally(() => {
+        this.checking = null;
+      });
+    return this.checking;
   }
   confirm() {
-    if (!this.candidate || !this.canEdit(this.candidate)) return false;
-    this.reviewed = this.candidate;
-    this.required = false;
-    this.candidate = null;
-    return true;
-  }
-  canEdit(offer: TradeView) {
-    return (
-      offer.actions.includes("counter") ||
-      offer.actions.includes("change_offer")
-    );
+    const before = this.model;
+    this.dispatch({ type: "review_confirmed" });
+    return this.model !== before;
   }
   async submit(
     terms: OfferTerms,
@@ -44,31 +82,33 @@ export class OfferReview {
     post: (id: string, body: ChangeOffer) => Promise<TradeView>,
     read: (id: string) => Promise<TradeView>
   ): Promise<TradeView | null> {
-    if (this.required) return null;
-    const offer = this.reviewed;
+    if (!canSendOffer(this.model)) return null;
+    this.dispatch({ type: "send_requested", terms, key });
+    const command = this.model.pending;
+    if (this.model.phase !== "sending" || !command) return null;
     try {
-      return await post(offer.thread_id, {
-        ...terms,
-        offer_id: offer.offer_id,
-        revision: offer.revision,
-        idempotency_key: key,
-      });
+      const next = await post(this.reviewed.thread_id, command);
+      this.dispatch({ type: "send_succeeded" });
+      return next;
     } catch (cause) {
       if (
         (cause instanceof TradesError || cause instanceof SocialError) &&
         cause.code === "TRADE_NOT_FOUND"
       ) {
-        this.required = true;
-        this.unavailable = true;
+        this.dispatch({ type: "unavailable" });
         return null;
       }
       if (
         (cause instanceof TradesError || cause instanceof SocialError) &&
         (threadVersionChanged(cause.code) || cause.code === "STEP_NOT_ALLOWED")
       ) {
+        this.dispatch({ type: "offer_changed" });
         await this.refresh(read);
         return null;
       }
+      this.dispatch({
+        type: tradeOutcomeUnknown(cause) ? "transport_failed" : "send_refused",
+      });
       throw cause;
     }
   }
