@@ -46,12 +46,14 @@ function returning(
 ): LoanView {
   return {
     id: "loan",
+    thread_id: "loan-thread",
+    loan_id: "loan",
     kind: "borrow_request",
     state: "handed_over",
     closed_reason: null,
     closed_by: null,
     role,
-    other: { collector_id: "other", display_name: "Sam", handle: null },
+    other: { collector_id: "other", display_name: "Sam" },
     return_by: null,
     you_confirmed_handover: true,
     they_confirmed_handover: true,
@@ -75,6 +77,7 @@ function returning(
     actions: ownFirst ? [] : ["confirm_return"],
     revision: 4,
     pending_return: {
+      return_id: "return",
       started_by: ownFirst ? "you" : "them",
       lines: [{ edition_id: "iono", copies: back }],
       you_confirmed: ownFirst,

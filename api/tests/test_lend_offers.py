@@ -33,8 +33,8 @@ def offer(lender, borrower, picks, **extra):
 
 
 def take(borrower, loan, lines, deck_id=None):
-    return call('POST', f"/api/loans/{loan['id']}/accept-offer", borrower, {
-        'revision': view(borrower, loan)['revision'], 'idempotency_key': str(uuid4()), 'deck_id': deck_id,
+    return call('POST', f"/api/loans/{loan['thread_id']}/accept-offer", borrower, {
+        'loan_id': loan['loan_id'], 'revision': view(borrower, loan)['revision'], 'idempotency_key': str(uuid4()), 'deck_id': deck_id,
         'lines': [{'edition_id': edition, 'promised': str(count)} for edition, count in lines]})
 
 
@@ -164,7 +164,7 @@ def test_an_unanswered_offer_nudges_both_sides_once_after_14_days(store):
     with connect() as conn:
         conn.execute("UPDATE loan SET created_at = now() - interval '14 days' WHERE id=%s", (loan['id'],))
     assert view(misty, loan)['notices'] == ['nudge_answer'] and view(ash, loan)['notices'] == ['nudge_answer']
-    assert ok(call('POST', f"/api/social/loans/{loan['id']}/notices/seen", ash,
+    assert ok(call('POST', f"/api/loans/{loan['thread_id']}/notices/seen", ash,
                    {'kinds': ['nudge_answer']}))['notices'] == []
     assert view(misty, loan)['notices'] == ['nudge_answer']
     ok(take(ash, loan, [(iono, 1)]))
@@ -178,7 +178,7 @@ def test_accepting_an_offer_waits_for_the_borrowers_deck_deletion_and_finds_the_
     loan = ok(offer(misty, ash, [(binders['Binder A'], iono, 1)]), 201)
     charizard = deck(ash, 'Charizard', 0)
     found = node(ash, charizard)
-    body = {'revision': view(ash, loan)['revision'], 'idempotency_key': str(uuid4()), 'deck_id': charizard,
+    body = {'loan_id': loan['loan_id'], 'revision': view(ash, loan)['revision'], 'idempotency_key': str(uuid4()), 'deck_id': charizard,
             'lines': [{'edition_id': iono, 'promised': '1'}]}
     drop = _sleeping('location', 'DELETE', "OLD.kind = 'deck'")
     try:
@@ -188,7 +188,7 @@ def test_accepting_an_offer_waits_for_the_borrowers_deck_deletion_and_finds_the_
                                       {'name': found['name'], 'version': found['version'],
                                        'idempotency_key': str(uuid4())})
             _asleep(watch, 1, [deleted])
-            taken = executor.submit(call, 'POST', f"/api/loans/{loan['id']}/accept-offer", ash, body)
+            taken = executor.submit(call, 'POST', f"/api/loans/{loan['thread_id']}/accept-offer", ash, body)
             deleted, taken = deleted.result(), taken.result()
     finally:
         drop()

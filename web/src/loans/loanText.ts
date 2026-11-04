@@ -249,19 +249,15 @@ export function waitingLabel(loan: LoanView): string | null {
       return "Answer";
     case "fix_picks":
       return "Update picks";
-    case "choose":
+    case "choose_written_off":
       return "Keep or remove";
     case "confirm_return":
       return "Confirm return";
-    case "finish_return":
-      return "Finish return";
     case "hand_over":
       return "Hand over";
-    case "receive":
+    case "confirm_handover":
       return "Confirm you have them";
-    case "return":
-      return loan.role === "lender" ? "Record a return" : "Give cards back";
-    case "more_time":
+    case "answer_more_time":
       return "Asked for more time";
     default:
       return null;

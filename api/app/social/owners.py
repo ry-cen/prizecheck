@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from psycopg import sql
 
-from ..location_tree import replay
+from ..location_tree import replay, replay_with_presence
 
 COMMANDS_PER_HOUR = 120
 # A column value a step's ``apply`` returns for the transaction's time (``loans.run_step``, ``trades.run_trade_step``).
@@ -65,14 +65,28 @@ def count_owner_command(conn, user_id: str, kind: str) -> None:
     conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,%s)", (user_id, kind))
 
 
+def _prepare_owner_command(conn, user_id: str, kind: str) -> None:
+    ensure_owner(conn, user_id)
+    conn.execute(f"SELECT pg_advisory_xact_lock(hashtext('prizecheck.{kind}_command:' || %s))", (user_id,))
+
+
+def replay_owner_command(conn, user_id: str, key: UUID, payload: dict, kind: str):
+    """The existing no-count owner prelude, retaining replay's two-value result."""
+    _prepare_owner_command(conn, user_id, kind)
+    return replay(conn, user_id, key, payload)
+
+
+def replay_owner_receipt(conn, user_id: str, key: UUID, payload: dict, kind: str) -> tuple[str, bool, object]:
+    """Observe presence, validated digest and response together, without counting quota."""
+    _prepare_owner_command(conn, user_id, kind)
+    return replay_with_presence(conn, user_id, key, payload)
+
 def begin_owner_command(conn, user_id: str, key: UUID, payload: dict, kind: str):
     """The start every Loan and Trade command shares: the caller's owner row made if new, the caller's commands of
     this ``kind`` ('loan' or 'trade') one at a time under an advisory lock of their own, a replay answered from the
     caller's record, else the command counted (under 'loan_command' or 'trade_command', apart from the Friend
     commands' count). Returns (digest, stored response or None)."""
-    ensure_owner(conn, user_id)
-    conn.execute(f"SELECT pg_advisory_xact_lock(hashtext('prizecheck.{kind}_command:' || %s))", (user_id,))
-    digest, stored = replay(conn, user_id, key, payload)
+    digest, stored = replay_owner_command(conn, user_id, key, payload, kind)
     if stored is None:
         count_owner_command(conn, user_id, f'{kind}_command')
     return digest, stored

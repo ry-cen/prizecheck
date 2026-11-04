@@ -77,7 +77,7 @@ def pair(name='Pair'):
 def conversation_changed_at(a, b):
     low, high = sorted((a, b))
     with connect() as conn:
-        return conn.execute('SELECT changed_at FROM conversation WHERE user_low = %s AND user_high = %s',
+        return conn.execute('SELECT max(changed_at) AS changed_at FROM thread WHERE user_low = %s AND user_high = %s',
                             (low, high)).fetchone()['changed_at']
 
 
@@ -402,15 +402,16 @@ def test_a_block_ends_reach_and_contact_both_ways_and_an_unblock_restores_them(s
     assert ok(call('GET', f'/api/social/traders/{trader_of(ash)}', misty))['status'] == 'unavailable'
     for viewer, status in ((ash, 'you_blocked'), (misty, 'unavailable')):
         seen = ok(view(viewer, conversation))
-        assert (seen['status'], seen['can_message'], seen['can_propose'], seen['can_report']) == (
-            status, False, False, True)
+        assert (seen['can_message'], seen['can_report']) == (False, True)
+        assert seen['live_offer']['other']['available'] is False
+        assert seen['live_offer']['actions'] == []
     for sender, other in ((ash, misty), (misty, ash)):
         assert detail(say(sender, conversation, 'hi')) == UNAVAILABLE
         assert detail(say_to(sender, trader_of(other), 'hi')) == UNAVAILABLE
         assert detail(propose_to(sender, trader_of(other), give=[(iono, 1)], get=[(arven, 1)])) == UNAVAILABLE
     ok(unblock_by_id(ash, block_row(ash, misty)['id']))
     for viewer in (ash, misty):
-        assert ok(view(viewer, conversation))['status'] == 'open'
+        assert ok(view(viewer, conversation))['can_message'] is True
     ok(say(ash, conversation, 'hi again'), 201)
 
 

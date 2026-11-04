@@ -34,7 +34,7 @@ from want_list_swap_fixtures import seed_swap_catalog  # noqa: F401
 
 def side(user, trade, destination=None):
     suffix = f'?destination_id={destination}' if destination else ''
-    return ok(call('GET', f"/api/trades/{trade['id']}/side{suffix}", user))
+    return ok(call('GET', f"/api/trades/{trade['thread_id']}/side{suffix}", user))
 
 
 def switch_body(switch):
@@ -47,8 +47,8 @@ def switch_body(switch):
 def confirm(user, trade, destination=None, switches=(), key=None, revision=None):
     """``user``'s Confirm swap with the given switches (offers from ``side`` or 4-tuples), on the revision they read now
     unless ``revision`` says otherwise."""
-    return call('POST', f"/api/trades/{trade['id']}/confirm-swap", user,
-                {'revision': revision or ok(read(user, trade))['revision'], 'idempotency_key': str(key or uuid4()),
+    return call('POST', f"/api/trades/{trade['thread_id']}/confirm-swap", user,
+                {'offer_id': trade['offer_id'], 'revision': revision or ok(read(user, trade))['revision'], 'idempotency_key': str(key or uuid4()),
                  'destination_id': destination, 'deck_switches': [switch_body(item) for item in switches]})
 
 
@@ -286,8 +286,8 @@ def test_the_side_read_offers_switches_only_while_the_reader_has_to_confirm(stor
     assert side(misty, trade)['deck_switches'] == []
     ok(confirm(ash, trade))
     assert side(ash, trade)['deck_switches'] == []
-    for text in (read(ash, trade).text, read(misty, trade).text, call('GET', '/api/social/trades', ash).text,
-                 call('GET', '/api/social/trades', misty).text):
+    for text in (read(ash, trade).text, read(misty, trade).text, call('GET', '/api/trades', ash).text,
+                 call('GET', '/api/trades', misty).text):
         assert 'deck_switches' not in text and 'switched_decks' not in text and 'Ladder' not in text
 
 

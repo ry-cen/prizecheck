@@ -171,14 +171,14 @@ def test_a_handover_racing_an_unfriend_waits_and_then_finds_the_loan_cancelled(s
     # Misty's unfriend locks Ash's row first and holds it while it writes the Loan row; Ash's handover waits on it.
     iono, ash, misty, binder, loan = accepted_loan(held=2, asked=2, ordered=True)
     before = revision_of(misty)
-    body = {'revision': view(ash, loan)['revision'], 'idempotency_key': str(uuid4())}
+    body = {'loan_id': loan['id'], 'revision': view(ash, loan)['revision'], 'idempotency_key': str(uuid4())}
     drop = _sleeping('loan', 'UPDATE', f"NEW.closed_by = '{misty}'")
     try:
         with ThreadPoolExecutor(max_workers=2) as executor, \
                 psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
             removed = executor.submit(remove, misty, ash)
             _asleep(watch, 1, [removed])
-            handed = executor.submit(call, 'POST', f"/api/loans/{loan['id']}/handover", ash, body)
+            handed = executor.submit(call, 'POST', f"/api/loans/{loan['thread_id']}/handover", ash, body)
             removed, handed = removed.result(), handed.result()
     finally:
         drop()
@@ -194,12 +194,12 @@ def test_an_unfriend_and_a_cancel_from_the_other_side_lock_both_owners_in_order_
     iono, ash, misty, binder, first = accepted_loan(held=4, asked=2, ordered=True)
     second = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 1)])), [(iono, 1)]))
     before = revision_of(misty)
-    body = {'revision': view(ash, first)['revision'], 'idempotency_key': str(uuid4())}
+    body = {'loan_id': first['id'], 'revision': view(ash, first)['revision'], 'idempotency_key': str(uuid4())}
     drop = _sleeping('loan', 'UPDATE', f"NEW.closed_by = '{ash}'")
     try:
         with ThreadPoolExecutor(max_workers=2) as executor, \
                 psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
-            cancelled = executor.submit(call, 'POST', f"/api/social/loans/{first['id']}/cancel", ash, body)
+            cancelled = executor.submit(call, 'POST', f"/api/loans/{first['thread_id']}/cancel", ash, body)
             _asleep(watch, 1, [cancelled])
             removed = executor.submit(remove, misty, ash)
             cancelled, removed = cancelled.result(), removed.result()
@@ -212,27 +212,28 @@ def test_an_unfriend_and_a_cancel_from_the_other_side_lock_both_owners_in_order_
     assert revision_of(misty) == before + 2
 
 
-def test_edit_and_resend_is_offered_only_while_the_lender_is_still_a_friend(store):
+def test_edit_and_resend_is_offered_only_for_a_live_request_while_still_friends(store):
     iono, ash, misty, loans = loans_between()
     declined = sent(ash, misty, [(iono, 1)])
     ok(step(misty, view(misty, declined), 'decline'))
-    assert view(ash, declined)['actions'] == ['edit_and_resend']
-    # Ash removes Misty: the requests he sent, cancelled or declined, no longer offer it, on the Loan and the Loans tab.
+    assert view(ash, declined)['actions'] == []
     ok(remove(ash, misty))
     for name in ('requested', 'accepted'):
         assert shape(ash, loans[name]) == ('closed', 'cancelled', 'you') and view(ash, loans[name])['actions'] == []
     assert view(ash, declined)['actions'] == []
-    tab = {loan['id']: loan['actions'] for loan in ok(call('GET', '/api/social/loans', ash))['loans']}
-    assert tab[declined['id']] == [] and tab[loans['requested']['id']] == []
-    # Friends again, it is offered again.
+    tab = ok(call('GET', '/api/loans?group=done', ash))
+    for loan in (declined, loans['requested']):
+        assert loan['thread_id'] in {item['id'] for item in tab}
+        assert ok(call('GET', f"/api/loans/{loan['thread_id']}", ash))['live_terms']['actions'] == []
     befriend(ash, misty)
-    assert view(ash, declined)['actions'] == ['edit_and_resend']
-    assert view(ash, loans['requested'])['actions'] == ['edit_and_resend']
-    # Misty's Block hides it, and lifting the Block doesn't bring it back: they aren't Friends.
+    assert view(ash, declined)['actions'] == view(ash, loans['requested'])['actions'] == []
+    fresh = sent(ash, misty, [(iono, 1)])
+    assert 'edit_and_resend' in view(ash, fresh)['actions']
     block(misty, ash)
-    assert view(ash, declined)['actions'] == []
+    assert view(ash, fresh)['actions'] == []
     assert ok(unblock(misty, ash))['relation'] == 'none'
-    assert view(ash, declined)['actions'] == []
+    assert view(ash, fresh)['actions'] == []
+
 
 
 # Ending a friendship with open Trades (Trading #274).
@@ -310,8 +311,8 @@ def test_removing_a_friend_cancels_every_trade_nobody_confirmed_either_way_and_k
     assert revision_of(misty) == before[misty] + 1 and revision_of(ash) == before[ash] + 1
     # Misty is told each was cancelled by Ash and never why; Ash, who ended it, is told nothing new.
     assert trade_cancels(misty) == sorted(
-        [('accepted', trades[name]['id'], 'Ash K.') for name in ('accepted', 'half')]
-        + [('cancelled', trades[name]['id'], 'Ash K.') for name in ENDED])
+        [('accepted', trades[name]['thread_id'], 'Ash K.') for name in ('accepted', 'half')]
+        + [('cancelled', trades[name]['thread_id'], 'Ash K.') for name in ENDED])
     assert trade_cancels(ash) == []
     # The same command replayed changes nothing more.
     assert ok(remove(ash, misty, key))['relation'] == 'none'
@@ -352,22 +353,22 @@ def test_a_block_by_either_side_cancels_them_too_and_the_remaining_side_finishes
     assert revision_of(misty) == before[misty] + 1 and revision_of(ash) == before[ash] + 1
     actor_name = 'Ash K.' if actor == ash else 'Misty W.'
     assert [entry for entry in trade_cancels(other) if entry[0] == 'cancelled'] == sorted(
-        ('cancelled', trades[name]['id'], actor_name) for name in ENDED)
+        ('cancelled', trades[name]['thread_id'], actor_name) for name in ENDED)
     # Misty's half-confirmed Trade, its line and her steps read exactly as before the Block, and nothing says Block.
     assert _by_name(ok(read(misty, trades['half']))) == _by_name(seen)
     assert ok(read(misty, trades['half']))['other'] == _unavailable_other(ash, 'Ash K.')
     # Ash's proposal to Misty was cancelled, so her one line left is the half-confirmed Trade, as it was.
     assert [_by_name(waiting) for waiting in inbox(misty)['trade_waiting']] == [_by_name(line)]
-    for body in (seen, line, inbox(misty), ok(call('GET', '/api/social/trades', misty))):
+    for body in (seen, line, inbox(misty), ok(call('GET', '/api/trades', misty))):
         _no_block(body)
     if blocker == 'remaining':
         # Ash, the blocked side, sees his half-confirmed Trade unchanged, and nothing he reads says Block.
         assert _by_name(ok(read(ash, trades['half']))) == _by_name(ash_half)
         assert ok(read(ash, trades['half']))['other'] == _unavailable_other(misty, 'Misty W.')
         for key in ('trade_waiting', 'trade_updates'):
-            assert [line for line in inbox(ash)[key] if line.get('id', line.get('trade_id')) == trades['half']['id']] \
-                == [line for line in ash_inbox[key] if line.get('id', line.get('trade_id')) == trades['half']['id']], key
-        for body in (ok(read(ash, trades['half'])), inbox(ash), ok(call('GET', '/api/social/trades', ash))):
+            assert [line for line in inbox(ash)[key] if line.get('id', line.get('trade_id')) in (trades['half']['id'], trades['half']['thread_id'])] \
+                == [line for line in ash_inbox[key] if line.get('id', line.get('trade_id')) in (trades['half']['id'], trades['half']['thread_id'])], key
+        for body in (ok(read(ash, trades['half'])), inbox(ash), ok(call('GET', '/api/trades', ash))):
             _no_block(body)
     # She confirms alone: the Trade is swapped, and Ash, who confirmed first, hears it.
     done = ok(confirm(misty, trades['half']))
@@ -390,8 +391,8 @@ def _normal_update(trade):
 
 def _normal_entry(user, trade):
     [entry] = [entry for entry in inbox(user)['trade_updates']
-               if entry['trade_id'] == trade['id'] and entry['kind'] != 'accepted']
-    return {key: value for key, value in entry.items() if key not in ('id', 'trade_id', 'at')}
+               if entry['trade_id'] == trade['thread_id'] and entry['kind'] != 'accepted']
+    return {key: value for key, value in entry.items() if key not in ('id', 'trade_id', 'thread_id', 'at')}
 
 
 def _unavailable_other(user, name):
@@ -411,8 +412,8 @@ def _normal_view(user, trade):
     # Whether the other side is still a Friend or in reach differs between an unfriend, a Block and a cancel (#299); the
     # name is what every world shows alike.
     found['other'] = {'display_name': found['other']['display_name']}
-    # Each world has a pair of its own, so its conversation (Trading #298) is another id.
-    return {key: value for key, value in found.items() if key not in ('id', 'created_at', 'conversation_id')}
+    # Each world has its own round and thread ids.
+    return {key: value for key, value in found.items() if key not in ('id', 'thread_id', 'offer_id', 'created_at', 'conversation_id')}
 
 
 def _ended_world(ids, action):
@@ -485,12 +486,13 @@ def test_only_the_sides_whose_copies_were_promised_move_their_revision_once_for_
 def trades_counted(user, other):
     """The Remove Friend and Block questions' counts, by the web's rule (``tradesEnding``) over the Trades list:
     (Trade Proposals, Trades nobody has confirmed, Trades one side has confirmed), and the ids of the first two."""
-    rows = [trade for trade in ok(call('GET', '/api/social/trades', user))['trades']
-            if trade['other']['trader_id'] == trader_of(other)]
-    proposals = [trade['id'] for trade in rows if trade['state'] == 'proposed']
-    unswapped = [trade['id'] for trade in rows if trade['state'] == 'accepted'
+    items = [item for group in ('needs_you', 'open')
+             for item in ok(call('GET', '/api/trades?group=' + group + '&with=' + trader_of(other), user))]
+    rows = [ok(call('GET', f"/api/trades/{item['id']}", user))['live_offer'] for item in items]
+    proposals = [trade['thread_id'] for trade in rows if trade['state'] == 'proposed']
+    unswapped = [trade['thread_id'] for trade in rows if trade['state'] == 'accepted'
                  and not trade['you_confirmed_swap'] and not trade['they_confirmed_swap']]
-    staying = [trade['id'] for trade in rows if trade['state'] == 'accepted'
+    staying = [trade['thread_id'] for trade in rows if trade['state'] == 'accepted'
                and trade['you_confirmed_swap'] != trade['they_confirmed_swap']]
     return (len(proposals), len(unswapped), len(staying)), set(proposals + unswapped)
 
@@ -499,7 +501,7 @@ def test_the_trades_list_gives_both_sides_the_questions_counts_and_they_are_what
     ids, ash, misty, binder, box, trades = trades_between()
     counted, ending = trades_counted(ash, misty)
     assert counted == (2, 1, 1) and trades_counted(misty, ash) == (counted, ending)
-    assert ending == {trades[name]['id'] for name in ENDED}
+    assert ending == {trades[name]['thread_id'] for name in ENDED}
     ok(remove(misty, ash))
     assert {trade_id for kind, trade_id, _ in trade_cancels(ash) if kind == 'cancelled'} == ending
     # Afterwards only the Trade that stays is counted.
@@ -600,7 +602,7 @@ def test_ending_a_friendship_and_a_trade_step_of_the_pair_run_one_after_the_othe
             assert trade_picks(row['id']) == [('proposer', giver, binder, 1)]
             assert held(taker, box) == {arven: '1'} and held(taker, unsorted(taker)) == {iono: '1'}
             assert revision_of(taker) == before[taker] + 1 and revision_of(giver) == before[giver]
-            assert ok(confirm(giver, row))['closed_reason'] == 'swapped'
+            assert ok(confirm(giver, ok(read(giver, trade))))['closed_reason'] == 'swapped'
         else:
             # The accepted Trade, or the new proposal, is then cancelled by the unfriend or Block.
             assert (row['state'], row['closed_reason'], row['closed_by']) == ('closed', 'cancelled', ender)
@@ -618,11 +620,11 @@ def test_ending_a_friendship_and_a_trade_step_of_the_pair_run_one_after_the_othe
         else:
             # The step read the Trade before the unfriend or Block cancelled it: its revision moved on. Read again,
             # nothing is left to do.
-            assert detail(stepped) == (409, {'code': 'TRADE_CHANGED'})
+            assert detail(stepped) == (409, {'code': 'OFFER_CHANGED'})
             [row] = rows
             assert (row['state'], row['closed_reason'], row['closed_by']) == ('closed', 'cancelled', giver)
             assert trade_picks(row['id']) == [] and reserved(giver, iono) == (0, 0) and reserved(taker, arven) == (0, 0)
             assert held(taker, box) == {arven: '2'}
             fresh = ok(read(taker, trade))['revision']
             retried = accept_trade(taker, trade, revision=fresh) if step_name == 'accept' else confirm(taker, trade)
-            assert detail(retried) == (409, {'code': 'STEP_NOT_ALLOWED'})
+            assert detail(retried) == (409, {'code': 'OFFER_CHANGED'})

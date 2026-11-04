@@ -8,7 +8,7 @@ import {
 } from "../social/blockMessages";
 import { endingText, traderEnding } from "../social/friendshipEnding";
 import { commandMessage } from "../social/socialMessages";
-import { blockTrader, getLoans, getTrades } from "../social_generated";
+import { blockTrader, getLoanViews, getTradeViews } from "../social_generated";
 import { Button } from "../ui/Button";
 import type { MenuItem } from "../ui/Menu";
 
@@ -62,18 +62,13 @@ export function useTraderBlock(
     const key = crypto.randomUUID();
     setState({ kind: "asking", target: who, key, cancels: "" });
     Promise.all([
-      getTrades(controller.signal),
-      who.handle ? getLoans(controller.signal) : Promise.resolve(null),
+      getTradeViews(controller.signal),
+      who.handle ? getLoanViews(controller.signal) : Promise.resolve(null),
     ])
       .then(([trades, loans]) => {
         if (controller.signal.aborted) return;
         const cancels = endingText(
-          traderEnding(
-            loans ? loans.loans : null,
-            trades.trades,
-            who.traderId,
-            who.handle
-          )
+          traderEnding(loans ? loans : null, trades, who.traderId, who.handle)
         );
         setState((current) =>
           current.kind === "asking" && current.key === key

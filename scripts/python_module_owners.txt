@@ -30,6 +30,7 @@ app.quote_contract root
 app.settings core
 app.social core
 app.social.conversations core
+app.social.threads core
 app.social.counts core
 app.social.discovery core
 app.social.friend_copies core

@@ -19,12 +19,15 @@ import {
   SocialError,
   type TradeView,
 } from "../social_generated";
+import { counterTrade, getTradeList, TradesError } from "../trades_generated";
 import {
-  counterTrade,
-  getTradeList,
   sendTradeProposal,
-  TradesError,
-} from "../trades_generated";
+  type TradeView as SentTradeView,
+} from "../trade_send_generated";
+import {
+  initialSendOutcome,
+  isAppliedTradeUnavailable,
+} from "./initialSendOutcome";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
@@ -72,8 +75,8 @@ import {
   type MineLoad,
   type TheirsLoad,
 } from "./ProposalLibrary";
-import { conversationLinkText, UNAVAILABLE_NOTE } from "./conversationMessages";
-import { conversationPath, TRADE_FIND_PATH, tradePath } from "./tradeListModel";
+import { UNAVAILABLE_NOTE } from "./conversationMessages";
+import { TRADE_FIND_PATH, tradePath } from "./tradeListModel";
 import {
   COUNTER_CHANGED_TEXT,
   COUNTER_GONE_TEXT,
@@ -92,6 +95,10 @@ type Theirs =
   | { kind: "missing" }
   | { kind: "failed" }
   | Extract<TheirsLoad, { kind: "ready" }>;
+
+type TerminalSend =
+  | { kind: "applied_current"; trade: SentTradeView; label: "Current Trade" }
+  | { kind: "unavailable" };
 
 type Pane = "proposal" | "cards";
 
@@ -195,6 +202,8 @@ export function ProposalBuilderPage({
   const refreshInbox = useInboxRefresh();
   const key = useRef<string | null>(null);
   const sent = useRef(false);
+  const terminalRef = useRef<TerminalSend | null>(null);
+  const [terminal, setTerminal] = useState<TerminalSend | null>(null);
   const edited = useRef(false);
   const latest = useRef(proposal);
   latest.current = proposal;
@@ -385,6 +394,7 @@ export function ProposalBuilderPage({
 
   // Any change makes a new send key: a send is the same only when the proposal is.
   function change(next: (p: Proposal) => Proposal) {
+    if (terminalRef.current) return;
     edited.current = true;
     setProposal(next);
     key.current = null;
@@ -392,6 +402,7 @@ export function ProposalBuilderPage({
 
   // A cash change is an edit like a card: it makes a new send key.
   function editCash(next: CashDraft) {
+    if (terminalRef.current) return;
     edited.current = true;
     key.current = null;
     setCash(next);
@@ -442,7 +453,8 @@ export function ProposalBuilderPage({
   ) {
     try {
       key.current ??= crypto.randomUUID();
-      const trade = await counterTrade(target.id, {
+      const trade = await counterTrade(target.thread_id, {
+        offer_id: target.offer_id,
         revision: revision.current,
         idempotency_key: key.current,
         you_give: requestLines(current.give),
@@ -452,11 +464,13 @@ export function ProposalBuilderPage({
       sent.current = true;
       if (mounted.current)
         toast.show({
-          message: `Counter sent to ${name}`,
-          route: tradePath(trade.id),
+          message: target.actions.includes("change_offer")
+            ? `Offer updated for ${name}`
+            : `Counter sent to ${name}`,
+          route: tradePath(trade.thread_id),
         });
       refreshInbox();
-      if (mounted.current) onNavigate(tradePath(trade.id));
+      if (mounted.current) onNavigate(tradePath(trade.thread_id));
     } catch (cause) {
       if (!tradeOutcomeUnknown(cause)) key.current = null;
       const other = () =>
@@ -479,8 +493,11 @@ export function ProposalBuilderPage({
         setMessage(COUNTER_GONE_TEXT);
       };
       try {
-        const fresh = await getTrade(target.id);
-        if (fresh.state === "proposed" && fresh.actions.includes("counter")) {
+        const fresh = await getTrade(target.thread_id);
+        if (
+          fresh.actions.includes("counter") ||
+          fresh.actions.includes("change_offer")
+        ) {
           revision.current = fresh.revision;
           setAnswered(fresh);
           setMessage(COUNTER_CHANGED_TEXT);
@@ -494,7 +511,7 @@ export function ProposalBuilderPage({
   }
 
   async function send() {
-    if (busy || !party) return;
+    if (terminalRef.current || sending.current || busy || !party) return;
     const current = proposal;
     const name = party.display_name;
     let cashBody: { cents: string; payer: "you" | "them" } | null = null;
@@ -518,30 +535,51 @@ export function ProposalBuilderPage({
       }
       return;
     }
+    // Capture this submission even if an edit clears the ref while it is in flight.
+    const submittedKey = key.current ?? crypto.randomUUID();
+    if (terminalRef.current) return;
+    key.current = submittedKey;
+    const settle = (result: TerminalSend) => {
+      sent.current = true;
+      terminalRef.current = result;
+      key.current = submittedKey;
+      if (mounted.current) setTerminal(result);
+    };
     try {
-      key.current ??= crypto.randomUUID();
-      const trade = await sendTradeProposal({
-        recipient_trader_id: party.trader_id,
-        you_give: requestLines(current.give),
-        you_get: requestLines(current.get),
-        cash: cashBody,
-        idempotency_key: key.current,
-      });
+      const result = initialSendOutcome(
+        await sendTradeProposal({
+          recipient_trader_id: party.trader_id,
+          you_give: requestLines(current.give),
+          you_get: requestLines(current.get),
+          cash: cashBody,
+          idempotency_key: submittedKey,
+        })
+      );
+      if (result.kind === "applied_current") {
+        settle(result);
+        return;
+      }
       sent.current = true;
       if (mounted.current)
         toast.show({
           message: `Trade Proposal sent to ${name}`,
-          route: tradePath(trade.id),
+          route: tradePath(result.trade.thread_id),
         });
       // Leaving while the send was out is the collector's choice; the Trade is theirs to find in Trades.
-      if (mounted.current) onNavigate(tradePath(trade.id));
+      if (mounted.current) onNavigate(tradePath(result.trade.thread_id));
     } catch (cause) {
+      if (isAppliedTradeUnavailable(cause)) {
+        settle({ kind: "unavailable" });
+        return;
+      }
+      if (terminalRef.current) return;
       // A refusal is final for this key; an unknown outcome keeps it, so the retry is the same send.
       if (!tradeOutcomeUnknown(cause)) key.current = null;
-      setMessage(sendTradeMessage(cause, name, current.give, current.get));
+      if (mounted.current)
+        setMessage(sendTradeMessage(cause, name, current.give, current.get));
     } finally {
       sending.current = false;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -574,6 +612,7 @@ export function ProposalBuilderPage({
 
   // The browser's own warning on reload or close, while something the collector changed is unsent.
   const dirty =
+    !terminal &&
     reachable.current &&
     !gone &&
     edited.current &&
@@ -594,7 +633,7 @@ export function ProposalBuilderPage({
     onNavigate(to);
   };
   const backTo = counter
-    ? tradePath(counter.id)
+    ? tradePath(counter.thread_id)
     : (listBack ?? TRADE_FIND_PATH);
   const backLink = (
     <a href={backTo} onClick={go(backTo)} className={BACK}>
@@ -608,23 +647,12 @@ export function ProposalBuilderPage({
           : "Find trades"}
     </a>
   );
-  // In counter mode, a Trade of a pair with a conversation links to it (Trading #298).
-  const conversationTo = counter?.conversation_id
-    ? conversationPath(counter.conversation_id)
-    : null;
-  const back = counter ? (
-    <div className="flex flex-wrap items-center gap-2">
-      {backLink}
-      {conversationTo && (
-        <a href={conversationTo} onClick={go(conversationTo)} className={BACK}>
-          {conversationLinkText(counter.other.display_name)}
-        </a>
-      )}
-    </div>
-  ) : (
-    backLink
-  );
-  const frameTitle = counter ? "Counter" : "Trade Proposal";
+  const back = backLink;
+  const frameTitle = counter
+    ? counter.actions.includes("change_offer")
+      ? "Change offer"
+      : "Counter"
+    : "Trade Proposal";
   const frame = (title: string, children: ReactNode) => (
     <main className={FRAME}>
       {back}
@@ -632,6 +660,67 @@ export function ProposalBuilderPage({
       {children}
     </main>
   );
+
+  if (terminal) {
+    const backToTrades = (
+      <a href="/trades" onClick={go("/trades")} className={BACK}>
+        Back to Trades
+      </a>
+    );
+    if (terminal.kind === "unavailable")
+      return (
+        <main className={FRAME}>
+          <PageHeader title="Trade Proposal" />
+          <p role="status" className="m-0 text-body text-text">
+            Your proposal was already sent. This Trade isn't available to view.
+            Return to Trades to check your items.
+          </p>
+          {backToTrades}
+        </main>
+      );
+    const trade = terminal.trade;
+    const target = tradePath(trade.thread_id);
+    return (
+      <main className={FRAME}>
+        <PageHeader title={terminal.label} />
+        <p role="status" className="m-0 text-body text-text">
+          Your proposal was already sent. These are the current terms.
+        </p>
+        <p className="m-0 text-body text-text">
+          {
+            { proposed: "Proposed", accepted: "Agreed", closed: "Closed" }[
+              trade.state
+            ]
+          }
+        </p>
+        {(["give", "get"] as const).map((side) => (
+          <section key={side} aria-label={SIDE_LABEL[side]}>
+            <h2 className="m-0 text-heading font-semibold">
+              {SIDE_LABEL[side]}
+            </h2>
+            <ul className="m-0 list-none p-0">
+              {trade[side === "give" ? "you_give" : "you_get"].map((card) => (
+                <TradeTermsRow
+                  key={card.edition_id}
+                  card={card}
+                  quantity={`${card.copies} copies`}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
+        <p className="m-0 text-body text-text">
+          {trade.cash
+            ? `${trade.cash.payer === "you" ? "You pay" : "They pay"} $${centsAmount(trade.cash.cents)}`
+            : "No cash"}
+        </p>
+        <a href={target} onClick={go(target)} className={BACK}>
+          View current Trade
+        </a>
+        {backToTrades}
+      </main>
+    );
+  }
 
   if (theirs.kind === "missing")
     return frame(
@@ -763,12 +852,16 @@ export function ProposalBuilderPage({
         <Button
           variant="primary"
           className="disabled:opacity-45"
-          disabled={empty || gone || unchanged}
+          disabled={empty || gone || unchanged || terminal !== null}
           aria-disabled={busy || undefined}
           aria-describedby={reason ? reasonId : undefined}
           onClick={() => void send()}
         >
-          {counter ? "Send Counter" : "Send Trade Proposal"}
+          {counter
+            ? counter.actions.includes("change_offer")
+              ? "Send changed offer"
+              : "Send Counter"
+            : "Send Trade Proposal"}
         </Button>
         {reason && (
           <p id={reasonId} className="m-0 text-meta text-text-muted">

@@ -1,3 +1,6 @@
+import { usePulseChanged } from "../inbox/Inbox";
+import { LoanTermsEditor } from "./LoanTermsEditor";
+import { ThreadTimeline } from "../threads/ThreadTimeline";
 import { Avatar } from "../ui/Avatar";
 import { canRetryHandover } from "../social/confirmationRetry";
 import {
@@ -135,11 +138,13 @@ const OFFER_ASK: typeof ASK = {
  */
 export function LoanScreen({
   loanId,
+  active = true,
   focusOnOpen = false,
   onLoanChanged,
   onAllLoans,
   onOpenDeck,
 }: {
+  active?: boolean;
   loanId: string;
   focusOnOpen?: boolean;
   onLoanChanged: () => void;
@@ -152,6 +157,7 @@ export function LoanScreen({
   // Opened from the inbox's drawer: the heading takes focus once the Loan is drawn, as the bell may be hidden.
   const openedFromInbox = useOpenedFromInbox();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  const pulseChanged = usePulseChanged();
   const [attempt, setAttempt] = useState(0);
   const [promised, setPromised] = useState<Map<string, number>>(new Map());
   const [asking, setAsking] = useState<Asking | null>(null);
@@ -174,7 +180,9 @@ export function LoanScreen({
   const [deckId, setDeckId] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editingTerms, setEditingTerms] = useState(false);
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
+  const stepBodies = useRef(new Map<string, LoanStep>());
   const keys = useRef(new Map<string, string>());
   const menuAnchor = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -196,7 +204,9 @@ export function LoanScreen({
     const controller = new AbortController();
     Promise.all([
       getLoan(loanId, controller.signal),
-      getLoanSide(loanId, controller.signal),
+      getLoan(loanId, controller.signal).then((view) =>
+        getLoanSide(view.thread_id, controller.signal)
+      ),
     ]).then(
       ([loan, side]) => {
         if (controller.signal.aborted) return;
@@ -226,7 +236,7 @@ export function LoanScreen({
       }
     );
     return () => controller.abort();
-  }, [loanId, attempt]);
+  }, [loanId, attempt, pulseChanged]);
 
   // After each render: a focus move asked for by the last press or step (FocusNext).
   useLayoutEffect(() => {
@@ -305,6 +315,28 @@ export function LoanScreen({
         {actions && <div className="absolute top-0 right-0">{actions}</div>}
       </div>
       {children}
+      {load.kind === "ready" && (
+        <ThreadTimeline
+          active={active}
+          kind="loan"
+          id={load.loan.thread_id}
+          editionNames={Object.fromEntries(
+            load.loan.lines.map((card) => [card.edition_id, card.name])
+          )}
+        />
+      )}
+      {load.kind === "ready" && editingTerms && (
+        <LoanTermsEditor
+          loan={load.loan}
+          deckId={load.side.deck?.id ?? null}
+          onClose={() => setEditingTerms(false)}
+          onSaved={() => {
+            setEditingTerms(false);
+            setAttempt((n) => n + 1);
+            refreshInbox();
+          }}
+        />
+      )}
     </div>
   );
 
@@ -379,12 +411,13 @@ export function LoanScreen({
         )
           throw cause;
         const [fresh, freshSide] = await Promise.all([
-          getLoan(loan.id),
-          getLoanSide(loan.id),
+          getLoan(loan.thread_id),
+          getLoanSide(loan.thread_id),
         ]);
         if (!canRetryHandover(loan, fresh, side, freshSide)) throw cause;
         setLoad({ kind: "ready", loan: fresh, side: freshSide });
-        next = await confirmHandover(loan.id, {
+        next = await confirmHandover(loan.thread_id, {
+          loan_id: fresh.loan_id,
           revision: fresh.revision,
           idempotency_key: key,
         });
@@ -392,7 +425,7 @@ export function LoanScreen({
       keys.current.delete(name);
       // The open form stays, its buttons busy, until the screen's own side is read again: the new Loan, the form
       // closing and focus on the new headline then land in one render.
-      const nextSide = await getLoanSide(loanId).catch(() => side);
+      const nextSide = await getLoanSide(loan.thread_id).catch(() => side);
       focusNext.current = "heading";
       closeModes();
       setLoad({ kind: "ready", loan: next, side: nextSide });
@@ -412,16 +445,26 @@ export function LoanScreen({
       setBusy(false);
     }
   }
-  const body = (key: string): LoanStep => ({
-    revision: loan.revision,
-    idempotency_key: key,
-  });
+  const body = (key: string): LoanStep => {
+    let command = stepBodies.current.get(key);
+    if (!command) {
+      command = {
+        loan_id: loan.loan_id,
+        revision: loan.revision,
+        idempotency_key: key,
+      };
+      stepBodies.current.set(key, command);
+    }
+    return command;
+  };
+
   const run: Record<Asking, () => void> = {
     decline: () =>
-      void step("decline", (key) => declineLoan(loan.id, body(key))),
+      void step("decline", (key) => declineLoan(loan.thread_id, body(key))),
     withdraw: () =>
-      void step("withdraw", (key) => withdrawLoan(loan.id, body(key))),
-    cancel: () => void step("cancel", (key) => cancelLoan(loan.id, body(key))),
+      void step("withdraw", (key) => withdrawLoan(loan.thread_id, body(key))),
+    cancel: () =>
+      void step("cancel", (key) => cancelLoan(loan.thread_id, body(key))),
   };
   const total = [...promised.values()].reduce((sum, n) => sum + n, 0);
   const returnTotal = [...(returning?.values() ?? [])].reduce(
@@ -472,7 +515,7 @@ export function LoanScreen({
             label: "Take back my confirmation",
             onSelect: () =>
               void step("take_back", (key) =>
-                takeBackHandover(loan.id, body(key))
+                takeBackHandover(loan.thread_id, body(key))
               ),
           },
         ]
@@ -523,13 +566,8 @@ export function LoanScreen({
     ...(loan.actions.includes("edit_and_resend") && drafts
       ? [
           {
-            label: "Edit and resend",
-            onSelect: () =>
-              drafts.editAndResend(
-                loan,
-                side.deck?.id ?? null,
-                menuAnchor.current?.querySelector("button") ?? null
-              ),
+            label: "Change terms",
+            onSelect: () => setEditingTerms(true),
           },
         ]
       : []),
@@ -602,7 +640,7 @@ export function LoanScreen({
           aria-disabled={busy || undefined}
           onClick={() =>
             void step("accept", (key) =>
-              acceptLendOffer(loan.id, {
+              acceptLendOffer(loan.thread_id, {
                 ...body(key),
                 lines: loan.lines.map((line) => ({
                   edition_id: line.edition_id,
@@ -654,7 +692,7 @@ export function LoanScreen({
           aria-disabled={busy || undefined}
           onClick={() =>
             void step("accept", (key) =>
-              acceptBorrowRequest(loan.id, {
+              acceptBorrowRequest(loan.thread_id, {
                 ...body(key),
                 lines: loan.lines.map((line) => ({
                   edition_id: line.edition_id,
@@ -707,11 +745,11 @@ export function LoanScreen({
                 : "ask_for_more_time",
               (key) =>
                 dating.kind === "change"
-                  ? changeReturnBy(loan.id, {
+                  ? changeReturnBy(loan.thread_id, {
                       ...body(key),
                       return_by: dating.value,
                     })
-                  : askForMoreTime(loan.id, {
+                  : askForMoreTime(loan.thread_id, {
                       ...body(key),
                       return_by: dating.value,
                     })
@@ -725,7 +763,10 @@ export function LoanScreen({
             aria-disabled={busy || undefined}
             onClick={() =>
               void step("change_return_by", (key) =>
-                changeReturnBy(loan.id, { ...body(key), return_by: null })
+                changeReturnBy(loan.thread_id, {
+                  ...body(key),
+                  return_by: null,
+                })
               )
             }
           >
@@ -757,7 +798,7 @@ export function LoanScreen({
           aria-disabled={busy || undefined}
           onClick={() =>
             void step("write_off", (key) =>
-              writeOff(loan.id, {
+              writeOff(loan.thread_id, {
                 ...body(key),
                 lines: loan.lines
                   .filter((line) => (writing.get(line.edition_id) ?? 0) > 0)
@@ -789,7 +830,7 @@ export function LoanScreen({
           aria-disabled={busy || undefined}
           onClick={() =>
             void step("start_return", (key) =>
-              startReturn(loan.id, {
+              startReturn(loan.thread_id, {
                 ...body(key),
                 lines: loan.lines
                   .filter((line) => (returning.get(line.edition_id) ?? 0) > 0)
@@ -819,7 +860,7 @@ export function LoanScreen({
           aria-disabled={busy || undefined}
           onClick={() =>
             void step("use_suggested", (key) =>
-              useSuggestedPicks(loan.id, body(key))
+              useSuggestedPicks(loan.thread_id, body(key))
             )
           }
         >
@@ -841,7 +882,7 @@ export function LoanScreen({
               aria-disabled={busy || undefined}
               onClick={() =>
                 void step(`choose_${choice}`, (key) =>
-                  chooseWrittenOff(loan.id, {
+                  chooseWrittenOff(loan.thread_id, {
                     ...body(key),
                     choice,
                     places: awaiting.map((place) => ({
@@ -874,7 +915,10 @@ export function LoanScreen({
           aria-disabled={busy || undefined}
           onClick={() =>
             void step("confirm_return", (key) =>
-              confirmReturn(loan.id, body(key))
+              confirmReturn(loan.thread_id, {
+                ...body(key),
+                return_id: loan.pending_return!.return_id,
+              })
             )
           }
         >
@@ -892,7 +936,9 @@ export function LoanScreen({
           variant="primary"
           aria-disabled={busy || undefined}
           onClick={() =>
-            void step("handover", (key) => confirmHandover(loan.id, body(key)))
+            void step("handover", (key) =>
+              confirmHandover(loan.thread_id, body(key))
+            )
           }
         >
           {loan.role === "lender" ? "Mark as handed over" : "Yes, I have them"}
@@ -961,7 +1007,7 @@ export function LoanScreen({
             aria-disabled={busy || undefined}
             onClick={() =>
               void step("approve_extension", (key) =>
-                approveExtension(loan.id, body(key))
+                approveExtension(loan.thread_id, body(key))
               )
             }
           >
@@ -971,7 +1017,7 @@ export function LoanScreen({
             aria-disabled={busy || undefined}
             onClick={() =>
               void step("decline_extension", (key) =>
-                declineExtension(loan.id, body(key))
+                declineExtension(loan.thread_id, body(key))
               )
             }
           >

@@ -87,7 +87,16 @@ def test_decline_withdraw_cancel_and_edit_and_resend_take_the_old_request_away(s
     ok(step(ash, view(ash, cancelled), 'cancel'))
     assert waiting(ash, charizard) == {}
     earlier = sent(ash, misty, [(iono, 1)], deck_id=charizard)
-    sent(ash, misty, [(iono, 2)], deck_id=charizard, replaces=earlier['id'])
+    from test_loan_threads import terms
+    edited = ok(terms(ash, earlier, iono, 2, deck_id=charizard))
+    assert edited['thread_id'] == earlier['thread_id']
+    assert edited['loan_id'] != earlier['loan_id']
+    with connect() as conn:
+        saved = conn.execute('SELECT deck_id FROM loan WHERE id=%s', (edited['loan_id'],)).fetchone()
+        original = conn.execute('SELECT state, closed_reason FROM loan WHERE id=%s',
+                                (earlier['loan_id'],)).fetchone()
+    assert str(saved['deck_id']) == charizard
+    assert original == {'state': 'closed', 'closed_reason': 'withdrawn'}
     assert waiting(ash, charizard) == {iono: ('2', '0', [('Misty W.', 'requested', '2')])}
 
 

@@ -6,14 +6,14 @@ export type TradeListCard = { edition_id: string; name: string; set_code: string
 export type OwnTradeList = { locations: TradeListLocation[]; cards: TradeListCard[] };
 export type TradeLineRequest = { edition_id: string; quantity: string };
 export type TradeCashRequest = { cents: string; payer: "you" | "them" };
-export type SendTradeProposal = { recipient_id?: string | null; recipient_trader_id?: string | null; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null; idempotency_key: string };
-export type CounterTrade = { revision: number; idempotency_key: string; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null };
+export type SendTradeProposal = { recipient_id?: string | null; recipient_trader_id?: string | null; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null; idempotency_key: string; message?: string | null };
+export type ChangeOffer = { offer_id: string; revision: number; idempotency_key: string; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null };
 export type TradePickPlace = { edition_id: string; location_id: string | null; name: string; path: string; copies: string; short: string };
 export type SwitchCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null };
 export type DeckSwitchOffer = { deck_id: string; deck_name: string; from_edition_id: string; to_edition_id: string; count: string; from_card: SwitchCard; to_card: SwitchCard };
 export type OwnTradeSide = { trade_id: string; picks: TradePickPlace[]; suggested: TradePickPlace[]; deck_switches: DeckSwitchOffer[] };
 export type DeckSwitchRequest = { deck_id: string; from_edition_id: string; to_edition_id: string; count: string };
-export type ConfirmSwap = { revision: number; idempotency_key: string; destination_id?: string | null; deck_switches?: DeckSwitchRequest[] };
+export type ConfirmSwap = { offer_id: string; revision: number; idempotency_key: string; destination_id?: string | null; deck_switches?: DeckSwitchRequest[] };
 export type SwitchedLine = { edition_id: string; quantity: string };
 export type SwitchedDeck = { deck_id: string; revision: number; undo: SwitchedLine[] };
 export type ConfirmedSwap = TradeView & { switched_decks?: SwitchedDeck[] };
@@ -52,8 +52,8 @@ export const acceptTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/accept`, 'POST', body);
 // Counter a Trade Proposal sent to you (#278), idempotent: it closes that proposal, frees the cards its sender gave,
 // and sends them this proposal instead, reserving the cards you give. Answers the new Trade as you read it.
-export const counterTrade = (id: string, body: CounterTrade) =>
-  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/counter`, 'POST', body);
+export const counterTrade = (id: string, body: ChangeOffer) =>
+  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/offer`, 'POST', body);
 // Your own side of a Trade (#272): where your picks take the cards you give from, which are out of date, and the
 // suggested picks; and the Deck switches Confirm swap offers for the cards you get in destinationId (#279).
 export const getTradeSide = (id: string, signal?: AbortSignal, destinationId?: string | null) =>

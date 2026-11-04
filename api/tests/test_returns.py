@@ -27,14 +27,15 @@ from want_list_swap_fixtures import seed_swap_catalog
 
 
 def start_return(user, loan, lines, key=None):
-    return call('POST', f"/api/loans/{loan['id']}/returns", user, {
-        'revision': view(user, loan)['revision'], 'idempotency_key': str(key or uuid4()),
+    return call('POST', f"/api/loans/{loan['thread_id']}/returns", user, {
+        'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(key or uuid4()),
         'lines': [{'edition_id': edition, 'quantity': str(copies)} for edition, copies in lines]})
 
 
 def confirm_return(user, loan):
-    return call('POST', f"/api/loans/{loan['id']}/returns/confirm", user,
-                {'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())})
+    return call('POST', f"/api/loans/{loan['thread_id']}/returns/confirm", user,
+                {'loan_id': loan['loan_id'], 'return_id': view(user, loan)['pending_return']['return_id'],
+                 'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())})
 
 
 def owner_revision(owner):
@@ -79,7 +80,7 @@ def test_a_partial_return_moves_each_sides_inventory_as_it_confirms_and_the_last
     # Ash gives one back: his own Borrowed Copies leave at once; Misty's Collection waits for her.
     ash_before = owner_revision(ash)
     given = ok(start_return(ash, loan, [(iono, 1)]))
-    assert given['pending_return'] == {'started_by': 'you', 'lines': [{'edition_id': iono, 'copies': '1'}],
+    assert given['pending_return'] == {'return_id': given['pending_return']['return_id'], 'started_by': 'you', 'lines': [{'edition_id': iono, 'copies': '1'}],
                                        'you_confirmed': True, 'they_confirmed': False}
     assert (given['actions'], given['needs_you'], returned(given)) == ([], False, [(iono, '0')])
     assert borrowed(loan) == {(charizard, iono): 2}
@@ -181,8 +182,8 @@ def test_a_return_its_starter_began_before_the_other_side_left_is_finished_by_th
     assert 'confirm_return' in alone['actions'] and alone['needs_you'] is True
     ok(confirm_return(misty, loan))
     assert holding(misty, binders['Binder'], iono)['quantity'] == '1'
-    closed = ok(call('POST', f"/api/loans/{loan['id']}/write-off", misty, {
-        'revision': view(misty, loan)['revision'], 'idempotency_key': str(uuid4()),
+    closed = ok(call('POST', f"/api/loans/{loan['thread_id']}/write-off", misty, {
+        'loan_id': loan['loan_id'], 'revision': view(misty, loan)['revision'], 'idempotency_key': str(uuid4()),
         'lines': [{'edition_id': iono, 'quantity': '2'}]}))
     assert (closed['state'], closed['closed_reason']) == ('closed', 'written_off')
 
@@ -196,8 +197,8 @@ def test_a_return_is_refused_beyond_what_is_out_and_one_waits_at_a_time(store):
     key = uuid4()
     first = ok(start_return(ash, loan, [(iono, 1)], key))
     # The same key replays the answer and gives nothing more back.
-    assert call('POST', f"/api/loans/{loan['id']}/returns", ash, {
-        'revision': first['revision'] - 1, 'idempotency_key': str(key),
+    assert call('POST', f"/api/loans/{loan['thread_id']}/returns", ash, {
+        'loan_id': loan['loan_id'], 'revision': first['revision'] - 1, 'idempotency_key': str(key),
         'lines': [{'edition_id': iono, 'quantity': '1'}]}).json() == first
     assert sum(borrowed(loan).values()) == 1
     # One pending return at a time: neither side starts another until Misty confirms.
@@ -232,13 +233,14 @@ def test_a_closing_return_racing_the_borrowers_deck_deletion_never_deadlocks(sto
     # it waits on the Loan row.
     iono, ash, misty, binders, loan, charizard = lent_loan({'Binder': 2}, 2, 'Charizard')
     ok(start_return(ash, loan, [(iono, 2)]))
-    body = {'revision': view(misty, loan)['revision'], 'idempotency_key': str(uuid4())}
+    body = {'return_id': view(misty, loan)['pending_return']['return_id'],
+            'loan_id': loan['loan_id'], 'revision': view(misty, loan)['revision'], 'idempotency_key': str(uuid4())}
     found = node(ash, charizard)
     drop = _sleeping('loan_return', 'UPDATE', 'NEW.lender_confirmed_at IS NOT NULL')
     try:
         with ThreadPoolExecutor(max_workers=2) as executor, \
                 psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
-            confirmed = executor.submit(call, 'POST', f"/api/loans/{loan['id']}/returns/confirm", misty, body)
+            confirmed = executor.submit(call, 'POST', f"/api/loans/{loan['thread_id']}/returns/confirm", misty, body)
             _asleep(watch, 1, [confirmed])
             deleted = executor.submit(call, 'DELETE', f'/api/decks/{charizard}', ash,
                                       {'name': found['name'], 'version': found['version'],

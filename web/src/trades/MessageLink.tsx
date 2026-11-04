@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { messageLabel } from "./nearYouMessages";
-import { traderConversationPath } from "./tradeListModel";
+import { proposalPath } from "./tradeListModel";
 
 const LINK =
   "inline-flex h-control items-center rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:h-control-phone";
@@ -18,7 +18,7 @@ export function MessageLink({
   name: string;
   onNavigate: (to: string) => void;
 }) {
-  const href = traderConversationPath(traderId);
+  const href = proposalPath(traderId);
   const go = (event: MouseEvent) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey) return;
     event.preventDefault();
@@ -28,10 +28,10 @@ export function MessageLink({
     <a
       href={href}
       onClick={go}
-      aria-label={messageLabel(name)}
+      aria-label={`Propose a Trade to ${name}`}
       className={LINK}
     >
-      Message
+      Propose trade
     </a>
   );
 }
