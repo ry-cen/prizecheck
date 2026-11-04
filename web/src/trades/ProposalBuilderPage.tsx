@@ -1,3 +1,4 @@
+import { offerLibrary, offerCopyMap } from "./offerCopies";
 import { useMessagePrefill } from "./messagePrefill";
 import { ArrowRight, ChevronLeft } from "lucide-react";
 import {
@@ -190,14 +191,8 @@ export function ProposalBuilderPage({
     useMemo(() => valueLines(proposal.give, proposal.get), [proposal])
   );
 
-  // A Counter: the copies the proposal's sender gave are reserved by it, so the library offers them again.
-  const released = useMemo(
-    () =>
-      new Map(
-        (counter?.you_get ?? []).map((c) => [c.edition_id, Number(c.copies)])
-      ),
-    [counter]
-  );
+  const released = useMemo(() => offerCopyMap(counter, "get"), [counter]);
+  const releasedOwn = useMemo(() => offerCopyMap(counter, "give"), [counter]);
   const revision = useRef(counter?.revision ?? 0);
   // The terms the Counter answers: the Trade as read, or as read again after a refusal that took a new revision.
   const [answered, setAnswered] = useState(counter);
@@ -303,28 +298,13 @@ export function ProposalBuilderPage({
     return () => controller.abort();
   }, [mineAttempt]);
 
-  // A released Edition the Friend lists no copy of now has no tile, so it is added back after the list (when the search
-  // matches it), at the copies the proposal held.
-  function releasedCards<T extends ProposalCard>(
-    cards: readonly T[],
-    q: string
-  ): ProposalCard[] {
-    const adjusted: ProposalCard[] = withReleased(cards, released);
-    if (!counter) return adjusted;
-    const listed = new Set(cards.map((card) => card.edition_id));
-    return [
-      ...adjusted,
-      ...counter.you_get
-        .filter(
-          (card) => !listed.has(card.edition_id) && matchesSearch(card.name, q)
-        )
-        .map(toProposalCard),
-    ];
-  }
   const libraryTheirs = useMemo<TheirsLoad>(
     () =>
       theirs.kind === "ready"
-        ? { ...theirs, cards: releasedCards(theirs.cards, theirs.q) }
+        ? {
+            ...theirs,
+            cards: offerLibrary(theirs.cards, counter, "get", theirs.q),
+          }
         : theirs.kind === "loading"
           ? { kind: "loading" }
           : { kind: "failed" }, // a missing Friend shows its own frame, never the library
@@ -338,10 +318,19 @@ export function ProposalBuilderPage({
             row: {
               ...match.row,
               you_get: withReleased(match.row.you_get, released),
+              you_give: withReleased(match.row.you_give, releasedOwn),
             },
           }
         : match,
-    [match, released]
+    [match, released, releasedOwn]
+  );
+
+  const libraryMine = useMemo<MineLoad>(
+    () =>
+      mine.kind === "ready"
+        ? { ...mine, cards: offerLibrary(mine.cards, counter, "give") }
+        : mine,
+    [mine, counter]
   );
 
   // A Counter's lines start at the countered copies as their cap; each library that lists more raises it. Only the caps
@@ -356,11 +345,11 @@ export function ProposalBuilderPage({
         next = withLibraryCaps(next, "get", libraryMatch.row.you_get);
         next = withLibraryCaps(next, "give", libraryMatch.row.you_give);
       }
-      if (mine.kind === "ready")
-        next = withLibraryCaps(next, "give", mine.cards);
+      if (libraryMine.kind === "ready")
+        next = withLibraryCaps(next, "give", libraryMine.cards);
       return next;
     });
-  }, [counter, libraryTheirs, libraryMatch, mine]);
+  }, [counter, libraryTheirs, libraryMatch, libraryMine]);
 
   async function showMore() {
     if (
@@ -897,7 +886,7 @@ export function ProposalBuilderPage({
       ownScroll={!phone}
       friendName={name}
       theirs={libraryTheirs}
-      mine={mine}
+      mine={libraryMine}
       match={libraryMatch}
       onTheirSearch={setTheirQ}
       onShowMore={() => void showMore()}
