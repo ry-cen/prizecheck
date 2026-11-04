@@ -188,7 +188,10 @@ export function ProposalBuilderPage({
   const [message, setMessage] = useState("");
   const prefilledMessage = useMessagePrefill();
   const [initialMessage, setInitialMessage] = useState(prefilledMessage);
-  const [announce, setAnnounce] = useState("");
+  const [announcement, setAnnouncement] = useState<{
+    text: string;
+    owner: "cards" | "proposal";
+  }>({ text: "", owner: "proposal" });
   const [asking, setAsking] = useState<{ leave: () => void } | null>(null);
   const [cash, setCash] = useState<CashDraft>(() =>
     counter?.cash
@@ -504,10 +507,13 @@ export function ProposalBuilderPage({
   // The same words twice are announced twice: the line is cleared first, then set a moment later.
   const announceTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(announceTimer.current), []);
-  function say(text: string) {
+  function say(text: string, owner: "cards" | "proposal" = "cards") {
     window.clearTimeout(announceTimer.current);
-    setAnnounce("");
-    announceTimer.current = window.setTimeout(() => setAnnounce(text), 60);
+    setAnnouncement({ text: "", owner });
+    announceTimer.current = window.setTimeout(
+      () => setAnnouncement({ text, owner }),
+      60
+    );
   }
 
   function add(side: ProposalSide, libraryCard: LibraryCard) {
@@ -887,7 +893,10 @@ export function ProposalBuilderPage({
         proposal[side].length > 0
       )}
       onChange={(line, quantity) => {
-        say(`${tradeCardName(line)}: ${quantity} in ${SIDE_LABEL[side]}`);
+        say(
+          `${tradeCardName(line)}: ${quantity} in ${SIDE_LABEL[side]}`,
+          "proposal"
+        );
         if (quantity === 0) refocus.current = side;
         change((p) => setQuantity(p, side, line, quantity));
       }}
@@ -1083,9 +1092,12 @@ export function ProposalBuilderPage({
       </section>
     </fieldset>
   );
+  const libraryAnnounces =
+    announcement.owner === "cards" && (!phone || pane === "cards");
   const library = (
     <ProposalLibrary
       headingId={libraryId}
+      announcement={libraryAnnounces ? announcement.text : null}
       ownScroll={!phone}
       friendName={name}
       theirs={libraryTheirs}
@@ -1121,7 +1133,11 @@ export function ProposalBuilderPage({
             idBase={idBase}
             panelId={`${idBase}-panel`}
             value={pane}
-            onChange={setPane}
+            onChange={(next) => {
+              window.clearTimeout(announceTimer.current);
+              setAnnouncement({ text: "", owner: "proposal" });
+              setPane(next);
+            }}
             options={[
               { value: "proposal", label: "Proposal", count: String(copies) },
               { value: "cards", label: "Cards" },
@@ -1143,9 +1159,11 @@ export function ProposalBuilderPage({
           {library}
         </div>
       )}
-      <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
-        {announce}
-      </p>
+      {!libraryAnnounces && (
+        <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
+          {announcement.owner === "proposal" ? announcement.text : ""}
+        </p>
+      )}
       <Dialog
         open={asking !== null}
         onClose={() => setAsking(null)}

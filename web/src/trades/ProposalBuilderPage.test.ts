@@ -514,3 +514,94 @@ it.each(["refusal", "edit-after-unknown"])(
     });
   }
 );
+
+it.each([false, true])(
+  "announces a full library card inside Cards once, then a quantity edit once (phone=%s)",
+  async (phone) => {
+    vi.useFakeTimers();
+    const scroll = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView"
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      vi.mocked(window.matchMedia).mockImplementation((query) => ({
+        matches: phone && query.includes("max-width"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+      const arven = {
+        ...card,
+        edition_id: "Arven",
+        name: "Arven",
+        set_code: "SVI",
+        collector_number: "166",
+        copies: "2",
+      };
+      vi.mocked(getTraderTradeList).mockResolvedValue({
+        trader_id: "misty",
+        display_name: "Misty",
+        band: null,
+        completed_trades: 0,
+        cards: [arven],
+        next_page: null,
+      });
+      vi.mocked(peekProposalSeed).mockReturnValue({
+        give: [],
+        get: [{ ...arven, quantity: 2 }],
+      });
+      await act(async () =>
+        root.render(
+          h(ToastProvider, {
+            children: h(ProposalBuilderPage, {
+              traderId: "misty",
+              onNavigate: navigate,
+            }),
+          })
+        )
+      );
+      const library = host.querySelector("aside")!;
+      const tile = [...library.querySelectorAll("button")].find((b) =>
+        b.getAttribute("aria-label")?.includes("Add to You get")
+      )!;
+      expect(tile).toBeDefined();
+      expect(tile.getAttribute("aria-disabled")).toBe("true");
+      await click(tile);
+      await act(async () => {
+        vi.advanceTimersByTime(60);
+      });
+      expect(library.querySelector('[role="status"]')?.textContent).toBe(
+        "All 2 Arven (SVI 166) are in You get."
+      );
+      expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
+      if (phone) {
+        const proposalTab = [
+          ...host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+        ].find((b) => b.textContent?.startsWith("Proposal"))!;
+        await click(proposalTab);
+      }
+      await click(button("Decrease Arven (SVI 166) you get"));
+      await act(async () => {
+        vi.advanceTimersByTime(60);
+      });
+      expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
+      expect(host.querySelector('[role="status"]')?.textContent).toBe(
+        "Arven (SVI 166): 1 in You get"
+      );
+      expect(library.querySelector('[role="status"]')).toBeNull();
+    } finally {
+      if (scroll)
+        Object.defineProperty(HTMLElement.prototype, "scrollIntoView", scroll);
+      else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+      vi.useRealTimers();
+    }
+  }
+);
