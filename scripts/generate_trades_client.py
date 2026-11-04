@@ -9,7 +9,7 @@ import client_generator as gen
 
 TARGET = "web/src/trades_generated.ts"
 NAMES = ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
-         "TradeCashRequest", "SendTradeProposal", "CounterTrade", "TradePickPlace", "SwitchCard", "DeckSwitchOffer",
+         "TradeCashRequest", "SendTradeProposal", "ChangeOffer", "TradePickPlace", "SwitchCard", "DeckSwitchOffer",
          "OwnTradeSide", "DeckSwitchRequest", "ConfirmSwap", "SwitchedLine", "SwitchedDeck", "TradeWantLine",
          "WillAcceptChoice",
          "TradeWants", "SetTradeWant", "SetWillAccept",
@@ -31,8 +31,8 @@ export const acceptTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/accept`, 'POST', body);
 // Counter a Trade Proposal sent to you (#278), idempotent: it closes that proposal, frees the cards its sender gave,
 // and sends them this proposal instead, reserving the cards you give. Answers the new Trade as you read it.
-export const counterTrade = (id: string, body: CounterTrade) =>
-  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/counter`, 'POST', body);
+export const counterTrade = (id: string, body: ChangeOffer) =>
+  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/offer`, 'POST', body);
 // Your own side of a Trade (#272): where your picks take the cards you give from, which are out of date, and the
 // suggested picks; and the Deck switches Confirm swap offers for the cards you get in destinationId (#279).
 export const getTradeSide = (id: string, signal?: AbortSignal, destinationId?: string | null) =>

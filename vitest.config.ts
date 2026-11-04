@@ -9,6 +9,7 @@ export default defineConfig({
       "web/src/loans/**/*.test.ts",
       "web/src/scanner/**/*.test.ts",
       "web/src/trades/**/*.test.ts",
+      "web/src/threads/**/*.test.ts",
       "web/src/ui/**/*.test.ts",
       "web/src/workspace/**/*.test.ts",
     ],

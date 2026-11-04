@@ -10,6 +10,9 @@ routes; Trades are seeded rows (``test_trade_promises.seed_trade``) until the Tr
 """
 from uuid import UUID, uuid4
 
+import pytest
+from test_threads import thread as make_thread
+
 from app.main import connect  # noqa: F401
 from app.social import trade_matches
 from app.social.friend_copies import TradeCopies, friend_trade_copies
@@ -375,9 +378,12 @@ COLLECTOR_UNKNOWN = b'{"detail":{"code":"COLLECTOR_NOT_FOUND"}}'
 TRADER_LIST_FIELDS = {'trader_id', 'display_name', 'band', 'completed_trades', 'cards', 'next_page'}
 
 
-def message_to(user, trader, body='hello'):
-    """A message to a collector by trader id (test_conversations.say_to, which this module cannot import)."""
-    return call('POST', f'/api/social/traders/{trader}/messages', user, {'body': body, 'idempotency_key': str(uuid4())})
+def open_contact(user, trader, body='hello'):
+    """First contact opens a Trade with cards and an optional message, never a Conversation."""
+    edition=next(iter(own_cards(user)))
+    return call('POST','/api/trades',user,{'recipient_trader_id':trader,
+                'you_give':[{'edition_id':edition,'quantity':'1'}],
+                'message':body,'idempotency_key':str(uuid4())})
 
 
 def trader_list(viewer, trader, **params):
@@ -437,23 +443,25 @@ def test_the_trader_trade_list_needs_reach(store):
                   trader_of(suspended)):
         response = trader_list(ash, other)
         assert (response.status_code, response.content) == (404, COLLECTOR_UNKNOWN), other
-    # Ex-Friends who share a conversation keep reading each other's Trade List, with no band.
+    # Ex-Friends who share a Thread keep reading each other's Trade List, with no band.
     friend, _ = collector('Gary')
     befriend(ash, friend)
-    ok(message_to(ash, trader_of(friend)), 201)
+    ok(open_contact(ash, trader_of(friend)), 201)
     ok(call('POST', f'/api/social/friends/{friend}/remove', ash, {'idempotency_key': str(uuid4())}))
     response = trader_list(ash, trader_of(friend))
     assert response.status_code == 200 and response.json()['band'] is None
 
 
-def test_a_traders_header_answers_status_band_and_conversation(store):
+def test_a_traders_header_answers_status_and_band_for_thread_contacts(store):
     ids, ash, misty, binder, box = strangers()
     header = ok(trader_header(ash, trader_of(misty)))
     assert header == {'trader_id': trader_of(misty), 'display_name': 'Misty W.', 'friend': False, 'band': '5_to_10',
                       'completed_trades': 0, 'open_to_cash_offers': False, 'status': 'open', 'conversation_id': None,
                       'add_friend': None}
-    ok(message_to(ash, trader_of(misty)), 201)
-    assert ok(trader_header(ash, trader_of(misty)))['conversation_id'] is not None
+    opened=ok(open_contact(ash, trader_of(misty)), 201)
+    assert ok(call('GET',f"/api/trades/{opened['thread_id']}",ash))['can_message'] is True
+    # New contact creates no archived Conversation; its identity is the Thread.
+    assert ok(trader_header(ash, trader_of(misty)))['conversation_id'] is None
     block(misty, ash)
     gone = ok(trader_header(ash, trader_of(misty)))
     assert (gone['status'], gone['band'], gone['completed_trades'], gone['add_friend'], gone['open_to_cash_offers']) == (
@@ -471,3 +479,28 @@ def test_a_traders_header_answers_status_band_and_conversation(store):
     befriend(ash, friend)
     mate = ok(trader_header(ash, trader_of(friend)))
     assert (mate['friend'], mate['band'], mate['status']) == (True, None, 'open')
+
+
+@pytest.mark.parametrize('contact',['trade','loan','legacy'])
+@pytest.mark.parametrize('cause',['you_blocked','blocked_you','suspension'])
+def test_known_contact_header_remains_readable_without_inventory_reach(store,contact,cause):
+    ids,ash,misty,binder,box=strangers()
+    with connect() as conn:
+        if contact=='legacy':
+            conn.execute('INSERT INTO legacy_contact(user_low,user_high) VALUES (%s,%s)',tuple(sorted((ash,misty))))
+        else:
+            make_thread(ash,misty,kind=contact,closed=True,conn=conn)
+    if cause=='you_blocked':
+        block(ash,misty)
+    elif cause=='blocked_you':
+        block(misty,ash)
+    else:
+        with connect() as conn:
+            conn.execute('UPDATE collector_profile SET suspended_at=now() WHERE user_id=%s',(misty,))
+    header=ok(trader_header(ash,trader_of(misty)))
+    assert header['status']==('you_blocked' if cause=='you_blocked' else 'unavailable')
+    assert header['display_name']=='Misty W.' and header['band'] is None
+    assert header['open_to_cash_offers'] is False
+    assert header['completed_trades']==(0 if cause=='you_blocked' else None)
+    inventory=trader_list(ash,trader_of(misty))
+    assert (inventory.status_code,inventory.content)==(404,COLLECTOR_UNKNOWN)

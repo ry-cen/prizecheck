@@ -39,8 +39,7 @@ borrower's own, read through ``borrowed_copies.awaiting_choice`` for the borrowe
 
 **Return-by date** (#256): the lender keeps, changes or clears the requested date on accepting (``loan_inventory``),
 then changes or clears it while the Loan is open, but never brings it earlier once either side confirmed the handover;
-the borrower asks for more time (``extension_to``) and the lender approves or declines it. These steps lock only the
-Loan row. Overdue (from the day after the date, once a handover was confirmed) and the 14-day nudge (a Borrow Request
+the borrower asks for more time (``extension_to``) and the lender approves or declines it. These steps lock only the Loan row. Overdue (from the day after the date, once a handover was confirmed) and the 14-day nudge (a Borrow Request
 nobody answered, or an accepted Loan nobody confirmed a handover for, story 89) are worked out on read, and each is a
 notice the reader sees once (``loan_notice_seen``): 'overdue', 'nudge_answer' and 'nudge_handover', so seeing a
 request's nudge never hides the accepted Loan's.
@@ -79,9 +78,10 @@ from ..location_tree import error, record_response
 from ..db import connect
 from ..identity import verified_user
 from ..core.catalog.card_facts import card_facts
+from .threads import LoanDetail, touch_threads, write_event, thread_party
 from .owners import NOW, advance_revision, begin_owner_command, lock_owners
 
-router = APIRouter(prefix='/api/social/loans', tags=['social'])
+router = APIRouter(prefix='/api/loans', tags=['social'])
 
 # Closed Loans the Loans tab lists under History, newest first.
 HISTORY = 50
@@ -99,18 +99,17 @@ Section = Literal['needs_you', 'out_now', 'pending', 'history']
 # keep-or-remove choice after a Write-off (borrower), a return to confirm, a handover to confirm (the lender's
 # hand_over, the borrower's receive), a return the reader started to finish once the other side's account is gone,
 # copies to return then, more time to answer (lender).
-Waiting = Literal['answer', 'fix_picks', 'choose', 'confirm_return', 'finish_return', 'hand_over', 'receive', 'return',
-                  'more_time']
+Waiting = Literal['answer', 'fix_picks', 'choose_written_off', 'confirm_return', 'hand_over',
+                  'confirm_handover', 'answer_more_time']
 # The event updates a step stores for the other side (#259, migration 130).
 UpdateKind = Literal['accepted', 'partly_accepted', 'declined', 'cancelled', 'return_by_changed']
 
 
 class LoanParty(BaseModel):
     """The other side of a Loan. ``collector_id`` addresses a new request ("Edit and resend") and is never shown; it
-    and ``handle`` are None once the collector deleted their account, and ``display_name`` is the name they had."""
+    is None once the collector deleted their account, and ``display_name`` is the name they had."""
     collector_id: str | None
     display_name: str
-    handle: str | None
 
 
 class LoanCard(BaseModel):
@@ -138,6 +137,7 @@ class ReturnLine(BaseModel):
 class PendingReturn(BaseModel):
     """The Loan's return one side has confirmed and the other hasn't (#255): who started it, its copies, and which
     sides confirmed it."""
+    return_id: UUID
     started_by: Literal['you', 'them']
     lines: list[ReturnLine]
     you_confirmed: bool
@@ -149,6 +149,8 @@ class LoanView(BaseModel):
     withdrew or cancelled, 'you' or 'them'. ``actions``: the steps the reader may take now. ``revision``: send it back
     with a step."""
     id: UUID
+    thread_id: UUID
+    loan_id: UUID
     kind: Literal['borrow_request', 'lend_offer']
     state: Literal['requested', 'offered', 'accepted', 'handed_over', 'closed']
     closed_reason: Literal['declined', 'withdrawn', 'cancelled', 'returned', 'written_off'] | None
@@ -186,7 +188,9 @@ class LoansView(BaseModel):
 
 
 class LoanStep(BaseModel):
+    model_config = {"extra": "forbid"}
     account_id: str | None = None
+    loan_id: UUID
     revision: int = Field(ge=1)
     idempotency_key: UUID
 
@@ -241,9 +245,10 @@ class LoanFacts:
     stale_picks: bool = False
 
 
-def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
+def loan_facts(conn, user_id: str, rows, *, picks: bool = True) -> dict[UUID, LoanFacts]:
     """``LoanFacts`` for these Loan rows as the reader sees them, in eight reads whatever the number of Loans. Reads no
-    inventory but the reader's own Holdings, as lender, through ``stale_pick_loans`` (#259)."""
+    inventory but the reader's own Holdings, as lender, through ``stale_pick_loans`` (#259).
+    ``picks=False`` skips the stale-pick scan, for ``allowed()``, which doesn't read it."""
     rows = list(rows)
     ids = [row['id'] for row in rows]
     if not ids:
@@ -272,7 +277,7 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
         GROUP BY loan_id""", (ids,))}
     awaiting = awaiting_choice(conn, user_id, [row['id'] for row in rows if row['borrower_id'] == user_id])
     stale = stale_pick_loans(conn, user_id, [row['id'] for row in rows if row['lender_id'] == user_id
-                                             and row['state'] == 'accepted' and row['lender_handover_at'] is None])
+                                             and row['state'] == 'accepted' and row['lender_handover_at'] is None]) if picks else set()
     clock = conn.execute(f"SELECT current_date AS today, now() - interval '{NUDGE_DAYS} days' AS stale").fetchone()
     seen: dict[UUID, set] = {}
     for notice in conn.execute('SELECT loan_id, kind FROM loan_notice_seen WHERE loan_id = ANY(%s) AND user_id=%s',
@@ -333,19 +338,19 @@ def waiting_step(user_id: str, row, facts: LoanFacts | None = None) -> str | Non
         if facts.stale_picks and role == 'lender' and state == 'accepted' and row['lender_handover_at'] is None:
             return 'fix_picks'
         if facts.awaiting > 0:
-            return 'choose'
+            return 'choose_written_off'
         if pending is not None and pending['started_by'] != role and not pending[f'{role}_confirmed']:
             return 'confirm_return'
         if pending is not None and pending['started_by'] == role and not facts.other_exists:
-            return 'finish_return'
+            return 'confirm_return'
     if state == 'accepted':
         mine, theirs = confirmed(user_id, row)
         if theirs and not mine:
-            return 'hand_over' if role == 'lender' else 'receive'
+            return 'hand_over' if role == 'lender' else 'confirm_handover'
     if facts is not None and not facts.other_exists and facts.out.get(role, 0) > 0 and pending is None:
-        return 'return'
+        return 'confirm_return'
     if role == 'lender' and row['extension_to'] is not None:
-        return 'more_time'
+        return 'answer_more_time'
     return None
 
 
@@ -412,8 +417,7 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
         elif row['return_by'] is not None and row['extension_to'] is None:
             found.append('ask_for_more_time')
     if (role == 'borrower' and row['kind'] == 'borrow_request' and other_exists and friends
-            and (state == 'requested' or (state == 'closed'
-                                          and row['closed_reason'] in ('declined', 'withdrawn', 'cancelled')))):
+            and state == 'requested'):
         found.append('edit_and_resend')
     return found
 
@@ -460,18 +464,17 @@ def loan_views(conn, user_id: str, rows, facts: dict[UUID, LoanFacts] | None = N
         if pending is not None:
             order = {line['edition_id']: index for index, line in enumerate(lines.get(row['id'], []))}
             pending = PendingReturn(
-                started_by='you' if pending['started_by'] == role else 'them',
+                return_id=pending['id'], started_by='you' if pending['started_by'] == role else 'them',
                 lines=[ReturnLine(edition_id=edition, copies=str(copies)) for edition, copies in
                        sorted(pending['lines'].items(), key=lambda item: order.get(item[0], 0))],
                 you_confirmed=pending[f'{role}_confirmed'],
                 they_confirmed=pending['borrower_confirmed' if role == 'lender' else 'lender_confirmed'])
         closed_by = None if row['closed_by'] is None else 'you' if row['closed_by'] == user_id else 'them'
         views.append(LoanView(
-            id=row['id'], kind=row['kind'], state=row['state'], closed_reason=row['closed_reason'],
+            id=row['id'], thread_id=row['thread_id'], loan_id=row['id'], kind=row['kind'], state=row['state'], closed_reason=row['closed_reason'],
             closed_by=closed_by, role=role,
             other=LoanParty(collector_id=other_id if other_id in handles else None,
-                            display_name=row['borrower_name'] if role == 'lender' else row['lender_name'],
-                            handle=handles.get(other_id)),
+                            display_name=row['borrower_name'] if role == 'lender' else row['lender_name']),
             return_by=row['return_by'], you_confirmed_handover=mine, they_confirmed_handover=theirs,
             lines=card_lines, needs_you=needs_you(user_id, row, known), section=section(user_id, row, known),
             waiting=waiting_step(user_id, row, known),
@@ -492,21 +495,31 @@ def loan_view(conn, user_id: str, loan_id: UUID) -> LoanView:
     return loan_views(conn, user_id, [row])[0]
 
 
-@router.get('', response_model=LoansView)
-def list_loans(user_id: str = Depends(verified_user)):
-    with connect() as conn, conn.transaction():
-        open_rows = conn.execute(LOANS + " AND o.state <> 'closed' ORDER BY o.created_at DESC, o.id",
-                                 {'me': user_id}).fetchall()
-        closed_rows = conn.execute(LOANS + " AND o.state = 'closed' ORDER BY o.closed_at DESC, o.id LIMIT %(limit)s",
-                                   {'me': user_id, 'limit': HISTORY}).fetchall()
-        views = loan_views(conn, user_id, open_rows + closed_rows)
-    return LoansView(loans=views, needs_you=sum(view.needs_you for view in views))
+@router.get('/resolve/{identifier}')
+def resolve_loan(identifier: UUID, user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        found = conn.execute("""SELECT t.id FROM thread t WHERE t.kind='loan'
+          AND (t.user_low=%s OR t.user_high=%s) AND (t.id=%s OR t.id IN (
+          SELECT thread_id FROM thread_round_source WHERE kind='loan' AND round_id=%s))
+          ORDER BY (t.id=%s) DESC LIMIT 1""", (user_id, user_id, identifier, identifier, identifier)).fetchone()
+        if found is None:
+            error(404, 'LOAN_NOT_FOUND')
+        return {'thread_id': found['id']}
 
 
-@router.get('/{loan_id}', response_model=LoanView)
+@router.get('/{loan_id:uuid}', response_model=LoanDetail)
 def read_loan(loan_id: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
-        return loan_view(conn, user_id, loan_id)
+        row = conn.execute(LOANS + ' AND o.thread_id=%(id)s ORDER BY o.created_at DESC LIMIT 1',
+                           {'me': user_id, 'id': loan_id}).fetchone()
+        if row is None:
+            error(404, 'LOAN_NOT_FOUND')
+        thread = conn.execute('SELECT * FROM thread WHERE id=%s', (loan_id,)).fetchone()
+        party = thread_party(conn, user_id, thread)
+        other = row['borrower_id'] if row['lender_id'] == user_id else row['lender_id']
+        available = party.available
+        return LoanDetail(id=loan_id, live_terms=loan_views(conn, user_id, [row])[0],
+                          can_message=available, can_report=other is not None)
 
 
 def store(conn, user_id: str, key: UUID, digest: str, loan_id: UUID) -> dict:
@@ -523,8 +536,8 @@ def assert_account(command_account_id: str | None, user_id: str) -> None:
 
 
 def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, locks, extra: dict | None = None) -> dict:
-    """Runs one step on an existing Loan: ``begin_owner_command``, the owners ``locks(role, row)`` names locked in ascending
-    order, then the Loan row, its revision and ``allowed`` checked, then ``apply(conn, row)``, then the Loan row written
+    """Runs one step addressed by thread ``loan_id`` and exact round ``step.loan_id``: ``begin_owner_command``, the owners ``locks(role, row)`` names locked in ascending
+    order, then the Loan row, ``allowed`` and its revision checked, then ``apply(conn, row)``, then the Loan row written
     once, and the caller's view stored and returned. ``extra``: the step's own fields, part of its digest.
 
     ``apply`` writes everything but the ``loan`` row and returns the Loan columns the step sets (a mapping of column
@@ -536,28 +549,59 @@ def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, lo
     (``lock_owners`` says why). A deadlock the database ends anyway leaves nothing changed and answers 503
     INVENTORY_TEMPORARILY_UNAVAILABLE, which the client retries with the same key."""
     assert_account(step.account_id, user_id)
-    payload = {'action': f'loan_{action}', 'loan_id': str(loan_id), 'revision': step.revision, **(extra or {})}
+    payload = {'action': f'loan_{action}', 'thread_id': str(loan_id), 'loan_id': str(step.loan_id), 'revision': step.revision, **(extra or {})}
     try:
         with connect() as conn, conn.transaction():
             digest, stored = begin_owner_command(conn, user_id, step.idempotency_key, payload, 'loan')
             if stored is not None:
                 return stored
-            sides = conn.execute(LOANS + ' AND o.id = %(id)s', {'me': user_id, 'id': loan_id}).fetchone()
+            sides = conn.execute(LOANS + ' AND o.thread_id = %(id)s ORDER BY o.created_at DESC, o.id DESC LIMIT 1',
+                                 {'me': user_id, 'id': loan_id}).fetchone()
             if sides is None:
                 error(404, 'LOAN_NOT_FOUND')
             lock_owners(conn, *[owner for owner in locks(role_of(user_id, sides), sides) if owner is not None])
-            row = conn.execute('SELECT * FROM loan WHERE id = %s FOR NO KEY UPDATE', (loan_id,)).fetchone()
-            if row['revision'] != step.revision:
+            row = conn.execute('SELECT * FROM loan WHERE id = %s FOR NO KEY UPDATE',
+                               (sides['id'],)).fetchone()
+            if row['id'] != step.loan_id:
                 error(409, 'LOAN_CHANGED')
+            if row['state'] == 'closed':
+                error(409, 'LOAN_CHANGED')
+            if action == 'confirm_return':
+                pending = conn.execute('SELECT id FROM loan_return WHERE loan_id=%s AND completed_at IS NULL',
+                                       (row['id'],)).fetchone()
+                if pending is None or pending['id'] != step.return_id:
+                    error(409, 'RETURN_CHANGED')
             other = row['borrower_id'] if role_of(user_id, row) == 'lender' else row['lender_id']
             exists = other is not None and conn.execute('SELECT 1 FROM collector_profile WHERE user_id=%s',
                                                         (other,)).fetchone() is not None
             written_off = conn.execute('SELECT 1 FROM loan_line WHERE loan_id=%s AND written_off > 0 LIMIT 1',
-                                       (loan_id,)).fetchone() is not None
-            if action not in allowed(user_id, row, exists, written_off, loan_facts(conn, user_id, [row])[loan_id]):
+                                       (row['id'],)).fetchone() is not None
+            if action not in allowed(user_id, row, exists, written_off, loan_facts(conn, user_id, [row], picks=False)[row['id']]):
                 error(409, 'STEP_NOT_ALLOWED')
-            write_loan(conn, loan_id, apply(conn, row) or {})
-            return store(conn, user_id, step.idempotency_key, digest, loan_id)
+            if action == 'edit_and_resend':
+                from .friends import friend_ids
+                if row['lender_id'] not in friend_ids(conn, user_id):
+                    error(409, 'NOT_FRIENDS')
+            if action != 'confirm_return' and row['revision'] != step.revision:
+                error(409, 'LOAN_CHANGED')
+            before = event_snapshot(conn, row)
+            changes = apply(conn, row) or {}
+            assert not ('_closure' in changes and '_replacement' in changes), 'closure and replacement are mutually exclusive'
+            closure = changes.pop('_closure', None)
+            replacement = changes.pop('_replacement', None)
+            if replacement is None:
+                write_loan(conn, row['id'], changes)
+            after = conn.execute('SELECT * FROM loan WHERE id=%s', (row['id'],)).fetchone()
+            if replacement is None:
+                event_action = 'edit_and_resend' if (extra or {}).get('command') == 'use_suggested_picks' else action
+                log_step(conn, user_id, row, after, event_action, before)
+                if closure is not None:
+                    loan_event(conn, after, closure[0], closure[1])
+            elif replacement is not None:
+                after = conn.execute('SELECT * FROM loan WHERE id=%s', (replacement,)).fetchone()
+                log_step(conn, user_id, row, after, action, before)
+            touch_threads(conn, [row['thread_id']])
+            return store(conn, user_id, step.idempotency_key, digest, replacement or row['id'])
     except psycopg.errors.DeadlockDetected:
         error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
 
@@ -627,7 +671,19 @@ def release(conn, row, user_id: str, reason: str) -> dict:
     return close(conn, row, user_id, reason)
 
 
-def end_loans_between(conn, user_id: str, other_id: str) -> None:
+def cancel_unconfirmed(conn, row, actor_id: str) -> tuple[dict, str | None]:
+    """Cancel one Loan, notifying the other side and releasing picks without writing the Loan row.
+
+    Called with the original row. The Loan must be logically unconfirmed *after* the caller's returned changes
+    are applied. Return its closing columns and the lender whose revision the caller must advance once (or
+    deduplicate across a bulk closure). The caller writes the row once, then its closure event.
+    """
+    lender = row['lender_id'] if row['state'] in ('offered', 'accepted') else None
+    record_update(conn, row, actor_id, 'cancelled')
+    return close(conn, row, actor_id, 'cancelled'), lender
+
+
+def end_loans_between(conn, user_id: str, other_id: str | list[str], kind: str) -> set[UUID]:
     """Ending a friendship with open Loans (#260), from Remove Friend and Block (``friends.friendship_ended``) by
     ``user_id``, with both owners already locked in ascending ``user_id``. Each Borrow Request, Lend Offer and accepted
     Loan between the two, either way round, that nobody has confirmed a handover for is cancelled by ``user_id``: its
@@ -635,19 +691,25 @@ def end_loans_between(conn, user_id: str, other_id: str) -> None:
     (``record_update``), as for any cancel and never why. A Loan either side confirmed a handover for counts as handed
     over and stays open. A Lend Offer's or an accepted Loan's copies stop being reserved, so each such lender's
     revision moves, once."""
-    rows = conn.execute("""SELECT * FROM loan
-      WHERE ((lender_id = %(a)s AND borrower_id = %(b)s) OR (lender_id = %(b)s AND borrower_id = %(a)s))
+    if kind not in ('closed_blocked', 'closed_unfriended', 'closed_suspended'):
+        raise ValueError('closure kind required')
+    # A suspension supplies all partners at once, preserving global round-id lock order.
+    others = [other_id] if isinstance(other_id, str) else other_id
+    rows = conn.execute("""SELECT l.*, t.user_low AS thread_user_low FROM loan l JOIN thread t ON t.id=l.thread_id
+      WHERE ((lender_id = %(a)s AND borrower_id = ANY(%(b)s)) OR (lender_id = ANY(%(b)s) AND borrower_id = %(a)s))
         AND state IN ('requested', 'offered', 'accepted')
         AND lender_handover_at IS NULL AND borrower_handover_at IS NULL
-      ORDER BY id FOR NO KEY UPDATE""", {'a': user_id, 'b': other_id}).fetchall()
+      ORDER BY l.id FOR NO KEY UPDATE OF l""", {'a': user_id, 'b': others}).fetchall()
     lenders = set()
     for row in rows:
-        if row['state'] in ('offered', 'accepted'):
-            lenders.add(row['lender_id'])
-        record_update(conn, row, user_id, 'cancelled')
-        write_loan(conn, row['id'], close(conn, row, user_id, 'cancelled'))
+        columns, lender = cancel_unconfirmed(conn, row, user_id)
+        if lender is not None:
+            lenders.add(lender)
+        write_loan(conn, row['id'], columns)
+        loan_event(conn, row, user_id, kind)
     for lender in sorted(lenders):
         advance_revision(conn, lender)
+    return {row['thread_id'] for row in rows}
 
 
 @router.post('/{loan_id}/decline', response_model=LoanView)
@@ -745,8 +807,90 @@ def see_notices(loan_id: UUID, seen: SeenNotices, user_id: str = Depends(verifie
     """Records that the reader was shown these notices (#256), so each shows once per side. A notice not showing now
     is ignored, so it can still show later. No step: no revision, no key; recording twice changes nothing."""
     with connect() as conn, conn.transaction():
+        row = conn.execute(LOANS + ' AND o.thread_id=%(id)s ORDER BY o.created_at DESC, o.id DESC LIMIT 1',
+                           {'me': user_id, 'id': loan_id}).fetchone()
+        if row is None:
+            error(404, 'LOAN_NOT_FOUND')
+        loan_id = row['id']
         showing = loan_view(conn, user_id, loan_id).notices
         for kind in sorted(set(seen.kinds) & set(showing)):
             conn.execute('INSERT INTO loan_notice_seen(loan_id, user_id, kind) VALUES (%s, %s, %s) '
                          'ON CONFLICT DO NOTHING', (loan_id, user_id, kind))
         return loan_view(conn, user_id, loan_id)
+
+
+def loan_event(conn, row, actor_id, kind, data=None, return_id=None):
+    # Bulk closures fetch the participant slot with the locked rounds.
+    low = row['thread_user_low'] if 'thread_user_low' in row else conn.execute(
+        'SELECT user_low FROM thread WHERE id=%s', (row['thread_id'],)).fetchone()['user_low']
+    actor = None if actor_id is None else 'low' if low == actor_id else 'high'
+    write_event(conn, row['thread_id'], kind, row['id'], actor=actor, data=data, return_id=return_id)
+
+
+def event_snapshot(conn, row):
+    """Terms survive closure: requests keep requested counts until acceptance, then promised counts."""
+    quantity = 'requested' if row['accepted_at'] is None else 'promised'
+    return {str(line['edition_id']): int(line[quantity]) for line in conn.execute(
+        'SELECT edition_id, requested, promised FROM loan_line WHERE loan_id=%s', (row['id'],))}
+
+
+def log_step(conn, user_id, before, after, action, lines):
+    kinds = {'edit_and_resend': 'edited', 'accept': 'accepted', 'decline': 'declined', 'withdraw': 'withdrawn', 'cancel': 'cancelled',
+             'confirm_handover': 'handover_confirmed', 'take_back': 'handover_taken_back',
+             'start_return': 'return_recorded', 'confirm_return': 'return_confirmed',
+             'write_off': 'written_off', 'choose_written_off': 'write_off_choice',
+             'change_return_by': 'return_by_changed', 'ask_for_more_time': 'more_time_asked',
+             'approve_extension': 'more_time_approved', 'decline_extension': 'more_time_declined'}
+    current = event_snapshot(conn, after)
+    low = conn.execute('SELECT user_low FROM thread WHERE id=%s', (before['thread_id'],)).fetchone()['user_low']
+    giver = 'low' if before['lender_id'] == low else 'high'
+    data = {'lines': [{'giver': giver, 'edition_id': edition, 'from_qty': lines.get(edition, 0),
+                       'to_qty': current.get(edition, 0)} for edition in sorted(lines.keys() | current.keys())
+                      if lines.get(edition, 0) != current.get(edition, 0)]}
+    if action == 'ask_for_more_time':
+        data['return_by'] = {'from': str(before['return_by']), 'to': str(after['extension_to'])}
+    if before['return_by'] != after['return_by']:
+        data['return_by'] = {'from': str(before['return_by']) if before['return_by'] else None,
+                             'to': str(after['return_by']) if after['return_by'] else None}
+    kind = kinds[action]
+    if action == 'accept' and (data['lines'] or 'return_by' in data):
+        kind = 'partly_accepted'
+    pending = conn.execute('SELECT id FROM loan_return WHERE loan_id=%s ORDER BY created_at DESC, id DESC LIMIT 1',
+                           (before['id'],)).fetchone() if action in ('start_return', 'confirm_return') else None
+    if pending is not None:
+        data['returned'] = [{'edition_id': str(line['edition_id']), 'quantity': int(line['quantity'])}
+                            for line in conn.execute('SELECT edition_id, quantity FROM loan_return_line '
+                                                     'WHERE return_id=%s ORDER BY edition_id', (pending['id'],))]
+    if kind == 'partly_accepted':
+        data['not_lent'] = [{'edition_id': line['edition_id'], 'quantity': line['from_qty'] - line['to_qty']}
+                            for line in data['lines'] if line['from_qty'] > line['to_qty']]
+    loan_event(conn, after, user_id, kind, data, pending['id'] if pending else None)
+    if before['state'] != after['state'] and after['state'] in ('handed_over', 'closed'):
+        completion = 'handed_over' if after['state'] == 'handed_over' else after['closed_reason']
+        if completion in ('handed_over', 'returned'):
+            loan_event(conn, after, user_id, completion)
+
+
+def new_loan_thread(conn, lender, borrower):
+    thread_id = uuid4()
+    low, high = sorted([lender, borrower], key=lambda value: value.encode())
+    conn.execute("INSERT INTO thread(id, kind, user_low, user_high, created_at, last_activity_at, changed_at) VALUES (%s,'loan',%s,%s,now(),now(),now())",
+                 (thread_id, low, high))
+    for member in (low, high):
+        conn.execute('INSERT INTO thread_member(thread_id, member_id) VALUES (%s,%s)', (thread_id, member))
+    return thread_id
+
+
+def opened_loan(conn, user_id, loan_id, kind):
+    row = conn.execute('SELECT * FROM loan WHERE id=%s', (loan_id,)).fetchone()
+    data = {'lines': [
+        {'giver': 'low' if row['lender_id'].encode() < row['borrower_id'].encode() else 'high',
+         'edition_id': edition, 'from_qty': 0, 'to_qty': copies}
+        for edition, copies in event_snapshot(conn, row).items()]}
+    if row['return_by'] is not None:
+        data['return_by'] = {'from': None, 'to': row['return_by'].isoformat()}
+    loan_event(conn, row, user_id, kind, data)
+    touch_threads(conn, [row['thread_id']])
+
+
+LoanDetail.model_rebuild(_types_namespace={"LoanView": LoanView})

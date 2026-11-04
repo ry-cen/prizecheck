@@ -90,13 +90,6 @@ type DraftsApi = {
   ) => void;
   /** Opens the composer on the draft to one Friend. */
   review: (friendId: string, opener?: HTMLElement | null) => void;
-  /** Edit and resend: a draft to the Loan's other side with its cards, Deck and date, replacing the request while it
-   * is unanswered, and the composer open on it. */
-  editAndResend: (
-    loan: LoanView,
-    deckId: string | null,
-    opener?: HTMLElement | null
-  ) => void;
 };
 
 const DraftsContext = createContext<DraftsApi | null>(null);
@@ -293,41 +286,6 @@ export function BorrowDraftsProvider({
           return lines.length ? { ...base, friend: named, lines } : null;
         }),
       review: (friendId, from) => {
-        opener.current = from ?? null;
-        setComposing(friendId);
-      },
-      editAndResend: (loan, deckId, from) => {
-        const friendId = loan.other.collector_id;
-        if (!friendId) return;
-        const friend: DraftFriend = {
-          collector_id: friendId,
-          display_name: loan.other.display_name,
-          handle: loan.other.handle,
-        };
-        change(friendId, (draft) => {
-          const asked: DraftLine[] = loan.lines.map((line) => ({
-            edition_id: line.edition_id,
-            name: line.name,
-            set_code: line.set_code,
-            collector_number: line.collector_number,
-            descriptor: line.descriptor,
-            image_url: line.image_url,
-            quantity: Number(line.requested),
-            cap: null,
-            lendable: "",
-          }));
-          const kept = (draft?.lines ?? []).filter(
-            (line) =>
-              !asked.some((other) => other.edition_id === line.edition_id)
-          );
-          return {
-            friend,
-            lines: [...asked, ...kept],
-            deckId,
-            returnBy: loan.return_by ?? "",
-            replaces: loan.state === "requested" ? loan.id : null,
-          };
-        });
         opener.current = from ?? null;
         setComposing(friendId);
       },
@@ -592,7 +550,7 @@ function BorrowComposer({
     draft.lines.find((line) => line.edition_id === editionId)?.name ?? "a card";
 
   async function send() {
-    if (busy) return;
+    if (busy || draft.replaces) return;
     setBusy(true);
     setMessage("");
     try {
@@ -604,7 +562,6 @@ function BorrowComposer({
         })),
         deck_id: draft.deckId,
         return_by: draft.returnBy || null,
-        replaces: draft.replaces,
         idempotency_key: sendKey(),
       });
       onChange(() => null);
@@ -612,7 +569,7 @@ function BorrowComposer({
       noteLoansChanged();
       toast.show({
         message: `Borrow Request sent to ${endSentence(name)}`,
-        action: { label: "View", onAction: () => onOpenLoan(loan.id) },
+        action: { label: "View", onAction: () => onOpenLoan(loan.thread_id) },
         focus: true,
       });
     } catch (cause) {
@@ -655,9 +612,7 @@ function BorrowComposer({
         onChange((current) => (current ? { ...current, deckId: null } : null));
         setAttempt((n) => n + 1);
       } else if (error?.code === "LOAN_CHANGED")
-        onChange((current) =>
-          current ? { ...current, replaces: null } : null
-        );
+        onChange((current) => current ?? null);
       setMessage(sendMessage(cause, name, cardName));
     } finally {
       setBusy(false);
@@ -788,9 +743,19 @@ function BorrowComposer({
             Discard
           </Button>
           <Button onClick={onClose}>Keep draft</Button>
+          {draft.replaces && (
+            <>
+              <p>
+                This older draft cannot be sent. View its Loan or discard it.
+              </p>
+              <Button onClick={() => onOpenLoan(draft.replaces!)}>
+                View Loan
+              </Button>
+            </>
+          )}
           <Button
             variant="primary"
-            aria-disabled={busy || undefined}
+            disabled={busy || !!draft.replaces}
             onClick={() => void send()}
           >
             Send Borrow Request

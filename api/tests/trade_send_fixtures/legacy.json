@@ -1,0 +1,191 @@
+{
+  "provenance": {
+    "commit": "59f7dc57050fcb005f97dbeca75f3cd85f1d764e",
+    "description": "Literal pre-thread initial-send response authored from TradeView/TradeParty and send payload at D. Deterministic old-schema rows are seeded before real migration 162. Not derived by deleting fields from a current send. pre_party_response follows the older defaulted party-field family.",
+    "source_blobs": {
+      "api/app/social/trades.py": "dda474a2fdf8d37e0cd43ed67826c6b6cfff6ef1",
+      "api/app/games/pokemon/trading/trade_inventory.py": "7413bba3e97e30d11b5ba0ca10e81e0d3c32e4e7"
+    }
+  },
+  "owner": "legacy-sender",
+  "key": "44444444-4444-4444-8444-444444444444",
+  "variants": [
+    {
+      "name": "omitted",
+      "body": {
+        "recipient_id": "legacy-recipient",
+        "you_give": [
+          {
+            "edition_id": "11111111-1111-4111-8111-111111111111",
+            "quantity": "1"
+          }
+        ],
+        "you_get": []
+      },
+      "canonical": "{\"action\": \"trade_send\", \"recipient_id\": \"legacy-recipient\", \"you_get\": [], \"you_give\": [{\"edition_id\": \"11111111-1111-4111-8111-111111111111\", \"quantity\": \"1\"}]}",
+      "digest": "02f9737700664fbd15acbbb07ada07777a6a6c82b594a101af19677844a892d8"
+    },
+    {
+      "name": "null",
+      "body": {
+        "recipient_id": "legacy-recipient",
+        "you_give": [
+          {
+            "edition_id": "11111111-1111-4111-8111-111111111111",
+            "quantity": "1"
+          }
+        ],
+        "you_get": [],
+        "message": null,
+        "cash": null
+      },
+      "canonical": "{\"action\": \"trade_send\", \"recipient_id\": \"legacy-recipient\", \"you_get\": [], \"you_give\": [{\"edition_id\": \"11111111-1111-4111-8111-111111111111\", \"quantity\": \"1\"}]}",
+      "digest": "02f9737700664fbd15acbbb07ada07777a6a6c82b594a101af19677844a892d8"
+    },
+    {
+      "name": "trader",
+      "body": {
+        "recipient_trader_id": "22222222-2222-4222-8222-222222222222",
+        "you_give": [
+          {
+            "edition_id": "11111111-1111-4111-8111-111111111111",
+            "quantity": "1"
+          }
+        ],
+        "you_get": []
+      },
+      "canonical": "{\"action\": \"trade_send\", \"recipient_trader_id\": \"22222222-2222-4222-8222-222222222222\", \"you_get\": [], \"you_give\": [{\"edition_id\": \"11111111-1111-4111-8111-111111111111\", \"quantity\": \"1\"}]}",
+      "digest": "f7b1de19d9ab427c4978c9515fa670337119562c926e52fcb7fb452c1f84d400"
+    },
+    {
+      "name": "raw",
+      "body": {
+        "recipient_id": "legacy-recipient",
+        "you_give": [
+          {
+            "edition_id": "11111111-1111-4111-8111-111111111111",
+            "quantity": "1"
+          }
+        ],
+        "you_get": [],
+        "message": "  Hello\r\nCafe\u0301\u202e  "
+      },
+      "canonical": "{\"action\": \"trade_send\", \"message\": \"  Hello\\r\\nCafe\\u0301\\u202e  \", \"recipient_id\": \"legacy-recipient\", \"you_get\": [], \"you_give\": [{\"edition_id\": \"11111111-1111-4111-8111-111111111111\", \"quantity\": \"1\"}]}",
+      "digest": "2fb4757492006f934968bf9c13e41ff502468b6c85394bf0e3d9fd3a988d768d"
+    },
+    {
+      "name": "normalized",
+      "body": {
+        "recipient_id": "legacy-recipient",
+        "you_give": [
+          {
+            "edition_id": "11111111-1111-4111-8111-111111111111",
+            "quantity": "1"
+          }
+        ],
+        "you_get": [],
+        "message": "Hello\nCaf\u00e9"
+      },
+      "canonical": "{\"action\": \"trade_send\", \"message\": \"Hello\\nCaf\\u00e9\", \"recipient_id\": \"legacy-recipient\", \"you_get\": [], \"you_give\": [{\"edition_id\": \"11111111-1111-4111-8111-111111111111\", \"quantity\": \"1\"}]}",
+      "digest": "06131921847e0491f5f96bdec51084555e7faec8c6738d1dced54c5d3d6cafac"
+    },
+    {
+      "name": "cash",
+      "body": {
+        "recipient_id": "legacy-recipient",
+        "you_give": [
+          {
+            "edition_id": "11111111-1111-4111-8111-111111111111",
+            "quantity": "1"
+          }
+        ],
+        "you_get": [],
+        "cash": {
+          "cents": "500",
+          "payer": "you"
+        }
+      },
+      "canonical": "{\"action\": \"trade_send\", \"cash\": {\"cents\": \"500\", \"payer\": \"you\"}, \"recipient_id\": \"legacy-recipient\", \"you_get\": [], \"you_give\": [{\"edition_id\": \"11111111-1111-4111-8111-111111111111\", \"quantity\": \"1\"}]}",
+      "digest": "f985d022eed9b539d4d839264225e3dfa2dac94949311cecc7a18af1b99ec0c4"
+    }
+  ],
+  "response": {
+    "id": "33333333-3333-4333-8333-333333333333",
+    "state": "proposed",
+    "closed_reason": null,
+    "closed_by": null,
+    "role": "proposer",
+    "other": {
+      "collector_id": "legacy-recipient",
+      "handle": "legacy_recipient",
+      "trader_id": "22222222-2222-4222-8222-222222222222",
+      "display_name": "Misty",
+      "open_to_cash_offers": false,
+      "friend": true,
+      "available": true,
+      "completed_trades": 0
+    },
+    "countered_from": null,
+    "you_give": [
+      {
+        "edition_id": "11111111-1111-4111-8111-111111111111",
+        "name": "Iono",
+        "set_code": "",
+        "set_name": "",
+        "collector_number": "",
+        "descriptor": {},
+        "image_url": null,
+        "copies": "1"
+      }
+    ],
+    "you_get": [],
+    "cash": null,
+    "you_confirmed_swap": false,
+    "they_confirmed_swap": false,
+    "needs_you": false,
+    "waiting": null,
+    "section": "pending",
+    "actions": ["withdraw"],
+    "revision": 1,
+    "created_at": "2020-01-02T00:00:00Z",
+    "conversation_id": null
+  },
+  "pre_party_response": {
+    "id": "33333333-3333-4333-8333-333333333333",
+    "state": "proposed",
+    "closed_reason": null,
+    "closed_by": null,
+    "role": "proposer",
+    "other": {
+      "collector_id": "legacy-recipient",
+      "handle": "legacy_recipient",
+      "display_name": "Misty",
+      "open_to_cash_offers": false
+    },
+    "countered_from": null,
+    "you_give": [
+      {
+        "edition_id": "11111111-1111-4111-8111-111111111111",
+        "name": "Iono",
+        "set_code": "",
+        "set_name": "",
+        "collector_number": "",
+        "descriptor": {},
+        "image_url": null,
+        "copies": "1"
+      }
+    ],
+    "you_get": [],
+    "cash": null,
+    "you_confirmed_swap": false,
+    "they_confirmed_swap": false,
+    "needs_you": false,
+    "waiting": null,
+    "section": "pending",
+    "actions": ["withdraw"],
+    "revision": 1,
+    "created_at": "2020-01-02T00:00:00Z",
+    "conversation_id": null
+  },
+  "buggy_null_digest": "08d2492af2b9c2655cf2834e6a0b5622d1645b5a0905e681e6571f794a37698c"
+}

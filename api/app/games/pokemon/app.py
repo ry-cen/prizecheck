@@ -38,7 +38,13 @@ from app.games.pokemon.catalog.rule_rollout import start_on_startup as start_rul
 from app.games.pokemon.scanner.scanner import router as scanner_router
 from app.games.pokemon.scanner.scanner_save import router as scanner_save_router
 from app.settings import router as settings_router
-from app.social.conversations import router as conversations_router, traders_router as conversation_traders_router
+from app.social.threads import router as threads_router, trade_router as trade_threads_router, loan_router as loan_threads_router
+from app.social.threads import TradeDetail, LoanDetail
+from app.social.trades import TradeView
+from app.social.loans import LoanView
+
+TradeDetail.model_rebuild(_types_namespace={"TradeView": TradeView})
+LoanDetail.model_rebuild(_types_namespace={"LoanView": LoanView})
 from app.social.discovery import router as open_discovery_router
 from app.social.friend_reads import router as friend_reads_router
 from app.social.friends import router as friends_router
@@ -76,9 +82,9 @@ ROUTERS = (
     published_cost_router, published_live_export_router, published_mass_entry_router, published_format_checks_router,
     format_standing_router, collection_import_router, scanner_router, art_router, public_art_router, scanner_save_router,
     # social and trading
+    threads_router, trade_threads_router, loan_threads_router,
     profile_router, public_invite_router, friends_router, friend_reads_router, trade_matches_router, loans_router,
-    inbox_router, trades_router, trade_settings_router, open_discovery_router, conversations_router,
-    conversation_traders_router, loan_inventory_router, trade_list_router, trade_inventory_router, trade_value_router,
+    inbox_router, trades_router, trade_settings_router, open_discovery_router, loan_inventory_router, trade_list_router, trade_inventory_router, trade_value_router,
     trade_wants_router, reports_router, trade_reports_admin_router,
 )
 

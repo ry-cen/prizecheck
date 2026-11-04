@@ -67,7 +67,7 @@ def test_loan_picks_name_full_paths_only_on_the_lenders_own_side(store):
     ]
     # The borrower's side names none of the lender's Locations, by leaf or by path.
     seen = ' '.join(call('GET', path, ash).text for path in (
-        '/api/social/loans', f"/api/social/loans/{loan['id']}", f"/api/loans/{loan['id']}/side"))
+        '/api/loans', f"/api/loans/{loan['thread_id']}", f"/api/loans/{loan['thread_id']}/side"))
     for secret in ('Misty Secret Shelf', 'Binder A', 'Binder B', page_a, page_b):
         assert secret not in seen, secret
 
@@ -81,13 +81,13 @@ def test_trade_picks_name_full_paths_only_on_the_givers_own_side(store):
     hold(misty, page_b, iono, 1)
     ok(mark(misty, top))
     trade = ok(accept_trade(ash, proposed(misty, ash, give=[(iono, 3)])))
-    picks = ok(call('GET', f"/api/trades/{trade['id']}/side", misty))['picks']
+    picks = ok(call('GET', f"/api/trades/{trade['thread_id']}/side", misty))['picks']
     assert [(pick['location_id'], pick['name'], pick['path'], pick['copies']) for pick in picks] == [
         (page_a, 'Page 1', 'Misty Trade Shelf / Binder A / Page 1', '2'),
         (page_b, 'Page 1', 'Misty Trade Shelf / Binder B / Page 1', '1'),
     ]
     seen = ' '.join(call('GET', path, ash).text for path in (
-        f"/api/social/trades/{trade['id']}", f"/api/trades/{trade['id']}/side"))
+        f"/api/trades/{trade['thread_id']}", f"/api/trades/{trade['thread_id']}/side"))
     for secret in ('Misty Trade Shelf', 'Binder A', 'Binder B', page_a, page_b):
         assert secret not in seen, secret
 

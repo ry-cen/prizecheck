@@ -78,7 +78,10 @@ type InboxApi = {
   /** Whether the drawer just opened this Loan or Trade; true once, for its screen to focus its heading. */
   takeOpened: (id: string) => boolean;
   /** Conversations with unread messages (Trading #298), from the pulse; 0 until the first read. */
-  unreadConversations: number;
+  threadCounts: {
+    trades: import("../social_generated").PulseCount;
+    loans: import("../social_generated").PulseCount;
+  };
   /** How many times the pulse's watermark moved, for the conversation list and the open conversation to read again. */
   pulseChanged: number;
   /** Reads the pulse now (after the collector read or sent something). */
@@ -112,8 +115,13 @@ export function useTradesChanged(): number {
 }
 
 /** Conversations with unread messages, for the Trades tab's badge (Trading #298); 0 outside the shell. */
-export function useUnreadConversations(): number {
-  return useContext(InboxContext)?.unreadConversations ?? 0;
+export function useThreadCounts() {
+  return (
+    useContext(InboxContext)?.threadCounts ?? {
+      trades: { needs_you: 0, waiting: 0, unread: 0 },
+      loans: { needs_you: 0, waiting: 0, unread: 0 },
+    }
+  );
 }
 
 /** A count that moves when the pulse's watermark does, for the conversation list and an open conversation to read
@@ -258,7 +266,7 @@ export function InboxProvider({
           opened.current = null;
           return true;
         },
-        unreadConversations: pulse.unread,
+        threadCounts: { trades: pulse.trades, loans: pulse.loans },
         pulseChanged,
         pollPulse: pulse.poll,
         openConversation,

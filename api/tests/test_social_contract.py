@@ -210,7 +210,11 @@ def social_responses():
     """(route, status, schema) for every response of every /api/social route."""
     spec = app.openapi()
     for route, methods in spec['paths'].items():
-        if not route.startswith('/api/social'):
+        if not (route.startswith('/api/social') or route == '/api/threads/pulse'
+                or route in ('/api/trades', '/api/loans', '/api/trades/{trade_id}',
+                             '/api/trades/{trade_id}/withdraw', '/api/trades/{trade_id}/decline',
+                             '/api/trades/{trade_id}/cancel')
+                or re.fullmatch(r'/api/(trades|loans)/\{thread_id\}(?:/(timeline|messages|read))?', route)):
             continue
         for method, operation in methods.items():
             for status, response in operation.get('responses', {}).items():
@@ -248,13 +252,15 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
                 'open_to_cash_offers', 'more_you_get'} <= matched, (route, matched)
     offers = {field for _, field, _ in routes['GET /api/social/trade-card-matches']}
     assert {'offers', 'copies', 'descriptor', 'display_name'} <= offers, offers
-    # Trades (trading #270): both sides' cards and the other side, read by the walk on the list, one Trade and each
-    # step under /api/social (withdraw, #270; decline and cancel, #271).
-    for route in ('GET /api/social/trades', 'GET /api/social/trades/{trade_id}',
-                  'POST /api/social/trades/{trade_id}/withdraw', 'POST /api/social/trades/{trade_id}/decline',
-                  'POST /api/social/trades/{trade_id}/cancel'):
+    # Thread lists carry summaries; details and steps carry the shared offer facts.
+    trade_list = {field for _, field, _ in routes['GET /api/trades']}
+    assert {'summary', 'you_are', 'other', 'you_give', 'you_get', 'copies', 'needs_you'} <= trade_list
+    for route in ('GET /api/trades/{trade_id}',
+                  'POST /api/trades/{trade_id}/withdraw', 'POST /api/trades/{trade_id}/decline',
+                  'POST /api/trades/{trade_id}/cancel'):
         trade = {field for _, field, _ in routes[route]}
-        assert {'you_give', 'you_get', 'other', 'copies', 'descriptor', 'open_to_cash_offers'} <= trade, (route, trade)
+        assert {'you_give', 'you_get', 'other', 'copies', 'descriptor', 'open_to_cash_offers',
+                'thread_id', 'offer_id'} <= trade, (route, trade)
     # Open to cash offers (trading #277): one setting, read and set by value.
     for route in ('GET /api/social/trade-settings', 'PUT /api/social/trade-settings'):
         assert {field for _, field, _ in routes[route]} == {'open_to_cash_offers'}, route
@@ -262,23 +268,23 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     for route in ('GET /api/social/discovery', 'PUT /api/social/discovery'):
         assert {field for _, field, _ in routes[route]} == {
             'status', 'zip', 'radius_mi', 'zip_changes_left', 'visible_beyond_friends'}, route
-    # Conversations (trading #298): the pulse is two fields; the party never carries a collector id; a conversation
-    # reaches the Trade cards and the completed-Trade count.
-    assert {field for _, field, _ in routes['GET /api/social/conversations/pulse']} == {
-        'unread_conversations', 'watermark'}
+    # Item threads replace the Conversation routes and their identity namespace.
+    assert not any('/api/social/conversations' in route for route in routes)
+    assert {field for _, field, _ in routes['GET /api/threads/pulse']} == {
+        'trades', 'loans', 'needs_you', 'waiting', 'unread', 'watermark'}
     schemas = components
-    assert set(schemas['ConversationParty']['properties']) == {
-        'trader_id', 'display_name', 'friend', 'handle', 'band', 'completed_trades'}
-    assert set(schemas['ConversationView']['properties']) == {
-        'id', 'other', 'status', 'can_message', 'can_propose', 'can_report', 'items', 'next_before'}
-    assert set(schemas['ConversationsView']['properties']) == {'conversations', 'next_before', 'suspended'}
-    assert set(schemas['ReportResult']['properties']) == {'reported'}
-    assert set(schemas['ConversationSummary']['properties']) == {
-        'id', 'other', 'status', 'last_message', 'open_trades', 'waiting_on_you', 'unread', 'archived',
-        'last_activity_at'}
+    assert set(schemas['ThreadParty']['properties']) == {'trader_id', 'display_name', 'friend', 'available'}
+    assert {'you_are', 'summary', 'section', 'waiting', 'unread'} <= set(schemas['ThreadItem']['properties'])
+    assert set(schemas['OfferSummary']['properties']) == {'cards', 'you_give', 'you_get', 'cash'}
     assert set(schemas['Message']['properties']) == {'id', 'from', 'body', 'at'}
-    reached = {field for _, field, _ in routes['GET /api/social/conversations/{conversation_id}']}
-    assert {'items', 'trade', 'message', 'you_give', 'descriptor', 'completed_trades'} <= reached, reached
+    assert set(schemas['ReportResult']['properties']) == {'reported'}
+    for kind in ('trades', 'loans'):
+        assert {'summary', 'cards', 'copies', 'edition_id', 'payer'} <= {
+            field for _, field, _ in routes[f'GET /api/{kind}']}
+        reached = {field for _, field, _ in routes[f'GET /api/{kind}/{{thread_id}}/timeline']}
+        assert {'you_are', 'event', 'message', 'data', 'giver', 'edition_id'} <= reached
+        assert f'POST /api/{kind}/{{thread_id}}/messages' in routes
+        assert f'POST /api/{kind}/{{thread_id}}/read' in routes
     # The trader reads (trading #299): a stranger's header, Trade List and match row, with exactly these fields.
     assert set(schemas['TraderView']['properties']) == {
         'trader_id', 'display_name', 'friend', 'band', 'completed_trades', 'open_to_cash_offers', 'status',
@@ -321,7 +327,7 @@ def test_each_sides_own_trade_reads_and_inventory_steps_stay_outside_the_social_
     for route, method in (('/api/trades/{trade_id}/side', 'get'),
                           ('/api/trades/{trade_id}/picks/use-suggested', 'post'),
                           ('/api/trades/{trade_id}/confirm-swap', 'post'),
-                          ('/api/trades/{trade_id}/counter', 'post')):
+                          ('/api/trades/{trade_id}/offer', 'post')):
         assert method in paths[route], route
     assert not [route for route in paths if route.startswith('/api/social') and
                 ('/side' in route or 'confirm-swap' in route or 'use-suggested' in route or 'counter' in route)]
@@ -501,14 +507,15 @@ def test_the_message_guard_matches_sql_and_never_docstrings():
         assert not any(MESSAGE_TABLE.search(found) for found in string_constants(text)), text
 
 
-def test_the_names_triggers_fire_loan_then_trade_then_conversation():
+def test_the_names_triggers_fire_loan_then_trade_without_writing_the_archive():
     from app.main import connect
     with connect() as conn:
         names = [row['tgname'] for row in conn.execute(
             """SELECT tgname FROM pg_trigger WHERE tgrelid = 'collector_profile'::regclass AND NOT tgisinternal
               ORDER BY tgname COLLATE "C"
             """)]
-    ours = ['collector_profile_loan_names', 'trade_names_follow_profile', 'trade_names_follow_profile_conversations']
+    assert 'trade_names_follow_profile_conversations' not in names
+    ours = ['collector_profile_loan_names', 'trade_names_follow_profile']
     assert [name for name in names if name in ours] == ours
 
 
@@ -547,7 +554,8 @@ def test_deck_switches_stay_in_the_confirmers_own_trade_reads():
 # The Identity table (Stage 2 spec "Identity"): which models never carry a user id (a stranger is addressed by trader id
 # only), and which never carry a trader id (the Friend models address by user id). #300 and #302 remove a name from
 # ``NOT_YET`` when they add the model, so it is walked from then on.
-NO_USER_ID = {'NearbyMatchRow', 'CardHolder', 'TraderView', 'TraderTradeList', 'TraderMatchRow', 'ConversationParty',
+NO_USER_ID = {'NearbyMatchRow', 'CardHolder', 'TraderView', 'TraderTradeList', 'TraderMatchRow', 'ThreadParty',
+              'ThreadItem', 'OfferSummary', 'SummaryCard', 'SummaryCash', 'Timeline', 'TimelineItem', 'EventView',
               'BlockedCollector'}
 NO_TRADER_ID = {'Collector', 'CollectorLookup', 'InviteCollector', 'FriendsView'}
 NOT_YET = {'NearbyMatchRow', 'CardHolder'}
@@ -592,6 +600,57 @@ def test_the_identity_table_holds_in_the_openapi_schema():
         assert 'collector_id' not in reachable_properties(components, name), name
     for name in sorted(NO_TRADER_ID):
         assert 'trader_id' not in reachable_properties(components, name), name
+
+
+
+def thread_contract_schemas():
+    import copy
+    from app.social.threads import TradeDetail, LoanDetail
+    components = copy.deepcopy(app.openapi()['components']['schemas'])
+    for model in (TradeDetail, LoanDetail):
+        schema = model.model_json_schema(mode='serialization')
+        components.update(schema.pop('$defs', {}))
+        components[model.__name__] = schema
+    return components
+
+
+def thread_identity_violations(root, components):
+    # Friend-aware legacy round parties are the ADR's explicit mixed-identity
+    # models. Only their conditional Friend fields may carry account ids/Handles.
+    friend_fields = {('TradeParty', 'collector_id'), ('TradeParty', 'handle'),
+                     ('LoanParty', 'collector_id'), ('LoanParty', 'handle')}
+    account_words = {'account', 'user', 'owner', 'collector', 'proposer', 'recipient', 'lender', 'borrower', 'member'}
+    return {(owner, name) for kind, _, name, _, owner in nodes(root, components)
+            if kind == 'field' and (words(name) == {'handle'} or ('id' in words(name) and words(name) & account_words))
+            and (owner, name) not in friend_fields}
+
+
+def test_thread_contract_privacy_and_identity_are_recursive_including_shared_details():
+    components = thread_contract_schemas()
+    models = {'ThreadItem', 'OfferSummary', 'TradeDetail', 'LoanDetail', 'Timeline', 'TimelineItem', 'EventView'}
+    for model in models:
+        root = {'$ref': '#/components/schemas/' + model}
+        assert not refused(root, components), (model, refused(root, components))
+        forbidden = thread_identity_violations(root, components)
+        assert not forbidden, (model, forbidden)
+    # The event payload has a closed, recursively walked schema, not a map hole.
+    assert components['_EventData']['additionalProperties'] is False
+    assert {'edition_id', 'giver', 'from_qty', 'to_qty', 'cents', 'payer', 'quantity'} <= reachable_properties(
+        components, 'EventView')
+
+
+def test_thread_contract_walk_rejects_private_fields_in_nested_summary_event_and_detail():
+    import copy
+    for owner, field in (('SummaryCard', 'location_id'), ('_Quantity', 'deck_id'), ('TradeParty', 'storage_leaf')):
+        components = copy.deepcopy(thread_contract_schemas())
+        components[owner]['properties'][field] = {'type': 'string'}
+        root = 'TradeDetail' if owner == 'TradeParty' else 'ThreadItem'
+        assert refused({'$ref': '#/components/schemas/' + root}, components), (owner, field)
+    for owner, field, root in (('SummaryCard', 'userId', 'ThreadItem'), ('_Quantity', 'account_id', 'EventView'),
+                               ('LoanParty', 'owner_id', 'LoanDetail'), ('_Cash', 'handle', 'Timeline')):
+        components = thread_contract_schemas()
+        components[owner]['properties'][field] = {'type': 'string'}
+        assert thread_identity_violations({'$ref': '#/components/schemas/' + root}, components) == {(owner, field)}
 
 
 def test_the_property_walk_follows_every_way_a_schema_can_nest():

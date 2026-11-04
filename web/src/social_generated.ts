@@ -1,4 +1,24 @@
 // Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit.
+export type OfferSummary = { cards: SummaryCard[]; you_give: string; you_get: string; cash?: SummaryCash | null };
+export type SummaryCard = { edition_id: string; name: string; image_url: string | null; copies: string; side: "you_give" | "you_get" };
+export type SummaryCash = { cents: string; payer: "you" | "them" };
+export type PulseCount = { needs_you?: number; waiting?: number; unread?: number };
+export type EventView = { id: string; actor: "low" | "high" | null; kind: string; round_id: string; return_id?: string | null; data?: _EventData; at: string };
+export type _EventData = { lines?: _EventLine[] | null; cash?: _CashChange | null; return_by?: _DateChange | null; not_lent?: _Quantity[] | null; returned?: _Quantity[] | null };
+export type _EventLine = { giver: "low" | "high"; edition_id: string; from_qty: number; to_qty: number };
+export type _CashChange = { from: _Cash; to: _Cash };
+export type _Cash = { cents?: number | null; payer?: "low" | "high" | null };
+export type _DateChange = { from: string | null; to: string | null };
+export type _Quantity = { edition_id: string; quantity: number };
+export type EditTerms = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; lines: LoanLineRequest[]; deck_id?: string | null; return_by?: string | null };
+export type ThreadItem = { id: string; kind: "trade" | "loan"; other: ThreadParty; you_are: "low" | "high"; summary: OfferSummary; section: "needs_you" | "open" | "out_now" | "pending" | "done"; state: string; waiting?: string | null; unread?: number; needs_you?: boolean; last_activity_at: string; latest?: TimelineItem | null };
+export type ThreadParty = { trader_id: string | null; display_name: string; friend?: boolean; available?: boolean };
+export type TradeDetail = { id: string; live_offer: TradeView; can_message: boolean; can_report: boolean };
+export type LoanDetail = { id: string; live_terms: LoanView; can_message: boolean; can_report: boolean };
+export type Timeline = { you_are: "low" | "high"; items: TimelineItem[]; next_before?: string | null };
+export type Pulse = { trades: PulseCount; loans: PulseCount; watermark: string };
+export type ReadResult = { read: boolean };
+export type ConfirmReturn = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; return_id: string };
 export type Collector = { collector_id: string; handle: string; display_name: string };
 export type CollectorLookup = { collector_id: string; handle: string; display_name: string; relation: "self" | "none" | "friends" | "request_sent" | "request_received" | "blocked" };
 export type InviteCollector = { collector_id: string; display_name: string; relation: "self" | "none" | "friends" | "request_sent" | "request_received" | "blocked" };
@@ -15,19 +35,18 @@ export type FriendCopy = { collector_id: string; handle: string; display_name: s
 export type WantedCard = { edition_id: string; copies: FriendCopy[] };
 export type WantListMatches = { has_friends: boolean; cards: WantedCard[] };
 export type CardMatches = { has_friends: boolean; copies: FriendCopy[] };
-export type LoanParty = { collector_id: string | null; display_name: string; handle: string | null };
+export type LoanParty = { collector_id: string | null; display_name: string };
 export type LoanCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; requested: string; promised: string; written_off: string; returned?: string };
 export type ReturnLine = { edition_id: string; copies: string };
-export type PendingReturn = { started_by: "you" | "them"; lines: ReturnLine[]; you_confirmed: boolean; they_confirmed: boolean };
-export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[]; waiting?: "answer" | "fix_picks" | "choose" | "confirm_return" | "finish_return" | "hand_over" | "receive" | "return" | "more_time" | null };
-export type LoansView = { loans: LoanView[]; needs_you: number };
+export type PendingReturn = { return_id: string; started_by: "you" | "them"; lines: ReturnLine[]; you_confirmed: boolean; they_confirmed: boolean };
+export type LoanView = { id: string; thread_id: string; loan_id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[]; waiting?: "answer" | "fix_picks" | "choose_written_off" | "confirm_return" | "hand_over" | "confirm_handover" | "answer_more_time" | null };
 export type VoidCommandKey = { idempotency_key: string; account_id: string };
 export type CommandKeyOutcome = { outcome: "applied" | "void"; account_id: string };
-export type LoanStep = { account_id?: string | null; revision: number; idempotency_key: string };
+export type LoanStep = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string };
 export type LoanLineRequest = { edition_id: string; quantity: string };
-export type SendBorrowRequest = { lender_id: string; lines: LoanLineRequest[]; deck_id?: string | null; return_by?: string | null; replaces?: string | null; account_id?: string | null; idempotency_key: string };
+export type SendBorrowRequest = { lender_id: string; lines: LoanLineRequest[]; deck_id?: string | null; return_by?: string | null; account_id?: string | null; idempotency_key: string };
 export type PromisedLine = { edition_id: string; promised: string };
-export type AcceptBorrowRequest = { account_id?: string | null; revision: number; idempotency_key: string; lines: PromisedLine[]; return_by?: string | null };
+export type AcceptBorrowRequest = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; lines: PromisedLine[]; return_by?: string | null };
 export type PromiseLimit = { edition_id: string; available: string };
 export type LoanPickPlace = { edition_id: string; location_id: string | null; name: string; path: string; copies: string; short: string };
 export type LoanDeck = { id: string; name: string };
@@ -42,19 +61,19 @@ export type PendingLender = { lender: string; state: "requested" | "accepted"; c
 export type PendingLine = { edition_id: string; requested: string; accepted: string; lenders: PendingLender[] };
 export type PendingLoans = { deck_id: string; lines: PendingLine[] };
 export type ReturnedLine = { edition_id: string; quantity: string };
-export type StartReturn = { account_id?: string | null; revision: number; idempotency_key: string; lines: ReturnedLine[] };
+export type StartReturn = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; all?: boolean; lines?: ReturnedLine[] };
 export type WriteOffLine = { edition_id: string; quantity: string };
-export type WriteOff = { account_id?: string | null; revision: number; idempotency_key: string; lines: WriteOffLine[] };
+export type WriteOff = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; lines: WriteOffLine[] };
 export type ChosenPlace = { location_id: string; edition_id: string; copies: string };
-export type WrittenOffChoice = { account_id?: string | null; revision: number; idempotency_key: string; choice: "keep" | "remove"; places: ChosenPlace[] };
-export type ChangeReturnBy = { account_id?: string | null; revision: number; idempotency_key: string; return_by: string | null };
-export type AskForMoreTime = { account_id?: string | null; revision: number; idempotency_key: string; return_by: string };
+export type WrittenOffChoice = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; choice: "keep" | "remove"; places: ChosenPlace[] };
+export type ChangeReturnBy = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; return_by: string | null };
+export type AskForMoreTime = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; return_by: string };
 export type SeenNotices = { kinds: ("overdue" | "nudge_answer" | "nudge_handover")[] };
 export type OfferedCopies = { location_id: string; edition_id: string; quantity: string };
 export type SendLendOffer = { borrower_id: string; copies: OfferedCopies[]; return_by?: string | null; account_id?: string | null; idempotency_key: string };
-export type AcceptLendOffer = { account_id?: string | null; revision: number; idempotency_key: string; lines: PromisedLine[]; deck_id?: string | null };
+export type AcceptLendOffer = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; lines: PromisedLine[]; deck_id?: string | null };
 export type InboxUpdate = { id: string; kind: "accepted" | "partly_accepted" | "declined" | "cancelled" | "withdrawn" | "return_by_changed" | "overdue" | "nudge_answer" | "nudge_handover"; loan_id: string; loan_kind: "borrow_request" | "lend_offer"; loan_state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; role: "lender" | "borrower"; other_name: string; read: boolean; at: string; return_by?: string | null };
-export type InboxWaiting = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[]; waiting?: "answer" | "fix_picks" | "choose" | "confirm_return" | "finish_return" | "hand_over" | "receive" | "return" | "more_time" | null; since: string };
+export type InboxWaiting = { id: string; thread_id: string; loan_id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[]; waiting?: "answer" | "fix_picks" | "choose_written_off" | "confirm_return" | "hand_over" | "confirm_handover" | "answer_more_time" | null; since: string };
 export type InboxView = { waiting: InboxWaiting[]; updates: InboxUpdate[]; trade_waiting: InboxTradeWaiting[]; trade_updates: InboxTradeUpdate[] };
 export type InboxIds = { ids: string[] };
 export type FriendTradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
@@ -62,11 +81,10 @@ export type FriendTradeList = { collector_id: string; trader_id: string; handle:
 export type TradeParty = { collector_id: string | null; handle: string | null; trader_id?: string | null; display_name: string; open_to_cash_offers: boolean; friend?: boolean; available?: boolean; completed_trades?: number | null };
 export type TradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
 export type TradeCash = { cents: string; payer: "you" | "them" };
-export type TradeView = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; conversation_id?: string | null };
-export type TradesView = { trades: TradeView[]; needs_you: number };
-export type TradeStep = { revision: number; idempotency_key: string };
-export type InboxTradeWaiting = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; conversation_id?: string | null; since: string };
-export type InboxTradeUpdate = { id: string; kind: "accepted" | "declined" | "cancelled" | "withdrawn" | "swapped"; trade_id: string; trade_state: "proposed" | "accepted" | "closed"; role: "proposer" | "recipient"; other_name: string; read: boolean; at: string };
+export type TradeView = { id: string; thread_id: string; offer_id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel" | "change_offer")[]; revision: number; created_at: string; conversation_id?: string | null };
+export type TradeStep = { offer_id: string; revision: number; idempotency_key: string };
+export type InboxTradeWaiting = { id: string; thread_id: string; offer_id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel" | "change_offer")[]; revision: number; created_at: string; conversation_id?: string | null; since: string };
+export type InboxTradeUpdate = { id: string; kind: "accepted" | "declined" | "cancelled" | "withdrawn" | "swapped"; trade_id: string; thread_id: string; trade_state: "proposed" | "accepted" | "closed"; role: "proposer" | "recipient"; other_name: string; read: boolean; at: string };
 export type OwnTradeNeed = { edition_id: string; want_list_need: string; trade_wants_quantity: string; widened: boolean; shared: boolean };
 export type NeedGroup = { id: string; need: string; cards: string };
 export type TradeMatchCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string; need: string; want_list_need: string; origin: "want_list" | "trade_wants" | "both"; accepts_as: "exact" | "any_finish" | "same_name" | null; need_groups: string[] };
@@ -78,18 +96,12 @@ export type TradeSettings = { open_to_cash_offers: boolean };
 export type SetTradeSettings = { open_to_cash_offers: boolean };
 export type DiscoverySettings = { status: "off" | "on" | "removed" | "suspended"; zip: string | null; radius_mi: 5 | 10 | 25 | 50; zip_changes_left: number; visible_beyond_friends: boolean };
 export type SetDiscovery = { enabled?: boolean | null; zip?: string | null; radius_mi?: 5 | 10 | 25 | 50 | null };
-export type ConversationParty = { trader_id: string | null; display_name: string; friend: boolean; handle: string | null; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null };
 export type Message = { id: string; from: "you" | "them"; body: string; at: string };
-export type TimelineItem = { kind: "message" | "trade"; at: string; cursor: string; message: Message | null; trade: TradeView | null };
-export type ConversationView = { id: string | null; other: ConversationParty; status: "open" | "you_blocked" | "unavailable"; can_message: boolean; can_propose: boolean; can_report: boolean; items: TimelineItem[]; next_before: string | null };
-export type LastMessage = { from: "you" | "them"; preview: string; at: string };
+export type TimelineItem = { kind: "message" | "event"; at: string; cursor: string; message?: Message | null; event?: EventView | null };
 export type NearbyMatchRow = { trader_id: string; display_name: string; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50"; completed_trades: number; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have"; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number; you_get_groups: NeedGroup[]; you_give_groups: NeedGroup[] };
 export type NearbyMatches = { status: "off" | "on" | "removed" | "suspended"; radius_mi: 5 | 10 | 25 | 50; rows: NearbyMatchRow[] };
 export type CardHolder = { trader_id: string; display_name: string; friend: boolean; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number; open_to_cash_offers: boolean; cards: FriendTradeCard[]; more_cards: number };
 export type TradeCardSearch = { status: "off" | "on" | "removed" | "suspended"; friends: CardHolder[]; near: CardHolder[] };
-export type ConversationSummary = { id: string; other: ConversationParty; status: "open" | "you_blocked" | "unavailable"; last_message: LastMessage | null; open_trades: number; waiting_on_you: number; unread: boolean; archived: boolean; last_activity_at: string };
-export type ConversationsView = { conversations: ConversationSummary[]; next_before: string | null; suspended: boolean };
-export type ConversationPulse = { unread_conversations: number; watermark: string };
 export type SendMessage = { body: string; idempotency_key: string };
 export type ReadThrough = { through: string };
 export type TraderView = { trader_id: string; display_name: string; friend: boolean; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; open_to_cash_offers: boolean; status: "open" | "unavailable" | "you_blocked"; conversation_id: string | null; add_friend: "offer" | "sent" | "received" | null };
@@ -185,9 +197,35 @@ export const getCardMatches = (printingId: string, params: { printings?: Printin
 export const getFriendTradeList = (handle: string, params: { q?: string; page?: number }, signal?: AbortSignal) =>
   request<FriendTradeList>(`/api/social/trade-lists/${at(handle)}${query(params)}`, 'GET', undefined, signal);
 // Loans (#252): the Loans tab and one Loan, as both sides read them.
-export const getLoans = (signal?: AbortSignal) => request<LoansView>('/api/social/loans', 'GET', undefined, signal);
+export const getLoans = (signal?: AbortSignal) => getItemGroups('loan', signal);
 export const getLoan = (id: string, signal?: AbortSignal) =>
-  request<LoanView>(`/api/social/loans/${at(id)}`, 'GET', undefined, signal);
+  request<{thread_id: string}>(`/api/loans/resolve/${at(id)}`, 'GET', undefined, signal).then(found => request<LoanDetail>(`/api/loans/${at(found.thread_id)}`, 'GET', undefined, signal)).then(detail => detail.live_terms);
+const getItemGroups = async (kind: 'trade' | 'loan', signal?: AbortSignal) => {
+  const groups = kind === 'trade' ? ['needs_you', 'open', 'done'] : ['needs_you', 'open', 'out_now', 'pending', 'done'];
+  const pages = await Promise.all(groups.map(async group => {
+    const rows: ThreadItem[] = [];
+    let before: string | undefined;
+    for (;;) {
+      const page = await request<ThreadItem[]>(`/api/${kind}s?${query({group,before})}`, 'GET', undefined, signal);
+      rows.push(...page);
+      if(page.length < 50) break;
+      const last = page[page.length-1];
+      const cursor = btoa(`${last.last_activity_at}|thread|${last.id}`).replaceAll('+','-').replaceAll('/','_').replace(/=+$/, '');
+      if(cursor === before) throw new Error('List did not advance');
+      before = cursor;
+    }
+    return rows;
+  }));
+  return [...new Map(pages.flat().map(item => [item.id, item])).values()];
+};
+// Safety summaries need each live agreement, rather than capped list previews.
+export const getLoanViews = async (signal?: AbortSignal) =>
+  Promise.all((await getLoans(signal)).map(item => getLoan(item.id, signal)));
+export const getTradeViews = async (signal?: AbortSignal) =>
+  Promise.all((await getTrades(signal)).map(item => getTrade(item.id, signal)));
+export const editLoanTerms = (id: string, body: EditTerms) => request<LoanView>(`/api/loans/${at(id)}/terms`, 'POST', body);
+export const getThreadDetail = (kind: 'trade' | 'loan', id: string, signal?: AbortSignal) =>
+  request<TradeDetail | LoanDetail>(`/api/${kind}s/${at(id)}`, 'GET', undefined, signal);
 // Your own side of a Loan: the Deck the cards go to, or what you could promise and where you take the cards from.
 export const getLoanSide = (id: string, signal?: AbortSignal) =>
   request<LoanSide>(`/api/loans/${at(id)}/side`, 'GET', undefined, signal);
@@ -199,11 +237,11 @@ export const sendBorrowRequest = (body: SendBorrowRequest) => request<LoanView>(
 export const acceptBorrowRequest = (id: string, body: AcceptBorrowRequest) =>
   request<LoanView>(`/api/loans/${at(id)}/accept`, 'POST', body);
 export const declineLoan = (id: string, body: LoanStep) =>
-  request<LoanView>(`/api/social/loans/${at(id)}/decline`, 'POST', body);
+  request<LoanView>(`/api/loans/${at(id)}/decline`, 'POST', body);
 export const withdrawLoan = (id: string, body: LoanStep) =>
-  request<LoanView>(`/api/social/loans/${at(id)}/withdraw`, 'POST', body);
+  request<LoanView>(`/api/loans/${at(id)}/withdraw`, 'POST', body);
 export const cancelLoan = (id: string, body: LoanStep) =>
-  request<LoanView>(`/api/social/loans/${at(id)}/cancel`, 'POST', body);
+  request<LoanView>(`/api/loans/${at(id)}/cancel`, 'POST', body);
 // Handover (#253): each side confirms for its own inventory, and may take that back until the other side confirms.
 export const confirmHandover = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/loans/${at(id)}/handover`, 'POST', body);
@@ -223,7 +261,7 @@ export const getPendingLoans = (deck: string, signal?: AbortSignal) =>
 // Returns (#255): either side starts one (its confirmation), and the other side confirms it.
 export const startReturn = (id: string, body: StartReturn) =>
   request<LoanView>(`/api/loans/${at(id)}/returns`, 'POST', body);
-export const confirmReturn = (id: string, body: LoanStep) =>
+export const confirmReturn = (id: string, body: ConfirmReturn) =>
   request<LoanView>(`/api/loans/${at(id)}/returns/confirm`, 'POST', body);
 // Write-off (#257): the lender's, final; then the borrower keeps or removes the written-off copies they hold.
 export const writeOff = (id: string, body: WriteOff) =>
@@ -232,37 +270,37 @@ export const chooseWrittenOff = (id: string, body: WrittenOffChoice) =>
   request<LoanView>(`/api/loans/${at(id)}/written-off`, 'POST', body);
 // Return-by date (#256): the lender changes or clears it; the borrower asks for more time, which the lender answers.
 export const changeReturnBy = (id: string, body: ChangeReturnBy) =>
-  request<LoanView>(`/api/social/loans/${at(id)}/return-by`, 'POST', body);
+  request<LoanView>(`/api/loans/${at(id)}/return-by`, 'POST', body);
 export const askForMoreTime = (id: string, body: AskForMoreTime) =>
-  request<LoanView>(`/api/social/loans/${at(id)}/extension`, 'POST', body);
+  request<LoanView>(`/api/loans/${at(id)}/extension`, 'POST', body);
 export const approveExtension = (id: string, body: LoanStep) =>
-  request<LoanView>(`/api/social/loans/${at(id)}/extension/approve`, 'POST', body);
+  request<LoanView>(`/api/loans/${at(id)}/extension/approve`, 'POST', body);
 export const declineExtension = (id: string, body: LoanStep) =>
-  request<LoanView>(`/api/social/loans/${at(id)}/extension/decline`, 'POST', body);
+  request<LoanView>(`/api/loans/${at(id)}/extension/decline`, 'POST', body);
 // Lend Offers (#258): the lender sends copies from the Collection; the borrower accepts all or part of one.
 export const sendLendOffer = (body: SendLendOffer) => request<LoanView>('/api/loans/offers', 'POST', body);
 export const acceptLendOffer = (id: string, body: AcceptLendOffer) =>
   request<LoanView>(`/api/loans/${at(id)}/accept-offer`, 'POST', body);
 // The time-based notices the reader was shown, so each shows once (#256).
 export const seeNotices = (id: string, body: SeenNotices) =>
-  request<LoanView>(`/api/social/loans/${at(id)}/notices/seen`, 'POST', body);
+  request<LoanView>(`/api/loans/${at(id)}/notices/seen`, 'POST', body);
 // The inbox (#259): the Loans waiting on you and the updates; mark the shown updates read, or Clear them.
 export const getInbox = (signal?: AbortSignal) => request<InboxView>('/api/social/inbox', 'GET', undefined, signal);
 export const markInboxRead = (body: InboxIds) => request<InboxView>('/api/social/inbox/read', 'POST', body);
 export const clearInbox = (body: InboxIds) => request<InboxView>('/api/social/inbox/clear', 'POST', body);
 // Trades (trading #270): the Trades list and one Trade, as both sides read them. Sending one is in the Trades client.
-export const getTrades = (signal?: AbortSignal) => request<TradesView>('/api/social/trades', 'GET', undefined, signal);
+export const getTrades = (signal?: AbortSignal) => getItemGroups('trade', signal);
 export const getTrade = (id: string, signal?: AbortSignal) =>
-  request<TradeView>(`/api/social/trades/${at(id)}`, 'GET', undefined, signal);
+  request<{thread_id: string}>(`/api/trades/resolve/${at(id)}`, 'GET', undefined, signal).then(found => request<TradeDetail>(`/api/trades/${at(found.thread_id)}`, 'GET', undefined, signal)).then(detail => detail.live_offer);
 // Trade steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Trade as it now stands.
 export const withdrawTrade = (id: string, body: TradeStep) =>
-  request<TradeView>(`/api/social/trades/${at(id)}/withdraw`, 'POST', body);
+  request<TradeView>(`/api/trades/${at(id)}/withdraw`, 'POST', body);
 // The recipient declines a Trade Proposal; either side cancels an accepted Trade nobody has confirmed (#271). Accepting
 // one reserves your cards, so it is in the Trades client.
 export const declineTrade = (id: string, body: TradeStep) =>
-  request<TradeView>(`/api/social/trades/${at(id)}/decline`, 'POST', body);
+  request<TradeView>(`/api/trades/${at(id)}/decline`, 'POST', body);
 export const cancelTrade = (id: string, body: TradeStep) =>
-  request<TradeView>(`/api/social/trades/${at(id)}/cancel`, 'POST', body);
+  request<TradeView>(`/api/trades/${at(id)}/cancel`, 'POST', body);
 // Find trades (trading #276): every Friend who matches, with at most 20 cards a side, and one Friend's row with every
 // card (a null match when nothing matches now).
 export const getTradeMatches = (signal?: AbortSignal) =>
@@ -294,28 +332,14 @@ export const setTradeSettings = (body: SetTradeSettings) =>
 export const getDiscovery = (signal?: AbortSignal) =>
   request<DiscoverySettings>('/api/social/discovery', 'GET', undefined, signal);
 export const setDiscovery = (body: SetDiscovery) => request<DiscoverySettings>('/api/social/discovery', 'PUT', body);
-// Conversations (trading #298): the list, one conversation by id or by the other's trader id, messages, the read marker,
-// archive, and the pulse the shell polls.
-export const getConversations = (params: { archived?: boolean; before?: string | null }, signal?: AbortSignal) =>
-  request<ConversationsView>(
-    `/api/social/conversations${query({ archived: params.archived ? 'true' : undefined, before: params.before })}`,
-    'GET', undefined, signal);
-export const getConversationPulse = (signal?: AbortSignal) =>
-  request<ConversationPulse>('/api/social/conversations/pulse', 'GET', undefined, signal);
-export const getConversation = (id: string, params: { before?: string | null }, signal?: AbortSignal) =>
-  request<ConversationView>(`/api/social/conversations/${at(id)}${query(params)}`, 'GET', undefined, signal);
-export const getTraderConversation = (traderId: string, params: { before?: string | null }, signal?: AbortSignal) =>
-  request<ConversationView>(`/api/social/conversations/with/${at(traderId)}${query(params)}`, 'GET', undefined, signal);
-export const sendMessage = (id: string, body: SendMessage) =>
-  request<Message>(`/api/social/conversations/${at(id)}/messages`, 'POST', body);
-export const sendTraderMessage = (traderId: string, body: SendMessage) =>
-  request<Message>(`/api/social/traders/${at(traderId)}/messages`, 'POST', body);
-export const readConversation = (id: string, body: ReadThrough) =>
-  request<ConversationSummary>(`/api/social/conversations/${at(id)}/read`, 'POST', body);
-export const archiveConversation = (id: string) =>
-  request<ConversationSummary>(`/api/social/conversations/${at(id)}/archive`, 'POST');
-export const unarchiveConversation = (id: string) =>
-  request<ConversationSummary>(`/api/social/conversations/${at(id)}/unarchive`, 'POST');
+// Each Trade or Loan owns its messages, change log and read marker.
+export const getThreadPulse = () => request<Pulse>('/api/threads/pulse', 'GET');
+export const getThreadTimeline = (kind: 'trade' | 'loan', id: string, before?: string | null, signal?: AbortSignal) =>
+  request<Timeline>(`/api/${kind}s/${at(id)}/timeline${query({before})}`, 'GET', undefined, signal);
+export const sendThreadMessage = (kind: 'trade' | 'loan', id: string, body: SendMessage) =>
+  request<Message>(`/api/${kind}s/${at(id)}/messages`, 'POST', body);
+export const readThread = (kind: 'trade' | 'loan', id: string, body: ReadThrough) =>
+  request<ReadResult>(`/api/${kind}s/${at(id)}/read`, 'POST', body);
 // Trader reads (trading #299): one collector by trader id, their Trade List and their match row, through the reach rule.
 export const getTrader = (traderId: string, signal?: AbortSignal) =>
   request<TraderView>(`/api/social/traders/${at(traderId)}`, 'GET', undefined, signal);

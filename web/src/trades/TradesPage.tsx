@@ -1,8 +1,10 @@
+import { ListDetailLayout } from "../ui/ListDetailLayout";
+import { LegacyThreadLink } from "../threads/LegacyThreadLink";
 import { useId } from "react";
 import { PageHeader } from "../shell/PageHeader";
 import { Segmented, segmentId } from "../ui/Segmented";
-import { ConversationList } from "./ConversationList";
-import { ConversationPage } from "./ConversationPage";
+import { ThreadList } from "../threads/ThreadList";
+
 import { CounterPage } from "./CounterPage";
 import { FindTrades } from "./FindTrades";
 import { MyTradeList } from "./MyTradeList";
@@ -63,21 +65,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
       />
     );
   if (route.kind === "with" || route.kind === "conversation")
-    return (
-      <ConversationPage
-        key={
-          route.kind === "with"
-            ? `with-${route.traderId}`
-            : `conversation-${route.id}`
-        }
-        target={
-          route.kind === "with"
-            ? { traderId: route.traderId }
-            : { conversationId: route.id }
-        }
-        onNavigate={onNavigate}
-      />
-    );
+    return <LegacyThreadLink section={section!} onNavigate={onNavigate} />;
   if (route.kind === "counter")
     return (
       <CounterPage
@@ -88,11 +76,25 @@ export function TradesPage({ active, section, onNavigate }: Props) {
     );
   if (route.kind === "trade" || route.kind === "missing")
     return (
-      <TradeScreen
-        key={route.kind === "trade" ? route.id : "missing"}
-        tradeId={route.kind === "trade" ? route.id : null}
-        onAllTrades={() => onNavigate(TRADES_PATH)}
-        onNavigate={onNavigate}
+      <ListDetailLayout
+        selected
+        queue={
+          <ThreadList
+            kind="trade"
+            active={active}
+            selected={route.kind === "trade" ? route.id : null}
+            onOpen={(id) => onNavigate(`/trades/${id}`)}
+          />
+        }
+        detail={
+          <TradeScreen
+            active={active}
+            key={route.kind === "trade" ? route.id : "missing"}
+            tradeId={route.kind === "trade" ? route.id : null}
+            onAllTrades={() => onNavigate(TRADES_PATH)}
+            onNavigate={onNavigate}
+          />
+        }
       />
     );
   const view = route.view;
@@ -121,7 +123,11 @@ export function TradesPage({ active, section, onNavigate }: Props) {
         className="flex min-w-0 flex-col gap-5"
       >
         {view === "trades" ? (
-          <ConversationList active={active} onNavigate={onNavigate} />
+          <ThreadList
+            kind="trade"
+            active={active}
+            onOpen={(id) => onNavigate(`/trades/${id}`)}
+          />
         ) : view === "find" ? (
           <FindTrades onNavigate={onNavigate} />
         ) : (

@@ -1,3 +1,4 @@
+import { itemTabName } from "../threads/threadPresentation";
 import { PageVisibility } from "../ui/PageVisibility";
 import { mountedPages } from "./keptPages";
 import { preloadShellPages } from "./lazyPages";
@@ -35,7 +36,7 @@ import {
   loansTabName,
   tradesTabName,
   useInboxTradesWaiting,
-  useUnreadConversations,
+  useThreadCounts,
   useInboxWaiting,
 } from "../inbox/Inbox";
 import {
@@ -149,19 +150,20 @@ function ShellFrame({
       delete document.documentElement.dataset.appShell;
     };
   }, []);
-  // Loans waiting on the collector: the Loans tab's badge (#259); Trades waiting on them: the Trades tab's (#273).
-  const waiting = useInboxWaiting();
-  const tradesWaiting = useInboxTradesWaiting();
-  // The Trades tab's badge adds the conversations with unread messages (Trading #298); the bell keeps Trades waiting.
-  const unread = useUnreadConversations();
+  const counts = useThreadCounts();
   const tabCount = (id: PageId) =>
-    id === "loans" ? waiting : id === "trades" ? tradesWaiting + unread : 0;
-  const tabName = (id: PageId) =>
     id === "loans"
-      ? loansTabName(waiting)
+      ? (counts.loans.needs_you ?? 0)
       : id === "trades"
-        ? tradesTabName(tradesWaiting, unread)
-        : undefined;
+        ? (counts.trades.needs_you ?? 0)
+        : 0;
+  const tabName = (id: PageId) => {
+    const count =
+      id === "loans" ? counts.loans : id === "trades" ? counts.trades : null;
+    return count
+      ? itemTabName(id === "loans" ? "Loans" : "Trades", count)
+      : undefined;
+  };
   // Pages shown so far; a kept-mounted one stays mounted from its first visit.
   const [visited, setVisited] = useState<ReadonlySet<PageId>>(
     () => new Set(other ? [] : [page])

@@ -43,7 +43,8 @@ ALLOWED_IMPORTS = {
     'app.social.hidden_locations': set(),
     'app.social.name_rules': set(),
     # The owner facts the Loan and Trade steps share: the inventory revision, the command start (replay, hourly count).
-    'app.social.owners': {('app.location_tree', 'replay')},
+    # Pure owner/key receipt presence; no inventory or hidden-Location access.
+    'app.social.owners': {('app.location_tree', 'replay'), ('app.location_tree', 'replay_with_presence')},
     # The choke point counts each Friend's wants with the pure allocation over rows it reads itself (trading #276).
     'app.social.friend_copies': {('app.social', 'counts'), ('app', 'copy_allocation'), ('app.copy_allocation', 'allocate_rows'),
                                 ('app.copy_allocation', 'AllocationRows')},
@@ -109,6 +110,7 @@ ALLOWED_IMPORTS = {
         ('app.social.conversations', 'normalize_text'), ('app.social.conversations', 'pair_row'), ('app.social.conversations', 'account_changed'),
         ('app.social.conversations', 'encode_cursor'), ('app.social.conversations', 'decode_cursor'),
         ('app.social.trades', 'end_trades_between'), ('app.social.trades', 'unconfirmed_partners'),
+        ('app.social.loans', 'end_loans_between'),
         ('app.core.catalog.card_facts', 'card_facts')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
@@ -176,6 +178,34 @@ ALLOWED_IMPORTS = {
         ('app.public_records', 'invite_key'), ('app.public_records', 'public_record_store'),
         ('app.core.publications.publish', 'PUBLIC_HEADERS'), ('app.core.publications.publish', 'TOKEN')},
 }
+
+# #478: shared thread contracts; allow the step and closure packages to adopt them
+# independently. These are permitted edges, not required imports.
+THREAD_EXPORTS = {'touch_threads', 'ThreadTouch', 'write_event', 'ThreadItem', 'ThreadParty',
+                  'TradeDetail', 'LoanDetail', 'TimelineItem', 'EventView', 'Pulse',
+                  'needs_you_rows', 'thread_items', 'member_thread', 'thread_party',
+                  'count_new_contact', 'new_contact_lock'}
+for _caller in ('trades', 'loans', 'friends', 'reports'):
+    ALLOWED_IMPORTS['app.social.' + _caller].update(
+        ('app.social.threads', name) for name in THREAD_EXPORTS)
+ALLOWED_IMPORTS['app.social.threads'] = {
+    ('app.core.catalog.card_facts', 'card_facts'),
+    ('app.db', 'connect'), ('app.identity', 'verified_user'), ('app.location_tree', 'error'),
+    ('app.social.owners', 'lock_owners'), ('app.social.discovery', 'reach_one'),
+    ('app.social.discovery', 'reach'), ('app.social.discovery', 'count_new_contact'),
+    ('app.social.discovery', 'new_contact_lock'),
+    ('app.social.discovery', 'require_not_suspended'), ('app.social.friends', 'friend_ids'),
+    ('app.social.trades', 'TradeView'), ('app.social.loans', 'LoanView'),
+    ('app.social.trades', 'trade_facts'), ('app.social.trades', 'waiting_trade_step'),
+    ('app.social.loans', 'loan_facts'), ('app.social.loans', 'waiting_step')}
+ALLOWED_IMPORTS['app.social.conversations'].update(
+    ('app.social.threads', name) for name in
+    ('normalize_text', 'encode_cursor', 'decode_cursor', 'count_message', 'touch_threads', 'ThreadTouch'))
+ALLOWED_IMPORTS['app.social.reports'].update(
+    ('app.social.threads', name) for name in ('normalize_text', 'encode_cursor', 'decode_cursor'))
+for _caller in ('trades', 'loans'):
+    ALLOWED_IMPORTS['app.social.' + _caller].update(
+        ('app.social.discovery', name) for name in ('count_new_contact', 'new_contact_lock'))
 
 RULES = {
     # The printed set code table is read by display and matching code, not by export (app redesign #173). The decklist
