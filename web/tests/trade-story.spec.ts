@@ -1,3 +1,4 @@
+import { tradeView } from "./support/trades";
 // Ticket #280 (Trading spec "Testing Decisions", Browser): the whole Stage 1 trade between two Friends, in the browser.
 // Ash marks a binder For trade. Misty uses Ask to trade from the card popup, then proposes from the two-way row on Find
 // trades: cash only is refused until Ash turns on Open to cash offers, then goes through. Ash counters with a card and
@@ -448,7 +449,11 @@ async function story(
     `a cash-only proposal to answer at ${width}`
   );
 
-  // S9. Ash counters with a card and cash.
+  const proposedOffer = await tradeView(
+    ash.page,
+    new URL(proposalAddress).pathname.split("/").at(-1)!
+  );
+  // S9. Ash counters with a card and cash on the same item.
   await ashMain.getByRole("button", { name: "Counter", exact: true }).click();
   await expect(ash.page).toHaveURL(`${proposalAddress}/counter`);
   await expect(heading(ash.page)).toHaveText("Counter to Misty W");
@@ -486,8 +491,12 @@ async function story(
   await sendCounter.click();
   await expect(toast(ash.page)).toContainText("Counter sent to Misty W");
   await expect(ash.page).toHaveURL(tradeAddress);
-  await expect(ash.page).not.toHaveURL(proposalAddress);
+  await expect(ash.page).toHaveURL(proposalAddress);
   const counterAddress = ash.page.url();
+  const counterOffer = await tradeView(ash.page, proposedOffer.thread_id);
+  expect(counterOffer.thread_id).toBe(proposedOffer.thread_id);
+  expect(counterOffer.offer_id).not.toBe(proposedOffer.offer_id);
+  expect(counterOffer.countered_from).toBe(proposedOffer.offer_id);
   await expect(heading(ash.page)).toHaveText("Waiting for Misty W to answer");
   await expect(ashMain).toContainText(
     "This is your Counter to Misty W's Trade Proposal."
