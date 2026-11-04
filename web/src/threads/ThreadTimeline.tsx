@@ -1,8 +1,12 @@
+import { ThreadMenu } from "./ThreadMenu";
+import { MESSAGE_LENGTH_TEXT, threadMessageError } from "./threadMessage";
 import { mergeTimeline } from "./timelineHistory";
 import { timelineText } from "./threadText";
 import { useEffect, useRef, useState } from "react";
 import {
   getThreadDetail,
+  getBlocked,
+  type TradeDetail,
   getThreadTimeline,
   sendThreadMessage,
   readThread,
@@ -21,11 +25,13 @@ export function ThreadTimeline({
   id,
   active = true,
   editionNames = {},
+  onChanged,
 }: {
   kind: "trade" | "loan";
   id: string;
   active?: boolean;
   editionNames?: Record<string, string>;
+  onChanged?: () => void;
 }) {
   const [log, setLog] = useState<Timeline | null>(null),
     [failed, setFailed] = useState(false),
@@ -34,6 +40,8 @@ export function ThreadTimeline({
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const [permissionFailed, setPermissionFailed] = useState(false);
+  const [tradeDetail, setTradeDetail] = useState<TradeDetail | null>(null);
+  const [ownBlock, setOwnBlock] = useState(false);
   const [name, setName] = useState("Other collector");
   const [canMessage, setCanMessage] = useState<boolean | null>(null);
   const pending = useRef<{ body: string; idempotency_key: string } | null>(
@@ -53,6 +61,21 @@ export function ThreadTimeline({
       (detail) => {
         if (!controller.signal.aborted) {
           setCanMessage(detail.can_message);
+          if ("live_offer" in detail) {
+            setTradeDetail(detail);
+            const trader = detail.live_offer.other.trader_id;
+            if (!detail.can_message && trader)
+              void getBlocked().then(
+                (answer) => {
+                  if (!controller.signal.aborted)
+                    setOwnBlock(
+                      answer.blocked.some((row) => row.trader_id === trader)
+                    );
+                },
+                () => {}
+              );
+            else setOwnBlock(false);
+          }
           setName(
             ("live_offer" in detail ? detail.live_offer : detail.live_terms)
               .other.display_name
@@ -108,6 +131,10 @@ export function ThreadTimeline({
   }
   async function send() {
     if (busy) return;
+    if (!pending.current && Array.from(body).length > 4000) {
+      setMessage(MESSAGE_LENGTH_TEXT);
+      return;
+    }
     const command = pending.current ?? {
       body,
       idempotency_key: crypto.randomUUID(),
@@ -124,11 +151,7 @@ export function ThreadTimeline({
     } catch (cause) {
       if (cause instanceof SocialError && cause.status < 500) {
         pending.current = null;
-        setMessage(
-          cause.code === "COLLECTOR_UNAVAILABLE"
-            ? "This collector is no longer available."
-            : "Your message could not be sent."
-        );
+        setMessage(threadMessageError(cause));
       } else setMessage("The answer was lost. Retry sends the same message.");
     } finally {
       setBusy(false);
@@ -139,7 +162,28 @@ export function ThreadTimeline({
       aria-label="Chat and changes"
       className="flex min-w-0 flex-col gap-3 border-t border-border pt-4"
     >
-      <h2 className="text-heading">Chat and changes</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-heading">Chat and changes</h2>
+        {tradeDetail?.live_offer.other.trader_id && (
+          <ThreadMenu
+            target={{
+              traderId: tradeDetail.live_offer.other.trader_id,
+              name,
+              handle: tradeDetail.live_offer.other.friend
+                ? tradeDetail.live_offer.other.handle
+                : null,
+            }}
+            canMessage={canMessage === true}
+            canReport={tradeDetail.can_report}
+            offerId={tradeDetail.live_offer.offer_id}
+            onChanged={() => {
+              setAttempt((n) => n + 1);
+              onChanged?.();
+            }}
+          />
+        )}
+      </div>
+      {ownBlock && <a href="/settings">You blocked {name}.</a>}
       {failed && (
         <p role="status">
           The timeline couldn't be loaded.{" "}
@@ -188,9 +232,9 @@ export function ThreadTimeline({
           <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
         </p>
       ) : (
-        <p>This chat is read-only.</p>
+        <p>This collector is no longer available</p>
       )}
-      {message && <p role="status">{message}</p>}
+      {message && <p role="alert">{message}</p>}
     </section>
   );
 }
