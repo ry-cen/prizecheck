@@ -1,3 +1,4 @@
+import { trackRecord } from "./conversationMessages";
 import { ItemThreadLayout } from "../threads/ItemThreadLayout";
 import { threadVersionChanged } from "../threads/commandChanges";
 import { usePulseChanged } from "../inbox/Inbox";
@@ -363,7 +364,10 @@ export function TradeScreen({
             active={active}
             kind="trade"
             onChanged={() => {
-              if (!busy && keys.current.size === 0) setAttempt((n) => n + 1);
+              if (!busy && keys.current.size === 0) {
+                reloading.current = true;
+                setAttempt((n) => n + 1);
+              }
             }}
             id={load.trade.thread_id}
             editionNames={Object.fromEntries(
@@ -674,6 +678,10 @@ export function TradeScreen({
   ) : null;
   const note = tradeNote(trade, stale);
   const headline = tradeHeadline(trade);
+  const record =
+    trade.other.available === true
+      ? trackRecord(trade.other.completed_trades)
+      : null;
   // Most state headlines already name the other collector. Own closed actions ("You declined") still need context.
   const needsParty = tradeNeedsPartyLabel(trade);
   return frame(
@@ -685,12 +693,30 @@ export function TradeScreen({
             <span className="font-semibold">Trade with {name}</span>
           )}
           {trade.other.friend && trade.other.handle && (
-            <span className="text-text-muted">
+            <a
+              className="inline-flex min-h-tap items-center text-text-muted"
+              href={`/friends/${encodeURIComponent(trade.other.handle)}`}
+              onClick={(event) => {
+                if (
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                )
+                  return;
+                event.preventDefault();
+                onNavigate(
+                  `/friends/${encodeURIComponent(trade.other.handle!)}`
+                );
+              }}
+            >
               {needsParty && " "}@{trade.other.handle}
-            </span>
+            </a>
           )}
         </p>
       )}
+      {record && <p className="m-0 text-meta text-text-muted">{record}</p>}
       {note && <p className="m-0 text-body text-text-muted">{note}</p>}
       <MeetInPublicTip trade={trade} />
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 phone:grid-cols-1">

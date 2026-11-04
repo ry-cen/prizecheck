@@ -213,3 +213,53 @@ it("shows the physical swap disclosure before its single confirmation control", 
     })
   );
 });
+it.each([false, true])(
+  "links a Handle only for a Friend (friend=%s)",
+  async (friend) => {
+    vi.mocked(getTrade).mockResolvedValue({
+      ...trade,
+      other: { ...trade.other, friend, handle: "misty_private" },
+    });
+    await act(async () =>
+      root.render(
+        h(ToastProvider, {
+          children: h(TradeScreen, {
+            tradeId: "item",
+            onAllTrades: vi.fn(),
+            onNavigate: vi.fn(),
+          }),
+        })
+      )
+    );
+    expect(
+      host.querySelector('a[href="/friends/misty_private"]') !== null
+    ).toBe(friend);
+    expect(host.textContent?.includes("@misty_private")).toBe(friend);
+  }
+);
+it.each([
+  [true, 0, "New to trading"],
+  [true, 1, "1 completed trade"],
+  [false, 1, null],
+] as const)(
+  "shows only an available collector's track record (%s/%s)",
+  async (available, completed_trades, text) => {
+    vi.mocked(getTrade).mockResolvedValue({
+      ...trade,
+      other: { ...trade.other, available, completed_trades },
+    });
+    await act(async () =>
+      root.render(
+        h(ToastProvider, {
+          children: h(TradeScreen, {
+            tradeId: "item",
+            onAllTrades: vi.fn(),
+            onNavigate: vi.fn(),
+          }),
+        })
+      )
+    );
+    if (text) expect(host.textContent).toContain(text);
+    else expect(host.textContent).not.toContain("completed trade");
+  }
+);
