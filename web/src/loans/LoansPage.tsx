@@ -31,7 +31,7 @@ type Props = {
   /** The Loan the address names (/loans/<id>), or null for the list. */
   loanId: string | null;
   active: boolean;
-  onOpenLoan: (id: string) => void;
+  onOpenLoan: (id: string, options?: { replace?: boolean }) => void;
   onAllLoans: () => void;
   /** Opens the borrower's Deck a Loan is for (/decks/<id>). */
   onOpenDeck: (id: string) => void;
@@ -78,6 +78,7 @@ export function LoansPage({
             key={loanId}
             loanId={loanId}
             onLoanChanged={() => setRevision((n) => n + 1)}
+            onCanonicalLoan={(id) => onOpenLoan(id, { replace: true })}
             focusOnOpen={opening.current === loanId}
             onAllLoans={onAllLoans}
             onOpenDeck={onOpenDeck}
