@@ -83,7 +83,7 @@ async function move(
   });
 }
 
-/** Misty sends Ash a Trade Proposal through the API; returns its id. */
+/** Misty sends Ash a Trade Proposal through the API; returns its thread id. */
 async function propose(
   page: Page,
   to: string,
@@ -100,7 +100,7 @@ async function propose(
     you_get: get.map(line),
     idempotency_key: randomUUID(),
   });
-  return trade.id as string;
+  return trade.thread_id as string;
 }
 
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });

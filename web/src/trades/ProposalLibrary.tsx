@@ -77,7 +77,6 @@ export function ProposalLibrary({
   onRetry,
   proposal,
   onAdd,
-  announce,
 }: {
   headingId: string;
   ownScroll: boolean;
@@ -90,7 +89,6 @@ export function ProposalLibrary({
   onRetry: (which: "theirs" | "mine" | "match") => void;
   proposal: Proposal;
   onAdd: (side: ProposalSide, card: LibraryCard) => void;
-  announce: string;
 }) {
   const [choice, setChoice] = useState<Choice>("theirs");
   const [theirText, setTheirText] = useState("");
@@ -184,9 +182,6 @@ export function ProposalLibrary({
             onChange={(event) => setMineText(event.target.value)}
           />
         )}
-        <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
-          {announce}
-        </p>
         {match.kind === "failed" && (
           <div className="flex flex-wrap items-center gap-3">
             <p role="alert" className="m-0 text-meta text-danger">
