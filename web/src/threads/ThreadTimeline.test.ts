@@ -2,7 +2,11 @@
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { SocialError, sendThreadMessage } from "../social_generated";
+import {
+  SocialError,
+  sendThreadMessage,
+  getThreadTimeline,
+} from "../social_generated";
 import { ThreadTimeline } from "./ThreadTimeline";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
@@ -16,6 +20,7 @@ vi.mock("../social_generated", async (original) => ({
     next_before: null,
   })),
   sendThreadMessage: vi.fn(),
+  readThread: vi.fn(async () => ({ read: false })),
 }));
 it.each([
   [
@@ -66,3 +71,49 @@ it.each([
     }
   }
 );
+it("reads a known command's new timeline without needing a pulse change", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.mocked(getThreadTimeline)
+    .mockResolvedValueOnce({ you_are: "low", items: [], next_before: null })
+    .mockResolvedValueOnce({
+      you_are: "low",
+      items: [
+        {
+          kind: "event",
+          at: "2026-11-04T10:00:00Z",
+          cursor: "new",
+          event: {
+            id: "event",
+            round_id: "offer",
+            actor: null,
+            at: "2026-11-04T10:00:00Z",
+            kind: "accepted",
+          },
+        },
+      ],
+      next_before: null,
+    });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        h(ThreadTimeline, { kind: "trade", id: "item", revision: "offer:1" })
+      )
+    );
+    expect(host.querySelectorAll("ol li")).toHaveLength(0);
+    await act(async () =>
+      root.render(
+        h(ThreadTimeline, { kind: "trade", id: "item", revision: "offer:2" })
+      )
+    );
+    expect(getThreadTimeline).toHaveBeenCalledTimes(2);
+    expect(host.querySelector("ol")?.textContent).toBe("Agreed");
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});
