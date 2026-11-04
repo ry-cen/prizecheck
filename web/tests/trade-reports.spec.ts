@@ -303,7 +303,7 @@ test.describe("desktop, Report", () => {
         idempotency_key: randomUUID(),
       })
     ).id as string;
-    await loanStep(s.misty, loan, `/api/loans/${loan}/accept`, {
+    await loanStep(s.misty, loan, "accept", {
       lines: [{ edition_id: s.ids["PAL 185"], promised: "1" }],
     });
     await page.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);

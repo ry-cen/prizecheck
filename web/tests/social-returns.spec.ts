@@ -126,7 +126,7 @@ test("a return the borrower started is his to finish once the lender's account i
   const loanId = await lendHandedOver(lender, page, [[ids["PAL 185"], 1]]);
   const title = (on: typeof page) => on.getByRole("heading", { level: 1 });
   // Ash gives the card back, and Misty deletes her account before confirming it.
-  await loanStep(page, loanId, `/api/loans/${loanId}/returns`, {
+  await loanStep(page, loanId, "returns", {
     lines: [{ edition_id: ids["PAL 185"], quantity: "1" }],
   });
   await leave(lender);

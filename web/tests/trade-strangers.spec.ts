@@ -1,3 +1,4 @@
+import { tradeView } from "./support/trades";
 // Ticket #299 (Trading Stage 2, "The reach rule and stranger Trades"): two collectors who are not Friends trade because
 // both are in open discovery within 50 miles. Misty (zip 00010) holds an Iono for trade and wants an Arven; Ash (00011,
 // about 7 miles away) holds Arven for trade. Ash opens Misty's Trade List by her trader id (a band and "New to trading"
@@ -274,8 +275,9 @@ test.describe("desktop, stranger Trades", () => {
       you_get: [],
       idempotency_key: randomUUID(),
     });
-    const trade = await api(page, "GET", `/api/social/trades/${sent.id}`);
-    await api(page, "POST", `/api/social/trades/${sent.id}/withdraw`, {
+    const trade = await tradeView(page, sent.id);
+    await api(page, "POST", `/api/trades/${trade.thread_id}/withdraw`, {
+      offer_id: trade.offer_id,
       revision: trade.revision,
       idempotency_key: randomUUID(),
     });

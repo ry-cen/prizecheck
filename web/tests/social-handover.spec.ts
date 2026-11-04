@@ -1,3 +1,4 @@
+import { loanView } from "./support/loans";
 // Ticket #253: Handover (spec "Loan steps", "Web screens"). Misty, a Friend, holds two Iono PAL 185 in her Deck and a
 // Boss's Orders PAL 172 in Unsorted, and accepted Ash's Borrow Request for one of each (sent and accepted through the
 // API, as #252's spec covers). She then moves the Boss's Orders into her Deck, so its pick is out of date: the Loan
@@ -203,8 +204,9 @@ test("both sides confirm a handover for their own inventory, after the lender fi
     deck_id: charizard,
     idempotency_key: randomUUID(),
   });
-  const asked = await api(lender, "GET", `/api/social/loans/${sent.id}`);
-  await api(lender, "POST", `/api/loans/${sent.id}/accept`, {
+  const asked = await loanView(lender, sent.id);
+  await api(lender, "POST", `/api/loans/${asked.thread_id}/accept`, {
+    loan_id: asked.loan_id,
     revision: asked.revision,
     idempotency_key: randomUUID(),
     lines: [

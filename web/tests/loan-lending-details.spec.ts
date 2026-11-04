@@ -127,7 +127,7 @@ test("eligibility excludes Borrowed Copies and other Loan and Trade promises, in
   const account = await accountId(page);
   const incoming = await request();
   const competing = await request();
-  await loanStep(page, competing.id, `/api/loans/${competing.id}/accept`, {
+  await loanStep(page, competing.id, "accept", {
     lines: [{ edition_id: edition, promised: "2" }],
   });
   const other = await accountId(borrower);
