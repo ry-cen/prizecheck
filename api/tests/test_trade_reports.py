@@ -21,7 +21,8 @@ from app.social.friends import command_payload
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_catalog_references import migrate
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_conversations import detail, pulse, say, say_to, start, swapped, view
+from test_conversations import detail
+from test_threads import thread as make_thread, message as thread_message, timeline as thread_timeline
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import deck, detail as deck_detail, hold, line
 from test_for_trade_locations import mark
@@ -33,10 +34,47 @@ from test_lend_offers import offer
 from test_loans import pair, send as borrow
 from test_open_discovery import discoverable, new_user, put
 from test_trade_swap import confirm
-from test_trades import accept_trade, propose, read
+from test_trades import accept_trade, propose, read, trade_step
 from test_want_list import want_list
 from test_trade_migrations import collector as scratch_collector, run_again, scratch  # noqa: F401
 from want_list_swap_fixtures import seed_swap_catalog
+
+
+def start(a, b, body='Hello'):
+    # A closed Loan supplies chat without adding a Trade to Report snapshots.
+    tid, _ = make_thread(a, b, kind='loan', closed=True)
+    ok(thread_message(a, tid, body, kind='loans'), 201)
+    return str(tid)
+
+
+def say(user, tid, body):
+    return thread_message(user, tid, body, kind='loans')
+
+
+def pulse(user):
+    return ok(call('GET', '/api/threads/pulse', user))
+
+
+def thread_available(user, tid):
+    items = []
+    for group in ('needs_you', 'done'):
+        items.extend(ok(call('GET', '/api/loans?group=' + group, user)))
+    return next(item['other']['available'] for item in items if item['id'] == str(tid))
+
+
+def swapped(conn, proposer, recipient, both=True):
+    tid, rid = uuid4(), uuid4()
+    low, high = sorted((proposer, recipient))
+    conn.execute("""INSERT INTO thread(id,kind,user_low,user_high,created_at,last_activity_at,changed_at)
+      VALUES (%s,'trade',%s,%s,now(),now(),now())""", (tid, low, high))
+    conn.execute('INSERT INTO thread_member VALUES (%s,%s,NULL),(%s,%s,NULL)', (tid, proposer, tid, recipient))
+    conn.execute("""INSERT INTO trade(id,thread_id,state,closed_reason,proposer_id,recipient_id,proposer_name,
+      recipient_name,proposer_swap_at,recipient_swap_at,closed_at)
+      VALUES (%s,%s,'closed','swapped',%s,%s,'Proposer','Recipient',now(),CASE WHEN %s THEN now() END,now())""",
+                 (rid, tid, proposer, recipient, both))
+    conn.execute("INSERT INTO thread_round_source VALUES ('trade',%s,%s)", (rid, tid))
+    return rid
+
 
 MIGRATION = '149_trade_reports.sql'
 
@@ -67,7 +105,7 @@ def setting(user):
 def changed_at(a, b):
     low, high = sorted((a, b))
     with connect() as conn:
-        return conn.execute('SELECT changed_at FROM conversation WHERE user_low = %s AND user_high = %s',
+        return conn.execute('SELECT max(changed_at) AS changed_at FROM thread WHERE user_low = %s AND user_high = %s',
                             (low, high)).fetchone()['changed_at']
 
 
@@ -221,15 +259,13 @@ def test_a_suspended_friend_has_no_trade_list_but_keeps_their_collection(store):
     assert call('GET', f'/api/social/collections/{misty_handle}', ash).status_code == 200
 
 
-def test_the_conversation_list_says_when_the_reader_is_suspended(store):
+def test_thread_chat_is_read_only_when_the_reader_is_suspended(store):
     (ash, _), (misty, _) = collector(), collector()
     befriend(ash, misty)
-    start(ash, misty)
-    listed = ok(call('GET', '/api/social/conversations', ash))
-    assert listed['suspended'] is False and len(listed['conversations']) == 1
+    tid = start(ash, misty)
     suspend_sql(ash)
-    listed = ok(call('GET', '/api/social/conversations', ash))
-    assert listed['suspended'] is True and len(listed['conversations']) == 1
+    assert detail(say(ash, tid, 'Hello')) == (403, {'code': 'ACCOUNT_SUSPENDED'})
+    assert thread_timeline(ash, tid, kind='loans')['items']
 
 
 def test_account_changed_moves_every_conversation_of_the_account_but_the_skipped(store):
@@ -350,8 +386,7 @@ def inbox_kinds(user):
 
 
 def decline(user, trade):
-    return call('POST', f"/api/social/trades/{trade['id']}/decline", user,
-                {'revision': ok(read(user, trade))['revision'], 'idempotency_key': str(uuid4())})
+    return trade_step(user, ok(read(user, trade)), 'decline')
 
 
 def world():
@@ -417,7 +452,7 @@ def test_a_report_blocks_and_snapshots_the_conversation_and_every_trade(store):
     assert seen['note'] == 'Never showed up'
     assert report_row['reporter'] == {'user_id': ash, 'display_name': 'Ash K.', 'handle': handle_of(ash)}
     assert report_row['reported'] == {'user_id': misty, 'display_name': 'Misty W.', 'handle': handle_of(misty)}
-    assert seen['conversation_id'] == conversation and seen['account'] == {
+    assert seen['conversation_id'] is None and seen['account'] == {
         'exists': True, 'suspended': False, 'removed': False}
 
 
@@ -469,6 +504,11 @@ def test_report_after_being_blocked_matches_report_of_suspended(store):
     blocked_pair, suspended_pair, open_pair = near_pair('Blocked'), near_pair('Suspended'), near_pair('Open')
     for first, second in (blocked_pair, suspended_pair, open_pair):
         start(first, second)
+        with connect() as conn:
+            assert conn.execute('SELECT 1 FROM conversation WHERE user_low=%s AND user_high=%s',
+                                tuple(sorted((first, second)))).fetchone() is None
+            assert conn.execute('SELECT 1 FROM loan WHERE lender_id=%s AND borrower_id=%s',
+                                (first, second)).fetchone() is not None
     ok(block_trader(blocked_pair[1], trader_of(blocked_pair[0])))
     suspend_sql(suspended_pair[1])
     answers = [report(first, trader_of(second)) for first, second in (blocked_pair, suspended_pair, open_pair)]
@@ -495,17 +535,17 @@ def test_the_reported_collector_is_never_told(store):
             ok(report(ash, trader_of(misty)), 201)
         else:
             ok(block_trader(ash, trader_of(misty)))
-        paths = [f'/api/social/conversations/{conversation}', f'/api/social/traders/{trader_of(ash)}',
-                 '/api/social/inbox', '/api/social/conversations', '/api/social/conversations/pulse',
+        paths = [f'/api/loans/{conversation}/timeline', f'/api/social/traders/{trader_of(ash)}',
+                 '/api/social/inbox', '/api/loans?group=needs_you', '/api/threads/pulse',
                  '/api/social/blocks', '/api/social/friends']
         answers = [call('GET', path, misty) for path in paths]
         assert all(answer.status_code == 200 for answer in answers), [a.text for a in answers]
-        pulse_body = ok(call('GET', '/api/social/conversations/pulse', misty))
+        pulse_body = ok(call('GET', '/api/threads/pulse', misty))
         names = [handle_of(ash), handle_of(misty), ash, misty]
         bodies = [scrub(answer.json(), names) for answer in answers[:4] + answers[5:]]
         for answer in answers:
             assert 'report' not in answer.text.replace('can_report', '').lower()
-        seen.append((bodies, pulse_body['unread_conversations']))
+        seen.append((bodies, pulse_body['loans']['unread']))
     assert seen[0] == seen[1]
 
 
@@ -647,8 +687,8 @@ def test_the_owner_detail_answers_the_snapshot_only(store):
     ok(propose_to(ash, trader_of(misty), give=[(arven, 1)], get=[(iono, 1)]), 201)
     # The live conversation and Trades could vanish: the review reads report-owned rows only.
     with connect() as conn:
-        conn.execute('DELETE FROM trade WHERE conversation_id = %s', (conversation,))
-        conn.execute('DELETE FROM conversation WHERE id = %s', (conversation,))
+        conn.execute('DELETE FROM thread_message WHERE thread_id = %s', (conversation,))
+        conn.execute('DELETE FROM trade WHERE proposer_id=%s OR recipient_id=%s', (ash, ash))
     assert owner_detail(owner, stored) == first
     suspend_sql(misty)
     assert owner_detail(owner, stored)['account'] == {'exists': True, 'suspended': True, 'removed': False}
@@ -705,11 +745,11 @@ def test_lifting_a_suspension_restores_contact_and_nothing_to_restore_after(stor
     owner = as_owner()
     ok(decide(owner, filed(ash, misty), 'suspend'))
     assert detail(say(misty, conversation, 'hi')) == SUSPENDED
-    assert ok(view(ash, conversation))['status'] == 'unavailable'
+    assert not thread_available(ash, conversation)
     assert ok(restore(owner, misty, 'suspension', note='mistake')) == {'restored': 'suspension'}
     ok(say(misty, conversation, 'back'), 201)
     ok(say(ash, conversation, 'welcome'), 201)
-    assert ok(view(ash, conversation))['status'] == 'open'
+    assert thread_available(ash, conversation)
     assert ok(call('GET', '/api/social/discovery', misty))['status'] == 'off'
     assert refused(restore(owner, misty, 'suspension')) == (409, {'code': 'NOTHING_TO_RESTORE'})
     assert [event['action'] for event in events(subject_id=misty)] == ['suspend', 'lift_suspension']
@@ -754,20 +794,26 @@ def test_suspensions_cancellations_have_the_suspended_account_as_actor_and_tell_
     stranger_trades = partner_trades(
         lambda a, b, give, get: ok(propose_to(a, trader_of(b), give, get), 201), misty, ash, iono, arven)
     owner = as_owner()
-    told = {user: inbox_kinds(user).count('cancelled') for user in (misty, gary, ash)}
+    told = {user: {r['id'] for r in rows("SELECT id FROM inbox_update WHERE recipient_id=%s AND kind='cancelled'",user)}
+            for user in (misty,gary,ash)}
     assert ok(decide(owner, filed(ash, misty), 'suspend')) == {'status': 'actioned', 'decision': 'suspend'}
     for partner, (out, incoming, accepted, half) in ((gary, friend_trades), (ash, stranger_trades)):
         for trade in (out, incoming, accepted):
             found = ok(read(partner, trade))
             assert (found['state'], found['closed_reason'], found['closed_by']) == ('closed', 'cancelled', 'them')
-        assert inbox_kinds(partner).count('cancelled') == told[partner] + 3
+        notices=[r for r in rows("SELECT id,trade_id,loan_id FROM inbox_update WHERE recipient_id=%s AND kind='cancelled'",partner)
+                 if r['id'] not in told[partner]]
+        assert {str(r['trade_id']) for r in notices if r['trade_id'] is not None} == {t['id'] for t in (out,incoming,accepted)}
+        assert [str(r['loan_id']) for r in notices if r['loan_id'] is not None] == ([loan['id']] if partner==gary else [])
+        assert len(notices)==(4 if partner==gary else 3)
         assert ok(read(partner, half))['state'] == 'accepted'
         assert ok(confirm(misty, half))['closed_reason'] == 'swapped'
-    assert inbox_kinds(misty).count('cancelled') == told[misty]
+    assert {r['id'] for r in rows("SELECT id FROM inbox_update WHERE recipient_id=%s AND kind='cancelled'",misty)} == told[misty]
     assert {row['closed_by'] for row in rows("SELECT closed_by FROM trade WHERE closed_reason = 'cancelled' AND "
                                               "(proposer_id = %s OR recipient_id = %s)", misty, misty)} == {misty}
-    assert ok(handover(misty, loan))['id'] == loan['id']
-    assert ok(handover(gary, loan))['id'] == loan['id']
+    assert detail(handover(misty, loan)) == (409, {'code': 'LOAN_CHANGED'})
+    assert detail(handover(gary, loan)) == (409, {'code': 'LOAN_CHANGED'})
+    assert rows('SELECT state,closed_by FROM loan WHERE id=%s', loan['id']) == [{'state': 'closed', 'closed_by': misty}]
     assert gary in call('GET', '/api/social/friends', misty).text
     assert setting(misty)['enabled'] is False
 
@@ -786,11 +832,11 @@ def test_a_suspension_and_its_lift_move_every_partners_watermark(store):
     ok(decide(owner, filed(ash, misty), 'suspend'))
     second = marks()
     assert all(a != b for a, b in zip(first, second))
-    assert ok(view(brock, with_brock))['status'] == 'unavailable'
+    assert not thread_available(brock, with_brock)
     ok(restore(owner, misty, 'suspension'))
     third = marks()
     assert all(a != b for a, b in zip(second, third))
-    assert ok(view(brock, with_brock))['status'] == 'open' and ok(view(ash, with_ash))['status'] == 'open'
+    assert thread_available(brock, with_brock) and thread_available(ash, with_ash)
     ok(decide(owner, filed(ash, misty), 'remove_from_discovery'))
     assert pulse(brock)['watermark'] == third[2]
 
@@ -849,9 +895,10 @@ def test_a_suspended_collector_keeps_their_own_data(store):
     ok(decide(owner, filed(brock, misty), 'suspend'))
     for response in (call('GET', '/api/location-tree', misty), call('GET', f'/api/decks/{gyarados}', misty),
                      call('GET', '/api/want-list', misty), call('GET', '/api/social/friends', misty),
-                     call('GET', '/api/social/discovery', misty), handover(misty, loan), handover(gary, loan)):
+                     call('GET', '/api/social/discovery', misty), call('GET', f"/api/loans/{loan['thread_id']}", misty)):
         assert response.status_code == 200, response.text
     assert deck_detail(misty, gyarados) and want_list(misty)
+    assert detail(handover(misty, loan)) == (409, {'code': 'LOAN_CHANGED'})
     assert ok(call('GET', '/api/social/discovery', misty))['status'] == 'suspended'
     by_handle = ok(lookup(misty, brock_handle))['collector_id']
     by_invite = ok(call('GET', f'/api/social/invites/{invite_token(token_owner)}', misty))['collector_id']
@@ -893,13 +940,13 @@ def test_a_suspension_racing_sends_and_messages_never_deadlocks(store):
                     'ash': pool.submit(propose_to, ash, trader_of(misty), [(arven, 1)], [(iono, 1)]),
                     'misty': pool.submit(propose_to, misty, trader_of(ash), [(iono, 1)], [(arven, 1)]),
                     'say': pool.submit(say, brock, with_brock, 'hi'),
-                    'say_to': pool.submit(say_to, brock, trader_of(misty), 'hey')}
+                    'second_message': pool.submit(say, brock, with_brock, 'hey')}
             answers = {name: future.result() for name, future in work.items()}
         assert all(answer.status_code < 500 for answer in answers.values()), [a.text for a in answers.values()]
         assert answers['decision'].status_code == 200
         for name in ('ash', 'misty'):
             assert answers[name].status_code == 201 or detail(answers[name]) in (SUSPENDED, UNAVAILABLE), name
-        for name in ('say', 'say_to'):
+        for name in ('say', 'second_message'):
             assert answers[name].status_code == 201 or detail(answers[name]) == UNAVAILABLE, name
         assert open_between(ash, misty) == []
 
@@ -952,3 +999,46 @@ def test_two_suspensions_of_trading_partners_at_once_never_deadlock(store):
             assert answer.status_code == 201 or detail(answer) == UNAVAILABLE
         assert account_state_of(misty)[0] and account_state_of(ash)[0]
         assert open_between(ash, misty) == []
+
+
+def test_thread_snapshot_spans_two_threads_and_archive_without_duplicate_messages(scratch):
+    """Seed pre-cutover archive, migrate, then snapshot both kinds and the archive.
+
+    Isolate snapshot construction from WP2c's closure callers. Message ids kept
+    by M1 appear once even though the archive retains the same source message.
+    """
+    from app.social.reports import ReportCollector, _file_report
+    from test_thread_migration import apply, message as archived_message, pair as archived_pair, trade as old_trade
+    migrate(scratch, before='162_trade_loan_threads.sql')
+    with psycopg.connect(scratch, row_factory=dict_row) as conn:
+        archived = archived_pair(conn)
+        first_round = old_trade(conn, closed='2020-01-03')
+        duplicate = archived_message(conn, archived, '2020-01-02')
+        archive_only = archived_message(conn, archived, '2020-01-01')
+        apply(conn)
+        conn.execute("UPDATE collector_profile SET handle='ashsnapshot',handle_key='ashsnapshot' WHERE user_id='A'")
+        conn.execute("UPDATE collector_profile SET handle='mistysnapshot',handle_key='mistysnapshot' WHERE user_id='z'")
+        # Keep one archived source without its migrated copy to independently
+        # exercise the archive leg of the snapshot union.
+        conn.execute('DELETE FROM thread_message WHERE id=%s', (archive_only,))
+        first_thread = conn.execute('SELECT thread_id FROM trade WHERE id=%s', (first_round,)).fetchone()['thread_id']
+        second_thread, second_round, second_message = uuid4(), uuid4(), uuid4()
+        conn.execute("""INSERT INTO thread(id,kind,user_low,user_high,created_at,last_activity_at,changed_at)
+          VALUES (%s,'loan','A','z',now(),now(),now())""", (second_thread,))
+        conn.execute("""INSERT INTO loan(id,thread_id,kind,state,lender_id,borrower_id,lender_name,borrower_name)
+          VALUES (%s,%s,'borrow_request','requested','A','z','Ash','Misty')""", (second_round, second_thread))
+        conn.execute("INSERT INTO thread_message VALUES (%s,%s,false,%s,'Loan chat',clock_timestamp())",
+                     (second_message, second_thread, uuid4()))
+        command = ReportCollector(trader_id=uuid4(), reason='harassment', source='conversation', idempotency_key=uuid4())
+        rid = uuid4()
+        _file_report(conn, rid, 'A', 'z', command, None)
+        captured = conn.execute('SELECT message_id,body,from_reporter FROM trade_report_message WHERE report_id=%s',
+                                (rid,)).fetchall()
+        assert {r['message_id'] for r in captured} == {duplicate, archive_only, second_message}
+        assert len(captured) == 3
+        assert next(r for r in captured if r['message_id'] == duplicate)['from_reporter'] is True
+        assert next(r for r in captured if r['message_id'] == second_message)['from_reporter'] is False
+        assert conn.execute('SELECT trade_id FROM trade_report_trade WHERE report_id=%s', (rid,)).fetchone()['trade_id'] == first_round
+        conn.execute("UPDATE thread_message SET body='Later text' WHERE thread_id=%s", (first_thread,))
+        assert conn.execute('SELECT body FROM trade_report_message WHERE report_id=%s AND message_id=%s',
+                            (rid, duplicate)).fetchone()['body'] == 'Hello'

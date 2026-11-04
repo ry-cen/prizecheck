@@ -1,4 +1,4 @@
-import type { ConversationParty } from "../social_generated";
+import type { NearbyMatchRow } from "../social_generated";
 import { trackRecord } from "./conversationMessages";
 
 // Collector-facing text new with trader addresses (Trading #299), approved by the owner.
@@ -10,7 +10,7 @@ export const SEND_UNAVAILABLE = "This collector is no longer available.";
  * label before the name is known. */
 export const TRADER_LIST_TITLE = "Trade List";
 
-export type Band = NonNullable<ConversationParty["band"]>;
+export type Band = NonNullable<NearbyMatchRow["band"]>;
 
 /** The distance bands (Stage 2 spec "Bands"), with en dashes. */
 export const BAND_LABELS: Record<Band, string> = {

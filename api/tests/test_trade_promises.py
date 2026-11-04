@@ -8,8 +8,8 @@ Loan accept never picks copies a Trade covers, and the other way round, and with
 deletion and leaf conversion carry Trade picks; a deleted pick source becomes NULL; account deletion keeps both names.
 Migration 142's deferred triggers on ``trade`` and ``trade_line`` are the backstop for any other write.
 
-No route creates a Trade yet (#269 onward), so the tests seed Trade rows directly, under the givers' owner locks as the
-Trade steps will (``owners.lock_owners``), and take every other step through signed HTTP.
+The invariant tests seed mapped Trade rounds directly, under the givers' owner locks
+(``owners.lock_owners``), and take every other step through signed HTTP.
 """
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +25,7 @@ from app.loan_inventory import replacement_picks
 from app.loan_picks import pick_shortfalls, stale_pick_loans
 from app.social import counts
 from app.social.owners import lock_owners
+from test_threads import thread as make_thread
 from test_batch_add import batch, undo, undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
@@ -45,16 +46,15 @@ def insert_trade(conn, proposer, recipient, gives=(), gets=(), picks=(), state='
     """Writes one Trade row, its lines and its picks on ``conn``, as the Trade steps will (#269). ``gives``: (Edition,
     copies) the proposer gives; ``gets``: what the recipient gives; ``picks``: (side, owner, Location id or None,
     Edition, copies). An accepted row is accepted now unless ``accepted_at`` says when. Returns the Trade id."""
-    trade_id = uuid4()
+    _, trade_id = make_thread(proposer, recipient, conn=conn)
     names = {row['user_id']: row['display_name'] for row in conn.execute(
         'SELECT user_id, display_name FROM collector_profile WHERE user_id = ANY(%s)', ([proposer, recipient],))}
     if accepted_at is None and state != 'proposed':
         accepted_at = datetime.now(timezone.utc)
-    conn.execute("""INSERT INTO trade(id, state, closed_reason, proposer_id, recipient_id, proposer_name, recipient_name,
-        created_at, accepted_at, proposer_swap_at, recipient_swap_at)
-      VALUES (%s, %s, %s, %s, %s, %s, %s, coalesce(%s, now()), %s, %s, %s)""",
-                 (trade_id, state, closed_reason, proposer, recipient, names[proposer], names[recipient], created_at,
-                  accepted_at, proposer_swap_at, recipient_swap_at))
+    conn.execute("""UPDATE trade SET state=%s, closed_reason=%s, proposer_name=%s, recipient_name=%s,
+        created_at=coalesce(%s,now()), accepted_at=%s, proposer_swap_at=%s, recipient_swap_at=%s WHERE id=%s""",
+                 (state, closed_reason, names[proposer], names[recipient], created_at,
+                  accepted_at, proposer_swap_at, recipient_swap_at, trade_id))
     for side_name, lines in (('proposer', gives), ('recipient', gets)):
         for position, (edition, count) in enumerate(lines):
             conn.execute('INSERT INTO trade_line(trade_id, side, edition_id, position, quantity) VALUES (%s,%s,%s,%s,%s)',
@@ -353,8 +353,14 @@ def test_a_direct_write_that_breaks_a_trade_promise_fails_at_commit_through_each
     assert refused.value.diag.constraint_name == 'loan_promises_owned'
     # trade_promise_guard on accept: the recipient's lines (2 Arven) above what Ash holds (1).
     violates(("UPDATE trade SET state='accepted', accepted_at=now() WHERE id=%s", (trade,)))
-    # trade_promise_guard on an owner change: Brock holds none of Misty's Iono.
-    violates(('UPDATE trade SET proposer_id=%s WHERE id=%s', (brock, trade)))
+    # The thread model freezes participants: reassignment is refused immediately,
+    # before the deferred promise guard. Quantity/state/holding guards above still run at commit.
+    with pytest.raises(psycopg.errors.RaiseException,match='participant_immutable'):
+        with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+            conn.execute('UPDATE trade SET proposer_id=%s WHERE id=%s',(brock,trade))
+    with connect() as conn:
+        assert conn.execute('SELECT proposer_id,recipient_id FROM trade WHERE id=%s',(trade,)).fetchone()=={
+            'proposer_id':misty,'recipient_id':ash}
     assert reserved(misty, iono) == (2, 2)
     # A swap: the proposer's swap time set while the copies leave, in one commit, checks nothing ...
     swapped = seed_trade(ash, misty, gives=[(arven, 1)], picks=[('proposer', ash, box, arven, 1)], state='accepted')

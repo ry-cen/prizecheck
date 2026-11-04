@@ -1,4 +1,4 @@
-import type { ConversationSummary, FriendTradeCard } from "../social_generated";
+import type { FriendTradeCard } from "../social_generated";
 import type {
   OwnTradeList,
   TradeListCard,
@@ -48,13 +48,6 @@ export function traderConversationPath(traderId: string): string {
  * side is deleted has no trader id, and because a Trade knows only the conversation's id. */
 export function conversationPath(id: string): string {
   return `${TRADES_PATH}/${TRADE_CONVERSATION_SEGMENT}/${encodeURIComponent(id)}`;
-}
-
-/** Where a conversation list row goes: by trader id when the other side has one, else by conversation id. */
-export function conversationHref(summary: ConversationSummary): string {
-  return summary.other.trader_id
-    ? traderConversationPath(summary.other.trader_id)
-    : conversationPath(summary.id);
 }
 
 /** The address of one of the Trades tab's views. */

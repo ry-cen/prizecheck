@@ -261,7 +261,7 @@ A collector's account of a problem with another collector, made from a Conversat
 _Avoid_: Flag, complaint
 
 **Suspension**:
-The owner's action that removes a collector from Open discovery and stops them messaging, proposing, countering, accepting, switching Open discovery on and sending Friend Requests, Borrow Requests or Lend Offers. Their unconfirmed Trades are cancelled, as for a Block; a Trade either side confirmed stays open. Their other Friends cannot see their Trade List. Their own Collection, Decks, friendships and existing Loans continue, and the owner can lift it. Lifting it does not switch Open discovery back on.
+The owner's action that removes a collector from Open discovery and stops them messaging, proposing, countering, accepting, switching Open discovery on and sending Friend Requests, Borrow Requests or Lend Offers. Their unconfirmed Trades are cancelled, as for a Block; a Trade either side confirmed stays open. Their other Friends cannot see their Trade List. Their requested, offered and accepted Loans where neither handover is confirmed are cancelled, whichever role the suspended collector has. Loans with a confirmed handover continue. Taking back a handover confirmation cancels the Loan if neither handover remains confirmed and either participant is suspended. Their own Collection, Decks and friendships continue, and the owner can lift it. Lifting it does not switch Open discovery back on.
 _Avoid_: Ban
 
 **Completed trade**:

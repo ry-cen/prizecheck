@@ -315,7 +315,7 @@ def test_only_the_collector_reads_their_trade_wants_and_no_friend_view_changes(s
                  if item['name'] == 'Unsorted')
     hold(owner, shelf, ids['PAL 254'], 2)
     reads = ('/api/trade-wants', f'/api/social/collections/{handle}?show=all', f'/api/social/trade-lists/{handle}',
-             '/api/social/want-list-matches', '/api/social/trades')
+             '/api/social/want-list-matches', '/api/trades')
     before = {path: call('GET', path, friend).text for path in reads}
     ok(set_want(owner, ids['PAL 254'], 3))
     ok(set_rule(owner, ids['PAL 185'], 'identity'))
