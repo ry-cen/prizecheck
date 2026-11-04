@@ -181,6 +181,10 @@ async function story(
   await expect(page.getByRole("main")).not.toContainText("@");
   await expectNoLeaks(page, s);
   const proposal = page.url();
+  const proposedOffer = await tradeView(
+    page,
+    new URL(proposal).pathname.split("/").at(-1)!
+  );
 
   // 3. Misty opens it and chooses Counter; the builder names the proposal in its back link; she asks for more Arven.
   await misty.goto(proposal);
@@ -211,15 +215,16 @@ async function story(
 
   // 4. Ash sees the Counter, still without a Handle on either side.
   await page.goto(`${ORIGIN}/trades`);
-  await page
-    .getByRole("list", { name: "Conversations" })
-    .getByRole("link", { name: /^Misty W/ })
-    .click();
-  await page
-    .getByRole("list", { name: "Messages and Trades" })
-    .getByRole("link", { name: /countered/i })
-    .last() // the timeline runs oldest first: the Counter is the newest card
-    .click();
+  const item = page
+    .getByRole("main")
+    .locator(`a[href="/trades/${proposedOffer.thread_id}"]`);
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText("Misty W");
+  await item.click();
+  await expect(page).toHaveURL(proposal);
+  const counterOffer = await tradeView(page, proposedOffer.thread_id);
+  expect(counterOffer.offer_id).not.toBe(proposedOffer.offer_id);
+  expect(counterOffer.countered_from).toBe(proposedOffer.offer_id);
   await expect(heading(page)).toHaveText(
     "Misty W countered your Trade Proposal"
   );
