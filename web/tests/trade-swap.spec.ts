@@ -358,8 +358,24 @@ async function story(
   await expect(main.getByRole("alert")).toHaveText(
     "This Trade has changed. Check it and try again."
   );
-  await expect(dialog).toBeHidden();
+  // The accepted disclosure is inline, so fresh terms stay available for
+  // deliberate review. A changed cash term must never trigger an automatic POST.
+  await expect(dialog).toBeVisible();
   await expect(heading(page)).toHaveText("Ash K confirmed the swap");
+  await expect(
+    main.getByText("You pay Ash K $2.00", { exact: true })
+  ).toBeVisible();
+  await expect(dialog).toContainText(
+    "Leaves your Collection: 1 Iono (PAL 185)"
+  );
+  await expect(dialog).toContainText("Arrives in Unsorted: 1 Arven (SVI 166)");
+  await expect(dialog).toContainText("The swap can't be undone.");
+  await expect(
+    dialog.getByRole("combobox", { name: "Put the cards you get in" })
+  ).toHaveValue("");
+  await expect(
+    dialog.getByRole("button", { name: "Confirm swap", exact: true })
+  ).toHaveCount(1);
   expect(reviewConfirmations).toBe(1);
   await page.unroute(changedPath);
 
