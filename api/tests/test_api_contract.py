@@ -1,7 +1,7 @@
-"""The public HTTP contract: the OpenAPI document and the route table, as generated from the code before the shared-core split.
+"""Pin the supported HTTP contract, including item-thread routes and match order.
 
-Both files under api_contract/ were generated once from the code as it stood before the split. There is no regenerate flag: a
-change to either file is a change to the API contract and needs the owner's approval.
+Snapshot changes accompany owner-approved API changes; equality and route-order
+assertions remain mandatory after the shared-core split.
 """
 import json
 from pathlib import Path
@@ -25,3 +25,29 @@ def test_openapi_document_matches_the_snapshot():
 
 def test_route_table_matches_the_snapshot_in_order():
     assert route_table() == json.loads((CONTRACT / 'routes.json').read_text())
+
+
+def test_static_inventory_reads_precede_thread_detail_routes():
+    rows = route_table()
+    for literal, dynamic in (
+        ('/api/trades/list', '/api/trades/{trade_id}'),
+        ('/api/loans/lent-out', '/api/loans/{loan_id}'),
+        ('/api/loans/pending', '/api/loans/{loan_id}'),
+        ('/api/loans/borrowed', '/api/loans/{loan_id}'),
+    ):
+        def index(path):
+            return next(i for i, (methods, found, _) in enumerate(rows) if found.replace(':uuid', '') == path and 'GET' in (methods or []))
+        assert index(literal) < index(dynamic), literal
+
+
+def test_thread_contract_names_real_lists_details_and_offer_edits():
+    schema = app.openapi()
+    paths = schema['paths']
+    for kind, detail, live in (('trade', 'TradeDetail', 'live_offer'), ('loan', 'LoanDetail', 'live_terms')):
+        response = paths[f'/api/{kind}s']['get']['responses']['200']['content']['application/json']['schema']
+        assert response['type'] == 'array' and response['items']['$ref'].endswith('/ThreadItem')
+        assert live in schema['components']['schemas'][detail]['required']
+        assert f'/api/{kind}s/{{thread_id}}/timeline' in paths
+    assert '/api/threads/pulse' in paths
+    assert paths['/api/trades/{trade_id}/offer']['post']['requestBody']['content']['application/json']['schema']['$ref'].endswith('/ChangeOffer')
+    assert not any('/conversations' in path for path in paths)

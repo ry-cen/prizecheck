@@ -20,7 +20,6 @@ import type {
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Pill } from "../ui/Pill";
-import { MessageLink } from "./MessageLink";
 import { proposeFromMatch } from "./openProposal";
 import { proposalPath } from "./tradeListModel";
 import {
@@ -206,11 +205,14 @@ export function MatchRow({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3">
-            <MessageLink
-              traderId={row.trader_id}
-              name={name}
-              onNavigate={onNavigate}
-            />
+            <Button
+              onClick={() => {
+                proposeFromMatch(row.trader_id, shown);
+                onNavigate(proposalPath(row.trader_id));
+              }}
+            >
+              Propose trade
+            </Button>
             <a href={list} onClick={go} className={LINK}>
               See all of {name}'s Trade List
             </a>

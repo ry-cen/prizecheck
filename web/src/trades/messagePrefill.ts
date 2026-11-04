@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { traderConversationPath } from "./tradeListModel";
+import { proposalPath } from "./tradeListModel";
 
 export const DRAFT_PARAM = "draft";
 /** The longest prefill taken, in code points. */
 export const PREFILL_LIMIT = 300;
 
-/** The conversation with a trader, with `text` to start the composer with. */
+/** The item proposal for a trader, with `text` to start the composer with. */
 export function prefilledMessagePath(traderId: string, text: string): string {
-  return `${traderConversationPath(traderId)}?${new URLSearchParams({ [DRAFT_PARAM]: text })}`;
+  return `${proposalPath(traderId)}?${new URLSearchParams({ [DRAFT_PARAM]: text })}`;
 }
 
 /** The prefill in an address's query string: trimmed, or "" when it is missing, empty or too long. */
