@@ -87,7 +87,7 @@ class EventEdition(BaseModel):
     name: str
     set_code: str
     collector_number: str
-    descriptor: dict
+    variant_label: str
 
 
 class EventView(BaseModel):
@@ -352,9 +352,38 @@ def event_edition_ids(data) -> set[UUID]:
     return {line.edition_id for lines in (value.lines, value.not_lent, value.returned) for line in (lines or [])}
 
 
+def public_variant_label(descriptor: dict) -> str:
+    """A public physical Variant label, never arbitrary descriptor keys or objects."""
+    if descriptor.get('kind') == 'unspecified':
+        return 'Unspecified Variant'
+    if isinstance(descriptor.get('label'), str) and descriptor['label'].strip():
+        return descriptor['label'].strip()
+    def words(value):
+        return ' '.join(word[:1].upper() + word[1:] for word in
+                        re.split(r'[\s_-]+', re.sub(r'([a-z])([A-Z])', r'\1 \2', value)) if word)
+    def label(value):
+        if isinstance(value, str):
+            return words(value)
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, list):
+            return ', '.join(text for part in value if (text := label(part)))
+        return ''
+    parts = []
+    for key in ('finish', 'type', 'subtype', 'foil', 'foilPattern', 'stamp', 'stamps', 'size'):
+        value = descriptor.get(key)
+        if key == 'size' and value == 'standard':
+            continue
+        text = ({'normal': 'Normal', 'holo': 'Holo', 'reverse': 'Reverse Holo'}.get(value, words(value))
+                if key in ('finish', 'type') and isinstance(value, str) else label(value))
+        if text:
+            parts.append(text)
+    return ', '.join(parts) or 'Unspecified Variant'
+
+
 def event_editions(data, facts) -> list[EventEdition]:
     return [EventEdition(edition_id=card.edition_id, name=card.name, set_code=card.set_code,
-                         collector_number=card.collector_number, descriptor=card.descriptor)
+                         collector_number=card.collector_number, variant_label=public_variant_label(card.descriptor))
             for edition in sorted(event_edition_ids(data)) if (card := facts.get(edition)) is not None]
 
 
