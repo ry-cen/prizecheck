@@ -3,7 +3,6 @@ import type { ChangeOffer } from "../trades_generated";
 import type { Proposal, ProposalCard } from "./proposalModel";
 import { offerVersion, withOfferInventoryCaps } from "./offerInventory";
 import { offerLibrary } from "./offerCopies";
-
 export type OfferTerms = Pick<ChangeOffer, "you_give" | "you_get" | "cash">;
 export type OfferPhase =
   | "loading"
@@ -15,36 +14,39 @@ export type OfferPhase =
   | "sending"
   | "retry_send"
   | "sent";
-type Side = "give" | "get";
+export type InventorySide = "give" | "get";
+export type ReadSource = "version" | InventorySide;
+export type OfferRead = { id: number; source: ReadSource; version: string };
+export type ReadResult =
+  | { kind: "version"; offer: TradeView }
+  | { kind: "inventory"; cards: readonly ProposalCard[] }
+  | { kind: "not_found" | "obsolete" | "failed" | "cancelled" };
+export type ReadCompletion = { read: OfferRead; result: ReadResult };
+export type OfferPost = { attempt: number; key: string };
+export type PostResult =
+  "success" | "unknown" | "not_found" | "changed" | "refused";
 export type OfferLifecycle = {
   phase: OfferPhase;
   reviewed: TradeView;
   candidate: TradeView | null;
-  inventory: Record<Side, readonly ProposalCard[] | null>;
+  inventory: Record<InventorySide, readonly ProposalCard[] | null>;
   failure: "version" | "inventory" | null;
   pending: ChangeOffer | null;
+  nextRead: number;
+  reads: Record<number, OfferRead>;
+  latestRead: Partial<Record<ReadSource, number>>;
+  deferred: ReadCompletion[];
+  nextPost: number;
+  activePost: OfferPost | null;
 };
+/** Read observations cannot be confused with the outcome of an issued POST. */
 export type OfferEvent =
-  | { type: "check_requested" }
-  | { type: "version_seen"; offer: TradeView }
-  | { type: "inventory_requested"; version: string; side: Side }
-  | {
-      type: "inventory_received";
-      version: string;
-      side: Side;
-      cards: readonly ProposalCard[];
-    }
-  | { type: "inventory_obsolete"; version: string }
+  | { type: "read_started"; source: ReadSource; version: string }
+  | ({ type: "read_completed" } & ReadCompletion)
   | { type: "review_confirmed" }
-  | { type: "read_failed"; stage: "version" | "inventory" }
-  | { type: "unavailable" }
   | { type: "send_requested"; terms: OfferTerms; key: string }
-  | { type: "offer_changed" }
-  | { type: "transport_failed" }
-  | { type: "send_refused" }
-  | { type: "send_succeeded" }
-  | { type: "retry" }
-  | { type: "draft_edited" };
+  | { type: "post_completed"; post: OfferPost; result: PostResult }
+  | { type: "retry" | "draft_edited" };
 const EMPTY = { give: null, get: null };
 export function canEditOffer(offer: TradeView) {
   return (
@@ -59,6 +61,12 @@ export function initialOfferLifecycle(reviewed: TradeView): OfferLifecycle {
     inventory: EMPTY,
     failure: null,
     pending: null,
+    nextRead: 0,
+    reads: {},
+    latestRead: {},
+    deferred: [],
+    nextPost: 0,
+    activePost: null,
   };
 }
 export function inventoryReady(model: OfferLifecycle) {
@@ -73,121 +81,159 @@ export function reviewRequired(model: OfferLifecycle) {
   );
 }
 export function canSendOffer(model: OfferLifecycle) {
+  // A receipt-first exact replay does not depend on a later inventory observation.
   return (
-    (model.phase === "ready" || model.phase === "retry_send") &&
-    inventoryReady(model)
+    (model.phase === "retry_send" && model.pending !== null) ||
+    (model.phase === "ready" && inventoryReady(model))
   );
 }
 const afterInventory = (model: OfferLifecycle): OfferPhase =>
   inventoryReady(model) ? "ready" : "loading";
-/** All offer consent, cap readiness and retry-key decisions live in this pure transition. */
+const terminal = (model: OfferLifecycle) =>
+  model.phase === "gone" || model.phase === "sent";
+function currentRead(model: OfferLifecycle, read: OfferRead) {
+  return (
+    read.version === offerVersion(model.reviewed) &&
+    model.latestRead[read.source] === read.id
+  );
+}
+function observe(
+  model: OfferLifecycle,
+  completion: ReadCompletion
+): OfferLifecycle {
+  const { read, result } = completion;
+  if (
+    terminal(model) ||
+    !currentRead(model, read) ||
+    result.kind === "cancelled"
+  )
+    return model;
+  if (read.source === "version") {
+    if (result.kind === "not_found")
+      return { ...model, phase: "gone", inventory: EMPTY, failure: null };
+    if (result.kind !== "version")
+      return { ...model, phase: "read_failed", failure: "version" };
+    if (!canEditOffer(result.offer))
+      return {
+        ...model,
+        phase: "gone",
+        candidate: result.offer,
+        inventory: EMPTY,
+        failure: null,
+      };
+    if (
+      !reviewRequired(model) &&
+      offerVersion(result.offer) === offerVersion(model.reviewed)
+    )
+      return model;
+    return {
+      ...model,
+      phase: "changed",
+      candidate: result.offer,
+      inventory: EMPTY,
+      failure: null,
+    };
+  }
+  if (reviewRequired(model) || model.phase === "read_failed") return model;
+  if (result.kind === "obsolete" || result.kind === "not_found")
+    return { ...model, phase: "checking", inventory: EMPTY, failure: null };
+  if (result.kind !== "inventory")
+    return { ...model, phase: "read_failed", failure: "inventory" };
+  const next = {
+    ...model,
+    inventory: { ...model.inventory, [read.source]: result.cards },
+    failure: null,
+  };
+  return { ...next, phase: afterInventory(next) };
+}
+function settledObservations(model: OfferLifecycle): OfferLifecycle {
+  const observations = [...model.deferred];
+  return observations
+    .sort((a, b) => a.read.id - b.read.id)
+    .reduce(observe, { ...model, deferred: [] });
+}
+/** Pure lifecycle. All background outcomes pass one authority boundary before affecting consent or commands. */
 export function transitionOffer(
   model: OfferLifecycle,
   event: OfferEvent
 ): OfferLifecycle {
-  if (model.phase === "gone" || model.phase === "sent") return model;
-  // Background reads cannot replace an in-flight or unknown command's body/key.
-  if (
-    (model.phase === "sending" || model.phase === "retry_send") &&
-    [
-      "check_requested",
-      "version_seen",
-      "inventory_requested",
-      "inventory_received",
-      "inventory_obsolete",
-      "read_failed",
-    ].includes(event.type)
-  )
-    return model;
-  const reviewing = reviewRequired(model);
+  if (event.type === "read_completed") {
+    const outstanding = model.reads[event.read.id];
+    if (
+      !outstanding ||
+      outstanding.source !== event.read.source ||
+      outstanding.version !== event.read.version
+    )
+      return model;
+    const reads = { ...model.reads };
+    delete reads[event.read.id];
+    const next = { ...model, reads };
+    if (
+      terminal(model) ||
+      !currentRead(model, event.read) ||
+      event.result.kind === "cancelled"
+    )
+      return next;
+    if (model.pending) {
+      // Observation only: never change a retained body, key, active attempt, phase or replay eligibility.
+      return {
+        ...next,
+        deferred: [
+          ...model.deferred.filter(
+            (item) => item.read.source !== event.read.source
+          ),
+          { read: event.read, result: event.result },
+        ],
+      };
+    }
+    return observe(next, event);
+  }
+  if (terminal(model)) return model;
   switch (event.type) {
-    case "check_requested":
-    case "offer_changed":
-      return {
-        ...model,
-        phase: "checking",
-        failure: null,
-        inventory: EMPTY,
-        pending: null,
+    case "read_started": {
+      const read = {
+        id: model.nextRead + 1,
+        source: event.source,
+        version: event.version,
       };
-    case "version_seen":
-      if (!canEditOffer(event.offer))
-        return {
-          ...model,
-          phase: "gone",
-          candidate: event.offer,
-          inventory: EMPTY,
-          pending: null,
-        };
-      if (
-        !reviewing &&
-        offerVersion(event.offer) === offerVersion(model.reviewed)
-      )
-        return model;
-      return {
+      const next = {
         ...model,
-        phase: "changed",
-        candidate: event.offer,
-        failure: null,
-        inventory: EMPTY,
-        pending: null,
+        nextRead: read.id,
+        reads: { ...model.reads, [read.id]: read },
+        latestRead:
+          event.version === offerVersion(model.reviewed)
+            ? { ...model.latestRead, [read.source]: read.id }
+            : model.latestRead,
       };
-    case "inventory_requested":
+      if (model.pending || event.version !== offerVersion(model.reviewed))
+        return next;
+      if (event.source === "version")
+        return { ...next, phase: "checking", inventory: EMPTY, failure: null };
+      if (reviewRequired(model) || model.phase === "read_failed") return next;
+      return {
+        ...next,
+        phase: "loading",
+        inventory: { ...model.inventory, [event.source]: null },
+        failure: null,
+      };
+    }
+    case "review_confirmed":
       if (
-        event.version !== offerVersion(model.reviewed) ||
-        model.phase === "read_failed" ||
-        reviewing ||
-        model.phase === "sending" ||
-        model.phase === "retry_send"
+        !model.candidate ||
+        !reviewRequired(model) ||
+        !canEditOffer(model.candidate)
       )
         return model;
       return {
         ...model,
         phase: "loading",
-        failure: null,
-        inventory: { ...model.inventory, [event.side]: null },
-      };
-    case "inventory_received": {
-      if (
-        event.version !== offerVersion(model.reviewed) ||
-        model.phase === "read_failed" ||
-        reviewing ||
-        model.phase === "sending" ||
-        model.phase === "retry_send"
-      )
-        return model;
-      const next = {
-        ...model,
-        inventory: { ...model.inventory, [event.side]: event.cards },
-        failure: null,
-      };
-      return { ...next, phase: afterInventory(next) };
-    }
-    case "inventory_obsolete":
-      if (event.version !== offerVersion(model.reviewed) || reviewing)
-        return model;
-      return {
-        ...model,
-        phase: "checking",
+        reviewed: model.candidate,
+        candidate: null,
         inventory: EMPTY,
-        pending: null,
         failure: null,
+        deferred: [],
       };
-    case "review_confirmed":
-      if (!model.candidate || !reviewing || !canEditOffer(model.candidate))
-        return model;
-      return { ...initialOfferLifecycle(model.candidate), phase: "loading" };
-    case "read_failed":
-      // A superseded availability request must never hide the current confirmation controls.
-      if (
-        event.stage === "inventory" &&
-        (reviewing || model.phase === "sending" || model.phase === "retry_send")
-      )
-        return model;
-      return { ...model, phase: "read_failed", failure: event.stage };
-    case "unavailable":
-      return { ...model, phase: "gone", inventory: EMPTY, pending: null };
-    case "send_requested":
+    case "send_requested": {
       if (!canSendOffer(model)) return model;
       if (
         !model.pending &&
@@ -206,47 +252,79 @@ export function transitionOffer(
         })
       )
         return model;
+      const pending = model.pending ?? {
+        ...structuredClone(event.terms),
+        offer_id: model.reviewed.offer_id,
+        revision: model.reviewed.revision,
+        idempotency_key: event.key,
+      };
       return {
         ...model,
         phase: "sending",
-        pending: model.pending ?? {
-          ...structuredClone(event.terms),
-          offer_id: model.reviewed.offer_id,
-          revision: model.reviewed.revision,
-          idempotency_key: event.key,
+        pending,
+        nextPost: model.nextPost + 1,
+        activePost: {
+          attempt: model.nextPost + 1,
+          key: pending.idempotency_key,
         },
       };
-    case "transport_failed":
-      return model.phase === "sending" && model.pending
-        ? { ...model, phase: "retry_send" }
-        : model;
-    case "send_refused":
-      return model.phase === "sending"
-        ? { ...model, phase: afterInventory(model), pending: null }
-        : model;
-    case "send_succeeded":
-      return model.phase === "sending"
-        ? { ...model, phase: "sent", pending: null }
-        : model;
-    case "retry":
-      if (model.phase === "read_failed")
+    }
+    case "post_completed": {
+      if (
+        model.phase !== "sending" ||
+        !model.pending ||
+        event.post.attempt !== model.activePost?.attempt ||
+        event.post.key !== model.pending.idempotency_key
+      )
+        return model;
+      if (event.result === "unknown")
+        return { ...model, phase: "retry_send", activePost: null };
+      const settled = { ...model, pending: null, activePost: null };
+      if (event.result === "success")
+        return { ...settled, phase: "sent", deferred: [] };
+      if (event.result === "not_found")
         return {
-          ...model,
-          phase: model.failure === "version" ? "checking" : "loading",
+          ...settled,
+          phase: "gone",
+          inventory: EMPTY,
+          deferred: [],
           failure: null,
         };
-      return model;
+      if (event.result === "changed") {
+        // The adapter issues a NEW post-refusal read. Older observations cannot substitute for it.
+        return {
+          ...settled,
+          phase: "checking",
+          inventory: EMPTY,
+          failure: null,
+          deferred: [],
+        };
+      }
+      return settledObservations({
+        ...settled,
+        phase: afterInventory(settled),
+      });
+    }
+    case "retry":
+      return model.phase === "read_failed"
+        ? {
+            ...model,
+            phase: model.failure === "version" ? "checking" : "loading",
+            failure: null,
+          }
+        : model;
     case "draft_edited":
       if (model.phase === "sending") return model;
-      return {
-        ...model,
-        pending: null,
-        phase:
-          model.phase === "retry_send" ? afterInventory(model) : model.phase,
-      };
+      return model.pending
+        ? settledObservations({
+            ...model,
+            pending: null,
+            activePost: null,
+            phase: afterInventory(model),
+          })
+        : model;
   }
 }
-/** The page uses this policy for its actual recovery controls, not just for tests. */
 export function offerControls(model: OfferLifecycle) {
   return {
     review:
