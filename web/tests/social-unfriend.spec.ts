@@ -73,7 +73,7 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
       idempotency_key: randomUUID(),
     })
   ).id as string;
-  await loanStep(lender, pending, `/api/loans/${pending}/accept`, {
+  await loanStep(lender, pending, "accept", {
     lines: [{ edition_id: ids["PAL 185"], promised: "1" }],
   });
 
@@ -169,7 +169,7 @@ test("the Block question says how many open Loans it cancels, and only that it i
       idempotency_key: randomUUID(),
     })
   ).id as string;
-  await loanStep(lender, pending, `/api/loans/${pending}/accept`, {
+  await loanStep(lender, pending, "accept", {
     lines: [{ edition_id: ids["PAL 185"], promised: "1" }],
   });
 
@@ -241,7 +241,7 @@ async function tradeStory(
       idempotency_key: randomUUID(),
     })
   ).id as string;
-  await loanStep(lender, loan, `/api/loans/${loan}/accept`, {
+  await loanStep(lender, loan, "accept", {
     lines: [{ edition_id: iono, promised: "1" }],
   });
 

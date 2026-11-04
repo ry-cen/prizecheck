@@ -1,3 +1,4 @@
+import { tradeView } from "./support/trades";
 // Ticket #271: accept, decline or cancel a Trade (Trading spec "Answering a proposal" and "Cancelling a Trade",
 // prototype verdict variant A; owner, 2026-10-20: withdraw, decline and cancel ask first, accept doesn't). Misty sends
 // Ash four Trade Proposals through the API. Ash declines one and keeps it at the question, then accepts it whole, and
@@ -164,7 +165,7 @@ async function propose(
 
 /** The Trade as `page`'s collector reads it, through the API. */
 const tradeState = async (page: Page, id: string) => {
-  const trade = await api(page, "GET", `/api/social/trades/${id}`);
+  const trade = await tradeView(page, id);
   return {
     state: trade.state as string,
     revision: trade.revision as number,

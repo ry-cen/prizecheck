@@ -291,7 +291,7 @@ async function tradeStory(
       idempotency_key: randomUUID(),
     })
   ).id as string;
-  await loanStep(misty, loan, `/api/loans/${loan}/accept`, {
+  await loanStep(misty, loan, "accept", {
     lines: [{ edition_id: iono, promised: "1" }],
   });
 

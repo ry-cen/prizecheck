@@ -1,3 +1,4 @@
+import { tradeView } from "./support/trades";
 // Ticket #302 (Trading Stage 2, "Block for strangers"): Misty (zip 00010) and Ash (00011) are strangers in reach. Ash
 // blocks Misty from their conversation's ⋯ menu; the question counts the Trade Proposals it would cancel, both sides
 // go read-only (Misty's open page turns on the pulse, with no reload and no mention of a Block), Settings › Privacy
@@ -210,7 +211,7 @@ test.describe("desktop, Block for strangers", () => {
       you_get: [{ edition_id: s.ids["PAL 185"], quantity: "1" }],
       idempotency_key: randomUUID(),
     });
-    const read = () => api(page, "GET", `/api/social/trades/${sent.id}`);
+    const read = () => tradeView(page, sent.id);
 
     const confirm = await askToBlock(page, s);
     await expect(

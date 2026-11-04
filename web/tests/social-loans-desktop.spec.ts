@@ -51,11 +51,11 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   const account = await accountId(page);
   const selected = await request();
   const pending = await request();
-  await loanStep(page, pending.id, `/api/loans/${pending.id}/accept`, {
+  await loanStep(page, pending.id, "accept", {
     lines: [{ edition_id: ids["PAL 185"], promised: "3" }],
   });
   const history = await request();
-  await loanStep(page, history.id, `/api/social/loans/${history.id}/decline`);
+  await loanStep(page, history.id, "decline");
   // Enough real requests to exercise the queue's independent scroll region.
   for (const _ of Array.from({ length: 6 })) await request();
   let listReads = 0;
