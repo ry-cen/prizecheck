@@ -236,7 +236,25 @@ export function LoanScreen({
       }
     );
     return () => controller.abort();
-  }, [loanId, attempt, pulseChanged]);
+  }, [loanId, attempt]);
+  const lastPulse = useRef(pulseChanged);
+  useEffect(() => {
+    if (lastPulse.current === pulseChanged) return;
+    lastPulse.current = pulseChanged;
+    // Keep lending choices, pending forms and unknown-outcome bodies intact.
+    const answering =
+      load.kind === "ready" && load.loan.actions.includes("accept");
+    if (
+      !busy &&
+      !asking &&
+      !returning &&
+      !writing &&
+      !dating &&
+      !answering &&
+      keys.current.size === 0
+    )
+      setAttempt((n) => n + 1);
+  }, [pulseChanged]);
 
   // After each render: a focus move asked for by the last press or step (FocusNext).
   useLayoutEffect(() => {

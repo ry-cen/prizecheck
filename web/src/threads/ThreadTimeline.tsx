@@ -55,22 +55,28 @@ export function ThreadTimeline({
   const [body, setBody] = useState(""),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
-  const [canMessage, setCanMessage] = useState(false);
+  const [permissionFailed, setPermissionFailed] = useState(false);
+  const [canMessage, setCanMessage] = useState<boolean | null>(null);
   const pending = useRef<{ body: string; idempotency_key: string } | null>(
     null
   );
   const changed = usePulseChanged(),
     poll = usePollPulse();
-  useConversationOpen();
+  useConversationOpen(active);
   useEffect(() => {
     if (!active) return;
+    setCanMessage(null);
+    setPermissionFailed(false);
     const controller = new AbortController();
     void getThreadDetail(kind, id, controller.signal).then(
       (detail) => {
         if (!controller.signal.aborted) setCanMessage(detail.can_message);
       },
       () => {
-        if (!controller.signal.aborted) setCanMessage(false);
+        if (!controller.signal.aborted) {
+          setCanMessage(null);
+          setPermissionFailed(true);
+        }
       }
     );
     getThreadTimeline(kind, id, null, controller.signal).then(
@@ -201,6 +207,11 @@ export function ThreadTimeline({
             {busy ? "Sending…" : pending.current ? "Retry" : "Send"}
           </Button>
         </form>
+      ) : canMessage === null ? (
+        <p role="status">
+          {permissionFailed ? "Chat couldn't be checked." : "Checking chat…"}{" "}
+          <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
+        </p>
       ) : (
         <p>This chat is read-only.</p>
       )}

@@ -270,7 +270,15 @@ export function TradeScreen({
       }
     );
     return () => controller.abort();
-  }, [tradeId, attempt, pulseChanged]);
+  }, [tradeId, attempt]);
+  const lastPulse = useRef(pulseChanged);
+  useEffect(() => {
+    if (lastPulse.current === pulseChanged) return;
+    lastPulse.current = pulseChanged;
+    // Never replace consent or an unsettled same-key command's view.
+    if (!busy && !confirming && !asking && keys.current.size === 0)
+      setAttempt((n) => n + 1);
+  }, [pulseChanged]);
 
   // Refresh an idle view when returning to it. An open consent dialog or unsettled command keeps its snapshot.
   useEffect(() => {

@@ -443,16 +443,18 @@ def test_trades_wait_on_the_side_whose_step_it_is_one_line_each(store):
     # A proposal waits on its recipient's answer, never on the proposer.
     assert trade_lines(ash) == [(trade['id'], 'answer')] and trade_lines(misty) == []
     ok(accept_trade(ash, trade))
-    # Accepted, nobody confirmed and every pick up to date: it waits on neither side.
-    assert trade_lines(ash) == [] and trade_lines(misty) == []
+    # Agreed, nobody confirmed: each eligible participant needs to confirm.
+    assert trade_lines(ash) == [(trade['id'], 'confirm_swap')]
+    assert trade_lines(misty) == [(trade['id'], 'confirm_swap')]
     # Misty moves a picked Iono out of the Trade Binder: her pick is out of date, which waits on her until she fixes
     # it, on the Trades list too.
     shelf = place(misty, 'Shelf')
     move_one(misty, binder, iono, shelf)
-    assert trade_lines(misty) == [(trade['id'], 'fix_picks')] and trade_lines(ash) == []
+    assert trade_lines(misty) == [(trade['id'], 'fix_picks')]
+    assert trade_lines(ash) == [(trade['id'], 'confirm_swap')]
     seen = ok(read(misty, trade))
     assert (seen['waiting'], seen['needs_you'], seen['section']) == ('fix_picks', True, 'needs_you')
-    assert ok(read(ash, trade))['section'] == 'to_swap'
+    assert ok(read(ash, trade))['section'] == 'needs_you'
     # Ash confirms. Misty's Trade now needs two things and is still one line, the out-of-date pick first.
     ok(confirm(ash, trade))
     assert trade_lines(misty) == [(trade['id'], 'fix_picks')] and trade_lines(ash) == []
@@ -483,10 +485,10 @@ def test_each_trade_line_says_since_when_the_trade_reached_the_step_that_waits_o
     move_one(misty, binder, iono, place(misty, 'Shelf'))
     row = row_of(trade)
     assert trade_since(misty, trade) == row['accepted_at'] != row['created_at']
-    # A swap the other side confirmed waits from that confirmation.
+    # Own confirmation has waited since agreement, even after the other side confirms.
     ok(use_suggested_picks(misty, trade))
     ok(confirm(ash, trade))
-    assert trade_since(misty, trade) == row_of(trade)['recipient_swap_at'] is not None
+    assert trade_since(misty, trade) == row_of(trade)['accepted_at'] is not None
 
 
 def test_trade_steps_tell_the_other_side_who_took_them_and_a_withdraw_reads_as_withdrawn(store):
@@ -635,7 +637,7 @@ def test_the_inbox_reads_trades_without_waiting_on_a_lock_and_a_trade_step_never
     ('proposed', 'recipient', (None, None), True, 'answer', 'needs_you'),
     ('proposed', 'proposer', (None, None), True, None, 'pending'),
     ('accepted', 'proposer', (None, None), True, 'fix_picks', 'needs_you'),
-    ('accepted', 'proposer', (None, None), False, None, 'to_swap'),
+    ('accepted', 'proposer', (None, None), False, 'confirm_swap', 'needs_you'),
     ('accepted', 'proposer', (None, 'now'), True, 'fix_picks', 'needs_you'),
     ('accepted', 'proposer', (None, 'now'), False, 'confirm_swap', 'needs_you'),
     ('accepted', 'proposer', ('now', None), True, None, 'pending'),
@@ -657,7 +659,9 @@ def test_since_is_read_from_the_time_the_trade_reached_its_step():
            'proposer_swap_at': None, 'recipient_swap_at': swapped_}
     assert trades.trade_waiting_since('ash', row, 'answer') == created
     assert trades.trade_waiting_since('misty', row, 'fix_picks') == accepted_
-    assert trades.trade_waiting_since('misty', row, 'confirm_swap') == swapped_
+    assert trades.trade_waiting_since('misty', row, 'confirm_swap') == accepted_
+    assert trades.trade_waiting_since('misty', {**row, 'recipient_swap_at': None}, 'confirm_swap') == accepted_
+    assert trades.trade_waiting_since('misty', {**row, 'accepted_at': None}, 'confirm_swap') == created
     assert trades.trade_waiting_since('misty', {**row, 'accepted_at': None}, 'fix_picks') == created
 
 
@@ -666,10 +670,13 @@ def test_unread_only_trade_needs_you_without_an_inbox_waiting_step(store):
     ids, ash, misty, binder, box = trading()
     trade = proposed(misty, ash, give=[(ids['PAL 185'], 1)], get=[(ids['SVI 166'], 1)])
     agreed = ok(accept_trade(ash, trade))
-    assert trade_lines(misty) == trade_lines(ash) == []
+    ok(confirm(misty, agreed))
+    assert trade_lines(misty) == []
+    assert trade_lines(ash) == [(trade['id'], 'confirm_swap')]
     ok(message(ash, agreed['thread_id'], 'See you at the league'), 201)
     listed = ok(call('GET', '/api/trades?group=needs_you', misty))
     assert len(listed) == 1
     assert listed[0]['id'] == agreed['thread_id']
     assert listed[0]['waiting'] is None and listed[0]['unread'] == 1
-    assert trade_lines(misty) == [] and trade_lines(ash) == []
+    assert trade_lines(misty) == []
+    assert trade_lines(ash) == [(trade['id'], 'confirm_swap')]

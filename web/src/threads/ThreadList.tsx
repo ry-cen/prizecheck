@@ -1,4 +1,4 @@
-import { WAITING_LABELS } from "./threadPresentation";
+import { waitingAction } from "./threadPresentation";
 import { useEffect, useRef, useState } from "react";
 import { getLoans, getTrades, type ThreadItem } from "../social_generated";
 import { useLoansChanged, usePulseChanged } from "../inbox/Inbox";
@@ -108,9 +108,7 @@ export function ThreadList({
               </span>
               <span>
                 {row.waiting && (
-                  <span>
-                    ↗ {WAITING_LABELS[row.waiting] ?? "Review agreement"}{" "}
-                  </span>
+                  <span>↗ {waitingAction(kind, row.waiting)} </span>
                 )}
                 {(row.unread ?? 0) > 0 && <span>● New messages</span>}
               </span>
