@@ -1,3 +1,4 @@
+import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
 import {
   createContext,
   useCallback,
@@ -530,6 +531,11 @@ function BorrowComposer({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const name = draft.friend.display_name;
+  const pending = useRef<Parameters<typeof sendBorrowRequest>[0] | null>(null);
+  const [retained, setRetained] = useState(false);
+  const form = useRef<HTMLDivElement>(null);
+  const close = () =>
+    closeLoanRequest(form.current, pending.current !== null, onClose);
 
   useEffect(() => {
     let live = true;
@@ -543,6 +549,7 @@ function BorrowComposer({
   }, [attempt]);
 
   function edit(update: (current: Draft) => Draft | null) {
+    if (pending.current) return;
     setMessage("");
     onChange((current) => (current ? update(current) : null));
   }
@@ -554,7 +561,7 @@ function BorrowComposer({
     setBusy(true);
     setMessage("");
     try {
-      const loan = await sendBorrowRequest({
+      pending.current ??= {
         lender_id: draft.friend.collector_id,
         lines: draft.lines.map((line) => ({
           edition_id: line.edition_id,
@@ -563,7 +570,11 @@ function BorrowComposer({
         deck_id: draft.deckId,
         return_by: draft.returnBy || null,
         idempotency_key: sendKey(),
-      });
+      };
+      setRetained(true);
+      const loan = await sendBorrowRequest(pending.current);
+      pending.current = null;
+      setRetained(false);
       onChange(() => null);
       onClose();
       noteLoansChanged();
@@ -573,7 +584,11 @@ function BorrowComposer({
         focus: true,
       });
     } catch (cause) {
-      if (!outcomeUnknown(cause)) forgetKey();
+      if (!outcomeUnknown(cause)) {
+        pending.current = null;
+        setRetained(false);
+        forgetKey();
+      }
       const error = cause instanceof SocialError ? cause : null;
       if (error?.code === "NOT_LENDABLE") {
         const editionId = String(error.detail.edition_id ?? "");
@@ -622,113 +637,118 @@ function BorrowComposer({
   return (
     <Dialog
       open
-      onClose={onClose}
+      onClose={close}
       title={`Borrow Request to ${name}`}
       closeLabel="Close Borrow Request"
       returnFocus={returnFocus}
     >
-      <div className="flex flex-col gap-4">
+      <div ref={form} className="flex flex-col gap-4">
         <p className="m-0 text-meta text-text-muted">
           {name} can accept all of it, part of it, or decline.
         </p>
-        <ul
-          aria-label="Cards to borrow"
-          className="m-0 flex list-none flex-col gap-3 p-0"
-        >
-          {draft.lines.map((line) => {
-            const edition = lineEdition(line);
-            return (
-              <li
-                key={line.edition_id}
-                className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 phone:grid-cols-[3rem_minmax(0,1fr)]"
+        <fieldset disabled={retained} className="contents">
+          <ul
+            aria-label="Cards to borrow"
+            className="m-0 flex list-none flex-col gap-3 p-0"
+          >
+            {draft.lines.map((line) => {
+              const edition = lineEdition(line);
+              return (
+                <li
+                  key={line.edition_id}
+                  className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 phone:grid-cols-[3rem_minmax(0,1fr)]"
+                >
+                  <CardImage url={line.image_url} />
+                  <div className="min-w-0">
+                    <p className="m-0 text-body font-medium wrap-anywhere">
+                      {line.name}
+                    </p>
+                    <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                      {edition}
+                      {line.lendable && ` · ${line.lendable}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 phone:col-start-2">
+                    <Stepper
+                      label={`Copies of ${line.name}, ${edition}`}
+                      value={line.quantity}
+                      min={1}
+                      max={line.cap ?? undefined}
+                      onChange={(quantity) =>
+                        edit((current) => ({
+                          ...current,
+                          lines: current.lines.map((item) =>
+                            item.edition_id === line.edition_id
+                              ? { ...item, quantity }
+                              : item
+                          ),
+                        }))
+                      }
+                    />
+                    <Button
+                      variant="quiet"
+                      icon={X}
+                      label={`Remove ${line.name}, ${edition}`}
+                      onClick={() =>
+                        edit((current) => {
+                          const lines = current.lines.filter(
+                            (item) => item.edition_id !== line.edition_id
+                          );
+                          return lines.length ? { ...current, lines } : null;
+                        })
+                      }
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <Select
+            label="For Deck"
+            value={draft.deckId ?? ""}
+            onChange={(event) =>
+              edit((current) => ({
+                ...current,
+                deckId: event.target.value || null,
+              }))
+            }
+          >
+            <option value="">No Deck (they go to Unsorted)</option>
+            {decks.kind === "ready" &&
+              decks.decks.map((deck) => (
+                <option key={deck.id} value={deck.id}>
+                  {deck.name}
+                </option>
+              ))}
+            {decks.kind !== "ready" && draft.deckId && (
+              <option value={draft.deckId}>The Deck you chose</option>
+            )}
+          </Select>
+          {decks.kind === "failed" && (
+            <p className="m-0 text-meta text-text-muted">
+              Your Decks couldn't be loaded.{" "}
+              <button
+                type="button"
+                onClick={() => setAttempt((n) => n + 1)}
+                className="cursor-pointer border-0 bg-transparent p-0 font-sans text-meta text-accent-strong underline"
               >
-                <CardImage url={line.image_url} />
-                <div className="min-w-0">
-                  <p className="m-0 text-body font-medium wrap-anywhere">
-                    {line.name}
-                  </p>
-                  <p className="m-0 text-meta text-text-muted wrap-anywhere">
-                    {edition}
-                    {line.lendable && ` · ${line.lendable}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 phone:col-start-2">
-                  <Stepper
-                    label={`Copies of ${line.name}, ${edition}`}
-                    value={line.quantity}
-                    min={1}
-                    max={line.cap ?? undefined}
-                    onChange={(quantity) =>
-                      edit((current) => ({
-                        ...current,
-                        lines: current.lines.map((item) =>
-                          item.edition_id === line.edition_id
-                            ? { ...item, quantity }
-                            : item
-                        ),
-                      }))
-                    }
-                  />
-                  <Button
-                    variant="quiet"
-                    icon={X}
-                    label={`Remove ${line.name}, ${edition}`}
-                    onClick={() =>
-                      edit((current) => {
-                        const lines = current.lines.filter(
-                          (item) => item.edition_id !== line.edition_id
-                        );
-                        return lines.length ? { ...current, lines } : null;
-                      })
-                    }
-                  />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-        <Select
-          label="For Deck"
-          value={draft.deckId ?? ""}
-          onChange={(event) =>
-            edit((current) => ({
-              ...current,
-              deckId: event.target.value || null,
-            }))
-          }
-        >
-          <option value="">No Deck (they go to Unsorted)</option>
-          {decks.kind === "ready" &&
-            decks.decks.map((deck) => (
-              <option key={deck.id} value={deck.id}>
-                {deck.name}
-              </option>
-            ))}
-          {decks.kind !== "ready" && draft.deckId && (
-            <option value={draft.deckId}>The Deck you chose</option>
+                Retry
+              </button>
+            </p>
           )}
-        </Select>
-        {decks.kind === "failed" && (
-          <p className="m-0 text-meta text-text-muted">
-            Your Decks couldn't be loaded.{" "}
-            <button
-              type="button"
-              onClick={() => setAttempt((n) => n + 1)}
-              className="cursor-pointer border-0 bg-transparent p-0 font-sans text-meta text-accent-strong underline"
-            >
-              Retry
-            </button>
-          </p>
+          <TextField
+            type="date"
+            label="Return by (optional)"
+            min={today()}
+            value={draft.returnBy}
+            onChange={(event) =>
+              edit((current) => ({ ...current, returnBy: event.target.value }))
+            }
+          />
+        </fieldset>
+        {retained && (
+          <PendingLoanRequest busy={busy} onRetry={() => void send()} />
         )}
-        <TextField
-          type="date"
-          label="Return by (optional)"
-          min={today()}
-          value={draft.returnBy}
-          onChange={(event) =>
-            edit((current) => ({ ...current, returnBy: event.target.value }))
-          }
-        />
         <p role="alert" className="m-0 text-meta text-danger empty:hidden">
           {message}
         </p>
@@ -736,13 +756,14 @@ function BorrowComposer({
           <Button
             variant="quiet"
             onClick={() => {
+              if (pending.current) return;
               onChange(() => null);
               onClose();
             }}
           >
             Discard
           </Button>
-          <Button onClick={onClose}>Keep draft</Button>
+          <Button onClick={close}>Keep draft</Button>
           {draft.replaces && (
             <>
               <p>
@@ -755,7 +776,7 @@ function BorrowComposer({
           )}
           <Button
             variant="primary"
-            disabled={busy || !!draft.replaces}
+            disabled={retained || busy || !!draft.replaces}
             onClick={() => void send()}
           >
             Send Borrow Request

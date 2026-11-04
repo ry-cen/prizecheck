@@ -1,3 +1,4 @@
+import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
 import {
   useEffect,
   useLayoutEffect,
@@ -87,6 +88,11 @@ export function LendOfferDialog({
   const [sent, setSent] = useState<Sent | null>(null);
   const [attempt, setAttempt] = useState(0);
   const key = useRef<string | null>(null);
+  const pending = useRef<Parameters<typeof sendLendOffer>[0] | null>(null);
+  const [retained, setRetained] = useState(false);
+  const form = useRef<HTMLDivElement>(null);
+  const close = () =>
+    closeLoanRequest(form.current, pending.current !== null, onClose);
   // Retry after the Friends couldn't be read stays, busy, while they are read again; then focus moves to the Friend
   // field, or stays on Retry if they still can't be read.
   const friendField = useRef<HTMLSelectElement>(null);
@@ -103,7 +109,7 @@ export function LendOfferDialog({
   }, [sent]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || pending.current) return;
     setFriendId("");
     setReturnBy("");
     setMessage("");
@@ -145,7 +151,7 @@ export function LendOfferDialog({
     setMessage("");
     key.current ??= crypto.randomUUID();
     try {
-      const loan = await sendLendOffer({
+      pending.current ??= {
         borrower_id: friendId,
         copies: rows.map((row) => ({
           location_id: row.locationId,
@@ -154,12 +160,20 @@ export function LendOfferDialog({
         })),
         return_by: returnBy || null,
         idempotency_key: key.current,
-      });
+      };
+      setRetained(true);
+      const loan = await sendLendOffer(pending.current);
+      pending.current = null;
+      setRetained(false);
       key.current = null;
       setSent({ id: loan.id, friend: friendName });
       onSent();
     } catch (cause) {
-      if (!outcomeUnknown(cause)) key.current = null;
+      if (!outcomeUnknown(cause)) {
+        key.current = null;
+        pending.current = null;
+        setRetained(false);
+      }
       setMessage(
         offerMessage(cause, friendName, (id) => cards.get(id)?.card ?? "a card")
       );
@@ -171,7 +185,7 @@ export function LendOfferDialog({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={close}
       title="Lend to a Friend"
       closeLabel="Close Lend to a Friend"
       returnFocus={returnFocus}
@@ -193,7 +207,7 @@ export function LendOfferDialog({
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div ref={form} className="flex flex-col gap-3">
           <ul
             aria-label="Cards to lend"
             className="m-0 flex list-none flex-col divide-y divide-border rounded-panel border border-border p-0"
@@ -216,8 +230,9 @@ export function LendOfferDialog({
               ref={friendField}
               label="Friend"
               value={friendId}
-              disabled={friends.kind !== "ready"}
+              disabled={retained || friends.kind !== "ready"}
               onChange={(event) => {
+                if (pending.current) return;
                 key.current = null;
                 setFriendId(event.target.value);
               }}
@@ -253,7 +268,9 @@ export function LendOfferDialog({
             label="Return by (optional)"
             min={today()}
             value={returnBy}
+            disabled={retained}
             onChange={(event) => {
+              if (pending.current) return;
               key.current = null;
               setReturnBy(event.target.value);
             }}
@@ -261,16 +278,19 @@ export function LendOfferDialog({
           <p role="alert" className="m-0 text-meta text-danger empty:hidden">
             {message}
           </p>
+          {retained && (
+            <PendingLoanRequest busy={busy} onRetry={() => void send()} />
+          )}
           <div className="flex flex-wrap gap-2">
             <Button
               variant="primary"
-              disabled={!friendId || copies === 0}
+              disabled={retained || !friendId || copies === 0}
               aria-disabled={busy || undefined}
               onClick={() => void send()}
             >
               Send offer of {cardCount(copies)}
             </Button>
-            <Button onClick={onClose}>Cancel</Button>
+            <Button onClick={close}>Cancel</Button>
           </div>
         </div>
       )}
