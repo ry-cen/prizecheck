@@ -91,6 +91,7 @@ async function story(
   const row = misty.locator(`a[data-thread="${thread}"]`);
   await expect(row).toContainText("Ash K");
   await expect(row).toContainText("New messages");
+  await expect(row).toContainText("Ash K: Hi Misty!\nStill have that Iono?");
   await expect(row).toContainText("Accept or counter");
   await expectPageChecks(misty, `waiting and unread on one item at ${width}`);
   await row.click();
