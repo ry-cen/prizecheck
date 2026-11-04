@@ -86,7 +86,8 @@ The list and reply SQL are nearly the same apart from the table name. The decisi
 2. **Shared models: rejected.** `ReportInput`, `ReportView` and `DecisionInput` have Pokémon-typed fields, so ADR 0023 keeps them with the route. Their component names are also in the API contract.
 3. **Shared paging: rejected.** There is nothing to extract, and adding paging would change the API.
 4. **Report lifecycle helpers: possible, not yet justified.** This would be a game-free module, under a core path, with the reporter list, one-row read and reply statements. Moving the routes is out: under ADR 0023 they stay with the game, because their models and wiring are Pokémon's.
-   - **Required inputs, keyword-only with no default:** table name from a trusted constant; a view function; the limit; the not-found refusal, because the 404 bodies differ.
+   - **Required inputs:** an open connection, because core can't import `app.db` and the game keeps connection and transaction ownership. Each call also takes the report ID or reporter ID it needs, and the reply takes the note and evidence URL.
+   - **Game values, keyword-only with no default:** table name from a trusted constant; a view function; the list limit; the not-found refusal, because the 404 bodies differ.
    - **Left out:** decisions, approval, caps and queues. These differ too much to share cleanly.
    - **Gain:** it removes about 25 lines repeated across three files. It takes on dynamic table-name SQL, and no other caller would use it yet.
 5. **Generic report framework or registry: rejected.** ADR 0023 forbids registries and protocols, and #530 excludes it.
@@ -111,6 +112,7 @@ These behaviours have no direct API assertion that I could find:
 - `owner_begin`: creation with `reporter_id` NULL, refusal for a non-owner, and the same two refusals. No test I found submits the Begin a record form.
 - `respond_to_review`: the reporter's own 404 outside `needs_info`, `evidence_url` kept when the reply omits it, and which review fields survive the return to `pending`.
 - `decide_report`: reject and its closure, `REASON_REQUIRED` for a blank reason after cleaning, `CATALOG_UNAVAILABLE`, 404 for an unknown report, and reviewer columns written on `needs_info`.
+- Edition approval (`missing_cards.py:217-226`): 404 when the Printing is absent from the active generation or tombstoned, and `POSSIBLE_DUPLICATE` for an existing descriptor. Each refusal also asserts that report and catalog state are unchanged. The existing duplicate test covers a Printing's set and number only.
 - Lists: reporter order and `LIMIT 100`; queue order with open reports first and `LIMIT 200`.
 - Comparable coverage for the reject and repeat-decision paths already exists in `test_metadata_reviews.py:164-170` and `test_attribute_corrections.py:129-137`, so those tests can serve as the pattern.
 
