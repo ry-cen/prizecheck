@@ -68,11 +68,11 @@ jobs:
       matrix:
         include:
           - leg: api-1
-            args: --suite api --fast --shard 1/3
+            args: --suite api --fast --shard 1/3 -- api/tests -vv -o faulthandler_timeout=60
           - leg: api-2
-            args: --suite api --fast --shard 2/3
+            args: --suite api --fast --shard 2/3 -- api/tests -vv -o faulthandler_timeout=60
           - leg: api-3
-            args: --suite api --fast --shard 3/3
+            args: --suite api --fast --shard 3/3 -- api/tests -vv -o faulthandler_timeout=60
           - leg: auth
             args: --suite auth --fast
             browsers: true
