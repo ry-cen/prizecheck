@@ -99,7 +99,7 @@ export function useInboxRefresh(): () => void {
 }
 
 /** After a change that may have cancelled Loans and Trades outside their tabs (Remove Friend, Block): reads the inbox
- * again, and has the Loans list and the Trades list read again. */
+ * again, refreshes the item pulse counts, and has both agreement lists read again. */
 export function useNoteLoansChanged(): () => void {
   return useContext(InboxContext)?.noteLoansChanged ?? (() => {});
 }
@@ -263,6 +263,7 @@ export function InboxProvider({
         noteLoansChanged: () => {
           setLoansChanged((n) => n + 1);
           refresh();
+          pulse.poll();
         },
         takeOpened: (id) => {
           if (opened.current !== id) return false;
