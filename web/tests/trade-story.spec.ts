@@ -696,8 +696,7 @@ async function story(
   for (const { body, secretOf, against, url } of answers) {
     const text = await body;
     if (text === null) continue;
-    if (/\/api\/social\/trades\/[0-9a-f-]{36}$/.test(url))
-      readTrade.add(against);
+    if (/\/api\/trades\/[0-9a-f-]{36}$/.test(url)) readTrade.add(against);
     for (const item of secretOf) expect(text).not.toContain(item);
   }
   expect([...readTrade].sort()).toEqual([ashPlace, mistyPlace].sort());
