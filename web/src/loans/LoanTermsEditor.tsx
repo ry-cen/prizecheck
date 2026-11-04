@@ -37,14 +37,20 @@ export function LoanTermsEditor({
   const [attempt, setAttempt] = useState(0);
   const form = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
+  const checking = useRef<AbortController | null>(null);
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      checking.current?.abort();
     };
   }, []);
   function close() {
-    closeLoanRequest(form.current, !canClose(), onClose);
+    closeLoanRequest(form.current, !canClose(), () => {
+      alive.current = false;
+      checking.current?.abort();
+      onClose();
+    });
   }
 
   function matches(fresh: LoanView) {
@@ -75,9 +81,17 @@ export function LoanTermsEditor({
   async function save() {
     if (busy || !ready) return;
     setBusy(true);
+    const controller = new AbortController();
+    checking.current = controller;
+    const path = window.location.pathname;
     try {
-      const fresh = await getLoan(loan.thread_id);
-      if (!alive.current) return;
+      const fresh = await getLoan(loan.thread_id, controller.signal);
+      if (
+        !alive.current ||
+        controller.signal.aborted ||
+        window.location.pathname !== path
+      )
+        return;
       if (!matches(fresh)) {
         setReady(false);
         setMessage(
@@ -101,11 +115,14 @@ export function LoanTermsEditor({
         setAttempt((n) => n + 1);
       }
     } catch {
-      if (alive.current)
+      if (alive.current) {
+        setReady(false);
         setMessage(
           "The Loan could not be checked. Your changes are kept. Retry the check."
         );
+      }
     } finally {
+      if (checking.current === controller) checking.current = null;
       if (alive.current) setBusy(false);
     }
   }

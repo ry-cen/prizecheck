@@ -1,4 +1,8 @@
-import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
+import {
+  closeLoanRequest,
+  PendingLoanRequest,
+  useLoanCommand,
+} from "./PendingLoanRequest";
 import {
   useEffect,
   useLayoutEffect,
@@ -75,11 +79,12 @@ export function BorrowedDialog({
   const [copies, setCopies] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const pending = useRef<{
+  const authority = useLoanCommand<{
     card: BorrowedCard;
     body: Parameters<typeof moveBorrowed>[0];
-  } | null>(null);
-  const [retained, setRetained] = useState(false);
+  }>();
+  const pending = authority.command;
+  const retained = authority.pending;
   const surface = useRef<HTMLDivElement>(null);
   const close = () =>
     closeLoanRequest(surface.current, pending.current !== null, onClose);
@@ -135,38 +140,35 @@ export function BorrowedDialog({
     setDestination("");
     setCopies(Number(card.copies));
     setMessage("");
-    pending.current = null;
   }
 
   async function confirmMove(card: BorrowedCard) {
-    if (busy || !destination) return;
+    if ((!destination && !pending.current) || !authority.beginAttempt()) return;
     setBusy(true);
     setMessage("");
-    const command = pending.current ?? {
-      card,
-      body: {
-        loan_id: card.loan_id,
-        edition_id: card.edition_id,
-        from_location_id: card.location_id,
-        to_location_id: destination,
-        quantity: String(copies),
-        idempotency_key: crypto.randomUUID(),
-      },
-    };
-    pending.current = command;
-    setRetained(true);
     try {
+      const command =
+        pending.current ??
+        authority.retain({
+          card,
+          body: {
+            loan_id: card.loan_id,
+            edition_id: card.edition_id,
+            from_location_id: card.location_id,
+            to_location_id: destination,
+            quantity: String(copies),
+            idempotency_key: crypto.randomUUID(),
+          },
+        });
       const view = await moveBorrowed(command.body);
-      pending.current = null;
-      setRetained(false);
+      authority.settle();
       focusNext.current = { to: "row", key: rowKey(card) };
       setMoving(null);
       setLoad({ kind: "ready", view });
       onMoved();
     } catch (cause) {
       if (!outcomeUnknown(cause)) {
-        pending.current = null;
-        setRetained(false);
+        authority.settle();
       }
       setMessage(moveMessage(cause));
       if (
@@ -186,6 +188,7 @@ export function BorrowedDialog({
         onMoved();
       }
     } finally {
+      authority.endAttempt();
       setBusy(false);
     }
   }
@@ -281,7 +284,6 @@ export function BorrowedDialog({
                     onChange={(event) => {
                       if (pending.current) return;
                       setDestination(event.target.value);
-                      pending.current = null;
                     }}
                   >
                     <option value="">Choose a Location</option>
@@ -302,12 +304,10 @@ export function BorrowedDialog({
                     onChange={(value) => {
                       if (pending.current) return;
                       setCopies(value);
-                      pending.current = null;
                     }}
                   />
                   <span className="flex gap-2">
-                    {/* Busy, it stays enabled and focused (confirmMove ignores the press), so a refusal's focus never
-                        falls to the page. */}
+                    {/* An unresolved Move has its own exact-replay control below. */}
                     <Button
                       type="submit"
                       variant="primary"
@@ -357,6 +357,7 @@ export function BorrowedDialog({
         {body}
         {retained && (
           <PendingLoanRequest
+            boundaryRef={authority.boundary}
             busy={busy}
             onRetry={() => {
               const command = pending.current;
