@@ -1,0 +1,186 @@
+[
+  {
+    "productId": 477182,
+    "name": "Fuecoco - 002",
+    "cleanName": "Fuecoco 002",
+    "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/477182_200w.jpg",
+    "categoryId": 3,
+    "groupId": 22872,
+    "url": "https://www.tcgplayer.com/product/477182/pokemon-sv-scarlet-and-violet-promo-cards-fuecoco-002",
+    "modifiedOn": "2023-08-31T15:02:35.203",
+    "imageCount": 1,
+    "presaleInfo": {
+      "isPresale": false,
+      "releasedOn": null,
+      "note": null
+    },
+    "extendedData": [
+      {
+        "name": "Number",
+        "displayName": "Card Number",
+        "value": "002"
+      },
+      {
+        "name": "Rarity",
+        "displayName": "Rarity",
+        "value": "Promo"
+      },
+      {
+        "name": "Card Type",
+        "displayName": "Card Type",
+        "value": "Fire"
+      },
+      {
+        "name": "HP",
+        "displayName": "HP",
+        "value": "80"
+      },
+      {
+        "name": "Stage",
+        "displayName": "Stage",
+        "value": "Basic"
+      },
+      {
+        "name": "Attack 1",
+        "displayName": "Attack 1",
+        "value": "[1RR] Super Singe (30)\r\n<br>\r\nYour opponent's Active Pokémon is now Burned."
+      },
+      {
+        "name": "Weakness",
+        "displayName": "Weakness",
+        "value": "Wx2"
+      },
+      {
+        "name": "RetreatCost",
+        "displayName": "Retreat Cost",
+        "value": "2"
+      }
+    ]
+  },
+  {
+    "productId": 512035,
+    "name": "Charmander - 044",
+    "cleanName": "Charmander 044",
+    "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/512035_200w.jpg",
+    "categoryId": 3,
+    "groupId": 22872,
+    "url": "https://www.tcgplayer.com/product/512035/pokemon-sv-scarlet-and-violet-promo-cards-charmander-044",
+    "modifiedOn": "2026-07-14T21:35:03.457",
+    "imageCount": 1,
+    "presaleInfo": {
+      "isPresale": false,
+      "releasedOn": null,
+      "note": null
+    },
+    "extendedData": [
+      {
+        "name": "Number",
+        "displayName": "Card Number",
+        "value": "044"
+      },
+      {
+        "name": "Rarity",
+        "displayName": "Rarity",
+        "value": "Promo"
+      },
+      {
+        "name": "Card Type",
+        "displayName": "Card Type",
+        "value": "Fire"
+      },
+      {
+        "name": "HP",
+        "displayName": "HP",
+        "value": "60"
+      },
+      {
+        "name": "Stage",
+        "displayName": "Stage",
+        "value": "Basic"
+      },
+      {
+        "name": "Attack 1",
+        "displayName": "Attack 1",
+        "value": "[R] Heat Tackle: (30) <br>\r\nThis Pokemon does 10 damage to itself."
+      },
+      {
+        "name": "Weakness",
+        "displayName": "Weakness",
+        "value": "Wx2"
+      },
+      {
+        "name": "Resistance",
+        "displayName": "Resistance",
+        "value": "None"
+      },
+      {
+        "name": "RetreatCost",
+        "displayName": "Retreat Cost",
+        "value": "1"
+      }
+    ]
+  },
+  {
+    "productId": 512036,
+    "name": "Charmander - 044 (Pokemon Center Exclusive)",
+    "cleanName": "Charmander 044 Pokemon Center Exclusive",
+    "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/512036_200w.jpg",
+    "categoryId": 3,
+    "groupId": 22872,
+    "url": "https://www.tcgplayer.com/product/512036/pokemon-sv-scarlet-and-violet-promo-cards-charmander-044-pokemon-center-exclusive",
+    "modifiedOn": "2026-08-08T02:01:07.107",
+    "imageCount": 1,
+    "presaleInfo": {
+      "isPresale": false,
+      "releasedOn": null,
+      "note": null
+    },
+    "extendedData": [
+      {
+        "name": "Number",
+        "displayName": "Card Number",
+        "value": "044"
+      },
+      {
+        "name": "Rarity",
+        "displayName": "Rarity",
+        "value": "Promo"
+      },
+      {
+        "name": "Card Type",
+        "displayName": "Card Type",
+        "value": "Fire"
+      },
+      {
+        "name": "HP",
+        "displayName": "HP",
+        "value": "60"
+      },
+      {
+        "name": "Stage",
+        "displayName": "Stage",
+        "value": "Basic"
+      },
+      {
+        "name": "Attack 1",
+        "displayName": "Attack 1",
+        "value": "[R] Heat Tackle: (30) <br>\r\nThis Pokemon does 10 damage to itself."
+      },
+      {
+        "name": "Weakness",
+        "displayName": "Weakness",
+        "value": "Wx2"
+      },
+      {
+        "name": "Resistance",
+        "displayName": "Resistance",
+        "value": "None"
+      },
+      {
+        "name": "RetreatCost",
+        "displayName": "Retreat Cost",
+        "value": "1"
+      }
+    ]
+  }
+]
