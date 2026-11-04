@@ -43,6 +43,7 @@ export function ThreadTimeline({
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const [permissionFailed, setPermissionFailed] = useState(false);
+  const [checkingPermission, setCheckingPermission] = useState(true);
   const [moderation, setModeration] = useState<{
     target: BlockTarget;
     canReport: boolean;
@@ -51,24 +52,36 @@ export function ThreadTimeline({
   const [ownBlock, setOwnBlock] = useState(false);
   const [name, setName] = useState("Other collector");
   const [canMessage, setCanMessage] = useState<boolean | null>(null);
+  const currentPermission = useRef(canMessage);
+  currentPermission.current = canMessage;
   const pending = useRef<{ body: string; idempotency_key: string } | null>(
     null
   );
   const title = useRef<HTMLHeadingElement>(null);
+  const editor = useRef<HTMLTextAreaElement>(null);
   const epoch = useRef(0);
   const changed = usePulseChanged(),
     poll = usePollPulse();
   useConversationOpen(active);
   useEffect(() => {
     if (!active) return;
-    setCanMessage(null);
+    setCheckingPermission(true);
     setPermissionFailed(false);
     ++epoch.current;
     const controller = new AbortController();
     void getThreadDetail(kind, id, controller.signal).then(
       (detail) => {
         if (!controller.signal.aborted) {
+          // A background read keeps the editor node and its keyboard position.
+          // If chat really closes, move focus deliberately before removing it.
+          if (
+            !detail.can_message &&
+            !pending.current &&
+            document.activeElement === editor.current
+          )
+            title.current?.focus();
           setCanMessage(detail.can_message);
+          setCheckingPermission(false);
           const other =
             "live_offer" in detail ? detail.live_offer.other : detail.other;
           setName(other.display_name);
@@ -110,7 +123,7 @@ export function ThreadTimeline({
       },
       () => {
         if (!controller.signal.aborted) {
-          setCanMessage(null);
+          setCheckingPermission(false);
           setPermissionFailed(true);
         }
       }
@@ -156,7 +169,13 @@ export function ThreadTimeline({
     }
   }
   async function send() {
-    if (busy) return;
+    if (
+      busy ||
+      checkingPermission ||
+      permissionFailed ||
+      (!pending.current && canMessage !== true)
+    )
+      return;
     if (!pending.current && Array.from(body).length > 4000) {
       setMessage(MESSAGE_LENGTH_TEXT);
       return;
@@ -168,15 +187,23 @@ export function ThreadTimeline({
     pending.current = command;
     setBusy(true);
     setMessage("");
+    const release = () => {
+      if (
+        currentPermission.current === false &&
+        editor.current?.form?.contains(document.activeElement)
+      )
+        title.current?.focus();
+      pending.current = null;
+    };
     try {
       await sendThreadMessage(kind, id, command);
-      pending.current = null;
+      release();
       setBody("");
       setAttempt((n) => n + 1);
       poll();
     } catch (cause) {
       if (cause instanceof SocialError && cause.status < 500) {
-        pending.current = null;
+        release();
         setMessage(threadMessageError(cause));
       } else setMessage("The answer was lost. Retry sends the same message.");
     } finally {
@@ -231,7 +258,7 @@ export function ThreadTimeline({
           </li>
         ))}
       </ol>
-      {canMessage ? (
+      {canMessage || pending.current ? (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -240,6 +267,7 @@ export function ThreadTimeline({
           className="flex flex-col gap-2"
         >
           <TextArea
+            ref={editor}
             label={`Message ${name}`}
             value={body}
             disabled={busy || pending.current !== null}
@@ -248,18 +276,24 @@ export function ThreadTimeline({
           />
           <Button
             type="submit"
-            disabled={busy || (!body.trim() && !pending.current)}
+            disabled={
+              busy ||
+              checkingPermission ||
+              permissionFailed ||
+              (!body.trim() && !pending.current)
+            }
           >
             {busy ? "Sending…" : pending.current ? "Retry" : "Send"}
           </Button>
         </form>
-      ) : canMessage === null ? (
+      ) : canMessage === false ? (
+        <p>This collector is no longer available</p>
+      ) : null}
+      {(checkingPermission || permissionFailed) && (
         <p role="status">
           {permissionFailed ? "Chat couldn't be checked." : "Checking chat…"}{" "}
           <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
         </p>
-      ) : (
-        <p>This collector is no longer available</p>
       )}
       {message && <p role="alert">{message}</p>}
     </section>
