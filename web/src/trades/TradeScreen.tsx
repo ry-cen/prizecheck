@@ -362,6 +362,9 @@ export function TradeScreen({
           <ThreadTimeline
             active={active}
             kind="trade"
+            onChanged={() => {
+              if (!busy && keys.current.size === 0) setAttempt((n) => n + 1);
+            }}
             id={load.trade.thread_id}
             editionNames={Object.fromEntries(
               [...load.trade.you_give, ...load.trade.you_get].map((card) => [
