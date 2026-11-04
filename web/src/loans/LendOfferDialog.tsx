@@ -1,4 +1,8 @@
-import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
+import {
+  closeLoanRequest,
+  PendingLoanRequest,
+  useLoanCommand,
+} from "./PendingLoanRequest";
 import {
   useEffect,
   useLayoutEffect,
@@ -88,8 +92,9 @@ export function LendOfferDialog({
   const [sent, setSent] = useState<Sent | null>(null);
   const [attempt, setAttempt] = useState(0);
   const key = useRef<string | null>(null);
-  const pending = useRef<Parameters<typeof sendLendOffer>[0] | null>(null);
-  const [retained, setRetained] = useState(false);
+  const authority = useLoanCommand<Parameters<typeof sendLendOffer>[0]>();
+  const pending = authority.command;
+  const retained = authority.pending;
   const form = useRef<HTMLDivElement>(null);
   const close = () =>
     closeLoanRequest(form.current, pending.current !== null, onClose);
@@ -146,38 +151,38 @@ export function LendOfferDialog({
   }
 
   async function send() {
-    if (busy || !friendId) return;
+    if ((!friendId && !pending.current) || !authority.beginAttempt()) return;
     setBusy(true);
     setMessage("");
-    key.current ??= crypto.randomUUID();
     try {
-      pending.current ??= {
-        borrower_id: friendId,
-        copies: rows.map((row) => ({
-          location_id: row.locationId,
-          edition_id: row.editionId,
-          quantity: String(row.count),
-        })),
-        return_by: returnBy || null,
-        idempotency_key: key.current,
-      };
-      setRetained(true);
-      const loan = await sendLendOffer(pending.current);
-      pending.current = null;
-      setRetained(false);
+      key.current ??= crypto.randomUUID();
+      const command =
+        pending.current ??
+        authority.retain({
+          borrower_id: friendId,
+          copies: rows.map((row) => ({
+            location_id: row.locationId,
+            edition_id: row.editionId,
+            quantity: String(row.count),
+          })),
+          return_by: returnBy || null,
+          idempotency_key: key.current,
+        });
+      const loan = await sendLendOffer(command);
+      authority.settle();
       key.current = null;
       setSent({ id: loan.id, friend: friendName });
       onSent();
     } catch (cause) {
       if (!outcomeUnknown(cause)) {
         key.current = null;
-        pending.current = null;
-        setRetained(false);
+        authority.settle();
       }
       setMessage(
         offerMessage(cause, friendName, (id) => cards.get(id)?.card ?? "a card")
       );
     } finally {
+      authority.endAttempt();
       setBusy(false);
     }
   }
@@ -279,7 +284,11 @@ export function LendOfferDialog({
             {message}
           </p>
           {retained && (
-            <PendingLoanRequest busy={busy} onRetry={() => void send()} />
+            <PendingLoanRequest
+              boundaryRef={authority.boundary}
+              busy={busy}
+              onRetry={() => void send()}
+            />
           )}
           <div className="flex flex-wrap gap-2">
             <Button

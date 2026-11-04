@@ -15,7 +15,7 @@ import {
 } from "react";
 import { ChevronLeft, Ellipsis } from "lucide-react";
 import { useInboxRefresh, useOpenedFromInbox } from "../inbox/Inbox";
-import { PendingLoanRequest } from "./PendingLoanRequest";
+import { PendingLoanRequest, useLoanCommand } from "./PendingLoanRequest";
 import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
 import type { DeckIndexEntry } from "../decks_generated";
@@ -194,14 +194,14 @@ export function LoanScreen({
   const keys = useRef(new Map<string, string>());
   // A retained call captures all of this intent's choices, not just its revision.
   // Neither a rerender nor another action may replace it after response loss.
-  const retained = useRef<{
+  const authority = useLoanCommand<{
     name: string;
     key: string;
     call: (key: string) => Promise<LoanView>;
-  } | null>(null);
-  const inFlight = useRef(false);
+  }>();
+  const retained = authority.command;
   const refreshAfterCommand = useRef(false);
-  const [commandPending, setCommandPending] = useState(false);
+  const commandPending = authority.pending;
   const menuAnchor = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const askButton = useRef<HTMLButtonElement>(null);
@@ -396,6 +396,7 @@ export function LoanScreen({
       </fieldset>
       {commandPending && !editingTerms && (
         <PendingLoanRequest
+          boundaryRef={authority.boundary}
           busy={busy}
           onRetry={() => {
             const command = retained.current;
@@ -416,6 +417,7 @@ export function LoanScreen({
           pendingRequest={
             commandPending ? (
               <PendingLoanRequest
+                boundaryRef={authority.boundary}
                 busy={busy}
                 onRetry={() => {
                   const command = retained.current;
@@ -496,26 +498,20 @@ export function LoanScreen({
     name: string,
     call: (key: string) => Promise<LoanView>
   ): Promise<"applied" | "unknown" | "refused"> {
-    if (
-      inFlight.current ||
-      (retained.current && retained.current.name !== name)
-    )
-      return "unknown";
+    if (retained.current && retained.current.name !== name) return "unknown";
     const command = retained.current ?? {
       name,
       key: keys.current.get(name) ?? crypto.randomUUID(),
       call,
     };
-    retained.current = command;
-    inFlight.current = true;
-    setCommandPending(true);
+    if (!authority.beginAttempt()) return "unknown";
+    authority.retain(command);
     setBusy(true);
     setMessage("");
     const key = command.key;
     keys.current.set(name, key);
     const release = () => {
-      retained.current = null;
-      setCommandPending(false);
+      authority.settle();
       keys.current.delete(name);
       stepBodies.current.delete(key);
       returnBodies.current.delete(key);
@@ -554,7 +550,7 @@ export function LoanScreen({
       }
       return outcomeUnknown(cause) ? "unknown" : "refused";
     } finally {
-      inFlight.current = false;
+      authority.endAttempt();
       setBusy(false);
     }
   }

@@ -1,6 +1,60 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useLeaveGuard, type LeaveGuard } from "../shell/useRoute";
 import { Button } from "../ui/Button";
+
+/** Retained authority lives at the POST owner, before I/O or a recovery render.
+ * Read completions cannot replace it; only a known POST outcome may settle it. */
+export function useLoanCommand<T extends object>() {
+  const command = useRef<T | null>(null);
+  const attempting = useRef(false);
+  const [pending, setPending] = useState(false);
+  const boundary = useRef<HTMLElement | null>(null);
+  const guard = useMemo<LeaveGuard>(
+    () => ({
+      blocks: () => command.current !== null,
+      ask: () =>
+        boundary.current
+          ?.querySelector<HTMLElement>("[data-loan-explanation]")
+          ?.focus(),
+    }),
+    []
+  );
+  useLeaveGuard(guard);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (command.current === null) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
+  const observed: Readonly<RefObject<T | null>> = command;
+  return {
+    command: observed,
+    pending,
+    boundary,
+    beginAttempt(): boolean {
+      if (attempting.current) return false;
+      attempting.current = true;
+      return true;
+    },
+    endAttempt() {
+      attempting.current = false;
+    },
+    retain(value: T): T {
+      if (command.current === null) {
+        command.current = value;
+        setPending(true);
+      }
+      return command.current;
+    },
+    settle() {
+      command.current = null;
+      setPending(false);
+    },
+  };
+}
 
 /** Every Loan command surface uses this close rule until its POST settles. */
 export function closeLoanRequest(
@@ -22,34 +76,23 @@ export function closeLoanRequest(
 export function PendingLoanRequest({
   busy,
   onRetry,
+  boundaryRef,
 }: {
   busy: boolean;
   onRetry: () => void;
+  boundaryRef: RefObject<HTMLElement | null>;
 }) {
-  const explanation = useRef<HTMLParagraphElement>(null);
   const retry = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!busy) retry.current?.focus();
   }, [busy]);
-  const guard = useMemo<LeaveGuard>(
-    () => ({
-      blocks: () => true,
-      ask: () => explanation.current?.focus(),
-    }),
-    []
-  );
-  useLeaveGuard(guard);
-  useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, []);
   return (
-    <section aria-label="Pending request" className="flex flex-col gap-2">
-      <p ref={explanation} tabIndex={-1} className="m-0 text-body">
+    <section
+      ref={boundaryRef}
+      aria-label="Pending request"
+      className="flex flex-col gap-2"
+    >
+      <p data-loan-explanation tabIndex={-1} className="m-0 text-body">
         {busy
           ? "This request is being sent."
           : "The answer was lost. Retry sends the same request."}{" "}
