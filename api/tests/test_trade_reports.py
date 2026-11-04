@@ -6,7 +6,6 @@ watermark that suspension moves.
 """
 import hashlib
 import json
-import re
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
@@ -18,6 +17,7 @@ from app.main import app, connect  # noqa: F401
 from app.social import conversations, reports
 from app.social.discovery import (account_state, remove_from_discovery, restore_discovery, switch_off)
 from app.social.friends import command_payload
+from report_comparison import scrub
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_catalog_references import migrate
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
@@ -517,15 +517,6 @@ def test_report_after_being_blocked_matches_report_of_suspended(store):
         assert block_row(first, second)['via'] == 'trader'
 
 
-def scrub(value, names):
-    text = re.sub(r'"(cursor|next_before)": "[^"]*"', '"\\1": "<cursor>"', json.dumps(value, sort_keys=True))
-    text = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<id>', text)
-    text = re.sub(r'\d{4}-\d\d-\d\dT[\d:.]+(?:[+-]\d\d:\d\d|Z)?', '<time>', text)
-    for name in names:
-        text = text.replace(name, '<name>')
-    return text
-
-
 def test_the_reported_collector_is_never_told(store):
     seen = []
     for reporting in (True, False):
@@ -546,7 +537,11 @@ def test_the_reported_collector_is_never_told(store):
         for answer in answers:
             assert 'report' not in answer.text.replace('can_report', '').lower()
         seen.append((bodies, pulse_body['loans']['unread']))
-    assert seen[0] == seen[1]
+    assert seen[0] == seen[1], json.dumps({
+        'paths': paths,
+        'reported': seen[0],
+        'blocked': seen[1],
+    }, indent=2)
 
 
 def test_a_report_needs_reach_a_conversation_or_their_trade(store):
