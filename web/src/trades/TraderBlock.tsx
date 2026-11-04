@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useNoteLoansChanged, usePollPulse } from "../inbox/Inbox";
+import { useNoteLoansChanged } from "../inbox/Inbox";
 import {
   BLOCK,
   blockedStatus,
@@ -50,7 +50,6 @@ export function useTraderBlock(
 ): { item: MenuItem | null; panel: ReactNode } {
   const [state, setState] = useState<State>({ kind: "idle" });
   const noteLoansChanged = useNoteLoansChanged();
-  const pollPulse = usePollPulse();
   const questionId = useId();
   const primary = useRef<HTMLButtonElement>(null);
   const reading = useRef<AbortController | null>(null);
@@ -111,7 +110,6 @@ export function useTraderBlock(
         options.statusElsewhere ? { kind: "idle" } : { kind: "done", text }
       );
       noteLoansChanged();
-      pollPulse();
       options.onBlocked?.(text);
     } catch (cause) {
       setState({ kind: "failed", text: commandMessage(cause) });

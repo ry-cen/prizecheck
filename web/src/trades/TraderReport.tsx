@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useNoteLoansChanged, usePollPulse } from "../inbox/Inbox";
+import { useNoteLoansChanged } from "../inbox/Inbox";
 import { CANCEL } from "../social/blockMessages";
 import { endingText, traderEnding } from "../social/friendshipEnding";
 import {
@@ -68,7 +68,6 @@ export function useTraderReport(
 ): { item: MenuItem | null; panel: ReactNode } {
   const [state, setState] = useState<State>({ kind: "idle" });
   const noteLoansChanged = useNoteLoansChanged();
-  const pollPulse = usePollPulse();
   const groupName = useId();
   const helpId = useId();
   const first = useRef<HTMLInputElement>(null);
@@ -162,7 +161,6 @@ export function useTraderReport(
         options.statusElsewhere ? { kind: "idle" } : { kind: "done", text }
       );
       noteLoansChanged();
-      pollPulse();
       options.onReported?.(text);
     } catch (cause) {
       failed.current = true;
