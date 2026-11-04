@@ -1,7 +1,9 @@
-import { tradeCardName } from "./tradeText";
+import { tradeCardName, tradeOutcomeUnknown } from "./tradeText";
 import { SocialError, type TradeView } from "../social_generated";
 import { TradesError, type ChangeOffer } from "../trades_generated";
 import { threadVersionChanged } from "../threads/commandChanges";
+import { OfferInventoryChanged, offerVersion } from "./offerInventory";
+import type { ProposalCard } from "./proposalModel";
 import {
   canEditOffer,
   canSendOffer,
@@ -15,16 +17,29 @@ import {
   type InventorySide,
   type ReadSource,
   type ReadResult,
+  type OfferEffect,
 } from "./offerLifecycle";
-import { tradeOutcomeUnknown } from "./tradeText";
-import { offerVersion } from "./offerInventory";
 export type { OfferTerms } from "./offerLifecycle";
-/** I/O adapter only. The pure model owns consent, inventory readiness and retained commands. */
+export type OfferIO = {
+  version: (id: string, signal: AbortSignal) => Promise<TradeView>;
+  inventory: (
+    side: InventorySide,
+    offer: TradeView,
+    editions: readonly string[],
+    signal: AbortSignal
+  ) => Promise<readonly ProposalCard[]>;
+};
+/** Execute exactly the effects returned by the pure lifecycle; never infer I/O from its phase. */
 export class OfferReview {
   private model: OfferLifecycle;
   private listeners = new Set<() => void>();
-  private checking: { read: OfferRead; promise: Promise<TradeView> } | null =
-    null;
+  private io: OfferIO | null = null;
+  private readVersion: ((id: string) => Promise<TradeView>) | null = null;
+  private postOffer:
+    ((id: string, body: ChangeOffer) => Promise<TradeView>) | null = null;
+  private controllers = new Map<number, AbortController>();
+  private versionFlights = new Map<number, Promise<TradeView>>();
+  private postFlights = new Map<number, Promise<TradeView | null>>();
   constructor(offer: TradeView) {
     this.model = initialOfferLifecycle(offer);
   }
@@ -36,11 +51,26 @@ export class OfferReview {
     };
   };
   dispatch = (event: OfferEvent) => {
-    const next = transitionOffer(this.model, event);
-    if (next === this.model) return;
-    this.model = next;
-    for (const listener of this.listeners) listener();
+    const { model, effects } = transitionOffer(this.model, event);
+    const changed = model !== this.model;
+    this.model = model;
+    if (changed) for (const listener of this.listeners) listener();
+    for (const effect of effects) this.execute(effect);
   };
+  connect(io: OfferIO) {
+    this.io = io;
+    this.dispatch({
+      type: this.model.phase === "read_failed" ? "retry" : "start",
+    });
+    return () => {
+      this.io = null;
+      for (const [id, controller] of this.controllers) {
+        controller.abort();
+        this.completeRead(this.model.reads[id] ?? null, { kind: "cancelled" });
+      }
+      this.controllers.clear();
+    };
+  }
   get reviewed() {
     return this.model.reviewed;
   }
@@ -54,10 +84,117 @@ export class OfferReview {
     return this.model.phase === "gone";
   }
   canEdit = canEditOffer;
-  private beginRead(source: ReadSource, offer: TradeView): OfferRead | null {
+  private execute(effect: OfferEffect) {
+    if (effect.kind === "cancel") {
+      this.controllers.get(effect.read.id)?.abort();
+      this.controllers.delete(effect.read.id);
+      this.versionFlights.delete(effect.read.id);
+      return;
+    }
+    if (effect.kind === "post") {
+      const post = this.postOffer;
+      if (!post) throw new Error("Offer command transport is not connected");
+      const promise = Promise.resolve()
+        .then(() => post(effect.thread, effect.body))
+        .then(
+          (offer) => {
+            this.dispatch({
+              type: "post_completed",
+              post: effect.post,
+              result: "success",
+            });
+            return offer;
+          },
+          async (cause) => {
+            const api =
+              cause instanceof TradesError || cause instanceof SocialError;
+            const notFound = api && cause.code === "TRADE_NOT_FOUND";
+            const changed =
+              api &&
+              (threadVersionChanged(cause.code) ||
+                cause.code === "STEP_NOT_ALLOWED");
+            this.dispatch({
+              type: "post_completed",
+              post: effect.post,
+              result: notFound
+                ? "not_found"
+                : changed
+                  ? "changed"
+                  : tradeOutcomeUnknown(cause)
+                    ? "unknown"
+                    : "refused",
+            });
+            if (notFound) return null;
+            if (changed) {
+              const read = this.model.latestRead.version;
+              if (read !== undefined) await this.versionFlights.get(read);
+              return null;
+            }
+            throw cause;
+          }
+        );
+      this.postFlights.set(effect.post.attempt, promise);
+      // The caller awaits this promise; attach a handler immediately, including an unmount before it resumes.
+      void promise.catch(() => {});
+      return;
+    }
+    if (!this.model.reads[effect.read.id]) return;
+    const io = this.io;
+    const readVersion = this.readVersion;
+    if (effect.read.source !== "version" && !io) return; // Unit transport may complete its registered ticket explicitly.
+    if (effect.read.source === "version" && !io && !readVersion) return;
+    const controller = new AbortController();
+    this.controllers.set(effect.read.id, controller);
+    const fail = (cause: unknown): never => {
+      if (!controller.signal.aborted)
+        this.completeRead(effect.read, {
+          kind:
+            cause instanceof OfferInventoryChanged
+              ? "obsolete"
+              : cause instanceof SocialError && cause.status === 404
+                ? "not_found"
+                : "failed",
+        });
+      throw cause;
+    };
+    let completion: Promise<unknown>;
+    if (effect.read.source === "version") {
+      const observed = Promise.resolve()
+        .then(() =>
+          io
+            ? io.version(effect.offer.thread_id, controller.signal)
+            : readVersion!(effect.offer.thread_id)
+        )
+        .then((offer) => {
+          if (!controller.signal.aborted)
+            this.completeRead(effect.read, { kind: "version", offer });
+          return offer;
+        }, fail);
+      // A refresh promise means the observation has reached the model, not just the transport.
+      this.versionFlights.set(effect.read.id, observed);
+      completion = observed;
+    } else {
+      const side = effect.read.source;
+      completion = Promise.resolve()
+        .then(() =>
+          io!.inventory(side, effect.offer, effect.editions, controller.signal)
+        )
+        .then((cards) => {
+          if (!controller.signal.aborted)
+            this.completeRead(effect.read, { kind: "inventory", cards });
+        }, fail);
+    }
+    void completion
+      .catch(() => {})
+      .finally(() => {
+        this.controllers.delete(effect.read.id);
+        this.versionFlights.delete(effect.read.id);
+      });
+  }
+  private beginRead(source: ReadSource, offer: TradeView) {
     const before = this.model.nextRead;
     this.dispatch({
-      type: "read_started",
+      type: "read_requested",
       source,
       version: offerVersion(offer)!,
     });
@@ -74,40 +211,23 @@ export class OfferReview {
   cancelRead(read: OfferRead | null) {
     this.completeRead(read, { kind: "cancelled" });
   }
+  select(editions: readonly string[]) {
+    this.dispatch({ type: "selection_changed", editions });
+  }
+  invalidate(offer: TradeView) {
+    this.dispatch({ type: "invalidated", version: offerVersion(offer)! });
+  }
   refresh(
     read: (id: string) => Promise<TradeView>,
-    force = false
+    _force = false
   ): Promise<TradeView> {
-    if (
-      !force &&
-      this.checking &&
-      this.checking.read.version === offerVersion(this.reviewed)
-    )
-      return this.checking.promise;
-    const context = this.beginRead("version", this.reviewed);
-    if (!context) return Promise.resolve(this.model.candidate ?? this.reviewed);
-    const promise = Promise.resolve()
-      .then(() => read(this.reviewed.thread_id))
-      .then(
-        (offer) => {
-          this.completeRead(context, { kind: "version", offer });
-          return offer;
-        },
-        (cause) => {
-          this.completeRead(context, {
-            kind:
-              cause instanceof SocialError && cause.status === 404
-                ? "not_found"
-                : "failed",
-          });
-          throw cause;
-        }
-      )
-      .finally(() => {
-        if (this.checking?.read.id === context.id) this.checking = null;
-      });
-    this.checking = { read: context, promise };
-    return promise;
+    this.readVersion = read;
+    this.dispatch({ type: "read_requested", source: "version" });
+    const id = this.model.latestRead.version;
+    return (
+      (id === undefined ? undefined : this.versionFlights.get(id)) ??
+      Promise.resolve(this.model.candidate ?? this.reviewed)
+    );
   }
   confirm() {
     const before = this.model;
@@ -121,52 +241,13 @@ export class OfferReview {
     read: (id: string) => Promise<TradeView>
   ): Promise<TradeView | null> {
     if (!canSendOffer(this.model)) return null;
+    this.postFlights.clear();
+    this.postOffer = post;
+    this.readVersion = read;
     this.dispatch({ type: "send_requested", terms, key });
-    const command = this.model.pending;
-    const postContext = this.model.activePost;
-    if (this.model.phase !== "sending" || !command || !postContext) return null;
-    try {
-      const next = await post(this.reviewed.thread_id, command);
-      this.dispatch({
-        type: "post_completed",
-        post: postContext,
-        result: "success",
-      });
-      return next;
-    } catch (cause) {
-      if (
-        (cause instanceof TradesError || cause instanceof SocialError) &&
-        cause.code === "TRADE_NOT_FOUND"
-      ) {
-        this.dispatch({
-          type: "post_completed",
-          post: postContext,
-          result: "not_found",
-        });
-        return null;
-      }
-      if (
-        (cause instanceof TradesError || cause instanceof SocialError) &&
-        (threadVersionChanged(cause.code) || cause.code === "STEP_NOT_ALLOWED")
-      ) {
-        this.dispatch({
-          type: "post_completed",
-          post: postContext,
-          result: "changed",
-        });
-        await this.refresh(read, true);
-        return null;
-      }
-      this.dispatch({
-        type: "post_completed",
-        post: postContext,
-        result: tradeOutcomeUnknown(cause) ? "unknown" : "refused",
-      });
-      throw cause;
-    }
+    return this.postFlights.get(this.model.nextPost) ?? null;
   }
 }
-
 /** Describe changed collector terms without displaying record identities or internal reasons. */
 export function offerChanges(before: TradeView, after: TradeView): string[] {
   const changes: string[] = [];
