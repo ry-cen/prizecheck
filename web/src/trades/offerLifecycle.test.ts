@@ -8,7 +8,7 @@ import {
   offerCaps,
   offerControls,
   reviewRequired,
-  transitionOffer,
+  transitionOffer as withEffects,
   type OfferEvent,
   type OfferLifecycle,
   type OfferPhase,
@@ -17,6 +17,8 @@ import {
   type ReadResult,
   type PostResult,
 } from "./offerLifecycle";
+const transitionOffer = (model: OfferLifecycle, event: OfferEvent) =>
+  withEffects(model, event).model;
 const card = {
   edition_id: "Iono",
   name: "Iono",
@@ -74,7 +76,7 @@ function start(
   version = offerVersion(model.reviewed)!
 ) {
   const next = transitionOffer(model, {
-    type: "read_started",
+    type: "read_requested",
     source,
     version,
   });
@@ -230,10 +232,16 @@ it.each(configurations)(
         expect(next.reads[request.read.id]).toBeUndefined();
       if (reviewRequired(next)) expect(offerControls(next).send).toBe(false);
     }
+    for (const version of [offerVersion(model.reviewed)!, "obsolete-version"]) {
+      const invalidated = withEffects(model, { type: "invalidated", version });
+      retained(model, invalidated.model);
+    }
     const foreground: OfferEvent[] = [
       { type: "review_confirmed" },
       { type: "retry" },
       { type: "draft_edited" },
+      { type: "start" },
+      { type: "selection_changed", editions: ["Iono", "Boss"] },
       { type: "send_requested", terms: {}, key: "new-command" },
       ...(
         ["success", "unknown", "not_found", "changed", "refused"] as const
@@ -274,7 +282,7 @@ it.each(["sending", "retry_send"])(
     if (phase === "retry_send") model = post(model, "unknown");
     const request = start(model, "version");
     model = finish(request.model, request.read, { kind: "not_found" });
-    expect(model.deferred).toHaveLength(1);
+    expect(model.observed).toBe(true);
     if (phase === "sending") model = post(model, "unknown");
     expect(canSendOffer(model)).toBe(true);
     const bytes = JSON.stringify(model.pending);
@@ -283,25 +291,25 @@ it.each(["sending", "retry_send"])(
     expect(post(model, "success").phase).toBe("sent"); // active POST wins over old GET
   }
 );
-it.each([
-  { result: { kind: "not_found" } as ReadResult, phase: "gone" },
-  { result: { kind: "version", offer: B } as ReadResult, phase: "changed" },
-  { result: { kind: "version", offer: closed } as ReadResult, phase: "gone" },
-  { result: { kind: "failed" } as ReadResult, phase: "read_failed" },
-])(
-  "applies deferred $phase observation only after a definitive command refusal",
-  ({ result, phase }) => {
+it.each(results("version"))(
+  "discards retained observations and requests a fresh review after known refusal: $kind",
+  (result) => {
     const request = start(send(ready()), "version");
     const observed = finish(request.model, request.read, result);
-    expect(observed.phase).toBe("sending");
-    expect(observed.pending).not.toBeNull();
+    retained(request.model, observed);
     const settled = post(observed, "refused");
     expect(settled.pending).toBeNull();
-    expect(settled.phase).toBe(phase);
-    const controls = offerControls(settled);
-    expect(controls.back).toBe(true);
-    if (phase === "changed") expect(controls.review).toBe(true);
-    if (phase === "read_failed") expect(controls.retry).toBe("check");
+    expect(settled.phase).toBe("checking");
+    expect(settled.candidate).toBeNull();
+    expect(Object.values(settled.reads).map((read) => read.source)).toEqual([
+      "version",
+    ]);
+    expect(settled.observed).toBe(false);
+    const fresh = Object.values(settled.reads)[0];
+    const checked = finish(settled, fresh, { kind: "version", offer: B });
+    expect(checked.phase).toBe("changed");
+    expect(offerControls(checked).review).toBe(true);
+    expect(canSendOffer(checked)).toBe(false);
   }
 );
 it("keeps definitive not-found from the active POST terminal, and refuses stale POST outcomes", () => {
@@ -391,159 +399,6 @@ it("requires review after a version refusal even if its fresh read has the same 
   expect(canSendOffer(checked)).toBe(false);
 });
 
-function signature(model: OfferLifecycle) {
-  return JSON.stringify([
-    model.phase,
-    model.reviewed.offer_id,
-    model.candidate?.offer_id,
-    model.failure,
-    model.inventory.give?.map((c) => c.copies),
-    model.inventory.get?.map((c) => c.copies),
-    model.pending,
-    !!model.activePost,
-    Object.values(model.reads)
-      .map((r) => [r.source, r.version, model.latestRead[r.source] === r.id])
-      .sort(),
-    model.deferred.map((c) => [
-      c.read.source,
-      c.read.version,
-      model.latestRead[c.read.source] === c.read.id,
-      c.result,
-    ]),
-  ]);
-}
-/** Only actual outstanding reads/posts can produce replies; UI actions schedule missing requests. */
-function possible(model: OfferLifecycle): OfferEvent[] {
-  const events: OfferEvent[] = [];
-  const active = (source: ReadSource) =>
-    Object.values(model.reads).some(
-      (r) => r.source === source && r.version === offerVersion(model.reviewed)
-    );
-  if (model.phase === "loading")
-    for (const source of ["give", "get"] as const)
-      if (model.inventory[source] === null && !active(source))
-        events.push({
-          type: "read_started",
-          source,
-          version: offerVersion(model.reviewed)!,
-        });
-  if (model.phase === "checking" && !active("version"))
-    events.push({
-      type: "read_started",
-      source: "version",
-      version: offerVersion(model.reviewed)!,
-    });
-  const controls = offerControls(model);
-  if (controls.review) events.push({ type: "review_confirmed" });
-  if (controls.retry && model.phase === "read_failed")
-    events.push({ type: "retry" });
-  if (controls.send)
-    events.push({ type: "send_requested", terms: {}, key: "explore" });
-  if (model.activePost)
-    for (const result of [
-      "success",
-      "unknown",
-      "refused",
-      "changed",
-      "not_found",
-    ] as const)
-      events.push({ type: "post_completed", post: model.activePost, result });
-  for (const read of Object.values(model.reads))
-    for (const result of results(read.source))
-      events.push({ type: "read_completed", read, result });
-  return events;
-}
-function recover(model: OfferLifecycle) {
-  for (let step = 0; step < 16; step++) {
-    if (["ready", "gone", "sent"].includes(model.phase)) return true;
-    const controls = offerControls(model);
-    if (model.activePost) {
-      model = post(model, "success");
-      continue;
-    }
-    if (model.phase === "retry_send") {
-      model = send(model);
-      continue;
-    }
-    if (model.phase === "read_failed") {
-      model = transitionOffer(model, { type: "retry" });
-      continue;
-    }
-    if (controls.review) {
-      model = transitionOffer(model, { type: "review_confirmed" });
-      continue;
-    }
-    const expectedSource: ReadSource =
-      model.phase === "checking"
-        ? "version"
-        : model.inventory.give === null
-          ? "give"
-          : "get";
-    let read = Object.values(model.reads).find(
-      (r) =>
-        r.source === expectedSource &&
-        r.version === offerVersion(model.reviewed)
-    );
-    if (!read) {
-      const issued = start(model, expectedSource);
-      model = issued.model;
-      read = issued.read;
-    }
-    model = finish(
-      model,
-      read,
-      read.source === "version"
-        ? { kind: "version", offer: model.reviewed }
-        : { kind: "inventory", cards: [] }
-    );
-  }
-  return false;
-}
-it("explores bounded reordering of outstanding I/O, cached confirmation and exact replay, with visible recovery", () => {
-  const crossing = cachedCrossing();
-  const seeds = [
-    initialOfferLifecycle(A),
-    changed(),
-    crossing.model,
-    ready(crossing.model, "1"),
-    send(ready(crossing.model, "1")),
-  ];
-  const queue = seeds.map((model) => ({ model, depth: 0 }));
-  const seen = new Set<string>();
-  let lateMissingSending = false,
-    lateMissingRetry = false,
-    replyCount = 0;
-  while (queue.length) {
-    const { model, depth } = queue.shift()!;
-    const key = signature(model);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    expect(recover(model)).toBe(true);
-    if (depth === 8 || model.phase === "gone" || model.phase === "sent")
-      continue;
-    const events = possible(model);
-    expect(events.length).toBeGreaterThan(0);
-    for (const event of events) {
-      const next = transitionOffer(model, event);
-      if (event.type === "read_started" || event.type === "read_completed")
-        retained(model, next);
-      if (event.type === "read_completed") {
-        expect(model.reads[event.read.id]).toEqual(event.read);
-        replyCount++;
-        if (event.result.kind === "not_found" && model.pending) {
-          lateMissingSending ||= model.phase === "sending";
-          lateMissingRetry ||= model.phase === "retry_send";
-        }
-      }
-      queue.push({ model: next, depth: depth + 1 });
-    }
-  }
-  expect(seen.size).toBeGreaterThan(100);
-  expect(replyCount).toBeGreaterThan(100);
-  expect(lateMissingSending).toBe(true);
-  expect(lateMissingRetry).toBe(true);
-});
-
 it("a request for an older reviewed version cannot supersede the current version's pending read", () => {
   const current = start(initialOfferLifecycle(B), "get");
   const old = start(current.model, "get", offerVersion(A)!);
@@ -554,3 +409,247 @@ it("a request for an older reviewed version cannot supersede the current version
   });
   expect(accepted.inventory.get).toEqual([card]);
 });
+
+// The executor journal is distinct from the model: a registered ticket counts as I/O only if an effect issued it.
+type Recovery = {
+  model: OfferLifecycle;
+  io: Set<string>;
+  library: "loading" | "ready" | "failed";
+  libraryVersion: string;
+};
+type Move =
+  | { kind: "model"; event: OfferEvent }
+  | { kind: "library_reply"; result: "ready" | "failed" | "obsolete" }
+  | { kind: "library_retry" };
+function perform(state: Recovery, move: Move): Recovery {
+  let library = state.library;
+  let libraryVersion = state.libraryVersion;
+  let event: OfferEvent;
+  if (move.kind === "library_reply") {
+    expect(library).toBe("loading");
+    library = move.result === "ready" ? "ready" : "failed";
+    if (move.result !== "obsolete") return { ...state, library };
+    event = { type: "invalidated", version: libraryVersion };
+  } else if (move.kind === "library_retry") {
+    expect(library).toBe("failed");
+    library = "loading";
+    libraryVersion = offerVersion(state.model.reviewed)!;
+    // The actual page's library Retry starts its searched read and requests selected-edition inventory.
+    event = { type: "read_requested", source: "get" };
+  } else event = move.event;
+  const next = withEffects(state.model, event);
+  const io = new Set(state.io);
+  if (event.type === "read_completed") io.delete(`read:${event.read.id}`);
+  if (event.type === "post_completed") io.delete(`post:${event.post.attempt}`);
+  for (const effect of next.effects) {
+    if (effect.kind === "cancel") io.delete(`read:${effect.read.id}`);
+    else if (effect.kind === "read") io.add(`read:${effect.read.id}`);
+    else io.add(`post:${effect.post.attempt}`);
+  }
+  if (event.type === "review_confirmed" && next.model !== state.model) {
+    library = "loading";
+    libraryVersion = offerVersion(next.model.reviewed)!;
+  }
+  if (
+    event.type === "read_requested" ||
+    event.type === "read_completed" ||
+    event.type === "invalidated"
+  )
+    retained(state.model, next.model);
+  return { model: next.model, io, library, libraryVersion };
+}
+/** No read is manufactured here: only executor-issued replies or actual enabled page actions can occur. */
+function recoveryMoves(state: Recovery): Move[] {
+  const { model } = state;
+  if (model.phase === "gone" || model.phase === "sent") return [];
+  const moves: Move[] = [];
+  for (const read of Object.values(model.reads)) {
+    expect(state.io.has(`read:${read.id}`)).toBe(true);
+    for (const result of results(read.source))
+      moves.push({
+        kind: "model",
+        event: { type: "read_completed", read, result },
+      });
+  }
+  if (model.activePost) {
+    expect(state.io.has(`post:${model.activePost.attempt}`)).toBe(true);
+    for (const result of [
+      "success",
+      "unknown",
+      "not_found",
+      "changed",
+      "refused",
+    ] as const)
+      moves.push({
+        kind: "model",
+        event: { type: "post_completed", post: model.activePost, result },
+      });
+  }
+  const controls = offerControls(model);
+  if (controls.review)
+    moves.push({ kind: "model", event: { type: "review_confirmed" } });
+  if (controls.retry === "check")
+    moves.push({
+      kind: "model",
+      event: { type: "read_requested", source: "version" },
+    });
+  if (controls.retry === "inventory")
+    moves.push({ kind: "model", event: { type: "retry" } });
+  if (controls.send)
+    moves.push({
+      kind: "model",
+      event: {
+        type: "send_requested",
+        key: "explore",
+        terms: {
+          you_get: [{ edition_id: "Iono", quantity: "1" }],
+          cash: { payer: "them", cents: "1" },
+        },
+      },
+    });
+  // A quantity/cash edit is available after an unknown answer; it intentionally abandons that exact replay.
+  if (model.phase === "retry_send")
+    moves.push({ kind: "model", event: { type: "draft_edited" } });
+  if (state.library === "loading")
+    for (const result of ["ready", "failed", "obsolete"] as const)
+      moves.push({ kind: "library_reply", result });
+  if (state.library === "failed") moves.push({ kind: "library_retry" });
+  return moves;
+}
+function progress(state: Recovery) {
+  const { model } = state;
+  if (model.phase === "gone" || model.phase === "sent") return true;
+  const issued = Object.values(model.reads).some((read) =>
+    state.io.has(`read:${read.id}`)
+  );
+  const posting =
+    model.activePost !== null &&
+    state.io.has(`post:${model.activePost.attempt}`);
+  if (model.phase === "checking")
+    return Object.values(model.reads).some(
+      (read) => read.source === "version" && state.io.has(`read:${read.id}`)
+    );
+  if (model.phase === "sending") return posting;
+  const controls = offerControls(model);
+  // Back and unrelated library/search activity cannot certify recovery of the retained draft.
+  return (
+    issued ||
+    posting ||
+    controls.review ||
+    controls.send ||
+    controls.retry !== null
+  );
+}
+function recoveryKey(state: Recovery) {
+  const m = state.model;
+  return JSON.stringify([
+    m.phase,
+    m.reviewed.offer_id,
+    m.candidate?.offer_id,
+    m.failure,
+    m.inventory,
+    m.pending,
+    m.observed,
+    !!m.activePost,
+    Object.values(m.reads)
+      .map((read) => [read.source, read.version])
+      .sort(),
+    state.library,
+    state.libraryVersion,
+  ]);
+}
+// The collector has edited cash (they pay one cent alongside their card), so each ready draft differs from A/B.
+// One copy always fits their existing reservation, even when an availability page is empty.
+it("checks liveness after every reachable step using only real effects, pending replies and visible controls, including library Retry during send", () => {
+  const initial: Recovery = {
+    model: initialOfferLifecycle(A),
+    io: new Set(),
+    library: "loading",
+    libraryVersion: offerVersion(A)!,
+  };
+  const root = perform(initial, { kind: "model", event: { type: "start" } });
+  const queue = [{ state: root, depth: 0 }];
+  const seen = new Set<string>();
+  const visitedPhases = new Set<OfferPhase>();
+  let libraryRetryDuringSend = false,
+    settledObservation = false;
+  for (let index = 0; index < queue.length; index++) {
+    const { state, depth } = queue[index];
+    visitedPhases.add(state.model.phase);
+    expect(progress(state), `requestless/actionless ${state.model.phase}`).toBe(
+      true
+    );
+    const key = recoveryKey(state);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (depth === 9) continue;
+    for (const move of recoveryMoves(state)) {
+      const next = perform(state, move);
+      expect(
+        progress(next),
+        `after ${JSON.stringify(move)}: ${next.model.phase}`
+      ).toBe(true);
+      libraryRetryDuringSend ||=
+        move.kind === "library_retry" && state.model.phase === "sending";
+      settledObservation ||=
+        state.model.observed &&
+        next.model.phase === "checking" &&
+        !next.model.pending;
+      queue.push({ state: next, depth: depth + 1 });
+    }
+  }
+  expect(seen.size).toBeGreaterThan(100);
+  expect([...visitedPhases].sort()).toEqual([...phases].sort());
+  expect(libraryRetryDuringSend).toBe(true);
+  expect(settledObservation).toBe(true);
+});
+
+it.each(["refused", "edit-after-unknown"] as const)(
+  "S1-08 settles %s by issuing a fresh observation, never by replaying old payloads",
+  (outcome) => {
+    const version = start(send(ready()), "version");
+    const selected = start(version.model, "get");
+    let model = finish(selected.model, selected.read, { kind: "obsolete" });
+    model = finish(model, version.read, { kind: "version", offer: A });
+    if (outcome === "refused") model = post(model, "refused");
+    else
+      model = transitionOffer(post(model, "unknown"), { type: "draft_edited" });
+    expect(model.phase).toBe("checking");
+    expect(model.pending).toBeNull();
+    expect(model.candidate).toBeNull();
+    expect("deferred" in model).toBe(false);
+    const [fresh] = Object.values(model.reads);
+    expect(fresh.source).toBe("version");
+    expect(fresh.id).toBeGreaterThan(selected.read.id);
+    const checked = finish(model, fresh, { kind: "version", offer: B });
+    expect(canSendOffer(checked)).toBe(false);
+    expect(checked.reviewed).toBe(A);
+    const confirmed = withEffects(checked, { type: "review_confirmed" });
+    expect(
+      confirmed.effects
+        .filter((effect) => effect.kind === "read")
+        .map((effect) => effect.read.source)
+        .sort()
+    ).toEqual(["get", "give"]);
+    model = confirmed.model;
+    for (const read of Object.values(model.reads))
+      model = finish(model, read, {
+        kind: "inventory",
+        cards: read.source === "give" ? [] : [card],
+      });
+    expect(canSendOffer(model)).toBe(true);
+    const issued = withEffects(model, {
+      type: "send_requested",
+      key: "fresh",
+      terms: { you_get: [{ edition_id: "Iono", quantity: "1" }] },
+    });
+    expect(
+      issued.effects.filter((effect) => effect.kind === "post")
+    ).toHaveLength(1);
+    expect(issued.model.pending).toMatchObject({
+      offer_id: "B",
+      revision: 2,
+      idempotency_key: "fresh",
+    });
+  }
+);
