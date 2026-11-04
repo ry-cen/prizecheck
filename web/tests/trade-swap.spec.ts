@@ -116,7 +116,7 @@ const expectOnlyReport = async (page: Page) => {
   await page.keyboard.press("Escape");
 };
 const confirmDialog = (page: Page, other: string) =>
-  page.getByRole("dialog", { name: `Confirm swap with ${other}?` });
+  page.getByRole("region", { name: `Confirm swap with ${other}` });
 const noArtwork = (page: Page) =>
   page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => route.abort());
 
@@ -192,7 +192,6 @@ async function story(
     )
       stalePickConfirmations++;
   });
-  await ashMain.getByRole("button", { name: "Confirm swap" }).click();
   const ashDialog = confirmDialog(ash.page, "Misty W");
   await expect(ashDialog).toBeVisible();
   await expect(
@@ -238,10 +237,6 @@ async function story(
   await expect(heading(page)).toHaveText("Ready to swap with Ash K");
   // Keep consent open so focus refresh cannot hide the stale-revision regression.
   const dialog = confirmDialog(page, "Ash K");
-  await page
-    .getByRole("main")
-    .getByRole("button", { name: "Confirm swap" })
-    .click();
   await expect(dialog).toBeVisible();
   const confirmations: {
     revision: number;
@@ -258,11 +253,13 @@ async function story(
   });
 
   // C: Ash confirms, putting Misty's Iono in his Box.
-  await ashMain.getByRole("button", { name: "Confirm swap" }).click();
+  await expect(
+    ashMain.getByRole("list", { name: "You give", exact: true })
+  ).toContainText(`From ${secret} Box`);
   await expect(ashDialog).toContainText(
-    `Arven (SVI 166) ×1 · from ${secret} Box`
+    "Leaves your Collection: 1 Arven (SVI 166)"
   );
-  await expect(ashDialog).toContainText("Iono (PAL 185) ×1");
+  await expect(ashDialog).toContainText("1 Iono (PAL 185)");
   await expect(ashDialog).toContainText("The swap can't be undone.");
   await expectPageChecks(ash.page, `the confirm dialog at ${width}`);
   await ashDialog
@@ -329,7 +326,6 @@ async function story(
     idempotency_key: randomUUID(),
   });
   await page.goto(`${ORIGIN}/trades/${review}`);
-  await main.getByRole("button", { name: "Confirm swap" }).click();
   await expect(dialog).toBeVisible();
   await api(ash.page, "POST", `/api/trades/${review}/confirm-swap`, {
     offer_id: accepted.offer_id,
@@ -376,8 +372,7 @@ async function story(
   });
   await page.goto(`${ORIGIN}/trades/${gift}`);
   await expect(heading(page)).toHaveText("Ready to give Ash K 1 card");
-  await main.getByRole("button", { name: "Confirm swap" }).click();
-  await expect(dialog).toContainText("Iono (PAL 185) ×1");
+  await expect(dialog).toContainText("1 Iono (PAL 185)");
   await expect(dialog.getByRole("combobox")).toHaveCount(0);
   await expectPageChecks(page, `the confirm dialog of a gift at ${width}`);
   await dialog.getByRole("button", { name: "Confirm swap" }).click();

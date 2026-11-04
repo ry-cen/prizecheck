@@ -1,3 +1,5 @@
+import { mergeTimeline } from "./timelineHistory";
+import { timelineText } from "./threadText";
 import { useEffect, useRef, useState } from "react";
 import {
   getThreadDetail,
@@ -6,7 +8,6 @@ import {
   readThread,
   SocialError,
   type Timeline,
-  type TimelineItem,
 } from "../social_generated";
 import {
   useConversationOpen,
@@ -15,29 +16,6 @@ import {
 } from "../inbox/Inbox";
 import { Button } from "../ui/Button";
 import { TextArea } from "../ui/TextField";
-const EVENTS: Record<string, string> = {
-  proposed: "Proposed a Trade",
-  agreed: "Agreed",
-  changed_after_agreement: "Changed the agreed offer",
-  countered: "Changed the offer",
-  changed: "Changed terms",
-  returned_all: "Recorded all copies back",
-  accepted: "Agreed",
-  declined: "Declined",
-  withdrawn: "Withdrawn",
-  cancelled: "Cancelled",
-  offer_changed: "Changed the offer",
-  confirmed_swap: "Confirmed swap",
-  swapped: "Confirmed swap",
-  requested: "Asked to borrow",
-  offered: "Offered to lend",
-  terms_changed: "Changed Loan terms",
-  handover: "Confirmed handover",
-  returned: "Confirmed return",
-  return_started: "Started a return",
-  written_off: "Wrote off copies",
-  take_back: "Took back handover",
-};
 export function ThreadTimeline({
   kind,
   id,
@@ -56,10 +34,12 @@ export function ThreadTimeline({
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const [permissionFailed, setPermissionFailed] = useState(false);
+  const [name, setName] = useState("Other collector");
   const [canMessage, setCanMessage] = useState<boolean | null>(null);
   const pending = useRef<{ body: string; idempotency_key: string } | null>(
     null
   );
+  const epoch = useRef(0);
   const changed = usePulseChanged(),
     poll = usePollPulse();
   useConversationOpen(active);
@@ -67,10 +47,17 @@ export function ThreadTimeline({
     if (!active) return;
     setCanMessage(null);
     setPermissionFailed(false);
+    ++epoch.current;
     const controller = new AbortController();
     void getThreadDetail(kind, id, controller.signal).then(
       (detail) => {
-        if (!controller.signal.aborted) setCanMessage(detail.can_message);
+        if (!controller.signal.aborted) {
+          setCanMessage(detail.can_message);
+          setName(
+            ("live_offer" in detail ? detail.live_offer : detail.live_terms)
+              .other.display_name
+          );
+        }
       },
       () => {
         if (!controller.signal.aborted) {
@@ -82,7 +69,7 @@ export function ThreadTimeline({
     getThreadTimeline(kind, id, null, controller.signal).then(
       (next) => {
         if (controller.signal.aborted) return;
-        setLog(next);
+        setLog((current) => mergeTimeline(current, next, true));
         setFailed(false);
         if (next.items[0] && document.visibilityState === "visible")
           void readThread(kind, id, { through: next.items[0].cursor }).then(
@@ -94,7 +81,10 @@ export function ThreadTimeline({
         if (!controller.signal.aborted) setFailed(true);
       }
     );
-    return () => controller.abort();
+    return () => {
+      ++epoch.current;
+      controller.abort();
+    };
   }, [kind, id, changed, attempt, active]);
   useEffect(() => {
     const show = () => {
@@ -106,24 +96,13 @@ export function ThreadTimeline({
   }, [active]);
   async function earlier() {
     if (!log?.next_before) return;
+    const started = epoch.current;
     try {
       const page = await getThreadTimeline(kind, id, log.next_before);
-      setLog((current) =>
-        current
-          ? {
-              ...current,
-              items: [
-                ...current.items,
-                ...page.items.filter(
-                  (item) =>
-                    !current.items.some((old) => old.cursor === item.cursor)
-                ),
-              ],
-              next_before: page.next_before,
-            }
-          : page
-      );
+      if (started !== epoch.current) return;
+      setLog((current) => mergeTimeline(current, page, false));
     } catch {
+      if (started !== epoch.current) return;
       setMessage("Earlier messages could not be loaded. Please retry.");
     }
   }
@@ -155,13 +134,6 @@ export function ThreadTimeline({
       setBusy(false);
     }
   }
-  function text(item: TimelineItem) {
-    if (item.message)
-      return `${item.message.from === "you" ? "You" : "Them"}: ${item.message.body}`;
-    const event = item.event;
-    if (!event) return "";
-    return `${event.actor ? (event.actor === log?.you_are ? "You: " : "Them: ") : ""}${EVENTS[event.kind] ?? "Agreement updated"}${(event.data?.lines ?? []).map((line) => ` · ${line.giver === log?.you_are ? "You give" : "They give"} ${editionNames[line.edition_id] ?? "copies"}: ${line.from_qty} → ${line.to_qty}`).join("")}${event.data?.return_by ? ` · Return by: ${event.data.return_by.from ?? "None"} → ${event.data.return_by.to ?? "None"}` : ""}`;
-  }
   return (
     <section
       aria-label="Chat and changes"
@@ -178,10 +150,13 @@ export function ThreadTimeline({
       {log?.next_before && (
         <Button onClick={() => void earlier()}>Show earlier</Button>
       )}
-      <ol className="m-0 flex list-none flex-col gap-3 p-0">
+      <ol
+        aria-label="Messages and changes"
+        className="m-0 flex list-none flex-col gap-3 p-0"
+      >
         {[...(log?.items ?? [])].reverse().map((item) => (
           <li key={item.cursor} className="whitespace-pre-wrap wrap-anywhere">
-            {text(item)}
+            {timelineText(item, log!.you_are, name, editionNames)}
           </li>
         ))}
       </ol>
@@ -194,7 +169,7 @@ export function ThreadTimeline({
           className="flex flex-col gap-2"
         >
           <TextArea
-            label="Message"
+            label={`Message ${name}`}
             value={body}
             disabled={busy || pending.current !== null}
             onChange={(event) => setBody(event.target.value)}

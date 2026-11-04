@@ -32,7 +32,7 @@ const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 const confirmDialog = (page: Page, other: string) =>
-  page.getByRole("dialog", { name: `Confirm swap with ${other}?` });
+  page.getByRole("region", { name: `Confirm swap with ${other}` });
 const noArtwork = (page: Page) =>
   page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => route.abort());
 
@@ -95,7 +95,6 @@ async function story(
 
   // A: the offer is ticked. Misty unticks it, and her Deck keeps asking for the Reverse Holo.
   await page.goto(`${ORIGIN}/trades/${first}`);
-  await main.getByRole("button", { name: "Confirm swap" }).click();
   await expect(dialog).toBeVisible();
   await expect(
     dialog.getByRole("heading", { name: "Deck switches" })
@@ -123,7 +122,6 @@ async function story(
 
   // B: the offer left ticked. The Deck now lists the card she got, and Undo switch puts the Reverse Holo back.
   await page.goto(`${ORIGIN}/trades/${second}`);
-  await main.getByRole("button", { name: "Confirm swap" }).click();
   await expect(dialog).toBeVisible();
   await expect(offer).toBeChecked();
   await dialog.getByRole("button", { name: "Confirm swap" }).click();
