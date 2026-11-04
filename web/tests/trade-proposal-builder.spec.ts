@@ -182,7 +182,7 @@ const tile = (scope: Locator, side: "get" | "give", card: string) =>
 const library = (page: Page) =>
   page.getByRole("complementary", { name: "Cards" });
 const group = (page: Page, name: string | RegExp) =>
-  page.getByRole("group", { name });
+  page.getByRole("group", { name, exact: true });
 const lists = (page: Page) => ({
   get: page.getByRole("list", { name: "You get", exact: true }),
   give: page.getByRole("list", { name: "You give", exact: true }),
@@ -268,10 +268,10 @@ async function story(
   );
   await show(page, "Proposal");
   await expect(
-    group(page, "Iono (PAL 185) you get").locator("output")
+    group(page, "Iono (PAL 185) you get").getByText("1", { exact: true })
   ).toHaveText("1");
   await expect(
-    group(page, "Iono (PAL 254) you give").locator("output")
+    group(page, "Iono (PAL 254) you give").getByText("1", { exact: true })
   ).toHaveText("1");
   await expect(
     page.getByRole("region", { name: /^Choose printings for You/ })
