@@ -318,7 +318,7 @@ async function story(
   // Ash's screen still shows the proposal he opened: his accept finds it changed, and the screen reads it again.
   await ashMain.getByRole("button", { name: "Accept" }).click();
   await expect(ashMain.getByRole("alert")).toHaveText(
-    "This Trade has changed. Check it and try again."
+    "The offer changed. Review the current cards and cash before trying again."
   );
   await expect(heading(ash.page)).toHaveText(
     "Misty W withdrew this Trade Proposal"
@@ -371,7 +371,7 @@ async function story(
     .getByRole("button", { name: "Cancel Trade" })
     .click();
   await expect(otherMain.getByRole("alert")).toHaveText(
-    "This Trade has changed. Check it and try again."
+    "The offer changed. Review the current cards and cash before trying again."
   );
   await expect(heading(other)).toHaveText(`${mineName} cancelled this Trade`);
   await expect(heading(other)).toBeFocused();
