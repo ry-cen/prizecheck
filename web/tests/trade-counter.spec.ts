@@ -347,6 +347,9 @@ async function story(
   await expect(iono).toHaveAccessibleName(/2 of 3 in You get/);
   await show(ash.page, "Proposal");
   await amount.fill("5");
+  const diff = ash.page.getByRole("region", { name: "Proposed changes" });
+  await expect(diff).toContainText("You get Iono (PAL 185): 1 → 2");
+  await expect(diff).toContainText("Cash: No cash → You pay $5.00");
   await send.click();
   await expect(toast(ash.page)).toContainText("Counter sent to Misty W");
   await expect(ash.page).toHaveURL(

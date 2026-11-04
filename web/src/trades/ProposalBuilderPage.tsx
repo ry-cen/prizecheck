@@ -8,6 +8,7 @@ import { OfferReview, offerChanges } from "./offerReview";
 import { offerCaps, offerControls, reviewRequired } from "./offerLifecycle";
 import { offerVersion } from "./offerInventory";
 import { offerLibrary, offerCopyMap } from "./offerCopies";
+import { ProposedOfferChanges } from "./ProposedOfferChanges";
 import { useMessagePrefill } from "./messagePrefill";
 import { ArrowRight, ChevronLeft } from "lucide-react";
 import {
@@ -1045,6 +1046,15 @@ export function ProposalBuilderPage({
           )}
         </section>
         {cash.payer !== "none" && <LiabilityNotice />}
+        {counter && answered && (
+          <ProposedOfferChanges
+            before={counterProposal(answered)}
+            after={displayedProposal}
+            cashBefore={answered.cash}
+            cashAfter={cash}
+            other={name}
+          />
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="primary"
