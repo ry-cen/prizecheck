@@ -1107,6 +1107,7 @@ export function ProposalBuilderPage({
   const library = (
     <ProposalLibrary
       headingId={libraryId}
+      additionsBlocked={!capsReady || lifecycle?.phase === "sending"}
       announcement={libraryAnnounces ? announcement.text : null}
       ownScroll={!phone}
       friendName={name}

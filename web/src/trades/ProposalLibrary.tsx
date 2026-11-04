@@ -78,6 +78,7 @@ export function ProposalLibrary({
   onRetry,
   proposal,
   onAdd,
+  additionsBlocked = false,
 }: {
   headingId: string;
   announcement: string | null;
@@ -91,6 +92,7 @@ export function ProposalLibrary({
   onRetry: (which: "theirs" | "mine" | "match") => void;
   proposal: Proposal;
   onAdd: (side: ProposalSide, card: LibraryCard) => void;
+  additionsBlocked?: boolean;
 }) {
   const [choice, setChoice] = useState<Choice>("theirs");
   const [theirText, setTheirText] = useState("");
@@ -263,7 +265,9 @@ export function ProposalLibrary({
                           }
                         : null
                     }
-                    aria-disabled={onOther || held >= copies || undefined}
+                    aria-disabled={
+                      additionsBlocked || onOther || held >= copies || undefined
+                    }
                     onClick={() => onAdd(side, libraryCard)}
                   />
                   <Button

@@ -729,3 +729,114 @@ it.each(
     expect(retry[1].idempotency_key).not.toBe(first[1].idempotency_key);
   }
 );
+
+it.each(["initial", "refusal"] as const)(
+  "marks library additions unavailable until both inventory sides are current (%s)",
+  async (when) => {
+    const theirs = {
+      trader_id: "misty",
+      display_name: "Misty",
+      band: null,
+      completed_trades: 0,
+      cards: [
+        card,
+        {
+          ...card,
+          edition_id: "arven",
+          name: "Arven",
+          set_code: "SVI",
+          collector_number: "166",
+        },
+      ],
+      next_page: null,
+    };
+    vi.mocked(getTraderTradeList).mockResolvedValue(theirs);
+    let finish!: (list: Awaited<ReturnType<typeof getTradeList>>) => void;
+    const held = new Promise<Awaited<ReturnType<typeof getTradeList>>>(
+      (resolve) => {
+        finish = resolve;
+      }
+    );
+    if (when === "initial") vi.mocked(getTradeList).mockReturnValueOnce(held);
+    await mount(true);
+    if (when === "refusal") {
+      await click(increase());
+      vi.mocked(getTradeList).mockReturnValueOnce(held);
+      vi.mocked(counterTrade).mockRejectedValueOnce(
+        new TradesError(409, "NOT_TRADEABLE", {
+          edition_id: "Iono",
+          side: "you_get",
+          available: "1",
+        })
+      );
+      await click(send());
+    }
+    const tile = [
+      ...host.querySelectorAll<HTMLButtonElement>("aside button"),
+    ].find((b) =>
+      b.getAttribute("aria-label")?.startsWith("Add to You get, Arven,")
+    )!;
+    expect(tile).toBeDefined();
+    expect(tile.getAttribute("aria-disabled")).toBe("true");
+    await click(tile);
+    expect(tile.getAttribute("aria-label")).toContain("1 available");
+    expect(counterTrade).toHaveBeenCalledTimes(when === "initial" ? 0 : 1);
+    await act(async () => finish({ cards: [], locations: [] }));
+    expect(tile.getAttribute("aria-disabled")).not.toBe("true");
+    await click(tile);
+    expect(tile.getAttribute("aria-label")).toContain("1 of 1 in You get");
+    expect(send().disabled).toBe(false);
+  }
+);
+
+it("keeps the Reverse Holo re-add actionable after removing its last selected copy while inventory rereads", async () => {
+  const holo = {
+    ...card,
+    edition_id: "holo",
+    name: "Arven",
+    set_code: "SVI",
+    collector_number: "166",
+    descriptor: { finish: "reverse" },
+  };
+  current = { ...original, you_get: [card, holo] };
+  let hold = false,
+    finish!: (list: Awaited<ReturnType<typeof getTraderTradeList>>) => void;
+  const list = {
+    trader_id: "misty",
+    display_name: "Misty",
+    band: null,
+    completed_trades: 0,
+    cards: [{ ...card, copies: "2" }],
+    next_page: null,
+  };
+  const held = new Promise<Awaited<ReturnType<typeof getTraderTradeList>>>(
+    (resolve) => {
+      finish = resolve;
+    }
+  );
+  vi.mocked(getTraderTradeList).mockImplementation(async (_id, options) =>
+    hold && options?.q === undefined ? held : list
+  );
+  await mount(true);
+  const decreaseHolo = button("Decrease Arven (SVI 166, Reverse Holo) you get");
+  hold = true;
+  await click(decreaseHolo);
+  const tile = [
+    ...host.querySelectorAll<HTMLButtonElement>("aside button"),
+  ].find((b) =>
+    b
+      .getAttribute("aria-label")
+      ?.startsWith("Add to You get, Arven, SVI 166, Paldea, Reverse Holo,")
+  )!;
+  expect(tile).toBeDefined();
+  expect(tile.getAttribute("aria-label")).toContain("1 available");
+  expect(tile.getAttribute("aria-disabled")).toBe("true");
+  await act(async () => finish(list));
+  expect(tile.getAttribute("aria-disabled")).not.toBe("true");
+  await click(tile);
+  expect(tile.getAttribute("aria-label")).toContain("1 of 1 in You get");
+  expect(
+    button("Decrease Arven (SVI 166, Reverse Holo) you get").disabled
+  ).toBe(false);
+  expect(counterTrade).not.toHaveBeenCalled();
+});
