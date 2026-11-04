@@ -1,3 +1,10 @@
+import {
+  readOfferInventory,
+  selectedOfferInventory,
+  currentOfferRead,
+  withOfferInventoryCaps,
+  OfferInventoryChanged,
+} from "./offerInventory";
 import { OfferReview, offerChanges } from "./offerReview";
 import { offerLibrary, offerCopyMap } from "./offerCopies";
 import { useMessagePrefill } from "./messagePrefill";
@@ -63,7 +70,6 @@ import {
   setQuantity,
   toProposalCard,
   valueLines,
-  withLibraryCaps,
   withReleased,
   type CashDraft,
   type CashPayer,
@@ -248,8 +254,12 @@ export function ProposalBuilderPage({
     setTheirs((current) =>
       current.kind === "ready" ? current : { kind: "loading" }
     );
-    getTraderTradeList(traderId, { q: theirQ }, controller.signal)
-      .then((page) => {
+    readOfferInventory(
+      reviewedOffer,
+      () => getTraderTradeList(traderId, { q: theirQ }, controller.signal),
+      (id) => getTrade(id, controller.signal)
+    )
+      .then(({ value: page, offerVersion }) => {
         if (controller.signal.aborted) return;
         setParty(
           (current) =>
@@ -261,6 +271,7 @@ export function ProposalBuilderPage({
         setTheirs({
           kind: "ready",
           q: theirQ,
+          offerVersion,
           cards: page.cards,
           nextPage: page.next_page,
           more: "idle",
@@ -268,6 +279,7 @@ export function ProposalBuilderPage({
       })
       .catch((cause) => {
         if (controller.signal.aborted) return;
+        if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
         setTheirs(
           cause instanceof SocialError && cause.status === 404
             ? { kind: "missing" }
@@ -275,118 +287,190 @@ export function ProposalBuilderPage({
         );
       });
     return () => controller.abort();
-  }, [traderId, theirQ, attempt]);
+  }, [traderId, theirQ, attempt, reviewedOffer]);
 
   // The matches with this collector, listed first in the library.
   useEffect(() => {
     const controller = new AbortController();
     setMatch({ kind: "loading" });
-    getTraderMatch(traderId, controller.signal).then(
-      (row) => {
-        if (!controller.signal.aborted) setMatch({ kind: "ready", row });
+    readOfferInventory(
+      reviewedOffer,
+      () => getTraderMatch(traderId, controller.signal),
+      (id) => getTrade(id, controller.signal)
+    ).then(
+      ({ value: row, offerVersion }) => {
+        if (!controller.signal.aborted)
+          setMatch({ kind: "ready", row, offerVersion });
       },
-      () => {
-        if (!controller.signal.aborted) setMatch({ kind: "failed" });
+      (cause) => {
+        if (!controller.signal.aborted) {
+          setMatch({ kind: "failed" });
+          if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
+        }
       }
     );
     return () => controller.abort();
-  }, [traderId, matchAttempt]);
+  }, [traderId, matchAttempt, reviewedOffer]);
 
   // The collector's own Trade List, one row per Edition (not per Location).
   useEffect(() => {
     const controller = new AbortController();
     setMine({ kind: "loading" });
-    getTradeList(controller.signal).then(
-      (list) => {
+    readOfferInventory(
+      reviewedOffer,
+      () => getTradeList(controller.signal),
+      (id) => getTrade(id, controller.signal)
+    ).then(
+      ({ value: list, offerVersion }) => {
         if (!controller.signal.aborted)
-          setMine({ kind: "ready", cards: list.cards });
+          setMine({ kind: "ready", cards: list.cards, offerVersion });
       },
-      () => {
-        if (!controller.signal.aborted) setMine({ kind: "failed" });
+      (cause) => {
+        if (!controller.signal.aborted) {
+          setMine({ kind: "failed" });
+          if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
+        }
       }
     );
     return () => controller.abort();
-  }, [mineAttempt]);
+  }, [mineAttempt, reviewedOffer]);
 
+  // Selected caps must not depend on a library search or its currently visible page.
+  const [getInventory, setGetInventory] = useState<MineLoad>({
+    kind: "loading",
+  });
+  const selectedGet = proposal.get
+    .map((line) => line.edition_id)
+    .sort()
+    .join("\0");
+  useEffect(() => {
+    if (!reviewedOffer) return;
+    const controller = new AbortController();
+    setGetInventory({ kind: "loading" });
+    readOfferInventory(
+      reviewedOffer,
+      () =>
+        selectedOfferInventory(
+          selectedGet ? selectedGet.split("\0") : [],
+          (page) => getTraderTradeList(traderId, { page }, controller.signal)
+        ),
+      (id) => getTrade(id, controller.signal)
+    ).then(
+      ({ value: cards, offerVersion }) => {
+        if (!controller.signal.aborted)
+          setGetInventory({ kind: "ready", cards, offerVersion });
+      },
+      (cause) => {
+        if (controller.signal.aborted) return;
+        setGetInventory({ kind: "failed" });
+        if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
+      }
+    );
+    return () => controller.abort();
+  }, [traderId, reviewedOffer, selectedGet, attempt]);
+  const currentGetInventory = currentOfferRead(getInventory, reviewedOffer);
+  const currentTheirs = currentOfferRead(theirs, reviewedOffer);
+  const currentMatch = currentOfferRead(match, reviewedOffer);
+  const currentMine = currentOfferRead(mine, reviewedOffer);
   const libraryTheirs = useMemo<TheirsLoad>(
     () =>
-      theirs.kind === "ready"
+      currentTheirs.kind === "ready"
         ? {
-            ...theirs,
-            cards: offerLibrary(theirs.cards, reviewedOffer, "get", theirs.q),
+            ...currentTheirs,
+            cards: offerLibrary(
+              currentTheirs.cards,
+              reviewedOffer,
+              "get",
+              currentTheirs.q
+            ),
           }
-        : theirs.kind === "loading"
+        : currentTheirs.kind === "loading"
           ? { kind: "loading" }
           : { kind: "failed" }, // a missing Friend shows its own frame, never the library
-    [theirs, released, reviewedOffer]
+    [currentTheirs, released, reviewedOffer]
   );
   const libraryMatch = useMemo<MatchLoad>(
     () =>
-      match.kind === "ready"
+      currentMatch.kind === "ready"
         ? {
-            ...match,
+            ...currentMatch,
             row: {
-              ...match.row,
-              you_get: withReleased(match.row.you_get, released),
-              you_give: withReleased(match.row.you_give, releasedOwn),
+              ...currentMatch.row,
+              you_get: withReleased(currentMatch.row.you_get, released),
+              you_give: withReleased(currentMatch.row.you_give, releasedOwn),
             },
           }
-        : match,
-    [match, released, releasedOwn]
+        : currentMatch,
+    [currentMatch, released, releasedOwn]
   );
 
   const libraryMine = useMemo<MineLoad>(
     () =>
-      mine.kind === "ready"
-        ? { ...mine, cards: offerLibrary(mine.cards, reviewedOffer, "give") }
-        : mine,
-    [mine, reviewedOffer]
+      currentMine.kind === "ready"
+        ? {
+            ...currentMine,
+            cards: offerLibrary(currentMine.cards, reviewedOffer, "give"),
+          }
+        : currentMine,
+    [currentMine, reviewedOffer]
   );
 
-  // A Counter's lines start at the countered copies as their cap; each library that lists more raises it. Only the caps
-  // change, never the terms, so this is not an edit.
-  useEffect(() => {
-    if (!counter) return;
-    setProposal((p) => {
-      let next = p;
-      if (libraryTheirs.kind === "ready")
-        next = withLibraryCaps(next, "get", libraryTheirs.cards);
-      if (libraryMatch.kind === "ready") {
-        next = withLibraryCaps(next, "get", libraryMatch.row.you_get);
-        next = withLibraryCaps(next, "give", libraryMatch.row.you_give);
-      }
-      if (libraryMine.kind === "ready")
-        next = withLibraryCaps(next, "give", libraryMine.cards);
-      return next;
-    });
-  }, [counter, libraryTheirs, libraryMatch, libraryMine]);
+  const capsReady =
+    !counter ||
+    (currentMine.kind === "ready" && currentGetInventory.kind === "ready");
+  const displayedProposal = useMemo(() => {
+    if (
+      !counter ||
+      currentMine.kind !== "ready" ||
+      currentGetInventory.kind !== "ready"
+    )
+      return proposal;
+    return withOfferInventoryCaps(
+      proposal,
+      offerLibrary(currentMine.cards, reviewedOffer, "give"),
+      offerLibrary(currentGetInventory.cards, reviewedOffer, "get")
+    );
+  }, [proposal, counter, currentMine, currentGetInventory, reviewedOffer]);
+  const overCap =
+    !!counter &&
+    capsReady &&
+    [...displayedProposal.give, ...displayedProposal.get].some(
+      (line) => line.quantity > Number(line.copies)
+    );
 
   async function showMore() {
     if (
-      theirs.kind !== "ready" ||
-      theirs.nextPage === null ||
-      theirs.more === "loading" ||
-      theirs.q !== theirQ
+      currentTheirs.kind !== "ready" ||
+      currentTheirs.nextPage === null ||
+      currentTheirs.more === "loading" ||
+      currentTheirs.q !== theirQ
     )
       return;
-    const current = theirs;
+    const current = currentTheirs;
     const at = generation.current;
     setTheirs({ ...current, more: "loading" });
     try {
-      const page = await getTraderTradeList(traderId, {
-        q: current.q,
-        page: current.nextPage!,
-      });
+      const { value: page, offerVersion } = await readOfferInventory(
+        reviewedOffer,
+        () =>
+          getTraderTradeList(traderId, {
+            q: current.q,
+            page: current.nextPage!,
+          }),
+        getTrade
+      );
       if (generation.current !== at) return;
       setTheirs({
         kind: "ready",
         q: current.q,
+        offerVersion,
         cards: [...current.cards, ...page.cards],
         nextPage: page.next_page,
         more: "idle",
       });
     } catch (cause) {
       if (generation.current !== at) return;
+      if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
       if (cause instanceof SocialError && cause.status === 404) {
         setTheirs({ kind: "missing" });
         return;
@@ -421,6 +505,7 @@ export function ProposalBuilderPage({
   }
 
   function add(side: ProposalSide, libraryCard: LibraryCard) {
+    if (!capsReady) return;
     const card = toProposalCard(libraryCard.card);
     const label = tradeCardName(card);
     const n = quantityIn(proposal, side, card.edition_id);
@@ -528,7 +613,15 @@ export function ProposalBuilderPage({
   }
 
   async function send() {
-    if (terminalRef.current || sending.current || busy || !party) return;
+    if (
+      terminalRef.current ||
+      sending.current ||
+      busy ||
+      !party ||
+      !capsReady ||
+      overCap
+    )
+      return;
     const current = proposal;
     const name = party.display_name;
     let cashBody: { cents: string; payer: "you" | "them" } | null = null;
@@ -779,17 +872,22 @@ export function ProposalBuilderPage({
             }
           : NO_CASH
       );
-  const reason = empty
-    ? "Add at least one card to either side."
-    : unchanged
-      ? "Change a card, a quantity or the cash to send a Counter."
-      : null;
+  const reason = !capsReady
+    ? "Checking available copies…"
+    : overCap
+      ? "Some quantities exceed the available copies. Lower them before sending."
+      : empty
+        ? "Add at least one card to either side."
+        : unchanged
+          ? "Change a card, a quantity or the cash to send a Counter."
+          : null;
 
   const sideSection = (side: ProposalSide) => (
     <ProposalSideSection
       key={side}
       side={side}
-      lines={proposal[side]}
+      lines={displayedProposal[side]}
+      loadingCaps={!capsReady}
       heading={sideHeading[side]}
       total={sideValueText(
         value,
@@ -927,12 +1025,26 @@ export function ProposalBuilderPage({
         )}
       </section>
       {cash.payer !== "none" && <LiabilityNotice />}
+      {currentGetInventory.kind === "failed" && (
+        <p role="alert">
+          Available copies couldn't be loaded.{" "}
+          <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+            Retry
+          </button>
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="primary"
           className="disabled:opacity-45"
           disabled={
-            empty || gone || unchanged || reviewNeeded || terminal !== null
+            empty ||
+            gone ||
+            unchanged ||
+            reviewNeeded ||
+            !capsReady ||
+            overCap ||
+            terminal !== null
           }
           aria-disabled={busy || undefined}
           aria-describedby={reason ? reasonId : undefined}
@@ -982,7 +1094,7 @@ export function ProposalBuilderPage({
         else if (which === "mine") setMineAttempt((n) => n + 1);
         else setMatchAttempt((n) => n + 1);
       }}
-      proposal={proposal}
+      proposal={displayedProposal}
       onAdd={add}
       announce={announce}
     />
@@ -1069,6 +1181,7 @@ function ProposalSideSection({
   lines,
   heading,
   total,
+  loadingCaps,
   onChange,
 }: {
   side: ProposalSide;
@@ -1076,6 +1189,7 @@ function ProposalSideSection({
   heading: React.RefObject<HTMLHeadingElement | null>;
   /** The side's estimated total, or null when it has no lines. */
   total: string | null;
+  loadingCaps: boolean;
   onChange: (line: ProposalLine, quantity: number) => void;
 }) {
   const headingId = useId();
@@ -1113,13 +1227,15 @@ function ProposalSideSection({
                     label={`${tradeCardName(line)} ${side === "get" ? "you get" : "you give"}`}
                     value={line.quantity}
                     min={0}
-                    max={cap}
+                    max={loadingCaps ? line.quantity : cap}
                     onChange={(value) => onChange(line, value)}
                   />
                 }
                 context={
                   <span className="text-meta text-text-subtle tabular-nums">
-                    Up to {cap}
+                    {loadingCaps
+                      ? "Checking available copies…"
+                      : `Up to ${cap}`}
                   </span>
                 }
                 details={
