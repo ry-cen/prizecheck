@@ -1,3 +1,4 @@
+import { sendItemMessage as say, tradeThreadFor } from "./support/item-chat";
 // Ticket #303 (Trading Stage 2, "Reports and the owner review queue"): Misty (zip 00010) and Ash (00011) are strangers in
 // reach. Ash Reports Misty from their conversation, from a Near you row or from a Trade; a Report Blocks her and she is
 // told nothing. The owner reviews the snapshot in Owner controls' Trade reports, suspends Misty, and lifts the suspension.
@@ -104,12 +105,6 @@ async function expectNoLeaks(page: Page) {
   expect(text).not.toMatch(NO_SOURCES);
 }
 
-const say = (from: Page, to: string, body: string) =>
-  api(from, "POST", `/api/social/traders/${to}/messages`, {
-    body,
-    idempotency_key: randomUUID(),
-  });
-
 const reasonLabel = (page: Page, name: string) =>
   page.locator("label").filter({ hasText: new RegExp(`^${name}$`) });
 
@@ -137,12 +132,18 @@ async function conversationStory(
   await say(page, s.mistyTrader, "Hi Misty");
   await say(misty, s.ashTrader, "Hi Ash");
   if (!phone) {
-    await misty.goto(`${ORIGIN}/trades/with/${s.ashTrader}`);
-    await expect(misty.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await misty.goto(
+      `${ORIGIN}/trades/${await tradeThreadFor(misty, s.ashTrader)}`
+    );
+    await expect(
+      misty.getByRole("textbox", { name: /^Message / })
+    ).toBeVisible();
   }
 
   // 2. Report is in the ⋯ menu; the form asks about Misty and focuses its first reason.
-  await page.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);
+  await page.goto(
+    `${ORIGIN}/trades/${await tradeThreadFor(page, s.mistyTrader)}`
+  );
   const more = page.getByRole("button", { name: MORE });
   if (phone) await expectTouchTarget(more);
   await more.click();
@@ -179,7 +180,7 @@ async function conversationStory(
   ).toBeVisible();
   // The form is gone, so the conversation's heading takes focus.
   await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
-  await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: /^Message / })).toHaveCount(0);
   await expect(more).toBeVisible();
   await more.click();
   await expect(page.getByRole("menuitem")).toHaveText(["Report"]);
@@ -229,7 +230,7 @@ test.describe("desktop, Report", () => {
       .locator("> li");
     await expect(rows).toHaveCount(1);
     const row = rows.first();
-    await row.getByRole("button", { name: /Misty W/ }).click();
+    await row.getByRole("button", { name: /^Misty W/ }).click();
     await row.getByRole("button", { name: MORE }).click();
     await page.getByRole("menuitem", { name: "Report" }).click();
     await expect(
@@ -249,7 +250,9 @@ test.describe("desktop, Report", () => {
     collectors,
   }) => {
     const s = await strangers(page, collectors, DESKTOP_SIZE);
-    await page.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);
+    await page.goto(
+      `${ORIGIN}/trades/${await tradeThreadFor(page, s.mistyTrader)}`
+    );
     const more = page.getByRole("button", { name: MORE });
     await more.click();
     await page.getByRole("menuitem", { name: "Report" }).click();
@@ -266,7 +269,9 @@ test.describe("desktop, Report", () => {
     collectors,
   }) => {
     const s = await strangers(page, collectors, DESKTOP_SIZE);
-    await page.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);
+    await page.goto(
+      `${ORIGIN}/trades/${await tradeThreadFor(page, s.mistyTrader)}`
+    );
     await page.getByRole("button", { name: MORE }).click();
     await page.getByRole("menuitem", { name: "Report" }).click();
     const submit = await fillReport(page, "Other");
@@ -306,7 +311,9 @@ test.describe("desktop, Report", () => {
     await loanStep(s.misty, loan, "accept", {
       lines: [{ edition_id: s.ids["PAL 185"], promised: "1" }],
     });
-    await page.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);
+    await page.goto(
+      `${ORIGIN}/trades/${await tradeThreadFor(page, s.mistyTrader)}`
+    );
     await page.getByRole("button", { name: MORE }).click();
     await page.getByRole("menuitem", { name: "Report" }).click();
     await expect(
@@ -412,7 +419,9 @@ test.describe("desktop, Report", () => {
     await api(s.ash, "POST", `/api/social/traders/${s.mistyTrader}/unblock`, {
       idempotency_key: randomUUID(),
     });
-    await s.ash.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);
+    await s.ash.goto(
+      `${ORIGIN}/trades/${await tradeThreadFor(s.ash, s.mistyTrader)}`
+    );
     await expect(
       s.ash.getByText("This collector is no longer available")
     ).toBeVisible();

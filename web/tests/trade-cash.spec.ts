@@ -9,7 +9,6 @@ import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
-import { openConversation, timeline } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 
@@ -278,14 +277,17 @@ async function story(
   await expect(total(page, "You get")).toHaveText(/^(Estimat|No estimate)/);
   await expectPageChecks(page, `the Trade screen with cash at ${width}`);
 
-  // 7: Ash sees a cash purchase from his side.
-  await openConversation(ash.page, "Misty W");
-  const row = timeline(ash.page)
-    .getByRole("listitem")
-    .filter({ hasText: "Misty W would pay $15.00 for 2 cards" });
+  // 7: Ash opens the same cash purchase item from his own list.
+  const purchasePath = new URL(page.url()).pathname;
+  await ash.page.goto(`${ORIGIN}/trades`);
+  const row = ash.page.locator(`a[href="${purchasePath}"]`);
   await expect(row).toHaveCount(1);
-  await expect(row).toContainText("Misty W pays you $15.00");
-  await row.getByRole("link").first().click();
+  await expect(row).toContainText("Misty W");
+  await expect(row).toContainText("They pay $15.00");
+  await row.click();
+  await expect(heading(ash.page)).toHaveText(
+    "Misty W would pay $15.00 for 2 cards"
+  );
   await expect(ash.page.getByRole("main").getByRole("note")).toBeVisible();
   await expect(region(ash.page, "Cash")).toContainText(
     "Misty W pays you $15.00"

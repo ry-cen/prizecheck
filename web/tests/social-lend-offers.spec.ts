@@ -86,7 +86,13 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await page.goto(`${ORIGIN}/loans`);
   await expect(
     page.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText("Misty W offered to lend you 1 card");
+  ).toContainText("Misty W");
+  await expect(
+    page.getByRole("region", { name: "Needs you" }).getByRole("link")
+  ).toContainText("Lend offer");
+  await expect(
+    page.getByRole("region", { name: "Needs you" }).getByRole("link")
+  ).toContainText("You give 0 · You get 1");
   // The kept /loans page may warm Decks while this navigation starts. Keep the failure active until
   // the Loan screen shows its own error, so an earlier warm read cannot consume the injection.
   const decksRead = /\/api\/decks(\?.*)?$/;
@@ -160,7 +166,10 @@ test("the lender offers selected copies from the Collection, and the borrower ac
 
   // She withdraws that offer from its Loan screen: her heading says she did, and Ash's says so, naming the cards.
   await lender.goto(`${ORIGIN}/loans`);
-  await lender.getByRole("link", { name: /You offered Ash K 1 card/ }).click();
+  await lender
+    .getByRole("region", { name: "Pending" })
+    .getByRole("link", { name: /^Ash K/ })
+    .click();
   await expect(title(lender)).toHaveText("You offered Ash K 1 card");
   const second = new URL(lender.url()).pathname;
   await lender.getByRole("button", { name: "More for this Loan" }).click();
