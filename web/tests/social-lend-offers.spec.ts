@@ -158,7 +158,15 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await expect(friend).toBeFocused();
   await expect(retry).toHaveCount(0);
   await friend.selectOption({ label: "Ash K" });
+  const newOffer = lender.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/loans/offers"
+  );
   await send.click();
+  const offered: import("../src/social_generated").LoanView = await (
+    await newOffer
+  ).json();
   await expect(dialog).toContainText("Offer sent to Ash K.");
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(dialog).toBeHidden();
@@ -168,7 +176,7 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await lender.goto(`${ORIGIN}/loans`);
   await lender
     .getByRole("region", { name: "Pending" })
-    .getByRole("link", { name: /^Ash K/ })
+    .locator(`a[href="/loans/${offered.thread_id}"]`)
     .click();
   await expect(title(lender)).toHaveText("You offered Ash K 1 card");
   const second = new URL(lender.url()).pathname;
