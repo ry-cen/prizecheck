@@ -3,7 +3,7 @@ import { usePulseChanged } from "../inbox/Inbox";
 import { LoanTermsEditor } from "./LoanTermsEditor";
 import { ThreadTimeline } from "../threads/ThreadTimeline";
 import { Avatar } from "../ui/Avatar";
-import { canRetryHandover } from "../social/confirmationRetry";
+import { handoverCommand } from "./handoverCommand";
 import {
   Fragment,
   useEffect,
@@ -419,28 +419,7 @@ export function LoanScreen({
     const key = keys.current.get(name) ?? crypto.randomUUID();
     keys.current.set(name, key);
     try {
-      let next: LoanView;
-      try {
-        next = await call(key);
-      } catch (cause) {
-        if (
-          name !== "handover" ||
-          !(cause instanceof SocialError) ||
-          cause.code !== "LOAN_CHANGED"
-        )
-          throw cause;
-        const [fresh, freshSide] = await Promise.all([
-          getLoan(loan.thread_id),
-          getLoanSide(loan.thread_id),
-        ]);
-        if (!canRetryHandover(loan, fresh, side, freshSide)) throw cause;
-        setLoad({ kind: "ready", loan: fresh, side: freshSide });
-        next = await confirmHandover(loan.thread_id, {
-          loan_id: fresh.loan_id,
-          revision: fresh.revision,
-          idempotency_key: key,
-        });
-      }
+      const next = await call(key);
       keys.current.delete(name);
       // The open form stays, its buttons busy, until the screen's own side is read again: the new Loan, the form
       // closing and focus on the new headline then land in one render.
@@ -959,7 +938,19 @@ export function LoanScreen({
           aria-disabled={busy || undefined}
           onClick={() =>
             void step("handover", (key) =>
-              confirmHandover(loan.thread_id, body(key))
+              handoverCommand(
+                loan,
+                side,
+                key,
+                stepBodies.current,
+                {
+                  confirm: confirmHandover,
+                  read: getLoan,
+                  readSide: getLoanSide,
+                },
+                (fresh, freshSide) =>
+                  setLoad({ kind: "ready", loan: fresh, side: freshSide })
+              )
             )
           }
         >
