@@ -8,7 +8,12 @@ import {
 } from "../social/blockMessages";
 import { endingText, traderEnding } from "../social/friendshipEnding";
 import { commandMessage } from "../social/socialMessages";
-import { blockTrader, getLoanViews, getTradeViews } from "../social_generated";
+import {
+  getFriends,
+  blockTrader,
+  getLoanViews,
+  getTradeViews,
+} from "../social_generated";
 import { Button } from "../ui/Button";
 import type { MenuItem } from "../ui/Menu";
 
@@ -64,11 +69,21 @@ export function useTraderBlock(
     Promise.all([
       getTradeViews(controller.signal),
       who.handle ? getLoanViews(controller.signal) : Promise.resolve(null),
+      who.handle ? getFriends() : Promise.resolve(null),
     ])
-      .then(([trades, loans]) => {
+      .then(([trades, loans, friends]) => {
         if (controller.signal.aborted) return;
         const cancels = endingText(
-          traderEnding(loans ? loans : null, trades, who.traderId, who.handle)
+          traderEnding(
+            loans,
+            trades,
+            who.traderId,
+            who.handle,
+            friends?.friends.find(
+              (friend) =>
+                friend.handle.toLowerCase() === who.handle?.toLowerCase()
+            )?.collector_id ?? null
+          )
         );
         setState((current) =>
           current.kind === "asking" && current.key === key

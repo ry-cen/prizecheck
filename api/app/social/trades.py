@@ -255,31 +255,30 @@ def confirmed(user_id: str, row) -> tuple[bool, bool]:
 
 
 def waiting_trade_step(user_id: str, row, facts: TradeFacts | None = None) -> str | None:
-    """What the Trade waits on the reader for, or None, the first that applies: 'answer' when they received a proposal
-    nobody has answered (a Counter is the same step); 'fix_picks' once accepted, when the reader hasn't confirmed
-    the swap and a pick of theirs is out of date (``facts.stale_picks``; without facts, never); 'confirm_swap' once
-    accepted, when the other side confirmed the swap and the reader has not. An accepted Trade nobody has confirmed,
-    with the reader's picks up to date, waits on neither side. One Trade is one step, whatever else it needs."""
+    """Proposal answer, then stale own picks, then every eligible own confirmation.
+
+    An agreed Trade waits on each unconfirmed participant independently of the
+    other side. A participant who already confirmed has no waiting step.
+    """
     mine, theirs = confirmed(user_id, row)
     if row['state'] == 'proposed':
         return 'answer' if role_of(user_id, row) == 'recipient' else None
     if row['state'] == 'accepted' and not mine:
         if facts is not None and facts.stale_picks:
             return 'fix_picks'
-        if theirs:
-            return 'confirm_swap'
+        return 'confirm_swap'
     return None
 
 
 def trade_waiting_since(user_id: str, row, step: str) -> datetime:
-    """When the Trade began to wait on the reader for ``step`` (``waiting_trade_step``), from times the row holds: a
-    proposal to answer, its ``created_at``; a swap the other side confirmed, that confirmation. Out-of-date picks have
-    no moment of their own (a Move or a Removal made them so, and nothing records when) and use ``accepted_at``, as the
-    Loans' do (``inbox.waiting_since``)."""
+    """Answer begins at creation; own confirmation begins at agreement.
+
+    Keep the start when the counterpart confirms later. Stale own picks have no
+    independent invalidation timestamp, so also use accepted_at with a legacy
+    created_at fallback.
+    """
     if step == 'answer':
         return row['created_at']
-    if step == 'confirm_swap':
-        return row[f'{other_side(role_of(user_id, row))}_swap_at']
     return row['accepted_at'] or row['created_at']
 
 

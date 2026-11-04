@@ -219,3 +219,17 @@ def test_opening_without_message_uses_no_message_quota(store):
     assert open_trade(misty, ash, ids['PAL 185']).status_code == 201
     assert message_count(misty) == 120
     assert opening_rows(misty) == {'trades': 1, 'threads': 1, 'messages': 0, 'picks': 1, 'commands': 1}
+
+
+def test_each_agreed_side_waits_until_its_own_physical_confirmation(store):
+    ids, ash, misty, _, _ = trading()
+    original = proposed(misty, ash, give=[(ids['PAL 185'], 1)], get=[(ids['SVI 166'], 1)])
+    agreed = ok(accept_trade(ash, original))
+    for actor in (ash, misty):
+        before = ok(read(actor, agreed))
+        assert before['waiting'] == 'confirm_swap' and before['needs_you'] is True
+        assert before['section'] == 'needs_you'
+    ok(confirm(misty, agreed, revision=agreed['revision']))
+    mine, theirs = ok(read(misty, agreed)), ok(read(ash, agreed))
+    assert mine['waiting'] is None and mine['needs_you'] is False
+    assert theirs['waiting'] == 'confirm_swap' and theirs['needs_you'] is True
