@@ -334,6 +334,14 @@ promote({'card-1': 'Pikachu'})`,
       )
     ).rows[0].id as string;
     await addToDeck(page, deckId, pikachu, 3);
+    // Stable initial art lets this story force the replacement at the gesture
+    // boundary instead of depending on when a real art request fails.
+    await page.route(/\/api\/art\/[^/]+\/(?:small|large)(?:\?.*)?$/, (route) =>
+      route.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="245" height="342"><rect width="245" height="342" fill="white"/></svg>',
+      })
+    );
     await page.goto(`${ORIGIN}/collection?location=${deckId}`);
     await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
     await expect(
@@ -348,8 +356,22 @@ promote({'card-1': 'Pikachu'})`,
       .filter({ hasText: /Moved|Removed|Undo/ });
     await expect(tiles).toHaveCount(3);
 
+    // Force the hosted race: artwork is replaced after pointerdown and before
+    // the browser generates click. The original Move/Remove/Undo proof follows.
+    const first = tiles.nth(0),
+      art = first.locator("img");
+    await expect(art).toBeVisible();
+    await first.hover();
+    await page.mouse.down();
+    try {
+      await art.evaluate((image) => image.dispatchEvent(new Event("error")));
+      await expect(art).toHaveCount(0);
+    } finally {
+      await page.mouse.up();
+    }
+    await expect(first).toHaveAttribute("aria-pressed", "true");
+    await expect(bar).toContainText("1 copy selected");
     // Move one copy out to the top-level Unsorted, then Undo puts it back.
-    await tiles.nth(0).click();
     await bar.getByRole("button", { name: "Actions" }).click();
     await bar.getByRole("button", { name: "Move…" }).click();
     const move = page.getByRole("dialog", { name: "Move 1 copy" });
