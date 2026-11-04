@@ -1,3 +1,4 @@
+import { threadVersionChanged } from "../threads/commandChanges";
 import { usePulseChanged } from "../inbox/Inbox";
 import { LoanTermsEditor } from "./LoanTermsEditor";
 import { ThreadTimeline } from "../threads/ThreadTimeline";
@@ -453,7 +454,10 @@ export function LoanScreen({
     } catch (cause) {
       if (!outcomeUnknown(cause)) keys.current.delete(name);
       setMessage(loanStepMessage(cause, other, cardName));
-      if (cause instanceof SocialError && RELOAD.has(cause.code)) {
+      if (
+        cause instanceof SocialError &&
+        (threadVersionChanged(cause.code) || RELOAD.has(cause.code))
+      ) {
         onLoanChanged();
         reloading.current = true;
         setAttempt((n) => n + 1);
