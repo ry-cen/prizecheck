@@ -27,6 +27,8 @@ export function ThreadList({
   revision?: number;
 }) {
   const [rows, setRows] = useState<ThreadItem[] | null>(null);
+  const lastRows = useRef(rows);
+  lastRows.current = rows;
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const changed = useLoansChanged(),
@@ -46,7 +48,8 @@ export function ThreadList({
         }
       },
       () => {
-        if (!controller.signal.aborted) setFailed(true);
+        if (!controller.signal.aborted && lastRows.current === null)
+          setFailed(true);
       }
     );
     return () => controller.abort();
