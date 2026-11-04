@@ -531,14 +531,16 @@ async function story(
   await expect(main.getByRole("list", { name: "You give" })).toContainText(
     `From ${mistyPlace} Shelf`
   );
-  await expect(bell(page)).toHaveAccessibleName("Inbox");
+  // TA-H01: both eligible unconfirmed participants wait, even before either confirms.
+  await expect(bell(page)).toHaveAccessibleName("Inbox, 1 waiting");
   await expectCollectorCopy(main, ashPlace);
   await expectPageChecks(page, `an accepted Trade at ${width}`);
 
   // S11. Ash confirms first, into his Box, with the Deck switch.
   await ash.page.goto(`${ORIGIN}/collection`);
-  await expect(bell(ash.page)).toHaveAccessibleName("Inbox");
+  await expect(bell(ash.page)).toHaveAccessibleName("Inbox, 1 waiting");
   await bell(ash.page).click();
+  await expect(waitingOn(ash.page)).toHaveText([/^Misty W · Confirm swap/]);
   await expect(earlierOn(ash.page).getByRole("link")).toHaveText([
     /^New: Misty W accepted your Trade Proposal /,
   ]);
