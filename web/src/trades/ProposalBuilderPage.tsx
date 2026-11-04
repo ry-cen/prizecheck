@@ -2,10 +2,11 @@ import {
   readOfferInventory,
   selectedOfferInventory,
   currentOfferRead,
-  withOfferInventoryCaps,
   OfferInventoryChanged,
 } from "./offerInventory";
 import { OfferReview, offerChanges } from "./offerReview";
+import { offerCaps, offerControls, reviewRequired } from "./offerLifecycle";
+import { offerVersion } from "./offerInventory";
 import { offerLibrary, offerCopyMap } from "./offerCopies";
 import { useMessagePrefill } from "./messagePrefill";
 import { ArrowRight, ChevronLeft } from "lucide-react";
@@ -15,6 +16,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -148,6 +150,9 @@ const BACK =
  * refused because the proposal changed takes the new revision and asks for one more tap; one refused because the
  * proposal no longer waits for the answer disables Send, and the leave guard stops.
  */
+const noSubscribe = () => () => {};
+const noOffer = () => null;
+
 export function ProposalBuilderPage({
   traderId,
   onNavigate,
@@ -170,7 +175,7 @@ export function ProposalBuilderPage({
   const [listBack] = useState(() =>
     counter ? null : peekFromTradeList(traderId)
   );
-  const [party, setParty] = useState<Party | null>(null);
+  const [loadedParty, setParty] = useState<Party | null>(null);
   const [theirs, setTheirs] = useState<Theirs>({ kind: "loading" });
   const [match, setMatch] = useState<MatchLoad>({ kind: "loading" });
   const [mine, setMine] = useState<MineLoad>({ kind: "loading" });
@@ -201,9 +206,21 @@ export function ProposalBuilderPage({
   const [offerReview] = useState(() =>
     counter ? new OfferReview(counter) : null
   );
-  const [reviewNeeded, setReviewNeeded] = useState(false);
-  const [answered, setAnswered] = useState(counter);
-  const reviewedOffer = offerReview?.reviewed;
+  const lifecycle = useSyncExternalStore(
+    offerReview?.subscribe ?? noSubscribe,
+    offerReview?.getSnapshot ?? noOffer,
+    offerReview?.getSnapshot ?? noOffer
+  );
+  const reviewedOffer = lifecycle?.reviewed;
+  const controls = lifecycle ? offerControls(lifecycle) : null;
+  const reviewNeeded = lifecycle ? reviewRequired(lifecycle) : false;
+  const answered = reviewedOffer;
+  const party = lifecycle
+    ? {
+        trader_id: traderId,
+        display_name: lifecycle.reviewed.other.display_name,
+      }
+    : loadedParty;
   const released = useMemo(
     () => offerCopyMap(reviewedOffer, "get"),
     [reviewedOffer]
@@ -212,8 +229,7 @@ export function ProposalBuilderPage({
     () => offerCopyMap(reviewedOffer, "give"),
     [reviewedOffer]
   );
-  const [gone, setGone] = useState(false);
-  const goneRef = useRef(false);
+  const gone = lifecycle?.phase === "gone";
   const refreshInbox = useInboxRefresh();
   const key = useRef<string | null>(null);
   const sent = useRef(false);
@@ -279,7 +295,7 @@ export function ProposalBuilderPage({
       })
       .catch((cause) => {
         if (controller.signal.aborted) return;
-        if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
+        inventoryFailed(cause, reviewedOffer);
         setTheirs(
           cause instanceof SocialError && cause.status === 404
             ? { kind: "missing" }
@@ -305,7 +321,7 @@ export function ProposalBuilderPage({
       (cause) => {
         if (!controller.signal.aborted) {
           setMatch({ kind: "failed" });
-          if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
+          inventoryFailed(cause, reviewedOffer);
         }
       }
     );
@@ -316,19 +332,33 @@ export function ProposalBuilderPage({
   useEffect(() => {
     const controller = new AbortController();
     setMine({ kind: "loading" });
+    if (reviewedOffer)
+      offerReview?.dispatch({
+        type: "inventory_requested",
+        side: "give",
+        version: offerVersion(reviewedOffer)!,
+      });
     readOfferInventory(
       reviewedOffer,
       () => getTradeList(controller.signal),
       (id) => getTrade(id, controller.signal)
     ).then(
       ({ value: list, offerVersion }) => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
           setMine({ kind: "ready", cards: list.cards, offerVersion });
+          if (offerVersion)
+            offerReview?.dispatch({
+              type: "inventory_received",
+              side: "give",
+              version: offerVersion,
+              cards: list.cards,
+            });
+        }
       },
       (cause) => {
         if (!controller.signal.aborted) {
           setMine({ kind: "failed" });
-          if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
+          inventoryFailed(cause, reviewedOffer, true);
         }
       }
     );
@@ -336,9 +366,7 @@ export function ProposalBuilderPage({
   }, [mineAttempt, reviewedOffer]);
 
   // Selected caps must not depend on a library search or its currently visible page.
-  const [getInventory, setGetInventory] = useState<MineLoad>({
-    kind: "loading",
-  });
+
   const selectedGet = proposal.get
     .map((line) => line.edition_id)
     .sort()
@@ -346,7 +374,11 @@ export function ProposalBuilderPage({
   useEffect(() => {
     if (!reviewedOffer) return;
     const controller = new AbortController();
-    setGetInventory({ kind: "loading" });
+    offerReview?.dispatch({
+      type: "inventory_requested",
+      side: "get",
+      version: offerVersion(reviewedOffer)!,
+    });
     readOfferInventory(
       reviewedOffer,
       () =>
@@ -357,18 +389,21 @@ export function ProposalBuilderPage({
       (id) => getTrade(id, controller.signal)
     ).then(
       ({ value: cards, offerVersion }) => {
-        if (!controller.signal.aborted)
-          setGetInventory({ kind: "ready", cards, offerVersion });
+        if (!controller.signal.aborted && offerVersion)
+          offerReview?.dispatch({
+            type: "inventory_received",
+            side: "get",
+            version: offerVersion,
+            cards,
+          });
       },
       (cause) => {
         if (controller.signal.aborted) return;
-        setGetInventory({ kind: "failed" });
-        if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
+        inventoryFailed(cause, reviewedOffer, true);
       }
     );
     return () => controller.abort();
   }, [traderId, reviewedOffer, selectedGet, attempt]);
-  const currentGetInventory = currentOfferRead(getInventory, reviewedOffer);
   const currentTheirs = currentOfferRead(theirs, reviewedOffer);
   const currentMatch = currentOfferRead(match, reviewedOffer);
   const currentMine = currentOfferRead(mine, reviewedOffer);
@@ -415,28 +450,12 @@ export function ProposalBuilderPage({
     [currentMine, reviewedOffer]
   );
 
-  const capsReady =
-    !counter ||
-    (currentMine.kind === "ready" && currentGetInventory.kind === "ready");
-  const displayedProposal = useMemo(() => {
-    if (
-      !counter ||
-      currentMine.kind !== "ready" ||
-      currentGetInventory.kind !== "ready"
-    )
-      return proposal;
-    return withOfferInventoryCaps(
-      proposal,
-      offerLibrary(currentMine.cards, reviewedOffer, "give"),
-      offerLibrary(currentGetInventory.cards, reviewedOffer, "get")
-    );
-  }, [proposal, counter, currentMine, currentGetInventory, reviewedOffer]);
-  const overCap =
-    !!counter &&
-    capsReady &&
-    [...displayedProposal.give, ...displayedProposal.get].some(
-      (line) => line.quantity > Number(line.copies)
-    );
+  const caps = lifecycle
+    ? offerCaps(lifecycle, proposal)
+    : { proposal, ready: true, overCap: false };
+  const capsReady = caps.ready;
+  const displayedProposal = caps.proposal;
+  const overCap = caps.overCap;
 
   async function showMore() {
     if (
@@ -470,7 +489,7 @@ export function ProposalBuilderPage({
       });
     } catch (cause) {
       if (generation.current !== at) return;
-      if (cause instanceof OfferInventoryChanged) void checkCurrentOffer();
+      inventoryFailed(cause, reviewedOffer);
       if (cause instanceof SocialError && cause.status === 404) {
         setTheirs({ kind: "missing" });
         return;
@@ -481,7 +500,8 @@ export function ProposalBuilderPage({
 
   // Any change makes a new send key: a send is the same only when the proposal is.
   function change(next: (p: Proposal) => Proposal) {
-    if (terminalRef.current) return;
+    if (terminalRef.current || lifecycle?.phase === "sending") return;
+    offerReview?.dispatch({ type: "draft_edited" });
     edited.current = true;
     setProposal(next);
     key.current = null;
@@ -489,7 +509,8 @@ export function ProposalBuilderPage({
 
   // A cash change is an edit like a card: it makes a new send key.
   function editCash(next: CashDraft) {
-    if (terminalRef.current) return;
+    if (terminalRef.current || lifecycle?.phase === "sending") return;
+    offerReview?.dispatch({ type: "draft_edited" });
     edited.current = true;
     key.current = null;
     setCash(next);
@@ -505,7 +526,7 @@ export function ProposalBuilderPage({
   }
 
   function add(side: ProposalSide, libraryCard: LibraryCard) {
-    if (!capsReady) return;
+    if (!capsReady || lifecycle?.phase === "sending") return;
     const card = toProposalCard(libraryCard.card);
     const label = tradeCardName(card);
     const n = quantityIn(proposal, side, card.edition_id);
@@ -533,56 +554,67 @@ export function ProposalBuilderPage({
     if (side) sideHeading[side].current?.focus();
   }, [proposal]);
 
+  function inventoryFailed(
+    cause: unknown,
+    expected: TradeView | undefined,
+    required = false
+  ) {
+    if (
+      !offerReview ||
+      !expected ||
+      offerVersion(expected) !== offerVersion(offerReview.reviewed)
+    )
+      return;
+    if (
+      cause instanceof OfferInventoryChanged ||
+      (cause instanceof SocialError && cause.status === 404)
+    ) {
+      offerReview.dispatch({
+        type: "inventory_obsolete",
+        version: offerVersion(expected)!,
+      });
+      void checkCurrentOffer();
+    } else if (required)
+      offerReview.dispatch({ type: "read_failed", stage: "inventory" });
+  }
   async function checkCurrentOffer() {
     if (!offerReview) return;
-    setReviewNeeded(true);
     try {
-      const fresh = await offerReview.refresh(getTrade);
-      setGone(!offerReview.canEdit(fresh));
-      setMessage(
-        "The offer changed. Your draft is kept. Review the current cards and cash below before sending again."
-      );
+      await offerReview.refresh(getTrade);
     } catch {
-      setGone(offerReview.unavailable);
-      if (offerReview.unavailable) {
-        setMessage(COUNTER_GONE_TEXT);
-        return;
-      }
-      setMessage(
-        "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
-      );
+      /* The model keeps the cached candidate and exposes Retry. */
     }
+  }
+  function retryOfferRead() {
+    if (!offerReview) return;
+    const retry = offerControls(offerReview.getSnapshot()).retry;
+    if (retry === "check") {
+      void checkCurrentOffer();
+      return;
+    }
+    offerReview.dispatch({ type: "retry" });
+    setMineAttempt((n) => n + 1);
+    setAttempt((n) => n + 1);
+    setMatchAttempt((n) => n + 1);
   }
   async function sendCounter(
     current: Proposal,
     name: string,
     cashBody: { cents: string; payer: "you" | "them" } | null
   ) {
-    if (!offerReview || offerReview.required) return;
+    if (!offerReview || !offerControls(offerReview.getSnapshot()).send) return;
     try {
-      key.current ??= crypto.randomUUID();
       const trade = await offerReview.submit(
         {
           you_give: requestLines(current.give),
           you_get: requestLines(current.get),
           cash: cashBody,
         },
-        key.current,
+        crypto.randomUUID(),
         counterTrade,
         getTrade
       );
       if (!trade) {
-        key.current = null;
-        setReviewNeeded(true);
-        setGone(
-          offerReview.unavailable ||
-            (offerReview.candidate
-              ? !offerReview.canEdit(offerReview.candidate)
-              : false)
-        );
-        setMessage(
-          "The offer changed. Your draft is kept. Review the current cards and cash below before sending again."
-        );
         refreshInbox();
         return;
       }
@@ -596,19 +628,9 @@ export function ProposalBuilderPage({
       }
       refreshInbox();
     } catch (cause) {
-      if (offerReview.required) {
-        setGone(offerReview.unavailable);
-        key.current = null;
-        setReviewNeeded(true);
-        setMessage(
-          "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
-        );
-      } else {
-        if (!tradeOutcomeUnknown(cause)) key.current = null;
-        setMessage(
-          sendTradeMessage(cause, name, current.give, current.get, "counter")
-        );
-      }
+      setMessage(
+        sendTradeMessage(cause, name, current.give, current.get, "counter")
+      );
     }
   }
 
@@ -619,6 +641,7 @@ export function ProposalBuilderPage({
       busy ||
       !party ||
       !capsReady ||
+      (controls !== null && !controls.send) ||
       overCap
     )
       return;
@@ -701,7 +724,7 @@ export function ProposalBuilderPage({
         !sent.current &&
         !sending.current &&
         reachable.current &&
-        !goneRef.current &&
+        !offerReview?.unavailable &&
         edited.current &&
         proposalCopies(latest.current) > 0,
       ask: (leave) => {
@@ -833,12 +856,12 @@ export function ProposalBuilderPage({
     );
   }
 
-  if (theirs.kind === "missing")
+  if (!lifecycle && theirs.kind === "missing")
     return frame(
       frameTitle,
       <p className="m-0 text-body text-text-muted">{UNAVAILABLE_NOTE}</p>
     );
-  if (theirs.kind === "failed" && !party)
+  if (!lifecycle && theirs.kind === "failed" && !party)
     return frame(
       frameTitle,
       <div className="flex flex-wrap items-center gap-3">
@@ -901,183 +924,195 @@ export function ProposalBuilderPage({
     />
   );
   const proposalPane = (
-    <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
-      {reviewNeeded && (
-        <section
-          aria-label="Current offer to review"
-          className="flex flex-col gap-2 rounded-panel border border-border p-3"
-        >
-          <p role="status">The offer changed. Your draft is kept.</p>
-          {offerReview?.candidate ? (
-            <>
-              <h2>Current offer</h2>
-              <ul>
-                {offerChanges(offerReview.reviewed, offerReview.candidate).map(
-                  (text) => (
-                    <li key={text}>{text}</li>
-                  )
-                )}
-              </ul>
-              <p>
-                You give:{" "}
-                {offerReview.candidate.you_give
-                  .map((card) => `${card.copies} ${tradeCardName(card)}`)
-                  .join(", ") || "Nothing"}
+    <fieldset disabled={lifecycle?.phase === "sending"} className="contents">
+      <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
+        {lifecycle &&
+          (reviewNeeded ||
+            lifecycle.phase === "read_failed" ||
+            lifecycle.phase === "loading") && (
+            <section
+              aria-label="Current offer to review"
+              className="flex flex-col gap-2 rounded-panel border border-border p-3"
+            >
+              <p role="status">
+                {lifecycle.phase === "gone"
+                  ? "This Trade no longer accepts an offer change. Your draft is kept."
+                  : lifecycle.phase === "read_failed"
+                    ? lifecycle.failure === "version"
+                      ? "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
+                      : "Available copies couldn't be loaded. Your draft is kept."
+                    : lifecycle.phase === "loading"
+                      ? "Checking available copies…"
+                      : lifecycle.phase === "checking"
+                        ? "Checking the current offer. Your draft is kept."
+                        : "The offer changed. Your draft is kept."}
               </p>
-              <p>
-                You get:{" "}
-                {offerReview.candidate.you_get
-                  .map((card) => `${card.copies} ${tradeCardName(card)}`)
-                  .join(", ") || "Nothing"}
-              </p>
-              <p>
-                {offerReview.candidate.cash
-                  ? `${offerReview.candidate.cash.payer === "you" ? "You pay" : "They pay"} $${(Number(offerReview.candidate.cash.cents) / 100).toFixed(2)}`
-                  : "No cash"}
-              </p>
-              <Button
-                disabled={!offerReview.canEdit(offerReview.candidate)}
-                onClick={() => {
-                  if (!offerReview.confirm()) return;
-                  setAnswered(offerReview.reviewed);
-                  setReviewNeeded(false);
-                  setGone(false);
-                  key.current = null;
-                  setMineAttempt((n) => n + 1);
-                  setAttempt((n) => n + 1);
-                  setMatchAttempt((n) => n + 1);
-                  setMessage(
-                    "Current offer reviewed. Check your draft before sending."
-                  );
-                }}
-              >
-                I reviewed the current offer
-              </Button>
-              {gone && <p>This Trade no longer accepts an offer change.</p>}
-            </>
-          ) : (
-            <p>The current offer has not been loaded.</p>
+              {lifecycle.candidate ? (
+                <>
+                  <h2>Current offer</h2>
+                  <ul>
+                    {offerChanges(lifecycle.reviewed, lifecycle.candidate).map(
+                      (text) => (
+                        <li key={text}>{text}</li>
+                      )
+                    )}
+                  </ul>
+                  <p>
+                    You give:{" "}
+                    {lifecycle.candidate.you_give
+                      .map((card) => `${card.copies} ${tradeCardName(card)}`)
+                      .join(", ") || "Nothing"}
+                  </p>
+                  <p>
+                    You get:{" "}
+                    {lifecycle.candidate.you_get
+                      .map((card) => `${card.copies} ${tradeCardName(card)}`)
+                      .join(", ") || "Nothing"}
+                  </p>
+                  <p>
+                    {lifecycle.candidate.cash
+                      ? `${lifecycle.candidate.cash.payer === "you" ? "You pay" : "They pay"} $${(Number(lifecycle.candidate.cash.cents) / 100).toFixed(2)}`
+                      : "No cash"}
+                  </p>
+                  <Button
+                    disabled={!controls?.review}
+                    onClick={() => {
+                      if (!offerReview?.confirm()) return;
+                      setMineAttempt((n) => n + 1);
+                      setAttempt((n) => n + 1);
+                      setMatchAttempt((n) => n + 1);
+                      setMessage(
+                        "Current offer reviewed. Check your draft before sending."
+                      );
+                    }}
+                  >
+                    I reviewed the current offer
+                  </Button>
+                  {gone && <p>This Trade no longer accepts an offer change.</p>}
+                </>
+              ) : (
+                <p>The current offer has not been loaded.</p>
+              )}
+              {controls?.retry && controls.retry !== "send" && (
+                <Button onClick={retryOfferRead}>
+                  {controls.retry === "check"
+                    ? lifecycle.phase === "read_failed"
+                      ? "Retry current offer"
+                      : "Check current offer"
+                    : "Retry available copies"}
+                </Button>
+              )}
+            </section>
           )}
-          <Button onClick={() => void checkCurrentOffer()}>
-            Check current offer
-          </Button>
-        </section>
-      )}
-      {sideSection("get")}
-      {fromMatch && match.kind === "ready" && (
-        <MatchPrintingChoices
-          side="get"
-          row={match.row}
-          proposal={proposal}
-          onChoose={(groupId, editionId) =>
-            change((p) =>
-              chooseMatchedPrinting(p, "get", match.row, groupId, editionId)
-            )
-          }
-        />
-      )}
-      {sideSection("give")}
-      {fromMatch && match.kind === "ready" && (
-        <MatchPrintingChoices
-          side="give"
-          row={match.row}
-          proposal={proposal}
-          onChoose={(groupId, editionId) =>
-            change((p) =>
-              chooseMatchedPrinting(p, "give", match.row, groupId, editionId)
-            )
-          }
-        />
-      )}
-      <section
-        aria-labelledby={cashHeadingId}
-        className="flex min-w-0 flex-col gap-2"
-      >
-        <h2 id={cashHeadingId} className="m-0 text-heading font-semibold">
-          Cash
-        </h2>
-        <Segmented<CashPayer>
-          mode="choice"
-          label="Cash"
-          labelledBy={cashHeadingId}
-          value={cash.payer}
-          onChange={(payer) =>
-            editCash(payer === "none" ? NO_CASH : { ...cash, payer })
-          }
-          options={[
-            { value: "none", label: "No cash" },
-            { value: "you", label: "You pay" },
-            { value: "them", label: `${name} pays` },
-          ]}
-        />
-        {cash.payer !== "none" && (
-          <TextField
-            label="Amount in US dollars"
-            inputMode="decimal"
-            placeholder="0.00"
-            autoComplete="off"
-            maxLength={14}
-            value={cash.amount}
-            onChange={(event) =>
-              editCash({ ...cash, amount: event.currentTarget.value })
+        {sideSection("get")}
+        {fromMatch && match.kind === "ready" && (
+          <MatchPrintingChoices
+            side="get"
+            row={match.row}
+            proposal={proposal}
+            onChoose={(groupId, editionId) =>
+              change((p) =>
+                chooseMatchedPrinting(p, "get", match.row, groupId, editionId)
+              )
             }
           />
         )}
-      </section>
-      {cash.payer !== "none" && <LiabilityNotice />}
-      {currentGetInventory.kind === "failed" && (
-        <p role="alert">
-          Available copies couldn't be loaded.{" "}
-          <button type="button" onClick={() => setAttempt((n) => n + 1)}>
-            Retry
-          </button>
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          variant="primary"
-          className="disabled:opacity-45"
-          disabled={
-            empty ||
-            gone ||
-            unchanged ||
-            reviewNeeded ||
-            !capsReady ||
-            overCap ||
-            terminal !== null
-          }
-          aria-disabled={busy || undefined}
-          aria-describedby={reason ? reasonId : undefined}
-          onClick={() => void send()}
-        >
-          {counter
-            ? counter.actions.includes("change_offer")
-              ? "Send changed offer"
-              : "Send Counter"
-            : "Send Trade Proposal"}
-        </Button>
-        {reason && (
-          <p id={reasonId} className="m-0 text-meta text-text-muted">
-            {reason}
-          </p>
+        {sideSection("give")}
+        {fromMatch && match.kind === "ready" && (
+          <MatchPrintingChoices
+            side="give"
+            row={match.row}
+            proposal={proposal}
+            onChoose={(groupId, editionId) =>
+              change((p) =>
+                chooseMatchedPrinting(p, "give", match.row, groupId, editionId)
+              )
+            }
+          />
         )}
-      </div>
-      {!counter && (
-        <TextArea
-          label="Message (optional)"
-          value={initialMessage}
-          maxLength={4000}
-          disabled={busy || terminal !== null || key.current !== null}
-          onChange={(event) => {
-            setInitialMessage(event.target.value);
-          }}
-        />
-      )}
+        <section
+          aria-labelledby={cashHeadingId}
+          className="flex min-w-0 flex-col gap-2"
+        >
+          <h2 id={cashHeadingId} className="m-0 text-heading font-semibold">
+            Cash
+          </h2>
+          <Segmented<CashPayer>
+            mode="choice"
+            label="Cash"
+            labelledBy={cashHeadingId}
+            value={cash.payer}
+            onChange={(payer) =>
+              editCash(payer === "none" ? NO_CASH : { ...cash, payer })
+            }
+            options={[
+              { value: "none", label: "No cash" },
+              { value: "you", label: "You pay" },
+              { value: "them", label: `${name} pays` },
+            ]}
+          />
+          {cash.payer !== "none" && (
+            <TextField
+              label="Amount in US dollars"
+              inputMode="decimal"
+              placeholder="0.00"
+              autoComplete="off"
+              maxLength={14}
+              value={cash.amount}
+              onChange={(event) =>
+                editCash({ ...cash, amount: event.currentTarget.value })
+              }
+            />
+          )}
+        </section>
+        {cash.payer !== "none" && <LiabilityNotice />}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="primary"
+            className="disabled:opacity-45"
+            disabled={
+              empty ||
+              gone ||
+              unchanged ||
+              reviewNeeded ||
+              (controls !== null && !controls.send) ||
+              !capsReady ||
+              overCap ||
+              terminal !== null
+            }
+            aria-disabled={busy || undefined}
+            aria-describedby={reason ? reasonId : undefined}
+            onClick={() => void send()}
+          >
+            {counter
+              ? counter.actions.includes("change_offer")
+                ? "Send changed offer"
+                : "Send Counter"
+              : "Send Trade Proposal"}
+          </Button>
+          {reason && (
+            <p id={reasonId} className="m-0 text-meta text-text-muted">
+              {reason}
+            </p>
+          )}
+        </div>
+        {!counter && (
+          <TextArea
+            label="Message (optional)"
+            value={initialMessage}
+            maxLength={4000}
+            disabled={busy || terminal !== null || key.current !== null}
+            onChange={(event) => {
+              setInitialMessage(event.target.value);
+            }}
+          />
+        )}
 
-      <p role="alert" className="m-0 text-meta text-danger empty:hidden">
-        {message}
-      </p>
-    </section>
+        <p role="alert" className="m-0 text-meta text-danger empty:hidden">
+          {message}
+        </p>
+      </section>
+    </fieldset>
   );
   const library = (
     <ProposalLibrary

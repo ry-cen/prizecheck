@@ -18,6 +18,22 @@ const offeredCard = (edition_id: string, name: string) => ({
   descriptor: { finish: "normal" },
   image_url: null,
 });
+function loadedInventory(review: OfferReview) {
+  for (const side of ["give", "get"] as const)
+    review.dispatch({
+      type: "inventory_received",
+      version: `${review.reviewed.thread_id}/${review.reviewed.offer_id}/${review.reviewed.revision}`,
+      side,
+      cards: review.reviewed[side === "give" ? "you_give" : "you_get"].map(
+        (card) => ({ ...card, copies: "3" })
+      ),
+    });
+}
+function loadedReview(offer: TradeView) {
+  const review = new OfferReview(offer);
+  loadedInventory(review);
+  return review;
+}
 const original: TradeView = {
   id: "old",
   offer_id: "old",
@@ -48,7 +64,7 @@ const original: TradeView = {
 it.each(["counter", "change_offer"] as const)(
   "keeps the draft and requires review after a peer replaces an offer during %s",
   async (action) => {
-    const review = new OfferReview({ ...original, actions: [action] });
+    const review = loadedReview({ ...original, actions: [action] });
     const fresh = {
       ...original,
       id: "new",
@@ -77,6 +93,7 @@ it.each(["counter", "change_offer"] as const)(
     expect(await review.submit(draft, "new-key", post, read)).toBeNull();
     expect(post).toHaveBeenCalledTimes(1);
     expect(review.confirm()).toBe(true);
+    loadedInventory(review);
     await review.submit(draft, "new-key", post, read);
     expect(post.mock.calls[1][1]).toEqual({
       ...draft,
@@ -88,7 +105,7 @@ it.each(["counter", "change_offer"] as const)(
   }
 );
 it("fails closed when the fresh read fails and never sends to the obsolete offer again", async () => {
-  const review = new OfferReview(original);
+  const review = loadedReview(original);
   const post = vi.fn().mockRejectedValue(new TradesError(409, "OFFER_CHANGED"));
   await expect(
     review.submit({}, "key", post, async () => {
@@ -101,7 +118,7 @@ it("fails closed when the fresh read fails and never sends to the obsolete offer
   expect(post).toHaveBeenCalledTimes(1);
 });
 it("keeps unknown-outcome retries on the same reviewed identity and key", async () => {
-  const review = new OfferReview(original);
+  const review = loadedReview(original);
   const post = vi
     .fn()
     .mockRejectedValueOnce(new TypeError("Offline"))
@@ -129,7 +146,7 @@ it("classifies stale detail commands and gives plain words for Trade and Loan co
 });
 
 it("stops posting when the thread can no longer be found", async () => {
-  const review = new OfferReview(original),
+  const review = loadedReview(original),
     post = vi.fn().mockRejectedValue(new TradesError(404, "TRADE_NOT_FOUND"));
   expect(await review.submit({}, "key", post, vi.fn())).toBeNull();
   expect(review.unavailable).toBe(true);
