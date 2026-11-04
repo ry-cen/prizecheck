@@ -20,7 +20,7 @@ from app.core.ops.api_errors import api_error
 from app.holdings import MAX_BATCH_EDITIONS
 from app.db import connect
 from app.identity import verified_user
-from app.idempotency import expire
+from app.core.inventory.idempotency import expire
 from app.inventory_core import MAX_QUANTITY, REPLAY, lock_owner
 
 router = APIRouter(prefix="/api/scanner")
