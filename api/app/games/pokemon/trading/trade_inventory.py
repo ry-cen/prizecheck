@@ -186,6 +186,12 @@ def cash_only_side(give, get, cash: tuple[int, str] | None) -> str | None:
     return None
 
 
+
+def had_cash_only_side(conn, row) -> bool:
+    """The prior cash payer gave no cards; a gift plus cash is not cash-only."""
+    return row['cash_payer'] is not None and not side_gives(conn, row['id'], row['cash_payer'])
+
+
 def proposal_shape(you_give, you_get, cash_request):
     """The 422 shape rules a send and a Counter share, in order: INVALID_QUANTITY, DUPLICATE_EDITION (one Edition twice
     on one side), SAME_CARD_BOTH_SIDES, TOO_MANY_LINES, TRADE_HAS_NO_CARDS, INVALID_CASH. Returns ``(give, get, cash)``
@@ -391,7 +397,9 @@ def change_offer(trade_id: UUID, command: ChangeOffer, user_id: str = Depends(ve
             profiles = {row['user_id']: row for row in conn.execute(
                 'SELECT user_id,display_name,open_to_cash_offers FROM collector_profile WHERE user_id=ANY(%s)', ([user_id, other],))}
             cash_side = cash_only_side(give, get, cash)
-            if cash_side and not profiles[other]['open_to_cash_offers']:
+            if (cash_side and not profiles[other]['open_to_cash_offers']
+                    and not (old['state'] == 'proposed' and role_of(user_id, old) == 'recipient'
+                             and had_cash_only_side(conn, old))):
                 refuse(409, 'CASH_ONLY_NOT_OPEN', side=cash_side)
             affected = {old[f'{side}_id'] for side in ('proposer', 'recipient')
                         if (side == 'proposer' or old['state'] == 'accepted') and side_gives(conn, old['id'], side)}

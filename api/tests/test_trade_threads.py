@@ -233,3 +233,23 @@ def test_each_agreed_side_waits_until_its_own_physical_confirmation(store):
     mine, theirs = ok(read(misty, agreed)), ok(read(ash, agreed))
     assert mine['waiting'] is None and mine['needs_you'] is False
     assert theirs['waiting'] == 'confirm_swap' and theirs['needs_you'] is True
+
+
+def test_cash_only_counter_keeps_the_setting_off_and_replays_once(store):
+    from test_trades import trade_settings
+    ids, ash, misty, _, _ = trading()
+    trade_settings(ash, True)
+    assert trade_settings(misty) is False
+    original = proposed(misty, ash, get=[(ids['SVI 166'], 1)],
+                        cash={'cents': '1000', 'payer': 'you'})
+    key = uuid4()
+    body = {'offer_id': original['offer_id'], 'revision': original['revision'],
+            'idempotency_key': str(key), 'you_give': [{'edition_id': ids['SVI 166'], 'quantity': '1'}],
+            'you_get': [], 'cash': {'cents': '1500', 'payer': 'them'}}
+    changed = ok(call('POST', f"/api/trades/{original['thread_id']}/offer", ash, body))
+    assert trade_settings(misty) is False
+    assert changed['thread_id'] == original['thread_id'] and changed['offer_id'] != original['offer_id']
+    assert changed['cash'] == body['cash']
+    before = trade_picks(changed['id']), revision_of(ash), revision_of(misty), events(changed)
+    assert ok(call('POST', f"/api/trades/{original['thread_id']}/offer", ash, body)) == changed
+    assert (trade_picks(changed['id']), revision_of(ash), revision_of(misty), events(changed)) == before
