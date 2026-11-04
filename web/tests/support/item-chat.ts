@@ -17,8 +17,13 @@ export async function tradeThreadFor(
     const rows: ThreadItem[] = await api(
       page,
       "GET",
-      `/api/trades?group=${group}&with_trader=${trader}`
+      `/api/trades?group=${group}&with=${encodeURIComponent(trader)}`
     );
+    for (const row of rows)
+      expect(
+        row.other.trader_id,
+        "Item chat setup stays with its intended collector"
+      ).toBe(trader);
     if (rows[0]) return rows[0].id;
   }
   const list: OwnTradeList = await api(page, "GET", "/api/trades/list");
