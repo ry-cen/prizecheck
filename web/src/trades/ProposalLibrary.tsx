@@ -18,6 +18,7 @@ import {
   type LibraryCard,
   type Proposal,
   type ProposalSide,
+  type ProposalCard,
 } from "./proposalModel";
 import { acceptsText, originText, wantText } from "./tradeMatchText";
 import { tradeCardName } from "./tradeText";
@@ -29,7 +30,7 @@ export type TheirsLoad =
       kind: "ready";
       /** The search the cards were read for. */
       q: string;
-      cards: FriendTradeCard[];
+      cards: ProposalCard[];
       nextPage: number | null;
       more: "idle" | "loading" | "failed";
     };
@@ -37,7 +38,7 @@ export type TheirsLoad =
 export type MineLoad =
   | { kind: "loading" }
   | { kind: "failed" }
-  | { kind: "ready"; cards: TradeListCard[] };
+  | { kind: "ready"; cards: ProposalCard[] };
 
 export type MatchLoad =
   | { kind: "loading" }
