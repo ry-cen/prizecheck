@@ -1150,3 +1150,13 @@ below says where each group ended up; the module map in section 1 stays the plan
   these are the four current production callers. A repository-wide import and patch-path scan found
   no remaining consumer requiring the old path, so the root module and its ownership entry are removed
   without a compatibility shim. Test assertions and API snapshots are unchanged.
+
+**2026-11-04 — Location router relocation (#528)**
+
+- The whole owner-scoped Location router moved from `app.locations` to
+  `app.core.inventory.locations`. Only its imports of the existing core-owned `app.db` and `app.identity`
+  changed; models, route order, owner filters, onboarding transaction and HTTP behavior are unchanged.
+- The existing SQL names only `inventory_owner` and `location`; it has no catalog reads or game literals.
+- The Pokémon composition imports the moved router with the same alias and registration order.
+  A repository-wide import, dynamic-path and patch-path scan found no other consumer requiring the old path,
+  so the root module and its exact ownership row are removed without a compatibility shim.
