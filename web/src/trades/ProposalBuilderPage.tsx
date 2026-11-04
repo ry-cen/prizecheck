@@ -1,3 +1,4 @@
+import { useMessagePrefill } from "./messagePrefill";
 import { ArrowRight, ChevronLeft } from "lucide-react";
 import {
   useEffect,
@@ -33,6 +34,7 @@ import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { Stepper } from "../ui/Stepper";
+import { TextArea } from "../ui/TextField";
 import { TextField } from "../ui/TextField";
 import { useToast } from "../ui/Toast";
 import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
@@ -171,6 +173,8 @@ export function ProposalBuilderPage({
   const [pane, setPane] = useState<Pane>(counter ? "proposal" : "cards");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const prefilledMessage = useMessagePrefill();
+  const [initialMessage, setInitialMessage] = useState(prefilledMessage);
   const [announce, setAnnounce] = useState("");
   const [asking, setAsking] = useState<{ leave: () => void } | null>(null);
   const [cash, setCash] = useState<CashDraft>(() =>
@@ -553,6 +557,7 @@ export function ProposalBuilderPage({
           you_get: requestLines(current.get),
           cash: cashBody,
           idempotency_key: submittedKey,
+          message: initialMessage || null,
         })
       );
       if (result.kind === "applied_current") {
@@ -869,6 +874,18 @@ export function ProposalBuilderPage({
           </p>
         )}
       </div>
+      {!counter && (
+        <TextArea
+          label="Message (optional)"
+          value={initialMessage}
+          maxLength={4000}
+          disabled={busy || terminal !== null || key.current !== null}
+          onChange={(event) => {
+            setInitialMessage(event.target.value);
+          }}
+        />
+      )}
+
       <p role="alert" className="m-0 text-meta text-danger empty:hidden">
         {message}
       </p>

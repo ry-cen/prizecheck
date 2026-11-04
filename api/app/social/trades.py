@@ -410,7 +410,11 @@ def trade_view(conn, user_id: str, trade_id: UUID) -> TradeView:
     return trade_views(conn, user_id, [row])[0]
 
 
-@router.get('/resolve/{identifier}')
+class TradeResolution(BaseModel):
+    thread_id: UUID
+
+
+@router.get('/resolve/{identifier}', response_model=TradeResolution)
 def resolve_trade(identifier: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn:
         found = conn.execute("""SELECT t.id FROM thread t WHERE t.kind='trade'
