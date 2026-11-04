@@ -498,9 +498,9 @@ async function story(
   expect(counterOffer.offer_id).not.toBe(proposedOffer.offer_id);
   expect(counterOffer.countered_from).toBe(proposedOffer.offer_id);
   await expect(heading(ash.page)).toHaveText("Waiting for Misty W to answer");
-  await expect(ashMain).toContainText(
-    "This is your Counter to Misty W's Trade Proposal."
-  );
+  await expect(
+    ash.page.getByRole("list", { name: "Messages and changes" })
+  ).toContainText("You: Sent a Counter");
   await expect(region(ash.page, "Cash")).toContainText(
     "Misty W pays you $5.00"
   );
@@ -519,7 +519,9 @@ async function story(
   await waitingOn(page).click();
   await expect(page).toHaveURL(counterAddress);
   await expect(heading(page)).toHaveText("Ash K countered your Trade Proposal");
-  await expect(main).toContainText("This is a Counter to your Trade Proposal.");
+  await expect(
+    page.getByRole("list", { name: "Messages and changes" })
+  ).toContainText("Ash K: Sent a Counter");
   await expect(region(page, "Cash")).toContainText("You pay Ash K $5.00");
   await expect(main.getByRole("note")).toContainText(NOTICE);
   await expectCollectorCopy(main, ashPlace);
