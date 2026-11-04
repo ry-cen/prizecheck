@@ -361,12 +361,18 @@ def event_editions(data, facts) -> list[EventEdition]:
 def timeline_item(row, low: bool, edition_facts=None) -> TimelineItem:
     at = row['created_at']
     kind = row['item_kind']
+    event_kind, actor, data, return_id = row['kind'], row['actor'], row['data'], row['return_id']
+    # Relationship/audit causes are private. Only the collector who placed a
+    # Block already knows that action; neither reader learns a Suspension here.
+    if event_kind in ('closed_blocked', 'closed_suspended') and not (
+            event_kind == 'closed_blocked' and actor == ('low' if low else 'high')):
+        event_kind, actor, data, return_id = 'closed_unavailable', None, {}, None
     return TimelineItem(kind=kind, at=at, cursor=encode_cursor(at, kind, row['id']),
                         message=Message(id=row['id'], from_='you' if row['from_low'] == low else 'them',
                                         body=row['body'], at=at) if kind == 'message' else None,
-                        event=EventView(id=row['id'], actor=row['actor'], kind=row['kind'], round_id=row['round_id'],
-                                        return_id=row['return_id'], data=row['data'],
-                                        editions=event_editions(row['data'], edition_facts or {}), at=at)
+                        event=EventView(id=row['id'], actor=actor, kind=event_kind, round_id=row['round_id'],
+                                        return_id=return_id, data=data,
+                                        editions=event_editions(data, edition_facts or {}), at=at)
                         if kind == 'event' else None)
 
 
