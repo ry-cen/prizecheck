@@ -7,7 +7,7 @@ import { timelineText } from "./threadText";
 import { useEffect, useRef, useState } from "react";
 import {
   getThreadDetail,
-  getBlocked,
+  getTrader,
   getThreadTimeline,
   sendThreadMessage,
   readThread,
@@ -96,16 +96,14 @@ export function ThreadTimeline({
               : null
           );
           if (!detail.can_message && other.trader_id)
-            void getBlocked().then(
+            void getTrader(other.trader_id, controller.signal).then(
               (answer) => {
                 if (!controller.signal.aborted)
-                  setOwnBlock(
-                    answer.blocked.some(
-                      (row) => row.trader_id === other.trader_id
-                    )
-                  );
+                  setOwnBlock(answer.status === "you_blocked");
               },
-              () => {}
+              () => {
+                if (!controller.signal.aborted) setOwnBlock(false);
+              }
             );
           else setOwnBlock(false);
         }

@@ -7,6 +7,7 @@ import {
   getThreadDetail,
   getThreadTimeline,
   getBlocked,
+  getTrader,
   getDiscovery,
   getFriends,
   getLoanViews,
@@ -21,6 +22,7 @@ vi.mock("../social_generated", async (original) => ({
   getThreadDetail: vi.fn(),
   getThreadTimeline: vi.fn(),
   getBlocked: vi.fn(),
+  getTrader: vi.fn(),
   getDiscovery: vi.fn(),
   getFriends: vi.fn(),
   getLoanViews: vi.fn(),
@@ -80,6 +82,17 @@ async function mounted(
     next_before: null,
   });
   vi.mocked(getBlocked).mockResolvedValue({ blocked: [] });
+  vi.mocked(getTrader).mockResolvedValue({
+    trader_id: "public-trader",
+    display_name: "Misty",
+    friend: false,
+    band: null,
+    completed_trades: null,
+    open_to_cash_offers: false,
+    status: "you_blocked",
+    conversation_id: null,
+    add_friend: null,
+  });
   vi.mocked(getDiscovery).mockResolvedValue({
     status: "off",
     zip: null,
