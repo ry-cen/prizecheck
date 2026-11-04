@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { TradeCard, TradeView } from "../social_generated";
-import { counterProposal, withLibraryCaps } from "./proposalModel";
+import { counterProposal } from "./proposalModel";
+import { withOfferInventoryCaps } from "./offerInventory";
 import { offerLibrary } from "./offerCopies";
 const card = (edition_id: string, copies: string): TradeCard => ({
   edition_id,
@@ -28,11 +29,7 @@ it.each([
     };
     const mine = offerLibrary([card("Own", "2")], offer, "give");
     const theirs = offerLibrary([card("Other", "2")], offer, "get");
-    const draft = withLibraryCaps(
-      withLibraryCaps(counterProposal(offer), "give", mine),
-      "get",
-      theirs
-    );
+    const draft = withOfferInventoryCaps(counterProposal(offer), mine, theirs);
     expect(draft.give[0].copies).toBe(String(own));
     expect(draft.get[0].copies).toBe(String(other));
   }
