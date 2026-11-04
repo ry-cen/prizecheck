@@ -2,6 +2,9 @@ import { threadPulse } from "../threads/threadPulse";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getThreadPulse, type PulseCount } from "../social_generated";
 
+// A contract failure is reported once per page session, including provider remounts.
+let reportedMalformedPulse = false;
+
 /** How often the pulse is read while a conversation page is open and the document is visible. */
 export const PULSE_FAST_MS = 15_000;
 /** How often it is read otherwise, while the document is visible. */
@@ -49,7 +52,16 @@ export function usePulse(
         (value) => {
           if (!alive.current) return;
           const pulse = threadPulse(value);
-          if (!pulse) return;
+          if (!pulse) {
+            if (!reportedMalformedPulse) {
+              reportedMalformedPulse = true;
+              // Do not include response contents: they may contain collector data.
+              console.error(
+                "Invalid thread pulse response; retaining the last valid counts."
+              );
+            }
+            return;
+          }
           setTrades(pulse.trades);
           setLoans(pulse.loans);
           const before = watermark.current;
