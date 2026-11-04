@@ -163,14 +163,14 @@ def test_a_request_while_one_is_pending_either_way_changes_nothing():
 
 def test_remove_friend_ends_it_for_both_and_runs_the_loan_hook(monkeypatch):
     calls = []
-    monkeypatch.setattr(friends_module, 'friendship_ended', lambda conn, a, b: calls.append((a, b)))
+    monkeypatch.setattr(friends_module, 'friendship_ended', lambda conn, a, b, kind: calls.append((a, b, kind)) or set())
     (ash, _), (misty, _), (brock, _) = new_owner(), new_owner(), new_owner()
     for other in (misty, brock):
         send(ash, other)
         step(other, 'accept', ash)
     assert relation(step(ash, 'remove', misty)) == 'none'
     assert relation(step(brock, 'remove', ash)) == 'none'
-    assert calls == [(ash, misty), (brock, ash)]
+    assert calls == [(ash, misty, 'closed_unfriended'), (brock, ash, 'closed_unfriended')]
     assert view(ash) == view(misty) == view(brock) == {'received': [], 'friends': [], 'sent': []}
     # Not Friends: nothing to end, and the hook doesn't run; nor do declines and withdrawals.
     assert relation(step(ash, 'remove', misty)) == 'none'
@@ -178,7 +178,7 @@ def test_remove_friend_ends_it_for_both_and_runs_the_loan_hook(monkeypatch):
     step(misty, 'decline', ash)
     send(ash, brock)
     step(ash, 'withdraw', brock)
-    assert calls == [(ash, misty), (brock, ash)]
+    assert calls == [(ash, misty, 'closed_unfriended'), (brock, ash, 'closed_unfriended')]
 
 
 def test_lookup_is_exact_and_ignores_case():
