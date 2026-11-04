@@ -423,3 +423,94 @@ it.each(["sending", "retry_send"])(
     expect(JSON.stringify(vi.mocked(counterTrade).mock.calls[2])).toBe(bytes);
   }
 );
+
+it.each(["refusal", "edit-after-unknown"])(
+  "S1-08: %s must not leave checking with no read or Retry",
+  async (outcome) => {
+    await mount();
+    await click(increase());
+    // A definitive version conflict may read the same version; explicit review is still required.
+    vi.mocked(counterTrade).mockRejectedValueOnce(
+      new TradesError(409, "OFFER_CHANGED")
+    );
+    await click(send());
+    expect(button("I reviewed the current offer").disabled).toBe(false);
+    let finishCheck!: (offer: TradeView) => void;
+    vi.mocked(getTrade).mockImplementationOnce(
+      () =>
+        new Promise<TradeView>((yes) => {
+          finishCheck = yes;
+        })
+    );
+    await click(button("Check current offer"));
+    // Make only the searched library fail. Selected-edition inventory still loads normally.
+    vi.mocked(getTraderTradeList).mockImplementation(async (_id, opts) => {
+      if (opts?.q !== undefined) throw new TypeError("library offline");
+      return {
+        trader_id: "misty",
+        display_name: "Misty",
+        band: null,
+        completed_trades: 0,
+        cards: [{ ...card, copies: "2" }],
+        next_page: null,
+      };
+    });
+    await click(button("I reviewed the current offer"));
+    await click(increase()); // Quantity 3, so lowering to 2 still differs from the reviewed quantity 1.
+    expect(send().disabled).toBe(false);
+    expect(button("Retry").disabled).toBe(false);
+    let refusePost!: (cause: Error) => void;
+    vi.mocked(counterTrade).mockImplementationOnce(
+      () =>
+        new Promise<TradeView>((_, no) => {
+          refusePost = no;
+        })
+    );
+    await click(send());
+    // Library stays interactive during send. Retry also starts a new selected-inventory read.
+    vi.mocked(getTraderTradeList).mockResolvedValue({
+      trader_id: "misty",
+      display_name: "Misty",
+      band: null,
+      completed_trades: 0,
+      cards: [{ ...card, copies: "2" }],
+      next_page: null,
+    });
+    vi.mocked(getTrade)
+      .mockResolvedValueOnce(original)
+      .mockResolvedValueOnce(replacement);
+    await click(button("Retry"));
+    // The obsolete selected read reuses the already-outstanding version check. Its result is newer
+    // than the obsolete completion, but its request ID predates the selected-inventory request.
+    await act(async () => finishCheck(original));
+    if (outcome === "refusal")
+      await act(async () =>
+        refusePost(
+          new TradesError(409, "NOT_TRADEABLE", {
+            edition_id: "Iono",
+            side: "you_get",
+            available: "2",
+          })
+        )
+      );
+    else {
+      await act(async () => refusePost(new TypeError("lost response")));
+      expect(send().disabled).toBe(false);
+      await click(decrease()); // Explicit edit abandons the exact replay and applies deferred observations.
+    }
+    // Settlement discards all retained payloads and issues a new current-offer read.
+    expect(button("I reviewed the current offer").disabled).toBe(false);
+    expect(send().disabled).toBe(true);
+    await click(button("I reviewed the current offer"));
+    if (outcome === "refusal") await click(decrease());
+    expect(send().disabled).toBe(false);
+    const calls = vi.mocked(counterTrade).mock.calls.length;
+    await click(send());
+    expect(counterTrade).toHaveBeenCalledTimes(calls + 1);
+    expect(vi.mocked(counterTrade).mock.calls.at(-1)?.[1]).toMatchObject({
+      offer_id: current.offer_id,
+      revision: current.revision,
+      you_get: [{ edition_id: "Iono", quantity: "2" }],
+    });
+  }
+);

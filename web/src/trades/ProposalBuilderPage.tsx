@@ -5,12 +5,7 @@ import {
   OfferInventoryChanged,
 } from "./offerInventory";
 import { OfferReview, offerChanges } from "./offerReview";
-import {
-  offerCaps,
-  offerControls,
-  reviewRequired,
-  type OfferRead,
-} from "./offerLifecycle";
+import { offerCaps, offerControls, reviewRequired } from "./offerLifecycle";
 import { offerVersion } from "./offerInventory";
 import { offerLibrary, offerCopyMap } from "./offerCopies";
 import { useMessagePrefill } from "./messagePrefill";
@@ -268,6 +263,41 @@ export function ProposalBuilderPage({
   // Bumped each time the main read starts, so a Show more read begun under an earlier search is dropped on arrival.
   const generation = useRef(0);
 
+  // The model owns counter inventory/version scheduling. This bridge executes only its read effects.
+  useEffect(() => {
+    if (!offerReview) return;
+    return offerReview.connect({
+      version: (id, signal) => getTrade(id, signal),
+      inventory: async (side, offer, editions, signal) => {
+        if (side === "give") {
+          setMine({ kind: "loading" });
+          try {
+            const { value: list, offerVersion } = await readOfferInventory(
+              offer,
+              () => getTradeList(signal),
+              (id) => getTrade(id, signal)
+            );
+            if (!signal.aborted)
+              setMine({ kind: "ready", cards: list.cards, offerVersion });
+            return list.cards;
+          } catch (cause) {
+            if (!signal.aborted) setMine({ kind: "failed" });
+            throw cause;
+          }
+        }
+        const { value } = await readOfferInventory(
+          offer,
+          () =>
+            selectedOfferInventory(editions, (page) =>
+              getTraderTradeList(traderId, { page }, signal)
+            ),
+          (id) => getTrade(id, signal)
+        );
+        return value;
+      },
+    });
+  }, [offerReview, traderId]);
+
   // The other side's Trade List, searched on the server; the first answer names them.
   useEffect(() => {
     const controller = new AbortController();
@@ -333,71 +363,30 @@ export function ProposalBuilderPage({
     return () => controller.abort();
   }, [traderId, matchAttempt, reviewedOffer]);
 
-  // The collector's own Trade List, one row per Edition (not per Location).
+  // Initial proposals have no reviewed offer; counter caps are read by model effects above.
   useEffect(() => {
+    if (offerReview) return;
     const controller = new AbortController();
     setMine({ kind: "loading" });
-    const read = offerReview?.beginInventory("give", reviewedOffer) ?? null;
-    readOfferInventory(
-      reviewedOffer,
-      () => getTradeList(controller.signal),
-      (id) => getTrade(id, controller.signal)
-    ).then(
-      ({ value: list, offerVersion }) => {
-        if (!controller.signal.aborted) {
-          setMine({ kind: "ready", cards: list.cards, offerVersion });
-          offerReview?.completeRead(read, {
-            kind: "inventory",
-            cards: list.cards,
-          });
-        }
+    getTradeList(controller.signal).then(
+      (list) => {
+        if (!controller.signal.aborted)
+          setMine({ kind: "ready", cards: list.cards });
       },
-      (cause) => {
-        if (!controller.signal.aborted) {
-          setMine({ kind: "failed" });
-          inventoryFailed(cause, reviewedOffer, read);
-        }
+      () => {
+        if (!controller.signal.aborted) setMine({ kind: "failed" });
       }
     );
-    return () => {
-      controller.abort();
-      offerReview?.cancelRead(read);
-    };
-  }, [mineAttempt, reviewedOffer]);
-
-  // Selected caps must not depend on a library search or its currently visible page.
+    return () => controller.abort();
+  }, [mineAttempt, offerReview]);
 
   const selectedGet = proposal.get
     .map((line) => line.edition_id)
     .sort()
     .join("\0");
   useEffect(() => {
-    if (!reviewedOffer) return;
-    const controller = new AbortController();
-    const read = offerReview?.beginInventory("get", reviewedOffer) ?? null;
-    readOfferInventory(
-      reviewedOffer,
-      () =>
-        selectedOfferInventory(
-          selectedGet ? selectedGet.split("\0") : [],
-          (page) => getTraderTradeList(traderId, { page }, controller.signal)
-        ),
-      (id) => getTrade(id, controller.signal)
-    ).then(
-      ({ value: cards, offerVersion }) => {
-        if (!controller.signal.aborted)
-          offerReview?.completeRead(read, { kind: "inventory", cards });
-      },
-      (cause) => {
-        if (controller.signal.aborted) return;
-        inventoryFailed(cause, reviewedOffer, read);
-      }
-    );
-    return () => {
-      controller.abort();
-      offerReview?.cancelRead(read);
-    };
-  }, [traderId, reviewedOffer, selectedGet, attempt]);
+    offerReview?.select(selectedGet ? selectedGet.split("\0") : []);
+  }, [offerReview, selectedGet]);
   const currentTheirs = currentOfferRead(theirs, reviewedOffer);
   const currentMatch = currentOfferRead(match, reviewedOffer);
   const currentMine = currentOfferRead(mine, reviewedOffer);
@@ -550,29 +539,13 @@ export function ProposalBuilderPage({
     if (side) sideHeading[side].current?.focus();
   }, [proposal]);
 
-  function inventoryFailed(
-    cause: unknown,
-    expected: TradeView | undefined,
-    read: OfferRead | null = null
-  ) {
-    if (!offerReview) return;
-    const changed =
-      cause instanceof OfferInventoryChanged ||
-      (cause instanceof SocialError && cause.status === 404);
-    offerReview.completeRead(read, {
-      kind:
-        cause instanceof OfferInventoryChanged
-          ? "obsolete"
-          : changed
-            ? "not_found"
-            : "failed",
-    });
+  function inventoryFailed(cause: unknown, expected: TradeView | undefined) {
     if (
-      changed &&
       expected &&
-      offerVersion(expected) === offerVersion(offerReview.reviewed)
+      (cause instanceof OfferInventoryChanged ||
+        (cause instanceof SocialError && cause.status === 404))
     )
-      void checkCurrentOffer();
+      offerReview?.invalidate(expected);
   }
   async function checkCurrentOffer() {
     if (!offerReview) return;
@@ -1121,9 +1094,13 @@ export function ProposalBuilderPage({
       onTheirSearch={setTheirQ}
       onShowMore={() => void showMore()}
       onRetry={(which) => {
-        if (which === "theirs") setAttempt((n) => n + 1);
-        else if (which === "mine") setMineAttempt((n) => n + 1);
-        else setMatchAttempt((n) => n + 1);
+        if (which === "theirs") {
+          setAttempt((n) => n + 1);
+          offerReview?.beginInventory("get");
+        } else if (which === "mine") {
+          setMineAttempt((n) => n + 1);
+          offerReview?.beginInventory("give");
+        } else setMatchAttempt((n) => n + 1);
       }}
       proposal={displayedProposal}
       onAdd={add}
