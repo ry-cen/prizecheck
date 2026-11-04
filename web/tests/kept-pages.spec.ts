@@ -480,14 +480,24 @@ test("first activation keeps the warm read in flight, and a later quiet failure 
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route(/\/api\/loans\?group=pending(?:&.*)?$/, async (route) => {
-    count++;
-    if (count === 1) {
-      arrived();
-      await held;
-      await route.fulfill({ json: [] });
-    } else await route.fulfill({ status: 503, json: {} });
-  });
+  const groups = new Set<string>();
+  await page.route(
+    /\/api\/loans\?group=(?:needs_you|open|out_now|pending|done)(?:&.*)?$/,
+    async (route) => {
+      const group = new URL(route.request().url()).searchParams.get("group")!;
+      groups.add(group);
+      if (group !== "pending") {
+        await route.fulfill({ json: [] });
+        return;
+      }
+      count++;
+      if (count === 1) {
+        arrived();
+        await held;
+        await route.fulfill({ json: [] });
+      } else await route.fulfill({ status: 503, json: {} });
+    }
+  );
   await signInAsOwner(page);
   await started;
   try {
@@ -519,16 +529,30 @@ test("first activation keeps the warm read in flight, and a later quiet failure 
     main(page).getByText("Your Loans couldn't be loaded.", { exact: true })
   ).toHaveCount(0);
   expect(count).toBe(2);
+  expect([...groups].sort()).toEqual([
+    "done",
+    "needs_you",
+    "open",
+    "out_now",
+    "pending",
+  ]);
 });
 
 test("a failed hidden read retries on first activation", async ({ page }) => {
   let count = 0;
-  await page.route(/\/api\/loans\?group=pending(?:&.*)?$/, (route) => {
-    count++;
-    return count === 1
-      ? route.fulfill({ status: 503, json: {} })
-      : route.fulfill({ json: [] });
-  });
+  const groups = new Set<string>();
+  await page.route(
+    /\/api\/loans\?group=(?:needs_you|open|out_now|pending|done)(?:&.*)?$/,
+    (route) => {
+      const group = new URL(route.request().url()).searchParams.get("group")!;
+      groups.add(group);
+      if (group !== "pending") return route.fulfill({ json: [] });
+      count++;
+      return count === 1
+        ? route.fulfill({ status: 503, json: {} })
+        : route.fulfill({ json: [] });
+    }
+  );
   await signInAsOwner(page);
   await warmed(page);
   expect(count).toBe(1);
@@ -537,6 +561,13 @@ test("a failed hidden read retries on first activation", async ({ page }) => {
     .click();
   await expect(main(page).getByText(/^No Loans yet\./)).toBeVisible();
   expect(count).toBe(2);
+  expect([...groups].sort()).toEqual([
+    "done",
+    "needs_you",
+    "open",
+    "out_now",
+    "pending",
+  ]);
 });
 
 test("Settings preserves unsaved form fields across tab switches", async ({
