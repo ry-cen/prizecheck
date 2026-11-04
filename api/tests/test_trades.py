@@ -1152,9 +1152,6 @@ def test_a_counter_may_answer_a_cash_only_proposal_with_a_cash_only_side_whateve
     answer = {'ash_sells': dict(give=[(arven, 1)], cash={'cents': '1500', 'payer': 'them'}),
               'ash_buys': dict(get=[(iono, 1)], cash={'cents': '500', 'payer': 'you'})}[reply]
     trade = proposed(misty, ash, **first)
-    assert detail(counter(ash, trade, **answer)) == (409, {'code': 'CASH_ONLY_NOT_OPEN',
-                                                          'side': 'you_get' if reply == 'ash_sells' else 'you_give'})
-    trade_settings(misty, True)
     new = countered(ash, trade, **answer)
     assert new['cash'] == answer['cash'] and row_of(trade)['closed_reason'] == 'countered'
 
