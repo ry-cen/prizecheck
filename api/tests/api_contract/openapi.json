@@ -6763,6 +6763,43 @@
     "title": "ElsewhereLocation",
     "type": "object"
    },
+   "EventEdition": {
+    "additionalProperties": false,
+    "description": "Public Printing and Variant facts needed to name an event's Edition.",
+    "properties": {
+     "collector_number": {
+      "title": "Collector Number",
+      "type": "string"
+     },
+     "descriptor": {
+      "additionalProperties": true,
+      "title": "Descriptor",
+      "type": "object"
+     },
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "set_code": {
+      "title": "Set Code",
+      "type": "string"
+     }
+    },
+    "required": [
+     "edition_id",
+     "name",
+     "set_code",
+     "collector_number",
+     "descriptor"
+    ],
+    "title": "EventEdition",
+    "type": "object"
+   },
    "EventView": {
     "properties": {
      "actor": {
@@ -6787,6 +6824,13 @@
      },
      "data": {
       "$ref": "#/components/schemas/_EventData"
+     },
+     "editions": {
+      "items": {
+       "$ref": "#/components/schemas/EventEdition"
+      },
+      "title": "Editions",
+      "type": "array"
      },
      "id": {
       "format": "uuid",
