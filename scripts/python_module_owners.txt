@@ -18,7 +18,6 @@ app.deck_list_capture core
 app.deck_pick_list core
 app.holdings core
 app.host_readiness root
-app.idempotency core
 app.identity core
 app.inventory_core core
 app.loan_inventory core

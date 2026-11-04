@@ -36,7 +36,7 @@ from app.core.decks.store import check_revision, read_deck_list_revision, requir
 from .location_tree import location_paths, owner_and_rows
 from .db import connect
 from .identity import verified_user
-from .idempotency import expire
+from .core.inventory.idempotency import expire
 from .inventory_core import MAX_QUANTITY, first_non_leaf, quantity, record_undo, undo_id_for
 from .moves import MAX_BATCH
 from .social import counts

@@ -1140,3 +1140,13 @@ below says where each group ended up; the module map in section 1 stays the plan
 - A repository-wide caller scan found no script, deploy or unedited consumer requiring the old import path.
   The root module and its ownership entry are removed without a compatibility shim.
   Price runner/admission/seeding work remains outside this relocation.
+
+**2026-11-03 — Idempotency helper relocation (#528)**
+
+- The six-line helper moved byte-for-byte from `app.idempotency` to
+  `app.core.inventory.idempotency`, the destination planned in section 1. Its expiry SQL and caller-owned
+  transaction behavior are unchanged.
+- Holdings, Moves, Deck Pick List and Pokémon Scanner Save now import the core helper directly;
+  these are the four current production callers. A repository-wide import and patch-path scan found
+  no remaining consumer requiring the old path, so the root module and its ownership entry are removed
+  without a compatibility shim. Test assertions and API snapshots are unchanged.

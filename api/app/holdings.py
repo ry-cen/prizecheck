@@ -22,7 +22,7 @@ from app.core.ops.api_errors import api_error
 from .core.art.urls import route_address
 from .db import connect
 from .identity import verified_user
-from .idempotency import expire
+from .core.inventory.idempotency import expire
 from .inventory_core import MAX_QUANTITY, REPLAY, leaf, lock_owner, quantity, record_undo, undo_id_for
 
 router = APIRouter(prefix="/api/holdings", tags=["holdings"])
