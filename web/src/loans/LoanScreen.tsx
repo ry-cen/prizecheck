@@ -200,6 +200,7 @@ export function LoanScreen({
     call: (key: string) => Promise<LoanView>;
   } | null>(null);
   const inFlight = useRef(false);
+  const refreshAfterCommand = useRef(false);
   const [commandPending, setCommandPending] = useState(false);
   const menuAnchor = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -227,6 +228,10 @@ export function LoanScreen({
     ]).then(
       ([loan, side]) => {
         if (controller.signal.aborted) return;
+        if (retained.current) {
+          refreshAfterCommand.current = true;
+          return;
+        }
         if (loanId !== loan.thread_id) {
           onCanonicalLoan(loan.thread_id);
           return;
@@ -249,6 +254,10 @@ export function LoanScreen({
       },
       (cause) => {
         if (controller.signal.aborted) return;
+        if (retained.current) {
+          refreshAfterCommand.current = true;
+          return;
+        }
         setLoad(
           cause instanceof SocialError && cause.status === 404
             ? { kind: "missing" }
@@ -350,6 +359,13 @@ export function LoanScreen({
             active={active}
             kind="loan"
             id={load.loan.thread_id}
+            onChanged={() => {
+              if (retained.current) refreshAfterCommand.current = true;
+              else {
+                reloading.current = true;
+                setAttempt((n) => n + 1);
+              }
+            }}
             revision={`${load.loan.loan_id}:${load.loan.revision}`}
             editionNames={Object.fromEntries(
               load.loan.lines.map((card) => [card.edition_id, card.name])
@@ -479,6 +495,13 @@ export function LoanScreen({
       keys.current.delete(name);
       stepBodies.current.delete(key);
       returnBodies.current.delete(key);
+      // Observations cannot settle a retained POST. Once it settles, read current
+      // terms afresh rather than adopting an earlier reply or its receipt view.
+      if (refreshAfterCommand.current) {
+        refreshAfterCommand.current = false;
+        reloading.current = true;
+        setAttempt((n) => n + 1);
+      }
     };
     try {
       const next = await command.call(key);

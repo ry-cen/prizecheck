@@ -8,6 +8,7 @@ import {
   startReturn,
   acceptBorrowRequest,
   changeReturnBy,
+  SocialError,
   type LoanView,
 } from "../social_generated";
 import { useRoute } from "../shell/useRoute";
@@ -20,7 +21,10 @@ vi.mock("../social_generated", async (original) => ({
   acceptBorrowRequest: vi.fn(),
   changeReturnBy: vi.fn(),
 }));
-vi.mock("../threads/ThreadTimeline", () => ({ ThreadTimeline: () => null }));
+vi.mock("../threads/ThreadTimeline", () => ({
+  ThreadTimeline: ({ onChanged }: { onChanged?: () => void }) =>
+    h("button", { onClick: onChanged }, "Chat moderation completed"),
+}));
 const loan: LoanView = {
   id: "round",
   loan_id: "round",
@@ -549,3 +553,198 @@ it("S2-01: an unknown date save cannot become Clear date or a return command", a
     vi.clearAllMocks();
   }
 });
+
+it("S2-02: completed chat moderation refreshes the live requested Loan and its focused outcome", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const active: LoanView = {
+    ...loan,
+    role: "lender",
+    state: "requested",
+    closed_reason: null,
+    closed_by: null,
+    actions: ["accept", "decline"],
+    needs_you: true,
+    section: "needs_you",
+  };
+  const closed: LoanView = {
+    ...active,
+    state: "closed",
+    closed_reason: "cancelled",
+    closed_by: "you",
+    actions: [],
+    needs_you: false,
+    section: "history",
+    revision: 3,
+  };
+  vi.mocked(getLoan)
+    .mockResolvedValueOnce(active)
+    .mockResolvedValueOnce(active)
+    .mockResolvedValue(closed);
+  vi.mocked(getLoanSide).mockResolvedValue({
+    loan_id: "round",
+    deck: null,
+    can_promise: [],
+    picks: [],
+    suggested: [],
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        h(LoanScreen, {
+          loanId: "item",
+          onCanonicalLoan: vi.fn(),
+          onLoanChanged: vi.fn(),
+          onAllLoans: vi.fn(),
+          onOpenDeck: vi.fn(),
+        })
+      )
+    );
+    expect(host.querySelector("h1")?.textContent).toContain("wants to borrow");
+    await act(async () =>
+      [...host.querySelectorAll("button")]
+        .find((b) => b.textContent === "Chat moderation completed")!
+        .click()
+    );
+    expect(host.querySelector("h1")?.textContent).toBe(
+      "You cancelled this Loan"
+    );
+    expect(document.activeElement).toBe(host.querySelector("h1"));
+    expect(getLoan).toHaveBeenCalledTimes(4);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});
+for (const lateStatus of ["none", "404", "200"] as const) {
+  const lateRead = lateStatus !== "none";
+  it(`S2-01/S2-02: moderation and late reads preserve an unknown return then refresh once after exact replay (read=${lateStatus})`, async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const active: LoanView = {
+      ...loan,
+      state: "handed_over",
+      closed_reason: null,
+      closed_by: null,
+      role: "borrower",
+      you_confirmed_handover: true,
+      they_confirmed_handover: true,
+      lines: [
+        { ...loan.lines[0], requested: "3", promised: "3", returned: "0" },
+      ],
+      actions: ["start_return"],
+      revision: 4,
+      section: "out_now",
+    };
+    const receipt: LoanView = {
+      ...active,
+      actions: [],
+      revision: 5,
+      pending_return: {
+        return_id: "claim",
+        started_by: "you",
+        lines: [{ edition_id: "iono", copies: "3" }],
+        you_confirmed: true,
+        they_confirmed: false,
+      },
+    };
+    const closed: LoanView = {
+      ...active,
+      state: "closed",
+      closed_reason: "returned",
+      closed_by: null,
+      lines: [{ ...active.lines[0], returned: "3" }],
+      actions: [],
+      revision: 6,
+      section: "history",
+    };
+    let rejectRead!: (cause: Error) => void,
+      resolveRead!: (value: LoanView) => void,
+      rejectPost!: (cause: Error) => void;
+    const heldRead = new Promise<LoanView>((resolve, reject) => {
+      rejectRead = reject;
+      resolveRead = resolve;
+    });
+    vi.mocked(getLoan)
+      .mockResolvedValueOnce(active)
+      .mockResolvedValueOnce(active);
+    if (lateRead)
+      vi.mocked(getLoan)
+        .mockReturnValueOnce(heldRead)
+        .mockReturnValueOnce(heldRead);
+    vi.mocked(getLoan).mockResolvedValue(closed);
+    vi.mocked(getLoanSide).mockResolvedValue({
+      loan_id: "round",
+      deck: null,
+      can_promise: [],
+      picks: [],
+      suggested: [],
+    });
+    vi.mocked(startReturn)
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectPost = reject;
+          })
+      )
+      .mockResolvedValueOnce(receipt);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const button = (name: string) =>
+      [...host.querySelectorAll("button")].find((b) => b.textContent === name)!;
+    try {
+      await act(async () =>
+        root.render(
+          h(LoanScreen, {
+            loanId: "item",
+            onCanonicalLoan: vi.fn(),
+            onLoanChanged: vi.fn(),
+            onAllLoans: vi.fn(),
+            onOpenDeck: vi.fn(),
+          })
+        )
+      );
+      if (lateRead) {
+        await act(async () => button("Chat moderation completed").click());
+        expect(getLoan).toHaveBeenCalledTimes(4);
+      }
+      await act(async () => button("All back").click());
+      const original = JSON.stringify(vi.mocked(startReturn).mock.calls[0]);
+      if (lateRead) {
+        await act(async () => {
+          if (lateStatus === "404")
+            rejectRead(new SocialError(404, "LOAN_NOT_FOUND"));
+          else resolveRead(closed);
+        });
+        expect(host.querySelector("h1")?.textContent).toBe(
+          "You have 3 cards of Misty's"
+        );
+      }
+      await act(async () => rejectPost(new TypeError("lost response")));
+      await act(async () => button("Chat moderation completed").click());
+      await act(async () => button("Chat moderation completed").click());
+      expect(getLoan).toHaveBeenCalledTimes(lateRead ? 4 : 2);
+      expect(button("Retry request").matches(":disabled")).toBe(false);
+      await act(async () => button("Retry request").click());
+      expect(startReturn).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(vi.mocked(startReturn).mock.calls[1])).toBe(
+        original
+      );
+      expect(getLoan).toHaveBeenCalledTimes(lateRead ? 6 : 4);
+      expect(host.querySelector("h1")?.textContent).toBe(
+        "Your Loan from Misty ended"
+      );
+      expect(host.textContent).toContain("3 returned");
+      expect(button("Retry request")).toBeUndefined();
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+      vi.clearAllMocks();
+    }
+  });
+}
