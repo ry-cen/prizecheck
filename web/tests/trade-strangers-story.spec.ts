@@ -236,6 +236,7 @@ async function storyOne(
   await expectPageChecks(page, `Ash's Trade List, ${width}`);
   await message.click();
   await expect(page).toHaveURL(`${ORIGIN}/trades/new/${w.ashTrader}`);
+  await show(page, "Proposal");
   await expect(
     page.getByRole("textbox", { name: "Message (optional)" })
   ).toHaveValue(/^Is your Arven .* still available\?$/);
