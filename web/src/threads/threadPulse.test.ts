@@ -94,3 +94,55 @@ it.each([false, true])(
     }
   }
 );
+
+it.each([false, true])(
+  "reports malformed pulses once per page session, never valid pulses (malformed=%s)",
+  async (malformed) => {
+    vi.resetModules();
+    const { usePulse: useSessionPulse, PULSE_SLOW_MS: interval } =
+      await import("../inbox/usePulse");
+    vi.useFakeTimers();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("visible");
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        Response.json(malformed ? { secret: "must not be logged" } : valid)
+      );
+    vi.stubGlobal("fetch", fetch);
+    const host = document.createElement("div");
+    document.body.append(host);
+    let root = createRoot(host);
+    function View() {
+      const pulse = useSessionPulse(false, () => {});
+      return h("span", null, pulse.trades.needs_you);
+    }
+    try {
+      await act(async () => root.render(h(View)));
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(interval);
+      });
+      await act(async () => root.unmount());
+      root = createRoot(host);
+      await act(async () => root.render(h(View)));
+      expect(fetch).toHaveBeenCalledTimes(4);
+      expect(host.textContent).toBe(malformed ? "0" : "3");
+      expect(diagnostic).toHaveBeenCalledTimes(malformed ? 1 : 0);
+      if (malformed)
+        expect(diagnostic).toHaveBeenCalledWith(
+          "Invalid thread pulse response; retaining the last valid counts."
+        );
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      diagnostic.mockRestore();
+      visibility.mockRestore();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  }
+);
