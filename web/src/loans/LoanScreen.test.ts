@@ -1,3 +1,5 @@
+import { useLoanCommand } from "./PendingLoanRequest";
+import { LoanTermsEditor } from "./LoanTermsEditor";
 // @vitest-environment jsdom
 import { act, createElement as h, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -933,3 +935,130 @@ for (const closePath of [
     }
   });
 }
+
+it("closing terms cancels a delayed preflight before a parent can commit the close", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const prototype = HTMLDialogElement.prototype;
+  const descriptors = ["showModal", "close"].map((name) =>
+    Object.getOwnPropertyDescriptor(prototype, name)
+  );
+  Object.defineProperty(prototype, "showModal", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = true;
+    },
+  });
+  Object.defineProperty(prototype, "close", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = false;
+    },
+  });
+  const current: LoanView = {
+    ...loan,
+    state: "requested",
+    closed_reason: null,
+    actions: ["edit_and_resend"],
+  };
+  let deliver!: (value: LoanView) => void;
+  vi.mocked(getLoan)
+    .mockReset()
+    .mockResolvedValueOnce(current)
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        deliver = resolve;
+      })
+    );
+  const save = vi.fn(async (): Promise<"applied"> => "applied"),
+    closed = vi.fn();
+  vi.mocked(editLoanTerms).mockReset();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const button = (name: string) =>
+    [...host.querySelectorAll("button")].find((b) => b.textContent === name)!;
+  try {
+    await act(async () =>
+      root.render(
+        h(LoanTermsEditor, {
+          loan: current,
+          deckId: null,
+          onSave: save,
+          onClose: closed,
+          canClose: () => true,
+          pending: false,
+          commandMessage: "",
+          pendingRequest: null,
+        })
+      )
+    );
+    await act(async () => button("Save terms").click());
+    // The parent has received close intent, but its render has not committed yet.
+    await act(async () => {
+      button("Close").click();
+      deliver(current);
+    });
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+    expect(editLoanTerms).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    for (const [i, name] of ["showModal", "close"].entries()) {
+      const descriptor = descriptors[i];
+      if (descriptor) Object.defineProperty(prototype, name, descriptor);
+      else Reflect.deleteProperty(prototype, name);
+    }
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});
+
+it("one Loan authority owns both its retained packet and its in-flight attempt before render", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("scrollTo", vi.fn());
+  window.history.replaceState(null, "", "/loans/item");
+  type Packet = { body: string; key: string };
+  let owner!: ReturnType<typeof useLoanCommand<Packet>>;
+  let navigate!: () => void;
+  function View() {
+    owner = useLoanCommand<Packet>();
+    const route = useRoute();
+    navigate = () => route.navigate("/collection");
+    return h("p", null, owner.pending ? "Retry" : "Ready");
+  }
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const first = { body: "3 copies", key: "retained" };
+  try {
+    await act(async () => root.render(h(View)));
+    await act(async () => {
+      expect(owner.beginAttempt()).toBe(true);
+      expect(owner.retain(first)).toBe(first);
+      expect(owner.beginAttempt()).toBe(false);
+      expect(owner.retain({ body: "2 copies", key: "different" })).toBe(first);
+      navigate();
+      expect(window.location.pathname).toBe("/loans/item");
+      expect(
+        window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
+      ).toBe(false);
+      owner.endAttempt();
+    });
+    expect(owner.pending).toBe(true);
+    await act(async () => {
+      expect(owner.beginAttempt()).toBe(true);
+      expect(owner.command.current).toBe(first);
+      owner.settle();
+      owner.endAttempt();
+    });
+    expect(owner.pending).toBe(false);
+    await act(async () => navigate());
+    expect(window.location.pathname).toBe("/collection");
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});

@@ -101,13 +101,22 @@ for (const kind of ["borrow", "lend", "borrowed move"] as const)
           ? vi.mocked(sendLendOffer)
           : vi.mocked(moveBorrowed);
     let lose!: (error: Error) => void;
+    let navigateDuringPost!: () => void;
+    const lostResponse = new Promise<never>((_, reject) => {
+      lose = reject;
+    });
     send
-      .mockReturnValueOnce(
-        new Promise<never>((_, reject) => {
-          lose = reject;
-        })
-      )
-      .mockRejectedValueOnce(new SocialError(409, "NOT_FRIENDS"));
+      .mockImplementationOnce(() => {
+        // Navigation can arrive before React renders the pending recovery UI.
+        navigateDuringPost();
+        return lostResponse;
+      })
+      .mockRejectedValueOnce(
+        new SocialError(
+          409,
+          kind === "borrowed move" ? "LOCATION_NOT_FOUND" : "NOT_FRIENDS"
+        )
+      );
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -147,6 +156,7 @@ for (const kind of ["borrow", "lend", "borrowed move"] as const)
     }
     function View() {
       const route = useRoute();
+      navigateDuringPost = () => route.navigate("/decks");
       const [open, setOpen] = useState(true);
       return h(
         ToastProvider,

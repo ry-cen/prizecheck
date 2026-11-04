@@ -1,4 +1,8 @@
-import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
+import {
+  closeLoanRequest,
+  PendingLoanRequest,
+  useLoanCommand,
+} from "./PendingLoanRequest";
 import {
   createContext,
   useCallback,
@@ -531,8 +535,9 @@ function BorrowComposer({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const name = draft.friend.display_name;
-  const pending = useRef<Parameters<typeof sendBorrowRequest>[0] | null>(null);
-  const [retained, setRetained] = useState(false);
+  const authority = useLoanCommand<Parameters<typeof sendBorrowRequest>[0]>();
+  const pending = authority.command;
+  const retained = authority.pending;
   const form = useRef<HTMLDivElement>(null);
   const close = () =>
     closeLoanRequest(form.current, pending.current !== null, onClose);
@@ -557,24 +562,25 @@ function BorrowComposer({
     draft.lines.find((line) => line.edition_id === editionId)?.name ?? "a card";
 
   async function send() {
-    if (busy || draft.replaces) return;
+    if ((draft.replaces && !pending.current) || !authority.beginAttempt())
+      return;
     setBusy(true);
     setMessage("");
     try {
-      pending.current ??= {
-        lender_id: draft.friend.collector_id,
-        lines: draft.lines.map((line) => ({
-          edition_id: line.edition_id,
-          quantity: String(line.quantity),
-        })),
-        deck_id: draft.deckId,
-        return_by: draft.returnBy || null,
-        idempotency_key: sendKey(),
-      };
-      setRetained(true);
-      const loan = await sendBorrowRequest(pending.current);
-      pending.current = null;
-      setRetained(false);
+      const command =
+        pending.current ??
+        authority.retain({
+          lender_id: draft.friend.collector_id,
+          lines: draft.lines.map((line) => ({
+            edition_id: line.edition_id,
+            quantity: String(line.quantity),
+          })),
+          deck_id: draft.deckId,
+          return_by: draft.returnBy || null,
+          idempotency_key: sendKey(),
+        });
+      const loan = await sendBorrowRequest(command);
+      authority.settle();
       onChange(() => null);
       onClose();
       noteLoansChanged();
@@ -585,8 +591,7 @@ function BorrowComposer({
       });
     } catch (cause) {
       if (!outcomeUnknown(cause)) {
-        pending.current = null;
-        setRetained(false);
+        authority.settle();
         forgetKey();
       }
       const error = cause instanceof SocialError ? cause : null;
@@ -630,6 +635,7 @@ function BorrowComposer({
         onChange((current) => current ?? null);
       setMessage(sendMessage(cause, name, cardName));
     } finally {
+      authority.endAttempt();
       setBusy(false);
     }
   }
@@ -747,7 +753,11 @@ function BorrowComposer({
           />
         </fieldset>
         {retained && (
-          <PendingLoanRequest busy={busy} onRetry={() => void send()} />
+          <PendingLoanRequest
+            boundaryRef={authority.boundary}
+            busy={busy}
+            onRetry={() => void send()}
+          />
         )}
         <p role="alert" className="m-0 text-meta text-danger empty:hidden">
           {message}
