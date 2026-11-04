@@ -170,7 +170,7 @@ export function TradeScreen({
   tradeId: string | null;
   onAllTrades: () => void;
   /** Goes to another address in the app: the Counter builder, or the proposal a Counter answers. */
-  onNavigate: (to: string) => void;
+  onNavigate: (to: string, options?: { replace?: boolean }) => void;
 }) {
   const toast = useToast();
   const refreshInbox = useInboxRefresh();
@@ -250,6 +250,10 @@ export function TradeScreen({
     ]).then(
       ([trade, side]) => {
         if (controller.signal.aborted) return;
+        if (tradeId !== trade.thread_id) {
+          onNavigate(tradePath(trade.thread_id), { replace: true });
+          return;
+        }
         if (reloading.current) {
           reloading.current = false;
           focusNext.current = "heading";
@@ -373,7 +377,10 @@ export function TradeScreen({
     actions?: ReactNode,
     dialog?: ReactNode
   ) => (
-    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-4 px-7 py-5 phone:px-4 phone:py-3">
+    <section
+      aria-label="Trade details"
+      className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-4 px-7 py-5 phone:px-4 phone:py-3"
+    >
       {back}
       <div className="[&>div]:mb-0 [&>div]:flex-nowrap [&>div]:items-start [&_h1]:min-w-0 [&_h1]:flex-1 phone:[&>div>div]:basis-auto">
         <PageHeader title={title} actions={actions} headingRef={heading} />
@@ -393,7 +400,7 @@ export function TradeScreen({
         />
       )}
       {dialog}
-    </main>
+    </section>
   );
 
   if (load.kind === "loading")
