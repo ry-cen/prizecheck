@@ -120,6 +120,11 @@ async function messageOnCard(page: Page, s: Strangers, phone: boolean) {
   );
   await message.click();
   await expect(page).toHaveURL(`${ORIGIN}/trades/new/${s.mistyTrader}`);
+  if (phone)
+    await page
+      .getByRole("tablist", { name: "Proposal builder" })
+      .getByRole("tab", { name: /^Proposal/ })
+      .click();
   await expect(
     page.getByRole("textbox", { name: "Message (optional)" })
   ).toHaveValue(QUESTION);
