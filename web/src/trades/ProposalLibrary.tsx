@@ -28,6 +28,7 @@ export type TheirsLoad =
   | { kind: "failed" }
   | {
       kind: "ready";
+      offerVersion?: string;
       /** The search the cards were read for. */
       q: string;
       cards: ProposalCard[];
@@ -38,12 +39,12 @@ export type TheirsLoad =
 export type MineLoad =
   | { kind: "loading" }
   | { kind: "failed" }
-  | { kind: "ready"; cards: ProposalCard[] };
+  | { kind: "ready"; offerVersion?: string; cards: ProposalCard[] };
 
 export type MatchLoad =
   | { kind: "loading" }
   | { kind: "failed" }
-  | { kind: "ready"; row: TraderMatchRow };
+  | { kind: "ready"; offerVersion?: string; row: TraderMatchRow };
 
 type Choice = "theirs" | "mine";
 
