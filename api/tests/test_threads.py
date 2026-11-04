@@ -392,3 +392,20 @@ def test_each_timeline_page_resolves_all_public_event_editions_without_mutating_
     assert len(seen) == len(set(seen)) == 52
     with connect() as conn:
         assert all(row['data'] == data for row in conn.execute('SELECT data FROM thread_event WHERE thread_id=%s', (tid,)))
+
+
+@pytest.mark.parametrize('low', [True, False])
+def test_private_closure_projection_fences_every_public_event_field(low):
+    from app.social.threads import timeline_item
+    row = dict(id=uuid4(), created_at=datetime.now(timezone.utc), item_kind='event',
+               actor='high' if low else 'low', round_id=uuid4(), return_id=None, data={})
+    blocked = timeline_item(dict(row, kind='closed_blocked'), low).model_dump(mode='json')
+    suspended = timeline_item(dict(row, kind='closed_suspended'), low).model_dump(mode='json')
+    assert blocked == suspended
+    assert blocked['event']['actor'] is None and blocked['event']['data'] == {}
+    # Even a historical anomalous payload cannot identify the private action.
+    contaminated = dict(row, kind='closed_suspended', return_id=uuid4(),
+                        data={'return_by': {'from': None, 'to': '2026-12-01'}})
+    assert timeline_item(contaminated, low).model_dump(mode='json') == suspended
+    own = timeline_item(dict(row, kind='closed_blocked'), not low)
+    assert own.event.kind == 'closed_blocked' and own.event.actor == row['actor']

@@ -262,3 +262,36 @@ def test_bulk_closure_prerequisite_selects_are_bounded_at_250_rounds(store):
     with connect() as conn:
         assert conn.execute("SELECT count(*) AS n FROM thread_event WHERE thread_id=ANY(%s) AND kind='closed_suspended'",
                             (list(touched),)).fetchone()['n']==250
+
+
+@pytest.mark.parametrize('kind', ['trade', 'loan'])
+def test_counterpart_block_and_suspension_closures_match_in_timeline_and_list(store, kind):
+    """Real closures, not synthetic log inserts: the cause stays in audit storage only."""
+    observations = []
+    for action in ('block', 'suspend'):
+        ids, ash, misty, _, _ = trading()
+        item = (proposed(misty, ash, give=[(ids['PAL 185'], 1)]) if kind == 'trade'
+                else sent(ash, misty, [(ids['PAL 185'], 1)]))
+        tid = item['thread_id']
+        if action == 'block':
+            ok(call('POST', '/api/social/blocks', misty,
+                    {'collector_id': ash, 'idempotency_key': str(uuid4())}))
+        else:
+            ok(decide(as_owner(), filed(ash, misty), 'suspend'))
+        page = ok(call('GET', f'/api/{kind}s/{tid}/timeline', ash))
+        rows = ok(call('GET', f'/api/{kind}s?group=done', ash))
+        latest = next(row['latest'] for row in rows if row['id'] == tid)
+        event = page['items'][0]['event']
+        assert latest == page['items'][0]
+        assert event['kind'] == 'closed_unavailable'
+        assert event['actor'] is None and event['data'] == {} and event['return_id'] is None
+        assert event['editions'] == []
+        observations.append({key: event[key] for key in ('kind', 'actor', 'data', 'return_id', 'editions')})
+        with connect() as conn:
+            stored = conn.execute('SELECT kind,actor,data FROM thread_event WHERE id=%s', (event['id'],)).fetchone()
+        assert stored['kind'] == ('closed_blocked' if action == 'block' else 'closed_suspended')
+        assert stored['actor'] == ('low' if misty < ash else 'high') and stored['data'] == {}
+        if action == 'block':
+            own = ok(call('GET', f'/api/{kind}s/{tid}/timeline', misty))['items'][0]['event']
+            assert own['kind'] == 'closed_blocked' and own['actor'] == ('low' if misty < ash else 'high')
+    assert observations[0] == observations[1]
