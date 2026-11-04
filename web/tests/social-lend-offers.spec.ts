@@ -102,7 +102,10 @@ test("the lender offers selected copies from the Collection, and the borrower ac
     "Your Decks couldn't be loaded."
   );
   await page.unroute(decksRead);
-  await page.getByRole("button", { name: "Retry" }).click();
+  await page
+    .getByRole("group", { name: "Loan terms and actions" })
+    .getByRole("button", { name: "Retry", exact: true })
+    .click();
   await expect(
     page.getByRole("combobox", { name: "Put them in" })
   ).toBeFocused();
