@@ -87,7 +87,10 @@ export function timelineText(
     );
   for (const [field, label] of [
     ["not_lent", "Not lent"],
-    ["returned", "Returned"],
+    [
+      "returned",
+      event.kind === "return_recorded" ? "Recorded for return" : "Returned",
+    ],
   ] as const)
     for (const line of event.data?.[field] ?? [])
       changes.push(

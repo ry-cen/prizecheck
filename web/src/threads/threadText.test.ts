@@ -96,3 +96,16 @@ it("attributes each swap confirmation separately from completion", () => {
     )
   ).toBe("Swap complete");
 });
+it("labels recorded quantities as a claim until the other collector confirms", () => {
+  const data = { returned: [{ edition_id: "private-card", quantity: 2 }] };
+  expect(
+    timelineText(event("return_recorded", data), "low", "Misty", {
+      "private-card": "Iono",
+    })
+  ).toBe("Misty: Recorded a return · Recorded for return: 2 Iono");
+  expect(
+    timelineText(event("return_confirmed", data), "low", "Misty", {
+      "private-card": "Iono",
+    })
+  ).toBe("Misty: Confirmed the return · Returned: 2 Iono");
+});
