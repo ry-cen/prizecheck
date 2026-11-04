@@ -621,7 +621,7 @@ export function ProposalBuilderPage({
       sent.current = true;
       if (mounted.current) {
         toast.show({
-          message: `Offer sent to ${name}`,
+          message: `${offerReview.reviewed.actions.includes("change_offer") ? "Offer" : "Counter"} sent to ${name}`,
           route: tradePath(trade.thread_id),
         });
         onNavigate(tradePath(trade.thread_id));
@@ -918,6 +918,7 @@ export function ProposalBuilderPage({
         proposal[side].length > 0
       )}
       onChange={(line, quantity) => {
+        say(`${tradeCardName(line)}: ${quantity} in ${SIDE_LABEL[side]}`);
         if (quantity === 0) refocus.current = side;
         change((p) => setQuantity(p, side, line, quantity));
       }}
@@ -1131,7 +1132,6 @@ export function ProposalBuilderPage({
       }}
       proposal={displayedProposal}
       onAdd={add}
-      announce={announce}
     />
   );
 
@@ -1171,6 +1171,9 @@ export function ProposalBuilderPage({
           {library}
         </div>
       )}
+      <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
+        {announce}
+      </p>
       <Dialog
         open={asking !== null}
         onClose={() => setAsking(null)}
@@ -1263,6 +1266,7 @@ function ProposalSideSection({
                     value={line.quantity}
                     min={0}
                     max={loadingCaps ? line.quantity : cap}
+                    announceValue={false}
                     onChange={(value) => onChange(line, value)}
                   />
                 }

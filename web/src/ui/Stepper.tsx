@@ -9,6 +9,8 @@ type Props = {
   min?: number;
   max?: number;
   disabled?: boolean;
+  /** False when the caller announces quantity changes through one shared live region. */
+  announceValue?: boolean;
 };
 
 const STEP =
@@ -23,6 +25,7 @@ export function Stepper({
   min = 0,
   max = Number.MAX_SAFE_INTEGER,
   disabled,
+  announceValue = true,
 }: Props) {
   return (
     <div
@@ -41,7 +44,8 @@ export function Stepper({
       </button>
       {/* box-content: at least 32 px plus its padding, as before Preflight (#184) made border-box the default. */}
       <output
-        aria-live="polite"
+        role={announceValue ? undefined : "none"}
+        aria-live={announceValue ? "polite" : "off"}
         className="box-content inline-flex min-w-8 items-center justify-center px-1 text-control tabular-nums text-text"
       >
         {value}

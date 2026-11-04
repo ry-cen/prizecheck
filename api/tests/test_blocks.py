@@ -85,11 +85,11 @@ def statements(monkeypatch, request):
 
 def test_block_ends_the_friendship_and_stops_lookup_invites_and_requests(monkeypatch):
     calls = []
-    monkeypatch.setattr(friends_module, 'friendship_ended', lambda conn, a, b: calls.append((a, b)))
+    monkeypatch.setattr(friends_module, 'friendship_ended', lambda conn, a, b, kind: calls.append((a, b, kind)) or set())
     (ash, ash_handle), (misty, misty_handle) = new_owner(), new_owner()
     befriend(ash, misty)
     assert relation(block(misty, ash)) == 'blocked'
-    assert calls == [(misty, ash)]
+    assert calls == [(misty, ash, 'closed_blocked')]
     assert rows(ash, misty) == []
     assert view(ash) == view(misty) == {'received': [], 'friends': [], 'sent': []}
     with connect() as conn:
