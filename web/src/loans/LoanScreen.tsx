@@ -9,12 +9,14 @@ import {
   Fragment,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { ChevronLeft, Ellipsis } from "lucide-react";
 import { useInboxRefresh, useOpenedFromInbox } from "../inbox/Inbox";
+import { useLeaveGuard, type LeaveGuard } from "../shell/useRoute";
 import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
 import type { DeckIndexEntry } from "../decks_generated";
@@ -190,6 +192,15 @@ export function LoanScreen({
   const stepBodies = useRef(new Map<string, LoanStep>());
   const returnBodies = useRef(new Map<string, StartReturn>());
   const keys = useRef(new Map<string, string>());
+  // A retained call captures all of this intent's choices, not just its revision.
+  // Neither a rerender nor another action may replace it after response loss.
+  const retained = useRef<{
+    name: string;
+    key: string;
+    call: (key: string) => Promise<LoanView>;
+  } | null>(null);
+  const inFlight = useRef(false);
+  const [commandPending, setCommandPending] = useState(false);
   const menuAnchor = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const askButton = useRef<HTMLButtonElement>(null);
@@ -322,7 +333,7 @@ export function LoanScreen({
       onClick={(event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey) return;
         event.preventDefault();
-        onAllLoans();
+        if (!retained.current) onAllLoans();
       }}
       className="inline-flex h-control items-center gap-1 self-start rounded-control px-2 text-control font-medium text-text-muted no-underline hover:bg-surface-raised hover:text-text phone:h-control-phone"
     >
@@ -355,9 +366,26 @@ export function LoanScreen({
         <div className="min-w-0 flex-1">
           <PageHeader title={title} headingRef={heading} />
         </div>
-        {actions && <div className="absolute top-0 right-0">{actions}</div>}
+        {!commandPending && actions && (
+          <div className="absolute top-0 right-0">{actions}</div>
+        )}
       </div>
-      {children}
+      <fieldset
+        disabled={commandPending}
+        className="contents"
+        aria-label="Loan terms and actions"
+      >
+        {children}
+      </fieldset>
+      {commandPending && (
+        <PendingLoanRequest
+          busy={busy}
+          onRetry={() => {
+            const command = retained.current;
+            if (command) void step(command.name, command.call);
+          }}
+        />
+      )}
       {load.kind === "ready" && editingTerms && (
         <LoanTermsEditor
           loan={load.loan}
@@ -413,6 +441,7 @@ export function LoanScreen({
 
   /** Closes whichever form or question is open, before another opens: one at a time. */
   function closeModes() {
+    if (retained.current) return;
     setAsking(null);
     setReturning(null);
     setWriting(null);
@@ -420,24 +449,43 @@ export function LoanScreen({
   }
   /** Asks before a step that ends the Loan, with focus on the confirmation's button. */
   function ask(step: Asking) {
-    if (busy) return;
+    if (busy || retained.current) return;
     closeModes();
     focusNext.current = "ask";
     setAsking(step);
   }
   /** Runs one step: the answer replaces the Loan, and its own side is read again. */
   async function step(name: string, call: (key: string) => Promise<LoanView>) {
-    if (busy) return;
+    if (
+      inFlight.current ||
+      (retained.current && retained.current.name !== name)
+    )
+      return;
+    const command = retained.current ?? {
+      name,
+      key: keys.current.get(name) ?? crypto.randomUUID(),
+      call,
+    };
+    retained.current = command;
+    inFlight.current = true;
+    setCommandPending(true);
     setBusy(true);
     setMessage("");
-    const key = keys.current.get(name) ?? crypto.randomUUID();
+    const key = command.key;
     keys.current.set(name, key);
-    try {
-      const next = await call(key);
+    const release = () => {
+      retained.current = null;
+      setCommandPending(false);
       keys.current.delete(name);
+      stepBodies.current.delete(key);
+      returnBodies.current.delete(key);
+    };
+    try {
+      const next = await command.call(key);
       // The open form stays, its buttons busy, until the screen's own side is read again: the new Loan, the form
       // closing and focus on the new headline then land in one render.
       const nextSide = await getLoanSide(loan.thread_id).catch(() => side);
+      release();
       focusNext.current = "heading";
       closeModes();
       setLoad({ kind: "ready", loan: next, side: nextSide });
@@ -445,7 +493,7 @@ export function LoanScreen({
       refreshInbox();
       onLoanChanged();
     } catch (cause) {
-      if (!outcomeUnknown(cause)) keys.current.delete(name);
+      if (!outcomeUnknown(cause)) release();
       setMessage(loanStepMessage(cause, other, cardName));
       if (
         cause instanceof SocialError &&
@@ -457,6 +505,7 @@ export function LoanScreen({
         refreshInbox();
       }
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -621,7 +670,7 @@ export function LoanScreen({
             onClick={(event) => {
               if (event.metaKey || event.ctrlKey || event.shiftKey) return;
               event.preventDefault();
-              onOpenDeck(deck.id);
+              if (!retained.current) onOpenDeck(deck.id);
             }}
             className="inline-flex max-w-full min-h-(--target-pointer) items-center justify-center rounded-control text-accent-strong underline underline-offset-2 wrap-anywhere hover:text-text phone:min-h-tap phone:min-w-tap"
           >
@@ -1476,5 +1525,50 @@ function LoanLine({
         </CardPopup>
       )}
     </li>
+  );
+}
+
+/** Unknown steps have one visible route forward. Routing cannot silently discard
+ * their authority; browser reload/close also carries the ordinary leave warning. */
+function PendingLoanRequest({
+  busy,
+  onRetry,
+}: {
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  const explanation = useRef<HTMLParagraphElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!busy) retry.current?.focus();
+  }, [busy]);
+  const guard = useMemo<LeaveGuard>(
+    () => ({
+      blocks: () => true,
+      ask: () => explanation.current?.focus(),
+    }),
+    []
+  );
+  useLeaveGuard(guard);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
+  return (
+    <section aria-label="Pending request" className="flex flex-col gap-2">
+      <p ref={explanation} tabIndex={-1} className="m-0 text-body">
+        {busy
+          ? "This request is being sent."
+          : "The answer was lost. Retry sends the same request."}{" "}
+        Resolve this request before leaving the Loan or making other changes.
+      </p>
+      <Button ref={retry} variant="primary" disabled={busy} onClick={onRetry}>
+        Retry request
+      </Button>
+    </section>
   );
 }

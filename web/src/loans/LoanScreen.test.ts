@@ -7,8 +7,10 @@ import {
   getLoanSide,
   startReturn,
   acceptBorrowRequest,
+  changeReturnBy,
   type LoanView,
 } from "../social_generated";
+import { useRoute } from "../shell/useRoute";
 import { LoanScreen } from "./LoanScreen";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
@@ -16,6 +18,7 @@ vi.mock("../social_generated", async (original) => ({
   getLoanSide: vi.fn(),
   startReturn: vi.fn(),
   acceptBorrowRequest: vi.fn(),
+  changeReturnBy: vi.fn(),
 }));
 vi.mock("../threads/ThreadTimeline", () => ({ ThreadTimeline: () => null }));
 const loan: LoanView = {
@@ -168,9 +171,7 @@ for (const role of ["lender", "borrower"] as const) {
         await act(async () => all.click());
         if (lost) {
           const retry = [...host.querySelectorAll("button")].find(
-            (b) =>
-              b.textContent ===
-              (role === "lender" ? "Record return" : "Give these back")
+            (b) => b.textContent === "Retry request"
           )!;
           await act(async () => retry.click());
           expect(JSON.stringify(vi.mocked(startReturn).mock.calls[1])).toBe(
@@ -310,6 +311,241 @@ it("previews a partial acceptance without presenting draft quantities as agreed 
     await act(async () => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});
+
+for (const role of ["lender", "borrower"] as const) {
+  for (const entry of ["All back", "Some back"] as const) {
+    it(`S2-01: ${role} retains ${entry} through edits, Not now and Some back until exact replay settles`, async () => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      const active: LoanView = {
+        ...loan,
+        role,
+        state: "handed_over",
+        closed_reason: null,
+        closed_by: null,
+        you_confirmed_handover: true,
+        they_confirmed_handover: true,
+        lines: [{ ...loan.lines[0], requested: "3", promised: "3" }],
+        section: "out_now",
+        revision: 4,
+        actions: ["start_return", "change_return_by"],
+      };
+      vi.mocked(getLoan).mockResolvedValue(active);
+      vi.mocked(getLoanSide).mockResolvedValue({
+        loan_id: "round",
+        deck: null,
+        can_promise: [],
+        picks: [],
+        suggested: [],
+      });
+      let lose!: (cause: Error) => void;
+      vi.mocked(startReturn).mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            lose = reject;
+          })
+      );
+      vi.mocked(startReturn).mockResolvedValueOnce({
+        ...active,
+        actions: [],
+        revision: 5,
+        pending_return: {
+          return_id: "claim",
+          started_by: "you",
+          lines: [
+            { edition_id: "iono", copies: entry === "All back" ? "3" : "2" },
+          ],
+          you_confirmed: true,
+          they_confirmed: false,
+        },
+      });
+      const host = document.createElement("div");
+      document.body.append(host);
+      const root = createRoot(host);
+      const button = (name: string) =>
+        [...host.querySelectorAll("button")].find(
+          (b) => b.textContent === name
+        );
+      function View() {
+        const route = useRoute();
+        return h(
+          "div",
+          null,
+          h(
+            "button",
+            {
+              "data-navigate": true,
+              onClick: () => route.navigate("/collection"),
+            },
+            "Collection"
+          ),
+          h(LoanScreen, {
+            loanId: "item",
+            onCanonicalLoan: vi.fn(),
+            onLoanChanged: vi.fn(),
+            onAllLoans: vi.fn(),
+            onOpenDeck: vi.fn(),
+          })
+        );
+      }
+      try {
+        window.history.replaceState(null, "", "/loans/item");
+        vi.stubGlobal("scrollTo", vi.fn());
+        await act(async () => root.render(h(View)));
+        await act(async () => button(entry)!.click());
+        const decrease = () =>
+          host.querySelector<HTMLButtonElement>(
+            'button[aria-label^="Decrease Copies of Iono"]'
+          )!;
+        if (entry === "Some back") {
+          await act(async () => decrease().click());
+          await act(async () =>
+            button(
+              role === "lender" ? "Record return" : "Give these back"
+            )!.click()
+          );
+        }
+        const original = JSON.stringify(vi.mocked(startReturn).mock.calls[0]);
+        expect(JSON.parse(original)[1].lines).toEqual([
+          { edition_id: "iono", quantity: entry === "All back" ? "3" : "2" },
+        ]);
+        // Try the same edits while the POST is in flight, then after its response is lost.
+        for (const lost of [false, true]) {
+          if (lost) await act(async () => lose(new TypeError("lost response")));
+          expect(decrease().matches(":disabled")).toBe(true);
+          await act(async () => decrease().click());
+          expect(button("Not now")!.matches(":disabled")).toBe(true);
+          await act(async () => button("Not now")!.click());
+          expect(button("Some back")).toBeUndefined();
+          expect(button("All back")).toBeUndefined();
+          expect(
+            host.querySelector('[aria-label="More for this Loan"]')
+          ).toBeNull();
+          expect(startReturn).toHaveBeenCalledTimes(1);
+          await act(async () =>
+            host.querySelector<HTMLButtonElement>("[data-navigate]")!.click()
+          );
+          expect(window.location.pathname).toBe("/loans/item");
+          expect(
+            window.dispatchEvent(
+              new Event("beforeunload", { cancelable: true })
+            )
+          ).toBe(false);
+        }
+        const retry = button("Retry request")!;
+        expect(retry.matches(":disabled")).toBe(false);
+        await act(async () => retry.click());
+        expect(startReturn).toHaveBeenCalledTimes(2);
+        expect(JSON.stringify(vi.mocked(startReturn).mock.calls[1])).toBe(
+          original
+        );
+        expect(button("Retry request")).toBeUndefined();
+        expect(
+          window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
+        ).toBe(true);
+        await act(async () =>
+          host.querySelector<HTMLButtonElement>("[data-navigate]")!.click()
+        );
+        expect(window.location.pathname).toBe("/collection");
+        expect(host.querySelector("h1")?.textContent).toContain(
+          "Waiting for Misty to confirm"
+        );
+      } finally {
+        await act(async () => root.unmount());
+        host.remove();
+        vi.unstubAllGlobals();
+        vi.clearAllMocks();
+      }
+    });
+  }
+}
+it("S2-01: an unknown date save cannot become Clear date or a return command", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(10, 10, 30, 30)
+  );
+  const active: LoanView = {
+    ...loan,
+    role: "lender",
+    state: "handed_over",
+    closed_reason: null,
+    closed_by: null,
+    return_by: "2026-12-03",
+    lines: [{ ...loan.lines[0], promised: "3" }],
+    actions: ["change_return_by", "start_return"],
+  };
+  vi.mocked(getLoan).mockResolvedValue(active);
+  vi.mocked(getLoanSide).mockResolvedValue({
+    loan_id: "round",
+    deck: null,
+    can_promise: [],
+    picks: [],
+    suggested: [],
+  });
+  vi.mocked(changeReturnBy)
+    .mockRejectedValueOnce(new TypeError("lost response"))
+    .mockResolvedValueOnce({ ...active, revision: 3 });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const button = (name: string) =>
+    [...host.querySelectorAll("button")].find((b) => b.textContent === name);
+  try {
+    await act(async () =>
+      root.render(
+        h(LoanScreen, {
+          loanId: "item",
+          onCanonicalLoan: vi.fn(),
+          onLoanChanged: vi.fn(),
+          onAllLoans: vi.fn(),
+          onOpenDeck: vi.fn(),
+        })
+      )
+    );
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="More for this Loan"]'
+        )!
+        .click()
+    );
+    expect(
+      [...host.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(
+        (b) => b.textContent
+      )
+    ).toContain("Change return-by date");
+    await act(async () =>
+      [...host.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+        .find((b) => b.textContent === "Change return-by date")!
+        .click()
+    );
+    await act(async () => button("Save")!.click());
+    const original = JSON.stringify(vi.mocked(changeReturnBy).mock.calls[0]);
+    expect(button("Clear date")!.matches(":disabled")).toBe(true);
+    await act(async () => button("Clear date")!.click());
+    expect(button("Cancel")!.matches(":disabled")).toBe(true);
+    await act(async () => button("Cancel")!.click());
+    expect(button("All back")).toBeUndefined();
+    expect(startReturn).not.toHaveBeenCalled();
+    await act(async () => button("Retry request")!.click());
+    expect(changeReturnBy).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(vi.mocked(changeReturnBy).mock.calls[1])).toBe(
+      original
+    );
+    expect(button("All back")).toBeDefined();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   }
 });
