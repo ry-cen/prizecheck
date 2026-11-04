@@ -225,6 +225,7 @@ export function TradeScreen({
       ([trade, side]) => {
         if (controller.signal.aborted) return;
         if (tradeId !== trade.thread_id) {
+          openedFromInbox(tradeId, trade.thread_id);
           onNavigate(tradePath(trade.thread_id), { replace: true });
           return;
         }

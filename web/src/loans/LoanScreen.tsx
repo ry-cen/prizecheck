@@ -233,6 +233,7 @@ export function LoanScreen({
           return;
         }
         if (loanId !== loan.thread_id) {
+          openedFromInbox(loanId, loan.thread_id);
           onCanonicalLoan(loan.thread_id);
           return;
         }
