@@ -268,7 +268,7 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   page.on("request", (request) => {
     if (
       request.method() === "POST" &&
-      request.url().endsWith(`/api/loans/${sent.id}/handover`)
+      request.url().endsWith(`/api/loans/${sent.thread_id}/handover`)
     )
       handovers.push(request.postDataJSON());
   });
@@ -315,7 +315,7 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await expect(lentOut).toBeVisible();
   await expectPageChecks(lender, "the Lent out list on a phone");
   await lentCards.filter({ hasText: "Iono" }).click();
-  await expect(lender).toHaveURL(`${ORIGIN}/loans/${sent.id}`);
+  await expect(lender).toHaveURL(`${ORIGIN}/loans/${sent.thread_id}`);
   await expect(title(lender)).toHaveText("You're lending Ash K 2 cards");
   await lender.setViewportSize(DESKTOP);
   await lender.goto(`${ORIGIN}/decks/${lugia}`);
@@ -365,7 +365,10 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await page.getByRole("link", { name: "All Loans" }).click();
   await expect(
     page.getByRole("region", { name: "Out now" }).getByRole("link")
-  ).toContainText("You have 2 cards of Misty W's");
+  ).toContainText("You give 0 · You get 2");
+  await expect(
+    page.getByRole("region", { name: "Out now" }).getByRole("link")
+  ).toContainText("Misty W");
 
   await lender.goto(`${ORIGIN}/loans/${sent.id}`);
   await expect(title(lender)).toHaveText("Ash K has 2 cards of yours");

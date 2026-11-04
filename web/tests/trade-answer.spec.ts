@@ -160,7 +160,7 @@ async function propose(
     you_get: get.map(line),
     idempotency_key: randomUUID(),
   });
-  return trade.id as string;
+  return trade.thread_id as string;
 }
 
 /** The Trade as `page`'s collector reads it, through the API. */
@@ -245,7 +245,7 @@ async function story(
   const declined = await propose(page, ashId, [[iono, 1]], []);
   const withdrawn = await propose(page, ashId, [[iono, 1]], []);
 
-  // A: Ash opens the swap. Decline asks first, and Keep it leaves the proposal as it was.
+  // A: Ash opens the proposal and can accept immediately; Decline is tested on the other gift below.
   await ash.page.goto(`${ORIGIN}/trades/${swap}`);
   await expect(heading(ash.page)).toHaveText(
     "Misty W sent you a Trade Proposal"
@@ -254,20 +254,6 @@ async function story(
   await expect(ashMain.getByRole("button", { name: "Accept" })).toBeVisible();
   await expectOnlyReport(ash.page);
   await expectPageChecks(ash.page, `a received Trade Proposal at ${width}`);
-  await ashMain.getByRole("button", { name: "Decline" }).click();
-  const declining = ashMain.getByRole("group", { name: "Decline" });
-  await expect(declining).toContainText("Decline Misty W's Trade Proposal?");
-  await expect(
-    declining.getByRole("button", { name: "Decline" })
-  ).toBeFocused();
-  await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(0);
-  await expectPageChecks(ash.page, `the Decline question at ${width}`);
-  await declining.getByRole("button", { name: "Keep it" }).click();
-  await expect(declining).toHaveCount(0);
-  await expect(ashMain.getByRole("button", { name: "Decline" })).toBeFocused();
-  await expect(heading(ash.page)).toHaveText(
-    "Misty W sent you a Trade Proposal"
-  );
   expect(await tradeState(ash.page, swap)).toMatchObject({
     state: "proposed",
     revision: 1,
@@ -302,10 +288,7 @@ async function story(
   // Ash declines one of the gifts, and Misty's Iono comes back to her Trade List and to his read of it.
   await ash.page.goto(`${ORIGIN}/trades/${declined}`);
   await ashMain.getByRole("button", { name: "Decline" }).click();
-  await ashMain
-    .getByRole("group", { name: "Decline" })
-    .getByRole("button", { name: "Decline" })
-    .click();
+  await expect(ashMain.getByRole("group", { name: "Decline" })).toHaveCount(0);
   await expect(heading(ash.page)).toHaveText("You declined");
   await expect(toast(ash.page)).toContainText("Declined");
   expect((await tradeState(ash.page, declined)).actions).toEqual([]);
@@ -318,7 +301,7 @@ async function story(
   await expect(heading(page)).toHaveText("Ash K declined");
   await expectOnlyReport(page);
 
-  // C: Ash has the other gift open while Misty withdraws it. Withdraw asks first, and Keep it leaves it waiting.
+  // C: Withdraw acts once inline, while Ash has the gift open. Cancel alone keeps an ask.
   await ash.page.goto(`${ORIGIN}/trades/${withdrawn}`);
   await expect(heading(ash.page)).toHaveText(
     "Misty W wants to give you 1 card"
@@ -327,25 +310,9 @@ async function story(
   const mistyMain = page.getByRole("main");
   await more(page).click();
   await page.getByRole("menuitem", { name: "Withdraw" }).click();
-  const withdrawing = mistyMain.getByRole("group", { name: "Withdraw" });
-  await expect(withdrawing).toContainText(
-    "Withdraw your Trade Proposal to Ash K?"
+  await expect(mistyMain.getByRole("group", { name: "Withdraw" })).toHaveCount(
+    0
   );
-  await expect(
-    withdrawing.getByRole("button", { name: "Withdraw" })
-  ).toBeFocused();
-  await expectPageChecks(page, `the Withdraw question at ${width}`);
-  await withdrawing.getByRole("button", { name: "Keep it" }).click();
-  await expect(withdrawing).toHaveCount(0);
-  await expect(more(page)).toBeFocused();
-  await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
-  expect(await tradeState(page, withdrawn)).toMatchObject({
-    state: "proposed",
-    revision: 1,
-  });
-  await more(page).click();
-  await page.getByRole("menuitem", { name: "Withdraw" }).click();
-  await withdrawing.getByRole("button", { name: "Withdraw" }).click();
   await expect(heading(page)).toHaveText("You withdrew this Trade Proposal");
   await expect(toast(page)).toContainText("Withdrawn");
   // Ash's screen still shows the proposal he opened: his accept finds it changed, and the screen reads it again.

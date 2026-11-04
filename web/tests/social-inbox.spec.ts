@@ -28,7 +28,6 @@ import {
   seedCatalog,
   unsorted,
 } from "./support/loans";
-import { openConversation, timelineTrades } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 
@@ -93,14 +92,16 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
         deck_id: null,
         idempotency_key: randomUUID(),
       })
-    ).id as string;
+    ).thread_id as string;
   const older = await ask();
   const newer = await ask();
 
   // Misty: both requests wait on her, on the bell and on the Loans tab.
   await lender.goto(`${ORIGIN}/collection`);
   await expect(bell(lender)).toHaveAccessibleName("Inbox, 2 waiting");
-  await expect(loansTab(lender)).toHaveAccessibleName("Loans, 2 need you");
+  await expect(loansTab(lender)).toHaveAccessibleName(
+    "Loans, 2 need you: 2 waiting on you, 0 with new messages"
+  );
   await bell(lender).click();
   const waiting = drawer(lender)
     .getByRole("region", { name: "Waiting on you" })
@@ -134,13 +135,17 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
     "You declined Ash K's request for 1 card"
   );
   await expect(bell(lender)).toHaveAccessibleName("Inbox, 1 waiting");
-  await expect(loansTab(lender)).toHaveAccessibleName("Loans, 1 needs you");
+  await expect(loansTab(lender)).toHaveAccessibleName(
+    "Loans, 1 need you: 1 waiting on you, 0 with new messages"
+  );
 
   // Collection's phone header holds the bell and still fits Search.
   await lender.setViewportSize(PHONE);
   await lender.goto(`${ORIGIN}/collection`);
   await expect(bell(lender)).toBeVisible();
-  await expect(loansTab(lender)).toHaveAccessibleName("Loans, 1 needs you");
+  await expect(loansTab(lender)).toHaveAccessibleName(
+    "Loans, 1 need you: 1 waiting on you, 0 with new messages"
+  );
   await expectPageChecks(lender, "Collection on a phone with the bell");
 
   // Ash: nothing waits on him; the decline is under Earlier, three hours ago by his clock, and opens its Loan.
@@ -297,7 +302,7 @@ async function tradeStory(
       you_get: [{ edition_id: arven, quantity: "1" }],
       idempotency_key: randomUUID(),
     })
-  ).id as string;
+  ).thread_id as string;
   const tradeAddress = `${ORIGIN}/trades/${trade}`;
   const waitingOn = (on: Page) =>
     drawer(on)
@@ -309,7 +314,9 @@ async function tradeStory(
   // Ash: the proposal waits on his answer, on the bell and on the Trades tab, and its line opens the Trade.
   await ash.goto(`${ORIGIN}/collection`);
   await expect(bell(ash)).toHaveAccessibleName("Inbox, 1 waiting");
-  await expect(tradesTab(ash)).toHaveAccessibleName("Trades, 1 needs you");
+  await expect(tradesTab(ash)).toHaveAccessibleName(
+    "Trades, 1 need you: 1 waiting on you, 0 with new messages"
+  );
   await expect(loansTab(ash)).toHaveAccessibleName("Loans");
   await bell(ash).click();
   await expect(waitingOn(ash)).toHaveText([
@@ -323,13 +330,15 @@ async function tradeStory(
   await expect(title(ash)).toHaveText("Misty W sent you a Trade Proposal");
   await expect(title(ash)).toBeFocused();
 
-  // He accepts: nothing waits on him now, and Misty is told.
+  // TA-H01: after agreement both unconfirmed participants wait, regardless of the other side.
   await ash.getByRole("main").getByRole("button", { name: "Accept" }).click();
   await expect(title(ash)).toHaveText("Ready to swap with Misty W");
-  await expect(bell(ash)).toHaveAccessibleName("Inbox");
-  await expect(tradesTab(ash)).toHaveAccessibleName("Trades");
+  await expect(bell(ash)).toHaveAccessibleName("Inbox, 1 waiting");
+  await expect(tradesTab(ash)).toHaveAccessibleName(
+    "Trades, 1 need you: 1 waiting on you, 0 with new messages"
+  );
   await page.goto(`${ORIGIN}/collection`);
-  await expect(bell(page)).toHaveAccessibleName("Inbox");
+  await expect(bell(page)).toHaveAccessibleName("Inbox, 1 waiting");
   await bell(page).click();
   await expect(earlierOn(page).getByRole("link")).toHaveText([
     /^New: Ash K accepted your Trade Proposal /,
@@ -340,10 +349,13 @@ async function tradeStory(
   await move(page, shelf, iono, 1, box);
   await page.reload();
   await expect(bell(page)).toHaveAccessibleName("Inbox, 1 waiting");
-  await expect(tradesTab(page)).toHaveAccessibleName("Trades, 1 needs you");
+  await expect(tradesTab(page)).toHaveAccessibleName(
+    "Trades, 1 need you: 1 waiting on you, 0 with new messages"
+  );
   await tradesTab(page).click();
-  await openConversation(page, "Ash K");
-  await expect(timelineTrades(page)).toContainText(["· Fix picks"]);
+  await expect(page.locator(`a[data-thread="${trade}"]`)).toContainText(
+    "Update picks"
+  );
   await bell(page).click();
   await expect(waitingOn(page)).toHaveText([/^Ash K · Fix picks/]);
   await waitingOn(page).click();
@@ -356,11 +368,12 @@ async function tradeStory(
   await expect(
     page.getByRole("region", { name: "Notifications" })
   ).toContainText("Picks updated");
-  await expect(bell(page)).toHaveAccessibleName("Inbox");
+  await expect(bell(page)).toHaveAccessibleName("Inbox, 1 waiting");
 
   // Ash confirms the swap: it waits on Misty to confirm hers.
   const read = await tradeView(ash, trade);
   await api(ash, "POST", `/api/trades/${trade}/confirm-swap`, {
+    offer_id: read.offer_id,
     revision: read.revision,
     idempotency_key: randomUUID(),
     destination_id: null,
@@ -373,11 +386,7 @@ async function tradeStory(
   await waitingOn(page).click();
   await expect(title(page)).toHaveText("Ash K confirmed the swap");
   await page
-    .getByRole("main")
-    .getByRole("button", { name: "Confirm swap" })
-    .click();
-  await page
-    .getByRole("dialog", { name: "Confirm swap with Ash K?" })
+    .getByRole("region", { name: "Confirm swap with Ash K" })
     .getByRole("button", { name: "Confirm swap" })
     .click();
   await expect(title(page)).toHaveText("Swapped with Ash K");

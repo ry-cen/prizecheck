@@ -16,12 +16,7 @@ import type {
   Request,
 } from "@playwright/test";
 import { expect, test } from "./support/collectors";
-import {
-  openConversation,
-  timeline,
-  timelineTrades,
-  traderIdOf,
-} from "./support/conversations";
+import { traderIdOf } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import { bodyOf } from "./support/trades";
@@ -265,7 +260,7 @@ async function story(
 
   // Ash gives one of his Arven to Misty meanwhile, so only one is left on his Trade List: the send is
   // refused with the card and the count, and the cards stay.
-  await api(ash.page, "POST", "/api/trades", {
+  const incoming = await api(ash.page, "POST", "/api/trades", {
     recipient_id: await accountId(page),
     you_give: [{ edition_id: ids["SVI 166"], quantity: "1" }],
     you_get: [],
@@ -306,13 +301,9 @@ async function story(
   );
   await expectPageChecks(page, `the Trade screen at ${width}`);
 
-  // #514: the sent success belongs to that proposal, not a different incoming offer in the same conversation.
-  await page
-    .getByRole("link", { name: "Conversation with Ash K", exact: true })
-    .click();
-  await page
-    .getByRole("link", { name: /Ash K wants to give you 1 card/ })
-    .click();
+  // #514: success stays scoped to its item, not a different incoming agreement with the same collector.
+  await page.getByRole("link", { name: "All Trades", exact: true }).click();
+  await page.locator(`a[data-thread="${incoming.thread_id}"]`).click();
   await expect(heading(page)).toHaveText("Ash K wants to give you 1 card");
   await expect(toast(page)).not.toContainText("Trade Proposal sent to Ash K");
 
@@ -418,21 +409,23 @@ async function story(
   await show(brock.page, "Proposal");
   await expect(group(brock.page, /^Iono .* you give$/)).toHaveCount(1);
 
-  // C: Ash sees both proposals from his side.
-  await openConversation(ash.page, "Misty W");
-  const cards = timeline(ash.page);
-  // The two proposals that wait on Ash are in the Trades tab's name; no one has messaged him.
-  await expect(tradesTab(ash.page)).toHaveAccessibleName("Trades, 2 need you");
-  await expect(timelineTrades(ash.page)).toHaveCount(3);
-  await expect(cards).toContainText("Misty W sent you a Trade Proposal");
-  await expect(cards).toContainText("Misty W wants to give you 2 cards");
-  await expect(cards).toContainText("You give 1 card · You get 1 card");
-  await expect(cards).toContainText("Waiting for Misty W to answer");
-  await expectPageChecks(ash.page, `the conversation at ${width}`);
-  await timelineTrades(ash.page)
-    .filter({ hasText: /Misty W sent you a Trade Proposal/ })
-    .first()
-    .click();
+  // C: all three agreements are separate items, with exactly two answer steps and no unread messages.
+  await ash.page.goto(`${ORIGIN}/trades`);
+  const rows = ash.page.locator("a[data-thread]");
+  await expect(tradesTab(ash.page)).toHaveAccessibleName(
+    "Trades, 2 need you: 2 waiting on you, 0 with new messages"
+  );
+  await expect(rows).toHaveCount(3);
+  const swapRow = ash.page.locator(`a[href="${new URL(swap).pathname}"]`);
+  const giftRow = ash.page.locator(`a[href="${new URL(gift).pathname}"]`);
+  await expect(swapRow).toContainText("Misty W");
+  await expect(swapRow).toContainText("You give 1 · You get 1");
+  await expect(giftRow).toContainText("You give 0 · You get 2");
+  await expect(
+    ash.page.locator(`a[data-thread="${incoming.thread_id}"]`)
+  ).toContainText("Proposal");
+  await expectPageChecks(ash.page, `separate live agreements at ${width}`);
+  await swapRow.click();
   await expect(heading(ash.page)).toHaveText(
     "Misty W sent you a Trade Proposal"
   );
@@ -457,12 +450,7 @@ async function story(
     await page.goto(trade);
     await page.getByRole("button", { name: "More for this Trade" }).click();
     await page.getByRole("menuitem", { name: "Withdraw" }).click();
-    // Withdrawing asks first (#271); the question names the Friend.
-    const asking = page.getByRole("group", { name: "Withdraw" });
-    await expect(asking).toContainText(
-      "Withdraw your Trade Proposal to Ash K?"
-    );
-    await asking.getByRole("button", { name: "Withdraw" }).click();
+    await expect(page.getByRole("group", { name: "Withdraw" })).toHaveCount(0);
     await expect(heading(page)).toHaveText("You withdrew this Trade Proposal");
     await expect(toast(page)).toContainText("Withdrawn");
   }
@@ -477,12 +465,18 @@ async function story(
   await expect(
     ash.page.getByRole("main").getByRole("list", { name: "Iono", exact: true })
   ).toContainText("×3");
-  await openConversation(ash.page, "Misty W");
-  await expect(
-    timelineTrades(ash.page).filter({
-      hasText: /Misty W withdrew this Trade Proposal/,
-    })
-  ).toHaveCount(2);
+  await ash.page.goto(`${ORIGIN}/trades`);
+  await ash.page.getByText("Done", { exact: true }).click();
+  const done = ash.page.getByRole("list", { name: "Done Trades" });
+  await expect(done.getByRole("link")).toHaveCount(2);
+  for (const url of [swap, gift])
+    await expect(
+      done.locator(`a[href="${new URL(url).pathname}"]`)
+    ).toContainText("Closed");
+  await ash.page.goto(gift);
+  await expect(heading(ash.page)).toHaveText(
+    "Misty W withdrew this Trade Proposal"
+  );
   await ash.page.goto(swap);
   await expect(heading(ash.page)).toHaveText(
     "Misty W withdrew this Trade Proposal"

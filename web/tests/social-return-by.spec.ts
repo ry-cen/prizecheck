@@ -114,8 +114,11 @@ test("the lender extends the return-by date, and approves the borrower's request
   await lender.goto(`${ORIGIN}/loans`);
   await expect(
     lender.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText("Ash K asked for more time");
-  await lender.goto(`${ORIGIN}/loans/${loanId}`);
+  ).toContainText("Answer more time request");
+  await lender
+    .getByRole("region", { name: "Needs you" })
+    .getByRole("link")
+    .click();
   const request = lender.getByRole("group", { name: "More time" });
   await expect(request).toContainText(
     `Ash K asked for more time, until ${latest.text}.`

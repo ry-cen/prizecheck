@@ -887,12 +887,16 @@ collectorTest(
     const tab = lender.page
       .getByRole("navigation", { name: "Main views" })
       .getByRole("button", { name: /^Loans/ });
-    await expect(tab).toHaveAccessibleName("Loans, 12 need you");
+    await expect(tab).toHaveAccessibleName(
+      "Loans, 12 need you: 12 waiting on you, 0 with new messages"
+    );
     await expect(
       lender.page
         .getByRole("navigation", { name: "Main views" })
         .getByRole("button", { name: /^Trades/ })
-    ).toHaveAccessibleName("Trades, 12 need you");
+    ).toHaveAccessibleName(
+      "Trades, 12 need you: 12 waiting on you, 0 with new messages"
+    );
     const measure = () =>
       lender.page.evaluate(() => {
         const header = document.querySelector("header")!;

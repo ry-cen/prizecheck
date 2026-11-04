@@ -1,31 +1,9 @@
-// Conversation helpers for the Trade specs (Trading #298): where a spec reads a Friend's Trades, and the few pieces of
-// set-up the API has no route for. A pair's Trades are cards inside their conversation, opened from the Trades list.
+// Shared discovery and rate-limit setup. Chat and agreement readers use the current item-thread contract.
 import type { Page } from "@playwright/test";
 import { Pool } from "pg";
-import { expect } from "./collectors";
 import { accountId, api } from "./loans";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-
-/** The Trades tab's conversation list. */
-export const conversations = (page: Page) =>
-  page.getByRole("list", { name: "Conversations" });
-
-/** An open conversation's messages and Trade cards, oldest first. */
-export const timeline = (page: Page) =>
-  page.getByRole("list", { name: "Messages and Trades" });
-
-/** The Trade cards of an open conversation (only they are links). */
-export const timelineTrades = (page: Page) => timeline(page).getByRole("link");
-
-/** Opens the Trades list, then the conversation with the collector called `name`. */
-export async function openConversation(page: Page, name: string) {
-  await page.goto(`${ORIGIN}/trades`);
-  await conversations(page)
-    .getByRole("link", { name: new RegExp("^" + name) })
-    .click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
-}
 
 /** The page's collector's trader id, read from the database. The UI links to it only through other screens. */
 export async function traderIdOf(page: Page): Promise<string> {

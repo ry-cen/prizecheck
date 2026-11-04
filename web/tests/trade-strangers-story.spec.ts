@@ -1,3 +1,5 @@
+import { sendItemMessage as say, tradeThreadFor } from "./support/item-chat";
+import { tradeView } from "./support/trades";
 // Ticket #305 (Trading Stage 2, "Story specs"): the end-to-end proof, at desktop width and at 375 px.
 // Story one: Ash (A, zip 00010) and Brock (B, 00013, about 3 mi away) are strangers. Both switch open discovery on in
 // Settings. Brock finds Ash under Near you, opens his Trade List and messages him; Ash's Trades badge counts it after
@@ -16,7 +18,6 @@ import {
   discoverable,
   focusPulse,
   seedZips,
-  timeline,
   traderIdOf,
 } from "./support/conversations";
 import {
@@ -31,12 +32,7 @@ import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import { seedNearbyZip } from "./support/strangersStory";
 import { expectTouchTarget } from "./support/touch-target";
-import {
-  DESKTOP_SIZE,
-  PHONE_SIZE,
-  forTradeLeaf,
-  proposeToTrader,
-} from "./support/trades";
+import { DESKTOP_SIZE, PHONE_SIZE, forTradeLeaf } from "./support/trades";
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 const NO_SOURCES = /refresh|poll|updated \d|TCGdex|TCGplayer/i;
@@ -50,7 +46,10 @@ const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 const main = (page: Page) => page.getByRole("main");
 const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
-const composer = (page: Page) => page.getByRole("textbox", { name: "Message" });
+const composer = (page: Page) =>
+  page.getByRole("textbox", { name: /^Message / });
+const timeline = (page: Page) =>
+  page.getByRole("list", { name: "Messages and changes" });
 const send = (page: Page) =>
   page.getByRole("button", { name: "Send", exact: true });
 const tradesTab = (page: Page) =>
@@ -157,11 +156,10 @@ async function switchOn(page: Page, zip: string) {
 }
 
 const dialog = (page: Page, other: string) =>
-  page.getByRole("dialog", { name: `Confirm swap with ${other}?` });
+  page.getByRole("region", { name: `Confirm swap with ${other}` });
 
 /** Confirm swap from the Trade screen, into Unsorted. */
 async function confirmSwap(page: Page, other: string) {
-  await main(page).getByRole("button", { name: "Confirm swap" }).click();
   await dialog(page, other)
     .getByRole("button", { name: "Confirm swap" })
     .click();
@@ -218,7 +216,10 @@ async function storyOne(
   await expectNoLeaks(page, w.ashHandle);
 
   // 3. He opens Ash's Trade List and messages him about Ash's Arven: the question waits in the composer.
-  await rows.first().getByRole("button", { name: /Ash K/ }).click();
+  await rows
+    .first()
+    .getByRole("button", { name: /^Ash K/ })
+    .click();
   await rows
     .first()
     .getByRole("link", { name: "See all of Ash K's Trade List" })
@@ -234,57 +235,67 @@ async function storyOne(
   if (phone) await expectTouchTarget(message);
   await expectPageChecks(page, `Ash's Trade List, ${width}`);
   await message.click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/with/${w.ashTrader}`);
-  await expect(composer(page)).toHaveValue(
-    /^Is your Arven .* still available\?$/
-  );
-  await send(page).click();
-  await expect(timeline(page).getByRole("listitem")).toHaveCount(1);
+  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${w.ashTrader}`);
+  await expect(
+    page.getByRole("textbox", { name: "Message (optional)" })
+  ).toHaveValue(/^Is your Arven .* still available\?$/);
+  await page
+    .getByRole("button", { name: "Send Trade Proposal", exact: true })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`));
+  const threadId = new URL(page.url()).pathname.split("/").pop()!;
+  await expect(timeline(page)).toContainText("Is your Arven");
+  await expect(timeline(page).getByRole("listitem")).toHaveCount(2);
   await expect(composer(page)).toHaveValue("");
   await expectNoLeaks(page, w.ashHandle);
 
-  // 4. Ash's Trades badge counts it after focus; he opens it from the list and replies.
+  // 4. Waiting and unread overlap on this item; opening it clears unread only.
   await focusPulse(ash);
   await expect(tradesTab(ash)).toHaveAccessibleName(
-    "Trades, 1 unread conversation"
+    "Trades, 1 need you: 1 waiting on you, 1 with new messages"
   );
   await tradesTab(ash).click();
-  const row = ash
-    .getByRole("list", { name: "Conversations" })
-    .getByRole("link", { name: /^Brock T/ });
-  await expect(row).toContainText("Unread");
+  const row = ash.locator(`a[data-thread="${threadId}"]`);
+  await expect(row).toContainText("Brock T");
+  await expect(row).toContainText("New messages");
   await row.click();
-  await expect(heading(ash)).toHaveText("Brock T");
+  await expect(heading(ash)).toHaveText("Brock T sent you a Trade Proposal");
   await composer(ash).fill("Yes, I have three.");
   await send(ash).click();
-  await expect(timeline(ash).getByRole("listitem")).toHaveCount(2);
-  await expect(tradesTab(ash)).toHaveAccessibleName("Trades");
+  await expect(timeline(ash)).toContainText("Yes, I have three.");
+  await expect(timeline(ash).getByRole("listitem")).toHaveCount(3);
+  await expect(tradesTab(ash)).toHaveAccessibleName(
+    "Trades, 1 need you: 1 waiting on you, 0 with new messages"
+  );
   await focusPulse(page);
-  await expect(timeline(page).getByRole("listitem")).toHaveCount(2);
+  await expect(timeline(page)).toContainText("Yes, I have three.");
+  await expect(timeline(page).getByRole("listitem")).toHaveCount(3);
 
-  // 5. Brock proposes from the conversation.
-  const propose = page.getByRole("button", { name: "Propose trade to Ash K" });
-  if (phone) await expectTouchTarget(propose);
-  await propose.click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${w.ashTrader}`);
-  await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
-  let tradeId: string;
+  // 5. Brock revises this same live offer into a swap; chat and offer history stay on the item.
+  const firstOffer = await tradeView(page, threadId);
+  let tradeId = threadId;
   if (phone) {
-    // The builder's two panes are covered by the Stage 2 trade-strangers spec; here the proposal goes by the API.
-    await expectPageChecks(page, "the proposal builder, 375 px");
-    tradeId = await proposeToTrader(
-      page,
-      w.ashTrader,
-      [[w.ids["PAL 185"], 1]],
-      [[w.ids["SVI 166"], 1]]
-    );
+    await page.getByRole("button", { name: "More for this Trade" }).click();
+    await page.getByRole("menuitem", { name: "Change offer" }).click();
+    await expect(heading(page)).toHaveText("Change offer to Ash K");
+    await expectPageChecks(page, "the live-offer editor, 375 px");
+    await api(page, "POST", `/api/trades/${threadId}/offer`, {
+      offer_id: firstOffer.offer_id,
+      revision: firstOffer.revision,
+      you_give: [{ edition_id: w.ids["PAL 185"], quantity: "1" }],
+      you_get: [{ edition_id: w.ids["SVI 166"], quantity: "1" }],
+      idempotency_key: randomUUID(),
+    });
   } else {
+    await page.getByRole("button", { name: "More for this Trade" }).click();
+    await page.getByRole("menuitem", { name: "Change offer" }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades/${threadId}/counter`);
+    await expect(heading(page)).toHaveText("Change offer to Ash K");
+    await show(page, "Proposal");
+    await expect(
+      page.getByRole("region", { name: "You get", exact: true })
+    ).toContainText("Arven");
     await show(page, "Cards");
-    await tile(
-      page.getByRole("list", { name: "Ash K's Trade List" }),
-      "get",
-      "Arven, SVI 166, .+?, Normal"
-    ).click();
     await page.getByRole("radio", { name: "My Trade List" }).click();
     await tile(
       page.getByRole("list", { name: "Your Trade List" }),
@@ -292,13 +303,15 @@ async function storyOne(
       "Iono, PAL 185, .+?, Normal"
     ).click();
     await show(page, "Proposal");
-    await page.getByRole("button", { name: "Send Trade Proposal" }).click();
-    await expect(page).toHaveURL(
-      new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`)
-    );
-    await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
-    tradeId = page.url().split("/").pop()!;
+    await expect(
+      page.getByRole("region", { name: "Proposed changes" })
+    ).toContainText("You give Iono (PAL 185): 0 → 1");
+    await page.getByRole("button", { name: "Send changed offer" }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades/${threadId}`);
   }
+  const revised = await tradeView(page, threadId);
+  expect(revised.thread_id).toBe(firstOffer.thread_id);
+  expect(revised.offer_id).not.toBe(firstOffer.offer_id);
 
   // 6. Ash accepts and reads the meet-in-public tip.
   await ash.goto(`${ORIGIN}/trades/${tradeId}`);
@@ -317,11 +330,12 @@ async function storyOne(
   await expect(heading(page)).toHaveText("Ash K confirmed the swap");
   await confirmSwap(page, "Ash K");
   await expect(
-    page.getByRole("link", { name: /^Conversation with Ash K/ })
+    page.getByRole("link", { name: "All Trades", exact: true })
   ).toBeVisible();
-  await page.goto(`${ORIGIN}/trades/with/${w.ashTrader}`);
+  // Public band and track record stay on the collector's Trade List; no private coordinates are copied into events.
+  await page.goto(`${ORIGIN}/trades/trader/${w.ashTrader}`);
   await expect(main(page)).toContainText("Under 5 mi · 1 completed trade");
-  await ash.goto(`${ORIGIN}/trades/with/${w.brockTrader}`);
+  await ash.goto(`${ORIGIN}/trades/trader/${w.brockTrader}`);
   await expect(main(ash)).toContainText("Under 5 mi · 1 completed trade");
 
   // 8. Brock adds Ash as a Friend on the Trade; his screens still carry no Handle.
@@ -372,11 +386,6 @@ async function storyTwo(
   const phone = isPhone(w.ash);
   const { ash, brock } = w;
   const cara = w.cara!;
-  const say = (from: Page, to: string, body: string) =>
-    api(from, "POST", `/api/social/traders/${to}/messages`, {
-      body,
-      idempotency_key: randomUUID(),
-    });
 
   // 1. Ash, Brock and Cara are in reach; Brock and Ash talk; Cara and Ash talk, then Ash blocks Cara.
   await discoverable(ash, A_ZIP);
@@ -391,7 +400,9 @@ async function storyTwo(
   });
 
   // 2. Cara opens her read-only conversation and reports Ash from its ⋯ menu.
-  await cara.goto(`${ORIGIN}/trades/with/${w.ashTrader}`);
+  await cara.goto(
+    `${ORIGIN}/trades/${await tradeThreadFor(cara, w.ashTrader)}`
+  );
   await expect(cara.getByText(UNAVAILABLE)).toBeVisible();
   await expect(composer(cara)).toHaveCount(0);
   const more = cara.getByRole("button", { name: "More for Ash K" });
@@ -437,7 +448,9 @@ async function storyTwo(
   await expect(toast(page)).toContainText("Account suspended.");
 
   // 4. Brock's conversation with Ash reads unavailable, with no zip or Handle; Ash still opens his Collection.
-  await brock.goto(`${ORIGIN}/trades/with/${w.ashTrader}`);
+  await brock.goto(
+    `${ORIGIN}/trades/${await tradeThreadFor(brock, w.ashTrader)}`
+  );
   await expect(brock.getByText(UNAVAILABLE)).toBeVisible();
   await expect(composer(brock)).toHaveCount(0);
   await expectPageChecks(brock, `Brock's unavailable conversation, ${width}`);

@@ -50,7 +50,7 @@ test("a return started by either side moves on once the other side confirms, and
   // Ash gives two back: every copy out to start with, one taken off.
   await page.goto(`${ORIGIN}/loans/${loanId}`);
   await expect(title(page)).toHaveText("You have 3 cards of Misty W's");
-  await page.getByRole("button", { name: "Give cards back" }).click();
+  await page.getByRole("button", { name: "Some back" }).click();
   const stepper = page.getByRole("group", {
     name: /^Copies of Iono, .* to return$/,
   });
@@ -73,21 +73,33 @@ test("a return started by either side moves on once the other side confirms, and
   await lender.goto(`${ORIGIN}/loans`);
   await expect(
     lender.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText(
+  ).toContainText("Confirm return");
+  await lender
+    .getByRole("region", { name: "Needs you" })
+    .getByRole("link")
+    .click();
+  await expect(title(lender)).toHaveText(
     "Ash K says they gave back 2 cards · Waiting for you to confirm · 1 card still out"
   );
-  await lender.goto(`${ORIGIN}/loans/${loanId}`);
   await expectPageChecks(lender, "a return to confirm");
   await lender.getByRole("button", { name: "Yes, they're back" }).click();
   await expect(title(lender)).toHaveText("Ash K has 1 card of yours");
   await expect(iono(lender)).toContainText("2 returned");
 
   // Misty records the last one, and Ash confirms it: the Loan ends.
-  await lender.getByRole("button", { name: "Record a return" }).click();
-  await lender.getByRole("button", { name: "Record return" }).click();
+  let wholeReturns = 0;
+  lender.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      /\/api\/loans\/[^/]+\/returns$/.test(new URL(request.url()).pathname)
+    )
+      wholeReturns++;
+  });
+  await lender.getByRole("button", { name: "All back", exact: true }).click();
   await expect(title(lender)).toHaveText(
     "You recorded 1 card back · Waiting for Ash K to confirm"
   );
+  expect(wholeReturns).toBe(1);
   await expect(lender.getByRole("main")).toContainText(
     "Waiting for Ash K to confirm"
   );
