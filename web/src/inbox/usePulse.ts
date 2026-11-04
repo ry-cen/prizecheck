@@ -1,3 +1,4 @@
+import { threadPulse } from "../threads/threadPulse";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getThreadPulse, type PulseCount } from "../social_generated";
 
@@ -45,8 +46,10 @@ export function usePulse(
     inFlight.current = true;
     getThreadPulse()
       .then(
-        (pulse) => {
+        (value) => {
           if (!alive.current) return;
+          const pulse = threadPulse(value);
+          if (!pulse) return;
           setTrades(pulse.trades);
           setLoans(pulse.loans);
           const before = watermark.current;
