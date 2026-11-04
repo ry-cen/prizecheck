@@ -1,3 +1,4 @@
+import { threadVersionChanged } from "../threads/commandChanges";
 import { usePulseChanged } from "../inbox/Inbox";
 import { canKeepSwapChoices, canRetrySwap } from "../social/confirmationRetry";
 import {
@@ -487,7 +488,7 @@ export function TradeScreen({
           ? cause.code
           : null;
       const text = tradeStepMessage(cause, trade);
-      if (code !== null && RELOAD.has(code)) {
+      if (code !== null && (threadVersionChanged(code) || RELOAD.has(code))) {
         setMessage(text);
         reloading.current = true;
         setAttempt((n) => n + 1);

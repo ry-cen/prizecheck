@@ -431,6 +431,8 @@ export function tradeStepMessage(cause: unknown, trade: TradeView): string {
       return SEND_UNAVAILABLE;
     case "ACCOUNT_SUSPENDED":
       return SUSPENDED_NOTE;
+    case "OFFER_CHANGED":
+      return "The offer changed. Review the current cards and cash before trying again.";
     case "TRADE_CHANGED":
     case "STEP_NOT_ALLOWED":
       return "This Trade has changed. Check it and try again.";
