@@ -519,10 +519,11 @@ def read_loan(loan_id: UUID, user_id: str = Depends(verified_user)):
         if row is None:
             error(404, 'LOAN_NOT_FOUND')
         thread = conn.execute('SELECT * FROM thread WHERE id=%s', (loan_id,)).fetchone()
-        party = thread_party(conn, user_id, thread)
+        terms = loan_views(conn, user_id, [row])[0]
+        party = thread_party(conn, user_id, {**thread, 'other_name': terms.other.display_name})
         other = row['borrower_id'] if row['lender_id'] == user_id else row['lender_id']
         available = party.available
-        return LoanDetail(id=loan_id, live_terms=loan_views(conn, user_id, [row])[0],
+        return LoanDetail(id=loan_id, other=party, live_terms=terms,
                           can_message=available, can_report=other is not None)
 
 

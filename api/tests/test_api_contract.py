@@ -48,6 +48,8 @@ def test_thread_contract_names_real_lists_details_and_offer_edits():
         assert response['type'] == 'array' and response['items']['$ref'].endswith('/ThreadItem')
         assert live in schema['components']['schemas'][detail]['required']
         assert f'/api/{kind}s/{{thread_id}}/timeline' in paths
+    assert schema['components']['schemas']['LoanDetail']['properties']['other']['$ref'].endswith('/ThreadParty')
+    assert 'other' in schema['components']['schemas']['LoanDetail']['required']
     assert '/api/threads/pulse' in paths
     assert paths['/api/trades/{trade_id}/offer']['post']['requestBody']['content']['application/json']['schema']['$ref'].endswith('/ChangeOffer')
     assert not any('/conversations' in path for path in paths)

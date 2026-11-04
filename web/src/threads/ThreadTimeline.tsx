@@ -1,4 +1,5 @@
 import { TradingAvailability } from "./TradingAvailability";
+import type { BlockTarget } from "../trades/TraderBlock";
 import { ThreadMenu } from "./ThreadMenu";
 import { MESSAGE_LENGTH_TEXT, threadMessageError } from "./threadMessage";
 import { mergeTimeline } from "./timelineHistory";
@@ -7,7 +8,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   getThreadDetail,
   getBlocked,
-  type TradeDetail,
   getThreadTimeline,
   sendThreadMessage,
   readThread,
@@ -43,7 +43,11 @@ export function ThreadTimeline({
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const [permissionFailed, setPermissionFailed] = useState(false);
-  const [tradeDetail, setTradeDetail] = useState<TradeDetail | null>(null);
+  const [moderation, setModeration] = useState<{
+    target: BlockTarget;
+    canReport: boolean;
+    offerId?: string;
+  } | null>(null);
   const [ownBlock, setOwnBlock] = useState(false);
   const [name, setName] = useState("Other collector");
   const [canMessage, setCanMessage] = useState<boolean | null>(null);
@@ -65,25 +69,45 @@ export function ThreadTimeline({
       (detail) => {
         if (!controller.signal.aborted) {
           setCanMessage(detail.can_message);
-          if ("live_offer" in detail) {
-            setTradeDetail(detail);
-            const trader = detail.live_offer.other.trader_id;
-            if (!detail.can_message && trader)
-              void getBlocked().then(
-                (answer) => {
-                  if (!controller.signal.aborted)
-                    setOwnBlock(
-                      answer.blocked.some((row) => row.trader_id === trader)
-                    );
-                },
-                () => {}
-              );
-            else setOwnBlock(false);
-          }
-          setName(
-            ("live_offer" in detail ? detail.live_offer : detail.live_terms)
-              .other.display_name
+          const other =
+            "live_offer" in detail ? detail.live_offer.other : detail.other;
+          setName(other.display_name);
+          setModeration(
+            other.trader_id
+              ? {
+                  target: {
+                    traderId: other.trader_id,
+                    name: other.display_name,
+                    handle:
+                      "live_offer" in detail && detail.live_offer.other.friend
+                        ? detail.live_offer.other.handle
+                        : null,
+                    collectorId:
+                      "live_terms" in detail && detail.other.friend
+                        ? detail.live_terms.other.collector_id
+                        : null,
+                  },
+                  canReport: detail.can_report,
+                  offerId:
+                    "live_offer" in detail
+                      ? detail.live_offer.offer_id
+                      : undefined,
+                }
+              : null
           );
+          if (!detail.can_message && other.trader_id)
+            void getBlocked().then(
+              (answer) => {
+                if (!controller.signal.aborted)
+                  setOwnBlock(
+                    answer.blocked.some(
+                      (row) => row.trader_id === other.trader_id
+                    )
+                  );
+              },
+              () => {}
+            );
+          else setOwnBlock(false);
         }
       },
       () => {
@@ -170,18 +194,12 @@ export function ThreadTimeline({
         <h2 ref={title} tabIndex={-1} className="text-heading">
           Chat and changes
         </h2>
-        {tradeDetail?.live_offer.other.trader_id && (
+        {moderation && (
           <ThreadMenu
-            target={{
-              traderId: tradeDetail.live_offer.other.trader_id,
-              name,
-              handle: tradeDetail.live_offer.other.friend
-                ? tradeDetail.live_offer.other.handle
-                : null,
-            }}
+            target={moderation.target}
             canMessage={canMessage === true}
-            canReport={tradeDetail.can_report}
-            offerId={tradeDetail.live_offer.offer_id}
+            canReport={moderation.canReport}
+            offerId={moderation.offerId}
             onChanged={() => {
               title.current?.focus();
               setAttempt((n) => n + 1);

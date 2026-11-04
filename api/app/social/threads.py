@@ -147,6 +147,7 @@ class TradeDetail(BaseModel):
 
 class LoanDetail(BaseModel):
     id: UUID
+    other: ThreadParty
     live_terms: 'LoanView'
     can_message: bool
     can_report: bool
@@ -318,15 +319,21 @@ def member_thread(conn, user_id: str, thread_id: UUID, kind: Kind):
     return row
 
 
+def public_thread_party(profile, retained_name: str, *, available: bool, friend: bool) -> ThreadParty:
+    """One public projection for list and detail, including unavailable/deleted parties."""
+    return ThreadParty(trader_id=profile['trader_id'] if profile else None,
+                       display_name=profile['display_name'] if profile else retained_name,
+                       friend=available and friend, available=available)
+
+
 def thread_party(conn, user_id: str, row) -> ThreadParty:
     from .friends import friend_ids
     other = row['user_high'] if row['user_low'] == user_id else row['user_low']
     profile = conn.execute('SELECT trader_id, display_name FROM collector_profile WHERE user_id=%s',
                            (other,)).fetchone() if other else None
-    name = profile['display_name'] if profile else row.get('other_name', 'This collector is no longer available')
+    name = row.get('other_name', 'This collector is no longer available')
     available = other is not None and reach_one(conn, user_id, other) is not None
-    return ThreadParty(trader_id=profile['trader_id'] if profile else None, display_name=name,
-                       friend=available and other in friend_ids(conn, user_id), available=available)
+    return public_thread_party(profile, name, available=available, friend=other in friend_ids(conn, user_id))
 
 
 def timeline_item(row, low: bool) -> TimelineItem:
@@ -499,9 +506,8 @@ def thread_items(conn, user_id: str, kind: Kind, marks: list[dict] | None = None
         latest = latest_by_thread.get(row['id'])
         other_id = row['user_high'] if row['user_low'] == user_id else row['user_low']
         profile = profiles.get(other_id)
-        party = ThreadParty(trader_id=profile['trader_id'] if profile else None,
-                            display_name=profile['display_name'] if profile else row['other_name'],
-                            friend=other_id in reachable and other_id in friends, available=other_id in reachable)
+        party = public_thread_party(profile, row['other_name'], available=other_id in reachable,
+                                    friend=other_id in friends)
         state = live['state']
         if kind == 'trade':
             state = {'proposed': 'offered', 'accepted': 'agreed'}.get(state, state)
