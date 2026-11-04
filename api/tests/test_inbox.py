@@ -222,27 +222,25 @@ def test_overdue_and_the_nudge_are_listed_until_cleared_and_the_loan_screen_mark
     assert updates(misty) == []
 
 
-def test_steps_storing_loan_updates_wait_on_the_borrower_before_writing(store):
-    from test_loan_promises import _waiting_on_a_row
+def test_steps_storing_loan_updates_never_wait_on_the_other_collectors_owner_row(store):
+    # The accepted narrow owner sets leave these lender steps independent of the borrower's commands.
+    # Fetch each current round/revision before holding Ash's row; inventory reads must not join the proof.
     iono, ash, misty, loan, more = requested(day(10), held=4)
     ok(accept(misty, view(misty, loan), [(iono, 1)]))
     second = view(misty, more())
     operations = ((change, misty, loan, day(12)), (step, misty, second, 'decline'),
                   (step, misty, loan, 'cancel'))
     for operation in operations:
-        # Fetch the current revision before each step; the previous operation may have moved it.
         operation = (*operation[:2], view(misty, operation[2]), operation[3])
-        with psycopg.connect(os.environ['DATABASE_URL']) as holder, \
-                psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch, \
-                ThreadPoolExecutor(max_workers=1) as executor:
-            holder.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR NO KEY UPDATE', (ash,))
+        with psycopg.connect(os.environ['DATABASE_URL']) as holder, ThreadPoolExecutor(max_workers=1) as executor:
+            holder.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR UPDATE', (ash,))
             pending = executor.submit(*operation)
             try:
-                _waiting_on_a_row(watch, [pending])
-                assert not pending.done()
+                response = pending.result(timeout=20)
+                assert response.status_code == 200, response.text
             finally:
+                # Release even on failure before the executor waits for its worker to exit.
                 holder.rollback()
-            assert pending.result(timeout=20).status_code == 200
     assert [kind for kind, _, _, _ in updates(ash)] == ['cancelled', 'declined', 'return_by_changed', 'accepted']
 
 
