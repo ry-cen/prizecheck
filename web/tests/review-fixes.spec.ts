@@ -63,6 +63,20 @@ async function sessionFixture(
       });
       return;
     }
+    if (path === "/api/threads/pulse") {
+      await route.fulfill({
+        json: {
+          trades: { needs_you: 0, waiting: 0, unread: 0 },
+          loans: { needs_you: 0, waiting: 0, unread: 0 },
+          watermark: "fixture",
+        },
+      });
+      return;
+    }
+    if (path === "/api/loans" || path === "/api/trades") {
+      await route.fulfill({ json: [] });
+      return;
+    }
     if (path === "/api/social/friends") {
       // The shell reads the Friends badge on every page (social network #247): no Friends.
       await route.fulfill({ json: { received: [], friends: [], sent: [] } });
