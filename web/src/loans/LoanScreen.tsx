@@ -1120,6 +1120,31 @@ export function LoanScreen({
           />
         ))}
       </ul>
+      {answering && (
+        <section
+          aria-label="Acceptance preview"
+          className="flex flex-col gap-2 rounded-panel border border-border p-3"
+        >
+          <h2 className="m-0 text-heading font-semibold">Acceptance preview</h2>
+          <p className="m-0 text-body">
+            {total} {lender ? "to lend" : "to borrow"};{" "}
+            {Math.max(
+              0,
+              loan.lines.reduce(
+                (sum, line) => sum + Number(line.requested),
+                0
+              ) - total
+            )}{" "}
+            not lent.
+          </p>
+          <p className="m-0 text-body">
+            {(lender ? answerDate : loan.return_by)
+              ? `Return by ${dayText((lender ? answerDate : loan.return_by)!)}.`
+              : "No return date."}{" "}
+            Accepting agrees to these quantities and this return date.
+          </p>
+        </section>
+      )}
       <div className="flex flex-col gap-3 border-t border-border pt-4">
         {asking ? (
           <div
