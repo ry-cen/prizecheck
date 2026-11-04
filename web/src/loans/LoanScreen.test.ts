@@ -3,6 +3,7 @@ import { act, createElement as h, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import {
+  editLoanTerms,
   getLoan,
   getLoanSide,
   startReturn,
@@ -15,6 +16,7 @@ import { useRoute } from "../shell/useRoute";
 import { LoanScreen } from "./LoanScreen";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
+  editLoanTerms: vi.fn(),
   getLoan: vi.fn(),
   getLoanSide: vi.fn(),
   startReturn: vi.fn(),
@@ -24,6 +26,10 @@ vi.mock("../social_generated", async (original) => ({
 vi.mock("../threads/ThreadTimeline", () => ({
   ThreadTimeline: ({ onChanged }: { onChanged?: () => void }) =>
     h("button", { onClick: onChanged }, "Chat moderation completed"),
+}));
+vi.mock("./BorrowDrafts", async (original) => ({
+  ...(await original<typeof import("./BorrowDrafts")>()),
+  useBorrowDrafts: () => ({}),
 }));
 const loan: LoanView = {
   id: "round",
@@ -745,6 +751,185 @@ for (const lateStatus of ["none", "404", "200"] as const) {
       host.remove();
       vi.unstubAllGlobals();
       vi.clearAllMocks();
+    }
+  });
+}
+
+for (const closePath of [
+  "Close",
+  "header",
+  "Escape",
+  "scrim",
+  "cancel",
+  "native close",
+  "navigation",
+] as const) {
+  it(`keeps unknown terms authoritative through ${closePath}, then replays exact bytes`, async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("scrollTo", vi.fn());
+    vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+      1000
+    );
+    vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+      1000
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(10, 10, 30, 30)
+    );
+    window.history.replaceState(null, "", "/loans/item");
+    const prototype = HTMLDialogElement.prototype;
+    const descriptors = ["showModal", "close"].map((name) =>
+      Object.getOwnPropertyDescriptor(prototype, name)
+    );
+    Object.defineProperty(prototype, "showModal", {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.open = true;
+      },
+    });
+    Object.defineProperty(prototype, "close", {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.open = false;
+      },
+    });
+    const current: LoanView = {
+      ...loan,
+      state: "requested",
+      closed_reason: null,
+      closed_by: null,
+      actions: ["edit_and_resend"],
+      lines: [{ ...loan.lines[0], requested: "3" }],
+    };
+    vi.mocked(getLoan).mockResolvedValue(current);
+    vi.mocked(getLoanSide).mockResolvedValue({
+      loan_id: "round",
+      deck: null,
+      can_promise: [],
+      picks: [],
+      suggested: [],
+    });
+    let lose!: (cause: Error) => void;
+    vi.mocked(editLoanTerms)
+      .mockReturnValueOnce(
+        new Promise((_, reject) => {
+          lose = reject;
+        })
+      )
+      .mockResolvedValueOnce({ ...current, revision: 3 });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const button = (name: string) =>
+      [...document.querySelectorAll("button")].find(
+        (b) => b.textContent === name
+      )!;
+    function View() {
+      const route = useRoute();
+      return h(
+        "div",
+        null,
+        h(
+          "button",
+          { onClick: () => route.navigate("/collection") },
+          "Navigate away"
+        ),
+        h(LoanScreen, {
+          loanId: "item",
+          onCanonicalLoan: vi.fn(),
+          onLoanChanged: vi.fn(),
+          onAllLoans: vi.fn(),
+          onOpenDeck: vi.fn(),
+        })
+      );
+    }
+    try {
+      await act(async () => root.render(h(View)));
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(
+            '[aria-label="More for this Loan"]'
+          )!
+          .click()
+      );
+      await act(async () => button("Change terms").click());
+      await act(async () => button("Save terms").click());
+      const first = JSON.stringify(vi.mocked(editLoanTerms).mock.calls[0]);
+      expect(JSON.parse(first)[1].lines).toEqual([
+        { edition_id: "iono", quantity: "3" },
+      ]);
+      const dismiss = () => {
+        const dialog = host.querySelector("dialog")!;
+        switch (closePath) {
+          case "Close":
+            button("Close").click();
+            break;
+          case "header":
+            dialog
+              .querySelector<HTMLButtonElement>('[aria-label="Close"]')!
+              .click();
+            break;
+          case "Escape":
+            dialog.dispatchEvent(
+              new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+            );
+            break;
+          case "scrim":
+            dialog.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+            dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            break;
+          case "cancel":
+            dialog.dispatchEvent(
+              new Event("cancel", { bubbles: true, cancelable: true })
+            );
+            break;
+          case "native close":
+            dialog.open = false;
+            dialog.dispatchEvent(new Event("close", { bubbles: true }));
+            break;
+          case "navigation":
+            button("Navigate away").click();
+            break;
+        }
+      };
+      for (const lost of [false, true]) {
+        if (lost)
+          await act(async () =>
+            lose(new TypeError("response lost, original may still execute"))
+          );
+        await act(async () => dismiss());
+        expect(host.querySelector("dialog")?.open).toBe(true);
+        expect(window.location.pathname).toBe("/loans/item");
+        expect(
+          host.querySelector<HTMLInputElement>('input[type="number"]')?.disabled
+        ).toBe(true);
+        expect(editLoanTerms).toHaveBeenCalledTimes(1);
+      }
+      expect(
+        window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
+      ).toBe(false);
+      await act(async () => button("Retry request").click());
+      expect(editLoanTerms).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(vi.mocked(editLoanTerms).mock.calls[1])).toBe(
+        first
+      );
+      expect(host.querySelector("dialog")).toBeNull();
+      expect(
+        window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
+      ).toBe(true);
+      await act(async () => button("Navigate away").click());
+      expect(window.location.pathname).toBe("/collection");
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      for (const [i, name] of ["showModal", "close"].entries()) {
+        const descriptor = descriptors[i];
+        if (descriptor) Object.defineProperty(prototype, name, descriptor);
+        else Reflect.deleteProperty(prototype, name);
+      }
+      vi.unstubAllGlobals();
+      vi.clearAllMocks();
+      vi.restoreAllMocks();
     }
   });
 }
