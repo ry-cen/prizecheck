@@ -263,3 +263,81 @@ it.each([
     else expect(host.textContent).not.toContain("completed trade");
   }
 );
+
+it("S2-08: keeps compact phone terms together and every consent fact before the one swap action", async () => {
+  const card = {
+    edition_id: "iono",
+    name: "Iono",
+    set_code: "PAL",
+    set_name: "Paldea Evolved",
+    collector_number: "185",
+    descriptor: { finish: "normal" },
+    image_url: null,
+    copies: "1",
+  };
+  vi.mocked(getTrade).mockResolvedValue({
+    ...trade,
+    state: "accepted",
+    you_give: [card],
+    you_get: [
+      {
+        ...card,
+        edition_id: "arven",
+        name: "Arven",
+        set_code: "SVI",
+        collector_number: "166",
+      },
+    ],
+    actions: ["confirm_swap"],
+  });
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  const give = host.querySelector('ul[aria-label="You give"]')!,
+    get = host.querySelector('ul[aria-label="You get"]')!;
+  const terms = give.parentElement!.parentElement!;
+  expect(terms.contains(get)).toBe(true);
+  expect(terms.classList.contains("phone:grid-cols-2")).toBe(true);
+  expect(give.textContent).toContain("×1");
+  expect(get.textContent).toContain("×1");
+  const disclosure = host.querySelector(
+      '[aria-label="Confirm swap with Misty"]'
+    )!,
+    confirm = [...disclosure.querySelectorAll("button")].find(
+      (b) => b.textContent === "Confirm swap"
+    )!;
+  expect(
+    [...host.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Confirm swap"
+    )
+  ).toHaveLength(1);
+  for (const text of [
+    "Leaves your Collection: 1 Iono (PAL 185)",
+    "Arrives in Unsorted: 1 Arven (SVI 166)",
+    "Only confirm after the physical swap",
+    "selected Deck switches",
+    "The swap can't be undone.",
+    "Your destination, picks and Deck switches are private.",
+  ]) {
+    const paragraph = [...disclosure.querySelectorAll("p")].find((p) =>
+      p.textContent!.includes(text)
+    )!;
+    expect(paragraph, text).toBeDefined();
+    expect(
+      paragraph.compareDocumentPosition(confirm) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  }
+  expect(
+    disclosure.querySelector("select")?.getAttribute("disabled")
+  ).toBeNull();
+  expect(confirmSwap).not.toHaveBeenCalled();
+});
