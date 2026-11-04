@@ -187,9 +187,18 @@ test("the Block question says how many open Loans it cancels, and only that it i
   await yours.getByRole("button", { name: "Cancel" }).click();
 
   // With the Loans unreadable, the question says nothing about them.
-  await page.route(/\/api\/social\/loans/, (route) => route.abort());
+  let unreadableReads = 0;
+  await page.route(
+    /\/api\/loans\?group=(?:needs_you|open|out_now|pending|done)(?:&.*)?$/,
+    (route) => {
+      unreadableReads++;
+      return route.abort();
+    }
+  );
   await page.reload();
+  const beforeQuestion = unreadableReads;
   const again = await openBlock();
+  await expect.poll(() => unreadableReads).toBeGreaterThan(beforeQuestion);
   await expect(again.getByText(/^Block Misty W\?/)).toHaveText(
     "Block Misty W? They won't be told."
   );
