@@ -126,7 +126,7 @@ async function story(
   await focusPulse(page);
   await expect(timeline(page)).toContainText("You: Revised the offer");
   await expect(timeline(page).getByRole("listitem")).toHaveCount(4);
-  await expect(timeline(page)).toContainText("They give Iono: 1 → 2");
+  await expect(timeline(page)).toContainText("They give Iono (PAL 185): 1 → 2");
   await expect(
     page.getByRole("list", { name: "You get", exact: true })
   ).toContainText("×2");

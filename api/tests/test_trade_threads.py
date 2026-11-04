@@ -270,3 +270,27 @@ def test_cash_only_counter_keeps_the_setting_off_and_replays_once(store):
     before = trade_picks(changed['id']), revision_of(ash), revision_of(misty), events(changed)
     assert ok(call('POST', f"/api/trades/{original['thread_id']}/offer", ash, body)) == changed
     assert (trade_picks(changed['id']), revision_of(ash), revision_of(misty), events(changed)) == before
+
+
+@pytest.mark.parametrize('viewer_role', ['proposer', 'recipient'])
+def test_removed_offer_editions_keep_public_identity_in_history_and_item_preview(store, viewer_role):
+    ids, ash, misty, binder, box = trading()
+    original = proposed(misty, ash, give=[(ids['PAL 185'], 1)], get=[(ids['SVI 166'], 1)])
+    changed = ok(counter(misty, original, give=[], get=[(ids['SVI 166'], 1)]))
+    viewer = misty if viewer_role == 'proposer' else ash
+    current = ok(read(viewer, changed))
+    assert not (current['you_give'] if viewer_role == 'proposer' else current['you_get'])
+    before = events(changed)[-1]['data']
+    for _ in range(2):
+        page = ok(call('GET', f"/api/trades/{changed['thread_id']}/timeline", viewer))
+        event = next(item['event'] for item in page['items'] if item['event'] and item['event']['kind'] == 'revised')
+        label = next(card for card in event['editions'] if card['edition_id'] == ids['PAL 185'])
+        assert (label['name'], label['set_code'], label['collector_number']) == ('Iono', 'PAL', '185')
+        assert set(label) == {'edition_id', 'name', 'set_code', 'collector_number', 'descriptor'}
+        listed = [item for group in ('needs_you', 'open', 'done')
+                  for item in ok(call('GET', f'/api/trades?group={group}', viewer))
+                  if item['id'] == changed['thread_id']]
+        assert listed[0]['latest']['event']['editions'] == event['editions']
+        for private in (binder, box):
+            assert private not in str(event)
+    assert events(changed)[-1]['data'] == before

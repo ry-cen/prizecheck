@@ -80,6 +80,16 @@ def event_data(data: dict) -> dict:
     return _EventData.model_validate(data).model_dump(mode='json', by_alias=True, exclude_unset=True)
 
 
+class EventEdition(BaseModel):
+    """Public Printing and Variant facts needed to name an event's Edition."""
+    model_config = ConfigDict(extra='forbid')
+    edition_id: UUID
+    name: str
+    set_code: str
+    collector_number: str
+    descriptor: dict
+
+
 class EventView(BaseModel):
     id: UUID
     actor: Slot | None
@@ -87,6 +97,7 @@ class EventView(BaseModel):
     round_id: UUID
     return_id: UUID | None = None
     data: _EventData = Field(default_factory=_EventData)
+    editions: list[EventEdition] = Field(default_factory=list)
     at: datetime
 
     @field_serializer('data')
@@ -336,14 +347,26 @@ def thread_party(conn, user_id: str, row) -> ThreadParty:
     return public_thread_party(profile, name, available=available, friend=other in friend_ids(conn, user_id))
 
 
-def timeline_item(row, low: bool) -> TimelineItem:
+def event_edition_ids(data) -> set[UUID]:
+    value = _EventData.model_validate(data or {})
+    return {line.edition_id for lines in (value.lines, value.not_lent, value.returned) for line in (lines or [])}
+
+
+def event_editions(data, facts) -> list[EventEdition]:
+    return [EventEdition(edition_id=card.edition_id, name=card.name, set_code=card.set_code,
+                         collector_number=card.collector_number, descriptor=card.descriptor)
+            for edition in sorted(event_edition_ids(data)) if (card := facts.get(edition)) is not None]
+
+
+def timeline_item(row, low: bool, edition_facts=None) -> TimelineItem:
     at = row['created_at']
     kind = row['item_kind']
     return TimelineItem(kind=kind, at=at, cursor=encode_cursor(at, kind, row['id']),
                         message=Message(id=row['id'], from_='you' if row['from_low'] == low else 'them',
                                         body=row['body'], at=at) if kind == 'message' else None,
                         event=EventView(id=row['id'], actor=row['actor'], kind=row['kind'], round_id=row['round_id'],
-                                        return_id=row['return_id'], data=row['data'], at=at)
+                                        return_id=row['return_id'], data=row['data'],
+                                        editions=event_editions(row['data'], edition_facts or {}), at=at)
                         if kind == 'event' else None)
 
 
@@ -490,7 +513,9 @@ def thread_items(conn, user_id: str, kind: Kind, marks: list[dict] | None = None
           CASE WHEN r.accepted_at IS NULL THEN l.requested ELSE l.promised END AS quantity
           FROM loan_line l JOIN loan r ON r.id=l.loan_id WHERE l.loan_id=ANY(%s)
           ORDER BY l.loan_id,l.position""", (round_ids,)).fetchall()
-    cards = card_facts(conn, [line['edition_id'] for line in summary_lines])
+    event_ids = {edition for latest in latest_by_thread.values() if latest['item_kind'] == 'event'
+                 for edition in event_edition_ids(latest['data'])}
+    cards = card_facts(conn, [line['edition_id'] for line in summary_lines] + list(event_ids))
     lines_by_round = {}
     for line in summary_lines:
         lines_by_round.setdefault(line['round_id'], []).append(line)
@@ -541,7 +566,7 @@ def thread_items(conn, user_id: str, kind: Kind, marks: list[dict] | None = None
                                                       you_get=str(counts['you_get']), cash=cash),
                                  waiting=waiting, unread=unread, needs_you=marks_by_id[row['id']]['needs_you'],
                                  last_activity_at=row['last_activity_at'],
-                                 latest=timeline_item(latest, row['user_low'] == user_id) if latest else None))
+                                 latest=timeline_item(latest, row['user_low'] == user_id, cards) if latest else None))
     return result
 
 
@@ -593,7 +618,10 @@ def get_timeline(kind: Kind, thread_id: UUID, before: str | None, user_id: str):
     with connect() as conn, conn.transaction():
         row = member_thread(conn, user_id, thread_id, kind)
         found = timeline_rows(conn, thread_id, before)
-        items = [timeline_item(item, row['user_low'] == user_id) for item in found[:PAGE]]
+        page = found[:PAGE]
+        ids = {edition for item in page if item['item_kind'] == 'event' for edition in event_edition_ids(item['data'])}
+        facts = card_facts(conn, ids)
+        items = [timeline_item(item, row['user_low'] == user_id, facts) for item in page]
     return Timeline(you_are='low' if row['user_low'] == user_id else 'high', items=items, next_before=items[-1].cursor if len(found) > PAGE else None)
 
 

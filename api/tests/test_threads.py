@@ -362,3 +362,33 @@ def test_loan_detail_public_party_never_reveals_more_than_its_list(store, viewer
         assert detail['other']['available'] is False
         assert detail['other']['friend'] is False
     assert not {'collector_id', 'user_id', 'handle', 'location_id', 'deck_id'} & detail['other'].keys()
+
+
+def test_each_timeline_page_resolves_all_public_event_editions_without_mutating_data(store):
+    from want_list_swap_fixtures import seed_swap_catalog
+    ids = seed_swap_catalog()
+    a, _ = collector('Ash')
+    b, _ = collector('Misty')
+    tid, rid = thread(a, b, closed=True)
+    data = {'lines': [{'giver': 'low', 'edition_id': ids['PAL 185'], 'from_qty': 1, 'to_qty': 0}],
+            'not_lent': [{'edition_id': ids['SVI 166'], 'quantity': 1}],
+            'returned': [{'edition_id': ids['PAL 185'], 'quantity': 1}]}
+    with connect() as conn:
+        for _ in range(52):
+            write_event(conn, tid, 'countered', rid, actor='low', data=data)
+    seen = []
+    before = ''
+    while True:
+        page = timeline(b, tid, before=before)
+        for item in page['items']:
+            assert item['event']['data'] == data
+            labels = item['event']['editions']
+            assert {card['edition_id'] for card in labels} == {ids['PAL 185'], ids['SVI 166']}
+            assert all(set(card) == {'edition_id', 'name', 'set_code', 'collector_number', 'descriptor'} for card in labels)
+            seen.append(item['event']['id'])
+        if not page['next_before']:
+            break
+        before = page['next_before']
+    assert len(seen) == len(set(seen)) == 52
+    with connect() as conn:
+        assert all(row['data'] == data for row in conn.execute('SELECT data FROM thread_event WHERE thread_id=%s', (tid,)))

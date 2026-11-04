@@ -117,3 +117,139 @@ it("reads a known command's new timeline without needing a pulse change", async 
     vi.clearAllMocks();
   }
 });
+
+it("S2-03: removed Editions and same-name variants keep public identities across earlier pages and live-offer changes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const at = "2026-11-04T12:00:00Z",
+    old = "2026-11-03T12:00:00Z";
+  vi.mocked(getThreadTimeline)
+    .mockResolvedValueOnce({
+      you_are: "low",
+      items: [
+        {
+          kind: "event",
+          at,
+          cursor: "latest",
+          event: {
+            id: "latest-event",
+            round_id: "private-round",
+            actor: "high",
+            kind: "countered",
+            at,
+            data: {
+              lines: [
+                { giver: "high", edition_id: "arven", from_qty: 0, to_qty: 1 },
+              ],
+            },
+            editions: [
+              {
+                edition_id: "arven",
+                name: "Arven",
+                set_code: "SVI",
+                collector_number: "166",
+                descriptor: { finish: "normal", productId: "source-only" },
+              },
+            ],
+          },
+        },
+      ],
+      next_before: "earlier",
+    })
+    .mockResolvedValueOnce({
+      you_are: "low",
+      items: [
+        {
+          kind: "event",
+          at: old,
+          cursor: "old",
+          event: {
+            id: "old-event",
+            round_id: "private-round",
+            actor: "high",
+            kind: "countered",
+            at: old,
+            data: {
+              lines: [
+                {
+                  giver: "high",
+                  edition_id: "removed-edition",
+                  from_qty: 1,
+                  to_qty: 0,
+                },
+                {
+                  giver: "high",
+                  edition_id: "different-edition",
+                  from_qty: 0,
+                  to_qty: 1,
+                },
+              ],
+            },
+            editions: [
+              {
+                edition_id: "removed-edition",
+                name: "Iono",
+                set_code: "PAL",
+                collector_number: "185",
+                descriptor: { finish: "normal", productId: "source-only" },
+              },
+              {
+                edition_id: "different-edition",
+                name: "Iono",
+                set_code: "PAL",
+                collector_number: "254",
+                descriptor: { finish: "reverse" },
+              },
+            ],
+          },
+        },
+      ],
+      next_before: null,
+    });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        h(ThreadTimeline, {
+          kind: "trade",
+          id: "item",
+          editionNames: { arven: "Arven" },
+        })
+      )
+    );
+
+    await act(async () =>
+      [...host.querySelectorAll("button")]
+        .find((b) => b.textContent === "Show earlier")!
+        .click()
+    );
+    expect(getThreadTimeline).toHaveBeenLastCalledWith(
+      "trade",
+      "item",
+      "earlier"
+    );
+    const labels = host.querySelector("ol")?.textContent;
+    expect(labels).toContain("They give Iono (PAL 185): 1 → 0");
+    expect(labels).toContain("They give Arven (SVI 166): 0 → 1");
+    expect(labels).toContain("They give Iono (PAL 254, Reverse Holo): 0 → 1");
+    await act(async () =>
+      root.render(
+        h(ThreadTimeline, { kind: "trade", id: "item", editionNames: {} })
+      )
+    );
+    expect(host.querySelector("ol")?.textContent).toBe(labels);
+    for (const id of [
+      "removed-edition",
+      "different-edition",
+      "private-round",
+      "source-only",
+    ])
+      expect(labels).not.toContain(id);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});
