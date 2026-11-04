@@ -1,3 +1,4 @@
+import { TradingAvailability } from "./TradingAvailability";
 import { itemState } from "./threadText";
 import { waitingAction } from "./threadPresentation";
 import { useEffect, useRef, useState } from "react";
@@ -158,6 +159,10 @@ export function ThreadList({
         ) : (
           <h1 className="text-display font-semibold">Loans</h1>
         ))}
+      <TradingAvailability
+        enabled={kind === "trade" && !selected}
+        revision={`${pulse}:${changed}:${revision}:${attempt}`}
+      />
       {failed && (
         <div role="status">
           Your {title} couldn't be loaded.{" "}
