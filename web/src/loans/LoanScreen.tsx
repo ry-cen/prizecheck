@@ -43,6 +43,7 @@ import {
   type LoanPickPlace,
   type LoanSide,
   type LoanStep,
+  type StartReturn,
   type LoanView,
 } from "../social_generated";
 import { Button } from "../ui/Button";
@@ -187,6 +188,7 @@ export function LoanScreen({
   const [editingTerms, setEditingTerms] = useState(false);
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
   const stepBodies = useRef(new Map<string, LoanStep>());
+  const returnBodies = useRef(new Map<string, StartReturn>());
   const keys = useRef(new Map<string, string>());
   const menuAnchor = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -469,6 +471,25 @@ export function LoanScreen({
     }
     return command;
   };
+
+  function recordReturn(counts: Map<string, number>) {
+    void step("start_return", (key) => {
+      let command = returnBodies.current.get(key);
+      if (!command) {
+        command = {
+          ...body(key),
+          lines: loan.lines
+            .filter((line) => (counts.get(line.edition_id) ?? 0) > 0)
+            .map((line) => ({
+              edition_id: line.edition_id,
+              quantity: String(counts.get(line.edition_id)),
+            })),
+        };
+        returnBodies.current.set(key, command);
+      }
+      return startReturn(loan.thread_id, command);
+    });
+  }
 
   const run: Record<Asking, () => void> = {
     decline: () =>
@@ -840,19 +861,7 @@ export function LoanScreen({
           variant="primary"
           disabled={returnTotal === 0}
           aria-disabled={busy || undefined}
-          onClick={() =>
-            void step("start_return", (key) =>
-              startReturn(loan.thread_id, {
-                ...body(key),
-                lines: loan.lines
-                  .filter((line) => (returning.get(line.edition_id) ?? 0) > 0)
-                  .map((line) => ({
-                    edition_id: line.edition_id,
-                    quantity: String(returning.get(line.edition_id)),
-                  })),
-              })
-            )
-          }
+          onClick={() => recordReturn(returning)}
         >
           {lender ? "Record return" : "Give these back"}
         </Button>
@@ -970,8 +979,27 @@ export function LoanScreen({
       </div>
     ) : loan.actions.includes("start_return") ? (
       <div className="flex flex-wrap items-center gap-2">
+        <p className="m-0 basis-full text-body">
+          Record only after the physical return.{" "}
+          {loan.other.collector_id === null
+            ? "You can finish without the other collector."
+            : `${other} still confirms on their side.`}
+        </p>
         <Button
           variant="primary"
+          aria-disabled={busy || undefined}
+          onClick={() => {
+            const counts = new Map(
+              loan.lines.map((line) => [line.edition_id, lineOut(line)])
+            );
+            setReturning(counts);
+            recordReturn(counts);
+          }}
+        >
+          All back
+        </Button>
+        <Button
+          aria-disabled={busy || undefined}
           onClick={() => {
             keys.current.delete("start_return");
             closeModes();
@@ -983,7 +1011,7 @@ export function LoanScreen({
             );
           }}
         >
-          {lender ? "Record a return" : "Give cards back"}
+          Some back
         </Button>
       </div>
     ) : (
