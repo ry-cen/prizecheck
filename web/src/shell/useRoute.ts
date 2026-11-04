@@ -21,15 +21,40 @@ export type LeaveGuard = {
   ask: (leave: () => void) => void;
 };
 
-// One router per tab, so one guard at a time.
-let active: LeaveGuard | null = null;
+// Pages and nested command dialogs can independently own a leave boundary.
+// Keep registrations separate so settling one never unregisters another.
+type RegisteredGuard = { guard: LeaveGuard };
+const guards: RegisteredGuard[] = [];
+const blocking = (approved = new Set<RegisteredGuard>()) =>
+  guards.some((entry) => !approved.has(entry) && entry.guard.blocks());
 
-/** Registers `guard` while the calling page is mounted. */
+function askToLeave(
+  leave: () => void,
+  approved = new Set<RegisteredGuard>()
+): void {
+  const next = [...guards]
+    .reverse()
+    .find((entry) => !approved.has(entry) && entry.guard.blocks());
+  if (!next) {
+    leave();
+    return;
+  }
+  next.guard.ask(() => {
+    approved.add(next);
+    // Recheck live authorities: another command may start while a collector
+    // is answering a different surface's discard question.
+    askToLeave(leave, approved);
+  });
+}
+
+/** Registers this surface's guard while mounted; nested guards compose. */
 export function useLeaveGuard(guard: LeaveGuard): void {
   useEffect(() => {
-    active = guard;
+    const entry = { guard };
+    guards.push(entry);
     return () => {
-      if (active === guard) active = null;
+      const index = guards.indexOf(entry);
+      if (index >= 0) guards.splice(index, 1);
     };
   }, [guard]);
 }
@@ -42,30 +67,27 @@ export function useLeaveGuard(guard: LeaveGuard): void {
  * change: when the guard blocks and the target is another path, it asks and runs the change only if the collector
  * agrees. Browser Back and Forward arrive in `onPopState` after the browser has already moved: the guard's entry is
  * pushed back on top (which drops the entry Back left and, for Forward, sits after the target), then it asks, and
- * agreeing calls `history.back()` once, which lands on the target in both directions. That one popstate is let through
- * unasked.
+ * agreeing calls `history.back()` once, which lands on the target in both directions. Only those registrations are
+ * approved for that popstate; a new pending command must still answer before navigation.
  */
 export function useRoute(): Route {
   const [path, setPath] = useState(() => window.location.pathname);
   const current = useRef(path);
   current.current = path;
   const scrolls = useRef(new Map<string, number>()).current;
-  // Set when a guarded Back or Forward was agreed to: the popstate that history.back() raises is let through.
-  const leaving = useRef(false);
+  // Approval belongs to these exact registrations, never to an unconditional next popstate.
+  const leaving = useRef<Set<RegisteredGuard> | null>(null);
 
   useEffect(() => {
     const onPopState = () => {
-      if (leaving.current) leaving.current = false;
-      else if (
-        active?.blocks() &&
-        window.location.pathname !== current.current
-      ) {
+      const approved = leaving.current ?? new Set<RegisteredGuard>();
+      leaving.current = null;
+      if (blocking(approved) && window.location.pathname !== current.current) {
         window.history.pushState(null, "", current.current);
-        const guard = active;
-        guard.ask(() => {
-          leaving.current = true;
+        askToLeave(() => {
+          leaving.current = approved;
           window.history.back();
-        });
+        }, approved);
         return;
       }
       scrolls.set(current.current, window.scrollY);
@@ -91,10 +113,10 @@ export function useRoute(): Route {
       };
       if (
         !force &&
-        active?.blocks() &&
+        blocking() &&
         new URL(to, window.location.href).pathname !== current.current
       ) {
-        active.ask(go);
+        askToLeave(go);
         return;
       }
       go();
