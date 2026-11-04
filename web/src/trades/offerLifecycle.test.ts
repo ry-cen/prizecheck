@@ -282,7 +282,8 @@ it.each(["sending", "retry_send"])(
     if (phase === "retry_send") model = post(model, "unknown");
     const request = start(model, "version");
     model = finish(request.model, request.read, { kind: "not_found" });
-    expect(model.observed).toBe(true);
+    expect(model.pending).not.toBeNull();
+    expect("observed" in model).toBe(false);
     if (phase === "sending") model = post(model, "unknown");
     expect(canSendOffer(model)).toBe(true);
     const bytes = JSON.stringify(model.pending);
@@ -304,7 +305,7 @@ it.each(results("version"))(
     expect(Object.values(settled.reads).map((read) => read.source)).toEqual([
       "version",
     ]);
-    expect(settled.observed).toBe(false);
+    expect("observed" in settled).toBe(false);
     const fresh = Object.values(settled.reads)[0];
     const checked = finish(settled, fresh, { kind: "version", offer: B });
     expect(checked.phase).toBe("changed");
@@ -390,8 +391,8 @@ it("retains byte-identical unknown retries and clears only on explicit edit or a
 });
 it("requires review after a version refusal even if its fresh read has the same version", () => {
   const refused = post(send(ready()), "changed");
-  const request = start(refused, "version");
-  const checked = finish(request.model, request.read, {
+  const [request] = Object.values(refused.reads);
+  const checked = finish(refused, request, {
     kind: "version",
     offer: A,
   });
@@ -416,6 +417,7 @@ type Recovery = {
   io: Set<string>;
   library: "loading" | "ready" | "failed";
   libraryVersion: string;
+  observedInTrace: boolean;
 };
 type Move =
   | { kind: "model"; event: OfferEvent }
@@ -456,7 +458,18 @@ function perform(state: Recovery, move: Move): Recovery {
     event.type === "invalidated"
   )
     retained(state.model, next.model);
-  return { model: next.model, io, library, libraryVersion };
+  return {
+    model: next.model,
+    io,
+    library,
+    libraryVersion,
+    observedInTrace:
+      state.observedInTrace ||
+      (state.model.pending !== null &&
+        (event.type === "read_completed" ||
+          event.type === "read_requested" ||
+          event.type === "invalidated")),
+  };
 }
 /** No read is manufactured here: only executor-issued replies or actual enabled page actions can occur. */
 function recoveryMoves(state: Recovery): Move[] {
@@ -547,9 +560,10 @@ function recoveryKey(state: Recovery) {
     m.reviewed.offer_id,
     m.candidate?.offer_id,
     m.failure,
+    m.checkConsent,
     m.inventory,
     m.pending,
-    m.observed,
+    state.observedInTrace,
     !!m.activePost,
     Object.values(m.reads)
       .map((read) => [read.source, read.version])
@@ -566,6 +580,7 @@ it("checks liveness after every reachable step using only real effects, pending 
     io: new Set(),
     library: "loading",
     libraryVersion: offerVersion(A)!,
+    observedInTrace: false,
   };
   const root = perform(initial, { kind: "model", event: { type: "start" } });
   const queue = [{ state: root, depth: 0 }];
@@ -592,7 +607,7 @@ it("checks liveness after every reachable step using only real effects, pending 
       libraryRetryDuringSend ||=
         move.kind === "library_retry" && state.model.phase === "sending";
       settledObservation ||=
-        state.model.observed &&
+        state.observedInTrace &&
         next.model.phase === "checking" &&
         !next.model.pending;
       queue.push({ state: next, depth: depth + 1 });
@@ -651,5 +666,84 @@ it.each(["refused", "edit-after-unknown"] as const)(
       revision: 2,
       idempotency_key: "fresh",
     });
+  }
+);
+
+it.each(["refused", "edit-after-unknown"] as const)(
+  "S1-09 always issues a fresh read after quiet %s and reloads same-version inventories without confirmation",
+  (outcome) => {
+    const issuing = send(ready());
+    const result =
+      outcome === "refused"
+        ? withEffects(issuing, {
+            type: "post_completed",
+            post: issuing.activePost!,
+            result: "refused",
+          })
+        : withEffects(post(issuing, "unknown"), { type: "draft_edited" });
+    expect(result.model.phase).toBe("checking");
+    expect(result.model.pending).toBeNull();
+    expect("observed" in result.model).toBe(false);
+    const reads = result.effects.filter((effect) => effect.kind === "read");
+    expect(reads).toHaveLength(1);
+    expect(reads[0].read.source).toBe("version");
+    const fresh = withEffects(result.model, {
+      type: "read_completed",
+      read: reads[0].read,
+      result: { kind: "version", offer: A },
+    });
+    expect(fresh.model.phase).toBe("loading");
+    expect(fresh.model.candidate).toBeNull();
+    expect(fresh.model.reviewed).toBe(A);
+    expect(offerControls(fresh.model).review).toBe(false);
+    expect(canSendOffer(fresh.model)).toBe(false);
+    expect(
+      fresh.effects
+        .filter((effect) => effect.kind === "read")
+        .map((effect) => effect.read.source)
+        .sort()
+    ).toEqual(["get", "give"]);
+    let model = fresh.model;
+    for (const read of Object.values(model.reads))
+      model = finish(model, read, {
+        kind: "inventory",
+        cards: read.source === "give" ? [] : [card],
+      });
+    expect(model.phase).toBe("ready");
+    expect(canSendOffer(model)).toBe(true);
+  }
+);
+
+it.each(["refused", "edit-after-unknown"] as const)(
+  "S1-09 preserves same-version verification through a failed fresh read and visible Retry after %s",
+  (outcome) => {
+    const issued = send(ready());
+    let model =
+      outcome === "refused"
+        ? post(issued, "refused")
+        : transitionOffer(post(issued, "unknown"), { type: "draft_edited" });
+    const [first] = Object.values(model.reads);
+    model = finish(model, first, { kind: "failed" });
+    expect(offerControls(model).retry).toBe("check");
+    const retry = withEffects(model, {
+      type: "read_requested",
+      source: "version",
+    });
+    const [effect] = retry.effects.filter((effect) => effect.kind === "read");
+    expect(effect.read.id).toBeGreaterThan(first.id);
+    expect(retry.model.checkConsent).toBe("if_changed");
+    const fresh = withEffects(retry.model, {
+      type: "read_completed",
+      read: effect.read,
+      result: { kind: "version", offer: A },
+    });
+    expect(fresh.model.phase).toBe("loading");
+    expect(offerControls(fresh.model).review).toBe(false);
+    expect(
+      fresh.effects
+        .filter((effect) => effect.kind === "read")
+        .map((effect) => effect.read.source)
+        .sort()
+    ).toEqual(["get", "give"]);
   }
 );
