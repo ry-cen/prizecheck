@@ -8,6 +8,16 @@ import {
 } from "../threads/commandChanges";
 import { tradeStepMessage } from "./tradeText";
 import { loanStepMessage } from "../loans/loanText";
+const offeredCard = (edition_id: string, name: string) => ({
+  edition_id,
+  name,
+  copies: "1",
+  set_code: "PAL",
+  set_name: "Paldea",
+  collector_number: "1",
+  descriptor: { finish: "normal" },
+  image_url: null,
+});
 const original: TradeView = {
   id: "old",
   offer_id: "old",
@@ -23,8 +33,8 @@ const original: TradeView = {
     open_to_cash_offers: false,
   },
   countered_from: null,
-  you_give: [],
-  you_get: [],
+  you_give: [offeredCard("own", "Iono")],
+  you_get: [offeredCard("other", "Arven")],
   cash: null,
   you_confirmed_swap: false,
   they_confirmed_swap: false,
@@ -53,8 +63,8 @@ it.each(["counter", "change_offer"] as const)(
       .mockResolvedValue(fresh);
     const read = vi.fn().mockResolvedValue(fresh);
     const draft = {
-      you_give: [],
-      you_get: [],
+      you_give: [{ edition_id: "own", quantity: "1" }],
+      you_get: [{ edition_id: "other", quantity: "1" }],
       cash: { cents: "900", payer: "you" as const },
     };
     expect(await review.submit(draft, "old-key", post, read)).toBeNull();
