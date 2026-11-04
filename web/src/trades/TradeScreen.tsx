@@ -1,3 +1,4 @@
+import { ItemThreadLayout } from "../threads/ItemThreadLayout";
 import { threadVersionChanged } from "../threads/commandChanges";
 import { usePulseChanged } from "../inbox/Inbox";
 import { canKeepSwapChoices, canRetrySwap } from "../social/confirmationRetry";
@@ -45,7 +46,6 @@ import { Button } from "../ui/Button";
 import { TradeTermsRow } from "./TradeTermsRow";
 import { ownTradeDeckNeed, tradeDeckNeed } from "./tradeDeckNeed";
 import { useIncomingTradeMatch } from "./useIncomingTradeMatch";
-import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { Select } from "../ui/Select";
@@ -90,32 +90,25 @@ const RELOAD = new Set([
 ]);
 
 /** A step the screen runs; its idempotency key is kept under this name until it settles. */
-type StepName = Asking | "accept" | "use_suggested" | "confirm";
+type StepName =
+  Asking | "decline" | "withdraw" | "accept" | "use_suggested" | "confirm";
 
 /** A place the confirm dialog offers for the cards the reader gets: one of their Storage Leaves or Decks, by full
  * path, a Deck marked " (Deck)". */
 type SwapPlace = { id: string; path: string; label: string };
 
-/** A step that asks first (owner, 2026-10-20): Decline, Withdraw and Cancel Trade end the Trade for both sides. */
-type Asking = "decline" | "withdraw" | "cancel";
+/** Cancel asks once inline; Decline and Withdraw act directly. */
+type Asking = "cancel";
 
 /** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
  * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Trade), and the heading after a step or a
  * refusal that reads the Trade again. */
-type FocusNext = "ask" | "decline" | "menu" | "heading";
+type FocusNext = "ask" | "menu" | "heading";
 
 const ASK: Record<
   Asking,
   { question: (other: string) => string; yes: string }
 > = {
-  decline: {
-    question: (other) => `Decline ${other}'s Trade Proposal?`,
-    yes: "Decline",
-  },
-  withdraw: {
-    question: (other) => `Withdraw your Trade Proposal to ${other}?`,
-    yes: "Withdraw",
-  },
   cancel: {
     question: (other) =>
       `Cancel this Trade with ${other}? None of these cards stay promised.`,
@@ -124,7 +117,10 @@ const ASK: Record<
 };
 
 /** What each step's toast says once it went through. Confirm swap's names where the cards went (swapDoneMessage). */
-const DONE: Record<Asking | "accept" | "use_suggested", string> = {
+const DONE: Record<
+  Asking | "decline" | "withdraw" | "accept" | "use_suggested",
+  string
+> = {
   accept: "Accepted. Swap the cards in person, then confirm.",
   use_suggested: "Picks updated",
   decline: "Declined",
@@ -132,43 +128,21 @@ const DONE: Record<Asking | "accept" | "use_suggested", string> = {
   cancel: "Trade cancelled",
 };
 
-/**
- * One Trade's screen (Trading #270, prototype verdict variant A), at /trades/<id>: the headline, who the Trade is
- * with, and two columns, **You give** and **You get** (one column on a phone), each card with its copies. A recipient
- * answers a proposal with **Accept** or **Decline** under the two sides (#271); the proposer withdraws it from **⋯**,
- * and either side cancels an accepted Trade nobody has confirmed from **⋯** (**Cancel Trade**). Decline, Withdraw and
- * Cancel Trade ask first, as the Loan steps that end a Loan do: the question replaces the answer buttons, with the
- * step's own button and **Keep it**, which puts focus back on the opener. Only the steps the Trade's `actions` list
- * show.
- *
- * Confirm swap (#272): an accepted Trade has one primary button, **Confirm swap**, or **Use suggested picks** first
- * while one of the reader's picks is out of date (a proposer gets it on a waiting proposal too). Confirm swap opens a
- * dialog with what they give and where from, what they get, where to put it (Unsorted by default; no picker when they
- * get nothing) and "The swap can't be undone." The cards the reader gives show where their picks take them from, and
- * an out-of-date pick says what the suggestion takes instead. Those are the reader's own Locations, from their own side
- * read (`GET /api/trades/{id}/side`); the other side's never reach this screen.
- *
- * Deck switches (#279): when a card the reader gets came only through a widened Will accept choice for a Deck's want,
- * the dialog lists each Deck that could use it, ticked, under the place picker (their own side read, for the chosen
- * place). The ticked ones are sent with Confirm swap, and the toast offers **Undo switch**, which sends each Deck's own
- * Deck List batch back. A Deck that changed since the offer was shown refuses the whole confirm.
- *
- * Counter (#278) sits between Accept and Decline on a proposal sent to you and opens the Counter builder; a Counter
- * shows one line linking the proposal it answers.
- *
- * The inbox (Trading #273): the bell and the Trades tab's badge are read again after each step and after a refusal that
- * reads the Trade again, and a Trade opened from the drawer takes focus on its heading once it is drawn, as a Loan does.
- */
+/** The live item offer, its actions and inline physical-swap consent, beside its chat on wide screens.
+ * Decline and Withdraw act directly; Cancel asks once inline. Unknown commands retain their exact consent and key.
+ * Picks, destinations and selected Deck switches come only from the reader's own inventory. */
 export function TradeScreen({
   tradeId,
   active = true,
   onAllTrades,
+  onTradeChanged,
   onNavigate,
 }: {
   /** The Trade's id, or null for an address that names no Trade: it shows the same not-found as a missing Trade. */
   active?: boolean;
   tradeId: string | null;
   onAllTrades: () => void;
+  onTradeChanged?: () => void;
   /** Goes to another address in the app: the Counter builder, or the proposal a Counter answers. */
   onNavigate: (to: string, options?: { replace?: boolean }) => void;
 }) {
@@ -187,7 +161,7 @@ export function TradeScreen({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState<Asking | null>(null);
-  // The Confirm swap dialog: open or not, where the cards the reader gets go ("" for Unsorted), and its own message.
+  // Inline physical-swap consent and the destination for incoming copies ("" for Unsorted).
   const [confirming, setConfirming] = useState(false);
   const [destination, setDestination] = useState("");
   const [dialogMessage, setDialogMessage] = useState("");
@@ -232,7 +206,6 @@ export function TradeScreen({
   const heading = useRef<HTMLHeadingElement>(null);
   const menuAnchor = useRef<HTMLDivElement>(null);
   const askButton = useRef<HTMLButtonElement>(null);
-  const declineButton = useRef<HTMLButtonElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const focusNext = useRef<FocusNext | null>(null);
   // A step refused because the Trade moved on reads it again: an open question closes and the heading takes focus
@@ -276,6 +249,13 @@ export function TradeScreen({
     );
     return () => controller.abort();
   }, [tradeId, attempt]);
+  useEffect(() => {
+    if (load.kind !== "ready" || busy || keys.current.has("confirm")) return;
+    setConfirming(
+      load.trade.actions.includes("confirm_swap") &&
+        !load.side.picks.some((place) => place.short !== "0")
+    );
+  }, [load, busy]);
   const lastPulse = useRef(pulseChanged);
   useEffect(() => {
     if (lastPulse.current === pulseChanged) return;
@@ -323,11 +303,9 @@ export function TradeScreen({
     const element =
       target === "ask"
         ? askButton.current
-        : target === "decline"
-          ? declineButton.current
-          : target === "menu"
-            ? menuAnchor.current?.querySelector("button")
-            : heading.current;
+        : target === "menu"
+          ? menuAnchor.current?.querySelector("button")
+          : heading.current;
     element?.focus({ preventScroll: target === "heading" });
   });
 
@@ -377,30 +355,31 @@ export function TradeScreen({
     actions?: ReactNode,
     dialog?: ReactNode
   ) => (
-    <section
-      aria-label="Trade details"
-      className="mx-auto box-border flex w-full min-w-0 max-w-5xl flex-col gap-4 px-7 py-5 phone:px-4 phone:py-3"
+    <ItemThreadLayout
+      label="Trade details"
+      timeline={
+        load.kind === "ready" ? (
+          <ThreadTimeline
+            active={active}
+            kind="trade"
+            id={load.trade.thread_id}
+            editionNames={Object.fromEntries(
+              [...load.trade.you_give, ...load.trade.you_get].map((card) => [
+                card.edition_id,
+                card.name,
+              ])
+            )}
+          />
+        ) : null
+      }
     >
       {back}
       <div className="[&>div]:mb-0 [&>div]:flex-nowrap [&>div]:items-start [&_h1]:min-w-0 [&_h1]:flex-1 phone:[&>div>div]:basis-auto">
         <PageHeader title={title} actions={actions} headingRef={heading} />
       </div>
       {children}
-      {load.kind === "ready" && (
-        <ThreadTimeline
-          active={active}
-          kind="trade"
-          id={load.trade.thread_id}
-          editionNames={Object.fromEntries(
-            [...load.trade.you_give, ...load.trade.you_get].map((card) => [
-              card.edition_id,
-              card.name,
-            ])
-          )}
-        />
-      )}
       {dialog}
-    </section>
+    </ItemThreadLayout>
   );
 
   if (load.kind === "loading")
@@ -474,6 +453,7 @@ export function TradeScreen({
         revision: trade.revision,
         idempotency_key: key,
       });
+      onTradeChanged?.();
       keys.current.delete(action);
       if (action === "confirm") held.current = null;
       const nextSide = await getTradeSide(trade.thread_id).catch(() => side);
@@ -512,7 +492,7 @@ export function TradeScreen({
       setBusy(false);
     }
   }
-  const run: Record<Asking, () => void> = {
+  const run: Record<"decline" | "withdraw" | "cancel", () => void> = {
     decline: () =>
       void step(
         "decline",
@@ -533,12 +513,6 @@ export function TradeScreen({
       ),
   };
   const chosen = places.list.find((place) => place.id === destination);
-  function openConfirm() {
-    if (busy) return;
-    setMessage("");
-    setDialogMessage("");
-    setConfirming(true);
-  }
   // While a confirm key is held its snapshot stands in for the live offers; a reload never replaces it.
   const snapshot = keys.current.has("confirm") ? held.current : null;
   const shownOffers = snapshot ? snapshot.offers : switches.offers;
@@ -636,7 +610,7 @@ export function TradeScreen({
         ]
       : []),
     ...(trade.actions.includes("withdraw")
-      ? [{ label: "Withdraw", onSelect: () => ask("withdraw") }]
+      ? [{ label: "Withdraw", onSelect: () => run.withdraw() }]
       : []),
     ...(trade.actions.includes("cancel")
       ? [{ label: "Cancel Trade", onSelect: () => ask("cancel") }]
@@ -673,7 +647,7 @@ export function TradeScreen({
         </Button>
       )}
       {trade.actions.includes("decline") && (
-        <Button ref={declineButton} onClick={() => ask("decline")}>
+        <Button onClick={run.decline} aria-disabled={busy || undefined}>
           Decline
         </Button>
       )}
@@ -694,17 +668,6 @@ export function TradeScreen({
         Use suggested picks
       </Button>
     </div>
-  ) : trade.actions.includes("confirm_swap") ? (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        ref={confirmButton}
-        variant="primary"
-        aria-disabled={busy || undefined}
-        onClick={openConfirm}
-      >
-        Confirm swap
-      </Button>
-    </div>
   ) : null;
   const note = tradeNote(trade, stale);
   const headline = tradeHeadline(trade);
@@ -723,27 +686,6 @@ export function TradeScreen({
               {needsParty && " "}@{trade.other.handle}
             </span>
           )}
-        </p>
-      )}
-      {trade.countered_from && (
-        <p className="m-0 text-body wrap-anywhere">
-          {trade.role === "recipient"
-            ? "This is a Counter to "
-            : "This is your Counter to "}
-          <a
-            href={tradePath(trade.countered_from)}
-            onClick={(event) => {
-              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-              event.preventDefault();
-              onNavigate(tradePath(trade.countered_from!));
-            }}
-            className="text-accent-strong underline"
-          >
-            {trade.role === "recipient"
-              ? "your Trade Proposal"
-              : `${name}'s Trade Proposal`}
-          </a>
-          .
         </p>
       )}
       {note && <p className="m-0 text-body text-text-muted">{note}</p>}
@@ -810,7 +752,7 @@ export function TradeScreen({
           </Button>
           <Button
             onClick={() => {
-              focusNext.current = asking === "decline" ? "decline" : "menu";
+              focusNext.current = "menu";
               setAsking(null);
             }}
           >
@@ -848,121 +790,104 @@ export function TradeScreen({
         />
       </div>
     ),
-    <Dialog
-      open={confirming}
-      onClose={() => {
-        // Back and Escape wait for the request, so a failure message always lands in an open dialog.
-        if (!busy) setConfirming(false);
-      }}
-      title={`Confirm swap with ${name}?`}
-      returnFocus={confirmButton}
-    >
-      <div className="flex flex-col gap-4">
-        {trade.you_give.length > 0 && (
-          <SwapLines
-            title="You give"
-            lines={trade.you_give.map((card) => {
-              const from = tradePickText(side.picks, card.edition_id, true);
-              return {
-                key: card.edition_id,
-                text: `${tradeCardName(card)} ×${card.copies}${from ? ` · ${from}` : ""}`,
-              };
-            })}
-          />
-        )}
-        {gets && (
-          <SwapLines
-            title="You get"
-            lines={trade.you_get.map((card) => ({
-              key: card.edition_id,
-              text: `${tradeCardName(card)} ×${card.copies}`,
-            }))}
-          />
-        )}
-        {gets && (
-          <div className="flex flex-col gap-1">
-            <Select
-              label="Put the cards you get in"
-              value={destination}
-              // After a confirm whose outcome is unknown the held key belongs to this destination: keep it until known.
-              disabled={busy || keys.current.has("confirm")}
-              onChange={(event) => {
-                // Another place is another command: a retry with the old key would be refused.
-                forgetConfirm();
-                setDialogMessage("");
-                setDestination(event.target.value);
-              }}
-            >
-              <option value="">Unsorted</option>
-              {places.list.map((place) => (
-                <option key={place.id} value={place.id}>
-                  {place.label}
-                </option>
-              ))}
-            </Select>
-            {places.state === "failed" && (
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="m-0 text-meta text-text-muted">
-                  Your other places couldn't be loaded.
-                </p>
-                <Button onClick={places.reload}>Retry</Button>
-              </div>
-            )}
-          </div>
-        )}
-        {gets &&
-          (snapshot
-            ? shownOffers.length > 0
-            : switches.state === "ready" && shownOffers.length > 0) && (
-            <DeckSwitchOffers
-              offers={shownOffers}
-              ticked={shownTicked}
-              disabled={busy || keys.current.has("confirm")}
-              onToggle={(offer) => {
-                // Another set of switches is another command: a retry with the old key would be refused.
-                forgetConfirm();
-                setDialogMessage("");
-                switches.toggle(offer);
-              }}
-            />
+    confirming ? (
+      <section
+        aria-label={`Confirm swap with ${name}`}
+        className="rounded-panel border border-border bg-surface p-4"
+      >
+        <h2 className="m-0 text-heading">Confirm swap</h2>
+        <div className="flex flex-col gap-4">
+          {gets && (
+            <div className="flex flex-col gap-1">
+              <Select
+                label="Put the cards you get in"
+                value={destination}
+                // After a confirm whose outcome is unknown the held key belongs to this destination: keep it until known.
+                disabled={busy || keys.current.has("confirm")}
+                onChange={(event) => {
+                  // Another place is another command: a retry with the old key would be refused.
+                  forgetConfirm();
+                  setDialogMessage("");
+                  setDestination(event.target.value);
+                }}
+              >
+                <option value="">Unsorted</option>
+                {places.list.map((place) => (
+                  <option key={place.id} value={place.id}>
+                    {place.label}
+                  </option>
+                ))}
+              </Select>
+              {places.state === "failed" && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="m-0 text-meta text-text-muted">
+                    Your other places couldn't be loaded.
+                  </p>
+                  <Button onClick={places.reload}>Retry</Button>
+                </div>
+              )}
+            </div>
           )}
-        {gets && !snapshot && switches.state === "failed" && (
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="m-0 text-meta text-text-muted">
-              Deck switches couldn't be loaded.
-            </p>
-            <Button onClick={switches.reload}>Retry</Button>
+          {gets &&
+            (snapshot
+              ? shownOffers.length > 0
+              : switches.state === "ready" && shownOffers.length > 0) && (
+              <DeckSwitchOffers
+                offers={shownOffers}
+                ticked={shownTicked}
+                disabled={busy || keys.current.has("confirm")}
+                onToggle={(offer) => {
+                  // Another set of switches is another command: a retry with the old key would be refused.
+                  forgetConfirm();
+                  setDialogMessage("");
+                  switches.toggle(offer);
+                }}
+              />
+            )}
+          {gets && !snapshot && switches.state === "failed" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="m-0 text-meta text-text-muted">
+                Deck switches couldn't be loaded.
+              </p>
+              <Button onClick={switches.reload}>Retry</Button>
+            </div>
+          )}
+          <p className="m-0 text-body">
+            {trade.you_give.length
+              ? `Leaves your Collection: ${trade.you_give.map((card) => `${card.copies} ${tradeCardName(card)}`).join(" · ")}. `
+              : "No cards leave your Collection. "}
+            {trade.you_get.length
+              ? `Arrives in ${chosen?.path ?? "Unsorted"}: ${trade.you_get.map((card) => `${card.copies} ${tradeCardName(card)}`).join(" · ")}.`
+              : "No cards arrive in your Collection."}
+          </p>
+          <p className="m-0 text-body">
+            Only confirm after the physical swap. The cards you give leave your
+            Collection and the cards you get arrive in your chosen destination,
+            with the selected Deck switches. The swap can't be undone.
+          </p>
+          <p className="m-0 text-meta text-text-muted">
+            Your destination, picks and Deck switches are private.
+          </p>
+          <p role="alert" className="m-0 text-meta text-danger empty:hidden">
+            {dialogMessage}
+          </p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              ref={confirmButton}
+              variant="primary"
+              aria-disabled={
+                busy ||
+                (!snapshot && gets && switches.state !== "ready") ||
+                undefined
+              }
+              onClick={runConfirm}
+            >
+              Confirm swap
+            </Button>
           </div>
-        )}
-        <p className="m-0 text-meta text-text-muted">
-          The swap can't be undone.
-        </p>
-        <p role="alert" className="m-0 text-meta text-danger empty:hidden">
-          {dialogMessage}
-        </p>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            aria-disabled={busy || undefined}
-            onClick={() => {
-              if (!busy) setConfirming(false);
-            }}
-          >
-            Back
-          </Button>
-          <Button
-            variant="primary"
-            aria-disabled={
-              busy ||
-              (!snapshot && gets && switches.state !== "ready") ||
-              undefined
-            }
-            onClick={runConfirm}
-          >
-            Confirm swap
-          </Button>
         </div>
-      </div>
-    </Dialog>
+      </section>
+    ) : null
   );
 }
 
@@ -1028,31 +953,6 @@ function useSwapPlaces(open: boolean): {
     list,
     reload: () => setGeneration((value) => value + 1),
   };
-}
-
-/** One side of the confirm dialog: "You give", then each card with its copies (and where it comes from). */
-function SwapLines({
-  title,
-  lines,
-}: {
-  title: string;
-  lines: { key: string; text: string }[];
-}) {
-  const headingId = useId();
-  return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-1">
-      <h3 id={headingId} className="m-0 text-meta text-text-muted">
-        {title}
-      </h3>
-      <ul aria-label={title} className="m-0 flex list-none flex-col gap-1 p-0">
-        {lines.map((line) => (
-          <li key={line.key} className="text-body wrap-anywhere">
-            {line.text}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
 }
 
 /** One side of the Trade: each card with its copies, or "Nothing". With `side` (You give): where the reader's picks

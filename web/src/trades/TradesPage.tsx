@@ -1,6 +1,6 @@
 import { ListDetailLayout } from "../ui/ListDetailLayout";
 import { LegacyThreadLink } from "../threads/LegacyThreadLink";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { PageHeader } from "../shell/PageHeader";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { ThreadList } from "../threads/ThreadList";
@@ -38,6 +38,7 @@ type Props = {
  */
 export function TradesPage({ active, section, onNavigate }: Props) {
   const idBase = useId();
+  const [revision, setRevision] = useState(0);
   const panelId = `${idBase}-panel`;
   const route = tradesRoute(section);
   if (route.kind === "new")
@@ -74,26 +75,57 @@ export function TradesPage({ active, section, onNavigate }: Props) {
         onNavigate={onNavigate}
       />
     );
-  if (route.kind === "trade" || route.kind === "missing")
+  if (
+    route.kind === "trade" ||
+    route.kind === "missing" ||
+    (route.kind === "view" && route.view === "trades")
+  )
     return (
       <ListDetailLayout
-        selected
+        selected={route.kind !== "view"}
         queue={
-          <ThreadList
-            kind="trade"
-            active={active}
-            selected={route.kind === "trade" ? route.id : null}
-            onOpen={(id) => onNavigate(`/trades/${id}`)}
-          />
+          <div className="flex min-w-0 flex-col gap-4">
+            {route.kind === "view" ? (
+              <h1 className="text-display font-semibold">Trades</h1>
+            ) : (
+              <h2 className="text-heading">Trades</h2>
+            )}
+            <Segmented
+              label="Trades view"
+              idBase={idBase}
+              panelId={panelId}
+              value="trades"
+              onChange={(next) => onNavigate(tradesViewPath(next))}
+              options={TRADES_VIEWS}
+            />
+            <div
+              role="tabpanel"
+              id={panelId}
+              aria-labelledby={segmentId(idBase, "trades")}
+            >
+              <ThreadList
+                kind="trade"
+                active={active}
+                revision={revision}
+                selected={route.kind === "trade" ? route.id : null}
+                onOpen={(id) => onNavigate(`/trades/${id}`)}
+              />
+            </div>
+          </div>
         }
         detail={
-          <TradeScreen
-            active={active}
-            key={route.kind === "trade" ? route.id : "missing"}
-            tradeId={route.kind === "trade" ? route.id : null}
-            onAllTrades={() => onNavigate(TRADES_PATH)}
-            onNavigate={onNavigate}
-          />
+          route.kind === "view" ? (
+            <p className="m-0 text-body text-text-muted">Choose a Trade…</p>
+          ) : (
+            <TradeScreen
+              active={active}
+              onTradeChanged={() => setRevision((n) => n + 1)}
+              key={route.kind === "trade" ? route.id : "missing"}
+              tradeId={route.kind === "trade" ? route.id : null}
+              onAllTrades={() => onNavigate(TRADES_PATH)}
+              onNavigate={onNavigate}
+            />
+          )
         }
       />
     );
@@ -122,13 +154,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
         aria-labelledby={segmentId(idBase, view)}
         className="flex min-w-0 flex-col gap-5"
       >
-        {view === "trades" ? (
-          <ThreadList
-            kind="trade"
-            active={active}
-            onOpen={(id) => onNavigate(`/trades/${id}`)}
-          />
-        ) : view === "find" ? (
+        {view === "find" ? (
           <FindTrades onNavigate={onNavigate} />
         ) : (
           <MyTradeList onOpenCollection={() => onNavigate("/collection")} />

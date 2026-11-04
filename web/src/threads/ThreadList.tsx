@@ -1,3 +1,4 @@
+import { itemState } from "./threadText";
 import { waitingAction } from "./threadPresentation";
 import { useEffect, useRef, useState } from "react";
 import { getLoans, getTrades, type ThreadItem } from "../social_generated";
@@ -73,7 +74,10 @@ export function ThreadList({
       ) ?? [];
     if (!items.length) return null;
     const content = (
-      <ul className="m-0 list-none p-0">
+      <ul
+        aria-label={`${TITLES[group]} ${title}`}
+        className="m-0 list-none p-0"
+      >
         {items.map((row) => (
           <li key={row.id} className="border-b border-border">
             <a
@@ -95,6 +99,9 @@ export function ThreadList({
               className="flex min-h-tap flex-col gap-2 rounded-panel bg-surface px-4 py-3 text-text no-underline hover:bg-surface-raised"
             >
               <strong>{row.other.display_name}</strong>
+              <span className="text-meta text-text-muted">
+                {itemState(row)}
+              </span>
               <span>
                 You give {row.summary.you_give} · You get {row.summary.you_get}
                 {row.summary.cash
@@ -123,7 +130,7 @@ export function ThreadList({
         {content}
       </details>
     ) : (
-      <section key={group}>
+      <section key={group} aria-label={TITLES[group]}>
         <h2 className="text-heading">{TITLES[group]}</h2>
         {content}
       </section>
@@ -131,7 +138,12 @@ export function ThreadList({
   };
   return (
     <div ref={root} className="flex min-w-0 flex-col gap-4">
-      {kind === "loan" && <h1 className="text-display font-semibold">Loans</h1>}
+      {kind === "loan" &&
+        (selected ? (
+          <h2 className="text-heading">Loans</h2>
+        ) : (
+          <h1 className="text-display font-semibold">Loans</h1>
+        ))}
       {failed && (
         <div role="status">
           Your {title} couldn't be loaded.{" "}
