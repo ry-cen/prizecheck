@@ -11,6 +11,7 @@ import {
 } from "../social_generated";
 import { TradesError, counterTrade, getTradeList } from "../trades_generated";
 import { ToastProvider } from "../ui/Toast";
+import { peekProposalSeed } from "./openProposal";
 import { CounterPage } from "./CounterPage";
 import { ProposalBuilderPage } from "./ProposalBuilderPage";
 vi.mock("../social_generated", async (original) => ({
@@ -27,6 +28,10 @@ vi.mock("../trades_generated", async (original) => ({
 vi.mock("./useTradeValue", async (original) => ({
   ...(await original<typeof import("./useTradeValue")>()),
   useTradeValue: () => ({ kind: "none" }),
+}));
+vi.mock("./openProposal", async (original) => ({
+  ...(await original<typeof import("./openProposal")>()),
+  peekProposalSeed: vi.fn(),
 }));
 const card = {
   edition_id: "Iono",
@@ -308,4 +313,71 @@ it("freezes draft controls while sending, then exposes the identical-key retry a
   expect(vi.mocked(counterTrade).mock.calls[1]).toEqual(
     vi.mocked(counterTrade).mock.calls[0]
   );
+});
+
+it("announces a Counter as a Counter after sending", async () => {
+  navigate.mockImplementationOnce((path: string) =>
+    window.history.replaceState(null, "", path)
+  );
+  await mount();
+  await click(increase());
+  await click(send());
+  expect(
+    host.querySelector('[aria-label="Notifications"]')?.textContent
+  ).toContain("Counter sent to Misty");
+});
+it("keeps one outcome announcement when an unavailable replay replaces the mounted new draft", async () => {
+  vi.mocked(peekProposalSeed).mockReturnValue({
+    give: [],
+    get: [{ ...card, copies: "3", quantity: 1 }],
+  });
+  let finish!: (response: Response) => void;
+  const fetch = vi.fn().mockReturnValue(
+    new Promise<Response>((resolve) => {
+      finish = resolve;
+    })
+  );
+  vi.stubGlobal("fetch", fetch);
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(ProposalBuilderPage, {
+          traderId: "misty",
+          onNavigate: navigate,
+        }),
+      })
+    )
+  );
+  expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
+  expect(host.querySelector("output")?.getAttribute("role")).toBe("none");
+  const submit = button("Send Trade Proposal");
+  await act(async () => {
+    submit.click();
+    submit.click();
+  });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    finish(
+      new Response(
+        JSON.stringify({
+          detail: {
+            code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+            outcome: "already_applied",
+            view: "unavailable",
+          },
+        }),
+        { status: 409, headers: { "content-type": "application/json" } }
+      )
+    )
+  );
+  expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
+  expect(host.querySelector('[role="status"]')?.textContent).toContain(
+    "Your proposal was already sent. This Trade isn't available to view."
+  );
+  expect(host.querySelector("output")).toBeNull();
+  expect(
+    [...host.querySelectorAll("button")].some(
+      (b) => b.textContent === "Send Trade Proposal"
+    )
+  ).toBe(false);
 });
