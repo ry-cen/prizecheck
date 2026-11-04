@@ -67,6 +67,7 @@ const SIDE_LABEL: Record<ProposalSide, string> = {
  */
 export function ProposalLibrary({
   headingId,
+  announcement,
   ownScroll,
   friendName,
   theirs,
@@ -79,6 +80,7 @@ export function ProposalLibrary({
   onAdd,
 }: {
   headingId: string;
+  announcement: string | null;
   ownScroll: boolean;
   friendName: string;
   theirs: TheirsLoad;
@@ -297,6 +299,11 @@ export function ProposalLibrary({
               )}
             </div>
           )}
+        {announcement !== null && (
+          <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
+            {announcement}
+          </p>
+        )}
         <DetailsPopup
           details={details}
           proposal={proposal}
