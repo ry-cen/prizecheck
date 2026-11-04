@@ -361,6 +361,13 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
     reachable = reach(conn, user_id, others)
     friends = friend_ids(conn, user_id) if others else set()
     counts = completed_trades(conn, [other for other in others if other in reachable])
+    # The stored parent links every replacement for history. Only an actual Counter
+    # answers the other participant's proposal; revisions and agreed edits must not
+    # inherit that collector-facing meaning. Preserve historical Counter placement.
+    edits = {event['round_id'] for event in conn.execute(
+        "SELECT round_id FROM thread_event WHERE thread_id=ANY(%s) AND round_id=ANY(%s) "
+        "AND kind IN ('revised','changed_after_agreement')",
+        ([row['thread_id'] for row in rows], [row['id'] for row in rows]))}
 
     def side_cards(trade_id: UUID, side_name: str) -> list[TradeCard]:
         found = []
@@ -393,7 +400,7 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
                              available=available,
                              open_to_cash_offers=bool(available and profile['open_to_cash_offers']),
                              completed_trades=counts.get(other_id, 0) if available else None),
-            countered_from=row['countered_from'], you_give=side_cards(row['id'], role),
+            countered_from=None if row['id'] in edits else row['countered_from'], you_give=side_cards(row['id'], role),
             you_get=side_cards(row['id'], other), cash=cash, you_confirmed_swap=mine, they_confirmed_swap=theirs,
             needs_you=needs_you(user_id, row, known), waiting=waiting_trade_step(user_id, row, known),
             section=section(user_id, row, known), actions=allowed(user_id, row, bool(lines.get((row['id'], role)))),

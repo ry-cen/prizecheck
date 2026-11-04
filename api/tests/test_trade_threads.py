@@ -55,6 +55,23 @@ def test_agreed_edit_releases_both_sides_and_advances_each_revision_once(store):
     assert {line['giver'] for line in event['data']['lines']} == {'low', 'high'}
 
 
+@pytest.mark.parametrize('agreed', [False, True])
+def test_revising_an_offer_does_not_present_it_as_a_counter_to_its_recipient(store, agreed):
+    ids, ash, misty, binder, box = trading()
+    original = proposed(misty, ash, give=[(ids['PAL 185'], 1)], get=[(ids['SVI 166'], 1)])
+    current = ok(accept_trade(ash, original)) if agreed else original
+    changed = ok(counter(misty, current, give=[(ids['PAL 185'], 2)], get=[(ids['SVI 166'], 1)]))
+    assert changed['thread_id'] == original['thread_id']
+    assert changed['countered_from'] is None
+    assert ok(read(ash, changed))['countered_from'] is None
+    # The historical parent is retained; only its presentation is corrected.
+    assert str(row_of(changed)['countered_from']) == current['offer_id']
+    assert events(changed)[-1]['kind'] == ('changed_after_agreement' if agreed else 'revised')
+    recipient_counter = ok(counter(ash, changed, give=[(ids['SVI 166'], 1)], get=[(ids['PAL 185'], 1)]))
+    assert recipient_counter['countered_from'] == changed['offer_id']
+    assert ok(read(misty, recipient_counter))['countered_from'] == changed['offer_id']
+
+
 @pytest.mark.parametrize('refusal', ['caps', 'cash'])
 def test_refused_replacement_preserves_round_picks_revisions_and_log(store, refusal):
     ids, ash, misty, binder, box = trading()

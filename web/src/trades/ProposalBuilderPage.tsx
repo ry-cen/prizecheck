@@ -1122,10 +1122,7 @@ export function ProposalBuilderPage({
   return (
     <main className={FRAME}>
       {back}
-      <PageHeader
-        title={counter ? `Counter to ${name}` : `Trade Proposal to ${name}`}
-        headingRef={headingRef}
-      />
+      <PageHeader title={`${frameTitle} to ${name}`} headingRef={headingRef} />
       {phone ? (
         <>
           <Segmented
