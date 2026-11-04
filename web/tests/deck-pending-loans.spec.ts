@@ -30,8 +30,7 @@ import { signInAsOwner } from "./support/sign-in";
 // Misty W lends (another collector, signed in first); the test's page is Ash K, signing in afterwards as a new
 // account. A call through `page.request` stands for another device: it shares the account but tells the tab nothing.
 
-const isPulse = (url: string) =>
-  url.includes("/api/social/conversations/pulse");
+const isPulse = (url: string) => url.includes("/api/threads/pulse");
 const isPending = (url: string) => url.includes("/api/loans/pending");
 
 /** The collector leaves the window and comes straight back: a blur, then a focus, with no time passing in between, so
@@ -90,7 +89,7 @@ async function request(
 }
 
 const accept = (lender: Page, loan: string, edition: string, copies: number) =>
-  loanStep(lender, loan, `/api/loans/${loan}/accept`, {
+  loanStep(lender, loan, "accept", {
     lines: [{ edition_id: edition, promised: String(copies) }],
   });
 
@@ -165,8 +164,8 @@ test("a write-off moves no pulse, so it shows at the next focus", async ({
   const lines = needs(page, deckName);
   await expect(lines).toContainText("Misty W agreed to lend 3");
 
-  await loanStep(misty, loan, `/api/loans/${loan}/handover`);
-  await loanStep(misty, loan, `/api/loans/${loan}/write-off`, {
+  await loanStep(misty, loan, "handover");
+  await loanStep(misty, loan, "write-off", {
     lines: [{ edition_id: iono, quantity: "1" }],
   });
   // A pulse runs and finds nothing new: the write-off stored no inbox update, and nothing reads the pending again.
@@ -188,14 +187,14 @@ test("receiving the copies on another device clears the line's pending note at t
   const { iono, misty, deck, deckName } = await lending(page, collectors, 2, 3);
   const loan = await request(page, misty, iono, 2, deck);
   await accept(misty, loan, iono, 2);
-  await loanStep(misty, loan, `/api/loans/${loan}/handover`);
+  await loanStep(misty, loan, "handover");
   await page.clock.install();
   await openScoped(page, deck);
   const lines = needs(page, deckName);
   await expect(lines).toContainText("Misty W agreed to lend 2");
 
   // Ash's other device confirms the copies arrived: they are Borrowed Copies now, not on their way.
-  await loanStep(page, loan, `/api/loans/${loan}/handover`);
+  await loanStep(page, loan, "handover");
   const reread = page.waitForResponse((response) => isPending(response.url()));
   await focus(page);
   await reread;

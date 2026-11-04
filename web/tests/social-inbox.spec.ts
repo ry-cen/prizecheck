@@ -1,3 +1,4 @@
+import { tradeView } from "./support/trades";
 // Ticket #259: the inbox (spec "Inbox derivation", "Web screens"). Ash K. sends Misty W. two Borrow Requests through
 // the API. Misty's bell and Loans tab count both; the bell's drawer lists one line per Loan, she opens one from it and
 // declines it, and both badges count one. Ash's bell lists the decline under Earlier; he opens the Loan from it, and
@@ -190,7 +191,7 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
   await expect(earlier).toContainText("No updates.");
 
   // Ash withdraws his other request: Misty's bell says he withdrew it, two days ago by her clock, and nothing waits.
-  await loanStep(page, older, `/api/social/loans/${older}/withdraw`);
+  await loanStep(page, older, "withdraw");
   await fixClockAfterNewestUpdate(lender, 48 * HOUR);
   await lender.goto(`${ORIGIN}/loans`);
   await expect(bell(lender)).toHaveAccessibleName("Inbox");
@@ -358,7 +359,7 @@ async function tradeStory(
   await expect(bell(page)).toHaveAccessibleName("Inbox");
 
   // Ash confirms the swap: it waits on Misty to confirm hers.
-  const read = await api(ash, "GET", `/api/social/trades/${trade}`);
+  const read = await tradeView(ash, trade);
   await api(ash, "POST", `/api/trades/${trade}/confirm-swap`, {
     revision: read.revision,
     idempotency_key: randomUUID(),

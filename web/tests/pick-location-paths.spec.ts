@@ -183,7 +183,7 @@ async function lendingAndTrading(
       idempotency_key: randomUUID(),
     })
   ).id as string;
-  await loanStep(page, loan, `/api/loans/${loan}/accept`, {
+  await loanStep(page, loan, "accept", {
     lines: [
       { edition_id: lent, promised: "3" },
       { edition_id: arven, promised: "1" },

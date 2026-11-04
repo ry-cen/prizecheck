@@ -54,17 +54,17 @@ for (const viewport of [DESKTOP, PHONE]) {
       lines: [{ edition_id: ids["SVI 166"], quantity: "1" }],
       idempotency_key: randomUUID(),
     });
-    await loanStep(friend.page, loan.id, `/api/loans/${loan.id}/accept`, {
+    await loanStep(friend.page, loan.id, "accept", {
       lines: [{ edition_id: ids["SVI 166"], promised: "1" }],
     });
-    await loanStep(friend.page, loan.id, `/api/loans/${loan.id}/handover`);
+    await loanStep(friend.page, loan.id, "handover");
 
     // A real small/large art pair makes mounting unopened full artwork observable.
     const art = "/api/art/trade-popup-fixture/small?v=1";
-    await page.route(`**/api/social/trades/${swap}`, async (route) => {
+    await page.route(`**/api/trades/${swap}`, async (route) => {
       const response = await route.fetch();
       const body = await response.json();
-      body.you_get[0].image_url = art;
+      body.live_offer.you_get[0].image_url = art;
       await route.fulfill({ response, json: body });
     });
     await page.route(
@@ -170,10 +170,10 @@ for (const viewport of [DESKTOP, PHONE]) {
       [[ids["PAL 185"], 1]]
     );
     const longName = "Professor's Research (Professor Sada and Professor Turo)";
-    await page.route(`**/api/social/trades/${larger}`, async (route) => {
+    await page.route(`**/api/trades/${larger}`, async (route) => {
       const response = await route.fetch();
       const body = await response.json();
-      body.you_get.find(
+      body.live_offer.you_get.find(
         (card: { edition_id: string }) => card.edition_id === ids["SVI 166"]
       ).name = longName;
       await route.fulfill({ response, json: body });

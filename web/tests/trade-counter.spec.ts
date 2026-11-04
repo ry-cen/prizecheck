@@ -1,3 +1,4 @@
+import { tradeView } from "./support/trades";
 // Ticket #278, on the proposal builder of #284: Counter a Trade Proposal. Misty proposes her Iono for Ash's Arven. Only the
 // recipient sees Counter. Ash opens the Counter builder prefilled from the Trade: leaving it unchanged asks nothing, a
 // cash-only Counter is refused while Misty is not open to cash offers and leaves her proposal waiting, and after he adds
@@ -173,7 +174,7 @@ async function propose(
 
 /** The Trade as `page`'s collector reads it, through the API. */
 const tradeState = async (page: Page, id: string) => {
-  const trade = await api(page, "GET", `/api/social/trades/${id}`);
+  const trade = await tradeView(page, id);
   return {
     state: trade.state as string,
     revision: trade.revision as number,

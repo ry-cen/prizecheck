@@ -76,7 +76,7 @@ test("the lender extends the return-by date, and approves the borrower's request
   // A Save refused because the Loan moved on (held back by the test) reads the Loan again: the form closes and the
   // heading takes focus once the Loan is drawn again.
   await lender.route(
-    "**/api/social/loans/*/return-by",
+    "**/api/loans/*/return-by",
     (route) =>
       route.fulfill({
         status: 409,
