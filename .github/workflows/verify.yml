@@ -256,6 +256,75 @@ jobs:
           cache-to: type=gha,mode=max,scope=prizecheck-scanner-index-test${{ matrix.cache }}
       - name: Real-model test
         run: docker run --rm prizecheck-scanner-index-test
+  # Temporary diagnostic, never merged, not part of the rollup.
+  diagnostic-css:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.integration == 'none' && github.ref == 'refs/heads/fix/495-css-contrast' }}
+    name: ${{ matrix.leg }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: css-on
+            args: --suite browser --fast --shard 1/1 --browser-workers 1 -- web/tests/discover-page.spec.ts web/tests/kept-pages.spec.ts
+            browsers: true
+            css_blob: a5c1b101de6f68b357e65bfc305222c67ec941b4
+          - leg: css-off
+            args: --suite browser --fast --shard 1/1 --browser-workers 1 -- web/tests/discover-page.spec.ts web/tests/kept-pages.spec.ts
+            browsers: true
+            css_blob: 2a1a8b5b155b41817726afb2db8e0f50da7ea62d
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: npm ci
+      - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      # The api legs start no browser, so they skip the download.
+      - if: ${{ matrix.browsers }}
+        run: npx playwright install --with-deps chromium
+      - if: ${{ matrix.leg == 'css-off' }}
+        run: git show 98ab27b55ad8fe2f213a26cbdd9d6d67e168c905:web/src/tailwind.css > web/src/tailwind.css
+      - name: Check the CSS blob
+        env:
+          EXPECTED_CSS_BLOB: ${{ matrix.css_blob }}
+        run: |
+          actual=$(git hash-object web/src/tailwind.css)
+          echo "$actual"
+          test "$actual" = "$EXPECTED_CSS_BLOB"
+      - run: npm run verify -- ${{ matrix.args }}
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-${{ matrix.leg }}
+          path: .scratch/verification/
+          retention-days: 7
+          include-hidden-files: true
   # The one check that stands for the whole run: pull requests and build-images.yml's images job wait on "verify".
   # always() makes it run and fail after a failed or cancelled job instead of being skipped with it, because a skipped
   # check counts as passing. The default checks must always succeed. Each optional job must succeed when this run asked
