@@ -286,7 +286,7 @@ def test_removed_offer_editions_keep_public_identity_in_history_and_item_preview
         event = next(item['event'] for item in page['items'] if item['event'] and item['event']['kind'] == 'revised')
         label = next(card for card in event['editions'] if card['edition_id'] == ids['PAL 185'])
         assert (label['name'], label['set_code'], label['collector_number']) == ('Iono', 'PAL', '185')
-        assert set(label) == {'edition_id', 'name', 'set_code', 'collector_number', 'descriptor'}
+        assert set(label) == {'edition_id', 'name', 'set_code', 'collector_number', 'variant_label'}
         listed = [item for group in ('needs_you', 'open', 'done')
                   for item in ok(call('GET', f'/api/trades?group={group}', viewer))
                   if item['id'] == changed['thread_id']]

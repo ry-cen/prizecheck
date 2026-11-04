@@ -6771,11 +6771,6 @@
       "title": "Collector Number",
       "type": "string"
      },
-     "descriptor": {
-      "additionalProperties": true,
-      "title": "Descriptor",
-      "type": "object"
-     },
      "edition_id": {
       "format": "uuid",
       "title": "Edition Id",
@@ -6788,6 +6783,10 @@
      "set_code": {
       "title": "Set Code",
       "type": "string"
+     },
+     "variant_label": {
+      "title": "Variant Label",
+      "type": "string"
      }
     },
     "required": [
@@ -6795,7 +6794,7 @@
      "name",
      "set_code",
      "collector_number",
-     "descriptor"
+     "variant_label"
     ],
     "title": "EventEdition",
     "type": "object"

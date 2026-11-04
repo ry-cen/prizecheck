@@ -16,13 +16,17 @@ import { SEND_UNAVAILABLE } from "./traderMessages";
 
 /** A card as the Trade messages name it (prototype "Proposed wording"): "Iono (PAL 185)". A finish other than Normal
  * follows the number, so two Editions of one card never share a name: "Arven (SVI 166, Reverse Holo)". */
-export function tradeCardName(card: {
-  name: string;
-  set_code: string;
-  collector_number: string;
-  descriptor: Record<string, unknown>;
-}): string {
-  const finish = variantLabel(card.descriptor);
+export function tradeCardName(
+  card: {
+    name: string;
+    set_code: string;
+    collector_number: string;
+  } & ({ descriptor: Record<string, unknown> } | { variant_label: string })
+): string {
+  const finish =
+    "variant_label" in card
+      ? card.variant_label
+      : variantLabel(card.descriptor);
   return `${card.name} (${card.set_code} ${card.collector_number}${finish === "Normal" ? "" : `, ${finish}`})`;
 }
 

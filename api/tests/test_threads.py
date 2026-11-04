@@ -384,7 +384,7 @@ def test_each_timeline_page_resolves_all_public_event_editions_without_mutating_
             assert item['event']['data'] == data
             labels = item['event']['editions']
             assert {card['edition_id'] for card in labels} == {ids['PAL 185'], ids['SVI 166']}
-            assert all(set(card) == {'edition_id', 'name', 'set_code', 'collector_number', 'descriptor'} for card in labels)
+            assert all(set(card) == {'edition_id', 'name', 'set_code', 'collector_number', 'variant_label'} for card in labels)
             seen.append(item['event']['id'])
         if not page['next_before']:
             break
@@ -409,3 +409,17 @@ def test_private_closure_projection_fences_every_public_event_field(low):
     assert timeline_item(contaminated, low).model_dump(mode='json') == suspended
     own = timeline_item(dict(row, kind='closed_blocked'), not low)
     assert own.event.kind == 'closed_blocked' and own.event.actor == row['actor']
+
+
+def test_event_variant_identity_is_typed_and_never_projects_arbitrary_descriptor_data():
+    from app.social.threads import EventEdition, public_variant_label
+    assert set(EventEdition.model_fields) == {'edition_id', 'name', 'set_code', 'collector_number', 'variant_label'}
+    assert EventEdition.model_fields['variant_label'].annotation is str
+    cases = [({}, 'Unspecified Variant'), ({'finish': 'reverse'}, 'Reverse Holo'),
+             ({'type': 'normal', 'stamps': ['first-edition'], 'size': 'standard'}, 'Normal, First Edition'),
+             ({'kind': 'unspecified', 'label': 'ignored'}, 'Unspecified Variant'),
+             ({'label': ' Reviewed foil '}, 'Reviewed foil'),
+             ({'finish': 'holo', 'productId': 'secret', 'location': 'secret',
+               'foil': {'private': 'secret'}, 'stamps': [{'deck': 'secret'}]}, 'Holo')]
+    for descriptor, expected in cases:
+        assert public_variant_label(descriptor) == expected
