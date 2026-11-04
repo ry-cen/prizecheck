@@ -36,23 +36,34 @@ export function ThreadList({
   const root = useRef<HTMLDivElement>(null),
     previous = useRef(selected);
   const restore = useRef<string | null>(null);
+  const reading = useRef<AbortController | null>(null);
   useFirstReadSettled(rows !== null || failed);
-  useReadOnShow(active, failed, () => setAttempt((n) => n + 1));
+  useReadOnShow(active, failed, () => {
+    if (!reading.current) setAttempt((n) => n + 1);
+  });
   useEffect(() => {
     const controller = new AbortController();
-    (kind === "trade" ? getTrades : getLoans)(controller.signal).then(
-      (next) => {
-        if (!controller.signal.aborted) {
-          setRows(next);
-          setFailed(false);
+    reading.current = controller;
+    (kind === "trade" ? getTrades : getLoans)(controller.signal)
+      .then(
+        (next) => {
+          if (!controller.signal.aborted) {
+            setRows(next);
+            setFailed(false);
+          }
+        },
+        () => {
+          if (!controller.signal.aborted && lastRows.current === null)
+            setFailed(true);
         }
-      },
-      () => {
-        if (!controller.signal.aborted && lastRows.current === null)
-          setFailed(true);
-      }
-    );
-    return () => controller.abort();
+      )
+      .finally(() => {
+        if (reading.current === controller) reading.current = null;
+      });
+    return () => {
+      controller.abort();
+      if (reading.current === controller) reading.current = null;
+    };
   }, [kind, attempt, changed, pulse, revision]);
   useEffect(() => {
     if (previous.current && !selected) restore.current = previous.current;

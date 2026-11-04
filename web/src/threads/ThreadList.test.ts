@@ -63,3 +63,42 @@ it("exposes Retry on a failed first load and recovers without a reload", async (
     vi.clearAllMocks();
   }
 });
+it("reuses a quiet read still in flight across another hide and show", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let release!: (rows: []) => void;
+  const held = new Promise<[]>((resolve) => {
+    release = resolve;
+  });
+  vi.mocked(getLoans)
+    .mockResolvedValueOnce([])
+    .mockReturnValueOnce(held)
+    .mockResolvedValue([]);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const props = { kind: "loan" as const, active: true, onOpen: vi.fn() };
+  try {
+    await act(async () => root.render(h(ThreadList, props)));
+    await act(async () =>
+      root.render(h(ThreadList, { ...props, active: false }))
+    );
+    await act(async () => root.render(h(ThreadList, props)));
+    expect(getLoans).toHaveBeenCalledTimes(2);
+    const signal = vi.mocked(getLoans).mock.calls[1][0]!;
+    await act(async () =>
+      root.render(h(ThreadList, { ...props, active: false }))
+    );
+    await act(async () => root.render(h(ThreadList, props)));
+    expect(signal.aborted).toBe(false);
+    expect(getLoans).toHaveBeenCalledTimes(2);
+    await act(async () => release([]));
+    expect(host.textContent).toContain("No Loans yet.");
+    expect(host.querySelector('[role="status"]')).toBeNull();
+  } finally {
+    release([]);
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});
