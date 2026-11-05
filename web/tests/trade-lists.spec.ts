@@ -255,13 +255,13 @@ async function story(
 
   // B: Ash, Misty's Friend, opens her Trade List from her Collection.
   await noArtwork(page);
-  await signInAsOwner(page, "/collection");
-  const ashHandle = await nameCollector(page, "Ash K");
-  await befriend(page, misty.page);
   const audit = await auditPage(page, (url) =>
     url.includes("/api/social/trade-lists/")
   );
   try {
+    await signInAsOwner(page, "/collection");
+    const ashHandle = await nameCollector(page, "Ash K");
+    await befriend(page, misty.page);
     await page.goto(`${ORIGIN}/friends/${mistyHandle}`);
     await page
       .getByRole("main")
