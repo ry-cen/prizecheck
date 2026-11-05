@@ -1,5 +1,5 @@
 import { useLoanCommand } from "./PendingLoanRequest";
-import { LoanTermsEditor } from "./LoanTermsEditor";
+import { LoanTermsEditor as Editor } from "./LoanTermsEditor";
 // @vitest-environment jsdom
 import { act, createElement as h, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -23,9 +23,11 @@ import { createTabContext } from "./loanIntents";
 const threadId = "00000000-0000-4000-8000-000000000099";
 let keepReadView = false;
 let packets: string[] = [];
+let screenData = new Map<string, string>();
 function LoanScreen(props: Parameters<typeof Screen>[0]) {
   const [recovery] = useState(() => {
     const f = fixture();
+    screenData = f.shared.data;
     const fetchImpl: typeof fetch = async (input, init) => {
       if (
         String(input).endsWith("/returns") ||
@@ -48,6 +50,21 @@ function LoanScreen(props: Parameters<typeof Screen>[0]) {
     accountName: "Ana",
     ...recovery,
     children: h(Screen, props),
+  });
+}
+type EditorProps = Omit<Parameters<typeof Editor>[0], "onReread"> & {
+  onReread?: () => void;
+};
+function LoanTermsEditor(props: EditorProps) {
+  const [recovery] = useState(() => ({
+    ports: fixture().ports,
+    tab: createTabContext(),
+  }));
+  return h(LoanRecoveryProvider, {
+    accountId: "A",
+    accountName: "Ana",
+    ...recovery,
+    children: h(Editor, { ...props, onReread: props.onReread ?? vi.fn() }),
   });
 }
 vi.mock("../social_generated", async (original) => ({
@@ -909,6 +926,12 @@ for (const closePath of [
       await act(async () => button("Change terms").click());
       await act(async () => button("Save terms").click());
       const first = JSON.stringify(vi.mocked(editLoanTerms).mock.calls[0]);
+      expect(JSON.parse(first)[1].account_id).toBe("A");
+      expect(
+        [...screenData.keys()].filter((key) =>
+          key.startsWith("prizecheck:loan-intent:v2:")
+        )
+      ).toEqual([]);
       expect(JSON.parse(first)[1].lines).toEqual([
         { edition_id: "iono", quantity: "3" },
       ]);
@@ -958,6 +981,11 @@ for (const closePath of [
           host.querySelector<HTMLInputElement>('input[type="number"]')?.disabled
         ).toBe(true);
         expect(editLoanTerms).toHaveBeenCalledTimes(1);
+        expect(
+          [...screenData.keys()].filter((key) =>
+            key.startsWith("prizecheck:loan-intent:v2:")
+          )
+        ).toEqual([]);
       }
       expect(
         window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
@@ -1215,4 +1243,147 @@ it("a lost write-off owns its round, hides other commands, keeps chat and replay
     vi.clearAllMocks();
     vi.restoreAllMocks();
   }
+});
+
+async function termsHarness(
+  run: (
+    host: HTMLDivElement,
+    button: (name: string) => HTMLButtonElement
+  ) => Promise<void>,
+  screen = false
+) {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(10, 10, 30, 30)
+  );
+  const prototype = HTMLDialogElement.prototype;
+  const descriptors = ["showModal", "close"].map((name) =>
+    Object.getOwnPropertyDescriptor(prototype, name)
+  );
+  Object.defineProperty(prototype, "showModal", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = true;
+    },
+  });
+  Object.defineProperty(prototype, "close", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = false;
+    },
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const current: LoanView = {
+    ...loan,
+    state: "requested",
+    closed_reason: null,
+    closed_by: null,
+    actions: ["edit_and_resend"],
+  };
+  vi.mocked(getLoan).mockReset().mockResolvedValue(current);
+  vi.mocked(getLoanSide).mockResolvedValue({
+    loan_id: "round",
+    deck: null,
+    can_promise: [],
+    picks: [],
+    suggested: [],
+  });
+  const button = (name: string) =>
+    [...host.querySelectorAll("button")].find((b) => b.textContent === name)!;
+  try {
+    await act(async () =>
+      root.render(
+        screen
+          ? h(LoanScreen, {
+              loanId: "item",
+              onCanonicalLoan: vi.fn(),
+              onLoanChanged: vi.fn(),
+              onAllLoans: vi.fn(),
+              onOpenDeck: vi.fn(),
+            })
+          : h(LoanTermsEditor, {
+              loan: current,
+              deckId: null,
+              onClose: vi.fn(),
+              onSave: vi.fn(),
+              canClose: () => true,
+              pending: false,
+              commandMessage: "",
+              pendingRequest: null,
+            })
+      )
+    );
+    if (screen) {
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(
+            '[aria-label="More for this Loan"]'
+          )!
+          .click()
+      );
+      await act(async () => button("Change terms").click());
+    }
+    await run(host, button);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    for (const [i, name] of ["showModal", "close"].entries()) {
+      if (descriptors[i])
+        Object.defineProperty(prototype, name, descriptors[i]!);
+      else Reflect.deleteProperty(prototype, name);
+    }
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  }
+}
+it("a Terms check that fails shows Retry check beside a seen change", async () => {
+  await termsHarness(async (host, button) => {
+    vi.mocked(getLoan).mockResolvedValueOnce({ ...loan, revision: 9 });
+    await act(async () => button("Save terms").click());
+    expect(host.textContent).toContain(
+      "This Loan changed. Close this editor to view the current terms."
+    );
+    vi.mocked(getLoan).mockRejectedValueOnce(new TypeError("lost read"));
+    await act(async () => button("Retry check").click());
+    expect(host.textContent).toContain(
+      "This Loan changed. Close this editor to view the current terms."
+    );
+    expect(host.textContent).toContain(
+      "The Loan could not be checked. Your changes are kept. Retry the check."
+    );
+    expect(button("Save terms").disabled).toBe(true);
+    expect(button("Retry check")).toBeDefined();
+    expect(editLoanTerms).not.toHaveBeenCalled();
+  });
+});
+it("ACCOUNT_CHANGED on Terms says who to sign in as and the Terms body carries the account", async () => {
+  vi.mocked(editLoanTerms)
+    .mockReset()
+    .mockRejectedValueOnce(new SocialError(409, "ACCOUNT_CHANGED"));
+  await termsHarness(async (host, button) => {
+    await act(async () => button("Save terms").click());
+    expect(editLoanTerms).toHaveBeenCalledExactlyOnceWith(
+      "item",
+      expect.objectContaining({
+        account_id: "A",
+        loan_id: "round",
+        revision: 2,
+      })
+    );
+    expect(host.textContent).toContain("Sign in as Ana to finish this.");
+    expect(
+      [...screenData.keys()].filter((key) =>
+        key.startsWith("prizecheck:loan-intent:v2:")
+      )
+    ).toEqual([]);
+  }, true);
 });
