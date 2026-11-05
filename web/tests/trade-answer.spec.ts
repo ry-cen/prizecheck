@@ -1,4 +1,4 @@
-import { responseAudit } from "./support/responseAudit";
+import { auditPage } from "./support/responseAudit";
 import { tradeView } from "./support/trades";
 // Ticket #271: accept, decline or cancel a Trade (Trading spec "Answering a proposal" and "Cancelling a Trade",
 // prototype verdict variant A; owner, 2026-10-20: withdraw, decline and cancel ask first, accept doesn't). Misty sends
@@ -232,13 +232,7 @@ async function story(
       [page, [`${secret} Shelf`, shelf]],
     ] as const
   ).map(([who, theirs]) => {
-    const audit = responseAudit((capture) => {
-      const receive = (response: import("@playwright/test").Response) => {
-        if (/\/api\/(social\/)?trade/.test(response.url())) capture(response);
-      };
-      who.on("response", receive);
-      return () => who.off("response", receive);
-    });
+    const audit = auditPage(who, (url) => /\/api\/(social\/)?trade/.test(url));
     return { audit, secretOf: [...theirs] };
   });
   try {
@@ -413,7 +407,7 @@ async function story(
     }
     expect(readBy.size).toBe(2);
   } finally {
-    for (const { audit } of audits) audit.stop();
+    for (const { audit } of audits) audit.dispose();
   }
 }
 

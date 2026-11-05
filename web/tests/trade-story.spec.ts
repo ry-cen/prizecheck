@@ -1,4 +1,4 @@
-import { responseAudit } from "./support/responseAudit";
+import { auditPage } from "./support/responseAudit";
 import { tradeView } from "./support/trades";
 // Ticket #280 (Trading spec "Testing Decisions", Browser): the whole Stage 1 trade between two Friends, in the browser.
 // Ash marks a binder For trade. Misty uses Ask to trade from the card popup, then proposes from the two-way row on Find
@@ -189,21 +189,14 @@ async function story(
       [page, [ashPlace, binder, box, ashDeck]],
     ] as const
   ).map(([who, theirs]) => {
-    const audit = responseAudit((capture) => {
-      const listener = (response: Response) => {
-        if (/\/api\/(social\/)?trade/.test(response.url()))
-          capture({
-            text: async () => {
-              const text = await response.text();
-              if (/\/api\/trades\/[0-9a-f-]{36}$/.test(response.url()))
-                readTrade.add(theirs[0]);
-              return text;
-            },
-          });
-      };
-      who.on("response", listener);
-      return () => who.off("response", listener);
-    });
+    const audit = auditPage(
+      who,
+      (url) => /\/api\/(social\/)?trade/.test(url),
+      (response) => {
+        if (/\/api\/trades\/[0-9a-f-]{36}$/.test(response.url()))
+          readTrade.add(theirs[0]);
+      }
+    );
     return { audit, secretOf: [...theirs] };
   });
   try {
@@ -708,7 +701,7 @@ async function story(
     }
     expect([...readTrade].sort()).toEqual([ashPlace, mistyPlace].sort());
   } finally {
-    for (const { audit } of audits) audit.stop();
+    for (const { audit } of audits) audit.dispose();
   }
 }
 
