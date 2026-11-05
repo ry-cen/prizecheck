@@ -12,11 +12,11 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 
-from app import card_accepts, deck_list_capture
+from app import card_accepts
 from app.core.art import store
 from app.core.art.urls import route_address
 from app.core.catalog.card_facts import CARD_FACTS, card_facts
-from app.core.decks import contents
+from app.core.decks import contents, deck_list_capture
 from app.core.trading.trade_wants import AVAILABLE
 from app.db import connect
 
