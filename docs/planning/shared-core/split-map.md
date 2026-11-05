@@ -1185,3 +1185,14 @@ below says where each group ended up; the module map in section 1 stays the plan
 - A repository-wide caller scan, including dynamic imports and monkeypatch paths, found no other
   consumer requiring the old path. The root module and its exact ownership row are removed without
   a compatibility shim. Test assertions, architecture rules and API snapshots are unchanged.
+
+**2026-11-05 — Price reads switch relocation (#528)**
+
+- The stdlib-only switch moved byte-for-byte from `app.price_reads` to
+  `app.core.prices.price_reads`, the destination planned in section 1. `PRICE_READS` parsing,
+  defaults and fail-safe behavior are unchanged.
+- Pokémon Public Catalog, Pokémon Prices and `test_prices.py` import the core helper directly;
+  the deployment comment names the new path. Test assertions and deployment configuration are unchanged.
+- A repository-wide caller scan, including dynamic imports, monkeypatch and patch strings, scripts,
+  deploy, auth, workflows, ownership lists and browser specs, found no other consumer requiring the old path.
+  The root module and its exact ownership row are removed without a compatibility shim.

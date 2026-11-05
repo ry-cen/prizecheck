@@ -65,7 +65,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.games.pokemon.prices import prices  # noqa: E402
 from app.core.inventory.bounded_work import Lane, Late  # noqa: E402
-from app.price_reads import price_reads_enabled  # noqa: E402
+from app.core.prices.price_reads import price_reads_enabled  # noqa: E402
 from app.games.pokemon.prices.catalog_targets import MATCHING  # noqa: E402
 from app.public_records import public_record_store, quote_key, result_key  # noqa: E402
 from test_catalog import reset_catalog  # noqa: E402
