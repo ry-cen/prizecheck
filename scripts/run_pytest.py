@@ -18,6 +18,8 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+from local_api_selection import eligible, narrow
+
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = ('pytest-parallel.xml', 'pytest-serial.xml')
 RESERVED_LONG = ('--dist', '--numprocesses', '--max-worker-restart', '--junitxml', '--junit-xml', '--strict-markers')
@@ -104,14 +106,45 @@ def main(argv=None):
         return 2
     logs = Path(os.environ.get('TEST_LOG_DIR') or '.')
     environment = pytest_environment(os.environ, shard)
+    if os.environ.get('VERIFY_ADMISSION_MODE') and narrow(selectors) and not shard:
+        # Only real collection can resolve inherited/parameterized/dynamic markers. This runs no fixtures/tests.
+        # An exclusive run earns evidence; an admitted run repeats collection and fails closed on disagreement.
+        collection = logs / 'admission-collection.json'
+        environment['PYTHONPATH'] = 'scripts:api'
+        environment['VERIFY_ADMISSION_COLLECTION'] = str(collection)
+        command = ['.venv/bin/pytest', '-q', '--strict-markers', '-p', 'no:xdist',
+                   '-p', 'local_admission_pytest', '--collect-only', *selectors]
+        code = subprocess.run(command, cwd=ROOT, env=environment).returncode
+        if code != 0:
+            return code if code is not None else 1
+        report = json.loads(collection.read_text()) if collection.exists() else {}
+        if report.get('version') == 1:
+            report['complete'] = True  # Attest the child exited successfully, not merely that one hook ran.
+            collection.write_text(json.dumps(report, indent=2))
+        if os.environ['VERIFY_ADMISSION_MODE'] == 'api' and not eligible(report):
+            print('Admission collection changed or contains serial cases; rerun exclusively', file=sys.stderr)
+            return 2
+        if os.environ.get('VERIFY_ADMISSION_PREPARE'):
+            return 0
+        environment.pop('VERIFY_ADMISSION_COLLECTION')
+    elif os.environ.get('VERIFY_ADMISSION_PREPARE'):
+        return 2
     codes = []
     for name, command in commands(fast, workers, logs, selectors):
+        if os.environ.get('VERIFY_ADMISSION_MODE') == 'api':
+            # Every actual collection, including each xdist worker, refuses serial tests before executing fixtures.
+            environment['PYTHONPATH'] = 'scripts:api'
+            command[1:1] = ['-p', 'local_admission_pytest']
         print(f'== pytest {name} pass{f" (shard {shard})" if shard else ""}: {" ".join(command)}', flush=True)
         codes.append(subprocess.run(command, cwd=ROOT, env=environment).returncode)
     counts = junit_counts([logs / report for report in REPORTS])
     print(f"== pytest total: {counts['passed']} passed, {counts['failed']} failed, {counts['errors']} errors, "
           f"{counts['skipped']} skipped (both passes)", flush=True)
-    return combined_status(codes)
+    status = combined_status(codes)
+    if status is None or (status == 0 and any(not (logs / report).is_file() for report in REPORTS)):
+        print('run_pytest: missing pytest exit status or JUnit report', file=sys.stderr)
+        return 1
+    return status
 
 
 if __name__ == '__main__':
