@@ -1,4 +1,4 @@
-import type { Frame, Page, Request, Response } from "@playwright/test";
+import type { Page, Request, Response } from "@playwright/test";
 
 type ReadableResponse = { text: () => Promise<string> };
 
@@ -44,7 +44,10 @@ export function routeShape(info: RequestInfo): string {
  * inspected same-route floor. Live requests remain owed; an observed body read
  * owns its outcome over transport events. Sealing closes admission, finished
  * commits proof, and disposal abandons it. All owned reads stay bounded. */
-export function responseAudit(subscribe: (events: Events) => () => void) {
+export function responseAudit(
+  subscribe: (events: Events) => () => void,
+  onSeal: () => void = () => {}
+) {
   const requests = new Map<object, Entry>();
   const aborted: { request: object; reason: string }[] = [];
   let phase: Phase = "open";
@@ -164,6 +167,7 @@ export function responseAudit(subscribe: (events: Events) => () => void) {
     if (phase !== "open") return;
     phase = "sealed";
     armDeadline();
+    onSeal();
   };
   const dispose = () => {
     if (phase === "finished" || phase === "disposed") {
@@ -252,65 +256,130 @@ export function responseAudit(subscribe: (events: Events) => () => void) {
   };
 }
 
-/** Keep each story's request predicate and successful-detail identity proof. */
+export type TrackedRequest = { key: string; loaderId: string };
+
+export function undelivered<T>(
+  waiting: { request: T; key: string }[],
+  inflight: Iterable<TrackedRequest>,
+  live: ReadonlySet<string>
+): T[] {
+  const dead = new Map<string, number>();
+  const alive = new Set<string>();
+  for (const { key, loaderId } of inflight) {
+    if (loaderId && !live.has(loaderId))
+      dead.set(key, (dead.get(key) ?? 0) + 1);
+    else alive.add(key);
+  }
+  const groups = new Map<string, T[]>();
+  for (const { request, key } of waiting) {
+    const group = groups.get(key) ?? [];
+    group.push(request);
+    groups.set(key, group);
+  }
+  return [...groups].flatMap(([key, group]) =>
+    !alive.has(key) && group.length === dead.get(key) ? group : []
+  );
+}
+
+/** Chromium loaderId identifies each document. Retire a whole METHOD URL key
+ * only when no tracked live/unknown loader owns it and waiting identities exactly
+ * match its dead-loader count. Public framenavigated/domcontentloaded events lack
+ * document identity and must never classify a request. Keep each story's request
+ * predicate and successful-detail identity proof. */
 export function auditPage(
   page: Page,
   include: (url: string) => boolean,
   onBody?: (response: Response) => void
 ) {
-  return responseAudit((events) => {
-    const isMainDocument = (request: Request) => {
-      if (!request.isNavigationRequest()) return false;
-      try {
-        return request.frame() === page.mainFrame();
-      } catch {
-        return false;
-      }
+  const inflight = new Map<string, TrackedRequest>();
+  let live: Set<string> | undefined;
+  let classify = () => {};
+  let reported = false;
+  const unavailable = (error: unknown) => {
+    live = undefined;
+    if (!reported) {
+      reported = true;
+      console.info(
+        `privacy audit document identity unavailable: ${String(error)}`
+      );
+    }
+  };
+  const session = page.context().newCDPSession(page);
+  const ready = session.then(async (cdp) => {
+    cdp.on("Network.requestWillBeSent", ({ requestId, loaderId, request }) => {
+      const url = request.url + (request.urlFragment ?? "");
+      if (include(url))
+        inflight.set(requestId, { key: `${request.method} ${url}`, loaderId });
+    });
+    const end = ({ requestId }: { requestId: string }) => {
+      inflight.delete(requestId);
+      classify();
     };
-    let navigating: string | undefined;
-    let cut: object[] | undefined;
-    const navigated = (frame: Frame) => {
-      if (frame !== page.mainFrame() || frame.url() !== navigating || cut)
-        return;
-      cut = events.awaitingHeaders();
-    };
-    const loaded = () => {
-      if (!cut) return;
-      events.documentReplaced(cut);
-      cut = navigating = undefined;
-    };
-    const started = (request: Request) => {
-      if (isMainDocument(request)) {
-        navigating = request.url();
-        cut = undefined;
-      }
-      if (include(request.url()))
-        events.started(request, {
-          method: request.method(),
-          url: request.url(),
-        });
-    };
-    const receive = (response: Response) =>
-      events.response(response.request(), {
-        text: async () => {
-          const body = await response.text();
-          onBody?.(response);
-          return body;
-        },
-      });
-    const failed = (request: Request) =>
-      events.failed(request, request.failure()?.errorText ?? null);
-    page.on("framenavigated", navigated);
-    page.on("domcontentloaded", loaded);
-    page.on("request", started);
-    page.on("response", receive);
-    page.on("requestfailed", failed);
-    return () => {
-      page.off("framenavigated", navigated);
-      page.off("domcontentloaded", loaded);
-      page.off("request", started);
-      page.off("response", receive);
-      page.off("requestfailed", failed);
-    };
+    cdp.on("Network.responseReceived", end);
+    cdp.on("Network.loadingFailed", end);
+    await cdp.send("Network.enable", {
+      maxTotalBufferSize: 0,
+      maxResourceBufferSize: 0,
+    });
   });
+  void ready.catch(unavailable);
+  const audit = responseAudit(
+    (events) => {
+      classify = () => {
+        if (!live) return;
+        const waiting = (events.awaitingHeaders() as Request[]).map(
+          (request) => ({
+            request,
+            key: `${request.method()} ${request.url()}`,
+          })
+        );
+        events.documentReplaced(undelivered(waiting, inflight.values(), live));
+      };
+      const started = (request: Request) => {
+        if (include(request.url()))
+          events.started(request, {
+            method: request.method(),
+            url: request.url(),
+          });
+      };
+      const receive = (response: Response) => {
+        events.response(response.request(), {
+          text: async () => {
+            const body = await response.text();
+            onBody?.(response);
+            return body;
+          },
+        });
+        classify();
+      };
+      const failed = (request: Request) => {
+        events.failed(request, request.failure()?.errorText ?? null);
+        classify();
+      };
+      page.on("request", started);
+      page.on("response", receive);
+      page.on("requestfailed", failed);
+      return () => {
+        page.off("request", started);
+        page.off("response", receive);
+        page.off("requestfailed", failed);
+        void session.then((cdp) => cdp.detach()).catch(() => {});
+      };
+    },
+    () => {
+      void (async () => {
+        await ready;
+        const cdp = await session;
+        const { frameTree } = await cdp.send("Page.getFrameTree");
+        type Tree = { frame: { loaderId: string }; childFrames?: Tree[] };
+        const loaders = (tree: Tree): string[] => [
+          tree.frame.loaderId,
+          ...(tree.childFrames ?? []).flatMap(loaders),
+        ];
+        live = new Set(loaders(frameTree));
+        classify();
+      })().catch(unavailable);
+    }
+  );
+  return Object.assign(audit, { ready });
 }
