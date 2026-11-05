@@ -454,3 +454,60 @@ export function loanDeckUseHint(
     parts.push(`Your Decks still need ${need}.`);
   return parts.join(" ") || null;
 }
+
+export const RECOVERY_TEXT = Object.freeze({
+  lend_offer: "Your Lend Offer may not have been sent.",
+  borrow_request: "Your Borrow Request may not have been sent.",
+  move_borrowed: "Your Move of borrowed cards may not have finished.",
+  start_return: "Your return may not have been started.",
+  write_off: "Your Write-off may not have been saved.",
+  all: "A Loan change may not have gone through.",
+  replay: "Send it again",
+  cancel: "Don't send it",
+  check: "Check again",
+  done: "It was sent.",
+  voided: "It wasn't sent.",
+  otherAccount:
+    "This may have been sent from another account. Check your Loans there.",
+  signIn: "Sign in as {name} to finish this.",
+  signBackIn: "Sign back in to finish this.",
+  busy: "This is being checked in another tab. Try again in a moment.",
+  not_saved:
+    "This couldn't be saved on this device, so it wasn't sent. Check your browser's settings for this site, then try again.",
+  no_locks:
+    "This browser can't send this safely. Update your browser, then try again.",
+  settled_elsewhere: "This was already checked.",
+  blockedDraft:
+    "Your Borrow Request to {name} may not have been sent. Review it first.",
+});
+export function pendingHeadline(
+  kind: import("./loanAttempt").DurableKind | null
+): string {
+  return kind === null ? RECOVERY_TEXT.all : RECOVERY_TEXT[kind];
+}
+export function signInAs(name: string | null): string {
+  return name === null
+    ? RECOVERY_TEXT.signBackIn
+    : RECOVERY_TEXT.signIn.replace("{name}", name);
+}
+export function resultText(
+  outcome: import("./loanIntents").FlowOutcome
+): string | null {
+  switch (outcome.kind) {
+    case "done":
+      return RECOVERY_TEXT.done;
+    case "voided":
+      return outcome.otherAccount
+        ? RECOVERY_TEXT.otherAccount
+        : RECOVERY_TEXT.voided;
+    case "not_sent":
+      return RECOVERY_TEXT.voided;
+    case "busy":
+    case "not_saved":
+    case "no_locks":
+    case "settled_elsewhere":
+      return RECOVERY_TEXT[outcome.kind];
+    default:
+      return null;
+  }
+}
