@@ -1,4 +1,4 @@
-import { responseAudit } from "./support/responseAudit";
+import { auditPage } from "./support/responseAudit";
 // Ticket #276, on the proposal builder of #284: Find trades among Friends and Ask to trade (Trading spec "Finding
 // matches" and "Card popup: Ask to trade", prototype verdict variant A). Misty wants Ash's Arven (a Deck line and Trade
 // Wants) and his Reverse Holo Boss's Orders (a Deck line that takes any finish), and Ash's Deck wants her Iono: a
@@ -234,13 +234,7 @@ async function story(
   await befriend(page, ash.page);
   await befriend(page, brock.page);
   // Everything about Trades that reaches Misty's browser, to check it never names a Location or a Deck.
-  const audit = responseAudit((capture) => {
-    const receive = (response: import("@playwright/test").Response) => {
-      if (/\/api\/social\/trade/.test(response.url())) capture(response);
-    };
-    page.on("response", receive);
-    return () => page.off("response", receive);
-  });
+  const audit = auditPage(page, (url) => /\/api\/social\/trade/.test(url));
   try {
     // A: Find trades, from the Trades tab's switch. Ash's two-way row comes first; Brock's one-way row has no tag.
     await page.goto(`${ORIGIN}/trades`);
@@ -523,7 +517,7 @@ async function story(
       ])
         expect(body).not.toContain(word);
   } finally {
-    audit.stop();
+    audit.dispose();
   }
 }
 

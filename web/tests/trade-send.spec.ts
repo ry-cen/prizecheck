@@ -1,4 +1,4 @@
-import { responseAudit } from "./support/responseAudit";
+import { auditPage } from "./support/responseAudit";
 // Ticket #270, on the proposal builder of #284: send a Friend a Trade Proposal and withdraw it (Trading spec "Trade
 // Proposals and the state model"). Misty opens the proposal builder from Ash's Trade List page and adds his Arven from
 // his Trade List, raises it with the stepper, and adds her own Iono from My Trade List. She sends the swap after a
@@ -205,13 +205,9 @@ async function story(
   await befriend(page, ash.page);
   await befriend(page, brock.page);
   // Everything about Trades that reaches Ash's browser, to check it never names one of Misty's Locations.
-  const audit = responseAudit((capture) => {
-    const receive = (response: import("@playwright/test").Response) => {
-      if (/\/api\/(social\/)?trade/.test(response.url())) capture(response);
-    };
-    ash.page.on("response", receive);
-    return () => ash.page.off("response", receive);
-  });
+  const audit = auditPage(ash.page, (url) =>
+    /\/api\/(social\/)?trade/.test(url)
+  );
   try {
     // A: Misty opens the builder from Ash's Trade List (no Add there), adds his Arven from his list and her Iono from hers.
     await page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
@@ -503,7 +499,7 @@ async function story(
       expect(body).not.toContain(binder);
     }
   } finally {
-    audit.stop();
+    audit.dispose();
   }
 }
 
