@@ -80,7 +80,7 @@ test("Loans keep a stable queue, canonical selection and open forms across width
       fullPage: true,
     });
   }
-  // F495-01: below the sticky height, reverse Tab must clear the header after the real queue moves under it.
+  // below the sticky height, reverse Tab must clear the header after the real queue moves under it.
   await page.setViewportSize({ width: 1440, height: 699 });
   const queue = main.locator(".list-detail-queue");
   await expect(queue).toHaveCSS("position", "static");

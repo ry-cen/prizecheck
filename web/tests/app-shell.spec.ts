@@ -1313,7 +1313,7 @@ test("desktop focus clearance is limited to the app shell", async ({
 
   await filters.getByRole("button", { name: "Any set", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Choose a set" });
-  const setFilter = dialog.getByRole("textbox", { name: "Filter sets" });
+  const setFilter = dialog.getByRole("searchbox", { name: "Filter sets" });
   await expect(setFilter).toBeFocused();
   expect((await clearance(page)).visible).toBe(true);
   inactive(await clearance(page));
@@ -1329,7 +1329,7 @@ test("desktop focus clearance is limited to the app shell", async ({
 
   const deck = await createDeck(page, `Focus clearance ${randomUUID()}`);
   await page.goto(`${ORIGIN}/decks/${deck}`);
-  const librarySearch = page.getByRole("textbox", {
+  const librarySearch = page.getByRole("searchbox", {
     name: "Search the library",
   });
   await page.keyboard.press("Tab");
