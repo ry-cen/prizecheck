@@ -676,3 +676,137 @@ def test_retired_borrow_replacement_field_stays_rejected(store):
     before = snapshot()
     assert send(borrower, body).status_code == 422
     assert snapshot() == before
+
+
+# Frozen pre-thread wire answer: deliberately not constructed from current LoanView.
+LEGACY_SEND_RECEIPT = """{
+  "id":"00000000-0000-4000-8000-000000000001", "kind":"borrow_request",
+  "state":"requested", "closed_reason":null, "closed_by":null, "role":"borrower",
+  "other":{"collector_id":"old-lender","display_name":"Misty","handle":"misty"},
+  "return_by":null, "you_confirmed_handover":false, "they_confirmed_handover":false,
+  "lines":[{"edition_id":"00000000-0000-4000-8000-000000000002", "name":"Iono",
+    "set_code":"PAL", "set_name":"Paldea Evolved", "collector_number":"185",
+    "descriptor":{}, "image_url":null, "requested":"1", "promised":"0", "written_off":"0"}],
+  "needs_you":false, "section":"pending", "actions":["withdraw","edit_and_resend"], "revision":1
+}"""
+LEGACY_OFFER_RECEIPT = """{
+  "id":"00000000-0000-4000-8000-000000000001", "kind":"lend_offer",
+  "state":"offered", "closed_reason":null, "closed_by":null, "role":"lender",
+  "other":{"collector_id":"old-borrower","display_name":"Ash","handle":"ash"},
+  "return_by":null, "you_confirmed_handover":false, "they_confirmed_handover":false,
+  "lines":[{"edition_id":"00000000-0000-4000-8000-000000000002", "name":"Iono",
+    "set_code":"PAL", "set_name":"Paldea Evolved", "collector_number":"185",
+    "descriptor":{}, "image_url":null, "requested":"1", "promised":"1", "written_off":"0"}],
+  "needs_you":false, "section":"pending", "actions":["withdraw"], "revision":1
+}"""
+
+
+@pytest.mark.parametrize('route', ['borrow', 'offer'])
+@pytest.mark.parametrize('state', ['current', 'pending_return', 'unavailable'])
+def test_historical_send_receipt_reads_current_view_without_writes(store, route, state):
+    borrower, lender, edition, source = setup_send()
+    path, body = route_body(route, lender, edition, source, uuid4())
+    owner = borrower
+    if route == 'offer':
+        owner = lender
+        body['borrower_id'] = borrower
+    first = ok(call('POST', path, owner, body), 201)
+    if state == 'pending_return':
+        if route == 'borrow':
+            accepted = ok(accept(lender, first, [(edition, 1)]))
+        else:
+            accepted = ok(call('POST', f"/api/loans/{first['thread_id']}/accept-offer", borrower, {
+                'loan_id': first['loan_id'], 'revision': first['revision'], 'idempotency_key': str(uuid4()),
+                'lines': [{'edition_id': edition, 'promised': '1'}]}))
+        from test_loans import step
+        ok(step(lender, accepted, 'handover'))
+        current = view(borrower, first)
+        ok(step(borrower, current, 'handover'))
+        current = view(owner, first)
+        ok(call('POST', f"/api/loans/{first['thread_id']}/returns", owner, {
+            'loan_id': first['loan_id'], 'revision': current['revision'], 'idempotency_key': str(uuid4()),
+            'lines': [{'edition_id': edition, 'quantity': '1'}]}))
+    historical = json.loads(LEGACY_SEND_RECEIPT if route == 'borrow' else LEGACY_OFFER_RECEIPT)
+    historical['id'] = first['loan_id'] if state != 'unavailable' else str(uuid4())
+    historical_model = DevSendBorrowRequest if route == 'borrow' else DevSendLendOffer
+    old_payload = {'action': 'loan_send' if route == 'borrow' else 'loan_offer',
+                   **historical_model.model_validate(body).model_dump(mode='json', exclude={'idempotency_key'})}
+    old_digest = hashlib.sha256(json.dumps(old_payload, sort_keys=True, default=str).encode()).hexdigest()
+    with connect() as conn:
+        conn.execute('UPDATE location_command SET response=%s::jsonb, request_digest=%s '
+                     'WHERE owner_id=%s AND request_key=%s',
+                     (json.dumps(historical), old_digest, owner, body['idempotency_key']))
+    expected = view(owner, first)
+    before = snapshot()
+    response = call('POST', path, owner, {**body, 'account_id': owner})
+    if state == 'unavailable':
+        refused(response, 'ALREADY_APPLIED')
+    else:
+        assert ok(response, 201) == expected
+        assert expected['thread_id'] == first['thread_id']
+        if state == 'pending_return':
+            assert expected['pending_return']['return_id']
+    assert snapshot() == before
+    assert receipt(owner, body['idempotency_key'])['response'] == historical
+
+
+def test_legacy_send_projection_leaves_current_bytes_and_non_404_errors_alone(monkeypatch):
+    current = {'thread_id': 'current', 'unknown_future_field': ['unchanged']}
+    assert loan_inventory.legacy_loan_view(None, 'me', current) is current
+    def failed(*_):
+        raise HTTPException(503, {'code': 'UNAVAILABLE'})
+    monkeypatch.setattr(loans, 'loan_view', failed)
+    with pytest.raises(HTTPException) as caught:
+        loan_inventory.legacy_loan_view(None, 'me', json.loads(LEGACY_SEND_RECEIPT))
+    assert caught.value.status_code == 503
+
+
+@pytest.mark.parametrize('action,model,body,golden', [
+    ('loan_send', loan_inventory.SendBorrowRequest,
+     {'lender_id': 'legacy-lender', 'lines': [{'edition_id': '00000000-0000-4000-8000-000000000002', 'quantity': '1'}]},
+     'e82a72612644f6a1f9540aa6305474cc8a305c0e13a69b27c499ec55d0bb0de6'),
+    ('loan_offer', loan_inventory.SendLendOffer,
+     {'borrower_id': 'legacy-borrower', 'copies': [{'edition_id': '00000000-0000-4000-8000-000000000002',
+       'location_id': '00000000-0000-4000-8000-000000000003', 'quantity': '1'}]},
+     '7cb95813bf1520289a74095b2be27a029648c5beeb776e4dd5e27f64683355f8'),
+])
+def test_two_send_historical_fingerprints_are_literal_goldens(action, model, body, golden):
+    command = model.model_validate({**body, 'idempotency_key': '00000000-0000-4000-8000-000000000004'})
+    payload = {'action': action, **command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'})}
+    if action == 'loan_send':
+        payload['replaces'] = None
+    assert hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest() == golden
+
+
+@pytest.mark.parametrize('replaces', [None, '00000000-0000-4000-8000-000000000001'])
+def test_old_borrow_wire_and_step_stay_strict_after_an_applied_send(store, replaces):
+    borrower, lender, edition, _ = setup_send()
+    body = borrow_body(lender, edition)
+    first = ok(send(borrower, body), 201)
+    before = snapshot()
+    assert send(borrower, {**body, 'replaces': replaces}).status_code == 422
+    assert call('POST', f"/api/loans/{first['thread_id']}/withdraw", borrower,
+                {'revision': first['revision'], 'idempotency_key': str(uuid4())}).status_code == 422
+    assert ok(void(borrower, body['idempotency_key']))['outcome'] == 'applied'
+    refused(send(borrower, {**body, 'account_id': lender}), 'ACCOUNT_CHANGED')
+    assert snapshot() == before
+
+
+def test_legacy_send_projection_reads_the_historical_id_and_maps_only_not_found(monkeypatch):
+    from types import SimpleNamespace
+    stored = json.loads(LEGACY_SEND_RECEIPT)
+    expected = {'thread_id': 'current-item', 'pending_return': {'return_id': 'current-return'}}
+    connection = object()
+    def project(conn, owner, identifier):
+        assert conn is connection and owner == 'me' and identifier == UUID(stored['id'])
+        return SimpleNamespace(model_dump=lambda **kwargs: expected if kwargs == {'mode': 'json'} else None)
+    monkeypatch.setattr(loans, 'loan_view', project)
+    assert loan_inventory.legacy_loan_view(connection, 'me', stored) == expected
+    assert 'thread_id' not in stored and stored['other']['handle'] == 'misty'
+    def inaccessible(*_):
+        raise HTTPException(404, {'code': 'LOAN_NOT_FOUND'})
+    monkeypatch.setattr(loans, 'loan_view', inaccessible)
+    with pytest.raises(HTTPException) as caught:
+        loan_inventory.legacy_loan_view(connection, 'me', stored)
+    assert caught.value.status_code == 409
+    assert caught.value.detail['code'] == 'ALREADY_APPLIED'
