@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { Frame, Page, Request, Response } from "@playwright/test";
+import type { CDPSession, Page, Request, Response } from "@playwright/test";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   AUDIT_DRAIN_TIMEOUT_MS,
@@ -7,6 +7,7 @@ import {
   auditPage,
   routeShape,
   responseAudit,
+  undelivered,
 } from "../../tests/support/responseAudit";
 
 afterEach(() => vi.useRealTimers());
@@ -639,223 +640,402 @@ it("a replacement only touches the identities it was given", async () => {
   );
 });
 
-// Planner cases 18–28: public Playwright event pairing, using its EventEmitter fake.
-function adapterFixture() {
-  let url = "https://test/one";
-  const main = { url: () => url } as Frame;
-  const page = Object.assign(new EventEmitter(), { mainFrame: () => main });
+// WP-2 replaces navigation-event pairing with exact document-identity accounting.
+it.each([
+  {
+    name: "all dead, exact count",
+    waiting: ["x", "x"],
+    tracked: [
+      ["x", "dead"],
+      ["x", "dead"],
+    ],
+    expected: [0, 1],
+  },
+  {
+    name: "older live, newer dead",
+    waiting: ["x", "x"],
+    tracked: [
+      ["x", "live"],
+      ["x", "dead"],
+    ],
+    expected: [],
+  },
+  {
+    name: "untracked waiting request",
+    waiting: ["x", "x"],
+    tracked: [["x", "dead"]],
+    expected: [],
+  },
+  {
+    name: "more tracked than waiting",
+    waiting: ["x"],
+    tracked: [
+      ["x", "dead"],
+      ["x", "dead"],
+    ],
+    expected: [],
+  },
+  {
+    name: "unknown loader",
+    waiting: ["x", "x"],
+    tracked: [
+      ["x", ""],
+      ["x", "dead"],
+    ],
+    expected: [],
+  },
+  {
+    name: "independent keys",
+    waiting: ["x", "y"],
+    tracked: [
+      ["x", "dead"],
+      ["y", "live"],
+    ],
+    expected: [0],
+  },
+])("undelivered: $name", ({ waiting, tracked, expected }) => {
+  expect(
+    undelivered(
+      waiting.map((key, request) => ({ key, request })),
+      tracked.map(([key, loaderId]) => ({ key, loaderId })),
+      new Set(["live"])
+    )
+  ).toEqual(expected);
+});
+
+const flushIdentity = async () => {
+  for (let turn = 0; turn < 8; turn++) await Promise.resolve();
+};
+type FrameTree = { frame: { loaderId: string }; childFrames?: FrameTree[] };
+function adapterFixture(
+  options: {
+    rejectSession?: boolean;
+    tree?: () => Promise<{ frameTree: FrameTree }>;
+  } = {}
+) {
+  const cdp = Object.assign(new EventEmitter(), {
+    send: vi.fn(async (method: string) => {
+      if (method === "Page.getFrameTree")
+        return options.tree
+          ? options.tree()
+          : { frameTree: { frame: { loaderId: "live" } } };
+      return undefined;
+    }),
+    detach: vi.fn(async () => {}),
+  });
+  const newCDPSession = vi.fn(() =>
+    options.rejectSession
+      ? Promise.reject(new Error("CDP unavailable"))
+      : Promise.resolve(cdp as unknown as CDPSession)
+  );
+  const page = Object.assign(new EventEmitter(), {
+    context: () => ({ newCDPSession }),
+  });
   const seen = vi.fn();
   const audit = auditPage(
     page as unknown as Page,
     (value) => /\/api\/trades(?:[/?]|$)/.test(value),
     seen
   );
+  let serial = 0;
+  const ids = new Map<Request, string>();
   const request = (
     value = info.url,
-    options: {
-      navigation?: boolean;
-      frame?: Frame;
-      throws?: boolean;
-      method?: string;
-      reason?: string;
-    } = {}
+    method = "GET",
+    reason = "net::ERR_ABORTED"
   ) =>
     ({
       url: () => value,
-      method: () => options.method ?? "GET",
-      isNavigationRequest: () => options.navigation ?? false,
-      frame: () => {
-        if (options.throws) throw new Error("frame not yet known");
-        return options.frame ?? main;
-      },
-      failure: () => (options.reason ? { errorText: options.reason } : null),
+      method: () => method,
+      failure: () => ({ errorText: reason }),
     }) as Request;
-  const response = (req: Request, text: () => Promise<string>) =>
-    ({ request: () => req, text, url: req.url }) as Response;
-  const start = (req: Request) => {
+  const track = (req: Request, loaderId: string, id = String(++serial)) => {
+    ids.set(req, id);
+    cdp.emit("Network.requestWillBeSent", {
+      requestId: id,
+      loaderId,
+      request: { method: req.method(), url: req.url() },
+    });
+    return id;
+  };
+  const start = (req = request(), loaderId: string | null = "live") => {
+    if (loaderId !== null) track(req, loaderId);
     page.emit("request", req);
     return req;
   };
-  const navigate = (value: string) =>
-    start(request(value, { navigation: true }));
-  const commit = (value: string, frame = main) => {
-    url = value;
-    page.emit("framenavigated", frame);
-  };
-  const loaded = () => page.emit("domcontentloaded");
   const body = (req: Request, value = "public terms") =>
-    page.emit(
-      "response",
-      response(req, async () => value)
-    );
+    page.emit("response", {
+      request: () => req,
+      text: async () => value,
+      url: req.url,
+    } as Response);
+  const end = (req: Request, failed = false) =>
+    cdp.emit(failed ? "Network.loadingFailed" : "Network.responseReceived", {
+      requestId: ids.get(req),
+    });
   const prime = async (label = info) => {
-    const req = start(request(label.url, { method: label.method }));
+    const req = start(request(label.url, label.method));
+    end(req);
     body(req);
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushIdentity();
   };
   return {
+    cdp,
     page,
-    main,
-    audit,
     seen,
+    audit,
+    newCDPSession,
     request,
-    response,
+    track,
     start,
-    navigate,
-    commit,
-    loaded,
     body,
+    end,
     prime,
   };
 }
 
-it("a committed main-frame navigation releases an unanswered request", async () => {
+it("a dead loader releases an unanswered request at seal", async () => {
   vi.useFakeTimers();
   vi.spyOn(console, "info").mockImplementation(() => {});
   const f = adapterFixture();
+  await f.audit.ready;
   await f.prime();
-  const req = f.start(f.request());
-  f.navigate("https://test/two");
-  f.commit("https://test/two");
-  f.loaded();
+  const req = f.start(f.request(), "dead");
   await expect(f.audit.finish()).resolves.toEqual(["public terms"]);
   expect(f.audit.abortedRequests).toEqual([
     { request: req, reason: DOCUMENT_REPLACED },
   ]);
   expect(vi.getTimerCount()).toBe(0);
+  expect(
+    f.cdp.send.mock.calls.filter(([method]) => method === "Page.getFrameTree")
+  ).toHaveLength(1);
 });
-it("a request issued between navigation start and commit is released", async () => {
+it("a request issued after navigation began is released by its loader", async () => {
   vi.spyOn(console, "info").mockImplementation(() => {});
-  const f = adapterFixture(),
-    label = { method: "POST", url: "https://test/api/trades/item/read" };
+  const f = adapterFixture();
+  await f.audit.ready;
+  const label = { method: "POST", url: "https://test/api/trades/item/read" };
   await f.prime(label);
-  f.navigate("https://test/two");
-  const req = f.start(f.request(label.url, { method: "POST" }));
-  f.commit("https://test/two");
-  f.loaded();
+  f.page.emit("request", f.request("https://test/two"));
+  const req = f.start(f.request(label.url, label.method), "dead");
   await expect(f.audit.finish()).resolves.toEqual(["public terms"]);
   expect(f.audit.abortedRequests).toEqual([
     { request: req, reason: DOCUMENT_REPLACED },
   ]);
 });
-it("a redirect chain commits on its final hop", async () => {
-  vi.spyOn(console, "info").mockImplementation(() => {});
-  const f = adapterFixture();
-  await f.prime();
-  const req = f.start(f.request());
-  f.navigate("https://test/redirect");
-  f.navigate("https://test/final");
-  f.commit("https://test/final");
-  f.loaded();
-  await expect(f.audit.finish()).resolves.toEqual(["public terms"]);
-  expect(f.audit.abortedRequests).toEqual([
-    { request: req, reason: DOCUMENT_REPLACED },
-  ]);
-});
-it("a same-document navigation releases nothing", async () => {
+it("an unchanged loader keeps its request owed", async () => {
   vi.useFakeTimers();
   const f = adapterFixture();
-  f.start(f.request());
-  f.commit("https://test/one#fragment");
-  const final = f.audit.finish().catch((error) => error);
+  await f.audit.ready;
+  f.start();
+  f.page.emit("framenavigated", {});
+  f.page.emit("domcontentloaded");
+  const proof = f.audit.finish().catch((error) => error);
   await vi.advanceTimersByTimeAsync(AUDIT_DRAIN_TIMEOUT_MS);
-  expect(String(await final)).toContain("(awaiting headers)");
-});
-it("a navigation that never commits releases nothing", async () => {
-  vi.useFakeTimers();
-  const f = adapterFixture();
-  f.start(f.request());
-  f.navigate("https://test/two");
-  f.commit("https://test/different");
-  f.loaded();
-  const final = f.audit.finish().catch((error) => error);
-  await vi.advanceTimersByTimeAsync(AUDIT_DRAIN_TIMEOUT_MS);
-  expect(String(await final)).toContain("(awaiting headers)");
-});
-it("a same-URL pushState during a failed navigation releases nothing", async () => {
-  vi.useFakeTimers();
-  const f = adapterFixture(),
-    req = f.start(f.request());
-  const nav = f.navigate("https://test/nocontent");
-  f.commit("https://test/nocontent");
-  f.page.emit("requestfailed", nav);
-  f.audit.stop();
-  expect(vi.getTimerCount()).toBe(1);
-  f.body(req, "private body in the still-live document");
-  await expect(f.audit.finish()).resolves.toEqual([
-    "private body in the still-live document",
-  ]);
+  expect(String(await proof)).toContain("(awaiting headers)");
   expect(f.audit.abortedRequests).toEqual([]);
 });
-it.each([false, true])(
-  "a subframe navigation releases nothing (unknown frame=%s)",
-  async (unknown) => {
-    vi.useFakeTimers();
-    const f = adapterFixture();
-    f.start(f.request());
-    const child = { url: () => "https://test/child" } as Frame;
-    f.start(
-      f.request("https://test/child", {
-        navigation: true,
-        frame: child,
-        throws: unknown,
-      })
+it.each(["before", "after", "iframe"])(
+  "WR-05: %s old DOMContentLoaded keeps the surviving document's body owed",
+  async (order) => {
+    // Port of exclusion.test.ts: failed navigation on either side of the old
+    // lifecycle event, plus the surviving child-document schedule.
+    const f = adapterFixture(
+      order === "iframe"
+        ? {
+            tree: async () => ({
+              frameTree: {
+                frame: { loaderId: "live" },
+                childFrames: [{ frame: { loaderId: "child" } }],
+              },
+            }),
+          }
+        : {}
     );
-    f.commit("https://test/child", unknown ? f.main : child);
-    f.loaded();
-    const final = f.audit.finish().catch((error) => error);
-    await vi.advanceTimersByTimeAsync(AUDIT_DRAIN_TIMEOUT_MS);
-    expect(String(await final)).toContain("(awaiting headers)");
+    await f.audit.ready;
+    await f.prime();
+    const live = f.start(f.request(), order === "iframe" ? "child" : "live");
+    const nav = f.request("https://test/nocontent");
+    f.page.emit("request", nav);
+    f.page.emit("framenavigated", { url: () => nav.url() });
+    if (order !== "after") f.page.emit("requestfailed", nav);
+    f.page.emit("domcontentloaded");
+    if (order === "after") f.page.emit("requestfailed", nav);
+    let settled = false;
+    const proof = f.audit.finish().then((bodies) => {
+      settled = true;
+      return bodies;
+    });
+    await flushIdentity();
+    expect(settled).toBe(false);
+    f.end(live);
+    f.body(live, "counterpart private Location after old DOMContentLoaded");
+    expect(await proof).toEqual([
+      "public terms",
+      "counterpart private Location after old DOMContentLoaded",
+    ]);
+    expect(f.audit.abortedRequests).toEqual([]);
+    expect(f.seen).toHaveBeenCalledTimes(2);
   }
 );
-it("a request admitted between commit and domcontentloaded stays owed", async () => {
-  vi.useFakeTimers();
+it("a new document's request stays owed", async () => {
   const f = adapterFixture();
+  await f.audit.ready;
   await f.prime();
-  f.start(f.request());
-  f.navigate("https://test/two");
-  f.commit("https://test/two");
-  f.start(f.request());
-  f.loaded();
-  const final = f.audit.finish().catch((error) => error);
-  await vi.advanceTimersByTimeAsync(AUDIT_DRAIN_TIMEOUT_MS);
-  expect(String(await final)).toContain("(awaiting headers)");
+  const old = f.start(f.request(), "dead"),
+    live = f.start();
+  f.page.emit("framenavigated", {});
+  f.page.emit("domcontentloaded");
+  let settled = false;
+  const proof = f.audit.finish().then((bodies) => {
+    settled = true;
+    return bodies;
+  });
+  await flushIdentity();
+  expect(settled).toBe(false);
+  f.end(live);
+  f.body(live, "new-document private body");
+  expect(await proof).toEqual(["public terms", "new-document private body"]);
+  expect(f.audit.abortedRequests).toEqual([
+    { request: old, reason: DOCUMENT_REPLACED },
+  ]);
 });
-it("a same-URL replaceState after the commit adds nothing to the snapshot", async () => {
+it.each(["CDP first", "Playwright first"])(
+  "a dead and a live request on one key: %s",
+  async (order) => {
+    const f = adapterFixture();
+    await f.audit.ready;
+    await f.prime();
+    const dead = f.start(f.request(), "dead"),
+      live = f.start();
+    let settled = false;
+    const proof = f.audit.finish().then((bodies) => {
+      settled = true;
+      return bodies;
+    });
+    await flushIdentity();
+    expect(settled).toBe(false);
+    if (order === "CDP first") f.end(live);
+    else f.body(live, "live private body");
+    await flushIdentity();
+    expect(settled).toBe(false);
+    expect(f.audit.abortedRequests).toEqual([]);
+    if (order === "CDP first") f.body(live, "live private body");
+    else f.end(live);
+    expect(await proof).toEqual(["public terms", "live private body"]);
+    expect(f.audit.abortedRequests).toEqual([
+      { request: dead, reason: DOCUMENT_REPLACED },
+    ]);
+  }
+);
+it.each(["deadline", "body"])(
+  "a late failure on the dead twin leaves the live request owed: %s",
+  async (outcome) => {
+    vi.useFakeTimers();
+    const f = adapterFixture();
+    await f.audit.ready;
+    await f.prime();
+    const olderLive = f.start(),
+      newerDead = f.start(f.request(), "dead");
+    const proof = f.audit.finish().catch((error) => error);
+    await flushIdentity();
+    f.end(newerDead, true);
+    f.page.emit("requestfailed", newerDead);
+    await flushIdentity();
+    expect(f.audit.phase).toBe("draining");
+    if (outcome === "body") {
+      f.end(olderLive);
+      f.body(olderLive, "older live private body");
+      expect(await proof).toEqual(["public terms", "older live private body"]);
+      expect(f.audit.abortedRequests).toEqual([
+        { request: newerDead, reason: "net::ERR_ABORTED" },
+      ]);
+    } else {
+      await vi.advanceTimersByTimeAsync(AUDIT_DRAIN_TIMEOUT_MS);
+      expect(String(await proof)).toContain("(awaiting headers)");
+      expect(f.audit.abortedRequests).toEqual([
+        { request: newerDead, reason: "net::ERR_ABORTED" },
+      ]);
+    }
+  }
+);
+it("no CDP session orphans nothing", async () => {
   vi.useFakeTimers();
-  const f = adapterFixture();
-  await f.prime();
-  f.navigate("https://test/two");
-  f.commit("https://test/two");
-  f.start(f.request());
-  f.commit("https://test/two");
-  f.loaded();
-  const final = f.audit.finish().catch((error) => error);
+  const log = vi.spyOn(console, "info").mockImplementation(() => {});
+  log.mockClear();
+  const f = adapterFixture({ rejectSession: true });
+  f.start(f.request(), null);
+  const proof = f.audit.finish().catch((error) => error);
   await vi.advanceTimersByTimeAsync(AUDIT_DRAIN_TIMEOUT_MS);
-  expect(String(await final)).toContain("(awaiting headers)");
+  expect(String(await proof)).toContain("(awaiting headers)");
+  expect(f.audit.abortedRequests).toEqual([]);
+  expect(log).toHaveBeenCalledTimes(1);
+  expect(log).toHaveBeenCalledWith(expect.stringContaining("CDP unavailable"));
 });
-it("a new navigation discards an unconfirmed snapshot", async () => {
+it.each(["reject", "hang"])(
+  "an unreadable frame tree orphans nothing: %s",
+  async (mode) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = adapterFixture({
+      tree: () =>
+        mode === "reject"
+          ? Promise.reject(new Error("tree unavailable"))
+          : new Promise(() => {}),
+    });
+    await f.audit.ready;
+    f.start(f.request(), "dead");
+    const proof = f.audit.finish().catch((error) => error);
+    await vi.advanceTimersByTimeAsync(AUDIT_DRAIN_TIMEOUT_MS);
+    expect(String(await proof)).toContain("(awaiting headers)");
+    expect(f.audit.abortedRequests).toEqual([]);
+  }
+);
+it("a request issued before tracking began stays owed", async () => {
   vi.useFakeTimers();
   const f = adapterFixture();
-  await f.prime();
-  f.start(f.request());
-  f.navigate("https://test/two");
-  f.commit("https://test/two");
-  f.navigate("https://test/three");
-  f.loaded();
-  const final = f.audit.finish().catch((error) => error);
+  f.start(f.request(), null);
+  await f.audit.ready;
+  const proof = f.audit.finish().catch((error) => error);
   await vi.advanceTimersByTimeAsync(AUDIT_DRAIN_TIMEOUT_MS);
-  expect(String(await final)).toContain("(awaiting headers)");
+  expect(String(await proof)).toContain("(awaiting headers)");
+  expect(f.audit.abortedRequests).toEqual([]);
+});
+it("a redirect keeps one tracked entry", async () => {
+  vi.spyOn(console, "info").mockImplementation(() => {});
+  const f = adapterFixture();
+  await f.audit.ready;
+  await f.prime();
+  const req = f.start(f.request(), null);
+  // CDP reuses requestId across redirect hops: update the same map slot.
+  f.track(f.request("https://test/api/trades/redirect"), "dead", "redirect");
+  f.track(req, "dead", "redirect");
+  await expect(f.audit.finish()).resolves.toEqual(["public terms"]);
+  expect(f.audit.abortedRequests).toEqual([
+    { request: req, reason: DOCUMENT_REPLACED },
+  ]);
 });
 it.each(["finish", "dispose"] as const)(
-  "the adapter removes every listener after %s",
+  "the identity adapter cleans up after %s",
   async (end) => {
-    const f = adapterFixture();
+    let release!: (tree: { frameTree: FrameTree }) => void;
+    const f = adapterFixture({
+      tree: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    await f.audit.ready;
     if (end === "finish") {
       await f.prime();
       await f.audit.finish();
-    } else f.audit.dispose();
+    } else {
+      f.start(f.request(), "dead");
+      f.audit.stop();
+      await flushIdentity();
+      f.audit.dispose();
+    }
+    await flushIdentity();
     for (const event of [
       "request",
       "response",
@@ -864,5 +1044,10 @@ it.each(["finish", "dispose"] as const)(
       "domcontentloaded",
     ])
       expect(f.page.listenerCount(event)).toBe(0);
+    expect(f.cdp.detach).toHaveBeenCalledTimes(1);
+    release({ frameTree: { frame: { loaderId: "live" } } });
+    await flushIdentity();
+    expect(f.audit.abortedRequests).toEqual([]);
+    expect(f.audit.phase).toBe(end === "finish" ? "finished" : "disposed");
   }
 );
