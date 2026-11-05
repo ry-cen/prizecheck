@@ -1,3 +1,4 @@
+import { responseAudit } from "./support/responseAudit";
 // Ticket #270, on the proposal builder of #284: send a Friend a Trade Proposal and withdraw it (Trading spec "Trade
 // Proposals and the state model"). Misty opens the proposal builder from Ash's Trade List page and adds his Arven from
 // his Trade List, raises it with the stepper, and adds her own Iono from My Trade List. She sends the swap after a
@@ -19,7 +20,6 @@ import { expect, test } from "./support/collectors";
 import { traderIdOf } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
-import { bodyOf } from "./support/trades";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
@@ -205,291 +205,305 @@ async function story(
   await befriend(page, ash.page);
   await befriend(page, brock.page);
   // Everything about Trades that reaches Ash's browser, to check it never names one of Misty's Locations.
-  const answers: Promise<string | null>[] = [];
-  ash.page.on("response", (response) => {
-    if (/\/api\/(social\/)?trade/.test(response.url()))
-      answers.push(bodyOf(response));
+  const audit = responseAudit((capture) => {
+    const receive = (response: import("@playwright/test").Response) => {
+      if (/\/api\/(social\/)?trade/.test(response.url())) capture(response);
+    };
+    ash.page.on("response", receive);
+    return () => ash.page.off("response", receive);
   });
-
-  // A: Misty opens the builder from Ash's Trade List (no Add there), adds his Arven from his list and her Iono from hers.
-  await page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
-  const friendMain = page.getByRole("main");
-  await expect(friendMain).toContainText("Arven");
-  await expect(friendMain.getByRole("button", { name: /^Add / })).toHaveCount(
-    0
-  );
-  await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
-  await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
-  const proposal = page.getByRole("main");
-  const theirList = page.getByRole("list", { name: "Ash K's Trade List" });
-  const myList = page.getByRole("list", { name: "Your Trade List" });
-  await show(page, "Cards");
-  // The two finishes of Arven are two tiles with different names.
-  await expect(
-    tile(theirList, "get", "Arven, SVI 166, .+?, Reverse Holo")
-  ).toHaveCount(1);
-  await expect(
-    tile(theirList, "get", "Arven, SVI 166, .+?, Normal")
-  ).toHaveCount(1);
-  await tile(theirList, "get", "Arven, SVI 166, .+?, Normal").click();
-  await show(page, "Proposal");
-  await page
-    .getByRole("button", { name: "Increase Arven (SVI 166) you get" })
-    .click();
-  await expect(group(page, "Arven (SVI 166) you get")).toContainText("2");
-  await show(page, "Cards");
-  await page.getByRole("radio", { name: "My Trade List" }).click();
-  await tile(myList, "give", "Iono, PAL 185, .+?, Normal").click();
-  await show(page, "Proposal");
-  await expect(proposal.getByRole("list", { name: "You give" })).toContainText(
-    "Iono"
-  );
-  await expect(proposal.getByRole("list", { name: "You give" })).toContainText(
-    "Up to 3"
-  );
-  await expect(proposal.getByRole("list", { name: "You get" })).toContainText(
-    "Arven"
-  );
-  await expectPageChecks(page, `the proposal builder at ${width}`);
-  if (isPhone(page)) {
+  try {
+    // A: Misty opens the builder from Ash's Trade List (no Add there), adds his Arven from his list and her Iono from hers.
+    await page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
+    const friendMain = page.getByRole("main");
+    await expect(friendMain).toContainText("Arven");
+    await expect(friendMain.getByRole("button", { name: /^Add / })).toHaveCount(
+      0
+    );
+    await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
+    await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
+    const proposal = page.getByRole("main");
+    const theirList = page.getByRole("list", { name: "Ash K's Trade List" });
+    const myList = page.getByRole("list", { name: "Your Trade List" });
     await show(page, "Cards");
-    await expectPageChecks(page, `the proposal builder's cards at ${width}`);
-    await show(page, "Proposal");
-  }
-
-  // Ash gives one of his Arven to Misty meanwhile, so only one is left on his Trade List: the send is
-  // refused with the card and the count, and the cards stay.
-  const incoming = await api(ash.page, "POST", "/api/trades", {
-    recipient_id: await accountId(page),
-    you_give: [{ edition_id: ids["SVI 166"], quantity: "1" }],
-    you_get: [],
-    idempotency_key: randomUUID(),
-  });
-  await proposal.getByRole("button", { name: "Send Trade Proposal" }).click();
-  await expect(proposal.getByRole("alert")).toHaveText(
-    "Ash K can trade only 1 Arven (SVI 166) now. Lower it to 1, then send again."
-  );
-  await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
-  await proposal
-    .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
-    .click();
-  // A send whose answer never comes keeps the cards too, and is sent again safely: the retry reuses the send's key.
-  const keys: string[] = [];
-  const record = (request: Request) => {
-    if (request.method() === "POST" && request.url() === `${ORIGIN}/api/trades`)
-      keys.push(String(request.postDataJSON().idempotency_key));
-  };
-  page.on("request", record);
-  await page.route(`${ORIGIN}/api/trades`, (route) => route.abort(), {
-    times: 1,
-  });
-  await proposal.getByRole("button", { name: "Send Trade Proposal" }).click();
-  await expect(proposal.getByRole("alert")).toHaveText(
-    "The Trade Proposal may not have been sent. Check your connection and try again."
-  );
-  await proposal.getByRole("button", { name: "Send Trade Proposal" }).click();
-  await expect(page).toHaveURL(new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`));
-  page.off("request", record);
-  expect(keys).toHaveLength(2);
-  expect(keys[1]).toBe(keys[0]);
-  const swap = page.url();
-  await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
-  await expect(toast(page)).toContainText("Trade Proposal sent to Ash K");
-  await expect(page.getByRole("list", { name: "You give" })).toContainText(
-    "×1"
-  );
-  await expectPageChecks(page, `the Trade screen at ${width}`);
-
-  // #514: success stays scoped to its item, not a different incoming agreement with the same collector.
-  await page.getByRole("link", { name: "All Trades", exact: true }).click();
-  await page.locator(`a[data-thread="${incoming.thread_id}"]`).click();
-  await expect(heading(page)).toHaveText("Ash K wants to give you 1 card");
-  await expect(toast(page)).not.toContainText("Trade Proposal sent to Ash K");
-
-  // B: a gift, from an empty builder: Send waits for a card.
-  await page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
-  await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
-  await show(page, "Proposal");
-  await expect(
-    page.getByRole("button", { name: "Send Trade Proposal" })
-  ).toBeDisabled();
-  await expect(page.getByRole("main")).toContainText(
-    "Add at least one card to either side."
-  );
-  await show(page, "Cards");
-  await page.getByRole("radio", { name: "My Trade List" }).click();
-  // One of her three Iono is promised to the swap: two are left on her list.
-  const iono = tile(
-    page.getByRole("list", { name: "Your Trade List" }),
-    "give",
-    "Iono, PAL 185, .+?, Normal"
-  );
-  await expect(iono).toHaveAccessibleName(/2 available/);
-  await iono.click();
-  await iono.click();
-  await show(page, "Proposal");
-  await expect(group(page, "Iono (PAL 185) you give")).toContainText("2");
-  await page.getByRole("button", { name: "Send Trade Proposal" }).click();
-  await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
-  const gift = page.url();
-
-  // Her Iono left both Trade Lists at once.
-  await page.goto(`${ORIGIN}/trades/list`);
-  await expect(page.getByRole("main")).toContainText(
-    "Your Trade List is empty."
-  );
-  await noArtwork(ash.page);
-  await ash.page.goto(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
-  await expect(ash.page.getByRole("status")).toHaveText(
-    "Misty W has nothing on their Trade List."
-  );
-
-  // A removal of one copy is refused: Trades promised all three. Collection's selection strip is checked at desktop
-  // width, as the Loans spec does.
-  const size = page.viewportSize()!;
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`${ORIGIN}/collection`);
-  await page
-    .getByRole("region", { name: "Cards" })
-    .getByRole("button", {
-      name: `Iono, Paldea Evolved 185, Normal, copy 1, ${secret} Binder`,
-    })
-    .click();
-  await page
-    .getByRole("region", { name: "Selection" })
-    .getByRole("button", { name: "Actions" })
-    .click();
-  await page
-    .getByRole("region", { name: "Selection" })
-    .getByRole("button", { name: "Inventory Removal…" })
-    .click();
-  const removal = page.getByRole("dialog", {
-    name: "Remove 1 copy from your Collection",
-  });
-  await removal.getByRole("button", { name: "Remove 1 copy" }).click();
-  await expect(removal).toContainText(
-    "to a Trade, so they can't all be removed. Nothing was removed."
-  );
-  await page.keyboard.press("Escape");
-  await expect(removal).toHaveCount(0);
-  await page.setViewportSize(size);
-
-  // An address that names no Trade is a missing Trade, not a failed load.
-  await page.goto(`${ORIGIN}/trades/not-a-trade`);
-  await expect(heading(page)).toHaveText("Trade not found");
-  await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
-
-  // An empty builder asks nothing when left, and a card held in two For trade Locations has one tile.
-  await noArtwork(brock.page);
-  await befriend(brock.page, ash.page);
-  await brock.page.goto(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
-  await brock.page
-    .getByRole("button", { name: "Propose trade to Misty W" })
-    .click();
-  await expect(brock.page).toHaveURL(`${ORIGIN}/trades/new/${mistyTrader}`);
-  await brock.page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
-  await brock.page
-    .getByRole("button", { name: "Propose trade to Ash K" })
-    .click();
-  await expect(brock.page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
-  await expect(heading(brock.page)).toHaveText("Trade Proposal to Ash K");
-  await expect(brock.page.getByRole("dialog")).toHaveCount(0);
-  await show(brock.page, "Cards");
-  await brock.page.getByRole("radio", { name: "My Trade List" }).click();
-  const brockIono = tile(
-    brock.page.getByRole("list", { name: "Your Trade List" }),
-    "give",
-    "Iono, PAL 254, .+?, Normal"
-  );
-  await expect(brockIono).toHaveCount(1);
-  await expect(brockIono).toHaveAccessibleName(/2 available/);
-  await brockIono.click();
-  await show(brock.page, "Proposal");
-  await expect(group(brock.page, /^Iono .* you give$/)).toHaveCount(1);
-
-  // C: all three agreements are separate items, with exactly two answer steps and no unread messages.
-  await ash.page.goto(`${ORIGIN}/trades`);
-  const rows = ash.page.locator("a[data-thread]");
-  await expect(tradesTab(ash.page)).toHaveAccessibleName(
-    "Trades, 2 need you: 2 waiting on you, 0 with new messages"
-  );
-  await expect(rows).toHaveCount(3);
-  const swapRow = ash.page.locator(`a[href="${new URL(swap).pathname}"]`);
-  const giftRow = ash.page.locator(`a[href="${new URL(gift).pathname}"]`);
-  await expect(swapRow).toContainText("Misty W");
-  await expect(swapRow).toContainText("You give 1 · You get 1");
-  await expect(giftRow).toContainText("You give 0 · You get 2");
-  await expect(
-    ash.page.locator(`a[data-thread="${incoming.thread_id}"]`)
-  ).toContainText("Proposal");
-  await expectPageChecks(ash.page, `separate live agreements at ${width}`);
-  await swapRow.click();
-  await expect(heading(ash.page)).toHaveText(
-    "Misty W sent you a Trade Proposal"
-  );
-  const ashMain = ash.page.getByRole("main");
-  await expect(ashMain).toContainText(`@${mistyHandle}`);
-  await expect(heading(ash.page)).toContainText("Misty W");
-  await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
-    "Arven"
-  );
-  await expect(ashMain.getByRole("list", { name: "You get" })).toContainText(
-    "Iono"
-  );
-  // The recipient's ⋯ holds only Report (#303); Withdraw is the proposer's.
-  await ashMain.getByRole("button", { name: "More for this Trade" }).click();
-  await expect(ash.page.getByRole("menuitem")).toHaveText(["Report"]);
-  await ash.page.keyboard.press("Escape");
-  await expect(ashMain).not.toContainText(secret);
-  await expectPageChecks(ash.page, `a received Trade Proposal at ${width}`);
-
-  // D: Misty withdraws both, and her Iono comes back to both lists.
-  for (const trade of [swap, gift]) {
-    await page.goto(trade);
-    await page.getByRole("button", { name: "More for this Trade" }).click();
-    await page.getByRole("menuitem", { name: "Withdraw" }).click();
-    await expect(page.getByRole("group", { name: "Withdraw" })).toHaveCount(0);
-    await expect(heading(page)).toHaveText("You withdrew this Trade Proposal");
-    await expect(toast(page)).toContainText("Withdrawn");
-  }
-  await page.goto(`${ORIGIN}/trades/list`);
-  await expect(
-    page
-      .getByRole("main")
-      .getByRole("list", { name: `${secret} Binder` })
-      .getByRole("listitem")
-  ).toContainText("×3");
-  await ash.page.goto(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
-  await expect(
-    ash.page.getByRole("main").getByRole("list", { name: "Iono", exact: true })
-  ).toContainText("×3");
-  await ash.page.goto(`${ORIGIN}/trades`);
-  await ash.page.getByText("Done", { exact: true }).click();
-  const done = ash.page.getByRole("list", { name: "Done Trades" });
-  await expect(done.getByRole("link")).toHaveCount(2);
-  for (const url of [swap, gift])
+    // The two finishes of Arven are two tiles with different names.
     await expect(
-      done.locator(`a[href="${new URL(url).pathname}"]`)
-    ).toContainText("Closed");
-  await ash.page.goto(gift);
-  await expect(heading(ash.page)).toHaveText(
-    "Misty W withdrew this Trade Proposal"
-  );
-  await ash.page.goto(swap);
-  await expect(heading(ash.page)).toHaveText(
-    "Misty W withdrew this Trade Proposal"
-  );
+      tile(theirList, "get", "Arven, SVI 166, .+?, Reverse Holo")
+    ).toHaveCount(1);
+    await expect(
+      tile(theirList, "get", "Arven, SVI 166, .+?, Normal")
+    ).toHaveCount(1);
+    await tile(theirList, "get", "Arven, SVI 166, .+?, Normal").click();
+    await show(page, "Proposal");
+    await page
+      .getByRole("button", { name: "Increase Arven (SVI 166) you get" })
+      .click();
+    await expect(group(page, "Arven (SVI 166) you get")).toContainText("2");
+    await show(page, "Cards");
+    await page.getByRole("radio", { name: "My Trade List" }).click();
+    await tile(myList, "give", "Iono, PAL 185, .+?, Normal").click();
+    await show(page, "Proposal");
+    await expect(
+      proposal.getByRole("list", { name: "You give" })
+    ).toContainText("Iono");
+    await expect(
+      proposal.getByRole("list", { name: "You give" })
+    ).toContainText("Up to 3");
+    await expect(proposal.getByRole("list", { name: "You get" })).toContainText(
+      "Arven"
+    );
+    await expectPageChecks(page, `the proposal builder at ${width}`);
+    if (isPhone(page)) {
+      await show(page, "Cards");
+      await expectPageChecks(page, `the proposal builder's cards at ${width}`);
+      await show(page, "Proposal");
+    }
 
-  // Nothing about these Trades that reached Ash names one of Misty's Locations, by name or by id.
-  const bodies = (await Promise.all(answers)).filter(
-    (body): body is string => body !== null
-  );
-  expect(bodies.length).toBeGreaterThan(0);
-  for (const body of bodies) {
-    expect(body).not.toContain(secret);
-    expect(body).not.toContain(binder);
+    // Ash gives one of his Arven to Misty meanwhile, so only one is left on his Trade List: the send is
+    // refused with the card and the count, and the cards stay.
+    const incoming = await api(ash.page, "POST", "/api/trades", {
+      recipient_id: await accountId(page),
+      you_give: [{ edition_id: ids["SVI 166"], quantity: "1" }],
+      you_get: [],
+      idempotency_key: randomUUID(),
+    });
+    await proposal.getByRole("button", { name: "Send Trade Proposal" }).click();
+    await expect(proposal.getByRole("alert")).toHaveText(
+      "Ash K can trade only 1 Arven (SVI 166) now. Lower it to 1, then send again."
+    );
+    await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
+    await proposal
+      .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+      .click();
+    // A send whose answer never comes keeps the cards too, and is sent again safely: the retry reuses the send's key.
+    const keys: string[] = [];
+    const record = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        request.url() === `${ORIGIN}/api/trades`
+      )
+        keys.push(String(request.postDataJSON().idempotency_key));
+    };
+    page.on("request", record);
+    await page.route(`${ORIGIN}/api/trades`, (route) => route.abort(), {
+      times: 1,
+    });
+    await proposal.getByRole("button", { name: "Send Trade Proposal" }).click();
+    await expect(proposal.getByRole("alert")).toHaveText(
+      "The Trade Proposal may not have been sent. Check your connection and try again."
+    );
+    await proposal.getByRole("button", { name: "Send Trade Proposal" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`)
+    );
+    page.off("request", record);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    const swap = page.url();
+    await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
+    await expect(toast(page)).toContainText("Trade Proposal sent to Ash K");
+    await expect(page.getByRole("list", { name: "You give" })).toContainText(
+      "×1"
+    );
+    await expectPageChecks(page, `the Trade screen at ${width}`);
+
+    // #514: success stays scoped to its item, not a different incoming agreement with the same collector.
+    await page.getByRole("link", { name: "All Trades", exact: true }).click();
+    await page.locator(`a[data-thread="${incoming.thread_id}"]`).click();
+    await expect(heading(page)).toHaveText("Ash K wants to give you 1 card");
+    await expect(toast(page)).not.toContainText("Trade Proposal sent to Ash K");
+
+    // B: a gift, from an empty builder: Send waits for a card.
+    await page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
+    await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
+    await show(page, "Proposal");
+    await expect(
+      page.getByRole("button", { name: "Send Trade Proposal" })
+    ).toBeDisabled();
+    await expect(page.getByRole("main")).toContainText(
+      "Add at least one card to either side."
+    );
+    await show(page, "Cards");
+    await page.getByRole("radio", { name: "My Trade List" }).click();
+    // One of her three Iono is promised to the swap: two are left on her list.
+    const iono = tile(
+      page.getByRole("list", { name: "Your Trade List" }),
+      "give",
+      "Iono, PAL 185, .+?, Normal"
+    );
+    await expect(iono).toHaveAccessibleName(/2 available/);
+    await iono.click();
+    await iono.click();
+    await show(page, "Proposal");
+    await expect(group(page, "Iono (PAL 185) you give")).toContainText("2");
+    await page.getByRole("button", { name: "Send Trade Proposal" }).click();
+    await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
+    const gift = page.url();
+
+    // Her Iono left both Trade Lists at once.
+    await page.goto(`${ORIGIN}/trades/list`);
+    await expect(page.getByRole("main")).toContainText(
+      "Your Trade List is empty."
+    );
+    await noArtwork(ash.page);
+    await ash.page.goto(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
+    await expect(ash.page.getByRole("status")).toHaveText(
+      "Misty W has nothing on their Trade List."
+    );
+
+    // A removal of one copy is refused: Trades promised all three. Collection's selection strip is checked at desktop
+    // width, as the Loans spec does.
+    const size = page.viewportSize()!;
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${ORIGIN}/collection`);
+    await page
+      .getByRole("region", { name: "Cards" })
+      .getByRole("button", {
+        name: `Iono, Paldea Evolved 185, Normal, copy 1, ${secret} Binder`,
+      })
+      .click();
+    await page
+      .getByRole("region", { name: "Selection" })
+      .getByRole("button", { name: "Actions" })
+      .click();
+    await page
+      .getByRole("region", { name: "Selection" })
+      .getByRole("button", { name: "Inventory Removal…" })
+      .click();
+    const removal = page.getByRole("dialog", {
+      name: "Remove 1 copy from your Collection",
+    });
+    await removal.getByRole("button", { name: "Remove 1 copy" }).click();
+    await expect(removal).toContainText(
+      "to a Trade, so they can't all be removed. Nothing was removed."
+    );
+    await page.keyboard.press("Escape");
+    await expect(removal).toHaveCount(0);
+    await page.setViewportSize(size);
+
+    // An address that names no Trade is a missing Trade, not a failed load.
+    await page.goto(`${ORIGIN}/trades/not-a-trade`);
+    await expect(heading(page)).toHaveText("Trade not found");
+    await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
+
+    // An empty builder asks nothing when left, and a card held in two For trade Locations has one tile.
+    await noArtwork(brock.page);
+    await befriend(brock.page, ash.page);
+    await brock.page.goto(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
+    await brock.page
+      .getByRole("button", { name: "Propose trade to Misty W" })
+      .click();
+    await expect(brock.page).toHaveURL(`${ORIGIN}/trades/new/${mistyTrader}`);
+    await brock.page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
+    await brock.page
+      .getByRole("button", { name: "Propose trade to Ash K" })
+      .click();
+    await expect(brock.page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
+    await expect(heading(brock.page)).toHaveText("Trade Proposal to Ash K");
+    await expect(brock.page.getByRole("dialog")).toHaveCount(0);
+    await show(brock.page, "Cards");
+    await brock.page.getByRole("radio", { name: "My Trade List" }).click();
+    const brockIono = tile(
+      brock.page.getByRole("list", { name: "Your Trade List" }),
+      "give",
+      "Iono, PAL 254, .+?, Normal"
+    );
+    await expect(brockIono).toHaveCount(1);
+    await expect(brockIono).toHaveAccessibleName(/2 available/);
+    await brockIono.click();
+    await show(brock.page, "Proposal");
+    await expect(group(brock.page, /^Iono .* you give$/)).toHaveCount(1);
+
+    // C: all three agreements are separate items, with exactly two answer steps and no unread messages.
+    await ash.page.goto(`${ORIGIN}/trades`);
+    const rows = ash.page.locator("a[data-thread]");
+    await expect(tradesTab(ash.page)).toHaveAccessibleName(
+      "Trades, 2 need you: 2 waiting on you, 0 with new messages"
+    );
+    await expect(rows).toHaveCount(3);
+    const swapRow = ash.page.locator(`a[href="${new URL(swap).pathname}"]`);
+    const giftRow = ash.page.locator(`a[href="${new URL(gift).pathname}"]`);
+    await expect(swapRow).toContainText("Misty W");
+    await expect(swapRow).toContainText("You give 1 · You get 1");
+    await expect(giftRow).toContainText("You give 0 · You get 2");
+    await expect(
+      ash.page.locator(`a[data-thread="${incoming.thread_id}"]`)
+    ).toContainText("Proposal");
+    await expectPageChecks(ash.page, `separate live agreements at ${width}`);
+    await swapRow.click();
+    await expect(heading(ash.page)).toHaveText(
+      "Misty W sent you a Trade Proposal"
+    );
+    const ashMain = ash.page.getByRole("main");
+    await expect(ashMain).toContainText(`@${mistyHandle}`);
+    await expect(heading(ash.page)).toContainText("Misty W");
+    await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
+      "Arven"
+    );
+    await expect(ashMain.getByRole("list", { name: "You get" })).toContainText(
+      "Iono"
+    );
+    // The recipient's ⋯ holds only Report (#303); Withdraw is the proposer's.
+    await ashMain.getByRole("button", { name: "More for this Trade" }).click();
+    await expect(ash.page.getByRole("menuitem")).toHaveText(["Report"]);
+    await ash.page.keyboard.press("Escape");
+    await expect(ashMain).not.toContainText(secret);
+    await expectPageChecks(ash.page, `a received Trade Proposal at ${width}`);
+
+    // D: Misty withdraws both, and her Iono comes back to both lists.
+    for (const trade of [swap, gift]) {
+      await page.goto(trade);
+      await page.getByRole("button", { name: "More for this Trade" }).click();
+      await page.getByRole("menuitem", { name: "Withdraw" }).click();
+      await expect(page.getByRole("group", { name: "Withdraw" })).toHaveCount(
+        0
+      );
+      await expect(heading(page)).toHaveText(
+        "You withdrew this Trade Proposal"
+      );
+      await expect(toast(page)).toContainText("Withdrawn");
+    }
+    await page.goto(`${ORIGIN}/trades/list`);
+    await expect(
+      page
+        .getByRole("main")
+        .getByRole("list", { name: `${secret} Binder` })
+        .getByRole("listitem")
+    ).toContainText("×3");
+    await ash.page.goto(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
+    await expect(
+      ash.page
+        .getByRole("main")
+        .getByRole("list", { name: "Iono", exact: true })
+    ).toContainText("×3");
+    await ash.page.goto(`${ORIGIN}/trades`);
+    await ash.page.getByText("Done", { exact: true }).click();
+    const done = ash.page.getByRole("list", { name: "Done Trades" });
+    await expect(done.getByRole("link")).toHaveCount(2);
+    for (const url of [swap, gift])
+      await expect(
+        done.locator(`a[href="${new URL(url).pathname}"]`)
+      ).toContainText("Closed");
+    await ash.page.goto(gift);
+    await expect(heading(ash.page)).toHaveText(
+      "Misty W withdrew this Trade Proposal"
+    );
+    await ash.page.goto(swap);
+    await expect(heading(ash.page)).toHaveText(
+      "Misty W withdrew this Trade Proposal"
+    );
+
+    // Nothing about these Trades that reached Ash names one of Misty's Locations, by name or by id.
+    const bodies = await audit.finish();
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect(body).not.toContain(secret);
+      expect(body).not.toContain(binder);
+    }
+  } finally {
+    audit.stop();
   }
 }
 
