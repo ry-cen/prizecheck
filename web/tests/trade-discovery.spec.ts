@@ -234,7 +234,9 @@ async function story(
   await befriend(page, ash.page);
   await befriend(page, brock.page);
   // Everything about Trades that reaches Misty's browser, to check it never names a Location or a Deck.
-  const audit = auditPage(page, (url) => /\/api\/social\/trade/.test(url));
+  const audit = await auditPage(page, (url) =>
+    /\/api\/social\/trade/.test(url)
+  );
   try {
     // A: Find trades, from the Trades tab's switch. Ash's two-way row comes first; Brock's one-way row has no tag.
     await page.goto(`${ORIGIN}/trades`);

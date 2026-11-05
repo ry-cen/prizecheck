@@ -258,7 +258,7 @@ async function story(
   await signInAsOwner(page, "/collection");
   const ashHandle = await nameCollector(page, "Ash K");
   await befriend(page, misty.page);
-  const audit = auditPage(page, (url) =>
+  const audit = await auditPage(page, (url) =>
     url.includes("/api/social/trade-lists/")
   );
   try {

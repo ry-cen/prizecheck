@@ -183,22 +183,24 @@ async function story(
   // Everything about Trades that reaches either browser, to check it never names the other side's Locations.
   // Chromium keeps no body for a read the app aborted (a Deck switch reload); only that error is allowed, and each side must still read its Trade.
   const readTrade = new Set<string>();
-  const audits = (
-    [
-      [ash.page, [mistyPlace, shelf, mistyDeck]],
-      [page, [ashPlace, binder, box, ashDeck]],
-    ] as const
-  ).map(([who, theirs]) => {
-    const audit = auditPage(
-      who,
-      (url) => /\/api\/(social\/)?trade/.test(url),
-      (response) => {
-        if (/\/api\/trades\/[0-9a-f-]{36}$/.test(response.url()))
-          readTrade.add(theirs[0]);
-      }
-    );
-    return { audit, secretOf: [...theirs] };
-  });
+  const audits = await Promise.all(
+    (
+      [
+        [ash.page, [mistyPlace, shelf, mistyDeck]],
+        [page, [ashPlace, binder, box, ashDeck]],
+      ] as const
+    ).map(async ([who, theirs]) => {
+      const audit = await auditPage(
+        who,
+        (url) => /\/api\/(social\/)?trade/.test(url),
+        (response) => {
+          if (/\/api\/trades\/[0-9a-f-]{36}$/.test(response.url()))
+            readTrade.add(theirs[0]);
+        }
+      );
+      return { audit, secretOf: [...theirs] };
+    })
+  );
   try {
     const main = page.getByRole("main");
     const ashMain = ash.page.getByRole("main");

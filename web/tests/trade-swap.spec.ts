@@ -151,15 +151,19 @@ async function story(
   const deck = await createDeck(page, `${secret} Deck`);
   await befriend(page, ash.page);
   // Everything about Trades that reaches either browser, to check it never names the other side's Locations.
-  const audits = (
-    [
-      [ash.page, [`${secret} Shelf`, shelf, `${secret} Deck`, deck]],
-      [page, [`${secret} Binder`, ashBinder, `${secret} Box`, ashBox]],
-    ] as const
-  ).map(([who, theirs]) => {
-    const audit = auditPage(who, (url) => /\/api\/(social\/)?trade/.test(url));
-    return { audit, secretOf: [...theirs] };
-  });
+  const audits = await Promise.all(
+    (
+      [
+        [ash.page, [`${secret} Shelf`, shelf, `${secret} Deck`, deck]],
+        [page, [`${secret} Binder`, ashBinder, `${secret} Box`, ashBox]],
+      ] as const
+    ).map(async ([who, theirs]) => {
+      const audit = await auditPage(who, (url) =>
+        /\/api\/(social\/)?trade/.test(url)
+      );
+      return { audit, secretOf: [...theirs] };
+    })
+  );
   try {
     const ashId = await accountId(ash.page);
     const swap = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);

@@ -226,15 +226,19 @@ async function story(
   await hold(page, binder, ids["PAL 185"], 3);
   await befriend(page, ash.page);
   // Everything about Trades that reaches either browser, to check it never names the other side's Location.
-  const audits = (
-    [
-      [ash.page, [`${secret} Binder`, binder]],
-      [page, [`${secret} Shelf`, shelf]],
-    ] as const
-  ).map(([who, theirs]) => {
-    const audit = auditPage(who, (url) => /\/api\/(social\/)?trade/.test(url));
-    return { audit, secretOf: [...theirs] };
-  });
+  const audits = await Promise.all(
+    (
+      [
+        [ash.page, [`${secret} Binder`, binder]],
+        [page, [`${secret} Shelf`, shelf]],
+      ] as const
+    ).map(async ([who, theirs]) => {
+      const audit = await auditPage(who, (url) =>
+        /\/api\/(social\/)?trade/.test(url)
+      );
+      return { audit, secretOf: [...theirs] };
+    })
+  );
   try {
     const ashId = await accountId(ash.page);
     const iono = ids["PAL 185"];
