@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from app.main import app, connect, operation_counter  # noqa: F401
-from app.price_budget import Budget
+from app.core.prices.price_budget import Budget
 from app.games.pokemon.prices.prices import format_usd, parse_amount
 
 # ------------------------------------------------------------------ amounts and display
@@ -39,7 +39,7 @@ def test_display_rounds_half_up_to_cents_only_at_display_and_marks_sub_cent_amou
 
 def test_budget_derives_the_wait_window_and_never_returns_a_zero_postgres_timeout(monkeypatch):
     clock = {"now": 1000.0}
-    monkeypatch.setattr("app.price_budget.time.monotonic", lambda: clock["now"])
+    monkeypatch.setattr("app.core.prices.price_budget.time.monotonic", lambda: clock["now"])
     budget = Budget(hard=1003.0, caller="user:u")
     assert budget.wait_until == 1002.5
     assert (round(budget.remaining(), 3), round(budget.wait_remaining(), 3), budget.expired()) == (3.0, 2.5, False)

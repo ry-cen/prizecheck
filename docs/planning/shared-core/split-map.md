@@ -1185,3 +1185,13 @@ below says where each group ended up; the module map in section 1 stays the plan
 - A repository-wide caller scan, including dynamic imports and monkeypatch paths, found no other
   consumer requiring the old path. The root module and its exact ownership row are removed without
   a compatibility shim. Test assertions, architecture rules and API snapshots are unchanged.
+
+**2026-11-05 — Price budget relocation (#528)**
+
+- The trusted budget module moved byte-identically from `app.price_budget` to
+  `app.core.prices.price_budget`. Budget values, signatures, deadlines and request handling are unchanged.
+- Production imports, test imports and the monotonic-clock patch path name the core module directly.
+  The gateway comment and price documentation name the destination; the root ownership row is removed.
+- A repository-wide caller scan, including dynamic imports, patch paths, scripts, deploy, auth, workflows,
+  browser specs and architecture tooling, found no other consumer requiring the old path. The root module
+  is removed without a compatibility shim; historical tables stay as written.

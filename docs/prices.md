@@ -75,7 +75,7 @@ The gateway takes a monotonic receipt time before it reads the body or looks up 
 
 The existing `x-internal-*` identity message is unchanged. Client-supplied `x-internal-*` headers never reach the API (the gateway builds its upstream headers from scratch), and the API ignores any other deadline header.
 
-`app.price_budget`:
+`app.core.prices.price_budget`:
 
 - `Budget(hard, caller, wait_until=hard-0.5)` with `remaining()`, `wait_remaining()`, `expired()` and `pg_timeout_ms(final=False)`. The timeout is never 0, because PostgreSQL reads 0 as "no timeout". The final phase leaves a 50 ms margin to answer.
 - `trusted_budget(request)` is the FastAPI dependency. It verifies the budget signature against the exact method, path, body hash, caller, milliseconds and time. A route that identifies a user also depends on `verified_user` and checks `budget.caller == f"user:{user_id}"`.

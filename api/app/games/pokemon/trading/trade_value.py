@@ -21,7 +21,7 @@ from app.games.pokemon.prices import prices
 from app.core.prices.cost import CostStatus, summarize
 from app.location_tree import error
 from app.identity import verified_user
-from app.price_budget import Budget, trusted_budget
+from app.core.prices.price_budget import Budget, trusted_budget
 from app.games.pokemon.trading.trade_inventory import trade_quantity
 
 router = APIRouter(prefix='/api/trades', tags=['trades'])

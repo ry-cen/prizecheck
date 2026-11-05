@@ -22,7 +22,7 @@ from .catalog_targets import is_unspecified
 from app.core.prices import quote_contract
 from app.price_reads import price_reads_enabled
 from app.identity import verified_user
-from app.price_budget import MAX_BODY_BYTES, Budget, trusted_budget
+from app.core.prices.price_budget import MAX_BODY_BYTES, Budget, trusted_budget
 from app.core.prices.quote_contract import parse_amount  # noqa: F401  (moved; re-exported so `prices.parse_amount` keeps working)
 
 router = APIRouter(prefix='/api/prices', tags=['prices'])

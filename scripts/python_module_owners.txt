@@ -24,7 +24,6 @@ app.loan_picks core
 app.location_tree core
 app.moves core
 app.operations core
-app.price_budget core
 app.price_launcher core
 app.price_reads core
 app.price_refresh core
