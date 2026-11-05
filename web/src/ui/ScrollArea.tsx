@@ -116,6 +116,9 @@ export function ScrollArea({
       <div
         {...viewportProps}
         ref={viewport}
+        data-scroll-viewport={
+          scroll && (vertical || bothAxes) ? "y" : undefined
+        }
         className={`relative min-h-0 min-w-0 ${
           !scroll
             ? ""

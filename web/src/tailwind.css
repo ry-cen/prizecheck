@@ -119,13 +119,31 @@
 /* Collection pins controls only when a phone has enough vertical room. */
 @custom-variant collection-pinned (@media (max-width: 760px) and (min-height: 481px));
 
-/* Native focus scrolling clears the desktop header and the existing focus ring. */
-@media (width > 760px) {
-  :root[data-app-shell]:has(#main-content :focus-visible) {
-    scroll-padding-top: calc(
-      var(--layout-header-height) + var(--focus-width) + var(--focus-offset)
-    );
-    scroll-padding-bottom: calc(var(--focus-width) + var(--focus-offset));
+@layer base {
+  /* Keep desktop keyboard focus below the shell header, including its focus ring. */
+  @media (width > 760px) {
+    :where(
+      :root[data-app-shell]
+        #main-content
+        :focus-visible:not(
+          dialog *,
+          [data-scroll-viewport="y"]:not(.list-detail-viewport) *
+        )
+    ) {
+      scroll-margin-top: calc(
+        var(--layout-header-height) + var(--focus-width) + var(--focus-offset)
+      );
+      scroll-margin-bottom: calc(var(--focus-width) + var(--focus-offset));
+    }
+    /* The Loans queue scrolls inside its viewport only at this breakpoint. */
+    @media (width >= 1440px) {
+      :where(
+        :root[data-app-shell] #main-content .list-detail-viewport :focus-visible
+      ) {
+        scroll-margin-top: 0px;
+        scroll-margin-bottom: 0px;
+      }
+    }
   }
 }
 

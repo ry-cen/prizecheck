@@ -58,9 +58,8 @@ async function focusObservation(page: Page) {
       scrollY,
       points,
       focusVisible: el.matches(":focus-visible"),
-      gate: document.documentElement.matches(
-        ":root[data-app-shell]:has(#main-content :focus-visible)"
-      ),
+      margin: getComputedStyle(el).scrollMarginTop,
+      bottomMargin: getComputedStyle(el).scrollMarginBottom,
       viewport: { width: innerWidth, height: innerHeight },
       focusWidth: getComputedStyle(document.documentElement)
         .getPropertyValue("--focus-width")
