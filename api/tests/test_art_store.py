@@ -9,7 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app import art_storage
+from app.core.art import art_storage
 from app.core.art import store as art_store
 from app.core.art.store import ArtFetcher, RateLimiter, backoff_seconds
 from app.core.art.urls import art_version
