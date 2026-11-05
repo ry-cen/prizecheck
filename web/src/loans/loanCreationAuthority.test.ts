@@ -150,6 +150,7 @@ async function setup(
     return f.server.fetchImpl(url, init);
   };
   let store!: LoanIntentStore;
+  const openedLoan = vi.fn();
   const moved = vi.fn(),
     sent = vi.fn();
   function Probe() {
@@ -231,11 +232,11 @@ async function setup(
               onClose: () => setOpen(false),
               onSent: sent,
               onLoansChanged: moved,
-              onOpenLoan: vi.fn(),
+              onOpenLoan: openedLoan,
             })
           : h(BorrowDraftsProvider, {
               userId: "A",
-              onOpenLoan: vi.fn(),
+              onOpenLoan: openedLoan,
               children: h(BorrowOpener),
             })
     );
@@ -290,6 +291,7 @@ async function setup(
     host,
     root,
     packets,
+    openedLoan,
     gate,
     button,
     openBorrow,
@@ -473,5 +475,62 @@ it("an orphaned wildcard intent stays visible without any Borrow Request draft",
   } finally {
     await act(async () => root.unmount());
     host.remove();
+  }
+});
+
+it("a legacy replaces draft never sends, View closes it and opens the Loan, and Discard removes it", async () => {
+  window.sessionStorage.setItem(
+    "prizecheck.borrowDrafts.A",
+    JSON.stringify([
+      {
+        friend: {
+          collector_id: "friend",
+          display_name: "Misty",
+          handle: "misty",
+        },
+        lines: [
+          {
+            edition_id: "iono",
+            name: "Iono",
+            set_code: "PAL",
+            collector_number: "185",
+            descriptor: {},
+            image_url: null,
+            quantity: 3,
+            cap: 3,
+            lendable: "3 available",
+          },
+        ],
+        deckId: null,
+        returnBy: "",
+        replaces: "old-round",
+      },
+    ])
+  );
+  const f = await setup("borrow", "lost");
+  try {
+    expect(f.button("Send Borrow Request").disabled).toBe(true);
+    await f.send();
+    expect(f.packets).toEqual([]);
+    expect(f.host.textContent).toContain(
+      "This edit was started before an update. Open the Borrow Request to edit it again."
+    );
+    await act(async () => f.button("View").click());
+    expect(f.openedLoan).toHaveBeenCalledExactlyOnceWith("old-round");
+    expect(f.host.querySelector("dialog[open]")).toBeNull();
+    await act(async () =>
+      [...f.host.querySelectorAll("button")]
+        .filter((b) => b.textContent === "Open")
+        .at(-1)!
+        .click()
+    );
+    await act(async () => f.button("Discard").click());
+    expect(
+      window.sessionStorage.getItem("prizecheck.borrowDrafts.A")
+    ).toBeNull();
+    expect(f.packets).toEqual([]);
+    expect(f.store.list()).toEqual([]);
+  } finally {
+    await f.cleanup();
   }
 });
