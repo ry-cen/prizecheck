@@ -262,7 +262,14 @@ async function storyOne(
   await row.click();
   await expect(heading(ash)).toHaveText("Brock T sent you a Trade Proposal");
   await composer(ash).fill("Yes, I have three.");
+  const replySent = ash.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === `/api/trades/${threadId}/messages` &&
+      response.request().method() === "POST" &&
+      response.status() === 201
+  );
   await send(ash).click();
+  await replySent;
   await expect(timeline(ash)).toContainText("Yes, I have three.");
   await expect(timeline(ash).getByRole("listitem")).toHaveCount(3);
   await expect(tradesTab(ash)).toHaveAccessibleName(
