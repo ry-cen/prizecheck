@@ -1,3 +1,4 @@
+import { responseAudit } from "./support/responseAudit";
 // Ticket #276, on the proposal builder of #284: Find trades among Friends and Ask to trade (Trading spec "Finding
 // matches" and "Card popup: Ask to trade", prototype verdict variant A). Misty wants Ash's Arven (a Deck line and Trade
 // Wants) and his Reverse Holo Boss's Orders (a Deck line that takes any finish), and Ash's Deck wants her Iono: a
@@ -16,7 +17,6 @@ import { expect, test } from "./support/collectors";
 import { traderIdOf } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
-import { bodyOf } from "./support/trades";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
@@ -234,274 +234,296 @@ async function story(
   await befriend(page, ash.page);
   await befriend(page, brock.page);
   // Everything about Trades that reaches Misty's browser, to check it never names a Location or a Deck.
-  const answers: Promise<string | null>[] = [];
-  page.on("response", (response) => {
-    if (/\/api\/social\/trade/.test(response.url()))
-      answers.push(bodyOf(response));
+  const audit = responseAudit((capture) => {
+    const receive = (response: import("@playwright/test").Response) => {
+      if (/\/api\/social\/trade/.test(response.url())) capture(response);
+    };
+    page.on("response", receive);
+    return () => page.off("response", receive);
   });
+  try {
+    // A: Find trades, from the Trades tab's switch. Ash's two-way row comes first; Brock's one-way row has no tag.
+    await page.goto(`${ORIGIN}/trades`);
+    await page.getByRole("tab", { name: "Find trades", exact: true }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades/find`);
+    const matches = page.getByRole("list", { name: "Matches" });
+    const rows = matches.getByRole("button", { expanded: false });
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText("Ash K");
+    await expect(rows.nth(0)).toContainText("Two-way match");
+    await expect(rows.nth(0)).toContainText(
+      "Ash K has 3 cards you want and wants 1 of yours"
+    );
+    await expect(rows.nth(1)).toContainText("Brock T has 1 card you want");
+    await expect(rows.nth(1)).not.toContainText("You could buy");
+    await expect(page.getByRole("main")).not.toContainText(
+      "Open to cash offers"
+    );
+    await expectPageChecks(page, `Find trades at ${width}`);
 
-  // A: Find trades, from the Trades tab's switch. Ash's two-way row comes first; Brock's one-way row has no tag.
-  await page.goto(`${ORIGIN}/trades`);
-  await page.getByRole("tab", { name: "Find trades", exact: true }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/find`);
-  const matches = page.getByRole("list", { name: "Matches" });
-  const rows = matches.getByRole("button", { expanded: false });
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText("Ash K");
-  await expect(rows.nth(0)).toContainText("Two-way match");
-  await expect(rows.nth(0)).toContainText(
-    "Ash K has 3 cards you want and wants 1 of yours"
-  );
-  await expect(rows.nth(1)).toContainText("Brock T has 1 card you want");
-  await expect(rows.nth(1)).not.toContainText("You could buy");
-  await expect(page.getByRole("main")).not.toContainText("Open to cash offers");
-  await expectPageChecks(page, `Find trades at ${width}`);
-
-  // The open row shows only the matched cards on each side, with their counts and tags, and no price.
-  await matches.getByRole("button", { name: /^Ash K/ }).click();
-  await expect(
-    matches.getByRole("button", { name: /^Ash K/, expanded: true })
-  ).toBeVisible();
-  const youGet = page.getByRole("list", { name: "You get from Ash K" });
-  const youGive = page.getByRole("list", { name: "You give Ash K" });
-  await expect(youGet.getByRole("listitem")).toHaveCount(3);
-  const arven = youGet.getByRole("listitem").filter({ hasText: "Arven" });
-  await expect(arven).toContainText("3 wanted (1 for Decks)");
-  await expect(arven).toContainText("For Decks and Trade Wants");
-  await expect(arven).toContainText("Exact");
-  await expect(arven).toContainText("×2");
-  const boss = youGet
-    .getByRole("listitem")
-    .filter({ hasText: "Boss's Orders" })
-    .filter({ hasText: "Reverse Holo" });
-  await expect(boss).toContainText("Any finish");
-  await expect(boss).toContainText("1 wanted (1 for Decks)");
-  await expect(youGive.getByRole("listitem")).toHaveCount(1);
-  await expect(youGive).toContainText("Iono");
-  await expect(youGive).toContainText("2 wanted (2 for Decks)");
-  await expect(youGive).toContainText("For Decks");
-  await expect(youGive).toContainText("×3");
-  await expect(page.getByRole("main")).not.toContainText("$");
-  await expect(page.getByRole("main")).not.toContainText(secret);
-  await expect(
-    page.getByRole("link", { name: "See all of Ash K's Trade List" })
-  ).toBeVisible();
-  await expectPageChecks(page, `an open match at ${width}`);
-
-  // A2: the list read cut Ash's side short; Show 2 more loads the per-Friend read, which moves focus to the side's
-  // heading and gives the row header the full read's tag.
-  const listRead = `${ORIGIN}/api/social/trade-matches`;
-  await page.route(listRead, async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    for (const row of body.rows)
-      if (row.display_name === "Ash K") {
-        row.match = "wants_what_you_have";
-        row.more_you_get = row.you_get.length - 1;
-        row.you_get = row.you_get.slice(0, 1);
-        const referenced = new Set(
-          row.you_get.flatMap(
-            (card: { need_groups: string[] }) => card.need_groups
-          )
-        );
-        row.you_get_groups = row.you_get_groups.filter(
-          (group: { id: string }) => referenced.has(group.id)
-        );
-      }
-    await route.fulfill({ response, json: body });
-  });
-  await page.reload();
-  await matches.getByRole("button", { name: /^Ash K/ }).click();
-  const ashHeader = matches.getByRole("button", { name: /^Ash K/ });
-  await expect(ashHeader).not.toContainText("Two-way match");
-  await expect(
-    page.getByRole("list", { name: "You get from Ash K" }).getByRole("listitem")
-  ).toHaveCount(1);
-  await page.getByRole("button", { name: "Show 2 more" }).click();
-  await expect(
-    page.getByRole("heading", { name: "You get", level: 4 })
-  ).toBeFocused();
-  await expect(
-    page.getByRole("list", { name: "You get from Ash K" }).getByRole("listitem")
-  ).toHaveCount(3);
-  await expect(ashHeader).toContainText("Two-way match");
-  await page.unroute(listRead);
-
-  // B: Propose trade prefills the visible match, including the cards loaded by Show more.
-  await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
-  await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
-  await expect(
-    page
-      .getByRole("main")
-      .getByRole("link", { name: "Find trades", exact: true })
-  ).toHaveAttribute("href", "/trades/find");
-  await show(page, "Proposal");
-  await expect(
-    page
-      .getByRole("list", { name: "You get", exact: true })
-      .getByRole("listitem")
-  ).toHaveCount(1);
-  await expect(
-    page
-      .getByRole("list", { name: "You give", exact: true })
-      .getByRole("listitem")
-  ).toHaveCount(1);
-  await expect(
-    group(page, "Arven (SVI 166) you get").getByText("2", { exact: true })
-  ).toHaveText("2");
-  // Both finishes share one remaining need: neither is picked, including the exact Edition.
-  await expect(group(page, "Boss's Orders (PAL 172) you get")).toHaveCount(0);
-  const printingChoices = page.getByRole("region", {
-    name: "Choose printings for You get",
-  });
-  await expect(printingChoices).toContainText(
-    "1 wanted across these printings"
-  );
-  await expect(printingChoices).toContainText("1 left to choose");
-  await expectPageChecks(page, `an explicit printing choice at ${width}`);
-  await printingChoices
-    .getByRole("button", {
-      name: "Choose this printing: Boss's Orders (PAL 172, Reverse Holo) · PAL 172 · Reverse Holo for You get",
-      exact: true,
-    })
-    .click();
-  await expect(
-    group(page, "Boss's Orders (PAL 172, Reverse Holo) you get").locator(
-      "output"
-    )
-  ).toHaveText("1");
-  await expect(printingChoices).toContainText("0 left to choose");
-  await expect(
-    printingChoices.getByRole("button", {
-      name: /^Choose this printing: Boss's Orders \(PAL 172\).*Normal for You get$/,
-    })
-  ).toBeDisabled();
-  await expect(
-    group(page, "Iono (PAL 185) you give").getByText("2", { exact: true })
-  ).toHaveText("2");
-  await show(page, "Cards");
-  const theirList = page.getByRole("list", { name: "Ash K's Trade List" });
-  const adds = theirList.getByRole("button", { name: /^Add to You get/ });
-  await expect(adds.nth(0)).toHaveAccessibleName(
-    /^Add to You get, Arven, SVI 166,.*3 wanted \(1 for Decks\)/
-  );
-  await expect(adds).toHaveCount(3);
-  const reverseBoss = theirList.getByRole("button", {
-    name: /^Add to You get, Boss's Orders, PAL 172,.*Reverse Holo.*1 wanted \(1 for Decks\)/,
-  });
-  await expect(reverseBoss).toHaveCount(1);
-  await expect(adds.nth(0)).toContainText("You want");
-  await expect(reverseBoss).toContainText("You want");
-  await expectPageChecks(
-    page,
-    `the proposal builder from Find trades at ${width}`
-  );
-  // The prefill is editable: reduce Arven, and add one more Iono from the library.
-  await show(page, "Proposal");
-  await page
-    .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
-    .click();
-  await expect(group(page, "Arven (SVI 166) you get")).toContainText("1");
-  await expect(group(page, "Arven (SVI 166) you get")).not.toContainText("2");
-  await show(page, "Cards");
-  await page.getByRole("radio", { name: "My Trade List" }).click();
-  await tile(
-    page.getByRole("list", { name: "Your Trade List" }),
-    "give",
-    "Iono, PAL 185, .+?, Normal"
-  ).click();
-  await show(page, "Proposal");
-  await expect(
-    group(page, "Iono (PAL 185) you give").getByText("3", { exact: true })
-  ).toHaveText("3");
-  await page.getByRole("button", { name: "Send Trade Proposal" }).click();
-  await expect(page).toHaveURL(new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`));
-  await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
-
-  // C: Ask to trade in the card popup opens Brock's builder with the card in You get.
-  await page.goto(`${ORIGIN}/catalog`);
-  await results(page)
-    .getByRole("button", { name: /^Iono, PAF/ })
-    .click();
-  const popup = page.getByRole("dialog", { name: "Iono" });
-  const offering = popup.getByRole("list", {
-    name: "Friends with this on their Trade List",
-  });
-  await expect(offering.getByRole("listitem")).toHaveCount(1);
-  await expect(offering).toContainText("Brock T");
-  await expect(offering).toContainText("×1");
-  // The popup's Add row names Misty's own Locations; the Friends' part names none of Brock's.
-  await expect(offering).not.toContainText(secret);
-  const askBrock = async () => {
-    await popup
-      .getByRole("button", { name: /^Ask Brock T to trade Iono \(PAF 0?80\)$/ })
-      .click();
-    await expect(page).toHaveURL(`${ORIGIN}/trades/new/${brockTrader}`);
-    await show(page, "Cards");
+    // The open row shows only the matched cards on each side, with their counts and tags, and no price.
+    await matches.getByRole("button", { name: /^Ash K/ }).click();
     await expect(
-      page.getByRole("radio", { name: "Their Trade List" })
-    ).toBeChecked();
+      matches.getByRole("button", { name: /^Ash K/, expanded: true })
+    ).toBeVisible();
+    const youGet = page.getByRole("list", { name: "You get from Ash K" });
+    const youGive = page.getByRole("list", { name: "You give Ash K" });
+    await expect(youGet.getByRole("listitem")).toHaveCount(3);
+    const arven = youGet.getByRole("listitem").filter({ hasText: "Arven" });
+    await expect(arven).toContainText("3 wanted (1 for Decks)");
+    await expect(arven).toContainText("For Decks and Trade Wants");
+    await expect(arven).toContainText("Exact");
+    await expect(arven).toContainText("×2");
+    const boss = youGet
+      .getByRole("listitem")
+      .filter({ hasText: "Boss's Orders" })
+      .filter({ hasText: "Reverse Holo" });
+    await expect(boss).toContainText("Any finish");
+    await expect(boss).toContainText("1 wanted (1 for Decks)");
+    await expect(youGive.getByRole("listitem")).toHaveCount(1);
+    await expect(youGive).toContainText("Iono");
+    await expect(youGive).toContainText("2 wanted (2 for Decks)");
+    await expect(youGive).toContainText("For Decks");
+    await expect(youGive).toContainText("×3");
+    await expect(page.getByRole("main")).not.toContainText("$");
+    await expect(page.getByRole("main")).not.toContainText(secret);
+    await expect(
+      page.getByRole("link", { name: "See all of Ash K's Trade List" })
+    ).toBeVisible();
+    await expectPageChecks(page, `an open match at ${width}`);
+
+    // A2: the list read cut Ash's side short; Show 2 more loads the per-Friend read, which moves focus to the side's
+    // heading and gives the row header the full read's tag.
+    const listRead = `${ORIGIN}/api/social/trade-matches`;
+    await page.route(listRead, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      for (const row of body.rows)
+        if (row.display_name === "Ash K") {
+          row.match = "wants_what_you_have";
+          row.more_you_get = row.you_get.length - 1;
+          row.you_get = row.you_get.slice(0, 1);
+          const referenced = new Set(
+            row.you_get.flatMap(
+              (card: { need_groups: string[] }) => card.need_groups
+            )
+          );
+          row.you_get_groups = row.you_get_groups.filter(
+            (group: { id: string }) => referenced.has(group.id)
+          );
+        }
+      await route.fulfill({ response, json: body });
+    });
+    await page.reload();
+    await matches.getByRole("button", { name: /^Ash K/ }).click();
+    const ashHeader = matches.getByRole("button", { name: /^Ash K/ });
+    await expect(ashHeader).not.toContainText("Two-way match");
+    await expect(
+      page
+        .getByRole("list", { name: "You get from Ash K" })
+        .getByRole("listitem")
+    ).toHaveCount(1);
+    await page.getByRole("button", { name: "Show 2 more" }).click();
+    await expect(
+      page.getByRole("heading", { name: "You get", level: 4 })
+    ).toBeFocused();
+    await expect(
+      page
+        .getByRole("list", { name: "You get from Ash K" })
+        .getByRole("listitem")
+    ).toHaveCount(3);
+    await expect(ashHeader).toContainText("Two-way match");
+    await page.unroute(listRead);
+
+    // B: Propose trade prefills the visible match, including the cards loaded by Show more.
+    await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
+    await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
+    await expect(
+      page
+        .getByRole("main")
+        .getByRole("link", { name: "Find trades", exact: true })
+    ).toHaveAttribute("href", "/trades/find");
     await show(page, "Proposal");
-    await expect(group(page, /^Iono \(PAF 0?80\) you get$/)).toContainText("1");
-  };
-  await askBrock();
-  for (const pane of isPhone(page)
-    ? (["Proposal", "Cards"] as const)
-    : ([null] as const)) {
-    if (pane) await show(page, pane);
+    await expect(
+      page
+        .getByRole("list", { name: "You get", exact: true })
+        .getByRole("listitem")
+    ).toHaveCount(1);
+    await expect(
+      page
+        .getByRole("list", { name: "You give", exact: true })
+        .getByRole("listitem")
+    ).toHaveCount(1);
+    await expect(
+      group(page, "Arven (SVI 166) you get").getByText("2", { exact: true })
+    ).toHaveText("2");
+    // Both finishes share one remaining need: neither is picked, including the exact Edition.
+    await expect(group(page, "Boss's Orders (PAL 172) you get")).toHaveCount(0);
+    const printingChoices = page.getByRole("region", {
+      name: "Choose printings for You get",
+    });
+    await expect(printingChoices).toContainText(
+      "1 wanted across these printings"
+    );
+    await expect(printingChoices).toContainText("1 left to choose");
+    await expectPageChecks(page, `an explicit printing choice at ${width}`);
+    await printingChoices
+      .getByRole("button", {
+        name: "Choose this printing: Boss's Orders (PAL 172, Reverse Holo) · PAL 172 · Reverse Holo for You get",
+        exact: true,
+      })
+      .click();
+    await expect(
+      group(page, "Boss's Orders (PAL 172, Reverse Holo) you get").locator(
+        "output"
+      )
+    ).toHaveText("1");
+    await expect(printingChoices).toContainText("0 left to choose");
+    await expect(
+      printingChoices.getByRole("button", {
+        name: /^Choose this printing: Boss's Orders \(PAL 172\).*Normal for You get$/,
+      })
+    ).toBeDisabled();
+    await expect(
+      group(page, "Iono (PAL 185) you give").getByText("2", { exact: true })
+    ).toHaveText("2");
+    await show(page, "Cards");
+    const theirList = page.getByRole("list", { name: "Ash K's Trade List" });
+    const adds = theirList.getByRole("button", { name: /^Add to You get/ });
+    await expect(adds.nth(0)).toHaveAccessibleName(
+      /^Add to You get, Arven, SVI 166,.*3 wanted \(1 for Decks\)/
+    );
+    await expect(adds).toHaveCount(3);
+    const reverseBoss = theirList.getByRole("button", {
+      name: /^Add to You get, Boss's Orders, PAL 172,.*Reverse Holo.*1 wanted \(1 for Decks\)/,
+    });
+    await expect(reverseBoss).toHaveCount(1);
+    await expect(adds.nth(0)).toContainText("You want");
+    await expect(reverseBoss).toContainText("You want");
     await expectPageChecks(
       page,
-      `the proposal builder from Ask to trade at ${width}${pane ? `, ${pane} pane` : ""}`
+      `the proposal builder from Find trades at ${width}`
     );
+    // The prefill is editable: reduce Arven, and add one more Iono from the library.
+    await show(page, "Proposal");
+    await page
+      .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+      .click();
+    await expect(group(page, "Arven (SVI 166) you get")).toContainText("1");
+    await expect(group(page, "Arven (SVI 166) you get")).not.toContainText("2");
+    await show(page, "Cards");
+    await page.getByRole("radio", { name: "My Trade List" }).click();
+    await tile(
+      page.getByRole("list", { name: "Your Trade List" }),
+      "give",
+      "Iono, PAL 185, .+?, Normal"
+    ).click();
+    await show(page, "Proposal");
+    await expect(
+      group(page, "Iono (PAL 185) you give").getByText("3", { exact: true })
+    ).toHaveText("3");
+    await page.getByRole("button", { name: "Send Trade Proposal" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`)
+    );
+    await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
+
+    // C: Ask to trade in the card popup opens Brock's builder with the card in You get.
+    await page.goto(`${ORIGIN}/catalog`);
+    await results(page)
+      .getByRole("button", { name: /^Iono, PAF/ })
+      .click();
+    const popup = page.getByRole("dialog", { name: "Iono" });
+    const offering = popup.getByRole("list", {
+      name: "Friends with this on their Trade List",
+    });
+    await expect(offering.getByRole("listitem")).toHaveCount(1);
+    await expect(offering).toContainText("Brock T");
+    await expect(offering).toContainText("×1");
+    // The popup's Add row names Misty's own Locations; the Friends' part names none of Brock's.
+    await expect(offering).not.toContainText(secret);
+    const askBrock = async () => {
+      await popup
+        .getByRole("button", {
+          name: /^Ask Brock T to trade Iono \(PAF 0?80\)$/,
+        })
+        .click();
+      await expect(page).toHaveURL(`${ORIGIN}/trades/new/${brockTrader}`);
+      await show(page, "Cards");
+      await expect(
+        page.getByRole("radio", { name: "Their Trade List" })
+      ).toBeChecked();
+      await show(page, "Proposal");
+      await expect(group(page, /^Iono \(PAF 0?80\) you get$/)).toContainText(
+        "1"
+      );
+    };
+    await askBrock();
+    for (const pane of isPhone(page)
+      ? (["Proposal", "Cards"] as const)
+      : ([null] as const)) {
+      if (pane) await show(page, pane);
+      await expectPageChecks(
+        page,
+        `the proposal builder from Ask to trade at ${width}${pane ? `, ${pane} pane` : ""}`
+      );
+    }
+    // Ask to trade is not a page of the Friend's, so the back link goes to Find trades.
+    await expect(
+      page
+        .getByRole("main")
+        .getByRole("link", { name: "Find trades", exact: true })
+    ).toHaveAttribute("href", "/trades/find");
+    // Leaving without touching it asks nothing.
+    const discard = page.getByRole("dialog", {
+      name: "Discard this proposal to Brock T?",
+    });
+    await page.goBack();
+    await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+    await expect(discard).toHaveCount(0);
+    // One more card makes leaving ask first.
+    await results(page)
+      .getByRole("button", { name: /^Iono, PAF/ })
+      .click();
+    await askBrock();
+    await show(page, "Cards");
+    await tile(
+      page.getByRole("list", { name: "Brock T's Trade List" }),
+      "get",
+      "Iono, PAL 254, .+?, Normal"
+    ).click();
+    await page.goBack();
+    await expect(discard).toBeVisible();
+    await discard.getByRole("button", { name: "Discard", exact: true }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+
+    // A card no Friend offers has no Ask to trade.
+    await results(page)
+      .getByRole("button", { name: /^Iono, PAL 185/ })
+      .click();
+    await expect(popup).toBeVisible();
+    await expect(popup).not.toContainText(
+      "Friends with this on their Trade List"
+    );
+    await popup.getByRole("button", { name: /^Close/ }).click();
+
+    // Nothing about Trades that reached Misty's browser names a Location or a Deck, by name or by id.
+    const bodies = await audit.finish();
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies)
+      for (const word of [
+        secret,
+        shelf,
+        ashDeck,
+        brockBinder,
+        binder,
+        mistyDeck,
+      ])
+        expect(body).not.toContain(word);
+  } finally {
+    audit.stop();
   }
-  // Ask to trade is not a page of the Friend's, so the back link goes to Find trades.
-  await expect(
-    page
-      .getByRole("main")
-      .getByRole("link", { name: "Find trades", exact: true })
-  ).toHaveAttribute("href", "/trades/find");
-  // Leaving without touching it asks nothing.
-  const discard = page.getByRole("dialog", {
-    name: "Discard this proposal to Brock T?",
-  });
-  await page.goBack();
-  await expect(page).toHaveURL(`${ORIGIN}/catalog`);
-  await expect(discard).toHaveCount(0);
-  // One more card makes leaving ask first.
-  await results(page)
-    .getByRole("button", { name: /^Iono, PAF/ })
-    .click();
-  await askBrock();
-  await show(page, "Cards");
-  await tile(
-    page.getByRole("list", { name: "Brock T's Trade List" }),
-    "get",
-    "Iono, PAL 254, .+?, Normal"
-  ).click();
-  await page.goBack();
-  await expect(discard).toBeVisible();
-  await discard.getByRole("button", { name: "Discard", exact: true }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/catalog`);
-
-  // A card no Friend offers has no Ask to trade.
-  await results(page)
-    .getByRole("button", { name: /^Iono, PAL 185/ })
-    .click();
-  await expect(popup).toBeVisible();
-  await expect(popup).not.toContainText(
-    "Friends with this on their Trade List"
-  );
-  await popup.getByRole("button", { name: /^Close/ }).click();
-
-  // Nothing about Trades that reached Misty's browser names a Location or a Deck, by name or by id.
-  const bodies = (await Promise.all(answers)).filter(
-    (body): body is string => body !== null
-  );
-  expect(bodies.length).toBeGreaterThan(0);
-  for (const body of bodies)
-    for (const word of [secret, shelf, ashDeck, brockBinder, binder, mistyDeck])
-      expect(body).not.toContain(word);
 }
 
 /** A collector with no Friends is told that matching needs Friends; with a Friend who matches nothing, says so. */

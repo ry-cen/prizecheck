@@ -1,3 +1,4 @@
+import { responseAudit } from "./support/responseAudit";
 import { tradeView } from "./support/trades";
 // Ticket #272: Confirm swap (Trading spec "Confirm swap and ownership transfer", prototype verdict variant A: received
 // cards go to Unsorted by default, changeable in the confirm dialog). Misty sends Ash a swap and a gift through the
@@ -22,7 +23,6 @@ import {
 } from "./support/loans";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
-import { bodyOf } from "./support/trades";
 
 /** A top-level Storage Leaf, marked For trade when `forTrade`; returns its id. */
 async function leaf(page: Page, name: string, forTrade: boolean) {
@@ -151,264 +151,281 @@ async function story(
   const deck = await createDeck(page, `${secret} Deck`);
   await befriend(page, ash.page);
   // Everything about Trades that reaches either browser, to check it never names the other side's Locations.
-  const answers: { body: Promise<string | null>; secretOf: string[] }[] = [];
-  for (const [who, theirs] of [
-    [ash.page, [`${secret} Shelf`, shelf, `${secret} Deck`, deck]],
-    [page, [`${secret} Binder`, ashBinder, `${secret} Box`, ashBox]],
-  ] as const)
-    who.on("response", (response) => {
-      if (/\/api\/(social\/)?trade/.test(response.url()))
-        answers.push({ body: bodyOf(response), secretOf: [...theirs] });
+  const audits = (
+    [
+      [ash.page, [`${secret} Shelf`, shelf, `${secret} Deck`, deck]],
+      [page, [`${secret} Binder`, ashBinder, `${secret} Box`, ashBox]],
+    ] as const
+  ).map(([who, theirs]) => {
+    const audit = responseAudit((capture) => {
+      const receive = (response: import("@playwright/test").Response) => {
+        if (/\/api\/(social\/)?trade/.test(response.url())) capture(response);
+      };
+      who.on("response", receive);
+      return () => who.off("response", receive);
+    });
+    return { audit, secretOf: [...theirs] };
+  });
+  try {
+    const ashId = await accountId(ash.page);
+    const swap = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
+    const gift = await propose(page, ashId, [[iono, 1]], []);
+
+    // A: Ash accepts the swap. His screen tells him to swap in person, then confirm, and says where his Arven comes from.
+    await ash.page.goto(`${ORIGIN}/trades/${swap}`);
+    const ashMain = ash.page.getByRole("main");
+    await ashMain.getByRole("button", { name: "Accept" }).click();
+    await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
+    await expect(toast(ash.page)).toContainText(
+      "Accepted. Swap the cards in person, then confirm."
+    );
+    await expect(ashMain).toContainText(
+      "Swap the cards in person, then confirm."
+    );
+    await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
+      `From ${secret} Binder`
+    );
+    await expect(more(ash.page)).toHaveCount(1);
+
+    // B: both Arven move to Ash's Box while his screen is open. His Confirm swap finds the pick out of date, and the
+    // screen reads the Trade and his picks again.
+    await move(ash.page, ashBinder, arven, 2, ashBox);
+    let stalePickConfirmations = 0;
+    ash.page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith(`/api/trades/${swap}/confirm-swap`)
+      )
+        stalePickConfirmations++;
+    });
+    const ashDialog = confirmDialog(ash.page, "Misty W");
+    await expect(ashDialog).toBeVisible();
+    await expect(
+      ashDialog.getByRole("combobox", { name: "Put the cards you get in" })
+    ).toHaveValue("");
+    await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
+    await expect(ashDialog).toBeHidden();
+    expect(stalePickConfirmations).toBe(1);
+    await expect(ashMain.getByRole("alert")).toHaveText(
+      "A pick is out of date. Use the suggested picks first."
+    );
+    await expect(ashMain).toContainText("A pick is out of date.");
+    await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
+      `${secret} Binder has none now · take it from ${secret} Box`
+    );
+    await expect(
+      ashMain.getByRole("button", { name: "Confirm swap" })
+    ).toHaveCount(0);
+    // The detail control names the visible card and Edition, including Normal. Its separate description announces
+    // both the quantity and the stale-pick instruction before the collector opens the card popup.
+    const staleCard = ashMain
+      .getByRole("list", { name: "You give", exact: true })
+      .getByRole("button", { name: "Arven SVI 166 · Normal", exact: true });
+    await expect(staleCard.getByText("Arven", { exact: true })).toBeVisible();
+    await expect(
+      staleCard.getByText("SVI 166 · Normal", { exact: true })
+    ).toBeVisible();
+    await expect(staleCard).toHaveAccessibleName("Arven SVI 166 · Normal");
+    await expect(staleCard).toHaveAccessibleDescription(
+      `×1 ${secret} Binder has none now · take it from ${secret} Box`
+    );
+    await staleCard.focus();
+    await expect(staleCard).toBeFocused();
+    await expectPageChecks(ash.page, `an out-of-date pick at ${width}`);
+    await ashMain.getByRole("button", { name: "Use suggested picks" }).click();
+    await expect(toast(ash.page)).toContainText("Picks updated");
+    await expect(heading(ash.page)).toBeFocused();
+    await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
+      `From ${secret} Box`
+    );
+
+    await page.goto(`${ORIGIN}/trades/${swap}`);
+    await expect(heading(page)).toHaveText("Ready to swap with Ash K");
+    // Keep consent open so focus refresh cannot hide the stale-revision regression.
+    const dialog = confirmDialog(page, "Ash K");
+    await expect(dialog).toBeVisible();
+    const confirmations: {
+      revision: number;
+      idempotency_key: string;
+      destination_id: string | null;
+      deck_switches: object[];
+    }[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith(`/api/trades/${swap}/confirm-swap`)
+      )
+        confirmations.push(request.postDataJSON());
     });
 
-  const ashId = await accountId(ash.page);
-  const swap = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
-  const gift = await propose(page, ashId, [[iono, 1]], []);
+    // C: Ash confirms, putting Misty's Iono in his Box.
+    await expect(
+      ashMain.getByRole("list", { name: "You give", exact: true })
+    ).toContainText(`From ${secret} Box`);
+    await expect(ashDialog).toContainText(
+      "Leaves your Collection: 1 Arven (SVI 166)"
+    );
+    await expect(ashDialog).toContainText("1 Iono (PAL 185)");
+    await expect(ashDialog).toContainText("The swap can't be undone.");
+    await expectPageChecks(ash.page, `the confirm dialog at ${width}`);
+    await ashDialog
+      .getByRole("combobox", { name: "Put the cards you get in" })
+      .selectOption({ label: `${secret} Box` });
+    await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
+    await expect(toast(ash.page)).toContainText(
+      `Swapped. 1 card is in ${secret} Box.`
+    );
+    await expect(heading(ash.page)).toHaveText(
+      "Waiting for Misty W to confirm the swap"
+    );
+    await expect(heading(ash.page)).toBeFocused();
+    await expect(
+      ashMain.getByRole("button", { name: "Confirm swap" })
+    ).toHaveCount(0);
+    await expectOnlyReport(ash.page);
+    expect(await held(ash.page, ashBox)).toEqual({ [arven]: "1", [iono]: "1" });
 
-  // A: Ash accepts the swap. His screen tells him to swap in person, then confirm, and says where his Arven comes from.
-  await ash.page.goto(`${ORIGIN}/trades/${swap}`);
-  const ashMain = ash.page.getByRole("main");
-  await ashMain.getByRole("button", { name: "Accept" }).click();
-  await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
-  await expect(toast(ash.page)).toContainText(
-    "Accepted. Swap the cards in person, then confirm."
-  );
-  await expect(ashMain).toContainText(
-    "Swap the cards in person, then confirm."
-  );
-  await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
-    `From ${secret} Binder`
-  );
-  await expect(more(ash.page)).toHaveCount(1);
+    // D: Misty's screen was open before Ash confirmed; confirming must recover from its stale revision.
+    const main = page.getByRole("main");
+    expect(await held(page, shelf)).toEqual({ [iono]: "3" });
 
-  // B: both Arven move to Ash's Box while his screen is open. His Confirm swap finds the pick out of date, and the
-  // screen reads the Trade and his picks again.
-  await move(ash.page, ashBinder, arven, 2, ashBox);
-  let stalePickConfirmations = 0;
-  ash.page.on("request", (request) => {
-    if (
-      request.method() === "POST" &&
-      request.url().endsWith(`/api/trades/${swap}/confirm-swap`)
-    )
-      stalePickConfirmations++;
-  });
-  const ashDialog = confirmDialog(ash.page, "Misty W");
-  await expect(ashDialog).toBeVisible();
-  await expect(
-    ashDialog.getByRole("combobox", { name: "Put the cards you get in" })
-  ).toHaveValue("");
-  await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
-  await expect(ashDialog).toBeHidden();
-  expect(stalePickConfirmations).toBe(1);
-  await expect(ashMain.getByRole("alert")).toHaveText(
-    "A pick is out of date. Use the suggested picks first."
-  );
-  await expect(ashMain).toContainText("A pick is out of date.");
-  await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
-    `${secret} Binder has none now · take it from ${secret} Box`
-  );
-  await expect(
-    ashMain.getByRole("button", { name: "Confirm swap" })
-  ).toHaveCount(0);
-  // The detail control names the visible card and Edition, including Normal. Its separate description announces
-  // both the quantity and the stale-pick instruction before the collector opens the card popup.
-  const staleCard = ashMain
-    .getByRole("list", { name: "You give", exact: true })
-    .getByRole("button", { name: "Arven SVI 166 · Normal", exact: true });
-  await expect(staleCard.getByText("Arven", { exact: true })).toBeVisible();
-  await expect(
-    staleCard.getByText("SVI 166 · Normal", { exact: true })
-  ).toBeVisible();
-  await expect(staleCard).toHaveAccessibleName("Arven SVI 166 · Normal");
-  await expect(staleCard).toHaveAccessibleDescription(
-    `×1 ${secret} Binder has none now · take it from ${secret} Box`
-  );
-  await staleCard.focus();
-  await expect(staleCard).toBeFocused();
-  await expectPageChecks(ash.page, `an out-of-date pick at ${width}`);
-  await ashMain.getByRole("button", { name: "Use suggested picks" }).click();
-  await expect(toast(ash.page)).toContainText("Picks updated");
-  await expect(heading(ash.page)).toBeFocused();
-  await expect(ashMain.getByRole("list", { name: "You give" })).toContainText(
-    `From ${secret} Box`
-  );
+    // E: Misty confirms into her Deck: the Trade is swapped, and the Deck lists the Arven it now holds.
+    await dialog
+      .getByRole("combobox", { name: "Put the cards you get in" })
+      .selectOption({ label: `${secret} Deck (Deck)` });
+    await dialog.getByRole("button", { name: "Confirm swap" }).click();
+    await expect(toast(page)).toContainText(
+      `Swapped. 1 card is in ${secret} Deck.`
+    );
+    await expect(heading(page)).toHaveText("Swapped with Ash K");
+    expect(confirmations).toHaveLength(2);
+    expect(confirmations[1].revision).toBe(confirmations[0].revision + 1);
+    expect(confirmations[0].destination_id).toBe(deck);
+    expect(confirmations[1].destination_id).toBe(deck);
+    expect(confirmations[1].deck_switches).toEqual(
+      confirmations[0].deck_switches
+    );
+    expect(confirmations[1].idempotency_key).toBe(
+      confirmations[0].idempotency_key
+    );
+    await expect(
+      main.getByRole("button", { name: "Confirm swap" })
+    ).toHaveCount(0);
+    expect(await held(page, shelf)).toEqual({ [iono]: "2" });
+    expect(await held(page, deck)).toEqual({ [arven]: "1" });
+    const lines = (await api(page, "GET", `/api/decks/${deck}`)).deck_list
+      .lines as { edition_id: string; quantity: string }[];
+    expect(lines.map((item) => [item.edition_id, item.quantity])).toEqual([
+      [arven, "1"],
+    ]);
+    await ash.page.reload();
+    await expect(heading(ash.page)).toHaveText("Swapped with Misty W");
 
-  await page.goto(`${ORIGIN}/trades/${swap}`);
-  await expect(heading(page)).toHaveText("Ready to swap with Ash K");
-  // Keep consent open so focus refresh cannot hide the stale-revision regression.
-  const dialog = confirmDialog(page, "Ash K");
-  await expect(dialog).toBeVisible();
-  const confirmations: {
-    revision: number;
-    idempotency_key: string;
-    destination_id: string | null;
-    deck_switches: object[];
-  }[] = [];
-  page.on("request", (request) => {
-    if (
-      request.method() === "POST" &&
-      request.url().endsWith(`/api/trades/${swap}/confirm-swap`)
-    )
-      confirmations.push(request.postDataJSON());
-  });
-
-  // C: Ash confirms, putting Misty's Iono in his Box.
-  await expect(
-    ashMain.getByRole("list", { name: "You give", exact: true })
-  ).toContainText(`From ${secret} Box`);
-  await expect(ashDialog).toContainText(
-    "Leaves your Collection: 1 Arven (SVI 166)"
-  );
-  await expect(ashDialog).toContainText("1 Iono (PAL 185)");
-  await expect(ashDialog).toContainText("The swap can't be undone.");
-  await expectPageChecks(ash.page, `the confirm dialog at ${width}`);
-  await ashDialog
-    .getByRole("combobox", { name: "Put the cards you get in" })
-    .selectOption({ label: `${secret} Box` });
-  await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
-  await expect(toast(ash.page)).toContainText(
-    `Swapped. 1 card is in ${secret} Box.`
-  );
-  await expect(heading(ash.page)).toHaveText(
-    "Waiting for Misty W to confirm the swap"
-  );
-  await expect(heading(ash.page)).toBeFocused();
-  await expect(
-    ashMain.getByRole("button", { name: "Confirm swap" })
-  ).toHaveCount(0);
-  await expectOnlyReport(ash.page);
-  expect(await held(ash.page, ashBox)).toEqual({ [arven]: "1", [iono]: "1" });
-
-  // D: Misty's screen was open before Ash confirmed; confirming must recover from its stale revision.
-  const main = page.getByRole("main");
-  expect(await held(page, shelf)).toEqual({ [iono]: "3" });
-
-  // E: Misty confirms into her Deck: the Trade is swapped, and the Deck lists the Arven it now holds.
-  await dialog
-    .getByRole("combobox", { name: "Put the cards you get in" })
-    .selectOption({ label: `${secret} Deck (Deck)` });
-  await dialog.getByRole("button", { name: "Confirm swap" }).click();
-  await expect(toast(page)).toContainText(
-    `Swapped. 1 card is in ${secret} Deck.`
-  );
-  await expect(heading(page)).toHaveText("Swapped with Ash K");
-  expect(confirmations).toHaveLength(2);
-  expect(confirmations[1].revision).toBe(confirmations[0].revision + 1);
-  expect(confirmations[0].destination_id).toBe(deck);
-  expect(confirmations[1].destination_id).toBe(deck);
-  expect(confirmations[1].deck_switches).toEqual(
-    confirmations[0].deck_switches
-  );
-  expect(confirmations[1].idempotency_key).toBe(
-    confirmations[0].idempotency_key
-  );
-  await expect(main.getByRole("button", { name: "Confirm swap" })).toHaveCount(
-    0
-  );
-  expect(await held(page, shelf)).toEqual({ [iono]: "2" });
-  expect(await held(page, deck)).toEqual({ [arven]: "1" });
-  const lines = (await api(page, "GET", `/api/decks/${deck}`)).deck_list
-    .lines as { edition_id: string; quantity: string }[];
-  expect(lines.map((item) => [item.edition_id, item.quantity])).toEqual([
-    [arven, "1"],
-  ]);
-  await ash.page.reload();
-  await expect(heading(ash.page)).toHaveText("Swapped with Misty W");
-
-  // A changed cash term in the refreshed answer requires review, even when the other side confirmed.
-  // Stock a fresh Arven in Ash's For trade Binder: his remaining copy is in the unlisted Box after the first swap.
-  await hold(ash.page, ashBinder, arven, 1);
-  const review = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
-  const offered = await tradeView(ash.page, review);
-  const accepted = await api(ash.page, "POST", `/api/trades/${review}/accept`, {
-    offer_id: offered.offer_id,
-    revision: offered.revision,
-    idempotency_key: randomUUID(),
-  });
-  await page.goto(`${ORIGIN}/trades/${review}`);
-  await expect(dialog).toBeVisible();
-  await api(ash.page, "POST", `/api/trades/${review}/confirm-swap`, {
-    offer_id: accepted.offer_id,
-    revision: accepted.revision,
-    idempotency_key: randomUUID(),
-  });
-  const changedPath = `**/api/trades/${review}`;
-  await page.route(changedPath, async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({
-      response,
-      json: await response.json().then((detail) => ({
-        ...detail,
-        live_offer: {
-          ...detail.live_offer,
-          cash: { cents: "200", payer: "you" },
-        },
-      })),
+    // A changed cash term in the refreshed answer requires review, even when the other side confirmed.
+    // Stock a fresh Arven in Ash's For trade Binder: his remaining copy is in the unlisted Box after the first swap.
+    await hold(ash.page, ashBinder, arven, 1);
+    const review = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
+    const offered = await tradeView(ash.page, review);
+    const accepted = await api(
+      ash.page,
+      "POST",
+      `/api/trades/${review}/accept`,
+      {
+        offer_id: offered.offer_id,
+        revision: offered.revision,
+        idempotency_key: randomUUID(),
+      }
+    );
+    await page.goto(`${ORIGIN}/trades/${review}`);
+    await expect(dialog).toBeVisible();
+    await api(ash.page, "POST", `/api/trades/${review}/confirm-swap`, {
+      offer_id: accepted.offer_id,
+      revision: accepted.revision,
+      idempotency_key: randomUUID(),
     });
-  });
-  let reviewConfirmations = 0;
-  page.on("request", (request) => {
-    if (
-      request.method() === "POST" &&
-      request.url().endsWith(`/api/trades/${review}/confirm-swap`)
-    )
-      reviewConfirmations++;
-  });
-  await dialog.getByRole("button", { name: "Confirm swap" }).click();
-  await expect(main.getByRole("alert")).toHaveText(
-    "This Trade has changed. Check it and try again."
-  );
-  // The accepted disclosure is inline, so fresh terms stay available for
-  // deliberate review. A changed cash term must never trigger an automatic POST.
-  await expect(dialog).toBeVisible();
-  await expect(heading(page)).toHaveText("Ash K confirmed the swap");
-  await expect(
-    main.getByText("You pay Ash K $2.00", { exact: true })
-  ).toBeVisible();
-  await expect(dialog).toContainText(
-    "Leaves your Collection: 1 Iono (PAL 185)"
-  );
-  await expect(dialog).toContainText("Arrives in Unsorted: 1 Arven (SVI 166)");
-  await expect(dialog).toContainText("The swap can't be undone.");
-  await expect(
-    dialog.getByRole("combobox", { name: "Put the cards you get in" })
-  ).toHaveValue("");
-  await expect(
-    dialog.getByRole("button", { name: "Confirm swap", exact: true })
-  ).toHaveCount(1);
-  expect(reviewConfirmations).toBe(1);
-  await page.unroute(changedPath);
+    const changedPath = `**/api/trades/${review}`;
+    await page.route(changedPath, async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: await response.json().then((detail) => ({
+          ...detail,
+          live_offer: {
+            ...detail.live_offer,
+            cash: { cents: "200", payer: "you" },
+          },
+        })),
+      });
+    });
+    let reviewConfirmations = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith(`/api/trades/${review}/confirm-swap`)
+      )
+        reviewConfirmations++;
+    });
+    await dialog.getByRole("button", { name: "Confirm swap" }).click();
+    await expect(main.getByRole("alert")).toHaveText(
+      "This Trade has changed. Check it and try again."
+    );
+    // The accepted disclosure is inline, so fresh terms stay available for
+    // deliberate review. A changed cash term must never trigger an automatic POST.
+    await expect(dialog).toBeVisible();
+    await expect(heading(page)).toHaveText("Ash K confirmed the swap");
+    await expect(
+      main.getByText("You pay Ash K $2.00", { exact: true })
+    ).toBeVisible();
+    await expect(dialog).toContainText(
+      "Leaves your Collection: 1 Iono (PAL 185)"
+    );
+    await expect(dialog).toContainText(
+      "Arrives in Unsorted: 1 Arven (SVI 166)"
+    );
+    await expect(dialog).toContainText("The swap can't be undone.");
+    await expect(
+      dialog.getByRole("combobox", { name: "Put the cards you get in" })
+    ).toHaveValue("");
+    await expect(
+      dialog.getByRole("button", { name: "Confirm swap", exact: true })
+    ).toHaveCount(1);
+    expect(reviewConfirmations).toBe(1);
+    await page.unroute(changedPath);
 
-  // F: Ash accepts the gift through the API. Misty's confirm gets her nothing, so it asks nowhere to put cards.
-  const read = await tradeView(ash.page, gift);
-  await api(ash.page, "POST", `/api/trades/${gift}/accept`, {
-    offer_id: read.offer_id,
-    revision: read.revision,
-    idempotency_key: randomUUID(),
-  });
-  await page.goto(`${ORIGIN}/trades/${gift}`);
-  await expect(heading(page)).toHaveText("Ready to give Ash K 1 card");
-  await expect(dialog).toContainText("1 Iono (PAL 185)");
-  await expect(dialog.getByRole("combobox")).toHaveCount(0);
-  await expectPageChecks(page, `the confirm dialog of a gift at ${width}`);
-  await dialog.getByRole("button", { name: "Confirm swap" }).click();
-  await expect(toast(page)).toContainText(
-    "Swapped. The cards you gave left your Collection."
-  );
-  await expect(heading(page)).toHaveText(
-    "Waiting for Ash K to confirm the swap"
-  );
-  expect(await held(page, shelf)).toEqual({ [iono]: "1" });
+    // F: Ash accepts the gift through the API. Misty's confirm gets her nothing, so it asks nowhere to put cards.
+    const read = await tradeView(ash.page, gift);
+    await api(ash.page, "POST", `/api/trades/${gift}/accept`, {
+      offer_id: read.offer_id,
+      revision: read.revision,
+      idempotency_key: randomUUID(),
+    });
+    await page.goto(`${ORIGIN}/trades/${gift}`);
+    await expect(heading(page)).toHaveText("Ready to give Ash K 1 card");
+    await expect(dialog).toContainText("1 Iono (PAL 185)");
+    await expect(dialog.getByRole("combobox")).toHaveCount(0);
+    await expectPageChecks(page, `the confirm dialog of a gift at ${width}`);
+    await dialog.getByRole("button", { name: "Confirm swap" }).click();
+    await expect(toast(page)).toContainText(
+      "Swapped. The cards you gave left your Collection."
+    );
+    await expect(heading(page)).toHaveText(
+      "Waiting for Ash K to confirm the swap"
+    );
+    expect(await held(page, shelf)).toEqual({ [iono]: "1" });
 
-  // Nothing about these Trades that reached either side names the other side's Locations, by name or by id.
-  const readBy = new Set<string>();
-  for (const { body, secretOf } of answers) {
-    const text = await body;
-    if (text === null) continue;
-    readBy.add(secretOf[0]);
-    for (const item of secretOf) expect(text).not.toContain(item);
+    // Nothing about these Trades that reached either side names the other side's Locations, by name or by id.
+    const readBy = new Set<string>();
+    for (const { audit } of audits) audit.stop();
+    for (const { audit, secretOf } of audits) {
+      for (const text of await audit.finish()) {
+        readBy.add(secretOf[0]);
+        for (const item of secretOf) expect(text).not.toContain(item);
+      }
+    }
+    expect(readBy.size).toBe(2);
+  } finally {
+    for (const { audit } of audits) audit.stop();
   }
-  expect(readBy.size).toBe(2);
 }
 
 test.describe("desktop", () => {
