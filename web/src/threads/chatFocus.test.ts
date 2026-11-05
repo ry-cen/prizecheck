@@ -247,7 +247,10 @@ for (const kind of ["trade", "loan"] as const)
             expect(sendThreadMessage).toHaveBeenCalledExactlyOnceWith(
               kind,
               "item",
-              expect.objectContaining({ body: "A held draft" })
+              {
+                body: "A held draft",
+                idempotency_key: keys.mock.results[0].value,
+              }
             );
           }
         } finally {
