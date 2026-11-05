@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { ThreadTimeline } from "./ThreadTimeline";
 import {
+  SocialError,
   getThreadDetail,
   getThreadTimeline,
   sendThreadMessage,
@@ -120,6 +121,9 @@ for (const kind of ["trade", "loan"] as const)
       it(`S2-07: ${kind} keeps the focused draft through a ${signal} permission read (${outcome})`, async () => {
         vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
         pulse.changed = 0;
+        vi.mocked(sendThreadMessage).mockRejectedValue(
+          new SocialError(429, "MESSAGE_RATE_LIMITED")
+        );
         vi.mocked(getThreadDetail).mockResolvedValue(detail(kind, true));
         vi.mocked(getThreadTimeline).mockResolvedValue({
           you_are: "low",
@@ -168,7 +172,24 @@ for (const kind of ["trade", "loan"] as const)
           expect(
             host.querySelector<HTMLButtonElement>('button[type="submit"]')!
               .disabled
+          ).toBe(false);
+          const keys = vi.spyOn(crypto, "randomUUID");
+          await act(async () =>
+            host
+              .querySelector("form")!
+              .dispatchEvent(
+                new Event("submit", { bubbles: true, cancelable: true })
+              )
+          );
+          expect(sendThreadMessage).not.toHaveBeenCalled();
+          expect(keys).not.toHaveBeenCalled();
+          expect(
+            host.querySelector<HTMLTextAreaElement>("textarea")!.readOnly
           ).toBe(true);
+          expect(host.querySelector('button[type="submit"]')?.textContent).toBe(
+            "Sending…"
+          );
+          // A second click/Enter cannot create another held body.
           await act(async () =>
             host
               .querySelector("form")!
@@ -182,6 +203,8 @@ for (const kind of ["trade", "loan"] as const)
             else resolve(detail(kind, outcome === "writable"));
           });
           if (outcome === "readonly") {
+            expect(sendThreadMessage).not.toHaveBeenCalled();
+            expect(keys).not.toHaveBeenCalled();
             expect(host.querySelector("textarea")).toBeNull();
             expect(document.activeElement).toBe(host.querySelector("h2"));
             expect(host.textContent).toContain(
@@ -192,6 +215,10 @@ for (const kind of ["trade", "loan"] as const)
             expect(document.activeElement).toBe(editor);
             expect(editor.value).toBe("A held draft");
             if (outcome === "failed") {
+              expect(sendThreadMessage).not.toHaveBeenCalled();
+              expect(keys).not.toHaveBeenCalled();
+              expect(editor.readOnly).toBe(false);
+              expect(host.textContent).toContain("Chat couldn't be checked.");
               expect(
                 host.querySelector<HTMLButtonElement>('button[type="submit"]')!
                   .disabled
@@ -202,18 +229,21 @@ for (const kind of ["trade", "loan"] as const)
               expect(retry).toBeDefined();
               await act(async () => retry.click());
               expect(host.querySelector("textarea")).toBe(editor);
+              expect(sendThreadMessage).not.toHaveBeenCalled();
             }
             expect(
               host.querySelector<HTMLButtonElement>('button[type="submit"]')!
                 .disabled
             ).toBe(false);
-            await act(async () =>
-              host
-                .querySelector("form")!
-                .dispatchEvent(
-                  new Event("submit", { bubbles: true, cancelable: true })
-                )
-            );
+            if (outcome === "failed")
+              await act(async () =>
+                host
+                  .querySelector("form")!
+                  .dispatchEvent(
+                    new Event("submit", { bubbles: true, cancelable: true })
+                  )
+              );
+            expect(keys).toHaveBeenCalledTimes(1);
             expect(sendThreadMessage).toHaveBeenCalledExactlyOnceWith(
               kind,
               "item",
@@ -224,6 +254,7 @@ for (const kind of ["trade", "loan"] as const)
           await act(async () => root.unmount());
           host.remove();
           vi.clearAllMocks();
+          vi.restoreAllMocks();
           vi.unstubAllGlobals();
         }
       });
@@ -295,3 +326,239 @@ for (const kind of ["loan", "trade"] as const) {
     }
   });
 }
+
+function deferred<T>() {
+  let resolve!: (value: T) => void, reject!: (cause: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+async function mountedChat(kind: "trade" | "loan") {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  pulse.changed = 0;
+  vi.mocked(getThreadDetail).mockResolvedValue(detail(kind, true));
+  vi.mocked(getThreadTimeline).mockResolvedValue({
+    you_are: "low",
+    items: [],
+    next_before: null,
+  });
+  vi.mocked(sendThreadMessage).mockRejectedValue(
+    new SocialError(429, "MESSAGE_RATE_LIMITED")
+  );
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let revision = 0;
+  const render = (id = "item") =>
+    act(async () =>
+      root.render(h(ThreadTimeline, { kind, id, revision: String(revision) }))
+    );
+  await render();
+  const keys = vi.spyOn(crypto, "randomUUID");
+  return {
+    host,
+    keys,
+    async edit(body = "A held draft") {
+      await act(async () => {
+        const editor = host.querySelector("textarea")!;
+        editor.focus();
+        Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value"
+        )!.set!.call(editor, body);
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    },
+    async press() {
+      await act(async () =>
+        host
+          .querySelector("form")!
+          .dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true })
+          )
+      );
+    },
+    async recheck() {
+      const read = deferred<TradeDetail | LoanDetail>();
+      vi.mocked(getThreadDetail).mockReturnValueOnce(read.promise);
+      revision++;
+      await render();
+      return read;
+    },
+    changeThread: () => render("another-item"),
+    async close() {
+      await act(async () => root.unmount());
+    },
+    async cleanup() {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.clearAllMocks();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
+for (const kind of ["trade", "loan"] as const) {
+  for (const outcome of ["writable", "readonly", "failed"] as const)
+    for (const order of ["old-first", "new-first"] as const)
+      it(`holds one ${kind} send for only the newest permission read (${outcome}, ${order})`, async () => {
+        const chat = await mountedChat(kind);
+        try {
+          await chat.edit();
+          const old = await chat.recheck();
+          await chat.press();
+          const newest = await chat.recheck();
+          const settleNewest = () =>
+            act(async () => {
+              if (outcome === "failed")
+                newest.reject(new TypeError("lost newest read"));
+              else newest.resolve(detail(kind, outcome === "writable"));
+            });
+          if (order === "old-first") {
+            await act(async () => old.resolve(detail(kind, true)));
+            expect(sendThreadMessage).not.toHaveBeenCalled();
+            expect(chat.keys).not.toHaveBeenCalled();
+            expect(
+              chat.host.querySelector('button[type="submit"]')?.textContent
+            ).toBe("Sending…");
+            await settleNewest();
+          } else {
+            await settleNewest();
+            await act(async () => old.resolve(detail(kind, true)));
+          }
+          expect(sendThreadMessage).toHaveBeenCalledTimes(
+            outcome === "writable" ? 1 : 0
+          );
+          expect(chat.keys).toHaveBeenCalledTimes(
+            outcome === "writable" ? 1 : 0
+          );
+          if (outcome === "writable")
+            expect(sendThreadMessage).toHaveBeenLastCalledWith(
+              kind,
+              "item",
+              expect.objectContaining({ body: "A held draft" })
+            );
+          if (outcome === "readonly") {
+            expect(chat.host.querySelector("textarea")).toBeNull();
+            expect(document.activeElement).toBe(chat.host.querySelector("h2"));
+          }
+          if (outcome === "failed") {
+            expect(chat.host.querySelector("textarea")?.value).toBe(
+              "A held draft"
+            );
+            expect(chat.host.textContent).toContain(
+              "Chat couldn't be checked."
+            );
+            const retry = [...chat.host.querySelectorAll("button")].find(
+              (b) => b.textContent === "Retry"
+            )!;
+            await act(async () => retry.click());
+            expect(sendThreadMessage).not.toHaveBeenCalled();
+            await chat.press();
+            expect(sendThreadMessage).toHaveBeenCalledExactlyOnceWith(
+              kind,
+              "item",
+              expect.objectContaining({ body: "A held draft" })
+            );
+          }
+        } finally {
+          await chat.cleanup();
+        }
+      });
+  for (const leave of ["unmount", "thread-change"] as const)
+    it(`drops a held ${kind} send without a key or POST on ${leave}`, async () => {
+      const chat = await mountedChat(kind);
+      try {
+        await chat.edit();
+        const read = await chat.recheck();
+        await chat.press();
+        if (leave === "unmount") await chat.close();
+        else await chat.changeThread();
+        await act(async () => read.resolve(detail(kind, true)));
+        expect(sendThreadMessage).not.toHaveBeenCalled();
+        expect(chat.keys).not.toHaveBeenCalled();
+        if (leave === "thread-change")
+          expect(chat.host.querySelector("textarea")?.value).toBe("");
+      } finally {
+        await chat.cleanup();
+      }
+    });
+  for (const writable of [true, false])
+    it(`holds ${kind} unknown-message replay without replacing its body/key (writable=${writable})`, async () => {
+      const chat = await mountedChat(kind);
+      try {
+        const post = deferred<Awaited<ReturnType<typeof sendThreadMessage>>>();
+        vi.mocked(sendThreadMessage).mockReturnValueOnce(post.promise);
+        await chat.edit("Exactly this message");
+        await chat.press();
+        const original = JSON.stringify(
+          vi.mocked(sendThreadMessage).mock.calls[0]
+        );
+        const old = await chat.recheck();
+        await chat.press(); // A POST already in flight cannot become a second hold.
+        expect(sendThreadMessage).toHaveBeenCalledTimes(1);
+        await act(async () => post.reject(new TypeError("lost POST")));
+        await chat.press();
+        const newest = await chat.recheck();
+        await act(async () => old.resolve(detail(kind, true)));
+        expect(sendThreadMessage).toHaveBeenCalledTimes(1);
+        expect(chat.keys).toHaveBeenCalledTimes(1);
+        await act(async () => newest.resolve(detail(kind, writable)));
+        if (!writable) {
+          expect(sendThreadMessage).toHaveBeenCalledTimes(1);
+          expect(
+            chat.host.querySelector('button[type="submit"]')?.textContent
+          ).toBe("Retry");
+          await chat.press(); // Explicit replay remains possible after a read-only observation.
+        }
+        expect(sendThreadMessage).toHaveBeenCalledTimes(2);
+        expect(JSON.stringify(vi.mocked(sendThreadMessage).mock.calls[1])).toBe(
+          original
+        );
+        expect(chat.keys).toHaveBeenCalledTimes(1);
+      } finally {
+        await chat.cleanup();
+      }
+    });
+}
+
+for (const kind of ["trade", "loan"] as const)
+  it(`cannot hold or POST a ${kind} message before the first permission is known`, async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    pulse.changed = 0;
+    const read = deferred<TradeDetail | LoanDetail>();
+    vi.mocked(getThreadDetail).mockReturnValueOnce(read.promise);
+    vi.mocked(getThreadTimeline).mockResolvedValue({
+      you_are: "low",
+      items: [],
+      next_before: null,
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const keys = vi.spyOn(crypto, "randomUUID");
+    try {
+      await act(async () =>
+        root.render(h(ThreadTimeline, { kind, id: "item" }))
+      );
+      expect(host.querySelector('button[type="submit"]')).toBeNull();
+      expect(host.querySelector("textarea")).toBeNull();
+      expect(sendThreadMessage).not.toHaveBeenCalled();
+      expect(keys).not.toHaveBeenCalled();
+      await act(async () => read.resolve(detail(kind, true)));
+      expect(
+        host.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled
+      ).toBe(true);
+      expect(sendThreadMessage).not.toHaveBeenCalled();
+      expect(keys).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.clearAllMocks();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });

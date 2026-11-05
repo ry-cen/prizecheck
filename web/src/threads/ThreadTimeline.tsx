@@ -21,7 +21,7 @@ import {
 } from "../inbox/Inbox";
 import { Button } from "../ui/Button";
 import { TextArea } from "../ui/TextField";
-export function ThreadTimeline({
+function ThreadTimelineContent({
   kind,
   id,
   active = true,
@@ -57,6 +57,12 @@ export function ThreadTimeline({
   const pending = useRef<{ body: string; idempotency_key: string } | null>(
     null
   );
+  // A press during a permission recheck is intent only: no command/key yet.
+  const held = useRef<{ body: string } | null>(null);
+  const [holding, setHolding] = useState(false);
+  const permissionRead = useRef<"reading" | "ready" | "failed">("reading");
+  const posting = useRef(false);
+  const alive = useRef(true);
   const title = useRef<HTMLHeadingElement>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
   const epoch = useRef(0);
@@ -65,6 +71,7 @@ export function ThreadTimeline({
   useConversationOpen(active);
   useEffect(() => {
     if (!active) return;
+    permissionRead.current = "reading";
     setCheckingPermission(true);
     setPermissionFailed(false);
     ++epoch.current;
@@ -72,12 +79,13 @@ export function ThreadTimeline({
     void getThreadDetail(kind, id, controller.signal).then(
       (detail) => {
         if (!controller.signal.aborted) {
+          permissionRead.current = "ready";
           // A background read keeps the editor node and its keyboard position.
           // If chat really closes, move focus deliberately before removing it.
           if (
             !detail.can_message &&
             !pending.current &&
-            document.activeElement === editor.current
+            (held.current !== null || document.activeElement === editor.current)
           )
             title.current?.focus();
           setCanMessage(detail.can_message);
@@ -123,6 +131,7 @@ export function ThreadTimeline({
       },
       () => {
         if (!controller.signal.aborted) {
+          permissionRead.current = "failed";
           setCheckingPermission(false);
           setPermissionFailed(true);
         }
@@ -149,6 +158,33 @@ export function ThreadTimeline({
     };
   }, [kind, id, changed, attempt, active, revision]);
   useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      held.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    if (
+      !held.current ||
+      checkingPermission ||
+      permissionRead.current === "reading"
+    )
+      return;
+    const intent = held.current;
+    held.current = null;
+    setHolding(false);
+    if (permissionFailed || permissionRead.current === "failed") {
+      editor.current?.focus();
+      return;
+    }
+    if (canMessage !== true) {
+      title.current?.focus();
+      return;
+    }
+    void send(intent.body);
+  }, [holding, checkingPermission, permissionFailed, canMessage]);
+  useEffect(() => {
     const show = () => {
       if (active && document.visibilityState === "visible")
         setAttempt((n) => n + 1);
@@ -168,23 +204,47 @@ export function ThreadTimeline({
       setMessage("Earlier messages could not be loaded. Please retry.");
     }
   }
-  async function send() {
+  function pressSend() {
+    if (
+      posting.current ||
+      held.current ||
+      permissionFailed ||
+      permissionRead.current === "failed"
+    )
+      return;
+    if (checkingPermission || permissionRead.current === "reading") {
+      if (!pending.current && canMessage !== true) return;
+      if (!pending.current && Array.from(body).length > 4000) {
+        setMessage(MESSAGE_LENGTH_TEXT);
+        return;
+      }
+      held.current = { body: pending.current?.body ?? body };
+      setHolding(true);
+      setMessage("");
+      return;
+    }
+    void send();
+  }
+  async function send(heldBody = body) {
     if (
       busy ||
+      posting.current ||
       checkingPermission ||
+      permissionRead.current !== "ready" ||
       permissionFailed ||
       (!pending.current && canMessage !== true)
     )
       return;
-    if (!pending.current && Array.from(body).length > 4000) {
+    if (!pending.current && Array.from(heldBody).length > 4000) {
       setMessage(MESSAGE_LENGTH_TEXT);
       return;
     }
     const command = pending.current ?? {
-      body,
+      body: heldBody,
       idempotency_key: crypto.randomUUID(),
     };
     pending.current = command;
+    posting.current = true;
     setBusy(true);
     setMessage("");
     const release = () => {
@@ -197,17 +257,20 @@ export function ThreadTimeline({
     };
     try {
       await sendThreadMessage(kind, id, command);
+      if (!alive.current) return;
       release();
       setBody("");
       setAttempt((n) => n + 1);
       poll();
     } catch (cause) {
+      if (!alive.current) return;
       if (cause instanceof SocialError && cause.status < 500) {
         release();
         setMessage(threadMessageError(cause));
       } else setMessage("The answer was lost. Retry sends the same message.");
     } finally {
-      setBusy(false);
+      posting.current = false;
+      if (alive.current) setBusy(false);
     }
   }
   return (
@@ -262,7 +325,7 @@ export function ThreadTimeline({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            void send();
+            pressSend();
           }}
           className="flex flex-col gap-2"
         >
@@ -271,18 +334,23 @@ export function ThreadTimeline({
             label={`Message ${name}`}
             value={body}
             disabled={busy || pending.current !== null}
-            onChange={(event) => setBody(event.target.value)}
+            readOnly={holding}
+            onChange={(event) => {
+              if (!held.current && !pending.current)
+                setBody(event.target.value);
+            }}
           />
           <Button
             type="submit"
             disabled={
               busy ||
-              checkingPermission ||
+              holding ||
+              (checkingPermission && canMessage !== true && !pending.current) ||
               permissionFailed ||
               (!body.trim() && !pending.current)
             }
           >
-            {busy ? "Sending…" : pending.current ? "Retry" : "Send"}
+            {busy || holding ? "Sending…" : pending.current ? "Retry" : "Send"}
           </Button>
         </form>
       ) : canMessage === false ? (
@@ -297,4 +365,11 @@ export function ThreadTimeline({
       {message && <p role="alert">{message}</p>}
     </section>
   );
+}
+
+/** Thread identity owns the chat draft/hold; changing items cannot release an old intent. */
+export function ThreadTimeline(
+  props: Parameters<typeof ThreadTimelineContent>[0]
+) {
+  return <ThreadTimelineContent key={`${props.kind}:${props.id}`} {...props} />;
 }
