@@ -310,7 +310,7 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
       - name: Reproduction after kept pages
-        run: npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/kept-pages.spec.ts:701 web/tests/mass-entry.spec.ts:243
+        run: npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/kept-pages.spec.ts:752 web/tests/mass-entry.spec.ts:243
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
       - uses: actions/upload-artifact@v4
