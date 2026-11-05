@@ -32,6 +32,7 @@ export function ThreadList({
   lastRows.current = rows;
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [readFinished, setReadFinished] = useState(0);
   const changed = useLoansChanged(),
     pulse = usePulseChanged();
   const root = useRef<HTMLDivElement>(null),
@@ -59,7 +60,10 @@ export function ThreadList({
         }
       )
       .finally(() => {
-        if (reading.current === controller) reading.current = null;
+        if (reading.current === controller) {
+          reading.current = null;
+          setReadFinished((n) => n + 1);
+        }
       });
     return () => {
       controller.abort();
@@ -76,9 +80,12 @@ export function ThreadList({
       const details = link?.closest("details");
       if (details) details.open = true;
       link?.focus({ preventScroll: true });
-      restore.current = null;
+      // A held refresh can move this row into Done after Back. Restore again
+      // when that authoritative list arrives, instead of consuming the token
+      // against the old node that React is about to remove.
+      if (!reading.current) restore.current = null;
     }
-  }, [active, selected, rows]);
+  }, [active, selected, rows, readFinished]);
   const title = kind === "trade" ? "Trades" : "Loans";
   const section = (group: (typeof GROUPS)[number]) => {
     const items =
