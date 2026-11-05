@@ -1256,11 +1256,18 @@ test("desktop focus clearance is limited to the app shell", async ({
     const loan = page.getByRole("button", { name: "Scope Loan queue" });
     await loan.focus();
     await expect(loan).toBeFocused();
-    for (const width of [1439, 1440, 1439]) {
-      await page.setViewportSize({ width, height: 800 });
+    for (const [width, height] of [
+      [1439, 800],
+      [1440, 800],
+      [1439, 800],
+      [1440, 699],
+      [1440, 700],
+      [1440, 699],
+    ]) {
+      await page.setViewportSize({ width, height });
       const css = await clearance(page);
       expect(css.visible).toBe(true);
-      if (width < 1440) {
+      if (width < 1440 || height < 700) {
         expect(css.margin).toBe(`${css.header + css.ring}px`);
         expect(css.bottomMargin).toBe(`${css.ring}px`);
         expect(["auto", "0px"]).toContain(css.top);

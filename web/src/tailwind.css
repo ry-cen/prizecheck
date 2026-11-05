@@ -135,8 +135,8 @@
       );
       scroll-margin-bottom: calc(var(--focus-width) + var(--focus-offset));
     }
-    /* The Loans queue scrolls inside its viewport only at this breakpoint. */
-    @media (width >= 1440px) {
+    /* The pinned Loans queue already clears the shell header. */
+    @media (width >= 1440px) and (min-height: 700px) {
       :where(
         :root[data-app-shell] #main-content .list-detail-viewport :focus-visible
       ) {

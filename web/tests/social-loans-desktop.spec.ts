@@ -80,6 +80,75 @@ test("Loans keep a stable queue, canonical selection and open forms across width
       fullPage: true,
     });
   }
+  // F495-01: below the sticky height, reverse Tab must clear the header after the real queue moves under it.
+  await page.setViewportSize({ width: 1440, height: 699 });
+  const queue = main.locator(".list-detail-queue");
+  await expect(queue).toHaveCSS("position", "static");
+  const queueRows = queue.locator('a[href^="/loans/"]');
+  const firstRow = queueRows.nth(0);
+  const secondQueueRow = queueRows.nth(1);
+  // Give the document scroll room without changing the queue or its real Loan rows.
+  const originalMinHeight = await page.evaluate(() => {
+    const previous = document.body.style.minHeight;
+    document.body.style.minHeight = "4000px";
+    return previous;
+  });
+  try {
+    await page.keyboard.press("Tab");
+    await secondQueueRow.focus();
+    await expect(secondQueueRow).toBeFocused();
+    await firstRow.evaluate((row) => {
+      const header = document
+        .querySelector("[data-app-shell] > header.sticky")!
+        .getBoundingClientRect();
+      window.scrollBy(0, row.getBoundingClientRect().top - header.bottom / 2);
+    });
+    await expect
+      .poll(() =>
+        firstRow.evaluate((row) => {
+          const rect = row.getBoundingClientRect();
+          const header = document
+            .querySelector("[data-app-shell] > header.sticky")!
+            .getBoundingClientRect();
+          return scrollY > 0 && rect.top >= 0 && rect.top < header.bottom;
+        })
+      )
+      .toBe(true);
+    await page.keyboard.press("Shift+Tab");
+    await expect(firstRow).toBeFocused();
+    await expect
+      .poll(() =>
+        firstRow.evaluate((row) => {
+          const rect = row.getBoundingClientRect();
+          const header = document
+            .querySelector("[data-app-shell] > header.sticky")!
+            .getBoundingClientRect();
+          const uncovered = [0.25, 0.5, 0.75].every((x) =>
+            [0.25, 0.5, 0.75].every((y) => {
+              const hit = document.elementFromPoint(
+                rect.left + rect.width * x,
+                rect.top + rect.height * y
+              );
+              return !!hit && row.contains(hit);
+            })
+          );
+          return (
+            row.matches(":focus-visible") &&
+            rect.left >= 0 &&
+            rect.right <= innerWidth &&
+            rect.top >= 0 &&
+            rect.bottom <= innerHeight &&
+            rect.top >= header.bottom &&
+            uncovered
+          );
+        })
+      )
+      .toBe(true);
+  } finally {
+    await page.evaluate((previous) => {
+      document.body.style.minHeight = previous;
+    }, originalMinHeight);
+  }
   await page.setViewportSize({ width: 1600, height: 650 });
   const row = main.locator(`a[href="/loans/${selected.id}"]`);
   await main.locator("summary", { hasText: "History" }).click();
