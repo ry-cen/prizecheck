@@ -36,7 +36,7 @@ from psycopg.pq import TransactionStatus
 from .card_attributes import FORMAT_FACT_COLUMNS, CardAttributeRules, CardAttributes
 from app.db import connect
 from app.public_projection import ProjectionUnavailable, public_record_store
-from app.price_reads import price_reads_enabled
+from app.core.prices.price_reads import price_reads_enabled
 from app.public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, price_key, quarantine_key)
 from app.core.prices.quote_contract import parse_amount
 
