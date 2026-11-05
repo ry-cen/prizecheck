@@ -70,7 +70,7 @@ from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import psycopg
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .copy_allocation import allocate
@@ -406,6 +406,22 @@ def replacement_picks(conn, lender_id: str, loan_id: UUID) -> dict[tuple[UUID, U
     return kept
 
 
+def legacy_loan_view(conn, user_id: str, stored: dict) -> dict:
+    """Only pre-thread send receipts need a current public Loan projection.
+
+    Current receipts remain byte replay. Never rewrite the historical receipt:
+    a pending return needs its real return_id, not fields patched onto old JSON.
+    """
+    if 'thread_id' in stored:
+        return stored
+    try:
+        return loans.loan_view(conn, user_id, UUID(stored['id'])).model_dump(mode='json')
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        error(409, 'ALREADY_APPLIED')
+
+
 @router.post('', response_model=LoanView, status_code=201)
 def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verified_user)):
     loans.assert_account(command.account_id, user_id)
@@ -421,7 +437,7 @@ def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verif
     with connect() as conn, conn.transaction():
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
-            return stored
+            return legacy_loan_view(conn, user_id, stored)
         if command.return_by is not None and command.return_by < conn.execute(
                 'SELECT current_date AS today').fetchone()['today']:
             error(422, 'INVALID_RETURN_BY')
@@ -527,7 +543,7 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
     with connect() as conn, conn.transaction():
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
-            return stored
+            return legacy_loan_view(conn, user_id, stored)
         if command.return_by is not None and command.return_by < today(conn):
             error(422, 'INVALID_RETURN_BY')
         # Both owners serialize incoming creation with Block and Suspension.
