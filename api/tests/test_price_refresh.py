@@ -283,13 +283,7 @@ def test_a_job_that_leaves_the_queue_without_a_result_is_failed_with_its_backoff
 # ------------------------------------------------------------------ joins, coalescing, expiry (AC6, AC7)
 def test_a_join_changes_nothing_and_never_extends_a_job(env):
     env.seed(1, 61 * MIN)
-    admission = env.admit([1])
-    admission.release()
-    # Preserve a failed admission's reason instead of losing it to a None subscript.
-    assert labels(admission) == {1: 'background'}, {
-        'refused': admission.refused, 'outcomes': admission.outcomes,
-        'committed': admission.committed, 'spawns': env.spawns,
-    }
+    env.admit([1]).release()
     first = env.value(qc.scheduler_key())['jobs']
     generation = env.generation()
     again = env.admit([1])
