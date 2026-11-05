@@ -1209,3 +1209,13 @@ below says where each group ended up; the module map in section 1 stays the plan
   scans, social caller scans, scripts, deploy, auth, workflows, Docker files, browser specs and web,
   found no other consumer requiring the old path. The root module and its exact ownership row
   are removed without a compatibility shim; core ownership is inferred from the destination.
+
+**2026-11-05 — Art storage relocation (#528)**
+
+- The stdlib-only module moved byte-for-byte from `app.art_storage` to `app.core.art.art_storage`,
+  the destination planned in section 1. Key validation, atomic writes, deletion and `ART_STORE_DIR`
+  resolution are unchanged.
+- The public art route, art store and `scripts/art_store.py`, plus the three existing test modules,
+  import the core module directly. Test assertions and class monkeypatches are unchanged.
+- A repository-wide caller scan found no other consumer requiring the old path. The root module and
+  its exact ownership row are removed without a compatibility shim; architecture rules are unchanged.
