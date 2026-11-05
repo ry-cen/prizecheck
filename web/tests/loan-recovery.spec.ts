@@ -91,6 +91,15 @@ async function lostPost(page: Page, path: string, commit: boolean) {
   );
 }
 
+function recordPosts(page: Page, path: string) {
+  const bodies: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === path)
+      bodies.push(request.postData() ?? "");
+  });
+  return bodies;
+}
+
 test("a lost Borrow Request answer is sent again once", async ({
   page,
   collectors,
@@ -207,6 +216,7 @@ test("a lost start return is checked after a reload, not started twice", async (
   const id = (await loanView(page, round)).thread_id;
   await page.goto(`${ORIGIN}/loans/${id}`);
   await page.getByRole("button", { name: "Some back" }).click();
+  const sends = recordPosts(page, `/api/loans/${id}/returns`);
   await lostPost(page, `/api/loans/${id}/returns`, true);
   await page.getByRole("button", { name: "Give these back" }).click();
   await expect(page.getByRole("main")).toContainText(
@@ -215,9 +225,21 @@ test("a lost start return is checked after a reload, not started twice", async (
   await page.reload();
   await expect(
     page.getByRole("group", { name: "Loan terms and actions" })
-  ).toBeDisabled();
+  ).toHaveAttribute("disabled", "");
+  await expect(
+    page.getByRole("button", { name: "More for this Loan" })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "All back", exact: true })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Some back", exact: true })
+  ).toHaveCount(0);
+  expect(sends).toHaveLength(1);
   await page.getByRole("button", { name: "Send it again" }).click();
   await expect(page.getByRole("main")).toContainText("It was sent.");
+  expect(sends).toHaveLength(2);
+  expect(sends[1]).toBe(sends[0]);
   const loan = await loanView(page, id);
   expect(loan.pending_return?.lines).toHaveLength(1);
   expect(loan.pending_return?.lines[0].copies).toBe("3");
@@ -246,6 +268,7 @@ test("a lost write-off is confirmed with Check again", async ({
     .getByRole("group", { name: /^Copies of Iono, .* to write off$/ })
     .getByRole("button", { name: /^Increase/ })
     .click();
+  const sends = recordPosts(lender, `/api/loans/${id}/write-off`);
   await lostPost(lender, `/api/loans/${id}/write-off`, true);
   await lender.getByRole("button", { name: "Write off", exact: true }).click();
   await expect(lender.getByRole("main")).toContainText(
@@ -257,18 +280,27 @@ test("a lost write-off is confirmed with Check again", async ({
   ).toHaveCount(0);
   await expect(
     lender.getByRole("group", { name: "Loan terms and actions" })
+  ).toHaveAttribute("disabled", "");
+  await expect(
+    lender.getByRole("button", { name: "All back", exact: true })
+  ).toBeDisabled();
+  await expect(
+    lender.getByRole("button", { name: "Some back", exact: true })
   ).toBeDisabled();
   await lender.route(
     `${ORIGIN}/api/loans/command-keys/void`,
     (route) => route.fulfill({ status: 503, json: {} }),
     { times: 1 }
   );
+  expect(sends).toHaveLength(1);
   await lender.getByRole("button", { name: "Send it again" }).click();
   await expect(
     lender.getByRole("button", { name: "Check again" })
   ).toBeVisible();
   await lender.getByRole("button", { name: "Check again" }).click();
   await expect(lender.getByRole("main")).toContainText("It was sent.");
+  expect(sends).toHaveLength(2);
+  expect(sends[1]).toBe(sends[0]);
   const loan = await loanView(lender, id);
   expect(loan.lines[0].written_off).toBe("1");
 });
@@ -706,6 +738,10 @@ test("a session for another account sends nothing and says who to sign in as", a
   test.slow();
   const { lender, ids } = await requestFixture(page, collectors);
   const form = await draft(page, lender, ids["PAL 185"]);
+  // Recovery identifies the auth account, not its independently edited public Display Name.
+  expect((await api(page, "GET", "/auth/session")).name).toBe(
+    "Owner Collector"
+  );
   const sends: string[] = [];
   page.on("request", (request) => {
     if (
@@ -724,7 +760,9 @@ test("a session for another account sends nothing and says who to sign in as", a
     { times: 1 }
   );
   await form.getByRole("button", { name: "Send Borrow Request" }).click();
-  await expect(form).toContainText("Sign in as Ash K to finish this.");
+  await expect(form).toContainText(
+    "Sign in as Owner Collector to finish this."
+  );
   expect(sends).toEqual([]);
 });
 
