@@ -202,7 +202,7 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertNotIn('playwright install', operations)
         mass = job_body('targeted-mass-entry')
         self.assertIn('npx playwright install --with-deps chromium', mass)
-        isolated = 'npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/mass-entry.spec.ts:244'
+        isolated = 'npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/mass-entry.spec.ts\n'
         reproduction = 'npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/kept-pages.spec.ts:752 web/tests/mass-entry.spec.ts:244'
         self.assertEqual(mass.count('run: npm run verify'), 2)
         self.assertLess(mass.index(isolated), mass.index(reproduction))
