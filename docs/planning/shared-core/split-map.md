@@ -1172,3 +1172,16 @@ below says where each group ended up; the module map in section 1 stays the plan
 - A repository-wide caller scan, including dynamic imports, patch paths, scripts, deploy, auth,
   workflows and ownership lists, found no other consumer requiring the old import path.
   The root module and its exact ownership row are removed without a compatibility shim.
+
+**2026-11-04 — Deck List capture relocation (#528)**
+
+- The capture moved from `app.deck_list_capture` to `app.core.decks.deck_list_capture`,
+  the destination planned in section 1, with only its five dependency imports changed.
+  `borrowed_copies`, `copy_allocation`, `location_tree`, `db` and `settings` stayed put as dependencies.
+- Deck cost and both private Deck exports, plus the Borrowed Copies and catalog contract tests,
+  now import the core module directly. The `catalog_state` read and the #520 contract test are unchanged;
+  the test still patches the capture module's `connect` name. Locking, captured values, timeouts and
+  transaction boundaries are unchanged.
+- A repository-wide caller scan, including dynamic imports and monkeypatch paths, found no other
+  consumer requiring the old path. The root module and its exact ownership row are removed without
+  a compatibility shim. Test assertions, architecture rules and API snapshots are unchanged.

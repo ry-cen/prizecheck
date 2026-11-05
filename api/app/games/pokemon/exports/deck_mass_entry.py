@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..prices.catalog_targets import edition_targets
-from app.deck_list_capture import capture_deck_list
+from app.core.decks.deck_list_capture import capture_deck_list
 from app.location_tree import error
 from app.db import connect
 from app.identity import verified_user
