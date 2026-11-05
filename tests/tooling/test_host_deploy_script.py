@@ -46,7 +46,8 @@ DEV = [
 WARNING = 'no mail relay'
 COMMIT = 'ab12' * 10
 OTHER = 'cd34' * 10
-TSX = ROOT / 'node_modules/.bin/tsx'
+# Resolve the import hook from this checkout, not the generated temporary module.
+TSX = ROOT / 'node_modules/tsx/dist/loader.mjs'
 PROOF = {
     'schemaVersion': 2, 'releaseCommit': COMMIT, 'authorizedByOwner': True, 'ownerWalkthroughVerified': True,
     'recoveryVerified': True, 'privacyVerified': True, 'capacityVerified': True, 'providerSignInVerified': ['google'],
@@ -110,7 +111,15 @@ if 'run' in args and 'auth' in args:
     with tempfile.TemporaryDirectory() as scratch:
         script = os.path.join(scratch, 'check.mjs')
         open(script, 'w').write(js)
-        sys.exit(subprocess.run([os.environ['FAKE_TSX'], script], env=env).returncode)
+        result = subprocess.run(['node', '--import', os.environ['FAKE_TSX'], script], env=env,
+                                capture_output=True, text=True)
+        sys.stdout.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        if result.returncode and result.stderr:
+            # The host script intentionally replaces this output with a fixed diagnostic.
+            with open(os.environ['FAKE_LOG'] + '.stderr', 'a') as log:
+                log.write(result.stderr)
+        sys.exit(result.returncode)
 with open(os.environ['FAKE_LOG'], 'a') as log:
     snapshots = sorted(os.listdir(os.environ['FAKE_SNAPSHOTS'])) if os.environ.get('FAKE_SNAPSHOTS') else None
     log.write(json.dumps({'args': args, 'mode': os.environ.get('PRIZECHECK_SIGNUP_MODE'), 'snapshots': snapshots,
@@ -409,6 +418,9 @@ class HostDeployScriptTest(unittest.TestCase):
                 'FAKE_SIGNUP_MODULE': str(ROOT / 'auth/src/signup.ts'), 'FAKE_TSX': str(TSX), **extra}
 
     def fake_calls(self):
+        diagnostics = Path(str(self.fake_log) + '.stderr')
+        if diagnostics.exists():
+            print('Readiness subprocess stderr:\n' + diagnostics.read_text(), file=sys.stderr)
         return [json.loads(line) for line in self.fake_log.read_text().splitlines()] if self.fake_log.exists() else []
 
     def test_check_config_inspects_the_proof_file_when_signup_is_public(self):
