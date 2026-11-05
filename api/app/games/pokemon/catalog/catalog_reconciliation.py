@@ -173,7 +173,7 @@ def replacements(user_id: str=Depends(verified_user)):
 @router.post('/api/holdings/reassign',response_model=ReassignResult)
 def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
     import hashlib,json
-    from app.moves import leaf,quantity,MAX_QUANTITY,check_promises
+    from app.core.inventory.moves import leaf,quantity,MAX_QUANTITY,check_promises
     from app.loan_inventory import follow_replacement,replacement_parties
     from app.social.owners import lock_owners
     amount=quantity(command.quantity)

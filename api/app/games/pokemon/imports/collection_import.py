@@ -69,8 +69,8 @@ from app.games.pokemon.imports import collection_import_matcher as matcher
 from app.games.pokemon.imports import collection_import_reader as reader
 from app.db import connect
 from app.identity import verified_user
-from app.moves import lock_owner
-from app.moves import fail as refuse
+from app.core.inventory.moves import lock_owner
+from app.core.inventory.moves import fail as refuse
 
 from app.core.imports.collection_draft import (
     CollectionImportCounts, CollectionImportGroup, CollectionImportSummary, CollectionImportCard,
