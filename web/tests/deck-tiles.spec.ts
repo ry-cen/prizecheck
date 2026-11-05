@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { buildLegalDeck, promoteLegalCatalog } from "./support/legal-deck";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
+import { accountId } from "./support/loans";
 import { startAsNewOwner } from "./support/owner";
 
 // My Decks as card tiles led by a cover card (#291). The cards come through the real catalog import
@@ -343,9 +344,25 @@ const layoutWidths = [1024, 1280, 1440, 1920, 320, 375, 390];
 
 // Each fixture/route gets its own test budget; keep the full resize sequence in
 // one test so unsaved form state is still checked across the phone breakpoint.
+// These new layout fixtures retire their own account after the case as well as
+// starting fresh. Legacy specs on the same stack can otherwise inherit its Decks.
+let layoutOwner: string | null = null;
+test.afterEach(async () => {
+  if (layoutOwner === null) return;
+  const owner = layoutOwner;
+  layoutOwner = null;
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    await pool.query('DELETE FROM "user" WHERE id=$1', [owner]);
+  } finally {
+    await pool.end();
+  }
+});
+
 async function seedLayoutDecks(page: Page, count: number) {
   promoteLegalCatalog();
   await signIn(page);
+  layoutOwner = await accountId(page);
   await stubCost(page);
   const built = await buildLegalDeck(
     page,
