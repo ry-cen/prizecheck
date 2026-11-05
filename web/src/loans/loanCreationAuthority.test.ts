@@ -234,6 +234,10 @@ for (const kind of ["borrow", "lend", "borrowed move"] as const)
       const original = JSON.stringify(send.mock.calls[0]);
       for (const lost of [false, true]) {
         if (lost) await act(async () => lose(new TypeError("lost response")));
+        if (lost && kind === "borrowed move") {
+          expect(button("Move").disabled).toBe(false);
+          expect(document.activeElement).toBe(button("Move"));
+        }
         await act(async () =>
           button(kind === "borrow" ? "Keep draft" : "Cancel").click()
         );
@@ -280,7 +284,10 @@ for (const kind of ["borrow", "lend", "borrowed move"] as const)
         ).toBe(false);
         expect(send).toHaveBeenCalledTimes(1);
       }
-      await act(async () => button("Retry request").click());
+      // Move itself is also exact replay, never a new intent after a lost answer.
+      await act(async () =>
+        button(kind === "borrowed move" ? "Move" : "Retry request").click()
+      );
       expect(send).toHaveBeenCalledTimes(2);
       expect(JSON.stringify(send.mock.calls[1])).toBe(original);
       expect(button("Retry request")).toBeUndefined();
