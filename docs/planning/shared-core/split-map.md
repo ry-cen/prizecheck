@@ -1185,3 +1185,16 @@ below says where each group ended up; the module map in section 1 stays the plan
 - A repository-wide caller scan, including dynamic imports and monkeypatch paths, found no other
   consumer requiring the old path. The root module and its exact ownership row are removed without
   a compatibility shim. Test assertions, architecture rules and API snapshots are unchanged.
+
+**2026-11-05 — Moves router relocation (#528)**
+
+- The whole Moves router moved from `app.moves` to `app.core.inventory.moves`, with only
+  its dependency imports changed. `app.inventory_core` stays in place; the moved module imports
+  the same helpers, and routes, responses, SQL, transactions, exceptions and business rules are unchanged.
+- Pick List, Pokémon composition, catalog reconciliation and Collection Import import the same
+  names and aliases from the new path. Reconciliation keeps its function-level import; the Moves
+  test still patches the moved module's `lock_owner` name without changing assertions.
+- A repository-wide caller scan, including dynamic imports, patch paths, ownership and dependency
+  scans, social caller scans, scripts, deploy, auth, workflows, Docker files, browser specs and web,
+  found no other consumer requiring the old path. The root module and its exact ownership row
+  are removed without a compatibility shim; core ownership is inferred from the destination.

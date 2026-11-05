@@ -13,11 +13,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.core.ops.api_errors import api_error
-from .db import connect
-from .identity import verified_user
-from .core.inventory.idempotency import expire
+from app.db import connect
+from app.identity import verified_user
+from app.core.inventory.idempotency import expire
 # Moved to inventory_core; other modules and branches still import these names from here.
-from .inventory_core import (MAX_QUANTITY, REPLAY, UNDO_LIMIT, check_promises, first_non_leaf, is_deck, leaf, lock_owner,
+from app.inventory_core import (MAX_QUANTITY, REPLAY, UNDO_LIMIT, check_promises, first_non_leaf, is_deck, leaf, lock_owner,
                              quantity, record_undo, undo_id_for)
 
 router = APIRouter(prefix="/api/moves", tags=["moves"])
