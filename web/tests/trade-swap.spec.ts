@@ -127,6 +127,7 @@ async function story(
     signIn: (options?: {
       next?: string;
       contextOptions?: BrowserContextOptions;
+      beforeSignIn?: (page: Page) => Promise<void>;
     }) => Promise<{ page: Page }>;
   },
   contextOptions: BrowserContextOptions,
@@ -136,35 +137,42 @@ async function story(
   const iono = ids["PAL 185"];
   const arven = ids["SVI 166"];
   const secret = `Secret ${randomUUID().slice(0, 6)}`;
-  const ash = await collectors.signIn({ contextOptions });
-  await nameCollector(ash.page, "Ash K");
-  const ashBinder = await leaf(ash.page, `${secret} Binder`, true);
-  const ashBox = await leaf(ash.page, `${secret} Box`, false);
-  await hold(ash.page, ashBinder, arven, 2);
-
-  await noArtwork(page);
-  await noArtwork(ash.page);
-  await signInAsOwner(page, "/collection");
-  await nameCollector(page, "Misty W");
-  const shelf = await leaf(page, `${secret} Shelf`, true);
-  await hold(page, shelf, iono, 3);
-  const deck = await createDeck(page, `${secret} Deck`);
-  await befriend(page, ash.page);
   // Everything about Trades that reaches either browser, to check it never names the other side's Locations.
-  const audits = await Promise.all(
-    (
-      [
-        [ash.page, [`${secret} Shelf`, shelf, `${secret} Deck`, deck]],
-        [page, [`${secret} Binder`, ashBinder, `${secret} Box`, ashBox]],
-      ] as const
-    ).map(async ([who, theirs]) => {
-      const audit = await auditPage(who, (url) =>
-        /\/api\/(social\/)?trade/.test(url)
-      );
-      return { audit, secretOf: [...theirs] };
-    })
-  );
+  const mistyPrivate = [`${secret} Shelf`];
+  const ashPrivate = [`${secret} Binder`];
+  const audits: {
+    audit: Awaited<ReturnType<typeof auditPage>>;
+    secretOf: string[];
+  }[] = [];
+  const attach = async (who: Page, secretOf: string[]) => {
+    audits.push({
+      audit: await auditPage(who, (url) => /\/api\/(social\/)?trade/.test(url)),
+      secretOf,
+    });
+  };
   try {
+    const ash = await collectors.signIn({
+      contextOptions,
+      beforeSignIn: (who) => attach(who, mistyPrivate),
+    });
+    await nameCollector(ash.page, "Ash K");
+    const ashBinder = await leaf(ash.page, `${secret} Binder`, true);
+    ashPrivate.push(ashBinder, `${secret} Box`);
+    const ashBox = await leaf(ash.page, `${secret} Box`, false);
+    ashPrivate.push(ashBox);
+    await hold(ash.page, ashBinder, arven, 2);
+
+    await noArtwork(page);
+    await noArtwork(ash.page);
+    await attach(page, ashPrivate);
+    await signInAsOwner(page, "/collection");
+    await nameCollector(page, "Misty W");
+    const shelf = await leaf(page, `${secret} Shelf`, true);
+    mistyPrivate.push(shelf, `${secret} Deck`);
+    await hold(page, shelf, iono, 3);
+    const deck = await createDeck(page, `${secret} Deck`);
+    mistyPrivate.push(deck);
+    await befriend(page, ash.page);
     const ashId = await accountId(ash.page);
     const swap = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
     const gift = await propose(page, ashId, [[iono, 1]], []);

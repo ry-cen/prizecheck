@@ -147,6 +147,7 @@ async function story(
     signIn: (options?: {
       next?: string;
       contextOptions?: BrowserContextOptions;
+      beforeSignIn?: (page: Page) => Promise<void>;
     }) => Promise<{ page: Page }>;
   },
   contextOptions: BrowserContextOptions,
@@ -159,49 +160,57 @@ async function story(
   const ionoAlt = ids["PAL 254"];
   const ashPlace = `Pallet ${randomUUID().slice(0, 6)}`;
   const mistyPlace = `Cerulean ${randomUUID().slice(0, 6)}`;
-  const ash = await collectors.signIn({ contextOptions });
-  const ashHandle = await nameCollector(ash.page, "Ash K");
-  const ashTrader = await traderIdOf(ash.page);
-  const binder = await storageLeaf(ash.page, `${ashPlace} Binder`);
-  const box = await storageLeaf(ash.page, `${ashPlace} Box`);
-  await hold(ash.page, binder, arven, 3);
-  const ashDeck = await createDeck(ash.page, `${ashPlace} Deck`);
-  await setLine(ash.page, ashDeck, ionoAlt, 1);
-  await api(ash.page, "PUT", `/api/trade-wants/will-accept/${ionoAlt}`, {
-    rule: "identity",
-  });
-
-  await noArtwork(page);
-  await noArtwork(ash.page);
-  await signInAsOwner(page, "/collection");
-  const mistyHandle = await nameCollector(page, "Misty W");
-  const shelf = await forTradeLeaf(page, `${mistyPlace} Shelf`);
-  await hold(page, shelf, iono, 3);
-  const mistyDeck = await createDeck(page, `${mistyPlace} Deck`);
-  await api(page, "PUT", `/api/trade-wants/${arven}`, { quantity: "3" });
-  await befriend(page, ash.page);
   // Everything about Trades that reaches either browser, to check it never names the other side's Locations.
   // Chromium keeps no body for a read the app aborted (a Deck switch reload); only that error is allowed, and each side must still read its Trade.
+  const ashPrivate = [ashPlace];
+  const mistyPrivate = [mistyPlace];
   const readTrade = new Set<string>();
-  const audits = await Promise.all(
-    (
-      [
-        [ash.page, [mistyPlace, shelf, mistyDeck]],
-        [page, [ashPlace, binder, box, ashDeck]],
-      ] as const
-    ).map(async ([who, theirs]) => {
-      const audit = await auditPage(
-        who,
-        (url) => /\/api\/(social\/)?trade/.test(url),
-        (response) => {
-          if (/\/api\/trades\/[0-9a-f-]{36}$/.test(response.url()))
-            readTrade.add(theirs[0]);
-        }
-      );
-      return { audit, secretOf: [...theirs] };
-    })
-  );
+  const audits: {
+    audit: Awaited<ReturnType<typeof auditPage>>;
+    secretOf: string[];
+  }[] = [];
+  const attach = async (who: Page, secretOf: string[]) => {
+    const audit = await auditPage(
+      who,
+      (url) => /\/api\/(social\/)?trade/.test(url),
+      (response) => {
+        if (/\/api\/trades\/[0-9a-f-]{36}$/.test(response.url()))
+          readTrade.add(secretOf[0]);
+      }
+    );
+    audits.push({ audit, secretOf });
+  };
   try {
+    const ash = await collectors.signIn({
+      contextOptions,
+      beforeSignIn: (who) => attach(who, mistyPrivate),
+    });
+    const ashHandle = await nameCollector(ash.page, "Ash K");
+    const ashTrader = await traderIdOf(ash.page);
+    const binder = await storageLeaf(ash.page, `${ashPlace} Binder`);
+    ashPrivate.push(binder);
+    const box = await storageLeaf(ash.page, `${ashPlace} Box`);
+    ashPrivate.push(box);
+    await hold(ash.page, binder, arven, 3);
+    const ashDeck = await createDeck(ash.page, `${ashPlace} Deck`);
+    ashPrivate.push(ashDeck);
+    await setLine(ash.page, ashDeck, ionoAlt, 1);
+    await api(ash.page, "PUT", `/api/trade-wants/will-accept/${ionoAlt}`, {
+      rule: "identity",
+    });
+
+    await noArtwork(page);
+    await noArtwork(ash.page);
+    await attach(page, ashPrivate);
+    await signInAsOwner(page, "/collection");
+    const mistyHandle = await nameCollector(page, "Misty W");
+    const shelf = await forTradeLeaf(page, `${mistyPlace} Shelf`);
+    mistyPrivate.push(shelf);
+    await hold(page, shelf, iono, 3);
+    const mistyDeck = await createDeck(page, `${mistyPlace} Deck`);
+    mistyPrivate.push(mistyDeck);
+    await api(page, "PUT", `/api/trade-wants/${arven}`, { quantity: "3" });
+    await befriend(page, ash.page);
     const main = page.getByRole("main");
     const ashMain = ash.page.getByRole("main");
     const tradeAddress = new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`);
