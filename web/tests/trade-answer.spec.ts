@@ -1,3 +1,4 @@
+import { responseAudit } from "./support/responseAudit";
 import { tradeView } from "./support/trades";
 // Ticket #271: accept, decline or cancel a Trade (Trading spec "Answering a proposal" and "Cancelling a Trade",
 // prototype verdict variant A; owner, 2026-10-20: withdraw, decline and cancel ask first, accept doesn't). Misty sends
@@ -15,7 +16,6 @@ import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
 import { signInAsOwner } from "./support/sign-in";
-import { bodyOf } from "./support/trades";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
@@ -226,173 +226,195 @@ async function story(
   await hold(page, binder, ids["PAL 185"], 3);
   await befriend(page, ash.page);
   // Everything about Trades that reaches either browser, to check it never names the other side's Location.
-  const answers: { body: Promise<string | null>; secretOf: string[] }[] = [];
-  for (const [who, theirs] of [
-    [ash.page, [`${secret} Binder`, binder]],
-    [page, [`${secret} Shelf`, shelf]],
-  ] as const)
-    who.on("response", (response) => {
-      if (/\/api\/(social\/)?trade/.test(response.url()))
-        answers.push({ body: bodyOf(response), secretOf: [...theirs] });
+  const audits = (
+    [
+      [ash.page, [`${secret} Binder`, binder]],
+      [page, [`${secret} Shelf`, shelf]],
+    ] as const
+  ).map(([who, theirs]) => {
+    const audit = responseAudit((capture) => {
+      const receive = (response: import("@playwright/test").Response) => {
+        if (/\/api\/(social\/)?trade/.test(response.url())) capture(response);
+      };
+      who.on("response", receive);
+      return () => who.off("response", receive);
+    });
+    return { audit, secretOf: [...theirs] };
+  });
+  try {
+    const ashId = await accountId(ash.page);
+    const iono = ids["PAL 185"];
+    const arven = ids["SVI 166"];
+    // A swap, an ask for both of Ash's Arven, and two gifts of one Iono each: all three of Misty's Iono are promised.
+    const swap = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
+    const askBoth = await propose(page, ashId, [], [[arven, 2]]);
+    const declined = await propose(page, ashId, [[iono, 1]], []);
+    const withdrawn = await propose(page, ashId, [[iono, 1]], []);
+
+    // A: Ash opens the proposal and can accept immediately; Decline is tested on the other gift below.
+    await ash.page.goto(`${ORIGIN}/trades/${swap}`);
+    await expect(heading(ash.page)).toHaveText(
+      "Misty W sent you a Trade Proposal"
+    );
+    const ashMain = ash.page.getByRole("main");
+    await expect(ashMain.getByRole("button", { name: "Accept" })).toBeVisible();
+    await expectOnlyReport(ash.page);
+    await expectPageChecks(ash.page, `a received Trade Proposal at ${width}`);
+    expect(await tradeState(ash.page, swap)).toMatchObject({
+      state: "proposed",
+      revision: 1,
     });
 
-  const ashId = await accountId(ash.page);
-  const iono = ids["PAL 185"];
-  const arven = ids["SVI 166"];
-  // A swap, an ask for both of Ash's Arven, and two gifts of one Iono each: all three of Misty's Iono are promised.
-  const swap = await propose(page, ashId, [[iono, 1]], [[arven, 1]]);
-  const askBoth = await propose(page, ashId, [], [[arven, 2]]);
-  const declined = await propose(page, ashId, [[iono, 1]], []);
-  const withdrawn = await propose(page, ashId, [[iono, 1]], []);
+    // Accepting asks nothing: the proposal becomes a Trade, and Ash's Arven leaves both reads of his Trade List.
+    await ashMain.getByRole("button", { name: "Accept" }).click();
+    await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
+    await expect(heading(ash.page)).toBeFocused();
+    await expect(toast(ash.page)).toContainText(
+      "Accepted. Swap the cards in person, then confirm."
+    );
+    await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(
+      0
+    );
+    await expect(ashMain.getByRole("button", { name: "Decline" })).toHaveCount(
+      0
+    );
+    await expect(more(ash.page)).toHaveCount(1);
+    await expectPageChecks(ash.page, `an accepted Trade at ${width}`);
+    await expectOwnCopies(ash.page, "Arven", "1");
+    await expectFriendCopies(page, ashHandle, "Arven", "1");
+    await expectOwnCopies(page, "Iono", "");
 
-  // A: Ash opens the proposal and can accept immediately; Decline is tested on the other gift below.
-  await ash.page.goto(`${ORIGIN}/trades/${swap}`);
-  await expect(heading(ash.page)).toHaveText(
-    "Misty W sent you a Trade Proposal"
-  );
-  const ashMain = ash.page.getByRole("main");
-  await expect(ashMain.getByRole("button", { name: "Accept" })).toBeVisible();
-  await expectOnlyReport(ash.page);
-  await expectPageChecks(ash.page, `a received Trade Proposal at ${width}`);
-  expect(await tradeState(ash.page, swap)).toMatchObject({
-    state: "proposed",
-    revision: 1,
-  });
+    // B: the ask for both Arven can't be accepted now: one is promised to the swap.
+    await ash.page.goto(`${ORIGIN}/trades/${askBoth}`);
+    await ashMain.getByRole("button", { name: "Accept" }).click();
+    await expect(ashMain.getByRole("alert")).toHaveText(
+      "You can trade only 1 Arven (SVI 166) now, so you can't accept this. Send a Counter or decline it instead."
+    );
+    await expect(heading(ash.page)).toHaveText(
+      "Misty W sent you a Trade Proposal"
+    );
+    expect((await tradeState(ash.page, askBoth)).state).toBe("proposed");
 
-  // Accepting asks nothing: the proposal becomes a Trade, and Ash's Arven leaves both reads of his Trade List.
-  await ashMain.getByRole("button", { name: "Accept" }).click();
-  await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
-  await expect(heading(ash.page)).toBeFocused();
-  await expect(toast(ash.page)).toContainText(
-    "Accepted. Swap the cards in person, then confirm."
-  );
-  await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(0);
-  await expect(ashMain.getByRole("button", { name: "Decline" })).toHaveCount(0);
-  await expect(more(ash.page)).toHaveCount(1);
-  await expectPageChecks(ash.page, `an accepted Trade at ${width}`);
-  await expectOwnCopies(ash.page, "Arven", "1");
-  await expectFriendCopies(page, ashHandle, "Arven", "1");
-  await expectOwnCopies(page, "Iono", "");
+    // Ash declines one of the gifts, and Misty's Iono comes back to her Trade List and to his read of it.
+    await ash.page.goto(`${ORIGIN}/trades/${declined}`);
+    await ashMain.getByRole("button", { name: "Decline" }).click();
+    await expect(ashMain.getByRole("group", { name: "Decline" })).toHaveCount(
+      0
+    );
+    await expect(heading(ash.page)).toHaveText("You declined");
+    await expect(toast(ash.page)).toContainText("Declined");
+    expect((await tradeState(ash.page, declined)).actions).toEqual([]);
+    await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(
+      0
+    );
+    await expect(ashMain.getByRole("button", { name: "Decline" })).toHaveCount(
+      0
+    );
+    await expectOnlyReport(ash.page);
+    await expectOwnCopies(page, "Iono", "1");
+    await expectFriendCopies(ash.page, mistyHandle, "Iono", "1");
+    await page.goto(`${ORIGIN}/trades/${declined}`);
+    await expect(heading(page)).toHaveText("Ash K declined");
+    await expectOnlyReport(page);
 
-  // B: the ask for both Arven can't be accepted now: one is promised to the swap.
-  await ash.page.goto(`${ORIGIN}/trades/${askBoth}`);
-  await ashMain.getByRole("button", { name: "Accept" }).click();
-  await expect(ashMain.getByRole("alert")).toHaveText(
-    "You can trade only 1 Arven (SVI 166) now, so you can't accept this. Send a Counter or decline it instead."
-  );
-  await expect(heading(ash.page)).toHaveText(
-    "Misty W sent you a Trade Proposal"
-  );
-  expect((await tradeState(ash.page, askBoth)).state).toBe("proposed");
+    // C: Withdraw acts once inline, while Ash has the gift open. Cancel alone keeps an ask.
+    await ash.page.goto(`${ORIGIN}/trades/${withdrawn}`);
+    await expect(heading(ash.page)).toHaveText(
+      "Misty W wants to give you 1 card"
+    );
+    await page.goto(`${ORIGIN}/trades/${withdrawn}`);
+    const mistyMain = page.getByRole("main");
+    await more(page).click();
+    await page.getByRole("menuitem", { name: "Withdraw" }).click();
+    await expect(
+      mistyMain.getByRole("group", { name: "Withdraw" })
+    ).toHaveCount(0);
+    await expect(heading(page)).toHaveText("You withdrew this Trade Proposal");
+    await expect(toast(page)).toContainText("Withdrawn");
+    // Ash's screen still shows the proposal he opened: his accept finds it changed, and the screen reads it again.
+    await ashMain.getByRole("button", { name: "Accept" }).click();
+    await expect(ashMain.getByRole("alert")).toHaveText(
+      "The offer changed. Review the current cards and cash before trying again."
+    );
+    await expect(heading(ash.page)).toHaveText(
+      "Misty W withdrew this Trade Proposal"
+    );
+    await expect(heading(ash.page)).toBeFocused();
+    await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(
+      0
+    );
+    await expectOwnCopies(page, "Iono", "2");
 
-  // Ash declines one of the gifts, and Misty's Iono comes back to her Trade List and to his read of it.
-  await ash.page.goto(`${ORIGIN}/trades/${declined}`);
-  await ashMain.getByRole("button", { name: "Decline" }).click();
-  await expect(ashMain.getByRole("group", { name: "Decline" })).toHaveCount(0);
-  await expect(heading(ash.page)).toHaveText("You declined");
-  await expect(toast(ash.page)).toContainText("Declined");
-  expect((await tradeState(ash.page, declined)).actions).toEqual([]);
-  await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(0);
-  await expect(ashMain.getByRole("button", { name: "Decline" })).toHaveCount(0);
-  await expectOnlyReport(ash.page);
-  await expectOwnCopies(page, "Iono", "1");
-  await expectFriendCopies(ash.page, mistyHandle, "Iono", "1");
-  await page.goto(`${ORIGIN}/trades/${declined}`);
-  await expect(heading(page)).toHaveText("Ash K declined");
-  await expectOnlyReport(page);
+    // D: one side cancels the accepted Trade. Cancel Trade asks first, and Keep it leaves the Trade as it was.
+    const [mine, other, otherName, mineName] =
+      canceller === "proposer"
+        ? [page, ash.page, "Ash K", "Misty W"]
+        : [ash.page, page, "Misty W", "Ash K"];
+    await mine.goto(`${ORIGIN}/trades/${swap}`);
+    await expect(heading(mine)).toHaveText(`Ready to swap with ${otherName}`);
+    const mineMain = mine.getByRole("main");
+    // The other side keeps the accepted Trade open, so its Cancel Trade goes stale once this side cancels.
+    await other.goto(`${ORIGIN}/trades/${swap}`);
+    await expect(heading(other)).toHaveText(`Ready to swap with ${mineName}`);
+    await more(mine).click();
+    await mine.getByRole("menuitem", { name: "Cancel Trade" }).click();
+    const cancelling = mineMain.getByRole("group", { name: "Cancel Trade" });
+    await expect(cancelling).toContainText(
+      `Cancel this Trade with ${otherName}? None of these cards stay promised.`
+    );
+    await expect(
+      cancelling.getByRole("button", { name: "Cancel Trade" })
+    ).toBeFocused();
+    await expectPageChecks(mine, `the Cancel Trade question at ${width}`);
+    await cancelling.getByRole("button", { name: "Keep it" }).click();
+    await expect(cancelling).toHaveCount(0);
+    await expect(more(mine)).toBeFocused();
+    await expect(heading(mine)).toHaveText(`Ready to swap with ${otherName}`);
+    expect(await tradeState(mine, swap)).toMatchObject({
+      state: "accepted",
+      revision: 2,
+    });
+    await more(mine).click();
+    await mine.getByRole("menuitem", { name: "Cancel Trade" }).click();
+    await cancelling.getByRole("button", { name: "Cancel Trade" }).click();
+    await expect(heading(mine)).toHaveText("You cancelled this Trade");
+    await expect(toast(mine)).toContainText("Trade cancelled");
+    await expectOnlyReport(mine);
+    // The other side cancels from the screen it already had open: the Trade has changed, and the screen reads it again.
+    const otherMain = other.getByRole("main");
+    await more(other).click();
+    await other.getByRole("menuitem", { name: "Cancel Trade" }).click();
+    await otherMain
+      .getByRole("group", { name: "Cancel Trade" })
+      .getByRole("button", { name: "Cancel Trade" })
+      .click();
+    await expect(otherMain.getByRole("alert")).toHaveText(
+      "The offer changed. Review the current cards and cash before trying again."
+    );
+    await expect(heading(other)).toHaveText(`${mineName} cancelled this Trade`);
+    await expect(heading(other)).toBeFocused();
+    await expectOnlyReport(other);
+    expect((await tradeState(other, swap)).state).toBe("closed");
 
-  // C: Withdraw acts once inline, while Ash has the gift open. Cancel alone keeps an ask.
-  await ash.page.goto(`${ORIGIN}/trades/${withdrawn}`);
-  await expect(heading(ash.page)).toHaveText(
-    "Misty W wants to give you 1 card"
-  );
-  await page.goto(`${ORIGIN}/trades/${withdrawn}`);
-  const mistyMain = page.getByRole("main");
-  await more(page).click();
-  await page.getByRole("menuitem", { name: "Withdraw" }).click();
-  await expect(mistyMain.getByRole("group", { name: "Withdraw" })).toHaveCount(
-    0
-  );
-  await expect(heading(page)).toHaveText("You withdrew this Trade Proposal");
-  await expect(toast(page)).toContainText("Withdrawn");
-  // Ash's screen still shows the proposal he opened: his accept finds it changed, and the screen reads it again.
-  await ashMain.getByRole("button", { name: "Accept" }).click();
-  await expect(ashMain.getByRole("alert")).toHaveText(
-    "The offer changed. Review the current cards and cash before trying again."
-  );
-  await expect(heading(ash.page)).toHaveText(
-    "Misty W withdrew this Trade Proposal"
-  );
-  await expect(heading(ash.page)).toBeFocused();
-  await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(0);
-  await expectOwnCopies(page, "Iono", "2");
+    // Both Trade Lists are whole again, on both sides.
+    await expectOwnCopies(page, "Iono", "3");
+    await expectOwnCopies(ash.page, "Arven", "2");
+    await expectFriendCopies(page, ashHandle, "Arven", "2");
+    await expectFriendCopies(ash.page, mistyHandle, "Iono", "3");
 
-  // D: one side cancels the accepted Trade. Cancel Trade asks first, and Keep it leaves the Trade as it was.
-  const [mine, other, otherName, mineName] =
-    canceller === "proposer"
-      ? [page, ash.page, "Ash K", "Misty W"]
-      : [ash.page, page, "Misty W", "Ash K"];
-  await mine.goto(`${ORIGIN}/trades/${swap}`);
-  await expect(heading(mine)).toHaveText(`Ready to swap with ${otherName}`);
-  const mineMain = mine.getByRole("main");
-  // The other side keeps the accepted Trade open, so its Cancel Trade goes stale once this side cancels.
-  await other.goto(`${ORIGIN}/trades/${swap}`);
-  await expect(heading(other)).toHaveText(`Ready to swap with ${mineName}`);
-  await more(mine).click();
-  await mine.getByRole("menuitem", { name: "Cancel Trade" }).click();
-  const cancelling = mineMain.getByRole("group", { name: "Cancel Trade" });
-  await expect(cancelling).toContainText(
-    `Cancel this Trade with ${otherName}? None of these cards stay promised.`
-  );
-  await expect(
-    cancelling.getByRole("button", { name: "Cancel Trade" })
-  ).toBeFocused();
-  await expectPageChecks(mine, `the Cancel Trade question at ${width}`);
-  await cancelling.getByRole("button", { name: "Keep it" }).click();
-  await expect(cancelling).toHaveCount(0);
-  await expect(more(mine)).toBeFocused();
-  await expect(heading(mine)).toHaveText(`Ready to swap with ${otherName}`);
-  expect(await tradeState(mine, swap)).toMatchObject({
-    state: "accepted",
-    revision: 2,
-  });
-  await more(mine).click();
-  await mine.getByRole("menuitem", { name: "Cancel Trade" }).click();
-  await cancelling.getByRole("button", { name: "Cancel Trade" }).click();
-  await expect(heading(mine)).toHaveText("You cancelled this Trade");
-  await expect(toast(mine)).toContainText("Trade cancelled");
-  await expectOnlyReport(mine);
-  // The other side cancels from the screen it already had open: the Trade has changed, and the screen reads it again.
-  const otherMain = other.getByRole("main");
-  await more(other).click();
-  await other.getByRole("menuitem", { name: "Cancel Trade" }).click();
-  await otherMain
-    .getByRole("group", { name: "Cancel Trade" })
-    .getByRole("button", { name: "Cancel Trade" })
-    .click();
-  await expect(otherMain.getByRole("alert")).toHaveText(
-    "The offer changed. Review the current cards and cash before trying again."
-  );
-  await expect(heading(other)).toHaveText(`${mineName} cancelled this Trade`);
-  await expect(heading(other)).toBeFocused();
-  await expectOnlyReport(other);
-  expect((await tradeState(other, swap)).state).toBe("closed");
-
-  // Both Trade Lists are whole again, on both sides.
-  await expectOwnCopies(page, "Iono", "3");
-  await expectOwnCopies(ash.page, "Arven", "2");
-  await expectFriendCopies(page, ashHandle, "Arven", "2");
-  await expectFriendCopies(ash.page, mistyHandle, "Iono", "3");
-
-  // Nothing about these Trades that reached either side names the other side's Location, by name or by id.
-  const readBy = new Set<string>();
-  for (const { body, secretOf } of answers) {
-    const text = await body;
-    if (text === null) continue;
-    readBy.add(secretOf[0]);
-    for (const item of secretOf) expect(text).not.toContain(item);
+    // Nothing about these Trades that reached either side names the other side's Location, by name or by id.
+    const readBy = new Set<string>();
+    for (const { audit } of audits) audit.stop();
+    for (const { audit, secretOf } of audits) {
+      for (const text of await audit.finish()) {
+        readBy.add(secretOf[0]);
+        for (const item of secretOf) expect(text).not.toContain(item);
+      }
+    }
+    expect(readBy.size).toBe(2);
+  } finally {
+    for (const { audit } of audits) audit.stop();
   }
-  expect(readBy.size).toBe(2);
 }
 
 test.describe("desktop", () => {
