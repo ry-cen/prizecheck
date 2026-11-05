@@ -119,7 +119,7 @@ class DeployPipelineTest(unittest.TestCase):
         on = VERIFY[:VERIFY.index('\njobs:')]
         self.assertRegex(on, r'(?m)^  workflow_dispatch:$')
         self.assertRegex(on, r'(?m)^      integration:$')
-        self.assertRegex(on, r'(?m)^        options:\n          - none\n          - sharded\n          - full\n        default: none$')
+        self.assertRegex(on, r'(?m)^        options:\n          - none\n          - sharded\n          - full\n          - targeted\n        default: none$')
         self.assertNotIn('inputs.full', VERIFY)
         # Sharded is also due on every pull request to main (a release); the unsharded full gate only on request.
         self.assertIn(f"    if: ${{{{ inputs.integration == 'sharded' || ({RELEASE_PR}) }}}}", job_body('integration-legs'))
@@ -141,7 +141,8 @@ class DeployPipelineTest(unittest.TestCase):
 
     def test_the_verify_aggregator_requires_the_default_checks_and_every_requested_job(self):
         verify = job_body('verify')
-        jobs = ['checks', 'scanner-index-image', 'integration-legs', 'integration-full', 'integration-scanner-model']
+        jobs = ['checks', 'scanner-index-image', 'integration-legs', 'integration-full', 'integration-scanner-model',
+                'targeted-operations', 'targeted-mass-entry']
         needs = re.search(r'needs:\s*\[([^\]]*)\]', verify).group(1)
         self.assertEqual([n.strip() for n in needs.split(',') if n.strip()], jobs)
         # always() keeps it from being skipped with a failed or cancelled job; a skipped check counts as passing.
@@ -150,9 +151,9 @@ class DeployPipelineTest(unittest.TestCase):
             self.assertIn(f'needs.{name}.result', verify)
         script = verify[verify.index('run: |'):]
         for required in ('test "$CHECKS_RESULT" = success', 'test "$SCANNER_INDEX_RESULT" = success',
-                         'none) legs=skipped; full=skipped; model=skipped ;;',
-                         'sharded) legs=success; full=skipped; model=success ;;',
-                         'full) legs=skipped; full=success; model=success ;;',
+                         'none) legs=skipped; full=skipped; model=skipped; targeted=skipped ;;',
+                         'sharded) legs=success; full=skipped; model=success; targeted=skipped ;;',
+                         'full) legs=skipped; full=success; model=success; targeted=skipped ;;',
                          'test "$LEGS_RESULT" = "$legs"', 'test "$FULL_RESULT" = "$full"', 'test "$SCANNER_MODEL_RESULT" = "$model"'):
             self.assertIn(required, script)
         # A pull request to main is due the sharded jobs even with no input, so skipped legs cannot pass there.
@@ -161,6 +162,57 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertLess(script.index('RELEASE_PR" = true'), script.index('case "$INTEGRATION"'))
         # An unrecognised choice fails instead of passing with everything skipped.
         self.assertIn('exit 1', script)
+
+    def test_targeted_jobs_validate_and_test_the_exact_source_with_separate_evidence(self):
+        self.assertEqual(between(VERIFY, '\npermissions:', '\njobs:'), '\npermissions:\n  contents: read')
+        self.assertIn('      source_sha:\n        description:', VERIFY)
+        self.assertIn('        default: ""', between(VERIFY, '      source_sha:', '  workflow_call:'))
+        for name, timeout in (('targeted-operations', 30), ('targeted-mass-entry', 20)):
+            job = job_body(name)
+            self.assertIn("if: ${{ inputs.integration == 'targeted' }}", job)
+            self.assertIn('runs-on: ubuntu-latest', job)
+            self.assertIn(f'timeout-minutes: {timeout}', job)
+            self.assertIn('steps:\n      - name: Validate source SHA', job)
+            validation = between(job, '      - name: Validate source SHA', '      - uses: actions/checkout@v4')
+            self.assertIn('SOURCE_SHA: ${{ inputs.source_sha }}', validation)
+            self.assertIn('[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] ||', validation)
+            self.assertIn('exit 1', validation)
+            self.assertIn('ref: ${{ inputs.source_sha }}', job)
+            self.assertIn('fetch-depth: 0', job)
+            self.assertIn('persist-credentials: false\n      - name: Check and record tested source', job)
+            self.assertIn('test "$(git rev-parse HEAD)" = "$SOURCE_SHA"', job)
+            self.assertIn('SOURCE_SHA: ${{ inputs.source_sha }}', between(job, '- name: Check and record', '- uses: actions/setup-node'))
+            self.assertIn('"$SOURCE_SHA" "$GITHUB_SHA"', job)
+            self.assertIn('tee .scratch/verification/source.txt >> "$GITHUB_STEP_SUMMARY"', job)
+            self.assertNotIn('continue-on-error', job)
+            for line in job.splitlines():
+                if 'run:' in line or line.startswith('          ' ) and not ':' in line:
+                    self.assertNotIn('${{', line)
+            for setup in ('image: postgres:16', 'POSTGRES_PASSWORD: test-only-password',
+                          'actions/setup-node@v4', 'actions/setup-python@v5', 'npm ci',
+                          'api/requirements.txt', 'postgresql-client-16'):
+                self.assertIn(setup, job)
+            self.assertIn('if: always()', job)
+            self.assertIn(f'name: verification-{name}', job)
+            self.assertIn('path: .scratch/verification/', job)
+            self.assertIn('retention-days: 7', job)
+        operations = job_body('targeted-operations')
+        self.assertEqual(operations.count('run: npm run verify'), 1)
+        self.assertIn('run: npm run verify -- --suite operations\n', operations)
+        self.assertNotIn('playwright install', operations)
+        mass = job_body('targeted-mass-entry')
+        self.assertIn('npx playwright install --with-deps chromium', mass)
+        isolated = 'npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/mass-entry.spec.ts:243'
+        reproduction = 'npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/kept-pages.spec.ts:701 web/tests/mass-entry.spec.ts:243'
+        self.assertEqual(mass.count('run: npm run verify'), 2)
+        self.assertLess(mass.index(isolated), mass.index(reproduction))
+        reproduction_step = between(mass, '- name: Reproduction after kept pages', '- uses: actions/upload-artifact')
+        self.assertNotIn('if:', reproduction_step)
+        self.assertIn(reproduction, reproduction_step)
+        aggregator = job_body('verify')
+        self.assertIn('targeted) legs=skipped; full=skipped; model=skipped; targeted=success ;;', aggregator)
+        self.assertIn('test "$OPERATIONS_RESULT" = "$targeted"', aggregator)
+        self.assertIn('test "$MASS_ENTRY_RESULT" = "$targeted"', aggregator)
 
     def test_the_shared_build_gates_its_images_on_the_verify_check(self):
         self.assertRegex(between(BUILD, '\n  verify:', '\n  images:'), r'uses: \./\.github/workflows/verify\.yml')

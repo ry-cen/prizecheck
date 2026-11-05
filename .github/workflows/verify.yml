@@ -17,7 +17,11 @@ on:
           - none
           - sharded
           - full
+          - targeted
         default: none
+      source_sha:
+        description: "Exact source commit for targeted validation (40 lowercase hexadecimal characters)"
+        default: ""
   workflow_call:
 permissions:
   contents: read
@@ -195,6 +199,125 @@ jobs:
           path: .scratch/verification/
           retention-days: 7
           include-hidden-files: true
+  targeted-operations:
+    if: ${{ inputs.integration == 'targeted' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Validate source SHA
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "source_sha must be exactly 40 lowercase hexadecimal characters"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check and record tested source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p .scratch/verification
+          printf 'Tested source SHA: %s\nWorkflow commit: %s\n' "$SOURCE_SHA" "$GITHUB_SHA" | tee .scratch/verification/source.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: npm ci
+      - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - name: Operations
+        run: npm run verify -- --suite operations
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-targeted-operations
+          path: .scratch/verification/
+          retention-days: 7
+          include-hidden-files: true
+  targeted-mass-entry:
+    if: ${{ inputs.integration == 'targeted' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Validate source SHA
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "source_sha must be exactly 40 lowercase hexadecimal characters"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check and record tested source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p .scratch/verification
+          printf 'Tested source SHA: %s\nWorkflow commit: %s\n' "$SOURCE_SHA" "$GITHUB_SHA" | tee .scratch/verification/source.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: npm ci
+      - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npx playwright install --with-deps chromium
+      - name: Isolated mass entry
+        run: npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/mass-entry.spec.ts:243
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
+      - name: Reproduction after kept pages
+        run: npm run verify -- --suite browser --shard 1/1 --browser-workers 1 -- web/tests/kept-pages.spec.ts:701 web/tests/mass-entry.spec.ts:243
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-targeted-mass-entry
+          path: .scratch/verification/
+          retention-days: 7
+          include-hidden-files: true
   # The scanner index job's image (deploy/docker/scanner-index.Dockerfile): a build check of the job image, on both
   # architectures because production runs the arm64 image. The image's default stage does not depend on the test stage,
   # so the real-model test is not built or run here; integration-scanner-model does that on demand. build-images.yml
@@ -268,6 +391,8 @@ jobs:
         integration-legs,
         integration-full,
         integration-scanner-model,
+        targeted-operations,
+        targeted-mass-entry,
       ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -281,6 +406,8 @@ jobs:
           SCANNER_INDEX_RESULT: ${{ needs.scanner-index-image.result }}
           LEGS_RESULT: ${{ needs.integration-legs.result }}
           FULL_RESULT: ${{ needs.integration-full.result }}
+          OPERATIONS_RESULT: ${{ needs.targeted-operations.result }}
+          MASS_ENTRY_RESULT: ${{ needs.targeted-mass-entry.result }}
           SCANNER_MODEL_RESULT: ${{ needs.integration-scanner-model.result }}
         run: |
           echo "integration: $INTEGRATION; release pull request: $RELEASE_PR; checks: $CHECKS_RESULT; scanner index image: $SCANNER_INDEX_RESULT; legs: $LEGS_RESULT; full: $FULL_RESULT; scanner model: $SCANNER_MODEL_RESULT"
@@ -289,11 +416,14 @@ jobs:
           # A pull request to main (a release) is due the sharded legs even though no input was set.
           if [ "$RELEASE_PR" = true ] && [ "$INTEGRATION" = none ]; then INTEGRATION=sharded; fi
           case "$INTEGRATION" in
-            none) legs=skipped; full=skipped; model=skipped ;;
-            sharded) legs=success; full=skipped; model=success ;;
-            full) legs=skipped; full=success; model=success ;;
+            none) legs=skipped; full=skipped; model=skipped; targeted=skipped ;;
+            sharded) legs=success; full=skipped; model=success; targeted=skipped ;;
+            full) legs=skipped; full=success; model=success; targeted=skipped ;;
+            targeted) legs=skipped; full=skipped; model=skipped; targeted=success ;;
             *) echo "unknown integration choice: $INTEGRATION"; exit 1 ;;
           esac
           test "$LEGS_RESULT" = "$legs"
           test "$FULL_RESULT" = "$full"
           test "$SCANNER_MODEL_RESULT" = "$model"
+          test "$OPERATIONS_RESULT" = "$targeted"
+          test "$MASS_ENTRY_RESULT" = "$targeted"
