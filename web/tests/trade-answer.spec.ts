@@ -205,6 +205,7 @@ async function story(
     signIn: (options?: {
       next?: string;
       contextOptions?: BrowserContextOptions;
+      beforeSignIn?: (page: Page) => Promise<void>;
     }) => Promise<{ page: Page }>;
   },
   contextOptions: BrowserContextOptions,
@@ -213,33 +214,38 @@ async function story(
 ) {
   const ids = seedCatalog();
   const secret = `Secret ${randomUUID().slice(0, 6)}`;
-  const ash = await collectors.signIn({ contextOptions });
-  const ashHandle = await nameCollector(ash.page, "Ash K");
-  const shelf = await forTradeBinder(ash.page, `${secret} Shelf`);
-  await hold(ash.page, shelf, ids["SVI 166"], 2);
-
-  await noArtwork(page);
-  await noArtwork(ash.page);
-  await signInAsOwner(page, "/collection");
-  const mistyHandle = await nameCollector(page, "Misty W");
-  const binder = await forTradeBinder(page, `${secret} Binder`);
-  await hold(page, binder, ids["PAL 185"], 3);
-  await befriend(page, ash.page);
-  // Everything about Trades that reaches either browser, to check it never names the other side's Location.
-  const audits = await Promise.all(
-    (
-      [
-        [ash.page, [`${secret} Binder`, binder]],
-        [page, [`${secret} Shelf`, shelf]],
-      ] as const
-    ).map(async ([who, theirs]) => {
-      const audit = await auditPage(who, (url) =>
-        /\/api\/(social\/)?trade/.test(url)
-      );
-      return { audit, secretOf: [...theirs] };
-    })
-  );
+  const mistyPrivate = [`${secret} Binder`];
+  const ashPrivate = [`${secret} Shelf`];
+  const audits: {
+    audit: Awaited<ReturnType<typeof auditPage>>;
+    secretOf: string[];
+  }[] = [];
+  const attach = async (who: Page, secretOf: string[]) => {
+    audits.push({
+      audit: await auditPage(who, (url) => /\/api\/(social\/)?trade/.test(url)),
+      secretOf,
+    });
+  };
   try {
+    // Await durable capture before either signed-in shell can mount its kept lists.
+    const ash = await collectors.signIn({
+      contextOptions,
+      beforeSignIn: (who) => attach(who, mistyPrivate),
+    });
+    const ashHandle = await nameCollector(ash.page, "Ash K");
+    const shelf = await forTradeBinder(ash.page, `${secret} Shelf`);
+    ashPrivate.push(shelf);
+    await hold(ash.page, shelf, ids["SVI 166"], 2);
+
+    await noArtwork(page);
+    await noArtwork(ash.page);
+    await attach(page, ashPrivate);
+    await signInAsOwner(page, "/collection");
+    const mistyHandle = await nameCollector(page, "Misty W");
+    const binder = await forTradeBinder(page, `${secret} Binder`);
+    mistyPrivate.push(binder);
+    await hold(page, binder, ids["PAL 185"], 3);
+    await befriend(page, ash.page);
     const ashId = await accountId(ash.page);
     const iono = ids["PAL 185"];
     const arven = ids["SVI 166"];
