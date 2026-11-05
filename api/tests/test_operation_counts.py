@@ -1,4 +1,4 @@
-"""Operational counts are written off the request path (app/operation_counts.py)."""
+"""Operational counts are written off the request path (app/core/ops/operation_counts.py)."""
 import asyncio
 import threading
 import time
@@ -8,7 +8,7 @@ import pytest
 from starlette.responses import JSONResponse
 
 from app.main import app, connect, operation_counter
-from app.operation_counts import Count, OperationCounter
+from app.core.ops.operation_counts import Count, OperationCounter
 
 
 class Gate:
@@ -92,6 +92,10 @@ def test_a_failing_writer_is_swallowed_and_never_reaches_a_request(writer, caplo
     assert operation_counter.flush()
     assert failing.calls == 1 and operation_counter.lost == lost + 1
     assert "Operational counts not written (RuntimeError)" in caplog.text
+    warnings = [record for record in caplog.records
+                if record.getMessage() == "Operational counts not written (RuntimeError)"]
+    assert len(warnings) == 1
+    assert warnings[0].name == 'app.operation_counts'
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
