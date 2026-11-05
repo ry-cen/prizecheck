@@ -2,7 +2,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from app.db import connect
 from app.identity import verified_user
-from app.holdings import parse_quantity
+from app.core.inventory.holdings import parse_quantity
 from app.location_tree import (owner_and_rows, replay, check_name, store_result, error, node_model,
                                apply_edit, cleaned_name, LocationCommandResult)
 from app.copy_allocation import deck_lines

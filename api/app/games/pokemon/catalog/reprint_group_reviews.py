@@ -71,7 +71,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from ..formats import format_evaluator as evaluator
 from .card_attributes import advance_attribute_revision, attribute_revision, read_card_attributes
 from ..formats.format_standing import rebuild_stale_best_effort
-from app.holdings import fail
+from app.core.inventory.holdings import fail
 from app.db import connect
 from app.identity import require_owner, verified_user
 from ..prices.metadata_reviews import delivery_status

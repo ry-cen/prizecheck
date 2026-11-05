@@ -15,7 +15,6 @@ app.copy_picks core
 app.db core
 app.deck_deletion core
 app.deck_pick_list core
-app.holdings core
 app.host_readiness root
 app.identity core
 app.inventory_core core

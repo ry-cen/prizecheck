@@ -1185,3 +1185,15 @@ below says where each group ended up; the module map in section 1 stays the plan
 - A repository-wide caller scan, including dynamic imports and monkeypatch paths, found no other
   consumer requiring the old path. The root module and its exact ownership row are removed without
   a compatibility shim. Test assertions, architecture rules and API snapshots are unchanged.
+
+**2026-11-05 — Holdings router relocation (#528)**
+
+- The whole Holdings router moved from `app.holdings` to `app.core.inventory.holdings`,
+  the destination planned in section 1A, with only its dependency imports changed.
+  Routes, responses, SQL, transactions, cursors, exceptions and business rules are unchanged.
+- #525 removed the Collection cursor dependency. The module's catalog reads moved unchanged,
+  including `leaf_holdings`; `app.inventory_core` stays in place. The twelve production consumers
+  now import the core module directly with the same names and aliases.
+- The root module and its exact ownership row are removed without a compatibility shim.
+  Architecture test paths are synthetic fixtures and remain unchanged; the catalog contract's
+  short `holdings.py` name stays accurate. No real test import or patch needs updating.

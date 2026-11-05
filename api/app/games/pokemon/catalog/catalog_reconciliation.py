@@ -9,7 +9,7 @@ from fastapi import APIRouter,Depends,HTTPException
 from pydantic import BaseModel,Field,HttpUrl
 from app.db import connect
 from app.identity import require_owner, verified_user
-from app.holdings import fail
+from app.core.inventory.holdings import fail
 from . import public_catalog
 
 router=APIRouter()

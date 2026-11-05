@@ -19,7 +19,7 @@ from app.deck_pick_list import router as deck_pick_list_router
 from app.games.pokemon.decks.routes import router as decks_router
 from app.games.pokemon.publications.discovery import router as discovery_router
 from app.games.pokemon.formats.format_standing import rebuild_on_startup as rebuild_format_standing, router as format_standing_router
-from app.holdings import router as holdings_router
+from app.core.inventory.holdings import router as holdings_router
 from app.loan_inventory import router as loan_inventory_router
 from app.location_tree import router as location_tree_router
 from app.core.inventory.locations import router as locations_router
