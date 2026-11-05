@@ -110,7 +110,14 @@ async function story(
     "Trades, 1 need you: 1 waiting on you, 0 with new messages"
   );
   await composer(misty).fill("Yes, 2 copies.");
+  const replySent = misty.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === `/api/trades/${thread}/messages` &&
+      response.request().method() === "POST" &&
+      response.status() === 201
+  );
   await sendButton(misty).click();
+  await replySent;
   await focusPulse(page);
   await expect(timeline(page)).toContainText("Misty W: Yes, 2 copies.");
   await expect(timeline(page).getByRole("listitem")).toHaveCount(3);
