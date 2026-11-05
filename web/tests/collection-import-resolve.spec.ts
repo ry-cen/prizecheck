@@ -303,7 +303,18 @@ test.describe("phone", () => {
     await fix(page, 2).tap();
     const klara = resolver(page, "Fix row 2");
     for (const target of [
-      klara.getByRole("button", { name: "Klara · Chilling Reign 145" }),
+      klara
+        .getByRole("list", { name: "Cards this row could be", exact: true })
+        .getByRole("button", {
+          name: "Klara · Chilling Reign 145",
+          exact: true,
+        }),
+      klara
+        .getByRole("list", { name: "Catalog results", exact: true })
+        .getByRole("button", {
+          name: "Klara · Chilling Reign 145",
+          exact: true,
+        }),
       klara.getByRole("searchbox", { name: "Search the catalog" }),
       klara.getByRole("button", { name: "Skip row" }),
     ])
