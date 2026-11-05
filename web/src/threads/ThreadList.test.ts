@@ -309,3 +309,74 @@ it("S2-09: Done keeps a full tap target and native folded history without markin
     vi.unstubAllGlobals();
   }
 });
+
+it("keeps return focus through an in-flight list move into Done without another read", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const row: ThreadItem = {
+    id: "moving-item",
+    kind: "loan",
+    you_are: "low",
+    other: {
+      trader_id: null,
+      display_name: "Ash",
+      friend: true,
+      available: true,
+    },
+    summary: { you_give: "3", you_get: "0", cards: [] },
+    section: "needs_you",
+    state: "requested",
+    waiting: "answer",
+    unread: 0,
+    needs_you: true,
+    last_activity_at: "2026-11-05T00:00:00Z",
+  };
+  let release!: (rows: ThreadItem[]) => void;
+  vi.mocked(getLoans)
+    .mockResolvedValueOnce([row])
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const props = {
+    kind: "loan" as const,
+    active: true,
+    onOpen: vi.fn(),
+    selected: row.id,
+    revision: 0,
+  };
+  try {
+    await act(async () => root.render(h(ThreadList, props)));
+    await act(async () =>
+      root.render(h(ThreadList, { ...props, revision: 1 }))
+    );
+    await act(async () =>
+      root.render(h(ThreadList, { ...props, selected: null, revision: 1 }))
+    );
+    expect(document.activeElement).toBe(host.querySelector("a"));
+    await act(async () =>
+      release([
+        {
+          ...row,
+          state: "closed",
+          section: "done",
+          waiting: null,
+          needs_you: false,
+        },
+      ])
+    );
+    const done = host.querySelector("details")!;
+    expect(done.open).toBe(true);
+    expect(document.activeElement).toBe(done.querySelector("a"));
+    expect(getLoans).toHaveBeenCalledTimes(2);
+    expect(readThread).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
