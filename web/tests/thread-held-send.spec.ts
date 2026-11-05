@@ -11,6 +11,37 @@ import {
 import { forTradeLeaf, propose } from "./support/trades";
 import { signInAsOwner } from "./support/sign-in";
 
+/** TradeScreen resolves its two offer reads; chat reads detail directly with a
+ * separate AbortSignal. Tag only those resolved offer reads so the fixture holds
+ * the permission owner, while all parent refresh I/O still runs normally. */
+async function identifyOfferReads(
+  page: import("@playwright/test").Page,
+  id: string
+) {
+  await page.addInitScript((thread) => {
+    const original = window.fetch.bind(window);
+    const offerSignals = new WeakSet<AbortSignal>();
+    window.fetch = (input, init) => {
+      const path = new URL(
+        input instanceof Request ? input.url : String(input),
+        location.href
+      ).pathname;
+      if (path === `/api/trades/resolve/${thread}` && init?.signal)
+        offerSignals.add(init.signal);
+      if (
+        path === `/api/trades/${thread}` &&
+        init?.signal &&
+        offerSignals.has(init.signal)
+      ) {
+        const headers = new Headers(init.headers);
+        headers.set("x-prizecheck-test-reader", "offer");
+        init = { ...init, headers };
+      }
+      return original(input, init);
+    };
+  }, id);
+}
+
 for (const outcome of ["writable", "read-only", "failed"] as const) {
   for (const order of ["obsolete-first", "newest-first"] as const) {
     test(`native held chat sends only after the newest read: ${outcome}, ${order}`, async ({
@@ -29,6 +60,7 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
         [],
         [[edition, 1]]
       );
+      await identifyOfferReads(page, id);
       await page.goto(`${ORIGIN}/trades/${id}`);
       const editor = page.getByRole("textbox", { name: /^Message / });
       const send = page.getByRole("button", { name: "Send", exact: true });
@@ -41,7 +73,11 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
       });
       const reads: { route: Route; body: Record<string, unknown> }[] = [];
       await page.route(`**/api/trades/${id}`, async (route) => {
-        if (route.request().method() !== "GET") return route.continue();
+        if (
+          route.request().method() !== "GET" ||
+          route.request().headers()["x-prizecheck-test-reader"] === "offer"
+        )
+          return route.continue();
         const response = await route.fetch();
         reads.push({ route, body: await response.json() });
       });
@@ -128,6 +164,7 @@ test("native IME composition keeps the message draft until an explicit Send", as
   await signInAsOwner(page, "/collection");
   await befriend(page, other);
   const id = await propose(page, await accountId(other), [], [[edition, 1]]);
+  await identifyOfferReads(page, id);
   await page.goto(`${ORIGIN}/trades/${id}`);
   const editor = page.getByRole("textbox", { name: /^Message / });
   await expect(editor).toBeEnabled();
@@ -189,6 +226,7 @@ async function chatItem(
   await signInAsOwner(page, "/collection");
   await befriend(page, other);
   const id = await propose(page, await accountId(other), [], [[edition, 1]]);
+  await identifyOfferReads(page, id);
   await page.goto(`${ORIGIN}/trades/${id}`);
   await expect(page.getByRole("textbox", { name: /^Message / })).toBeEnabled();
   return id;
@@ -213,6 +251,8 @@ test("native held chat is dropped on a real document departure without a POST", 
       bodies.push(request.postData()!);
   });
   await page.route(`**/api/trades/${id}`, async (route) => {
+    if (route.request().headers()["x-prizecheck-test-reader"] === "offer")
+      return route.continue();
     detail = await (await route.fetch()).json();
     held = route;
   });
@@ -258,6 +298,8 @@ test("native unknown chat holds its exact replay body and key through a permissi
   let held: Route | undefined;
   let detail: unknown;
   await page.route(`**/api/trades/${id}`, async (route) => {
+    if (route.request().headers()["x-prizecheck-test-reader"] === "offer")
+      return route.continue();
     detail = await (await route.fetch()).json();
     held = route;
   });
