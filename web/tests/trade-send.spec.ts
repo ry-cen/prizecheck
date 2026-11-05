@@ -205,7 +205,7 @@ async function story(
   await befriend(page, ash.page);
   await befriend(page, brock.page);
   // Everything about Trades that reaches Ash's browser, to check it never names one of Misty's Locations.
-  const audit = auditPage(ash.page, (url) =>
+  const audit = await auditPage(ash.page, (url) =>
     /\/api\/(social\/)?trade/.test(url)
   );
   try {
