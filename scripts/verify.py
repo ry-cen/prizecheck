@@ -24,6 +24,7 @@ from psycopg.conninfo import conninfo_to_dict
 
 from verify_reaper import create_databases, current_owner, reap
 from verify_report import network_changes, summarize
+from local_api_selection import source_fingerprint
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = ('all', 'api', 'browser', 'auth', 'operations')
@@ -322,6 +323,8 @@ def inherited_environment():
     under it; when TMPDIR is inside a repository (`<checkout>/.scratch/tmp`, for a slow /tmp), git run in the copy or in
     a test's temporary directory would otherwise walk up and find that repository, where under /tmp it finds none."""
     inherited = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'LANG', 'PLAYWRIGHT_BROWSERS_PATH', 'FONT_EVIDENCE', 'TEST_FONTCONFIG_FILE') if key in os.environ}
+    inherited.update({key: os.environ[key] for key in ('VERIFY_ADMISSION_MODE', 'VERIFY_ADMISSION_PREPARE')
+                      if key in os.environ})
     return dict(inherited, GIT_CEILING_DIRECTORIES=os.path.realpath(tempfile.gettempdir()))
 
 
@@ -479,6 +482,10 @@ def main(argv=None):
                 (artifacts/'result.json').write_text(json.dumps({
                     'run': identifier, 'exit_code': result, 'suite': suite, 'selectors': [], 'browser_args': [],
                     'fast': args.fast, 'shard': None, 'burn_in': plan, 'timing_warnings': []}))
+                if os.environ.get('VERIFY_ADMISSION_RECEIPT'):
+                    # Empty/invalid burn-in planning allocated no processes, workspace or databases.
+                    Path(os.environ['VERIFY_ADMISSION_RECEIPT']).write_text(json.dumps({
+                        'token': os.environ['VERIFY_ADMISSION_TOKEN'], 'clean': True, 'artifacts': str(artifacts)}))
                 return result
         pytest_workers, browser_workers = effective_workers(suite, args.pytest_workers, args.browser_workers)
         if plan and not plan['specs']:
@@ -512,6 +519,8 @@ def main(argv=None):
                 shutil.copy2(ROOT/relative, target)
             for dependency in ('.venv', 'node_modules'):
                 (checkout/dependency).symlink_to((ROOT/dependency).resolve(), target_is_directory=True)
+            if os.environ.get('VERIFY_ADMISSION_SOURCE') and source_fingerprint(checkout, files) != os.environ['VERIFY_ADMISSION_SOURCE']:
+                raise RuntimeError('Source changed during the admitted snapshot; no tests were started')
             api, auth, web, signup, secondary, unavailable = ports[:6]
             extra = ports[6:]
             stacks = [{'database_url': database_url(args.admin_url, f'{name}_s{number}'), 'api_port': extra[3*number-3],
@@ -587,6 +596,14 @@ def main(argv=None):
             for line in report.get('network_warnings', []):
                 print(f'WARNING: {line}')
         print(f'Verification artifacts: {artifacts}')
+    # Only reached after the workspace context exited, database drops completed, and the gate's result was recorded.
+    # An exception/kill, including during teardown, deliberately produces no cleanup proof for host admission.
+    if os.environ.get('VERIFY_ADMISSION_RECEIPT'):
+        report = json.loads((artifacts / 'result.json').read_text())
+        clean = (report.get('database_removed') is True and not report.get('cleanup_failures')
+                 and outcome.get('stopped') is True and kept is not None and not Path(kept).exists())
+        Path(os.environ['VERIFY_ADMISSION_RECEIPT']).write_text(json.dumps({
+            'token': os.environ['VERIFY_ADMISSION_TOKEN'], 'clean': clean, 'artifacts': str(artifacts)}))
     return result if result is not None else 1
 
 
