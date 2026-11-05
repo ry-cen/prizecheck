@@ -380,3 +380,138 @@ it("keeps return focus through an in-flight list move into Done without another 
     vi.unstubAllGlobals();
   }
 });
+
+const deferredFocusRow: ThreadItem = {
+  id: "A",
+  kind: "loan",
+  you_are: "low",
+  other: {
+    trader_id: null,
+    display_name: "Ash",
+    friend: true,
+    available: true,
+  },
+  summary: { you_give: "3", you_get: "0", cards: [] },
+  section: "needs_you",
+  state: "requested",
+  waiting: "answer",
+  unread: 0,
+  needs_you: true,
+  last_activity_at: "2026-11-05T00:00:00Z",
+};
+async function deferredFocusFixture() {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let release!: (rows: ThreadItem[]) => void;
+  vi.mocked(getLoans)
+    .mockResolvedValueOnce([deferredFocusRow])
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const other = document.createElement("button");
+  other.textContent = "Other navigation";
+  document.body.append(other);
+  let props = {
+    kind: "loan" as const,
+    active: true,
+    onOpen: vi.fn(),
+    selected: "A" as string | null,
+    revision: 0,
+  };
+  const render = async (changes: Partial<typeof props>) => {
+    props = { ...props, ...changes };
+    await act(async () => root.render(h(ThreadList, props)));
+  };
+  await render({});
+  await render({ revision: 1 });
+  await render({ selected: null });
+  expect(document.activeElement).toBe(host.querySelector("a"));
+  return {
+    host,
+    other,
+    render,
+    release: () =>
+      act(async () =>
+        release([
+          {
+            ...deferredFocusRow,
+            section: "done",
+            state: "closed",
+            waiting: null,
+            needs_you: false,
+          },
+        ])
+      ),
+    cleanup: async () => {
+      await act(async () => root.unmount());
+      host.remove();
+      other.remove();
+      vi.clearAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+it("review: authoritative refresh does not steal focus after collector moves to another control", async () => {
+  const f = await deferredFocusFixture();
+  try {
+    f.other.focus();
+    expect(document.activeElement).toBe(f.other);
+    await f.release();
+    expect(getLoans).toHaveBeenCalledTimes(2);
+    expect(readThread).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(f.other);
+    expect(f.host.querySelector("details")!.open).toBe(false);
+  } finally {
+    await f.cleanup();
+  }
+});
+it("review: return token does not survive leaving the page and open Done on a later visit", async () => {
+  const f = await deferredFocusFixture();
+  try {
+    await f.render({ active: false });
+    f.other.focus();
+    await f.release();
+    expect(getLoans).toHaveBeenCalledTimes(2);
+    expect(readThread).not.toHaveBeenCalled();
+    expect(f.host.querySelector("details")!.open).toBe(false);
+    // Keep the newly requested quiet read unresolved: the old token must not act at all.
+    vi.mocked(getLoans).mockImplementation(() => new Promise(() => {}));
+    await f.render({ active: true });
+    expect(f.host.querySelector("details")!.open).toBe(false);
+    expect(document.activeElement).toBe(f.other);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+for (const leave of [
+  "window blur",
+  "hidden document",
+  "outside pointer",
+] as const)
+  it(`deferred Done focus is cancelled by ${leave} without a read`, async () => {
+    const f = await deferredFocusFixture();
+    const visibility = vi.spyOn(document, "visibilityState", "get");
+    try {
+      if (leave === "window blur") window.dispatchEvent(new Event("blur"));
+      else if (leave === "hidden document") {
+        visibility.mockReturnValue("hidden");
+        document.dispatchEvent(new Event("visibilitychange"));
+      } else
+        f.other.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      await f.release();
+      expect(f.host.querySelector("details")!.open).toBe(false);
+      expect(document.activeElement).not.toBe(
+        f.host.querySelector("details a")
+      );
+      expect(getLoans).toHaveBeenCalledTimes(2);
+      expect(readThread).not.toHaveBeenCalled();
+    } finally {
+      visibility.mockRestore();
+      await f.cleanup();
+    }
+  });

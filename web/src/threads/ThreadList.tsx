@@ -37,7 +37,9 @@ export function ThreadList({
     pulse = usePulseChanged();
   const root = useRef<HTMLDivElement>(null),
     previous = useRef(selected);
-  const restore = useRef<string | null>(null);
+  const restore = useRef<{ id: string; node: HTMLAnchorElement | null } | null>(
+    null
+  );
   const reading = useRef<AbortController | null>(null);
   useFirstReadSettled(rows !== null || failed);
   useReadOnShow(active, failed, () => {
@@ -71,12 +73,54 @@ export function ThreadList({
     };
   }, [kind, attempt, changed, pulse, revision]);
   useEffect(() => {
-    if (previous.current && !selected) restore.current = previous.current;
+    const moved = (event: FocusEvent) => {
+      const token = restore.current;
+      // Removing the old focused row may leave body focused without a new
+      // collector choice. A real new focus target retires that return intent.
+      if (
+        token &&
+        event.target !== token.node &&
+        event.target !== document.body &&
+        event.target !== document.documentElement
+      )
+        restore.current = null;
+    };
+    const pressed = (event: PointerEvent) => {
+      const token = restore.current;
+      if (
+        token &&
+        event.target instanceof Node &&
+        !token.node?.contains(event.target)
+      )
+        restore.current = null;
+    };
+    const left = () => {
+      restore.current = null;
+    };
+    const visibility = () => {
+      if (document.visibilityState === "hidden") left();
+    };
+    window.addEventListener("blur", left);
+    document.addEventListener("visibilitychange", visibility);
+    document.addEventListener("focusin", moved);
+    document.addEventListener("pointerdown", pressed, true);
+    return () => {
+      window.removeEventListener("blur", left);
+      document.removeEventListener("visibilitychange", visibility);
+      document.removeEventListener("focusin", moved);
+      document.removeEventListener("pointerdown", pressed, true);
+    };
+  }, []);
+  useEffect(() => {
+    if (!active || selected) restore.current = null;
+    if (active && previous.current && !selected)
+      restore.current = { id: previous.current, node: null };
     previous.current = selected;
     if (active && !selected && rows && restore.current) {
       const link = Array.from(root.current?.querySelectorAll("a") ?? []).find(
-        (a) => a.dataset.thread === restore.current
+        (a) => a.dataset.thread === restore.current?.id
       );
+      restore.current.node = link ?? null;
       const details = link?.closest("details");
       if (details) details.open = true;
       link?.focus({ preventScroll: true });
