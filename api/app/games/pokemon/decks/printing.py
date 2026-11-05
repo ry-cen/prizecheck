@@ -24,7 +24,7 @@ from app.games.pokemon.decks.models import DeckListCommandResult
 from app.games.pokemon.decks.commands import advance_deck_list, replayed
 from app.core.decks.store import check_revision, keep_response, line_exists, require_deck
 from app.games.pokemon.prices import prices
-from app.holdings import parse_quantity
+from app.core.inventory.holdings import parse_quantity
 from app.identity import verified_user
 from app.location_tree import error, owner_and_rows, replay
 from app.core.prices.quote_contract import parse_amount

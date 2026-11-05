@@ -84,7 +84,7 @@ function send(command: AddCommand) {
   });
 }
 
-/** The codes the batch handler itself answers before it commits anything (api/app/holdings.py), under the owner lock:
+/** The codes the batch handler itself answers before it commits anything (api/app/core/inventory/holdings.py), under the owner lock:
  * a refusal with one of them proves the batch never committed. A status alone proves nothing: a gateway's 401, 403 or
  * 429, or a 422 without a code (the request's shape), can come while the earlier send is still being worked on. */
 const REFUSED_FOR_GOOD: ReadonlySet<string> = new Set([
