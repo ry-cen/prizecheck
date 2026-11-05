@@ -1160,3 +1160,15 @@ below says where each group ended up; the module map in section 1 stays the plan
 - The Pokémon composition imports the moved router with the same alias and registration order.
   A repository-wide import, dynamic-path and patch-path scan found no other consumer requiring the old path,
   so the root module and its exact ownership row are removed without a compatibility shim.
+
+**2026-11-04 — Operational counts relocation (#528)**
+
+- The stdlib-only module moved from `app.operation_counts` to `app.core.ops.operation_counts`,
+  the destination planned in section 1. Queue bounds, aggregation, the counter singleton, dropped/lost
+  counts, warning rate limits, stop/drain/restart behavior and the `operation-counts` thread are unchanged.
+- `main.py` and `test_operation_counts.py` import the core module directly; their path comments and
+  `docs/prices.md` name the destination. The logger name is pinned to `app.operation_counts` to preserve
+  logging identity, with a caplog assertion covering the swallowed-write warning.
+- A repository-wide caller scan, including dynamic imports, patch paths, scripts, deploy, auth,
+  workflows and ownership lists, found no other consumer requiring the old import path.
+  The root module and its exact ownership row are removed without a compatibility shim.

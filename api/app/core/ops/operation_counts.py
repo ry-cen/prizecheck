@@ -33,7 +33,8 @@ WRITE_TIMEOUT_SECONDS = 2
 STOP_DRAIN_SECONDS = 2.0
 WARN_INTERVAL_SECONDS = 60
 
-log = logging.getLogger(__name__)
+# Preserve the logger identity used before this module moved into core.
+log = logging.getLogger('app.operation_counts')
 
 
 @dataclass(frozen=True)
