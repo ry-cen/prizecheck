@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from app.core.inventory import collection as reads
 from app.core.inventory.collection import (CollectionPage, CollectionRevision, CollectionSetList, CollectionTotals,
                                            Distribution, HoldingSort, views)
-from app.holdings import HoldingView
+from app.core.inventory.holdings import HoldingView
 from app.identity import verified_user
 
 router = APIRouter(prefix='/api/collection', tags=['collection'])

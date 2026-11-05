@@ -46,7 +46,7 @@ from app.core.decks.store import MAX_DECK_LIST_CHANGES, keep_response
 from app.games.pokemon.decks.models import DeckListCommandResult
 from app.games.pokemon.decks.commands import advance_deck_list, replayed
 from ..formats.format_evaluator import FORMATS
-from app.holdings import parse_quantity
+from app.core.inventory.holdings import parse_quantity
 from app.games.pokemon.imports.import_allocation import ChosenBy, OwnedCards, Part, Resolved, Source, merged, parts_for
 from .import_matching import Match, match_lines
 from app.games.pokemon.imports.import_owned import capture_owned, groups

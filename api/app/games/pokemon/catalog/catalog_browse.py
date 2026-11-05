@@ -65,7 +65,7 @@ from ..formats import format_evaluator as evaluator
 from . import name_search, set_codes
 from ..formats import format_standing
 from app.core.inventory.cursors import anchor_json, anchor_value, cursor_key, encode_cursor
-from app.holdings import fail
+from app.core.inventory.holdings import fail
 from app.core.art.urls import route_address
 from app.games.pokemon.art.urls import art_url
 from app.borrowed_copies import borrowed_in
