@@ -28,7 +28,7 @@ from starlette.background import BackgroundTask
 from app.games.pokemon.prices import prices
 from app.core.prices.cost import DeckCostFigures, summarize
 from app.identity import verified_user
-from app.price_budget import Budget, trusted_budget
+from app.core.prices.price_budget import Budget, trusted_budget
 from app.settings import WantListCounting
 from app.want_list import capture_want_list, combined
 
