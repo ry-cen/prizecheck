@@ -1,4 +1,4 @@
-import { responseAudit } from "./support/responseAudit";
+import { auditPage } from "./support/responseAudit";
 import { tradeView } from "./support/trades";
 // Ticket #272: Confirm swap (Trading spec "Confirm swap and ownership transfer", prototype verdict variant A: received
 // cards go to Unsorted by default, changeable in the confirm dialog). Misty sends Ash a swap and a gift through the
@@ -157,13 +157,7 @@ async function story(
       [page, [`${secret} Binder`, ashBinder, `${secret} Box`, ashBox]],
     ] as const
   ).map(([who, theirs]) => {
-    const audit = responseAudit((capture) => {
-      const receive = (response: import("@playwright/test").Response) => {
-        if (/\/api\/(social\/)?trade/.test(response.url())) capture(response);
-      };
-      who.on("response", receive);
-      return () => who.off("response", receive);
-    });
+    const audit = auditPage(who, (url) => /\/api\/(social\/)?trade/.test(url));
     return { audit, secretOf: [...theirs] };
   });
   try {
@@ -424,7 +418,7 @@ async function story(
     }
     expect(readBy.size).toBe(2);
   } finally {
-    for (const { audit } of audits) audit.stop();
+    for (const { audit } of audits) audit.dispose();
   }
 }
 

@@ -1,4 +1,4 @@
-import { responseAudit } from "./support/responseAudit";
+import { auditPage } from "./support/responseAudit";
 // Ticket #269: My Trade List and a Friend's Trade List (Trading spec "For trade Locations and the Trade List",
 // prototype verdict variant A). Misty marks a binder For trade, and a binder she hid from Friends too; her Trade List
 // under the Trades tab shows each with its cards, says which one is hidden, and leaves out the cards she didn't mark.
@@ -258,14 +258,9 @@ async function story(
   await signInAsOwner(page, "/collection");
   const ashHandle = await nameCollector(page, "Ash K");
   await befriend(page, misty.page);
-  const audit = responseAudit((capture) => {
-    const receive = (response: import("@playwright/test").Response) => {
-      if (response.url().includes("/api/social/trade-lists/"))
-        capture(response);
-    };
-    page.on("response", receive);
-    return () => page.off("response", receive);
-  });
+  const audit = auditPage(page, (url) =>
+    url.includes("/api/social/trade-lists/")
+  );
   try {
     await page.goto(`${ORIGIN}/friends/${mistyHandle}`);
     await page
@@ -359,7 +354,7 @@ async function story(
     await expect(brock.page.getByRole("main")).not.toContainText("Iono");
     await expectPageChecks(brock.page, `a stranger's Trade List at ${width}`);
   } finally {
-    audit.stop();
+    audit.dispose();
   }
 }
 
