@@ -1,6 +1,11 @@
 // Item-thread chat: separate waiting/unread marks, live offer revisions, Done history, message refusals and pulse cadence.
 import { randomUUID } from "node:crypto";
-import type { BrowserContextOptions, Page } from "@playwright/test";
+import type {
+  BrowserContextOptions,
+  Page,
+  Request,
+  Response,
+} from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import {
   api,
@@ -287,11 +292,36 @@ test.describe("pulse timing", () => {
       if (isPulse(request.url())) pulses++;
     });
     const load = async (url: string) => {
+      const readPath = new URL(url).pathname.startsWith("/trades/")
+        ? `/api${new URL(url).pathname}/read`
+        : null;
+      let readAnswered = false;
+      const feedback = new Set<Request>();
+      const responseSeen = (response: Response) => {
+        if (new URL(response.url()).pathname === readPath) readAnswered = true;
+      };
+      const requestSeen = (request: Request) => {
+        if (readAnswered && isPulse(request.url())) feedback.add(request);
+      };
+      page.on("response", responseSeen);
+      page.on("request", requestSeen);
       const first = page.waitForResponse((response) => isPulse(response.url()));
-      await page.goto(url);
-      await first;
-      await expect(page.getByRole("main")).toBeVisible();
-      return pulses;
+      const settled = readPath
+        ? page.waitForResponse((response) => feedback.has(response.request()))
+        : first;
+      try {
+        await page.goto(url);
+        await first;
+        // Opening an item marks its timeline read and explicitly polls. Finish
+        // that startup chain before measuring timer-only cadence.
+        await (await settled).finished();
+        await page.evaluate(() => Promise.resolve());
+        await expect(page.getByRole("main")).toBeVisible();
+        return pulses;
+      } finally {
+        page.off("response", responseSeen);
+        page.off("request", requestSeen);
+      }
     };
     await page.clock.install();
 
