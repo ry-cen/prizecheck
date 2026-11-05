@@ -112,6 +112,7 @@ async function openDeck(page: Page, name: string) {
 }
 
 test.beforeEach(async ({ context }) => {
+  await pool.query("UPDATE catalog_rule_state SET activation_id=NULL");
   // Real TCGplayer is never contacted; the handler records what a browser would have requested.
   await context.route("https://www.tcgplayer.com/**", (route) => route.abort());
 });
