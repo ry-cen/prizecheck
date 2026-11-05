@@ -1,3 +1,8 @@
+import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
+import { PendingLoanNotice } from "./PendingLoanNotice";
+import { refusalError, type FlowOutcome } from "./loanIntents";
+import { resultText, signInAs } from "./loanText";
+import type { WriteOff } from "../social_generated";
 import { ItemThreadLayout } from "../threads/ItemThreadLayout";
 import { threadVersionChanged } from "../threads/commandChanges";
 import { usePulseChanged } from "../inbox/Inbox";
@@ -36,11 +41,9 @@ import {
   getLoanSide,
   seeNotices,
   SocialError,
-  startReturn,
   takeBackHandover,
   useSuggestedPicks,
   withdrawLoan,
-  writeOff,
   type LoanCard,
   type LoanPickPlace,
   type LoanSide,
@@ -159,6 +162,12 @@ export function LoanScreen({
   onOpenDeck: (id: string) => void;
 }) {
   const drafts = useBorrowDrafts();
+  const { store, blockerFor, accountName } = useLoanRecovery();
+  const guard = useFlowGuard();
+  const durable = useDurableSend();
+  useEffect(() => {
+    guard.bump();
+  }, [loanId]);
   // The bell and the Loans tab's badge are read again after each step and notice seen here (#259).
   const refreshInbox = useInboxRefresh();
   // Opened from the inbox's drawer: the heading takes focus once the Loan is drawn, as the bell may be hidden.
@@ -190,7 +199,6 @@ export function LoanScreen({
   const [editingTerms, setEditingTerms] = useState(false);
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
   const stepBodies = useRef(new Map<string, LoanStep>());
-  const returnBodies = useRef(new Map<string, StartReturn>());
   const keys = useRef(new Map<string, string>());
   // A retained call captures all of this intent's choices, not just its revision.
   // Neither a rerender nor another action may replace it after response loss.
@@ -201,7 +209,32 @@ export function LoanScreen({
   }>();
   const retained = authority.command;
   const refreshAfterCommand = useRef(false);
-  const commandPending = authority.pending;
+  const commandPending = authority.pending || durable.fence.pending;
+  const roundId = load.kind === "ready" ? load.loan.loan_id : null;
+  const recovery = [
+    ...new Map(
+      (roundId
+        ? [
+            blockerFor("start_return:" + roundId),
+            blockerFor("write_off:" + roundId),
+          ]
+        : []
+      )
+        .filter((view) => view !== undefined)
+        .map((view) => [view.operationId, view])
+    ).values(),
+  ];
+  const commandFenced = commandPending || recovery.length > 0;
+  // A persisted unknown outcome owns this round just as an in-flight call does.
+  // Delayed reads cannot replace its recovery surface.
+  const ownsCommand = () =>
+    retained.current !== null ||
+    durable.fence.command.current !== null ||
+    !!(
+      roundId &&
+      (store.blockerFor("start_return:" + roundId) ||
+        store.blockerFor("write_off:" + roundId))
+    );
   const menuAnchor = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const askButton = useRef<HTMLButtonElement>(null);
@@ -228,7 +261,7 @@ export function LoanScreen({
     ]).then(
       ([loan, side]) => {
         if (controller.signal.aborted) return;
-        if (retained.current) {
+        if (ownsCommand()) {
           refreshAfterCommand.current = true;
           return;
         }
@@ -255,7 +288,7 @@ export function LoanScreen({
       },
       (cause) => {
         if (controller.signal.aborted) return;
-        if (retained.current) {
+        if (ownsCommand()) {
           refreshAfterCommand.current = true;
           return;
         }
@@ -343,7 +376,7 @@ export function LoanScreen({
       onClick={(event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey) return;
         event.preventDefault();
-        if (!retained.current) onAllLoans();
+        if (!retained.current && !durable.fence.command.current) onAllLoans();
       }}
       className="inline-flex h-control items-center gap-1 self-start rounded-control px-2 text-control font-medium text-text-muted no-underline hover:bg-surface-raised hover:text-text phone:h-control-phone"
     >
@@ -351,7 +384,12 @@ export function LoanScreen({
       All Loans
     </a>
   );
-  const frame = (title: string, children: ReactNode, actions?: ReactNode) => (
+  const frame = (
+    title: string,
+    children: ReactNode,
+    actions?: ReactNode,
+    recoveryNotice?: ReactNode
+  ) => (
     <ItemThreadLayout
       label="Loan details"
       timeline={
@@ -361,7 +399,7 @@ export function LoanScreen({
             kind="loan"
             id={load.loan.thread_id}
             onChanged={() => {
-              if (retained.current) refreshAfterCommand.current = true;
+              if (ownsCommand()) refreshAfterCommand.current = true;
               else {
                 reloading.current = true;
                 setAttempt((n) => n + 1);
@@ -383,18 +421,18 @@ export function LoanScreen({
         <div className="min-w-0 flex-1">
           <PageHeader title={title} headingRef={heading} />
         </div>
-        {!commandPending && actions && (
+        {!commandFenced && actions && (
           <div className="absolute top-0 right-0">{actions}</div>
         )}
       </div>
       <fieldset
-        disabled={commandPending}
+        disabled={commandFenced}
         className="contents"
         aria-label="Loan terms and actions"
       >
         {children}
       </fieldset>
-      {commandPending && !editingTerms && (
+      {authority.pending && !editingTerms && (
         <PendingLoanRequest
           boundaryRef={authority.boundary}
           busy={busy}
@@ -404,6 +442,14 @@ export function LoanScreen({
           }}
         />
       )}
+      {durable.fence.pending && (
+        <PendingLoanRequest
+          boundaryRef={durable.fence.boundary}
+          busy
+          onRetry={() => {}}
+        />
+      )}
+      {recoveryNotice}
       {load.kind === "ready" && editingTerms && (
         <LoanTermsEditor
           loan={load.loan}
@@ -479,7 +525,7 @@ export function LoanScreen({
 
   /** Closes whichever form or question is open, before another opens: one at a time. */
   function closeModes() {
-    if (retained.current) return;
+    if (retained.current || durable.fence.command.current) return;
     setAsking(null);
     setReturning(null);
     setWriting(null);
@@ -488,16 +534,102 @@ export function LoanScreen({
   }
   /** Asks before a step that ends the Loan, with focus on the confirmation's button. */
   function ask(step: Asking) {
-    if (busy || retained.current) return;
+    if (
+      busy ||
+      retained.current ||
+      durable.fence.command.current ||
+      recovery.length > 0
+    )
+      return;
     closeModes();
     focusNext.current = "ask";
     setAsking(step);
+  }
+  async function durableOutcome(o: FlowOutcome) {
+    if (o.kind === "done" || o.kind === "voided") {
+      refreshInbox();
+      onLoanChanged();
+    }
+    if (o.kind === "done") {
+      refreshAfterCommand.current = false;
+      const tok = guard.capture();
+      try {
+        const [fresh, freshSide] = await Promise.all([
+          getLoan(loan.thread_id),
+          getLoanSide(loan.thread_id),
+        ]);
+        if (!guard.live(tok)) return;
+        focusNext.current = "heading";
+        closeModes();
+        setLoad({ kind: "ready", loan: fresh, side: freshSide });
+        setPromised(promiseStart(fresh, freshSide));
+        setMessage(resultText(o) ?? "");
+      } catch {
+        if (guard.live(tok)) setLoad({ kind: "failed" });
+      }
+    } else if ((o.kind === "voided" || o.kind === "pending") && o.refusal) {
+      const cause = refusalError(o.refusal);
+      setMessage(loanStepMessage(cause, other, cardName));
+      if (
+        o.kind === "voided" &&
+        (threadVersionChanged(cause.code) || RELOAD.has(cause.code))
+      ) {
+        reloading.current = true;
+        setAttempt((n) => n + 1);
+      }
+    } else
+      setMessage(
+        o.kind === "wrong_account"
+          ? signInAs(accountName)
+          : (resultText(o) ?? "")
+      );
+    if (o.kind === "voided" && refreshAfterCommand.current) {
+      refreshAfterCommand.current = false;
+      reloading.current = true;
+      setAttempt((n) => n + 1);
+    }
+  }
+  async function durableStep(
+    kind: "start_return" | "write_off",
+    lines: StartReturn["lines"]
+  ) {
+    if (
+      busy ||
+      retained.current ||
+      durable.fence.command.current ||
+      store.blockerFor("start_return:" + loan.loan_id) ||
+      store.blockerFor("write_off:" + loan.loan_id)
+    )
+      return;
+    const tok = guard.capture();
+    const fields = {
+      loan_id: loan.loan_id,
+      revision: loan.revision,
+      lines,
+    } satisfies Omit<StartReturn | WriteOff, "account_id" | "idempotency_key">;
+    setBusy(true);
+    setMessage("");
+    const o = await durable.send({
+      kind,
+      scope: kind + ":" + loan.loan_id,
+      path: `/api/loans/${loan.thread_id}/${kind === "start_return" ? "returns" : "write-off"}`,
+      fields,
+    });
+    if (!guard.live(tok)) return;
+    if (o) await durableOutcome(o);
+    if (guard.live(tok)) setBusy(false);
   }
   /** Runs one step: the answer replaces the Loan, and its own side is read again. */
   async function step(
     name: string,
     call: (key: string) => Promise<LoanView>
   ): Promise<"applied" | "unknown" | "refused"> {
+    if (
+      durable.fence.command.current ||
+      store.blockerFor("start_return:" + loan.loan_id) ||
+      store.blockerFor("write_off:" + loan.loan_id)
+    )
+      return "unknown";
     if (retained.current && retained.current.name !== name) return "unknown";
     const command = retained.current ?? {
       name,
@@ -514,7 +646,6 @@ export function LoanScreen({
       authority.settle();
       keys.current.delete(name);
       stepBodies.current.delete(key);
-      returnBodies.current.delete(key);
       // Observations cannot settle a retained POST. Once it settles, read current
       // terms afresh rather than adopting an earlier reply or its receipt view.
       if (refreshAfterCommand.current) {
@@ -568,22 +699,15 @@ export function LoanScreen({
   };
 
   function recordReturn(counts: Map<string, number>) {
-    void step("start_return", (key) => {
-      let command = returnBodies.current.get(key);
-      if (!command) {
-        command = {
-          ...body(key),
-          lines: loan.lines
-            .filter((line) => (counts.get(line.edition_id) ?? 0) > 0)
-            .map((line) => ({
-              edition_id: line.edition_id,
-              quantity: String(counts.get(line.edition_id)),
-            })),
-        };
-        returnBodies.current.set(key, command);
-      }
-      return startReturn(loan.thread_id, command);
-    });
+    void durableStep(
+      "start_return",
+      loan.lines
+        .filter((line) => (counts.get(line.edition_id) ?? 0) > 0)
+        .map((line) => ({
+          edition_id: line.edition_id,
+          quantity: String(counts.get(line.edition_id)),
+        }))
+    );
   }
 
   const run: Record<Asking, () => void> = {
@@ -656,7 +780,6 @@ export function LoanScreen({
           {
             label: "Write off…",
             onSelect: () => {
-              keys.current.delete("write_off");
               closeModes();
               setWriting(
                 new Map(loan.lines.map((line) => [line.edition_id, 0]))
@@ -925,16 +1048,14 @@ export function LoanScreen({
           disabled={writeTotal === 0}
           aria-disabled={busy || undefined}
           onClick={() =>
-            void step("write_off", (key) =>
-              writeOff(loan.thread_id, {
-                ...body(key),
-                lines: loan.lines
-                  .filter((line) => (writing.get(line.edition_id) ?? 0) > 0)
-                  .map((line) => ({
-                    edition_id: line.edition_id,
-                    quantity: String(writing.get(line.edition_id)),
-                  })),
-              })
+            void durableStep(
+              "write_off",
+              loan.lines
+                .filter((line) => (writing.get(line.edition_id) ?? 0) > 0)
+                .map((line) => ({
+                  edition_id: line.edition_id,
+                  quantity: String(writing.get(line.edition_id)),
+                }))
             )
           }
         >
@@ -1096,7 +1217,6 @@ export function LoanScreen({
         <Button
           aria-disabled={busy || undefined}
           onClick={() => {
-            keys.current.delete("start_return");
             closeModes();
             focusNext.current = "count";
             setReturning(
@@ -1204,10 +1324,8 @@ export function LoanScreen({
             }
             onCounting={(value) => {
               if (writing) {
-                keys.current.delete("write_off");
                 setWriting(new Map(writing).set(line.edition_id, value));
               } else {
-                keys.current.delete("start_return");
                 setReturning(new Map(returning).set(line.edition_id, value));
               }
             }}
@@ -1283,7 +1401,16 @@ export function LoanScreen({
           items={menu}
         />
       </div>
-    )
+    ),
+    recovery.map((view) => (
+      <PendingLoanNotice
+        key={view.operationId}
+        view={view}
+        onOutcome={(o) => {
+          void durableOutcome(o);
+        }}
+      />
+    ))
   );
 }
 

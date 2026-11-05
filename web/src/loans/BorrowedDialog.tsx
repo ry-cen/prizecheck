@@ -1,8 +1,8 @@
-import {
-  closeLoanRequest,
-  PendingLoanRequest,
-  useLoanCommand,
-} from "./PendingLoanRequest";
+import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
+import { PendingLoanNotice } from "./PendingLoanNotice";
+import { refusalError, type FlowOutcome } from "./loanIntents";
+import { resultText, signInAs } from "./loanText";
+import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
 import {
   useEffect,
   useLayoutEffect,
@@ -14,7 +14,7 @@ import {
 import { CardImage } from "../social/FriendCollectionPage";
 import {
   getBorrowed,
-  moveBorrowed,
+  type MoveBorrowed,
   SocialError,
   type BorrowedCard,
   type BorrowedCopies,
@@ -79,16 +79,19 @@ export function BorrowedDialog({
   const [copies, setCopies] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const authority = useLoanCommand<{
-    card: BorrowedCard;
-    body: Parameters<typeof moveBorrowed>[0];
-  }>();
-  const pending = authority.command;
-  const retained = authority.pending;
+  const durable = useDurableSend();
+  const fence = durable.fence;
+  const { blockerFor, accountName } = useLoanRecovery();
+  const guard = useFlowGuard();
+  const blocker = blockerFor("move_borrowed");
+  const retained = fence.pending;
+  const frozen = busy || retained || !!blocker;
   const surface = useRef<HTMLDivElement>(null);
-  const move = useRef<HTMLButtonElement>(null);
   const close = () =>
-    closeLoanRequest(surface.current, pending.current !== null, onClose);
+    closeLoanRequest(surface.current, fence.command.current !== null, onClose);
+  useEffect(() => {
+    guard.bump();
+  }, [open]);
   const leaves = useMemo(() => leavesOf(index), [index]);
   const focusNext = useRef<FocusNext | null>(null);
   const moveButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -98,7 +101,8 @@ export function BorrowedDialog({
 
   // Each opening starts afresh; a refusal that reads the list again keeps its message.
   useEffect(() => {
-    if (!open || pending.current) return;
+    if (!open || fence.command.current) return;
+    setBusy(false);
     setMoving(null);
     setMessage("");
   }, [open]);
@@ -135,7 +139,8 @@ export function BorrowedDialog({
   });
 
   function startMove(card: BorrowedCard) {
-    if (pending.current) return;
+    if (frozen || fence.command.current) return;
+    if (fence.command.current || blocker) return;
     focusNext.current = { to: "form" };
     setMoving(rowKey(card));
     setDestination("");
@@ -143,55 +148,54 @@ export function BorrowedDialog({
     setMessage("");
   }
 
-  async function confirmMove(card: BorrowedCard) {
-    if ((!destination && !pending.current) || !authority.beginAttempt()) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const command =
-        pending.current ??
-        authority.retain({
-          card,
-          body: {
-            loan_id: card.loan_id,
-            edition_id: card.edition_id,
-            from_location_id: card.location_id,
-            to_location_id: destination,
-            quantity: String(copies),
-            idempotency_key: crypto.randomUUID(),
-          },
-        });
-      const view = await moveBorrowed(command.body);
-      authority.settle();
-      focusNext.current = { to: "row", key: rowKey(card) };
+  function outcome(o: FlowOutcome) {
+    if (o.kind === "done" || o.kind === "voided") onMoved();
+    if (o.kind === "done") {
+      focusNext.current = { to: "row", key: moving ?? "" };
       setMoving(null);
-      setLoad({ kind: "ready", view });
-      onMoved();
-    } catch (cause) {
-      if (!outcomeUnknown(cause)) {
-        authority.settle();
-      }
+      // Keep the row focus request until the fresh list is ready.
+      setLoad({ kind: "loading" });
+      setAttempt((n) => n + 1);
+      setMessage(resultText(o) ?? "");
+    } else if ((o.kind === "pending" || o.kind === "voided") && o.refusal) {
+      const cause = refusalError(o.refusal);
       setMessage(moveMessage(cause));
-      if (
-        cause instanceof SocialError &&
-        cause.code === "NOT_ENOUGH_BORROWED"
-      ) {
+      if (o.kind === "voided" && cause.code === "NOT_ENOUGH_BORROWED") {
         focusNext.current = { to: "alert" };
         setMoving(null);
         setAttempt((n) => n + 1);
-      } else if (
-        cause instanceof SocialError &&
-        cause.code === "LOCATION_NOT_FOUND"
-      ) {
-        // The Location chosen is gone: the choices are read again without it, and focus waits on Move to.
+      } else if (o.kind === "voided" && cause.code === "LOCATION_NOT_FOUND") {
         focusNext.current = { to: "form" };
         setDestination("");
-        onMoved();
       }
-    } finally {
-      authority.endAttempt();
-      setBusy(false);
-    }
+    } else
+      setMessage(
+        o.kind === "wrong_account"
+          ? signInAs(accountName)
+          : (resultText(o) ?? "")
+      );
+  }
+  async function confirmMove(card: BorrowedCard) {
+    if (busy || blocker || !destination) return;
+    const tok = guard.capture();
+    const fields = {
+      loan_id: card.loan_id,
+      edition_id: card.edition_id,
+      from_location_id: card.location_id,
+      to_location_id: destination,
+      quantity: String(copies),
+    } satisfies Omit<MoveBorrowed, "account_id" | "idempotency_key">;
+    setBusy(true);
+    setMessage("");
+    const o = await durable.send({
+      kind: "move_borrowed",
+      scope: "move_borrowed",
+      path: "/api/loans/borrowed/move",
+      fields,
+    });
+    if (!guard.live(tok)) return;
+    setBusy(false);
+    if (o) outcome(o);
   }
 
   let body;
@@ -260,7 +264,7 @@ export function BorrowedDialog({
                       if (element) moveButtons.current.set(key, element);
                       else moveButtons.current.delete(key);
                     }}
-                    disabled={retained}
+                    disabled={frozen}
                     onClick={() => startMove(card)}
                     aria-label={`Move ${card.name} from ${card.location_name}`}
                   >
@@ -281,9 +285,9 @@ export function BorrowedDialog({
                     ref={destinationField}
                     label="Move to"
                     value={destination}
-                    disabled={retained}
+                    disabled={frozen}
                     onChange={(event) => {
-                      if (pending.current) return;
+                      if (fence.command.current || blocker) return;
                       setDestination(event.target.value);
                     }}
                   >
@@ -298,34 +302,31 @@ export function BorrowedDialog({
                   </Select>
                   <Stepper
                     label="Copies"
-                    disabled={retained}
+                    disabled={frozen}
                     value={copies}
                     min={1}
                     max={Number(card.copies)}
                     onChange={(value) => {
-                      if (pending.current) return;
+                      if (fence.command.current || blocker) return;
                       setCopies(value);
                     }}
                   />
                   <span className="flex gap-2">
-                    {/* The original control also replays the retained packet;
-                        it never adopts edits while the answer is unknown. */}
                     <Button
-                      ref={move}
                       type="submit"
                       variant="primary"
-                      disabled={busy || (!retained && !destination)}
+                      disabled={frozen || !destination}
                       aria-disabled={busy || undefined}
                     >
                       Move
                     </Button>
                     <Button
                       onClick={() => {
-                        if (pending.current) return;
+                        if (fence.command.current || blocker) return;
                         focusNext.current = { to: "row", key };
                         setMoving(null);
                       }}
-                      disabled={retained || busy}
+                      disabled={frozen}
                     >
                       Cancel
                     </Button>
@@ -360,14 +361,13 @@ export function BorrowedDialog({
         {body}
         {retained && (
           <PendingLoanRequest
-            boundaryRef={authority.boundary}
-            recoveryFocus={move}
-            busy={busy}
-            onRetry={() => {
-              const command = pending.current;
-              if (command) void confirmMove(command.card);
-            }}
+            boundaryRef={fence.boundary}
+            busy
+            onRetry={() => {}}
           />
+        )}
+        {blocker && !busy && (
+          <PendingLoanNotice view={blocker} autoFocus onOutcome={outcome} />
         )}
       </div>
     </Dialog>

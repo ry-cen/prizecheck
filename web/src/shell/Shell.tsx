@@ -1,3 +1,4 @@
+import { LoanRecoveryProvider } from "../loans/LoanRecovery";
 import { itemTabName } from "../threads/threadPresentation";
 import { PageVisibility } from "../ui/PageVisibility";
 import { mountedPages } from "./keptPages";
@@ -113,12 +114,17 @@ export function Shell(props: Props) {
           onPrivacy={() => props.onNavigate("settings")}
           onOpenCollection={props.onOpenFriend}
         >
-          <BorrowDraftsProvider
-            userId={props.userId}
-            onOpenLoan={props.onOpenLoan}
+          <LoanRecoveryProvider
+            accountId={props.userId}
+            accountName={props.name ?? props.email ?? null}
           >
-            <ShellFrame {...props} />
-          </BorrowDraftsProvider>
+            <BorrowDraftsProvider
+              userId={props.userId}
+              onOpenLoan={props.onOpenLoan}
+            >
+              <ShellFrame {...props} />
+            </BorrowDraftsProvider>
+          </LoanRecoveryProvider>
         </FriendsProvider>
       </InboxProvider>
     </ToastProvider>
