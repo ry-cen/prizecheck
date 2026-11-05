@@ -1,5 +1,11 @@
 import { closeLoanRequest } from "./PendingLoanRequest";
-import { sameLoanTermsVersion } from "../threads/commandChanges";
+import {
+  checkEdit,
+  sendCheckedEdit,
+  type EditGate,
+  type GateNow,
+} from "./editGate";
+import { useFlowGuard, useLoanRecovery } from "./LoanRecovery";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getLoan, type EditTerms, type LoanView } from "../social_generated";
 import { Button } from "../ui/Button";
@@ -10,6 +16,7 @@ export function LoanTermsEditor({
   deckId,
   onClose,
   onSave,
+  onReread,
   canClose,
   pending,
   commandMessage,
@@ -18,6 +25,7 @@ export function LoanTermsEditor({
   loan: LoanView;
   deckId: string | null;
   onClose: () => void;
+  onReread: () => void;
   canClose: () => boolean;
   pending: boolean;
   commandMessage: string;
@@ -27,102 +35,109 @@ export function LoanTermsEditor({
   ) => Promise<"applied" | "unknown" | "refused">;
 }) {
   const loan = useRef(incomingLoan).current;
+  const { store } = useLoanRecovery();
+  const guard = useFlowGuard();
   const [counts, setCounts] = useState(() =>
     loan.lines.map((line) => line.requested)
   );
   const [date, setDate] = useState(loan.return_by ?? "");
-  const [ready, setReady] = useState(false),
-    [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+  const [gate, setGate] = useState<EditGate>("checking");
+  const [changedSeen, setChangedSeen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const form = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
-  const checking = useRef<AbortController | null>(null);
+  const active = useRef<AbortController | null>(null);
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
-      checking.current?.abort();
+      active.current?.abort();
     };
   }, []);
   function close() {
     closeLoanRequest(form.current, !canClose(), () => {
       alive.current = false;
-      checking.current?.abort();
+      active.current?.abort();
       onClose();
+      if (changedSeen) onReread();
     });
   }
 
-  function matches(fresh: LoanView) {
-    return sameLoanTermsVersion(loan, fresh);
+  function apply(next: EditGate) {
+    setGate(next);
+    if (next === "changed") setChangedSeen(true);
+    if (next === "ok") setChangedSeen(false);
+  }
+  function dependencies() {
+    active.current?.abort();
+    const mine = new AbortController();
+    active.current = mine;
+    const binding = store.bind();
+    if (!binding) {
+      apply("error");
+      return null;
+    }
+    const token = guard.capture();
+    const path = window.location.pathname;
+    return {
+      read: getLoan,
+      captured: { binding, opened: loan },
+      signal: mine.signal,
+      now: (): GateNow => {
+        if (
+          !alive.current ||
+          !guard.live(token) ||
+          window.location.pathname !== path
+        )
+          return { live: false };
+        return {
+          live: true,
+          active: active.current === mine,
+          aborted: mine.signal.aborted,
+          binding: store.bind(),
+        };
+      },
+      apply,
+    };
   }
   useEffect(() => {
-    const controller = new AbortController();
-    setReady(false);
-    getLoan(loan.thread_id, controller.signal).then(
-      (fresh) => {
-        if (controller.signal.aborted) return;
-        setReady(matches(fresh));
-        setMessage(
-          matches(fresh)
-            ? ""
-            : "This Loan changed. Close this editor to view the current terms."
-        );
-      },
-      () => {
-        if (!controller.signal.aborted)
-          setMessage(
-            "The Loan could not be checked. Your changes are kept. Retry the check."
-          );
-      }
-    );
-    return () => controller.abort();
+    const deps = dependencies();
+    if (!deps) return;
+    apply("checking");
+    void checkEdit(deps);
+    return () => active.current?.abort();
   }, [loan.thread_id, attempt]);
   async function save() {
-    if (busy || !ready) return;
+    if (busy || pending || gate !== "ok") return;
+    const deps = dependencies();
+    if (!deps) return;
     setBusy(true);
-    const controller = new AbortController();
-    checking.current = controller;
-    const path = window.location.pathname;
+    apply("checking");
     try {
-      const fresh = await getLoan(loan.thread_id, controller.signal);
-      if (
-        !alive.current ||
-        controller.signal.aborted ||
-        window.location.pathname !== path
-      )
-        return;
-      if (!matches(fresh)) {
-        setReady(false);
-        setMessage(
-          "This Loan changed. Close this editor to view the current terms."
-        );
-        return;
-      }
-      const result = await onSave({
-        loan_id: loan.loan_id,
-        revision: loan.revision,
-        lines: loan.lines.map((line, i) => ({
-          edition_id: line.edition_id,
-          quantity: counts[i],
-        })),
-        deck_id: deckId,
-        return_by: date || null,
+      const result = await sendCheckedEdit({
+        ...deps,
+        send: () =>
+          onSave({
+            loan_id: loan.loan_id,
+            revision: loan.revision,
+            lines: loan.lines.map((line, i) => ({
+              edition_id: line.edition_id,
+              quantity: counts[i],
+            })),
+            deck_id: deckId,
+            return_by: date || null,
+          }),
       });
-      if (!alive.current) return;
-      if (result === "refused") {
-        setReady(false);
+      if (!deps.now().live) return;
+      if ("outcome" in result && result.outcome === "refused") {
+        apply("checking");
         setAttempt((n) => n + 1);
       }
     } catch {
-      if (alive.current) {
-        setReady(false);
-        setMessage(
-          "The Loan could not be checked. Your changes are kept. Retry the check."
-        );
-      }
+      const now = deps.now();
+      if (now.live && now.active) apply("error");
     } finally {
-      if (checking.current === controller) checking.current = null;
       if (alive.current) setBusy(false);
     }
   }
@@ -153,14 +168,25 @@ export function LoanTermsEditor({
           disabled={busy || pending}
           onChange={(event) => setDate(event.target.value)}
         />
-        <p role="status">{commandMessage || message}</p>
+        {(gate === "changed" || changedSeen) && (
+          <p role="status">
+            This Loan changed. Close this editor to view the current terms.
+          </p>
+        )}
+        {gate === "error" && (
+          <p role="status">
+            The Loan could not be checked. Your changes are kept. Retry the
+            check.
+          </p>
+        )}
+        {commandMessage && <p role="status">{commandMessage}</p>}
         {pendingRequest}
-        {!ready && !pending && (
+        {gate !== "ok" && gate !== "checking" && !pending && (
           <Button onClick={() => setAttempt((n) => n + 1)}>Retry check</Button>
         )}
         <Button onClick={close}>Close</Button>
         <Button
-          disabled={!ready || busy || pending}
+          disabled={gate !== "ok" || busy || pending}
           onClick={() => void save()}
         >
           Save terms

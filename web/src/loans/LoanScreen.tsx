@@ -162,7 +162,7 @@ export function LoanScreen({
   onOpenDeck: (id: string) => void;
 }) {
   const drafts = useBorrowDrafts();
-  const { store, blockerFor, accountName } = useLoanRecovery();
+  const { store, blockerFor, accountName, accountId } = useLoanRecovery();
   const guard = useFlowGuard();
   const durable = useDurableSend();
   useEffect(() => {
@@ -458,6 +458,10 @@ export function LoanScreen({
           onClose={() => {
             if (!retained.current) setEditingTerms(false);
           }}
+          onReread={() => {
+            reloading.current = true;
+            setAttempt((n) => n + 1);
+          }}
           pending={commandPending}
           commandMessage={message}
           pendingRequest={
@@ -476,6 +480,7 @@ export function LoanScreen({
             step("edit_terms", (key) =>
               editLoanTerms(load.loan.thread_id, {
                 ...draft,
+                account_id: accountId,
                 idempotency_key: key,
               })
             )
@@ -569,7 +574,11 @@ export function LoanScreen({
       }
     } else if ((o.kind === "voided" || o.kind === "pending") && o.refusal) {
       const cause = refusalError(o.refusal);
-      setMessage(loanStepMessage(cause, other, cardName));
+      setMessage(
+        cause instanceof SocialError && cause.code === "ACCOUNT_CHANGED"
+          ? signInAs(accountName)
+          : loanStepMessage(cause, other, cardName)
+      );
       if (
         o.kind === "voided" &&
         (threadVersionChanged(cause.code) || RELOAD.has(cause.code))
@@ -669,7 +678,11 @@ export function LoanScreen({
       return "applied";
     } catch (cause) {
       if (!outcomeUnknown(cause)) release();
-      setMessage(loanStepMessage(cause, other, cardName));
+      setMessage(
+        cause instanceof SocialError && cause.code === "ACCOUNT_CHANGED"
+          ? signInAs(accountName)
+          : loanStepMessage(cause, other, cardName)
+      );
       if (
         cause instanceof SocialError &&
         (threadVersionChanged(cause.code) || RELOAD.has(cause.code))
