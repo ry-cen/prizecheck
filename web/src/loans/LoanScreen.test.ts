@@ -9,19 +9,54 @@ import {
   getLoan,
   getLoanSide,
   startReturn,
+  writeOff,
   acceptBorrowRequest,
   changeReturnBy,
   SocialError,
   type LoanView,
 } from "../social_generated";
 import { useRoute } from "../shell/useRoute";
-import { LoanScreen } from "./LoanScreen";
+import { LoanScreen as Screen } from "./LoanScreen";
+import { LoanRecoveryProvider } from "./LoanRecovery";
+import { fixture, reply } from "./testing/loanFakes";
+import { createTabContext } from "./loanIntents";
+const threadId = "00000000-0000-4000-8000-000000000099";
+let keepReadView = false;
+let packets: string[] = [];
+function LoanScreen(props: Parameters<typeof Screen>[0]) {
+  const [recovery] = useState(() => {
+    const f = fixture();
+    const fetchImpl: typeof fetch = async (input, init) => {
+      if (
+        String(input).endsWith("/returns") ||
+        String(input).endsWith("/write-off")
+      ) {
+        packets.push(String(init?.body));
+        const next = await (
+          String(input).endsWith("/returns") ? startReturn : writeOff
+        )(threadId, JSON.parse(String(init?.body)));
+        await f.server.fetchImpl(input, init);
+        if (!keepReadView) vi.mocked(getLoan).mockResolvedValue(next);
+        return reply(200, next);
+      }
+      return f.server.fetchImpl(input, init);
+    };
+    return { ports: { ...f.ports, fetchImpl }, tab: createTabContext() };
+  });
+  return h(LoanRecoveryProvider, {
+    accountId: "A",
+    accountName: "Ana",
+    ...recovery,
+    children: h(Screen, props),
+  });
+}
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
   editLoanTerms: vi.fn(),
   getLoan: vi.fn(),
   getLoanSide: vi.fn(),
   startReturn: vi.fn(),
+  writeOff: vi.fn(),
   acceptBorrowRequest: vi.fn(),
   changeReturnBy: vi.fn(),
 }));
@@ -120,8 +155,11 @@ for (const role of ["lender", "borrower"] as const) {
     `records All back in one press as ${role}, never confirms for the other collector (lost=%s)`,
     async (lost) => {
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      packets = [];
+      keepReadView = false;
       const active: LoanView = {
         ...loan,
+        thread_id: threadId,
         state: "handed_over",
         role,
         closed_reason: null,
@@ -165,7 +203,7 @@ for (const role of ["lender", "borrower"] as const) {
         await act(async () =>
           root.render(
             h(LoanScreen, {
-              loanId: "item",
+              loanId: threadId,
               onCanonicalLoan: vi.fn(),
               onLoanChanged: vi.fn(),
               onAllLoans: vi.fn(),
@@ -183,7 +221,7 @@ for (const role of ["lender", "borrower"] as const) {
         await act(async () => all.click());
         if (lost) {
           const retry = [...host.querySelectorAll("button")].find(
-            (b) => b.textContent === "Retry request"
+            (b) => b.textContent === "Send it again"
           )!;
           await act(async () => retry.click());
           expect(JSON.stringify(vi.mocked(startReturn).mock.calls[1])).toBe(
@@ -191,8 +229,10 @@ for (const role of ["lender", "borrower"] as const) {
           );
         }
         expect(startReturn).toHaveBeenCalledTimes(lost ? 2 : 1);
+        expect(JSON.parse(packets[0]).account_id).toBe("A");
+        if (lost) expect(packets[1]).toBe(packets[0]);
         expect(startReturn).toHaveBeenLastCalledWith(
-          "item",
+          threadId,
           expect.objectContaining({
             loan_id: "round",
             revision: 4,
@@ -331,8 +371,11 @@ for (const role of ["lender", "borrower"] as const) {
   for (const entry of ["All back", "Some back"] as const) {
     it(`S2-01: ${role} retains ${entry} through edits, Not now and Some back until exact replay settles`, async () => {
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      packets = [];
+      keepReadView = false;
       const active: LoanView = {
         ...loan,
+        thread_id: threadId,
         role,
         state: "handed_over",
         closed_reason: null,
@@ -394,7 +437,7 @@ for (const role of ["lender", "borrower"] as const) {
             "Collection"
           ),
           h(LoanScreen, {
-            loanId: "item",
+            loanId: threadId,
             onCanonicalLoan: vi.fn(),
             onLoanChanged: vi.fn(),
             onAllLoans: vi.fn(),
@@ -403,7 +446,7 @@ for (const role of ["lender", "borrower"] as const) {
         );
       }
       try {
-        window.history.replaceState(null, "", "/loans/item");
+        window.history.replaceState(null, "", `/loans/${threadId}`);
         vi.stubGlobal("scrollTo", vi.fn());
         await act(async () => root.render(h(View)));
         await act(async () => button(entry)!.click());
@@ -439,21 +482,27 @@ for (const role of ["lender", "borrower"] as const) {
           await act(async () =>
             host.querySelector<HTMLButtonElement>("[data-navigate]")!.click()
           );
-          expect(window.location.pathname).toBe("/loans/item");
+          expect(window.location.pathname).toBe(
+            lost ? "/collection" : `/loans/${threadId}`
+          );
           expect(
             window.dispatchEvent(
               new Event("beforeunload", { cancelable: true })
             )
+          ).toBe(lost);
+          expect(
+            button("Chat moderation completed")!.matches(":disabled")
           ).toBe(false);
         }
-        const retry = button("Retry request")!;
+        const retry = button("Send it again")!;
         expect(retry.matches(":disabled")).toBe(false);
         await act(async () => retry.click());
         expect(startReturn).toHaveBeenCalledTimes(2);
         expect(JSON.stringify(vi.mocked(startReturn).mock.calls[1])).toBe(
           original
         );
-        expect(button("Retry request")).toBeUndefined();
+        expect(packets[1]).toBe(packets[0]);
+        expect(button("Send it again")).toBeUndefined();
         expect(
           window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
         ).toBe(true);
@@ -632,8 +681,11 @@ for (const lateStatus of ["none", "404", "200"] as const) {
   const lateRead = lateStatus !== "none";
   it(`S2-01/S2-02: moderation and late reads preserve an unknown return then refresh once after exact replay (read=${lateStatus})`, async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    packets = [];
+    keepReadView = true;
     const active: LoanView = {
       ...loan,
+      thread_id: threadId,
       state: "handed_over",
       closed_reason: null,
       closed_by: null,
@@ -708,7 +760,7 @@ for (const lateStatus of ["none", "404", "200"] as const) {
       await act(async () =>
         root.render(
           h(LoanScreen, {
-            loanId: "item",
+            loanId: threadId,
             onCanonicalLoan: vi.fn(),
             onLoanChanged: vi.fn(),
             onAllLoans: vi.fn(),
@@ -736,18 +788,18 @@ for (const lateStatus of ["none", "404", "200"] as const) {
       await act(async () => button("Chat moderation completed").click());
       await act(async () => button("Chat moderation completed").click());
       expect(getLoan).toHaveBeenCalledTimes(lateRead ? 4 : 2);
-      expect(button("Retry request").matches(":disabled")).toBe(false);
-      await act(async () => button("Retry request").click());
+      expect(button("Send it again").matches(":disabled")).toBe(false);
+      await act(async () => button("Send it again").click());
       expect(startReturn).toHaveBeenCalledTimes(2);
       expect(JSON.stringify(vi.mocked(startReturn).mock.calls[1])).toBe(
         original
       );
-      expect(getLoan).toHaveBeenCalledTimes(lateRead ? 6 : 4);
+      expect(getLoan).toHaveBeenCalledTimes(lateRead ? 5 : 3);
       expect(host.querySelector("h1")?.textContent).toBe(
         "Your Loan from Misty ended"
       );
       expect(host.textContent).toContain("3 returned");
-      expect(button("Retry request")).toBeUndefined();
+      expect(button("Send it again")).toBeUndefined();
     } finally {
       await act(async () => root.unmount());
       host.remove();
@@ -1060,5 +1112,107 @@ it("one Loan authority owns both its retained packet and its in-flight attempt b
     host.remove();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+  }
+});
+
+it("a lost write-off owns its round, hides other commands, keeps chat and replays exact bytes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(10, 10, 30, 30)
+  );
+  packets = [];
+  keepReadView = false;
+  const active: LoanView = {
+    ...loan,
+    thread_id: threadId,
+    role: "lender",
+    state: "handed_over",
+    closed_reason: null,
+    closed_by: null,
+    lines: [{ ...loan.lines[0], requested: "3", promised: "3" }],
+    actions: ["write_off", "start_return", "change_return_by"],
+    revision: 4,
+    section: "out_now",
+  };
+  vi.mocked(getLoan).mockResolvedValue(active);
+  vi.mocked(getLoanSide).mockResolvedValue({
+    loan_id: "round",
+    deck: null,
+    can_promise: [],
+    picks: [],
+    suggested: [],
+  });
+  vi.mocked(writeOff)
+    .mockRejectedValueOnce(new TypeError("lost answer"))
+    .mockResolvedValueOnce({
+      ...active,
+      revision: 5,
+      lines: [{ ...active.lines[0], written_off: "1" }],
+    });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const button = (text: string) =>
+    [...host.querySelectorAll("button")].find((b) => b.textContent === text)!;
+  try {
+    await act(async () =>
+      root.render(
+        h(LoanScreen, {
+          loanId: threadId,
+          onCanonicalLoan: vi.fn(),
+          onLoanChanged: vi.fn(),
+          onAllLoans: vi.fn(),
+          onOpenDeck: vi.fn(),
+        })
+      )
+    );
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>('[aria-label="More for this Loan"]')!
+        .click()
+    );
+    await act(async () => button("Write off…").click());
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="Increase Copies of Iono"]'
+        )!
+        .click()
+    );
+    await act(async () => button("Write off").click());
+    expect(writeOff).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.objectContaining({
+        account_id: "A",
+        loan_id: "round",
+        revision: 4,
+        lines: [{ edition_id: "iono", quantity: "1" }],
+      })
+    );
+    expect(host.querySelector('[aria-label="More for this Loan"]')).toBeNull();
+    expect(button("Keep it").matches(":disabled")).toBe(true);
+    expect(button("Chat moderation completed").matches(":disabled")).toBe(
+      false
+    );
+    expect(
+      window.dispatchEvent(new Event("beforeunload", { cancelable: true }))
+    ).toBe(true);
+    await act(async () => button("Send it again").click());
+    expect(writeOff).toHaveBeenCalledTimes(2);
+    expect(packets[1]).toBe(packets[0]);
+    expect(host.textContent).toContain("1 written off");
+    expect(button("Send it again")).toBeUndefined();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
   }
 });
