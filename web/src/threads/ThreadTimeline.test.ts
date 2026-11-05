@@ -3,6 +3,7 @@ import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import {
+  getThreadDetail,
   SocialError,
   sendThreadMessage,
   getThreadTimeline,
@@ -284,6 +285,64 @@ it("keeps an oversized pasted draft intact for explicit validation without posti
     );
     expect(sendThreadMessage).not.toHaveBeenCalled();
   } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps an authorized Send working when a background permission reply crosses the click", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const allowed = await getThreadDetail("trade", "item");
+  let release!: (value: typeof allowed) => void;
+  const held = new Promise<typeof allowed>((resolve) => {
+    release = resolve;
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const props = { kind: "trade" as const, id: "item", revision: "first" };
+  try {
+    await act(async () => root.render(h(ThreadTimeline, props)));
+    const field = host.querySelector("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      )!.set!.call(field, "Yes, I have three.");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const send = host.querySelector<HTMLButtonElement>(
+      'button[type="submit"]'
+    )!;
+    send.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    vi.mocked(getThreadDetail).mockReturnValueOnce(held);
+    await act(async () =>
+      root.render(h(ThreadTimeline, { ...props, revision: "read-completed" }))
+    );
+    vi.mocked(sendThreadMessage).mockResolvedValueOnce({
+      id: "message",
+      from: "you",
+      body: "Yes, I have three.",
+      at: "2026-11-05T00:00:00Z",
+    });
+    const keys = vi.spyOn(crypto, "randomUUID");
+    await act(async () => send.click());
+    expect(sendThreadMessage).not.toHaveBeenCalled();
+    expect(keys).not.toHaveBeenCalled();
+    expect(send.textContent).toBe("Sending…");
+    await act(async () => release(allowed));
+    expect(keys).toHaveBeenCalledTimes(1);
+    keys.mockRestore();
+    expect(sendThreadMessage).toHaveBeenCalledTimes(1);
+    expect(sendThreadMessage).toHaveBeenLastCalledWith(
+      "trade",
+      "item",
+      expect.objectContaining({ body: "Yes, I have three." })
+    );
+  } finally {
+    release(allowed);
     await act(async () => root.unmount());
     host.remove();
     vi.clearAllMocks();
