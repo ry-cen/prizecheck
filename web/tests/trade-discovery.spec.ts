@@ -375,8 +375,9 @@ async function story(
       })
       .click();
     await expect(
-      group(page, "Boss's Orders (PAL 172, Reverse Holo) you get").locator(
-        "output"
+      group(page, "Boss's Orders (PAL 172, Reverse Holo) you get").getByText(
+        "1",
+        { exact: true }
       )
     ).toHaveText("1");
     await expect(printingChoices).toContainText("0 left to choose");
