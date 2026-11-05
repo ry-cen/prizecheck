@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.games.pokemon.inventory.borrowed_gallery import router as borrowed_gallery_router
 from .db import connect
 from .core.ops.operation_counts import Count, DatabaseWriter, counter as operation_counter
-from .price_budget import is_budgeted
+from .core.prices.price_budget import is_budgeted
 from app.games.pokemon.app import LIFESPAN_HOOKS, ROUTERS
 
 
