@@ -77,15 +77,17 @@ export function PendingLoanRequest({
   busy,
   onRetry,
   boundaryRef,
+  recoveryFocus,
 }: {
   busy: boolean;
   onRetry: () => void;
   boundaryRef: RefObject<HTMLElement | null>;
+  recoveryFocus?: RefObject<HTMLButtonElement | null>;
 }) {
   const retry = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (!busy) retry.current?.focus();
-  }, [busy]);
+    if (!busy) (recoveryFocus?.current ?? retry.current)?.focus();
+  }, [busy, recoveryFocus]);
   return (
     <section
       ref={boundaryRef}

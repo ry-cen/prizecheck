@@ -86,6 +86,7 @@ export function BorrowedDialog({
   const pending = authority.command;
   const retained = authority.pending;
   const surface = useRef<HTMLDivElement>(null);
+  const move = useRef<HTMLButtonElement>(null);
   const close = () =>
     closeLoanRequest(surface.current, pending.current !== null, onClose);
   const leaves = useMemo(() => leavesOf(index), [index]);
@@ -307,11 +308,13 @@ export function BorrowedDialog({
                     }}
                   />
                   <span className="flex gap-2">
-                    {/* An unresolved Move has its own exact-replay control below. */}
+                    {/* The original control also replays the retained packet;
+                        it never adopts edits while the answer is unknown. */}
                     <Button
+                      ref={move}
                       type="submit"
                       variant="primary"
-                      disabled={retained || !destination}
+                      disabled={busy || (!retained && !destination)}
                       aria-disabled={busy || undefined}
                     >
                       Move
@@ -358,6 +361,7 @@ export function BorrowedDialog({
         {retained && (
           <PendingLoanRequest
             boundaryRef={authority.boundary}
+            recoveryFocus={move}
             busy={busy}
             onRetry={() => {
               const command = pending.current;
