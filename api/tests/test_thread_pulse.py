@@ -230,3 +230,63 @@ def test_already_read_agreed_erika_is_a_fourth_distinct_item(store):
     assert not any(row['id'] == str(tid) for row in ok(call('GET', '/api/trades?group=open', reader)))
     open_badge_item(reader, ash)
     badge_counts(reader, 3, 1, 4)
+
+
+@pytest.mark.parametrize('kind', ['trade', 'loan'])
+def test_reading_event_only_history_does_not_invalidate_lists_but_unread_reads_do(store, kind):
+    from app.social.threads import write_event
+    a, _ = collector()
+    b, _ = collector()
+    tid, rid = thread(a, b, kind=kind)
+    with connect() as conn:
+        write_event(conn, tid, 'accepted', rid, actor='low')
+    def pulse():
+        return ok(call('GET', '/api/threads/pulse', b))
+    before = pulse()
+    cursor = timeline(b, tid, kind=kind+'s')['items'][0]['cursor']
+    ok(call('POST', f'/api/{kind}s/{tid}/read', b, {'through': cursor}))
+    assert pulse() == before
+    ok(message(a, tid, kind=kind+'s'), 201)
+    ok(message(a, tid, kind=kind+'s'), 201)
+    unread = pulse()
+    assert unread[kind+'s']['unread'] == 1 and unread['watermark'] != before['watermark']
+    items = timeline(b, tid, kind=kind+'s')['items']
+    ok(call('POST', f'/api/{kind}s/{tid}/read', b, {'through': items[1]['cursor']}))
+    partial = pulse()
+    assert partial[kind+'s'] == unread[kind+'s']
+    assert partial['watermark'] != unread['watermark']
+    ok(call('POST', f'/api/{kind}s/{tid}/read', b, {'through': items[0]['cursor']}))
+    read = pulse()
+    assert read[kind+'s']['unread'] == 0 and read['watermark'] != partial['watermark']
+
+
+def test_pulse_fingerprints_public_unread_marks_not_cursor_storage(monkeypatch):
+    from contextlib import nullcontext
+    from app.social import threads
+    cursor = [1]
+    unread = [0]
+    class Connection:
+        def transaction(self):
+            return nullcontext()
+        def execute(self, query, params=None):
+            self.query = query
+            return self
+        def fetchone(self):
+            value = {'n': 1, 'changed': 1}
+            if 'm.read_at' in self.query:
+                value.update(read=cursor[0], read_n=1)
+            return value
+        def fetchall(self):
+            return []
+    monkeypatch.setattr(threads, 'connect', lambda: nullcontext(Connection()))
+    monkeypatch.setattr(threads, 'needs_you_rows', lambda conn, user, kind, **kwargs:
+                        [{'id': kind, 'waiting': 'answer', 'unread': unread[0], 'needs_you': True}])
+    before = threads.read_pulse('reader')
+    cursor[0] += 1
+    assert threads.read_pulse('reader') == before
+    unread[0] = 2
+    message = threads.read_pulse('reader')
+    assert message.watermark != before.watermark and message.loans.unread == 1
+    unread[0] = 1
+    partial = threads.read_pulse('reader')
+    assert partial.loans == message.loans and partial.watermark != message.watermark
