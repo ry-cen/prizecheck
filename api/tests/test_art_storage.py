@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from app.art_storage import DiskArtStorage, check_key
+from app.core.art.art_storage import DiskArtStorage, check_key
 
 
 # A later S3-compatible implementation adds its name to params and builds itself here; the tests below do not change.
