@@ -171,6 +171,7 @@ async function story(
     signIn: (options?: {
       next?: string;
       contextOptions?: BrowserContextOptions;
+      beforeSignIn?: (page: Page) => Promise<void>;
     }) => Promise<{ page: Page }>;
   },
   contextOptions: BrowserContextOptions,
@@ -178,37 +179,42 @@ async function story(
 ) {
   const ids = seedCatalog();
   const secret = `Secret ${randomUUID().slice(0, 6)}`;
-  const ash = await collectors.signIn({ contextOptions });
-  const ashHandle = await nameCollector(ash.page, "Ash K");
-  const ashTrader = await traderIdOf(ash.page);
-  const shelf = await forTradeBinder(ash.page, `${secret} Shelf`);
-  await hold(ash.page, shelf, ids["SVI 166"], 2);
-  // A second finish of the same card: its Add must not share a name with the Normal one's.
-  await hold(ash.page, shelf, ids["SVI 166 Reverse Holo"], 1);
-  const brock = await collectors.signIn({ contextOptions });
-  const brockHandle = await nameCollector(brock.page, "Brock T");
-  // Brock holds one card in two For trade binders, to check My Trade List shows one tile for it.
-  for (const name of [`${secret} Left`, `${secret} Right`])
-    await hold(
-      brock.page,
-      await forTradeBinder(brock.page, name),
-      ids["PAL 254"],
-      1
-    );
-
-  await noArtwork(page);
-  await signInAsOwner(page, "/collection");
-  const mistyHandle = await nameCollector(page, "Misty W");
-  const mistyTrader = await traderIdOf(page);
-  const binder = await forTradeBinder(page, `${secret} Binder`);
-  await hold(page, binder, ids["PAL 185"], 3);
-  await befriend(page, ash.page);
-  await befriend(page, brock.page);
   // Everything about Trades that reaches Ash's browser, to check it never names one of Misty's Locations.
-  const audit = await auditPage(ash.page, (url) =>
-    /\/api\/(social\/)?trade/.test(url)
-  );
+  let audit!: Awaited<ReturnType<typeof auditPage>>;
   try {
+    const ash = await collectors.signIn({
+      contextOptions,
+      beforeSignIn: async (who) => {
+        audit = await auditPage(who, (url) =>
+          /\/api\/(social\/)?trade/.test(url)
+        );
+      },
+    });
+    const ashHandle = await nameCollector(ash.page, "Ash K");
+    const ashTrader = await traderIdOf(ash.page);
+    const shelf = await forTradeBinder(ash.page, `${secret} Shelf`);
+    await hold(ash.page, shelf, ids["SVI 166"], 2);
+    // A second finish of the same card: its Add must not share a name with the Normal one's.
+    await hold(ash.page, shelf, ids["SVI 166 Reverse Holo"], 1);
+    const brock = await collectors.signIn({ contextOptions });
+    const brockHandle = await nameCollector(brock.page, "Brock T");
+    // Brock holds one card in two For trade binders, to check My Trade List shows one tile for it.
+    for (const name of [`${secret} Left`, `${secret} Right`])
+      await hold(
+        brock.page,
+        await forTradeBinder(brock.page, name),
+        ids["PAL 254"],
+        1
+      );
+
+    await noArtwork(page);
+    await signInAsOwner(page, "/collection");
+    const mistyHandle = await nameCollector(page, "Misty W");
+    const mistyTrader = await traderIdOf(page);
+    const binder = await forTradeBinder(page, `${secret} Binder`);
+    await hold(page, binder, ids["PAL 185"], 3);
+    await befriend(page, ash.page);
+    await befriend(page, brock.page);
     // A: Misty opens the builder from Ash's Trade List (no Add there), adds his Arven from his list and her Iono from hers.
     await page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
     const friendMain = page.getByRole("main");
@@ -499,7 +505,7 @@ async function story(
       expect(body).not.toContain(binder);
     }
   } finally {
-    audit.dispose();
+    audit?.dispose();
   }
 }
 

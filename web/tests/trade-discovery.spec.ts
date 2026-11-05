@@ -220,24 +220,24 @@ async function story(
   await hold(brock.page, brockBinder, ids["PAL 254"], 1);
 
   await noArtwork(page);
-  await signInAsOwner(page, "/collection");
-  await nameCollector(page, "Misty W");
-  const binder = await forTradeBinder(page, `${secret} Binder`);
-  await hold(page, binder, ids["PAL 185"], 3);
-  const mistyDeck = await deckWith(page, `${secret} Gardevoir`, [
-    [ids["SVI 166"], 1],
-    [ids["PAL 172"], 1],
-  ]);
-  await tradeWant(page, ids["SVI 166"], 2);
-  await tradeWant(page, ids["PAF 80"], 1);
-  await willAccept(page, ids["PAL 172"], "printing");
-  await befriend(page, ash.page);
-  await befriend(page, brock.page);
-  // Everything about Trades that reaches Misty's browser, to check it never names a Location or a Deck.
   const audit = await auditPage(page, (url) =>
     /\/api\/social\/trade/.test(url)
   );
   try {
+    await signInAsOwner(page, "/collection");
+    await nameCollector(page, "Misty W");
+    const binder = await forTradeBinder(page, `${secret} Binder`);
+    await hold(page, binder, ids["PAL 185"], 3);
+    const mistyDeck = await deckWith(page, `${secret} Gardevoir`, [
+      [ids["SVI 166"], 1],
+      [ids["PAL 172"], 1],
+    ]);
+    await tradeWant(page, ids["SVI 166"], 2);
+    await tradeWant(page, ids["PAF 80"], 1);
+    await willAccept(page, ids["PAL 172"], "printing");
+    await befriend(page, ash.page);
+    await befriend(page, brock.page);
+    // Everything about Trades that reaches Misty's browser, to check it never names a Location or a Deck.
     // A: Find trades, from the Trades tab's switch. Ash's two-way row comes first; Brock's one-way row has no tag.
     await page.goto(`${ORIGIN}/trades`);
     await page.getByRole("tab", { name: "Find trades", exact: true }).click();
