@@ -170,7 +170,7 @@ class DeployPipelineTest(unittest.TestCase):
         for name, timeout in (('targeted-operations', 30), ('targeted-mass-entry', 20)):
             job = job_body(name)
             self.assertIn("if: ${{ inputs.integration == 'targeted' }}", job)
-            self.assertIn('runs-on: ubuntu-latest', job)
+            self.assertIn('runs-on: ubuntu-24.04', job)
             self.assertIn(f'timeout-minutes: {timeout}', job)
             self.assertIn('steps:\n      - name: Validate source SHA', job)
             validation = between(job, '      - name: Validate source SHA', '      - uses: actions/checkout@v4')
