@@ -833,7 +833,20 @@ function BorrowComposer({
                 This edit was started before an update. Open the Borrow Request
                 to edit it again.
               </p>
-              <Button onClick={() => onOpenLoan(draft.replaces!)}>View</Button>
+              <Button
+                onClick={() =>
+                  closeLoanRequest(
+                    form.current,
+                    fence.command.current !== null,
+                    () => {
+                      onClose();
+                      onOpenLoan(draft.replaces!);
+                    }
+                  )
+                }
+              >
+                View
+              </Button>
             </>
           )}
           <Button
