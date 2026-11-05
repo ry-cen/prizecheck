@@ -1,3 +1,4 @@
+import { accountToScrub, scrubLoanBodies } from "./loans/loanIntents";
 import { pageAddress } from "./shell/keptPages";
 import React, {
   useEffect,
@@ -100,6 +101,7 @@ function safeDestination(): string {
 }
 
 function App() {
+  const lastUserId = useRef<string | null>(null);
   const { path, navigate, scrollFor } = useRoute();
   const [session, setSession] = useState<Session | null>(null);
   const [ownerCatalog, setOwnerCatalog] = useState<OwnerCatalogStatus | null>(
@@ -127,6 +129,12 @@ function App() {
         }
       }
       setOwnerCatalog(owner);
+      const gone = accountToScrub(
+        lastUserId.current,
+        result.signedIn ? result.userId : null
+      );
+      if (gone) scrubLoanBodies(gone);
+      lastUserId.current = result.signedIn ? result.userId : null;
       setSession(result);
     } catch {
       setMessage("Service temporarily unavailable. Please retry.");
@@ -237,6 +245,8 @@ function App() {
     }
     // Borrow Request drafts (#252) are the account's: none stay in this tab for whoever signs in next.
     forgetBorrowDrafts();
+    scrubLoanBodies(lastUserId.current);
+    lastUserId.current = null;
     setSession({ signedIn: false, userId: null });
     setOwnerCatalog(null);
     // An unsent proposal is lost with the session: sign-out never asks.

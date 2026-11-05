@@ -3,7 +3,22 @@ import { act, createElement as h, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { InboxProvider, InboxButton } from "../inbox/Inbox";
-import { LoanScreen } from "../loans/LoanScreen";
+import { LoanScreen as Screen } from "../loans/LoanScreen";
+import { LoanRecoveryProvider } from "../loans/LoanRecovery";
+import { fixture } from "../loans/testing/loanFakes";
+import { createTabContext } from "../loans/loanIntents";
+function LoanScreen(props: Parameters<typeof Screen>[0]) {
+  const [recovery] = useState(() => ({
+    ports: fixture().ports,
+    tab: createTabContext(),
+  }));
+  return h(LoanRecoveryProvider, {
+    accountId: "A",
+    accountName: "Ana",
+    ...recovery,
+    children: h(Screen, props),
+  });
+}
 import { TradeScreen } from "../trades/TradeScreen";
 import { ToastProvider } from "../ui/Toast";
 import {
