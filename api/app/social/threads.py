@@ -620,9 +620,8 @@ def read_pulse(user_id: str = Depends(verified_user)):
             counted[kind] = PulseCount(needs_you=sum(r['needs_you'] for r in marks),
                                        waiting=sum(r['waiting'] is not None for r in marks),
                                        unread=sum(r['unread'] > 0 for r in marks))
-            waiting_marks.extend((str(r['id']), r['waiting']) for r in marks)
-        stamps = conn.execute("""SELECT count(*) AS n,sum(extract(epoch FROM t.changed_at)) AS changed,
-          sum(extract(epoch FROM m.read_at)) AS read,count(m.read_at) AS read_n
+            waiting_marks.extend((str(r['id']), r['waiting'], r['unread']) for r in marks)
+        stamps = conn.execute("""SELECT count(*) AS n,sum(extract(epoch FROM t.changed_at)) AS changed
           FROM thread_member m JOIN thread t ON t.id=m.thread_id WHERE m.member_id=%s""", (user_id,)).fetchone()
         news = conn.execute('SELECT id,read_at,dismissed_at FROM inbox_update WHERE recipient_id=%s ORDER BY id',
                             (user_id,)).fetchall()
@@ -633,6 +632,9 @@ def read_pulse(user_id: str = Depends(verified_user)):
             WHERE m.member_id=%s) ORDER BY p.user_id""", (user_id, user_id, user_id)).fetchall()
         blocks = conn.execute('SELECT blocker_id,blocked_id FROM block WHERE blocker_id=%s OR blocked_id=%s '
                               'ORDER BY blocker_id,blocked_id', (user_id, user_id)).fetchall()
+        # Read cursors are storage boundaries, not public activity. Reading only
+        # log events must not invalidate every queue. Per-item unread counts still
+        # signal partial reads and redistributions even when badge totals agree.
         parts = (stamps, news, people, blocks, sorted(waiting_marks))
         watermark = hashlib.sha256(repr(parts).encode()).hexdigest()[:32]
     return Pulse(trades=counted['trade'], loans=counted['loan'], watermark=watermark)
