@@ -1,17 +1,48 @@
 import { createServer, type ServerResponse } from "node:http";
 import { expect, test, type Page } from "@playwright/test";
-import { auditPage } from "./support/responseAudit";
+import { DOCUMENT_REPLACED, auditPage } from "./support/responseAudit";
 
 /** This spec owns only a tiny HTTP fixture, not the application stack or a database. */
 async function viewerServer() {
   const held: ServerResponse[] = [];
   const navigation: ServerResponse[] = [];
+  const loading: ServerResponse[] = [];
   const counts = new Map<string, number>();
   const waiters: { path: string; count: number; resolve: () => void }[] = [];
   const server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
     if (path === "/api/trades/held") held.push(response);
     else if (path === "/nocontent") navigation.push(response);
+    else if (path === "/loading") {
+      loading.push(response);
+      const iframe = new URL(
+        request.url ?? "/",
+        "http://127.0.0.1"
+      ).searchParams.has("iframe");
+      const begin = `location.href = "/nocontent"; history.pushState(null, "", "/nocontent"); fetch("/scheduled");`;
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.write(`<!doctype html><!-- ${"x".repeat(1024)} --><script>
+        document.addEventListener("DOMContentLoaded", () => fetch("/parsed"));
+        window.beginNavigation = () => { ${begin} };
+        ${
+          iframe
+            ? ""
+            : `(async () => {
+          await (await fetch("/api/trades/open")).text();
+          fetch("/api/trades/held").then(r => r.text()).then(t => document.title = t);
+          window.beginNavigation();
+        })();`
+        }
+        </script>${iframe ? '<iframe src="/frame"></iframe>' : ""}`);
+    } else if (path === "/frame")
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+        .end(`<!doctype html><script>
+        (async () => {
+          await (await fetch("/api/trades/open")).text();
+          fetch("/api/trades/held").then(r => r.text()).then(t => document.title = t);
+          parent.beginNavigation();
+        })();
+      </script>`);
     else if (path === "/one" || path === "/two")
       response
         .writeHead(200, { "content-type": "text/html; charset=utf-8" })
@@ -40,6 +71,7 @@ async function viewerServer() {
     origin: `http://127.0.0.1:${address.port}`,
     held,
     navigation,
+    loading,
     received(path: string, count: number) {
       if ((counts.get(path) ?? 0) >= count) return Promise.resolve();
       return new Promise<void>((resolve) =>
@@ -78,6 +110,7 @@ async function withViewer(
           bodyInspected();
       }
     );
+    await audit.ready;
     await page.goto(`${server.origin}/one`);
     await run(server, audit, firstHeldBody);
   } finally {
@@ -140,38 +173,49 @@ test("live, same-document", async ({ page }) => {
   });
 });
 
-test("same-URL pushState during a navigation that does not commit", async ({
-  page,
-}) => {
-  await withViewer(page, async (server, audit) => {
-    await startHeld(page, server, 1);
-    const navigating = page.waitForRequest(
-      (request) =>
-        request.isNavigationRequest() &&
-        request.url() === `${server.origin}/nocontent`
-    );
-    await page.evaluate(() => {
-      location.href = "/nocontent";
+async function pendingBeforeBody(audit: ReturnType<typeof auditPage>) {
+  audit.stop();
+  const proof = audit.finish();
+  const early = await Promise.race([
+    proof.then(() => "finished"),
+    new Promise((resolve) => setTimeout(resolve, 1_000, "pending")),
+  ]);
+  expect(early).toBe("pending");
+  return { proof };
+}
+
+for (const schedule of [
+  "failed navigation first",
+  "DOMContentLoaded first",
+  "with a surviving iframe",
+]) {
+  test(`still-loading document, ${schedule}`, async ({ page }) => {
+    await withViewer(page, async (server, audit) => {
+      const iframe = schedule === "with a surviving iframe";
+      await page.goto(`${server.origin}/loading${iframe ? "?iframe=1" : ""}`, {
+        waitUntil: "commit",
+      });
+      await server.received("/loading", 1);
+      if (iframe) await server.received("/frame", 1);
+      await server.received("/api/trades/open", 1);
+      await server.received("/api/trades/held", 1);
+      await server.received("/nocontent", 1);
+      await server.received("/scheduled", 1);
+      const failNavigation = () => {
+        if (!server.navigation[0].destroyed)
+          server.navigation[0].writeHead(204).end();
+      };
+      if (schedule !== "DOMContentLoaded first") failNavigation();
+      server.loading[0].end("</html>");
+      await server.received("/parsed", 1);
+      if (schedule === "DOMContentLoaded first") failNavigation();
+      const { proof } = await pendingBeforeBody(audit);
+      server.held[0].end("marker from the surviving document");
+      expect(await proof).toContain("marker from the surviving document");
+      expect(audit.abortedRequests).toEqual([]);
     });
-    await server.received("/nocontent", 1);
-    await navigating;
-    const changed = page.waitForEvent("framenavigated", {
-      predicate: (frame) =>
-        frame === page.mainFrame() &&
-        frame.url() === `${server.origin}/nocontent`,
-    });
-    await page.evaluate(() => history.pushState(null, "", "/nocontent"));
-    await changed;
-    // A pushState may cancel the pending navigation in Chromium. Either way,
-    // no new document committed, and the API response must still be inspected.
-    if (!server.navigation[0].destroyed)
-      server.navigation[0].writeHead(204).end();
-    audit.stop();
-    server.held[0].end("marker after the uncommitted navigation");
-    const bodies = await audit.finish();
-    expect(bodies).toContain("marker after the uncommitted navigation");
   });
-});
+}
 
 test("new document after a cut", async ({ page }) => {
   await withViewer(page, async (server, audit, firstHeldBody) => {
@@ -179,12 +223,14 @@ test("new document after a cut", async ({ page }) => {
     const cut = await startHeld(page, server, 2);
     await page.goto(`${server.origin}/two`);
     await startHeld(page, server, 3);
-    audit.stop();
+    const { proof } = await pendingBeforeBody(audit);
     server.held[2].end("marker from the new document");
-    const bodies = await audit.finish();
+    const bodies = await proof;
     expect(bodies).toContain("marker from the new document");
-    expect(audit.abortedRequests.some((entry) => entry.request === cut)).toBe(
-      true
-    );
+    expect(
+      audit.abortedRequests.some(
+        (entry) => entry.request === cut && entry.reason === DOCUMENT_REPLACED
+      )
+    ).toBe(true);
   });
 });

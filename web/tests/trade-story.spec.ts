@@ -708,25 +708,28 @@ async function story(
 test.describe("desktop", () => {
   test.use(DESKTOP_SIZE);
 
-  test("two Friends trade in the browser from a For trade binder to both Confirm swaps: a cash offer from the two-way row is refused until cash offers are open, the Counter adds a card and less cash, it is accepted, and the cards have moved in Collection, the Trade Lists, the Deck and Trade Wants", async ({
-    page,
-    collectors,
-  }) => {
-    // Two collectors in two contexts, a catalog seed, the whole Trade from both sides and about twenty page checks: well over 30 s on a loaded host.
-    test.slow();
-    await story(page, collectors, DESKTOP_SIZE, "desktop width");
-  });
+  // Run 41961477816 exceeded the budget under load; give these two-collector journeys the runner alone within the unchanged budget.
+  test(
+    "two Friends trade in the browser from a For trade binder to both Confirm swaps: a cash offer from the two-way row is refused until cash offers are open, the Counter adds a card and less cash, it is accepted, and the cards have moved in Collection, the Trade Lists, the Deck and Trade Wants",
+    { tag: "@serial" },
+    async ({ page, collectors }) => {
+      // Two collectors in two contexts, a catalog seed, the whole Trade from both sides and about twenty page checks: well over 30 s on a loaded host.
+      test.slow();
+      await story(page, collectors, DESKTOP_SIZE, "desktop width");
+    }
+  );
 });
 
 test.describe("phone", () => {
   test.use(PHONE_SIZE);
 
-  test("the same at 375 px, with no sideways scroll and touch-sized controls", async ({
-    page,
-    collectors,
-  }) => {
-    // Two collectors in two contexts, a catalog seed, the whole Trade from both sides and about twenty page checks: well over 30 s on a loaded host.
-    test.slow();
-    await story(page, collectors, PHONE_SIZE, "375 px");
-  });
+  test(
+    "the same at 375 px, with no sideways scroll and touch-sized controls",
+    { tag: "@serial" },
+    async ({ page, collectors }) => {
+      // Two collectors in two contexts, a catalog seed, the whole Trade from both sides and about twenty page checks: well over 30 s on a loaded host.
+      test.slow();
+      await story(page, collectors, PHONE_SIZE, "375 px");
+    }
+  );
 });
