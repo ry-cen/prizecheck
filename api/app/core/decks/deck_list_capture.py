@@ -15,11 +15,11 @@ moves neither the inventory revision nor the Deck List revision.
 from dataclasses import dataclass
 from uuid import UUID
 
-from .borrowed_copies import borrowed_at, physical
-from .copy_allocation import deck_lines
-from .location_tree import error, owner_and_rows
-from .db import connect
-from .settings import WantListCounting, read_settings
+from app.borrowed_copies import borrowed_at, physical
+from app.copy_allocation import deck_lines
+from app.location_tree import error, owner_and_rows
+from app.db import connect
+from app.settings import WantListCounting, read_settings
 
 
 @dataclass(frozen=True)

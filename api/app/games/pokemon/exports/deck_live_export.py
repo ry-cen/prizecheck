@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..prices.catalog_targets import printing_live
-from app.deck_list_capture import capture_deck_list
+from app.core.decks.deck_list_capture import capture_deck_list
 from .live_export import LiveExport, LiveInputRow, format_live, iter_live_text
 from app.location_tree import error
 from app.db import connect

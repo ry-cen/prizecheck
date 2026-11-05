@@ -26,7 +26,7 @@ The direct shared catalog readers are:
 | `core/inventory/collection.py` (#521) | Aggregate Collection, Edition distribution, Holding paging/totals, set choices and revision reads. Uses the retained display/art/set-code joins and catalog generation/revision reads below. Reads the effective attribute revision; facet columns, joins, predicates, values and cursor context are supplied by Pokémon. `/sets` inner joins retained display, so bare Printings supply no set choice. |
 | `card_accepts.py` | `ACCEPTED`, `accepts`: widen an Edition to its Printing's Editions or its current Card Identity's Editions. |
 | `core/trading/trade_wants.py` | `AVAILABLE`: whether an Edition may start a new Trade Wants line. |
-| `core/decks/contents.py`, `deck_list_capture.py` | `capture_deck_contents`, `capture_deck_list`: lock and capture the catalog revision before detaching inventory. |
+| `core/decks/contents.py`, `core/decks/deck_list_capture.py` | `capture_deck_contents`, `capture_deck_list`: lock and capture the catalog revision before detaching inventory. |
 | `core/art/store.py` | `resolve`, `_read`, `_repair_pointer`, `warm_deck`: source URLs, public reference, cache state and Deck art warming. Also writes the adjacent art cache tables below. |
 | `operations.py` | `operations_status`: failed catalog runs, pending reviews and undelivered public-catalog work. |
 
