@@ -254,20 +254,22 @@ async function tradeStory(
 
   // Each agreement has one item; all three await Ash's own step, even before Misty confirms.
   await page.goto(`${ORIGIN}/trades`);
-  const rows = page.locator("a[data-thread]");
+  // Kept Loans may own hidden item links; this story counts only visible Trades.
+  await expect(page.getByRole("main")).toHaveCount(1);
+  const rows = page.getByRole("main").locator("a[data-thread]");
   await expect(rows).toHaveCount(3);
-  await expect(page.locator(`a[data-thread="${proposal}"]`)).toContainText(
-    "Accept or counter"
-  );
+  await expect(
+    page.getByRole("main").locator(`a[data-thread="${proposal}"]`)
+  ).toContainText("Accept or counter");
   for (const id of [accepted, half])
-    await expect(page.locator(`a[data-thread="${id}"]`)).toContainText(
-      "Confirm swap"
-    );
+    await expect(
+      page.getByRole("main").locator(`a[data-thread="${id}"]`)
+    ).toContainText("Confirm swap");
   await expect(tradesTab(page)).toHaveAccessibleName(
     "Trades, 3 need you: 3 waiting on you, 0 with new messages"
   );
   // Keep the surviving item open while the Friend command runs, proving it refreshes in place.
-  await page.locator(`a[data-thread="${half}"]`).click();
+  await page.getByRole("main").locator(`a[data-thread="${half}"]`).click();
   // He removes Misty. The question counts what it cancels, in the prototype's Proposed wording, and what stays.
   await page.getByRole("button", { name: "Friends", exact: true }).click();
   const yours = friends(page).getByRole("region", { name: "Your Friends" });
