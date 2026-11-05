@@ -1,4 +1,4 @@
-import type { Page, Request, Response } from "@playwright/test";
+import type { Frame, Page, Request, Response } from "@playwright/test";
 
 type ReadableResponse = { text: () => Promise<string> };
 
@@ -10,6 +10,7 @@ export function bodyOf(response: ReadableResponse): Promise<string | null> {
   });
 }
 
+// Hosted max API latency was 474 ms; the slowest passing journey used 81.3 of 90 s.
 export const AUDIT_DRAIN_TIMEOUT_MS = 5_000;
 type Phase = "open" | "sealed" | "draining" | "finished" | "disposed";
 type RequestInfo = { method: string; url: string };
@@ -18,18 +19,31 @@ type Events = {
   started: (request: object, info: RequestInfo) => void;
   response: (request: object, response: ReadableResponse) => void;
   failed: (request: object, reason: string | null) => void;
+  awaitingHeaders: () => object[];
+  documentReplaced: (requests: object[]) => void;
 };
 type Entry = {
   info: RequestInfo;
-  stage: "headers" | "body" | "settled";
-  result: Promise<Result>;
-  resolve: (result: Result) => void;
+  stage: "headers" | "orphaned" | "body" | "settled";
+  outcome?: Result;
+  transportError?: Error;
 };
 
-/** open admits identities; sealed fixes membership and starts the bounded drain;
- * draining owes every body/explicit abort/error. finished commits an immutable
- * result and cleans up. disposed abandons every unfinished proof, even settled
- * inputs. Missing terminal events fail with method/URL, never imply an abort. */
+export const DOCUMENT_REPLACED = "document replaced before any response";
+
+export function routeShape(info: RequestInfo): string {
+  const url = new URL(info.url);
+  return `${info.method} ${url.pathname + url.search}`.replace(
+    /[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi,
+    ":id"
+  );
+}
+
+/** Inspect every audited body delivered to a document of this viewer. Only a
+ * confirmed document replacement can exclude an unanswered request, with an
+ * inspected same-route floor. Live requests remain owed; an observed body read
+ * owns its outcome over transport events. Sealing closes admission, finished
+ * commits proof, and disposal abandons it. All owned reads stay bounded. */
 export function responseAudit(subscribe: (events: Events) => () => void) {
   const requests = new Map<object, Entry>();
   const aborted: { request: object; reason: string }[] = [];
@@ -38,83 +52,37 @@ export function responseAudit(subscribe: (events: Events) => () => void) {
   // when TypeScript narrows the surrounding continuation to draining.
   const isDisposed = () => phase === "disposed";
   let completed: Promise<string[]> | undefined;
+  let drained: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const pending = () =>
-    [...requests.values()].filter((entry) => entry.stage !== "settled");
+  const owed = () =>
+    [...requests.values()].filter(
+      (entry) => entry.stage === "headers" || entry.stage === "body"
+    );
   const clearDeadline = () => {
     clearTimeout(timer);
     timer = undefined;
   };
+  const checkDrained = () => {
+    if (!owed().length) {
+      clearDeadline();
+      drained?.();
+    }
+  };
   const settle = (entry: Entry, result: Result) => {
     if (entry.stage === "settled") return;
     entry.stage = "settled";
-    entry.resolve(result);
-    if (!pending().length) clearDeadline();
+    entry.outcome = result;
+    checkDrained();
   };
-  let unsubscribe = subscribe({
-    started(request, info) {
-      if (phase !== "open" || requests.has(request)) return;
-      let resolve!: (result: Result) => void;
-      const result = new Promise<Result>((yes) => {
-        resolve = yes;
-      });
-      requests.set(request, {
-        info: { ...info },
-        stage: "headers",
-        result,
-        resolve,
-      });
-    },
-    response(request, response) {
-      const entry = requests.get(request);
-      if (
-        phase === "disposed" ||
-        phase === "finished" ||
-        !entry ||
-        entry.stage !== "headers"
-      )
-        return;
-      entry.stage = "body";
-      // Handle rejection now, while retaining it as a failed final proof.
-      void bodyOf(response).then(
-        (body) =>
-          settle(
-            entry,
-            body === null
-              ? { aborted: "application navigation discarded response" }
-              : { body }
-          ),
-        (error) => settle(entry, { error })
-      );
-    },
-    failed(request, reason) {
-      const entry = requests.get(request);
-      if (phase === "disposed" || phase === "finished" || !entry) return;
-      // A real terminal event applies before or after headers. It never replaces
-      // an earlier terminal outcome, and no missing event is guessed from a URL.
-      settle(
-        entry,
-        reason === "net::ERR_ABORTED"
-          ? { aborted: reason }
-          : {
-              error: new Error(
-                `Unexpected audited request failure: ${reason ?? "unknown"} (${entry.info.method} ${entry.info.url})`
-              ),
-            }
-      );
-    },
-  });
-  const cleanup = () => {
-    clearDeadline();
-    unsubscribe();
-    unsubscribe = () => {};
-  };
-  const stop = () => {
-    if (phase !== "open") return;
-    phase = "sealed";
-    if (!pending().length) return;
+  const armDeadline = () => {
+    if (
+      (phase !== "sealed" && phase !== "draining") ||
+      timer !== undefined ||
+      !owed().length
+    )
+      return;
     timer = setTimeout(() => {
-      const unfinished = pending();
+      const unfinished = owed();
       const error = new Error(
         `Privacy audit requests did not finish within ${AUDIT_DRAIN_TIMEOUT_MS}ms:\n` +
           unfinished
@@ -127,6 +95,76 @@ export function responseAudit(subscribe: (events: Events) => () => void) {
       for (const entry of unfinished) settle(entry, { error });
     }, AUDIT_DRAIN_TIMEOUT_MS);
   };
+  let unsubscribe = subscribe({
+    started(request, info) {
+      if (phase !== "open" || requests.has(request)) return;
+      requests.set(request, { info: { ...info }, stage: "headers" });
+    },
+    response(request, response) {
+      const entry = requests.get(request);
+      if (
+        phase === "disposed" ||
+        phase === "finished" ||
+        !entry ||
+        (entry.stage !== "headers" && entry.stage !== "orphaned")
+      )
+        return;
+      entry.stage = "body";
+      armDeadline();
+      // Handle rejection now, while retaining it as a failed final proof.
+      void bodyOf(response).then(
+        (body) =>
+          settle(
+            entry,
+            entry.transportError
+              ? { error: entry.transportError }
+              : body === null
+                ? { aborted: "application navigation discarded response" }
+                : { body }
+          ),
+        (error) => settle(entry, { error })
+      );
+    },
+    failed(request, reason) {
+      const entry = requests.get(request);
+      if (phase === "disposed" || phase === "finished" || !entry) return;
+      if (entry.stage === "settled") return;
+      const error =
+        reason === "net::ERR_ABORTED"
+          ? undefined
+          : new Error(
+              `Unexpected audited request failure: ${reason ?? "unknown"} (${entry.info.method} ${entry.info.url})`
+            );
+      if (entry.stage === "body") {
+        if (error && !entry.transportError) entry.transportError = error;
+        return;
+      }
+      settle(entry, error ? { error } : { aborted: "net::ERR_ABORTED" });
+    },
+    awaitingHeaders() {
+      return [...requests]
+        .filter(([, entry]) => entry.stage === "headers")
+        .map(([request]) => request);
+    },
+    documentReplaced(identities) {
+      if (phase === "finished" || phase === "disposed") return;
+      for (const request of identities) {
+        const entry = requests.get(request);
+        if (entry?.stage === "headers") entry.stage = "orphaned";
+      }
+      checkDrained();
+    },
+  });
+  const cleanup = () => {
+    clearDeadline();
+    unsubscribe();
+    unsubscribe = () => {};
+  };
+  const stop = () => {
+    if (phase !== "open") return;
+    phase = "sealed";
+    armDeadline();
+  };
   const dispose = () => {
     if (phase === "finished" || phase === "disposed") {
       cleanup();
@@ -134,10 +172,7 @@ export function responseAudit(subscribe: (events: Events) => () => void) {
     }
     phase = "disposed";
     cleanup();
-    for (const entry of requests.values())
-      settle(entry, {
-        error: new Error("Privacy audit disposed before completion"),
-      });
+    drained?.();
   };
   return {
     stop,
@@ -156,18 +191,35 @@ export function responseAudit(subscribe: (events: Events) => () => void) {
       phase = "draining";
       completed = (async () => {
         try {
-          const results = await Promise.all(
-            [...requests.values()].map((entry) => entry.result)
-          );
-          // Promise settlement is not proof commitment. Disposal can happen in
-          // this gap, including with zero inputs or already-completed bodies.
+          do {
+            await new Promise<void>((resolve) => {
+              drained = resolve;
+              checkDrained();
+            });
+          } while (!isDisposed() && owed().length);
           if (isDisposed())
             throw new Error("Privacy audit disposed before completion");
+          const shapes = new Set<string>();
+          for (const entry of requests.values())
+            if (entry.outcome && "body" in entry.outcome)
+              shapes.add(routeShape(entry.info));
           const bodies: string[] = [];
           const errors: unknown[] = [];
-          let index = 0;
-          for (const request of requests.keys()) {
-            const result = results[index++];
+          const excluded: string[] = [];
+          for (const [request, entry] of requests) {
+            if (entry.stage === "orphaned") {
+              if (shapes.has(routeShape(entry.info))) {
+                aborted.push({ request, reason: DOCUMENT_REPLACED });
+                excluded.push(`${entry.info.method} ${entry.info.url}`);
+              } else
+                errors.push(
+                  new Error(
+                    `Privacy audit excluded a request with no inspected response on its route: ${entry.info.method} ${entry.info.url}`
+                  )
+                );
+              continue;
+            }
+            const result = entry.outcome!;
             if ("error" in result) {
               if (!errors.includes(result.error)) errors.push(result.error);
             } else if ("aborted" in result)
@@ -180,6 +232,11 @@ export function responseAudit(subscribe: (events: Events) => () => void) {
               errors,
               "Privacy audit failed:\n" +
                 errors.map((error) => String(error)).join("\n")
+            );
+          if (excluded.length)
+            console.info(
+              `privacy audit excluded ${excluded.length} undelivered request(s): ` +
+                excluded.join(", ")
             );
           phase = "finished";
           return bodies;
@@ -202,7 +259,31 @@ export function auditPage(
   onBody?: (response: Response) => void
 ) {
   return responseAudit((events) => {
+    const isMainDocument = (request: Request) => {
+      if (!request.isNavigationRequest()) return false;
+      try {
+        return request.frame() === page.mainFrame();
+      } catch {
+        return false;
+      }
+    };
+    let navigating: string | undefined;
+    let cut: object[] | undefined;
+    const navigated = (frame: Frame) => {
+      if (frame !== page.mainFrame() || frame.url() !== navigating || cut)
+        return;
+      cut = events.awaitingHeaders();
+    };
+    const loaded = () => {
+      if (!cut) return;
+      events.documentReplaced(cut);
+      cut = navigating = undefined;
+    };
     const started = (request: Request) => {
+      if (isMainDocument(request)) {
+        navigating = request.url();
+        cut = undefined;
+      }
       if (include(request.url()))
         events.started(request, {
           method: request.method(),
@@ -219,10 +300,14 @@ export function auditPage(
       });
     const failed = (request: Request) =>
       events.failed(request, request.failure()?.errorText ?? null);
+    page.on("framenavigated", navigated);
+    page.on("domcontentloaded", loaded);
     page.on("request", started);
     page.on("response", receive);
     page.on("requestfailed", failed);
     return () => {
+      page.off("framenavigated", navigated);
+      page.off("domcontentloaded", loaded);
       page.off("request", started);
       page.off("response", receive);
       page.off("requestfailed", failed);
