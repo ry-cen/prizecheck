@@ -25,7 +25,7 @@ from app.location_tree import router as location_tree_router
 from app.core.inventory.locations import router as locations_router
 from app.games.pokemon.prices.metadata_reviews import router as metadata_reviews_router
 from app.games.pokemon.catalog.missing_cards import router as missing_cards_router
-from app.moves import router as moves_router
+from app.core.inventory.moves import router as moves_router
 from app.operations import router as operations_router
 from app.games.pokemon.prices.prices import router as prices_router
 from app.games.pokemon.publications.publications import router as publications_router
