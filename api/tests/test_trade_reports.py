@@ -680,6 +680,9 @@ def test_each_decision_writes_an_event_and_a_second_is_refused(store):
 
 def test_removal_switches_discovery_off_and_restore_lets_the_collector_switch_on_again(store):
     ids, ash, misty, binder, box = strangers()
+    # The capped nearby query must not depend on discovery rows retained by earlier tests in this worker.
+    with connect() as conn:
+        conn.execute('DELETE FROM discovery_setting WHERE user_id <> ALL(%s)', ([ash, misty],))
     owner = as_owner()
     stored = filed(ash, misty)
     with connect() as conn:
