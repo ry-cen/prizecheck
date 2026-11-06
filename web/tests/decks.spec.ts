@@ -45,7 +45,7 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     await signInAsOwner(page, "/collection");
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     const name = `Deck ${randomUUID().slice(0, 8)}`;
-    await page.getByLabel("Deck name").fill(name);
+    await page.getByLabel("Deck name", { exact: true }).fill(name);
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
@@ -321,7 +321,7 @@ promote({'card-1': 'Pikachu'})`,
     await signInAsOwner(page, "/collection");
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     const name = `Deck ${randomUUID().slice(0, 8)}`;
-    await page.getByLabel("Deck name").fill(name);
+    await page.getByLabel("Deck name", { exact: true }).fill(name);
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
