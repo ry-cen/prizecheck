@@ -76,9 +76,12 @@ type InboxApi = {
   loansChanged: number;
   noteLoansChanged: () => void;
   /** Whether the drawer just opened this Loan or Trade; true once, for its screen to focus its heading. */
-  takeOpened: (id: string) => boolean;
+  takeOpened: (id: string, canonicalId?: string) => boolean;
   /** Conversations with unread messages (Trading #298), from the pulse; 0 until the first read. */
-  unreadConversations: number;
+  threadCounts: {
+    trades: import("../social_generated").PulseCount;
+    loans: import("../social_generated").PulseCount;
+  };
   /** How many times the pulse's watermark moved, for the conversation list and the open conversation to read again. */
   pulseChanged: number;
   /** Reads the pulse now (after the collector read or sent something). */
@@ -96,7 +99,7 @@ export function useInboxRefresh(): () => void {
 }
 
 /** After a change that may have cancelled Loans and Trades outside their tabs (Remove Friend, Block): reads the inbox
- * again, and has the Loans list and the Trades list read again. */
+ * again, refreshes the item pulse counts, and has both agreement lists read again. */
 export function useNoteLoansChanged(): () => void {
   return useContext(InboxContext)?.noteLoansChanged ?? (() => {});
 }
@@ -112,8 +115,13 @@ export function useTradesChanged(): number {
 }
 
 /** Conversations with unread messages, for the Trades tab's badge (Trading #298); 0 outside the shell. */
-export function useUnreadConversations(): number {
-  return useContext(InboxContext)?.unreadConversations ?? 0;
+export function useThreadCounts() {
+  return (
+    useContext(InboxContext)?.threadCounts ?? {
+      trades: { needs_you: 0, waiting: 0, unread: 0 },
+      loans: { needs_you: 0, waiting: 0, unread: 0 },
+    }
+  );
 }
 
 /** A count that moves when the pulse's watermark does, for the conversation list and an open conversation to read
@@ -128,13 +136,19 @@ export function usePollPulse(): () => void {
 }
 
 /** Called by a mounted conversation page: the pulse is read every 15 s while it is. */
-export function useConversationOpen(): void {
+export function useConversationOpen(active = true): void {
   const register = useContext(InboxContext)?.openConversation;
-  useEffect(() => (register ? register() : undefined), [register]);
+  useEffect(
+    () => (active && register ? register() : undefined),
+    [register, active]
+  );
 }
 
-/** Whether the inbox's drawer just opened this Loan or Trade, true once; false outside the shell. */
-export function useOpenedFromInbox(): (id: string) => boolean {
+/** Consumes the drawer focus intent, or transfers it to a canonical item without consuming it. */
+export function useOpenedFromInbox(): (
+  id: string,
+  canonicalId?: string
+) => boolean {
   return useContext(InboxContext)?.takeOpened ?? (() => false);
 }
 
@@ -252,13 +266,14 @@ export function InboxProvider({
         noteLoansChanged: () => {
           setLoansChanged((n) => n + 1);
           refresh();
+          pulse.poll();
         },
-        takeOpened: (id) => {
+        takeOpened: (id, canonicalId) => {
           if (opened.current !== id) return false;
-          opened.current = null;
+          opened.current = canonicalId ?? null;
           return true;
         },
-        unreadConversations: pulse.unread,
+        threadCounts: { trades: pulse.trades, loans: pulse.loans },
         pulseChanged,
         pollPulse: pulse.poll,
         openConversation,
@@ -294,25 +309,6 @@ export function InboxProvider({
 /** "Inbox", or "Inbox, 2 waiting" when Loans or Trades wait on the collector. */
 function inboxName(waiting: number): string {
   return waiting ? `Inbox, ${waiting} waiting` : "Inbox";
-}
-
-/** "Loans, 1 needs you", "Loans, 2 need you"; undefined when nothing does, so the tab's name is its label. */
-export function loansTabName(waiting: number): string | undefined {
-  if (!waiting) return undefined;
-  return `Loans, ${waiting} ${waiting === 1 ? "needs" : "need"} you`;
-}
-
-/** "Trades, 1 needs you", "Trades, 2 need you", "Trades, 1 unread conversation", or both parts ("Trades, 1 needs you,
- * 2 unread conversations"); undefined when neither is above zero, so the tab's name is its label. */
-export function tradesTabName(waiting: number, unread = 0): string | undefined {
-  const parts: string[] = [];
-  if (waiting > 0)
-    parts.push(`${waiting} ${waiting === 1 ? "needs" : "need"} you`);
-  if (unread > 0)
-    parts.push(
-      `${unread} unread ${unread === 1 ? "conversation" : "conversations"}`
-    );
-  return parts.length ? `Trades, ${parts.join(", ")}` : undefined;
 }
 
 /** A count drawn over a header button or a tab's icon; hidden from assistive technology, which reads the name. */

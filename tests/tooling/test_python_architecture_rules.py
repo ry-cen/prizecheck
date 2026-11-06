@@ -212,7 +212,7 @@ class SocialInventoryTest(unittest.TestCase):
                          ['social-inventory-readers: missing app.social.a'])
 
     def test_a_module_outside_the_social_area_may_read(self):
-        files = self.files(extra={'api/app/holdings.py': 'SQL = "SELECT 1 FROM holding"'})
+        files = self.files(extra={'api/app/core/inventory/holdings.py': 'SQL = "SELECT 1 FROM holding"'})
         self.assertEqual(run('social-inventory-readers', files, **self.DATA), [])
 
 
@@ -285,8 +285,8 @@ class SeveralOwnersTest(unittest.TestCase):
         self.assertEqual(run('several-owners-readers', social(), **self.DATA), [])
 
     def test_another_module_reading_several_owners_fails(self):
-        files = social({'api/app/holdings.py': self.SQL})
-        self.assertEqual(run('several-owners-readers', files, **self.DATA), ['several-owners-readers: unexpected app.holdings'])
+        files = social({'api/app/core/inventory/holdings.py': self.SQL})
+        self.assertEqual(run('several-owners-readers', files, **self.DATA), ['several-owners-readers: unexpected app.core.inventory.holdings'])
 
     def test_one_owner_and_a_docstring_do_not_count(self):
         files = social({'api/app/x.py': 'SQL = "SELECT 1 FROM holding h WHERE h.owner_id = %s"',

@@ -2,8 +2,13 @@
 // Storage Leaf, a Trade Proposal, and a Trade step at the Trade's current revision. The specs drive in the browser only
 // the steps they cover. The Trade specs of #270 to #273 keep their own copies.
 import { randomUUID } from "node:crypto";
-import type { BrowserContextOptions, Page, Response } from "@playwright/test";
+import type { BrowserContextOptions, Page } from "@playwright/test";
 import { api } from "./loans";
+import type {
+  TradeDetail,
+  TradeResolution,
+  TradeView,
+} from "../../src/social_generated";
 
 /** The sizes the Trade stories run at: desktop, and 375 px with touch. */
 export const DESKTOP_SIZE: BrowserContextOptions = {
@@ -15,14 +20,7 @@ export const PHONE_SIZE: BrowserContextOptions = {
   hasTouch: true,
 };
 
-/** A response's body, read at once; null only when Chromium no longer holds it, which happens to a read the app
- * aborted itself (a reload of Deck switch offers, a page that moved on). Any other error still fails the test. */
-export function bodyOf(response: Response): Promise<string | null> {
-  return response.text().catch((error: Error) => {
-    if (/navigated away from/.test(error.message)) return null;
-    throw error;
-  });
-}
+export { bodyOf } from "./responseAudit";
 
 /** A top-level Storage Leaf marked For trade; returns its id. */
 export async function forTradeLeaf(page: Page, name: string): Promise<string> {
@@ -58,17 +56,33 @@ export async function propose(
     you_get: get.map(line),
     idempotency_key: randomUUID(),
   });
-  return trade.id as string;
+  return trade.thread_id as string;
 }
 
-/** One Trade step through the API at the Trade's current revision: "accept" or "confirm-swap" (to Unsorted). */
+/** Read the live offer through the round-or-thread resolver. */
+export async function tradeView(page: Page, id: string): Promise<TradeView> {
+  const found: TradeResolution = await api(
+    page,
+    "GET",
+    `/api/trades/resolve/${id}`
+  );
+  const detail: TradeDetail = await api(
+    page,
+    "GET",
+    `/api/trades/${found.thread_id}`
+  );
+  return detail.live_offer;
+}
+
+/** One strict thread command, bound to the current offer and revision. */
 export async function tradeStep(
   page: Page,
   tradeId: string,
-  step: "accept" | "confirm-swap"
+  step: "accept" | "confirm-swap" | "withdraw"
 ) {
-  const trade = await api(page, "GET", `/api/social/trades/${tradeId}`);
-  return api(page, "POST", `/api/trades/${tradeId}/${step}`, {
+  const trade = await tradeView(page, tradeId);
+  return api(page, "POST", `/api/trades/${trade.thread_id}/${step}`, {
+    offer_id: trade.offer_id,
     revision: trade.revision,
     idempotency_key: randomUUID(),
     ...(step === "confirm-swap" ? { destination_id: null } : {}),
@@ -92,5 +106,5 @@ export async function proposeToTrader(
     you_get: get.map(line),
     idempotency_key: randomUUID(),
   });
-  return trade.id as string;
+  return trade.thread_id as string;
 }

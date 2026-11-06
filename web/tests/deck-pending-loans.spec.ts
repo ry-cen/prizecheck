@@ -25,13 +25,12 @@ import { signInAsOwner } from "./support/sign-in";
 // want-list-pending-loans.md): under each needed line, the copies asked for and the copies a Friend agreed to lend,
 // beside the counts and never taken off them. It is read apart from the Want List and again on window focus, the page
 // becoming visible, the inbox pulse moving, Loans changing outside the Loans tab and a request this tab sent. It is not
-// live: a change that moves neither (a write-off, the borrower's own step elsewhere) waits for the next focus.
+// live: Loan commands move the thread pulse; a Deck List change on another device waits for focus.
 //
 // Misty W lends (another collector, signed in first); the test's page is Ash K, signing in afterwards as a new
 // account. A call through `page.request` stands for another device: it shares the account but tells the tab nothing.
 
-const isPulse = (url: string) =>
-  url.includes("/api/social/conversations/pulse");
+const isPulse = (url: string) => url.includes("/api/threads/pulse");
 const isPending = (url: string) => url.includes("/api/loans/pending");
 
 /** The collector leaves the window and comes straight back: a blur, then a focus, with no time passing in between, so
@@ -90,7 +89,7 @@ async function request(
 }
 
 const accept = (lender: Page, loan: string, edition: string, copies: number) =>
-  loanStep(lender, loan, `/api/loans/${loan}/accept`, {
+  loanStep(lender, loan, "accept", {
     lines: [{ edition_id: edition, promised: String(copies) }],
   });
 
@@ -153,7 +152,7 @@ test("a Friend's answer from their own device shows once the inbox pulse moves",
   await expect(lines).toContainText("3 of 3");
 });
 
-test("a write-off moves no pulse, so it shows at the next focus", async ({
+test("a write-off moves the thread pulse and refreshes pending quantities without focus", async ({
   page,
   collectors,
 }) => {
@@ -165,20 +164,62 @@ test("a write-off moves no pulse, so it shows at the next focus", async ({
   const lines = needs(page, deckName);
   await expect(lines).toContainText("Misty W agreed to lend 3");
 
-  await loanStep(misty, loan, `/api/loans/${loan}/handover`);
-  await loanStep(misty, loan, `/api/loans/${loan}/write-off`, {
+  const beforePulse = await api(page, "GET", "/api/threads/pulse");
+  await loanStep(misty, loan, "handover");
+  await loanStep(misty, loan, "write-off", {
     lines: [{ edition_id: iono, quantity: "1" }],
   });
-  // A pulse runs and finds nothing new: the write-off stored no inbox update, and nothing reads the pending again.
+  // Every Loan command touches its item, including a write-off with no inbox update.
+  const afterPulse = await api(page, "GET", "/api/threads/pulse");
+  expect(afterPulse.watermark).not.toBe(beforePulse.watermark);
+  const pulse = page.waitForResponse((response) => isPulse(response.url()));
+  const reread = page.waitForResponse((response) => isPending(response.url()));
+  await page.clock.runFor(61_000);
+  await Promise.all([pulse, reread]);
+  await expect(lines).toContainText("Misty W agreed to lend 2");
+  await expect(lines).toContainText("3 of 3");
+});
+
+test("a Deck List change on another device refreshes pending Loans at focus without a thread signal or new Want List pins", async ({
+  page,
+  collectors,
+}) => {
+  const { iono, misty, deck, deckName } = await lending(page, collectors, 3, 3);
+  await request(page, misty, iono, 3, deck);
+  await page.clock.install();
+  const initialCost = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/want-list/cost"
+  );
+  await openScoped(page, deck);
+  await (await initialCost).finished();
+  const lines = needs(page, deckName);
+  await expect(lines).toContainText("Asked Misty W for 3");
+  await expect(lines).toContainText("3 of 3");
+  const before = await api(page, "GET", "/api/threads/pulse");
+  // This changes only the Deck List, not the agreement or its waiting step.
+  await setLine(page, deck, iono, 0);
+  expect((await api(page, "GET", "/api/threads/pulse")).watermark).toBe(
+    before.watermark
+  );
   const pulse = page.waitForResponse((response) => isPulse(response.url()));
   await page.clock.runFor(61_000);
   await pulse;
-  await expect(lines).toContainText("Misty W agreed to lend 3");
+  await expect(lines).toContainText("Asked Misty W for 3");
 
+  let wantReads = 0;
+  const wantRead = /\/api\/want-list\?deck=/;
+  await page.route(wantRead, (route) => {
+    wantReads++;
+    return route.continue();
+  });
   const reread = page.waitForResponse((response) => isPending(response.url()));
   await focus(page);
-  await reread;
-  await expect(lines).toContainText("Misty W agreed to lend 2");
+  const fresh = await reread;
+  expect((await fresh.json()).lines).toEqual([]);
+  // Focus reads pending Loans independently. No new Want List or pins arrived.
+  await expect(lines).toContainText("3 of 3");
+  await expect(lines).not.toContainText("Asked Misty W");
+  expect(wantReads).toBe(0);
 });
 
 test("receiving the copies on another device clears the line's pending note at the next focus", async ({
@@ -188,14 +229,14 @@ test("receiving the copies on another device clears the line's pending note at t
   const { iono, misty, deck, deckName } = await lending(page, collectors, 2, 3);
   const loan = await request(page, misty, iono, 2, deck);
   await accept(misty, loan, iono, 2);
-  await loanStep(misty, loan, `/api/loans/${loan}/handover`);
+  await loanStep(misty, loan, "handover");
   await page.clock.install();
   await openScoped(page, deck);
   const lines = needs(page, deckName);
   await expect(lines).toContainText("Misty W agreed to lend 2");
 
   // Ash's other device confirms the copies arrived: they are Borrowed Copies now, not on their way.
-  await loanStep(page, loan, `/api/loans/${loan}/handover`);
+  await loanStep(page, loan, "handover");
   const reread = page.waitForResponse((response) => isPending(response.url()));
   await focus(page);
   await reread;

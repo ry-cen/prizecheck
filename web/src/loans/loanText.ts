@@ -249,19 +249,15 @@ export function waitingLabel(loan: LoanView): string | null {
       return "Answer";
     case "fix_picks":
       return "Update picks";
-    case "choose":
+    case "choose_written_off":
       return "Keep or remove";
     case "confirm_return":
       return "Confirm return";
-    case "finish_return":
-      return "Finish return";
     case "hand_over":
       return "Hand over";
-    case "receive":
+    case "confirm_handover":
       return "Confirm you have them";
-    case "return":
-      return loan.role === "lender" ? "Record a return" : "Give cards back";
-    case "more_time":
+    case "answer_more_time":
       return "Asked for more time";
     default:
       return null;
@@ -358,6 +354,8 @@ export function loanStepMessage(
     return "The Loan may not have been updated. Check your connection and try again.";
   const error = cause as SocialError;
   switch (error.code) {
+    case "OFFER_CHANGED":
+      return "The Loan terms changed. Review the current terms before trying again.";
     case "LOAN_CHANGED":
     case "STEP_NOT_ALLOWED":
       return "This Loan has changed. Check it and try again.";
@@ -429,6 +427,8 @@ export function sendMessage(
       return "That Deck is gone. Choose another, or none.";
     case "INVALID_RETURN_BY":
       return "Choose a return-by date from today on.";
+    case "OFFER_CHANGED":
+      return "The Loan terms changed. Review the current terms before trying again.";
     case "LOAN_CHANGED":
       return `${friend} already answered your earlier request. Send this one as a new request?`;
     case "TOO_MANY_CHANGES":
@@ -453,4 +453,61 @@ export function loanDeckUseHint(
   if (Number.isSafeInteger(need) && need > 0)
     parts.push(`Your Decks still need ${need}.`);
   return parts.join(" ") || null;
+}
+
+export const RECOVERY_TEXT = Object.freeze({
+  lend_offer: "Your Lend Offer may not have been sent.",
+  borrow_request: "Your Borrow Request may not have been sent.",
+  move_borrowed: "Your Move of borrowed cards may not have finished.",
+  start_return: "Your return may not have been started.",
+  write_off: "Your Write-off may not have been saved.",
+  all: "A Loan change may not have gone through.",
+  replay: "Send it again",
+  cancel: "Don't send it",
+  check: "Check again",
+  done: "It was sent.",
+  voided: "It wasn't sent.",
+  otherAccount:
+    "This may have been sent from another account. Check your Loans there.",
+  signIn: "Sign in as {name} to finish this.",
+  signBackIn: "Sign back in to finish this.",
+  busy: "This is being checked in another tab. Try again in a moment.",
+  not_saved:
+    "This couldn't be saved on this device, so it wasn't sent. Check your browser's settings for this site, then try again.",
+  no_locks:
+    "This browser can't send this safely. Update your browser, then try again.",
+  settled_elsewhere: "This was already checked.",
+  blockedDraft:
+    "Your Borrow Request to {name} may not have been sent. Review it first.",
+});
+export function pendingHeadline(
+  kind: import("./loanAttempt").DurableKind | null
+): string {
+  return kind === null ? RECOVERY_TEXT.all : RECOVERY_TEXT[kind];
+}
+export function signInAs(name: string | null): string {
+  return name === null
+    ? RECOVERY_TEXT.signBackIn
+    : RECOVERY_TEXT.signIn.replace("{name}", name);
+}
+export function resultText(
+  outcome: import("./loanIntents").FlowOutcome
+): string | null {
+  switch (outcome.kind) {
+    case "done":
+      return RECOVERY_TEXT.done;
+    case "voided":
+      return outcome.otherAccount
+        ? RECOVERY_TEXT.otherAccount
+        : RECOVERY_TEXT.voided;
+    case "not_sent":
+      return RECOVERY_TEXT.voided;
+    case "busy":
+    case "not_saved":
+    case "no_locks":
+    case "settled_elsewhere":
+      return RECOVERY_TEXT[outcome.kind];
+    default:
+      return null;
+  }
 }

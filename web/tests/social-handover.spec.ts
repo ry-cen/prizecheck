@@ -1,3 +1,4 @@
+import { loanView } from "./support/loans";
 // Ticket #253: Handover (spec "Loan steps", "Web screens"). Misty, a Friend, holds two Iono PAL 185 in her Deck and a
 // Boss's Orders PAL 172 in Unsorted, and accepted Ash's Borrow Request for one of each (sent and accepted through the
 // API, as #252's spec covers). She then moves the Boss's Orders into her Deck, so its pick is out of date: the Loan
@@ -8,7 +9,7 @@
 // catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
@@ -203,8 +204,9 @@ test("both sides confirm a handover for their own inventory, after the lender fi
     deck_id: charizard,
     idempotency_key: randomUUID(),
   });
-  const asked = await api(lender, "GET", `/api/social/loans/${sent.id}`);
-  await api(lender, "POST", `/api/loans/${sent.id}/accept`, {
+  const asked = await loanView(lender, sent.id);
+  await api(lender, "POST", `/api/loans/${asked.thread_id}/accept`, {
+    loan_id: asked.loan_id,
     revision: asked.revision,
     idempotency_key: randomUUID(),
     lines: [
@@ -266,7 +268,7 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   page.on("request", (request) => {
     if (
       request.method() === "POST" &&
-      request.url().endsWith(`/api/loans/${sent.id}/handover`)
+      request.url().endsWith(`/api/loans/${sent.thread_id}/handover`)
     )
       handovers.push(request.postDataJSON());
   });
@@ -284,74 +286,99 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await page.setViewportSize(PHONE);
   await expectPageChecks(page, "a handover to confirm on a phone");
   await page.setViewportSize(DESKTOP);
-  await lender.getByRole("button", { name: "Mark as handed over" }).click();
-  await expect(lender.getByRole("main")).toContainText(
-    "Waiting for Ash K to confirm"
-  );
-
-  // Her Collection: Lent out counts the copies, and its list links to the Loan; her Deck's line says where they are.
-  await lender.goto(`${ORIGIN}/collection`);
-  await expect(lender.getByRole("main")).toContainText("· 2 lent out");
-  const sidebar = lender.getByRole("complementary", { name: "Sidebar" });
-  await sidebar.getByRole("button", { name: /^Lent out/ }).click();
-  const lentOut = lender.getByRole("dialog", { name: "Lent out" });
-  const lentCards = lentOut
-    .getByRole("list", { name: "Lent cards" })
-    .getByRole("link");
-  await expect(lentCards).toHaveCount(2);
-  await expect(lentCards.filter({ hasText: "Iono" })).toContainText(
-    "1 lent to Ash K"
-  );
-  await expect(lentCards.filter({ hasText: "Boss's Orders" })).toContainText(
-    "1 lent to Ash K"
-  );
-  await expectPageChecks(lender, "the Lent out list");
-  await lentOut.getByRole("button", { name: "Close Lent out" }).click();
-  await lender.setViewportSize(PHONE);
-  await lender.getByRole("button", { name: "Open locations" }).click();
-  await lender.getByRole("button", { name: /^Lent out/ }).click();
-  await expect(lentOut).toBeVisible();
-  await expectPageChecks(lender, "the Lent out list on a phone");
-  await lentCards.filter({ hasText: "Iono" }).click();
-  await expect(lender).toHaveURL(`${ORIGIN}/loans/${sent.id}`);
-  await expect(title(lender)).toHaveText("You're lending Ash K 2 cards");
-  await lender.setViewportSize(DESKTOP);
-  await lender.goto(`${ORIGIN}/decks/${lugia}`);
-  await expect(
-    lender.getByRole("button", { name: /lent out; 1 lent to Ash K$/ }).first()
-  ).toBeVisible();
-  // Lent copies are missing from the Deck, but still hers: never "not owned", never drawn as cards to buy ($).
-  await expect(
-    lender.getByRole("button", { name: /^(Iono|Boss's Orders),.*not owned/ })
-  ).toHaveCount(0);
-  await lender.getByRole("radio", { name: "Stacked" }).click();
-  // The Deck List's pile, not the card panel's tile: lent copies are still owned there (#254), "0 free of 1 owned".
-  const bossPile = lender.getByRole("button", {
-    name: /^Boss's Orders, Paldea Evolved/,
+  // Capture Ash's real command before Misty's confirmation, then release it
+  // after her inventory checks. A background pulse may refresh the open screen;
+  // the retry assertion requires a retained stale POST, not a race with that poll.
+  const handoverUrl = `${ORIGIN}/api/loans/${sent.thread_id}/handover`;
+  let releaseHandover!: () => void;
+  const heldHandover = new Promise<void>((resolve) => {
+    releaseHandover = resolve;
   });
-  await expect(bossPile).toContainText("×1 1 lent");
-  await expect(bossPile).not.toContainText("$");
-  // A line with copies owned elsewhere, lent out and not owned still fits its pile on a phone: the summary wraps.
-  await hold(lender, mistyUnsorted, ids["PAL 185"], 1);
-  await setLine(lender, lugia, ids["PAL 185"], 4);
-  await lender.setViewportSize(PHONE);
-  await lender.reload();
-  await lender.getByRole("tab", { name: /^Deck/ }).click();
-  const ionoPile = lender.getByRole("button", {
-    name: /^Iono, Paldea Evolved/,
-  });
-  await expect(ionoPile).toContainText("×4 1↻ 1 lent 1$");
-  await expect(
-    ionoPile
-      .locator(":scope > span")
-      .last()
-      .evaluate((summary) => summary.scrollWidth <= summary.clientWidth)
-  ).resolves.toBe(true);
-  await expectPageChecks(lender, "a Deck's piles with lent copies on a phone");
-  await lender.setViewportSize(DESKTOP);
+  let held = false;
+  const holdFirstHandover = async (route: Route) => {
+    if (route.request().method() === "POST" && !held) {
+      held = true;
+      await heldHandover;
+    }
+    await route.continue();
+  };
+  await page.route(handoverUrl, holdFirstHandover);
+  try {
+    await page.getByRole("button", { name: "Yes, I have them" }).click();
+    await expect.poll(() => handovers.length).toBe(1);
+    await lender.getByRole("button", { name: "Mark as handed over" }).click();
+    await expect(lender.getByRole("main")).toContainText(
+      "Waiting for Ash K to confirm"
+    );
 
-  // Ash confirms from the screen opened before either side confirmed.
-  await page.getByRole("button", { name: "Yes, I have them" }).click();
+    // Her Collection: Lent out counts the copies, and its list links to the Loan; her Deck's line says where they are.
+    await lender.goto(`${ORIGIN}/collection`);
+    await expect(lender.getByRole("main")).toContainText("· 2 lent out");
+    const sidebar = lender.getByRole("complementary", { name: "Sidebar" });
+    await sidebar.getByRole("button", { name: /^Lent out/ }).click();
+    const lentOut = lender.getByRole("dialog", { name: "Lent out" });
+    const lentCards = lentOut
+      .getByRole("list", { name: "Lent cards" })
+      .getByRole("link");
+    await expect(lentCards).toHaveCount(2);
+    await expect(lentCards.filter({ hasText: "Iono" })).toContainText(
+      "1 lent to Ash K"
+    );
+    await expect(lentCards.filter({ hasText: "Boss's Orders" })).toContainText(
+      "1 lent to Ash K"
+    );
+    await expectPageChecks(lender, "the Lent out list");
+    await lentOut.getByRole("button", { name: "Close Lent out" }).click();
+    await lender.setViewportSize(PHONE);
+    await lender.getByRole("button", { name: "Open locations" }).click();
+    await lender.getByRole("button", { name: /^Lent out/ }).click();
+    await expect(lentOut).toBeVisible();
+    await expectPageChecks(lender, "the Lent out list on a phone");
+    await lentCards.filter({ hasText: "Iono" }).click();
+    await expect(lender).toHaveURL(`${ORIGIN}/loans/${sent.thread_id}`);
+    await expect(title(lender)).toHaveText("You're lending Ash K 2 cards");
+    await lender.setViewportSize(DESKTOP);
+    await lender.goto(`${ORIGIN}/decks/${lugia}`);
+    await expect(
+      lender.getByRole("button", { name: /lent out; 1 lent to Ash K$/ }).first()
+    ).toBeVisible();
+    // Lent copies are missing from the Deck, but still hers: never "not owned", never drawn as cards to buy ($).
+    await expect(
+      lender.getByRole("button", { name: /^(Iono|Boss's Orders),.*not owned/ })
+    ).toHaveCount(0);
+    await lender.getByRole("radio", { name: "Stacked" }).click();
+    // The Deck List's pile, not the card panel's tile: lent copies are still owned there (#254), "0 free of 1 owned".
+    const bossPile = lender.getByRole("button", {
+      name: /^Boss's Orders, Paldea Evolved/,
+    });
+    await expect(bossPile).toContainText("×1 1 lent");
+    await expect(bossPile).not.toContainText("$");
+    // A line with copies owned elsewhere, lent out and not owned still fits its pile on a phone: the summary wraps.
+    await hold(lender, mistyUnsorted, ids["PAL 185"], 1);
+    await setLine(lender, lugia, ids["PAL 185"], 4);
+    await lender.setViewportSize(PHONE);
+    await lender.reload();
+    await lender.getByRole("tab", { name: /^Deck/ }).click();
+    const ionoPile = lender.getByRole("button", {
+      name: /^Iono, Paldea Evolved/,
+    });
+    await expect(ionoPile).toContainText("×4 1↻ 1 lent 1$");
+    await expect(
+      ionoPile
+        .locator(":scope > span")
+        .last()
+        .evaluate((summary) => summary.scrollWidth <= summary.clientWidth)
+    ).resolves.toBe(true);
+    await expectPageChecks(
+      lender,
+      "a Deck's piles with lent copies on a phone"
+    );
+    await lender.setViewportSize(DESKTOP);
+  } finally {
+    releaseHandover();
+    await page.unroute(handoverUrl, holdFirstHandover);
+  }
+  // The real stale command now gets LOAN_CHANGED and retries the peer-only change.
   await expect(title(page)).toHaveText("You have 2 cards of Misty W's");
   expect(handovers).toHaveLength(2);
   expect(handovers[1].revision).toBe(handovers[0].revision + 1);
@@ -363,7 +390,10 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await page.getByRole("link", { name: "All Loans" }).click();
   await expect(
     page.getByRole("region", { name: "Out now" }).getByRole("link")
-  ).toContainText("You have 2 cards of Misty W's");
+  ).toContainText("You give 0 · You get 2");
+  await expect(
+    page.getByRole("region", { name: "Out now" }).getByRole("link")
+  ).toContainText("Misty W");
 
   await lender.goto(`${ORIGIN}/loans/${sent.id}`);
   await expect(title(lender)).toHaveText("Ash K has 2 cards of yours");

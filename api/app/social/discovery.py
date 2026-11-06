@@ -66,9 +66,11 @@ Radius = Literal[5, 10, 25, 50]
 Band = Literal['under_5', '5_to_10', '10_to_25', '25_to_50']
 BANDS: dict[int, Band] = {1: 'under_5', 2: '5_to_10', 3: '10_to_25', 4: '25_to_50'}
 REACH = 'SELECT other_id, how, band FROM trade_reach(%(viewer)s, %(others)s::text[])'
-# The collectors this collector shares a conversation with, as user ids (a deleted collector's side is NULL).
-PARTNERS = """SELECT CASE WHEN user_low = %(me)s THEN user_high ELSE user_low END AS other FROM conversation
-  WHERE (user_low = %(me)s OR user_high = %(me)s) AND user_low IS NOT NULL AND user_high IS NOT NULL"""
+# Durable partners from item threads and grandfathered contacts; deleted slots are excluded.
+PARTNERS = """SELECT CASE WHEN user_low = %(me)s THEN user_high ELSE user_low END AS other FROM thread
+  WHERE (user_low = %(me)s OR user_high = %(me)s) AND user_low IS NOT NULL AND user_high IS NOT NULL
+  UNION SELECT CASE WHEN user_low = %(me)s THEN user_high ELSE user_low END FROM legacy_contact
+  WHERE user_low = %(me)s OR user_high = %(me)s"""
 
 
 @dataclass(frozen=True)
@@ -230,8 +232,10 @@ def read_discovery(conn, user_id: str) -> DiscoverySettings:
 
 
 def conversation_in_reach(conn, user_id: str) -> bool:
-    """Whether a collector the caller shares a conversation with is in the caller's reach by that conversation. Reach is
-    symmetric, so that collector can read the caller's Trade List through it."""
+    """Whether a durable partner outside Friends can still read the caller's Trade List.
+
+    Keep the reach check so Blocks, Suspensions and deleted accounts confer no visibility.
+    """
     partners = [row['other'] for row in conn.execute(PARTNERS, {'me': user_id})]
     return any(found.how == 'conversation' for found in reach(conn, user_id, partners).values())
 
@@ -298,3 +302,42 @@ def set_discovery(command: SetDiscovery, user_id: str = Depends(verified_user)):
                 lon = EXCLUDED.lon, radius_mi = EXCLUDED.radius_mi, updated_at = now()""",
                          (user_id, enabled, *place, radius))
         return read_discovery(conn, user_id)
+
+
+def new_contact_lock(conn, user_id: str) -> None:
+    """Before owner locks, serialize all new Trade openings by this caller."""
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.new_conversation:' || %s))", (user_id,))
+
+
+def count_new_contact(conn, user_id: str, other_id: str) -> None:
+    """Count a first Trade with a stranger, before inserting its thread.
+
+    Caller holds new_contact_lock then both owners. Friends and pairs sharing
+    any thread or legacy_contact are exempt. Retain the existing database event
+    kind so no migration or independent daily quota is needed at cutover.
+    """
+    held = conn.execute("""WITH k AS (SELECT hashtext('prizecheck.new_conversation:' || %s)::bigint AS key)
+      SELECT EXISTS (SELECT 1 FROM pg_locks,k WHERE locktype='advisory' AND pid=pg_backend_pid()
+        AND granted AND objsubid=1 AND mode='ExclusiveLock'
+        AND classid=((k.key >> 32) & 4294967295)::oid AND objid=(k.key & 4294967295)::oid) AS held""",
+                        (user_id,)).fetchone()['held']
+    if not held:
+        raise RuntimeError('count_new_contact requires new_contact_lock before owner locks')
+    reached = reach_one(conn, user_id, other_id)
+    if reached is not None and reached.how == 'friend':
+        return
+    low, high = sorted((user_id, other_id))
+    known = conn.execute("""SELECT EXISTS(SELECT 1 FROM thread WHERE user_low=%s AND user_high=%s
+      UNION ALL SELECT 1 FROM legacy_contact WHERE user_low=%s AND user_high=%s) AS known""",
+                         (low, high, low, high)).fetchone()['known']
+    if known:
+        return
+    conn.execute("DELETE FROM handle_lookup_event WHERE user_id=%s AND kind='new_conversation' "
+                 "AND created_at < now() - interval '24 hours'", (user_id,))
+    recent = conn.execute("SELECT count(*) AS n,min(created_at) AS oldest FROM handle_lookup_event "
+                          "WHERE user_id=%s AND kind='new_conversation'", (user_id,)).fetchone()
+    if recent['n'] >= 10:
+        wait = conn.execute("SELECT ceil(extract(epoch FROM %s + interval '24 hours' - now())/60) AS minutes",
+                            (recent['oldest'],)).fetchone()['minutes']
+        raise HTTPException(429, {'code': 'TOO_MANY_NEW_CONVERSATIONS', 'retry_after_minutes': max(1, int(wait))})
+    conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'new_conversation')", (user_id,))

@@ -76,6 +76,9 @@ export function useCatalogBrowse(
   const [first, setFirst] = useState<BrowsePage | null>(null);
   const [editions, setEditions] = useState<BrowseEdition[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  // Observer callbacks can outlive the render that supplied their cursor.
+  // Invalidate synchronously when a replacement walk starts, before React paints.
+  const walkCursor = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [notice, setNotice] = useState("");
@@ -121,6 +124,7 @@ export function useCatalogBrowse(
     // Own Adds counted before this read; ones that land while it runs stay counted.
     const ownAtStart = ownChanges.current;
     // No later page of the previous walk may be asked for while this first page is on its way.
+    walkCursor.current = null;
     setNextCursor(null);
     setLoading(true);
     try {
@@ -143,6 +147,7 @@ export function useCatalogBrowse(
       ownChanges.current = Math.max(0, ownChanges.current - ownAtStart);
       setFirst(page);
       setEditions(rows);
+      walkCursor.current = cursor;
       setNextCursor(cursor);
       setNotice(why);
       setError(null);
@@ -163,7 +168,12 @@ export function useCatalogBrowse(
   // One page request at a time: the sentinel and the last tile's focus can both ask before a render.
   const inFlight = useRef(false);
   const loadMore = useCallback(async () => {
-    if (!nextCursor || inFlight.current || consumed.current.has(nextCursor))
+    if (
+      !nextCursor ||
+      nextCursor !== walkCursor.current ||
+      inFlight.current ||
+      consumed.current.has(nextCursor)
+    )
       return;
     consumed.current.add(nextCursor);
     inFlight.current = true;
@@ -173,6 +183,7 @@ export function useCatalogBrowse(
       const page = await browseEditions(current.current, nextCursor);
       if (mine !== latest.current) return;
       setEditions((previous) => [...previous, ...page.editions]);
+      walkCursor.current = page.next_cursor;
       setNextCursor(page.next_cursor);
       setError(null);
     } catch (cause) {

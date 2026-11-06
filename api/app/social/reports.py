@@ -20,15 +20,15 @@ suspension. Every decision and restore writes one append-only ``moderation_event
 
 **Locks.** A decision takes the advisory lock ``prizecheck.trade_report:<id>`` (it serialises decisions on one report),
 then, for removal and suspension, ``discovery.lock_discovery`` for the account, then the owner rows in one ascending
-call, then profile, ``trade`` and ``conversation`` rows; the event and the report update come last. A restore takes
+call, then profile, ``loan``, ``trade`` and finally ``thread`` rows; the event and the report update come last. A restore takes
 ``lock_discovery`` and then the collector's owner row. This module never writes the discovery tables: it calls the
 ``discovery`` helpers.
 
-**Suspension** is one transaction. It reads the account's counterparties of unconfirmed Trades without locking, locks
+**Suspension** is one transaction. It reads the account's counterparties of pending Loans and unconfirmed Trades without locking, locks
 the account and them in one ascending call, reads them again and starts over (at most 3 attempts, then 503
 INVENTORY_TEMPORARILY_UNAVAILABLE) when a new one appeared. It then sets the flag, switches discovery off, cancels the
-Trades nobody confirmed with the suspended account as the actor, and moves the watermark of the account's other
-conversations. Loans and friendships stay. A deadlock in a decision or restore is 503 and is not retried.
+pending Loans then Trades nobody confirmed, with the suspended account as actor, and touches all of the
+account's threads once. Handed-over Loans, half-confirmed Trades and friendships stay. A deadlock in a decision or restore is 503 and is not retried.
 """
 import json
 from datetime import datetime
@@ -43,12 +43,14 @@ from ..location_tree import error, replay
 from ..db import connect
 from ..identity import require_owner, verified_user
 from ..core.catalog.card_facts import card_facts
-from .conversations import account_changed, decode_cursor, encode_cursor, normalize_text, pair_row
+from .conversations import account_changed, pair_row
+from .threads import ThreadTouch, touch_threads, decode_cursor, encode_cursor, normalize_text
+from .loans import end_loans_between
 from .discovery import (account_state, lock_discovery, reach_one, remove_from_discovery, restore_discovery, switch_off,
                         trader_user)
 from .friends import _command, command_payload, place_block
 from .owners import lock_owners
-from .trades import end_trades_between, unconfirmed_partners
+from .trades import end_trades_between
 
 router = APIRouter(prefix='/api/social/reports', tags=['social'])
 admin_router = APIRouter(tags=['admin'])
@@ -212,7 +214,7 @@ PAIR_TRADE = """SELECT 1 FROM trade WHERE id = %(id)s
   AND ((proposer_id = %(a)s AND recipient_id = %(b)s) OR (proposer_id = %(b)s AND recipient_id = %(a)s))"""
 PROFILES = 'SELECT user_id, display_name, handle FROM collector_profile WHERE user_id = ANY(%s)'
 COPY_MESSAGES = """INSERT INTO trade_report_message (report_id, message_id, from_reporter, body, at)
-  SELECT %(r)s, m.id, m.from_low = %(low)s, m.body, m.created_at FROM message m WHERE m.conversation_id = %(c)s"""
+  SELECT %(r)s, m.id, m.from_low = %(low)s, m.body, m.created_at FROM message m WHERE m.conversation_id = %(c)s ON CONFLICT DO NOTHING"""
 PAIR_TRADES = """SELECT * FROM trade
   WHERE (proposer_id = %(a)s AND recipient_id = %(b)s) OR (proposer_id = %(b)s AND recipient_id = %(a)s)
   ORDER BY created_at, id"""
@@ -302,6 +304,11 @@ def _file_report(conn, report_id: UUID, reporter: str, reported: str, command: R
     if conversation:
         conn.execute(COPY_MESSAGES, {'r': report_id, 'low': conversation['user_low'] == reporter,
                                      'c': conversation['id']})
+    conn.execute("""INSERT INTO trade_report_message(report_id,message_id,from_reporter,body,at)
+      SELECT %s,m.id,m.from_low=(t.user_low=%s),m.body,m.created_at
+      FROM thread_message m JOIN thread t ON t.id=m.thread_id
+      WHERE (t.user_low=%s AND t.user_high=%s) OR (t.user_low=%s AND t.user_high=%s)
+      ON CONFLICT DO NOTHING""", (report_id, reporter, reporter, reported, reported, reporter))
     _snapshot_trades(conn, report_id, reporter, reported)
 
 
@@ -324,7 +331,9 @@ def report_collector(command: ReportCollector, user_id: str = Depends(verified_u
         if command.source == 'trade':
             if conn.execute(PAIR_TRADE, {'id': command.trade_id, 'a': user_id, 'b': other}).fetchone() is None:
                 error(404, 'TRADE_NOT_FOUND')
-        elif reach_one(conn, user_id, other) is None and pair_row(conn, user_id, other) is None:
+        elif reach_one(conn, user_id, other) is None and pair_row(conn, user_id, other) is None and not conn.execute(
+            'SELECT 1 FROM thread WHERE (user_low=%s AND user_high=%s) OR (user_low=%s AND user_high=%s) LIMIT 1',
+            (user_id, other, other, user_id)).fetchone():
             error(404, 'COLLECTOR_NOT_FOUND')
 
     def apply(conn, row):
@@ -425,17 +434,27 @@ def _decide_row(conn, report, owner_id: str, action: str, note: str | None) -> R
     return ReportDecided(status=status, decision=action)
 
 
-def _suspend(conn, account: str, partners: list[str], touched: list[UUID]) -> None:
-    """Suspends the account under the locks of ``decide_trade_report``: the flag, discovery off, the unconfirmed
-    Trades with each counterparty cancelled by the account, and (the first time only) the watermark of every other
-    conversation of the account. Loans and friendships stay."""
+def unconfirmed_partners(conn, user_id: str) -> tuple[list[str], list[UUID]]:
+    """All cancellable Loan and Trade partners, read twice around the owner locks."""
+    rows = conn.execute("""SELECT borrower_id AS a,lender_id AS b,thread_id FROM loan
+      WHERE (borrower_id=%(me)s OR lender_id=%(me)s) AND borrower_id IS NOT NULL AND lender_id IS NOT NULL
+        AND state IN ('requested','offered','accepted') AND lender_handover_at IS NULL AND borrower_handover_at IS NULL
+      UNION ALL SELECT proposer_id,recipient_id,thread_id FROM trade
+      WHERE (proposer_id=%(me)s OR recipient_id=%(me)s) AND proposer_id IS NOT NULL AND recipient_id IS NOT NULL
+        AND state IN ('proposed','accepted') AND proposer_swap_at IS NULL AND recipient_swap_at IS NULL""", {'me': user_id}).fetchall()
+    return (sorted({r['b'] if r['a'] == user_id else r['a'] for r in rows}),
+            sorted({r['thread_id'] for r in rows}))
+
+
+def _suspend(conn, account: str, partners: list[str]) -> None:
+    """Close pending Loans, then Trades globally by id, and touch all threads once last."""
     newly = conn.execute('UPDATE collector_profile SET suspended_at = now() '
                          'WHERE user_id = %s AND suspended_at IS NULL RETURNING 1', (account,)).fetchone()
     switch_off(conn, account)
-    for other in partners:
-        end_trades_between(conn, account, other)
-    if newly:
-        account_changed(conn, account, touched)
+    closed = set(end_loans_between(conn, account, partners, 'closed_suspended'))
+    closed.update(end_trades_between(conn, account, partners, 'closed_suspended'))
+    rows = conn.execute('SELECT id FROM thread WHERE user_low=%s OR user_high=%s', (account, account)).fetchall() if newly else []
+    touch_threads(conn, [*closed, *[ThreadTouch(id=r['id'], activity=False) for r in rows]])
 
 
 def _suspension(report_id: UUID, user_id: str, raw_note: str | None) -> ReportDecided:
@@ -455,10 +474,10 @@ def _suspension(report_id: UUID, user_id: str, raw_note: str | None) -> ReportDe
                 lock_owners(conn, account, *seen)
                 if account_state(conn, account) is None:
                     error(409, 'REPORTED_ACCOUNT_GONE')
-                partners, touched = unconfirmed_partners(conn, account)
+                partners, _ = unconfirmed_partners(conn, account)
                 if set(partners) - set(seen):
                     raise _Retry
-                _suspend(conn, account, partners, touched)
+                _suspend(conn, account, partners)
                 return _decide_row(conn, report, user_id, 'suspend', note)
         except _Retry:
             continue

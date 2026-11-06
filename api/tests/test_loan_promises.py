@@ -222,14 +222,15 @@ def test_an_edit_and_resend_racing_the_lenders_acceptance_waits_and_then_finds_t
                 psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
             accepted = executor.submit(accept, misty, loan, [(iono, 1)])
             hold_until(watch, accepted)
-            resent = executor.submit(send, ash, misty, [(iono, 2)], replaces=loan['id'])
+            from test_loan_threads import terms
+            resent = executor.submit(terms, ash, loan, iono, 2)
             accepted, resent = accepted.result(), resent.result()
     finally:
         held()
     assert accepted.status_code == 200, accepted.text
     # The resend waited on the Loan row, then found the request answered; neither side deadlocked.
-    assert (resent.status_code, resent.json()['detail']['code']) == (409, 'LOAN_CHANGED')
-    assert [loan['state'] for loan in ok(call('GET', '/api/social/loans', ash))['loans']] == ['accepted']
+    assert (resent.status_code, resent.json()['detail']['code']) == (409, 'STEP_NOT_ALLOWED')
+    assert [item['state'] for item in ok(call('GET', '/api/loans?group=open', ash))] == ['accepted']
 
 
 def test_both_sides_cancelling_at_once_run_one_after_the_other(store):

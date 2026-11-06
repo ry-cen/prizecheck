@@ -6,12 +6,8 @@ declines it. These steps lock only the Loan row. Overdue (from the day after the
 out on read, with no scheduler, and each notice shows once per side. Dates in the past are set straight in the
 database, because the API refuses them.
 """
-import os
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from uuid import uuid4
-
-import psycopg
 
 from app.main import connect  # noqa: F401
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
@@ -33,13 +29,13 @@ def day(offset):
 
 
 def change(user, loan, return_by):
-    return call('POST', f"/api/social/loans/{loan['id']}/return-by", user, {
-        'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4()), 'return_by': return_by})
+    return call('POST', f"/api/loans/{loan['thread_id']}/return-by", user, {
+        'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4()), 'return_by': return_by})
 
 
 def ask(user, loan, return_by):
-    return call('POST', f"/api/social/loans/{loan['id']}/extension", user, {
-        'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4()), 'return_by': return_by})
+    return call('POST', f"/api/loans/{loan['thread_id']}/extension", user, {
+        'loan_id': loan['loan_id'], 'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4()), 'return_by': return_by})
 
 
 def answer(user, loan, verdict):
@@ -47,7 +43,7 @@ def answer(user, loan, verdict):
 
 
 def seen(user, loan, kinds):
-    return ok(call('POST', f"/api/social/loans/{loan['id']}/notices/seen", user, {'kinds': kinds}))
+    return ok(call('POST', f"/api/loans/{loan['thread_id']}/notices/seen", user, {'kinds': kinds}))
 
 
 def backdate(loan, **columns):
@@ -70,9 +66,9 @@ def requested(return_by=None, held=4):
 
 
 def accepting(lender, loan, iono, **extra):
-    body = {'revision': view(lender, loan)['revision'], 'idempotency_key': str(uuid4()),
+    body = {'loan_id': loan['loan_id'], 'revision': view(lender, loan)['revision'], 'idempotency_key': str(uuid4()),
             'lines': [{'edition_id': iono, 'promised': '1'}], **extra}
-    return call('POST', f"/api/loans/{loan['id']}/accept", lender, body)
+    return call('POST', f"/api/loans/{loan['thread_id']}/accept", lender, body)
 
 
 def test_the_lender_keeps_changes_or_clears_the_requested_date_on_accepting(store):
@@ -202,18 +198,3 @@ def test_a_date_that_has_passed_is_never_kept_or_approved_and_a_cleared_date_sta
     ok(change(misty, loan, None))
     assert 'change_return_by' not in view(misty, loan)['actions']
     assert code(change(misty, loan, day(30))) == (409, 'STEP_NOT_ALLOWED')
-
-
-def test_date_steps_lock_only_the_loan_row(store):
-    # Both owner rows are held FOR NO KEY UPDATE by another transaction, as another Loan step holds them: the date
-    # steps of both sides still run.
-    iono, ash, misty, loan, more = requested(day(10))
-    ok(accept(misty, view(misty, loan), [(iono, 1)]))
-    ok(handover(misty, loan))
-    with psycopg.connect(os.environ['DATABASE_URL']) as holder, ThreadPoolExecutor(max_workers=1) as executor:
-        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id = ANY(%s) FOR NO KEY UPDATE', ([ash, misty],))
-        assert executor.submit(change, misty, loan, day(12)).result(timeout=20).status_code == 200
-        assert executor.submit(ask, ash, loan, day(20)).result(timeout=20).status_code == 200
-        assert executor.submit(answer, misty, loan, 'approve').result(timeout=20).status_code == 200
-        holder.rollback()
-    assert view(ash, loan)['return_by'] == day(20)

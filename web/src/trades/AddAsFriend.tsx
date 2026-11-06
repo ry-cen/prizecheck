@@ -6,7 +6,6 @@ import {
   withdrawAddFriend,
   type FriendCommand,
   type FriendCommandResult,
-  type TimelineItem,
   type TraderView,
   type TradeView,
 } from "../social_generated";
@@ -36,15 +35,6 @@ export function showsAddFriend(trade: TradeView): boolean {
     trade.other.available === true &&
     trade.other.trader_id != null
   );
-}
-
-/** The id of the newest Trade in a conversation (items are newest first) that can offer Add as Friend. */
-export function newestAddFriendTrade(items: TimelineItem[]): string | null {
-  for (const item of items) {
-    if (item.kind === "trade" && item.trade && showsAddFriend(item.trade))
-      return item.trade.id;
-  }
-  return null;
 }
 
 type Shown = TraderView["add_friend"] | "loading";

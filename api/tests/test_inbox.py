@@ -53,7 +53,9 @@ def inbox(user):
 def waiting(user):
     """The inbox's waiting lines as (Loan id, step). The Loans tab's badge always counts the same Loans."""
     lines = [(loan['id'], loan['waiting']) for loan in inbox(user)['waiting']]
-    assert ok(call('GET', '/api/social/loans', user))['needs_you'] == len(lines)
+    thread_rows = ok(call('GET', '/api/loans?group=needs_you', user))
+    assert {item['id'] for item in thread_rows if item['waiting'] is not None} == {
+        loan['thread_id'] for loan in inbox(user)['waiting']}
     return lines
 
 
@@ -86,7 +88,7 @@ def test_waiting_on_you_follows_the_loan_through_its_steps_one_line_per_loan(sto
     assert waiting(misty) == []
     # Each side's handover waits on the other.
     ok(handover(misty, loan))
-    assert waiting(ash) == [(loan['id'], 'receive')] and waiting(misty) == []
+    assert waiting(ash) == [(loan['id'], 'confirm_handover')] and waiting(misty) == []
     second = more(day(10))
     ok(accept(misty, view(misty, second), [(iono, 1)]))
     ok(handover(ash, second))
@@ -99,7 +101,7 @@ def test_waiting_on_you_follows_the_loan_through_its_steps_one_line_per_loan(sto
     assert waiting(misty) == [(loan['id'], 'confirm_return')] and waiting(ash) == []
     ok(confirm_return(misty, loan))
     ok(ask(ash, second, day(20)))
-    assert waiting(misty) == [(second['id'], 'more_time')]
+    assert waiting(misty) == [(second['id'], 'answer_more_time')]
     ok(answer(misty, second, 'approve'))
     assert waiting(misty) == [] and waiting(ash) == []
 
@@ -107,7 +109,7 @@ def test_waiting_on_you_follows_the_loan_through_its_steps_one_line_per_loan(sto
 def test_a_write_off_choice_a_gone_collector_and_an_offer_wait_on_the_right_side(store):
     iono, ash, misty, binders, loan, _ = lent_loan({'Binder': 3}, 3)
     ok(write_off(misty, loan, [(iono, 1)]))
-    assert waiting(ash) == [(loan['id'], 'choose')] and waiting(misty) == []
+    assert waiting(ash) == [(loan['id'], 'choose_written_off')] and waiting(misty) == []
     ok(choose(ash, loan, 'remove'))
     assert waiting(ash) == []
     # Ash gives one back, and Misty deletes her account before confirming it: the return waits on Ash to finish, then
@@ -115,9 +117,16 @@ def test_a_write_off_choice_a_gone_collector_and_an_offer_wait_on_the_right_side
     ok(start_return(ash, loan, [(iono, 1)]))
     assert waiting(ash) == [] and waiting(misty) == [(loan['id'], 'confirm_return')]
     leave(misty)
-    assert waiting(ash) == [(loan['id'], 'finish_return')]
+    assert waiting(ash) == [(loan['id'], 'confirm_return')]
     ok(confirm_return(ash, loan))
-    assert waiting(ash) == [(loan['id'], 'return')]
+    assert waiting(ash) == [(loan['id'], 'confirm_return')]
+    (out,) = inbox(ash)['waiting']
+    assert out['pending_return'] is None
+    with connect() as conn:
+        at = conn.execute('SELECT borrower_handover_at FROM loan WHERE id=%s', (loan['id'],)).fetchone()
+    assert datetime.fromisoformat(out['since']) == at['borrower_handover_at']
+    ok(start_return(ash, loan, [(iono, 1)]))
+    assert waiting(ash) == []
     # A Lend Offer waits on the borrower.
     ids_, iono, ash, misty, binders = offering()
     offered = ok(offer(misty, ash, [(binders['Binder A'], iono, 2)]), 201)
@@ -213,18 +222,25 @@ def test_overdue_and_the_nudge_are_listed_until_cleared_and_the_loan_screen_mark
     assert updates(misty) == []
 
 
-def test_a_step_storing_an_update_never_waits_on_the_other_collectors_owner_row(store):
-    # Ash's owner row is held FOR UPDATE, as his own inventory commands hold it. Misty's steps that tell him something
-    # still run: the update names him with no key check on his row.
+def test_steps_storing_loan_updates_never_wait_on_the_other_collectors_owner_row(store):
+    # The accepted narrow owner sets leave these lender steps independent of the borrower's commands.
+    # Fetch each current round/revision before holding Ash's row; inventory reads must not join the proof.
     iono, ash, misty, loan, more = requested(day(10), held=4)
     ok(accept(misty, view(misty, loan), [(iono, 1)]))
     second = view(misty, more())
-    with psycopg.connect(os.environ['DATABASE_URL']) as holder, ThreadPoolExecutor(max_workers=1) as executor:
-        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR UPDATE', (ash,))
-        assert executor.submit(change, misty, loan, day(12)).result(timeout=20).status_code == 200
-        assert executor.submit(step, misty, second, 'decline').result(timeout=20).status_code == 200
-        assert executor.submit(step, misty, view(misty, loan), 'cancel').result(timeout=20).status_code == 200
-        holder.rollback()
+    operations = ((change, misty, loan, day(12)), (step, misty, second, 'decline'),
+                  (step, misty, loan, 'cancel'))
+    for operation in operations:
+        operation = (*operation[:2], view(misty, operation[2]), operation[3])
+        with psycopg.connect(os.environ['DATABASE_URL']) as holder, ThreadPoolExecutor(max_workers=1) as executor:
+            holder.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR UPDATE', (ash,))
+            pending = executor.submit(*operation)
+            try:
+                response = pending.result(timeout=20)
+                assert response.status_code == 200, response.text
+            finally:
+                # Release even on failure before the executor waits for its worker to exit.
+                holder.rollback()
     assert [kind for kind, _, _, _ in updates(ash)] == ['cancelled', 'declined', 'return_by_changed', 'accepted']
 
 
@@ -377,9 +393,12 @@ def loan_part(body: bytes) -> bytes:
 
 
 def trade_lines(user):
-    """The inbox's Trade lines as (Trade id, step). The Trades list's ``needs_you`` always counts the same Trades."""
+    """Inbox steps match Needs you rows with a waiting step; unread-only rows are separate."""
     lines = [(line['id'], line['waiting']) for line in inbox(user)['trade_waiting']]
-    assert ok(call('GET', '/api/social/trades', user))['needs_you'] == len(lines)
+    listed = [item for item in ok(call('GET', '/api/trades?group=needs_you', user))
+              if item['waiting'] is not None]
+    assert {item['id'] for item in listed} == {line['thread_id'] for line in inbox(user)['trade_waiting']}
+    assert len(listed) == len(lines)
     return lines
 
 
@@ -422,16 +441,18 @@ def test_trades_wait_on_the_side_whose_step_it_is_one_line_each(store):
     # A proposal waits on its recipient's answer, never on the proposer.
     assert trade_lines(ash) == [(trade['id'], 'answer')] and trade_lines(misty) == []
     ok(accept_trade(ash, trade))
-    # Accepted, nobody confirmed and every pick up to date: it waits on neither side.
-    assert trade_lines(ash) == [] and trade_lines(misty) == []
+    # Agreed, nobody confirmed: each eligible participant needs to confirm.
+    assert trade_lines(ash) == [(trade['id'], 'confirm_swap')]
+    assert trade_lines(misty) == [(trade['id'], 'confirm_swap')]
     # Misty moves a picked Iono out of the Trade Binder: her pick is out of date, which waits on her until she fixes
     # it, on the Trades list too.
     shelf = place(misty, 'Shelf')
     move_one(misty, binder, iono, shelf)
-    assert trade_lines(misty) == [(trade['id'], 'fix_picks')] and trade_lines(ash) == []
+    assert trade_lines(misty) == [(trade['id'], 'fix_picks')]
+    assert trade_lines(ash) == [(trade['id'], 'confirm_swap')]
     seen = ok(read(misty, trade))
     assert (seen['waiting'], seen['needs_you'], seen['section']) == ('fix_picks', True, 'needs_you')
-    assert ok(read(ash, trade))['section'] == 'to_swap'
+    assert ok(read(ash, trade))['section'] == 'needs_you'
     # Ash confirms. Misty's Trade now needs two things and is still one line, the out-of-date pick first.
     ok(confirm(ash, trade))
     assert trade_lines(misty) == [(trade['id'], 'fix_picks')] and trade_lines(ash) == []
@@ -462,10 +483,10 @@ def test_each_trade_line_says_since_when_the_trade_reached_the_step_that_waits_o
     move_one(misty, binder, iono, place(misty, 'Shelf'))
     row = row_of(trade)
     assert trade_since(misty, trade) == row['accepted_at'] != row['created_at']
-    # A swap the other side confirmed waits from that confirmation.
+    # Own confirmation has waited since agreement, even after the other side confirms.
     ok(use_suggested_picks(misty, trade))
     ok(confirm(ash, trade))
-    assert trade_since(misty, trade) == row_of(trade)['recipient_swap_at'] is not None
+    assert trade_since(misty, trade) == row_of(trade)['accepted_at'] is not None
 
 
 def test_trade_steps_tell_the_other_side_who_took_them_and_a_withdraw_reads_as_withdrawn(store):
@@ -483,13 +504,13 @@ def test_trade_steps_tell_the_other_side_who_took_them_and_a_withdraw_reads_as_w
     ok(confirm(ash, swapped))
     ok(confirm(misty, swapped))
     assert trade_told(misty) == [
-        ('accepted', cancelled['id'], 'Ash K.', 'proposer', 'closed', False),
-        ('declined', declined['id'], 'Ash K.', 'proposer', 'closed', False),
-        ('accepted', swapped['id'], 'Ash K.', 'proposer', 'closed', False)]
+        ('accepted', cancelled['thread_id'], 'Ash K.', 'proposer', 'closed', False),
+        ('declined', declined['thread_id'], 'Ash K.', 'proposer', 'closed', False),
+        ('accepted', swapped['thread_id'], 'Ash K.', 'proposer', 'closed', False)]
     assert trade_told(ash) == [
-        ('swapped', swapped['id'], 'Misty W.', 'recipient', 'closed', False),
-        ('cancelled', cancelled['id'], 'Misty W.', 'recipient', 'closed', False),
-        ('withdrawn', withdrawn['id'], 'Misty W.', 'recipient', 'closed', False)]
+        ('swapped', swapped['thread_id'], 'Misty W.', 'recipient', 'closed', False),
+        ('cancelled', cancelled['thread_id'], 'Misty W.', 'recipient', 'closed', False),
+        ('withdrawn', withdrawn['thread_id'], 'Misty W.', 'recipient', 'closed', False)]
     # Each says when its step stored it; none is a Loan update, and no update is time-based.
     with connect() as conn:
         stored_at = {str(row['id']): row['created_at'] for row in conn.execute(
@@ -569,7 +590,8 @@ def test_only_the_two_sides_see_a_trades_lines_and_updates_and_none_names_a_loca
     (line,) = bodies['misty'].json()['trade_waiting']
     assert set(line) == set(TradeView.model_fields) | {'since'}
     (update,) = bodies['misty'].json()['trade_updates']
-    assert set(update) == {'id', 'kind', 'trade_id', 'trade_state', 'role', 'other_name', 'read', 'at'}
+    assert set(update) == {'id', 'kind', 'trade_id', 'thread_id', 'trade_state', 'role', 'other_name', 'read', 'at'}
+    assert update['thread_id'] == update['trade_id'] == trade['thread_id']
     # A stranger sees none of it, even an update row naming the Trade that was stored for them.
     assert bodies['gary'].json() == {'waiting': [], 'updates': [], 'trade_waiting': [], 'trade_updates': []}
     with connect() as conn:
@@ -613,7 +635,7 @@ def test_the_inbox_reads_trades_without_waiting_on_a_lock_and_a_trade_step_never
     ('proposed', 'recipient', (None, None), True, 'answer', 'needs_you'),
     ('proposed', 'proposer', (None, None), True, None, 'pending'),
     ('accepted', 'proposer', (None, None), True, 'fix_picks', 'needs_you'),
-    ('accepted', 'proposer', (None, None), False, None, 'to_swap'),
+    ('accepted', 'proposer', (None, None), False, 'confirm_swap', 'needs_you'),
     ('accepted', 'proposer', (None, 'now'), True, 'fix_picks', 'needs_you'),
     ('accepted', 'proposer', (None, 'now'), False, 'confirm_swap', 'needs_you'),
     ('accepted', 'proposer', ('now', None), True, None, 'pending'),
@@ -635,5 +657,24 @@ def test_since_is_read_from_the_time_the_trade_reached_its_step():
            'proposer_swap_at': None, 'recipient_swap_at': swapped_}
     assert trades.trade_waiting_since('ash', row, 'answer') == created
     assert trades.trade_waiting_since('misty', row, 'fix_picks') == accepted_
-    assert trades.trade_waiting_since('misty', row, 'confirm_swap') == swapped_
+    assert trades.trade_waiting_since('misty', row, 'confirm_swap') == accepted_
+    assert trades.trade_waiting_since('misty', {**row, 'recipient_swap_at': None}, 'confirm_swap') == accepted_
+    assert trades.trade_waiting_since('misty', {**row, 'accepted_at': None}, 'confirm_swap') == created
     assert trades.trade_waiting_since('misty', {**row, 'accepted_at': None}, 'fix_picks') == created
+
+
+def test_unread_only_trade_needs_you_without_an_inbox_waiting_step(store):
+    from test_threads import message
+    ids, ash, misty, binder, box = trading()
+    trade = proposed(misty, ash, give=[(ids['PAL 185'], 1)], get=[(ids['SVI 166'], 1)])
+    agreed = ok(accept_trade(ash, trade))
+    ok(confirm(misty, agreed))
+    assert trade_lines(misty) == []
+    assert trade_lines(ash) == [(trade['id'], 'confirm_swap')]
+    ok(message(ash, agreed['thread_id'], 'See you at the league'), 201)
+    listed = ok(call('GET', '/api/trades?group=needs_you', misty))
+    assert len(listed) == 1
+    assert listed[0]['id'] == agreed['thread_id']
+    assert listed[0]['waiting'] is None and listed[0]['unread'] == 1
+    assert trade_lines(misty) == []
+    assert trade_lines(ash) == [(trade['id'], 'confirm_swap')]

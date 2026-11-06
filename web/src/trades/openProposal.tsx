@@ -61,6 +61,12 @@ export function proposeFromTradeList(key: string, back: string): void {
   origin = { key, back };
 }
 
+/** Review one card with its question in a new item composer. */
+export function proposeFromCard(key: string, card: ProposalCard): void {
+  seed = { key, proposal: seededProposal(card) };
+  origin = null;
+}
+
 /** Seeds the same in-memory handoff as Ask to trade, with only the match currently visible in the row. */
 export function proposeFromMatch(
   key: string,

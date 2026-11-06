@@ -1,3 +1,4 @@
+import { loanItems } from "./support/loans";
 import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
@@ -103,8 +104,8 @@ test("a Friend chip in the deck builder's panel asks the Friend through the Borr
   await expect(
     page.getByRole("region", { name: "Borrow Request drafts" })
   ).toContainText("1 card");
-  const loans = await api(page, "GET", "/api/social/loans");
-  expect(loans.loans).toEqual([]);
+  const loans = await loanItems(page);
+  expect(loans).toEqual([]);
   // The ask changes no count: the line still needs both copies.
   await expect(
     panel.getByRole("list", { name: `What ${deckName} needs` })

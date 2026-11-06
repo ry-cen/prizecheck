@@ -27,7 +27,7 @@ x-api-environment: &api-environment
   PUBLIC_PROJECTION_ADAPTER: filesystem
   PUBLIC_PROJECTION_DIR: /var/lib/prizecheck/public
   PRICE_RUNNER_LOCK_DIR: /var/lib/prizecheck/price-runners
-  # Collector price kill switch (api/app/price_reads.py): `off` answers every price row unavailable without a query.
+  # Collector price kill switch (api/app/core/prices/price_reads.py): `off` answers every price row unavailable without a query.
   # off disables storing and serving TCGplayer copies.
   ART_TCGPLAYER_SOURCE: ${ART_TCGPLAYER_SOURCE:-on}
   PRICE_READS: ${PRICE_READS:-on}

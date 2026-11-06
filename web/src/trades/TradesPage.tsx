@@ -1,8 +1,10 @@
-import { useId } from "react";
+import { ListDetailLayout } from "../ui/ListDetailLayout";
+import { LegacyThreadLink } from "../threads/LegacyThreadLink";
+import { useId, useState } from "react";
 import { PageHeader } from "../shell/PageHeader";
 import { Segmented, segmentId } from "../ui/Segmented";
-import { ConversationList } from "./ConversationList";
-import { ConversationPage } from "./ConversationPage";
+import { ThreadList } from "../threads/ThreadList";
+
 import { CounterPage } from "./CounterPage";
 import { FindTrades } from "./FindTrades";
 import { MyTradeList } from "./MyTradeList";
@@ -36,6 +38,7 @@ type Props = {
  */
 export function TradesPage({ active, section, onNavigate }: Props) {
   const idBase = useId();
+  const [revision, setRevision] = useState(0);
   const panelId = `${idBase}-panel`;
   const route = tradesRoute(section);
   if (route.kind === "new")
@@ -63,21 +66,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
       />
     );
   if (route.kind === "with" || route.kind === "conversation")
-    return (
-      <ConversationPage
-        key={
-          route.kind === "with"
-            ? `with-${route.traderId}`
-            : `conversation-${route.id}`
-        }
-        target={
-          route.kind === "with"
-            ? { traderId: route.traderId }
-            : { conversationId: route.id }
-        }
-        onNavigate={onNavigate}
-      />
-    );
+    return <LegacyThreadLink section={section!} onNavigate={onNavigate} />;
   if (route.kind === "counter")
     return (
       <CounterPage
@@ -86,13 +75,58 @@ export function TradesPage({ active, section, onNavigate }: Props) {
         onNavigate={onNavigate}
       />
     );
-  if (route.kind === "trade" || route.kind === "missing")
+  if (
+    route.kind === "trade" ||
+    route.kind === "missing" ||
+    (route.kind === "view" && route.view === "trades")
+  )
     return (
-      <TradeScreen
-        key={route.kind === "trade" ? route.id : "missing"}
-        tradeId={route.kind === "trade" ? route.id : null}
-        onAllTrades={() => onNavigate(TRADES_PATH)}
-        onNavigate={onNavigate}
+      <ListDetailLayout
+        selected={route.kind !== "view"}
+        queue={
+          <div className="flex min-w-0 flex-col gap-4">
+            {route.kind === "view" ? (
+              <h1 className="text-display font-semibold">Trades</h1>
+            ) : (
+              <h2 className="text-heading">Trades</h2>
+            )}
+            <Segmented
+              label="Trades view"
+              idBase={idBase}
+              panelId={panelId}
+              value="trades"
+              onChange={(next) => onNavigate(tradesViewPath(next))}
+              options={TRADES_VIEWS}
+            />
+            <div
+              role="tabpanel"
+              id={panelId}
+              aria-labelledby={segmentId(idBase, "trades")}
+            >
+              <ThreadList
+                kind="trade"
+                active={active}
+                revision={revision}
+                selected={route.kind === "trade" ? route.id : null}
+                onOpen={(id) => onNavigate(`/trades/${id}`)}
+              />
+            </div>
+          </div>
+        }
+        detail={
+          route.kind === "view" ? (
+            <p className="m-0 text-body text-text-muted">Choose a Trade…</p>
+          ) : (
+            <TradeScreen
+              active={active}
+              onTradeChanged={() => setRevision((n) => n + 1)}
+              key={route.kind === "trade" ? route.id : "missing"}
+              tradeId={route.kind === "trade" ? route.id : null}
+              onAllTrades={() => onNavigate(TRADES_PATH)}
+              onNavigate={onNavigate}
+            />
+          )
+        }
       />
     );
   const view = route.view;
@@ -120,9 +154,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
         aria-labelledby={segmentId(idBase, view)}
         className="flex min-w-0 flex-col gap-5"
       >
-        {view === "trades" ? (
-          <ConversationList active={active} onNavigate={onNavigate} />
-        ) : view === "find" ? (
+        {view === "find" ? (
           <FindTrades onNavigate={onNavigate} />
         ) : (
           <MyTradeList onOpenCollection={() => onNavigate("/collection")} />

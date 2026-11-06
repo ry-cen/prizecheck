@@ -1,5 +1,9 @@
+import { threadPulse } from "../threads/threadPulse";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getConversationPulse } from "../social_generated";
+import { getThreadPulse, type PulseCount } from "../social_generated";
+
+// A contract failure is reported once per page session, including provider remounts.
+let reportedMalformedPulse = false;
 
 /** How often the pulse is read while a conversation page is open and the document is visible. */
 export const PULSE_FAST_MS = 15_000;
@@ -15,8 +19,10 @@ export const PULSE_SLOW_MS = 60_000;
 export function usePulse(
   fast: boolean,
   onChange: () => void
-): { unread: number; poll: () => void } {
-  const [unread, setUnread] = useState(0);
+): { trades: PulseCount; loans: PulseCount; poll: () => void } {
+  const zero = { needs_you: 0, waiting: 0, unread: 0 };
+  const [trades, setTrades] = useState<PulseCount>(zero);
+  const [loans, setLoans] = useState<PulseCount>(zero);
   const watermark = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlight = useRef(false);
@@ -41,11 +47,23 @@ export function usePulse(
     }
     clear();
     inFlight.current = true;
-    getConversationPulse()
+    getThreadPulse()
       .then(
-        (pulse) => {
+        (value) => {
           if (!alive.current) return;
-          setUnread(pulse.unread_conversations);
+          const pulse = threadPulse(value);
+          if (!pulse) {
+            if (!reportedMalformedPulse) {
+              reportedMalformedPulse = true;
+              // Do not include response contents: they may contain collector data.
+              console.error(
+                "Invalid thread pulse response; retaining the last valid counts."
+              );
+            }
+            return;
+          }
+          setTrades(pulse.trades);
+          setLoans(pulse.loans);
           const before = watermark.current;
           watermark.current = pulse.watermark;
           if (before !== null && before !== pulse.watermark) changed.current();
@@ -95,5 +113,5 @@ export function usePulse(
     timer.current = setTimeout(poll, fast ? PULSE_FAST_MS : PULSE_SLOW_MS);
   }, [fast, poll, clear]);
 
-  return { unread, poll };
+  return { trades, loans, poll };
 }

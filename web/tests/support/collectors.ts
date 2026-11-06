@@ -31,6 +31,8 @@ export type OtherCollectorOptions = {
   next?: string;
   /** Options for the new context, for example a phone viewport. */
   contextOptions?: BrowserContextOptions;
+  /** Awaits page instrumentation before sign-in can start application reads. */
+  beforeSignIn?: (page: Page) => Promise<void>;
 };
 
 /** Takes every account holding the owner email out of the owner seat. Their sessions keep working. */
@@ -64,7 +66,11 @@ export async function retireOwnerSeat(pool: Pool): Promise<void> {
 export async function signInOtherCollector(
   browser: Browser,
   pool: Pool,
-  { next = "/collection", contextOptions = {} }: OtherCollectorOptions = {}
+  {
+    next = "/collection",
+    contextOptions = {},
+    beforeSignIn,
+  }: OtherCollectorOptions = {}
 ): Promise<OtherCollector> {
   // Only against a verification stack's disposable database: by hand it would take the developer's own account out
   // of the owner seat.
@@ -74,13 +80,24 @@ export async function signInOtherCollector(
     );
   await retireOwnerSeat(pool);
   const context = await browser.newContext(contextOptions);
-  const page = await context.newPage();
-  await signInAsOwner(page, next);
-  const session = await page.request.get(new URL("/auth/session", ORIGIN).href);
-  const { userId } = (await session.json()) as { userId?: string };
-  expect(userId, "the new collector's session names its account").toBeTruthy();
-  await retireOwnerSeat(pool);
-  return { context, page, userId: userId! };
+  try {
+    const page = await context.newPage();
+    if (beforeSignIn) await beforeSignIn(page);
+    await signInAsOwner(page, next);
+    const session = await page.request.get(
+      new URL("/auth/session", ORIGIN).href
+    );
+    const { userId } = (await session.json()) as { userId?: string };
+    expect(
+      userId,
+      "the new collector's session names its account"
+    ).toBeTruthy();
+    await retireOwnerSeat(pool);
+    return { context, page, userId: userId! };
+  } catch (error) {
+    await context.close();
+    throw error;
+  }
 }
 
 /**

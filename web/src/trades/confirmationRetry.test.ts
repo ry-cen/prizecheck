@@ -18,6 +18,8 @@ const card = {
 };
 const trade: TradeView = {
   id: "trade",
+  thread_id: "trade-thread",
+  offer_id: "trade",
   state: "accepted",
   closed_reason: null,
   closed_by: null,
@@ -58,12 +60,14 @@ const tradeSide: OwnTradeSide = {
 const swapped = { ...trade, revision: 5, they_confirmed_swap: true };
 const loan: LoanView = {
   id: "loan",
+  thread_id: "loan-thread",
+  loan_id: "loan",
   kind: "borrow_request",
   state: "accepted",
   closed_reason: null,
   closed_by: null,
   role: "lender",
-  other: { collector_id: "ash", handle: "ash", display_name: "Ash" },
+  other: { collector_id: "ash", display_name: "Ash" },
   return_by: "2026-12-01",
   you_confirmed_handover: false,
   they_confirmed_handover: false,

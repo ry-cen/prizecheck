@@ -2,6 +2,7 @@
  "components": {
   "schemas": {
    "AcceptBorrowRequest": {
+    "additionalProperties": false,
     "properties": {
      "account_id": {
       "anyOf": [
@@ -28,6 +29,11 @@
       "title": "Lines",
       "type": "array"
      },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
      "return_by": {
       "anyOf": [
        {
@@ -47,6 +53,7 @@
      }
     },
     "required": [
+     "loan_id",
      "revision",
      "idempotency_key",
      "lines"
@@ -55,6 +62,7 @@
     "type": "object"
    },
    "AcceptLendOffer": {
+    "additionalProperties": false,
     "description": "The borrower's answer to a Lend Offer (#258): the copies taken per line (\"0\" leaves a line out; the rest is\nreleased) and one of their Decks for the cards (None for Unsorted).",
     "properties": {
      "account_id": {
@@ -94,6 +102,11 @@
       "title": "Lines",
       "type": "array"
      },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
      "revision": {
       "minimum": 1.0,
       "title": "Revision",
@@ -101,6 +114,7 @@
      }
     },
     "required": [
+     "loan_id",
      "revision",
      "idempotency_key",
      "lines"
@@ -328,6 +342,7 @@
     "type": "object"
    },
    "AskForMoreTime": {
+    "additionalProperties": false,
     "description": "The later return-by date the borrower asks for (#256).",
     "properties": {
      "account_id": {
@@ -346,6 +361,11 @@
       "title": "Idempotency Key",
       "type": "string"
      },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
      "return_by": {
       "format": "date",
       "title": "Return By",
@@ -358,6 +378,7 @@
      }
     },
     "required": [
+     "loan_id",
      "revision",
      "idempotency_key",
      "return_by"
@@ -3037,7 +3058,61 @@
     "title": "ChangeDeckListLine",
     "type": "object"
    },
+   "ChangeOffer": {
+    "description": "A Counter (Trading #278): the countered proposal's revision and a key, then the reply's own lines and cash,\nfrom the counterer's side, as a send names them.",
+    "properties": {
+     "cash": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/TradeCashRequest"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "idempotency_key": {
+      "format": "uuid",
+      "title": "Idempotency Key",
+      "type": "string"
+     },
+     "offer_id": {
+      "format": "uuid",
+      "title": "Offer Id",
+      "type": "string"
+     },
+     "revision": {
+      "minimum": 1.0,
+      "title": "Revision",
+      "type": "integer"
+     },
+     "you_get": {
+      "default": [],
+      "items": {
+       "$ref": "#/components/schemas/TradeLineRequest"
+      },
+      "title": "You Get",
+      "type": "array"
+     },
+     "you_give": {
+      "default": [],
+      "items": {
+       "$ref": "#/components/schemas/TradeLineRequest"
+      },
+      "title": "You Give",
+      "type": "array"
+     }
+    },
+    "required": [
+     "offer_id",
+     "revision",
+     "idempotency_key"
+    ],
+    "title": "ChangeOffer",
+    "type": "object"
+   },
    "ChangeReturnBy": {
+    "additionalProperties": false,
     "description": "The lender's new return-by date (#256), or None to clear it.",
     "properties": {
      "account_id": {
@@ -3054,6 +3129,11 @@
      "idempotency_key": {
       "format": "uuid",
       "title": "Idempotency Key",
+      "type": "string"
+     },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
       "type": "string"
      },
      "return_by": {
@@ -3075,6 +3155,7 @@
      }
     },
     "required": [
+     "loan_id",
      "revision",
      "idempotency_key",
      "return_by"
@@ -4460,6 +4541,50 @@
     "title": "ConfirmPicks",
     "type": "object"
    },
+   "ConfirmReturn": {
+    "additionalProperties": false,
+    "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
+     "idempotency_key": {
+      "format": "uuid",
+      "title": "Idempotency Key",
+      "type": "string"
+     },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
+     "return_id": {
+      "format": "uuid",
+      "title": "Return Id",
+      "type": "string"
+     },
+     "revision": {
+      "minimum": 1.0,
+      "title": "Revision",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "loan_id",
+     "revision",
+     "idempotency_key",
+     "return_id"
+    ],
+    "title": "ConfirmReturn",
+    "type": "object"
+   },
    "ConfirmSwap": {
     "description": "Confirm swap. ``destination_id``: one of the confirmer's own Storage Leaves or Decks for the cards they get, or\nNone for Unsorted; ignored when they get none. ``deck_switches``: the switches the collector left ticked, each as\nthe side read offered it, with at most its count.",
     "properties": {
@@ -4488,6 +4613,11 @@
       "title": "Idempotency Key",
       "type": "string"
      },
+     "offer_id": {
+      "format": "uuid",
+      "title": "Offer Id",
+      "type": "string"
+     },
      "revision": {
       "minimum": 1.0,
       "title": "Revision",
@@ -4495,6 +4625,7 @@
      }
     },
     "required": [
+     "offer_id",
      "revision",
      "idempotency_key"
     ],
@@ -4513,7 +4644,8 @@
         "confirm_swap",
         "use_suggested_picks",
         "withdraw",
-        "cancel"
+        "cancel",
+        "change_offer"
        ],
        "type": "string"
       },
@@ -4601,6 +4733,11 @@
       "title": "Needs You",
       "type": "boolean"
      },
+     "offer_id": {
+      "format": "uuid",
+      "title": "Offer Id",
+      "type": "string"
+     },
      "other": {
       "$ref": "#/components/schemas/TradeParty"
      },
@@ -4647,6 +4784,11 @@
       "title": "They Confirmed Swap",
       "type": "boolean"
      },
+     "thread_id": {
+      "format": "uuid",
+      "title": "Thread Id",
+      "type": "string"
+     },
      "waiting": {
       "anyOf": [
        {
@@ -4684,6 +4826,8 @@
     },
     "required": [
      "id",
+     "thread_id",
+     "offer_id",
      "state",
      "closed_reason",
      "closed_by",
@@ -4705,270 +4849,6 @@
     "title": "ConfirmedSwap",
     "type": "object"
    },
-   "ConversationParty": {
-    "description": "The other collector as the reader sees them in a conversation. ``trader_id`` is their address for messages\n(None once their account is deleted); ``handle`` is set for Friends only; ``band`` is the distance band (None\nunless both are in open discovery, and None when they are unavailable); ``completed_trades`` is None when they\nare unavailable. Never their collector id.",
-    "properties": {
-     "band": {
-      "anyOf": [
-       {
-        "enum": [
-         "under_5",
-         "5_to_10",
-         "10_to_25",
-         "25_to_50"
-        ],
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Band"
-     },
-     "completed_trades": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Completed Trades"
-     },
-     "display_name": {
-      "title": "Display Name",
-      "type": "string"
-     },
-     "friend": {
-      "title": "Friend",
-      "type": "boolean"
-     },
-     "handle": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Handle"
-     },
-     "trader_id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Trader Id"
-     }
-    },
-    "required": [
-     "trader_id",
-     "display_name",
-     "friend",
-     "handle",
-     "band",
-     "completed_trades"
-    ],
-    "title": "ConversationParty",
-    "type": "object"
-   },
-   "ConversationPulse": {
-    "description": "What the web polls: how many visible conversations are unread, and an opaque watermark that changes when\nanything the shell shows may have changed.",
-    "properties": {
-     "unread_conversations": {
-      "title": "Unread Conversations",
-      "type": "integer"
-     },
-     "watermark": {
-      "title": "Watermark",
-      "type": "string"
-     }
-    },
-    "required": [
-     "unread_conversations",
-     "watermark"
-    ],
-    "title": "ConversationPulse",
-    "type": "object"
-   },
-   "ConversationSummary": {
-    "description": "One row of the conversation list. ``open_trades``: Trades not closed. ``waiting_on_you``: those that wait on the\nreader. ``unread``: the other side wrote since the reader last read. ``archived``: hidden until newer activity.",
-    "properties": {
-     "archived": {
-      "title": "Archived",
-      "type": "boolean"
-     },
-     "id": {
-      "format": "uuid",
-      "title": "Id",
-      "type": "string"
-     },
-     "last_activity_at": {
-      "format": "date-time",
-      "title": "Last Activity At",
-      "type": "string"
-     },
-     "last_message": {
-      "anyOf": [
-       {
-        "$ref": "#/components/schemas/LastMessage"
-       },
-       {
-        "type": "null"
-       }
-      ]
-     },
-     "open_trades": {
-      "title": "Open Trades",
-      "type": "integer"
-     },
-     "other": {
-      "$ref": "#/components/schemas/ConversationParty"
-     },
-     "status": {
-      "enum": [
-       "open",
-       "you_blocked",
-       "unavailable"
-      ],
-      "title": "Status",
-      "type": "string"
-     },
-     "unread": {
-      "title": "Unread",
-      "type": "boolean"
-     },
-     "waiting_on_you": {
-      "title": "Waiting On You",
-      "type": "integer"
-     }
-    },
-    "required": [
-     "id",
-     "other",
-     "status",
-     "last_message",
-     "open_trades",
-     "waiting_on_you",
-     "unread",
-     "archived",
-     "last_activity_at"
-    ],
-    "title": "ConversationSummary",
-    "type": "object"
-   },
-   "ConversationView": {
-    "description": "A conversation and its newest page of items (newest first), or an empty one (``id`` None) for a Friend the\nreader has not written to. ``status``: 'open', 'you_blocked' (the reader blocked the other) or 'unavailable' (the\nother blocked the reader, is suspended or is deleted; the three read alike). ``can_message`` and ``can_propose``:\nthe conversation is open and the reader is not suspended. ``can_report``: the other collector still exists.\n``next_before`` is the cursor of the next, older page.",
-    "properties": {
-     "can_message": {
-      "title": "Can Message",
-      "type": "boolean"
-     },
-     "can_propose": {
-      "title": "Can Propose",
-      "type": "boolean"
-     },
-     "can_report": {
-      "title": "Can Report",
-      "type": "boolean"
-     },
-     "id": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Id"
-     },
-     "items": {
-      "items": {
-       "$ref": "#/components/schemas/TimelineItem"
-      },
-      "title": "Items",
-      "type": "array"
-     },
-     "next_before": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Next Before"
-     },
-     "other": {
-      "$ref": "#/components/schemas/ConversationParty"
-     },
-     "status": {
-      "enum": [
-       "open",
-       "you_blocked",
-       "unavailable"
-      ],
-      "title": "Status",
-      "type": "string"
-     }
-    },
-    "required": [
-     "id",
-     "other",
-     "status",
-     "can_message",
-     "can_propose",
-     "can_report",
-     "items",
-     "next_before"
-    ],
-    "title": "ConversationView",
-    "type": "object"
-   },
-   "ConversationsView": {
-    "description": "One page of the list, newest activity first. ``next_before``: the cursor of the next page. ``suspended``: the\nreader is suspended (the Trades tab says so).",
-    "properties": {
-     "conversations": {
-      "items": {
-       "$ref": "#/components/schemas/ConversationSummary"
-      },
-      "title": "Conversations",
-      "type": "array"
-     },
-     "next_before": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Next Before"
-     },
-     "suspended": {
-      "title": "Suspended",
-      "type": "boolean"
-     }
-    },
-    "required": [
-     "conversations",
-     "next_before",
-     "suspended"
-    ],
-    "title": "ConversationsView",
-    "type": "object"
-   },
    "CountedFromDeck": {
     "description": "Copies another Deck holds for its own line that this line counts (One Deck at a time only).",
     "properties": {
@@ -4987,53 +4867,6 @@
      "quantity"
     ],
     "title": "CountedFromDeck",
-    "type": "object"
-   },
-   "CounterTrade": {
-    "description": "A Counter (Trading #278): the countered proposal's revision and a key, then the reply's own lines and cash,\nfrom the counterer's side, as a send names them.",
-    "properties": {
-     "cash": {
-      "anyOf": [
-       {
-        "$ref": "#/components/schemas/TradeCashRequest"
-       },
-       {
-        "type": "null"
-       }
-      ]
-     },
-     "idempotency_key": {
-      "format": "uuid",
-      "title": "Idempotency Key",
-      "type": "string"
-     },
-     "revision": {
-      "minimum": 1.0,
-      "title": "Revision",
-      "type": "integer"
-     },
-     "you_get": {
-      "default": [],
-      "items": {
-       "$ref": "#/components/schemas/TradeLineRequest"
-      },
-      "title": "You Get",
-      "type": "array"
-     },
-     "you_give": {
-      "default": [],
-      "items": {
-       "$ref": "#/components/schemas/TradeLineRequest"
-      },
-      "title": "You Give",
-      "type": "array"
-     }
-    },
-    "required": [
-     "revision",
-     "idempotency_key"
-    ],
-    "title": "CounterTrade",
     "type": "object"
    },
    "CreateDeck": {
@@ -6748,6 +6581,78 @@
     "title": "EditLocation",
     "type": "object"
    },
+   "EditTerms": {
+    "additionalProperties": false,
+    "properties": {
+     "account_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Account Id"
+     },
+     "deck_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Deck Id"
+     },
+     "idempotency_key": {
+      "format": "uuid",
+      "title": "Idempotency Key",
+      "type": "string"
+     },
+     "lines": {
+      "items": {
+       "$ref": "#/components/schemas/LoanLineRequest"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Lines",
+      "type": "array"
+     },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
+     "return_by": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Return By"
+     },
+     "revision": {
+      "minimum": 1.0,
+      "title": "Revision",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "loan_id",
+     "revision",
+     "idempotency_key",
+     "lines"
+    ],
+    "title": "EditTerms",
+    "type": "object"
+   },
    "EditionReplacementInput": {
     "properties": {
      "edition_id": {
@@ -6856,6 +6761,111 @@
      "quantity"
     ],
     "title": "ElsewhereLocation",
+    "type": "object"
+   },
+   "EventEdition": {
+    "additionalProperties": false,
+    "description": "Public Printing and Variant facts needed to name an event's Edition.",
+    "properties": {
+     "collector_number": {
+      "title": "Collector Number",
+      "type": "string"
+     },
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "set_code": {
+      "title": "Set Code",
+      "type": "string"
+     },
+     "variant_label": {
+      "title": "Variant Label",
+      "type": "string"
+     }
+    },
+    "required": [
+     "edition_id",
+     "name",
+     "set_code",
+     "collector_number",
+     "variant_label"
+    ],
+    "title": "EventEdition",
+    "type": "object"
+   },
+   "EventView": {
+    "properties": {
+     "actor": {
+      "anyOf": [
+       {
+        "enum": [
+         "low",
+         "high"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Actor"
+     },
+     "at": {
+      "format": "date-time",
+      "title": "At",
+      "type": "string"
+     },
+     "data": {
+      "$ref": "#/components/schemas/_EventData"
+     },
+     "editions": {
+      "items": {
+       "$ref": "#/components/schemas/EventEdition"
+      },
+      "title": "Editions",
+      "type": "array"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "return_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Return Id"
+     },
+     "round_id": {
+      "format": "uuid",
+      "title": "Round Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "actor",
+     "kind",
+     "round_id",
+     "at"
+    ],
+    "title": "EventView",
     "type": "object"
    },
    "FormatCheck": {
@@ -8303,6 +8313,11 @@
       "title": "Role",
       "type": "string"
      },
+     "thread_id": {
+      "format": "uuid",
+      "title": "Thread Id",
+      "type": "string"
+     },
      "trade_id": {
       "format": "uuid",
       "title": "Trade Id",
@@ -8322,6 +8337,7 @@
      "id",
      "kind",
      "trade_id",
+     "thread_id",
      "trade_state",
      "role",
      "other_name",
@@ -8343,7 +8359,8 @@
         "confirm_swap",
         "use_suggested_picks",
         "withdraw",
-        "cancel"
+        "cancel",
+        "change_offer"
        ],
        "type": "string"
       },
@@ -8431,6 +8448,11 @@
       "title": "Needs You",
       "type": "boolean"
      },
+     "offer_id": {
+      "format": "uuid",
+      "title": "Offer Id",
+      "type": "string"
+     },
      "other": {
       "$ref": "#/components/schemas/TradeParty"
      },
@@ -8474,6 +8496,11 @@
       "title": "They Confirmed Swap",
       "type": "boolean"
      },
+     "thread_id": {
+      "format": "uuid",
+      "title": "Thread Id",
+      "type": "string"
+     },
      "waiting": {
       "anyOf": [
        {
@@ -8511,6 +8538,8 @@
     },
     "required": [
      "id",
+     "thread_id",
+     "offer_id",
      "state",
      "closed_reason",
      "closed_by",
@@ -8765,6 +8794,11 @@
       "title": "Lines",
       "type": "array"
      },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
      "needs_you": {
       "title": "Needs You",
       "type": "boolean"
@@ -8861,19 +8895,22 @@
       "title": "They Confirmed Handover",
       "type": "boolean"
      },
+     "thread_id": {
+      "format": "uuid",
+      "title": "Thread Id",
+      "type": "string"
+     },
      "waiting": {
       "anyOf": [
        {
         "enum": [
          "answer",
          "fix_picks",
-         "choose",
+         "choose_written_off",
          "confirm_return",
-         "finish_return",
          "hand_over",
-         "receive",
-         "return",
-         "more_time"
+         "confirm_handover",
+         "answer_more_time"
         ],
         "type": "string"
        },
@@ -8890,6 +8927,8 @@
     },
     "required": [
      "id",
+     "thread_id",
+     "loan_id",
      "kind",
      "state",
      "closed_reason",
@@ -8939,35 +8978,6 @@
      "relation"
     ],
     "title": "InviteCollector",
-    "type": "object"
-   },
-   "LastMessage": {
-    "description": "The newest message of a conversation: its sender, the first ``PREVIEW`` code points and its time.",
-    "properties": {
-     "at": {
-      "format": "date-time",
-      "title": "At",
-      "type": "string"
-     },
-     "from": {
-      "enum": [
-       "you",
-       "them"
-      ],
-      "title": "From",
-      "type": "string"
-     },
-     "preview": {
-      "title": "Preview",
-      "type": "string"
-     }
-    },
-    "required": [
-     "from",
-     "preview",
-     "at"
-    ],
-    "title": "LastMessage",
     "type": "object"
    },
    "LeafHoldings": {
@@ -9509,6 +9519,38 @@
     "title": "LoanDeck",
     "type": "object"
    },
+   "LoanDetail": {
+    "properties": {
+     "can_message": {
+      "title": "Can Message",
+      "type": "boolean"
+     },
+     "can_report": {
+      "title": "Can Report",
+      "type": "boolean"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "live_terms": {
+      "$ref": "#/components/schemas/LoanView"
+     },
+     "other": {
+      "$ref": "#/components/schemas/ThreadParty"
+     }
+    },
+    "required": [
+     "id",
+     "other",
+     "live_terms",
+     "can_message",
+     "can_report"
+    ],
+    "title": "LoanDetail",
+    "type": "object"
+   },
    "LoanLabel": {
     "description": "Copies of a line's Card Edition in this Deck that one borrower's Loans take: the borrower's Display Name.",
     "properties": {
@@ -9548,7 +9590,7 @@
     "type": "object"
    },
    "LoanParty": {
-    "description": "The other side of a Loan. ``collector_id`` addresses a new request (\"Edit and resend\") and is never shown; it\nand ``handle`` are None once the collector deleted their account, and ``display_name`` is the name they had.",
+    "description": "The other side of a Loan. ``collector_id`` addresses a new request (\"Edit and resend\") and is never shown; it\nis None once the collector deleted their account, and ``display_name`` is the name they had.",
     "properties": {
      "collector_id": {
       "anyOf": [
@@ -9564,23 +9606,11 @@
      "display_name": {
       "title": "Display Name",
       "type": "string"
-     },
-     "handle": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Handle"
      }
     },
     "required": [
      "collector_id",
-     "display_name",
-     "handle"
+     "display_name"
     ],
     "title": "LoanParty",
     "type": "object"
@@ -9631,6 +9661,20 @@
      "short"
     ],
     "title": "LoanPickPlace",
+    "type": "object"
+   },
+   "LoanResolution": {
+    "properties": {
+     "thread_id": {
+      "format": "uuid",
+      "title": "Thread Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "thread_id"
+    ],
+    "title": "LoanResolution",
     "type": "object"
    },
    "LoanSide": {
@@ -9706,6 +9750,7 @@
     "type": "object"
    },
    "LoanStep": {
+    "additionalProperties": false,
     "properties": {
      "account_id": {
       "anyOf": [
@@ -9723,6 +9768,11 @@
       "title": "Idempotency Key",
       "type": "string"
      },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
      "revision": {
       "minimum": 1.0,
       "title": "Revision",
@@ -9730,6 +9780,7 @@
      }
     },
     "required": [
+     "loan_id",
      "revision",
      "idempotency_key"
     ],
@@ -9833,6 +9884,11 @@
       "title": "Lines",
       "type": "array"
      },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
      "needs_you": {
       "title": "Needs You",
       "type": "boolean"
@@ -9924,19 +9980,22 @@
       "title": "They Confirmed Handover",
       "type": "boolean"
      },
+     "thread_id": {
+      "format": "uuid",
+      "title": "Thread Id",
+      "type": "string"
+     },
      "waiting": {
       "anyOf": [
        {
         "enum": [
          "answer",
          "fix_picks",
-         "choose",
+         "choose_written_off",
          "confirm_return",
-         "finish_return",
          "hand_over",
-         "receive",
-         "return",
-         "more_time"
+         "confirm_handover",
+         "answer_more_time"
         ],
         "type": "string"
        },
@@ -9953,6 +10012,8 @@
     },
     "required": [
      "id",
+     "thread_id",
+     "loan_id",
      "kind",
      "state",
      "closed_reason",
@@ -9969,28 +10030,6 @@
      "revision"
     ],
     "title": "LoanView",
-    "type": "object"
-   },
-   "LoansView": {
-    "description": "The Loans tab: every open Loan and the newest closed ones, newest first; ``needs_you`` counts the Loans that\nneed the reader (the tab's badge, #259).",
-    "properties": {
-     "loans": {
-      "items": {
-       "$ref": "#/components/schemas/LoanView"
-      },
-      "title": "Loans",
-      "type": "array"
-     },
-     "needs_you": {
-      "title": "Needs You",
-      "type": "integer"
-     }
-    },
-    "required": [
-     "loans",
-     "needs_you"
-    ],
-    "title": "LoansView",
     "type": "object"
    },
    "Location": {
@@ -10353,7 +10392,6 @@
     "type": "object"
    },
    "Message": {
-    "description": "One message. ``from`` is 'you' for the reader's own and 'them' for the other collector's.",
     "properties": {
      "at": {
       "format": "date-time",
@@ -11723,6 +11761,43 @@
     "title": "NewInviteLink",
     "type": "object"
    },
+   "OfferSummary": {
+    "properties": {
+     "cards": {
+      "items": {
+       "$ref": "#/components/schemas/SummaryCard"
+      },
+      "maxItems": 3,
+      "title": "Cards",
+      "type": "array"
+     },
+     "cash": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/SummaryCash"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "you_get": {
+      "title": "You Get",
+      "type": "string"
+     },
+     "you_give": {
+      "title": "You Give",
+      "type": "string"
+     }
+    },
+    "required": [
+     "cards",
+     "you_give",
+     "you_get"
+    ],
+    "title": "OfferSummary",
+    "type": "object"
+   },
    "OfferedCopies": {
     "description": "Copies of one Holding the lender selected: its Location and Card Edition.",
     "properties": {
@@ -12319,6 +12394,11 @@
       "title": "Lines",
       "type": "array"
      },
+     "return_id": {
+      "format": "uuid",
+      "title": "Return Id",
+      "type": "string"
+     },
      "started_by": {
       "enum": [
        "you",
@@ -12337,6 +12417,7 @@
      }
     },
     "required": [
+     "return_id",
      "started_by",
      "lines",
      "you_confirmed",
@@ -14058,6 +14139,48 @@
     "title": "PublishedMassEntryView",
     "type": "object"
    },
+   "Pulse": {
+    "properties": {
+     "loans": {
+      "$ref": "#/components/schemas/PulseCount"
+     },
+     "trades": {
+      "$ref": "#/components/schemas/PulseCount"
+     },
+     "watermark": {
+      "title": "Watermark",
+      "type": "string"
+     }
+    },
+    "required": [
+     "trades",
+     "loans",
+     "watermark"
+    ],
+    "title": "Pulse",
+    "type": "object"
+   },
+   "PulseCount": {
+    "properties": {
+     "needs_you": {
+      "default": 0,
+      "title": "Needs You",
+      "type": "integer"
+     },
+     "unread": {
+      "default": 0,
+      "title": "Unread",
+      "type": "integer"
+     },
+     "waiting": {
+      "default": 0,
+      "title": "Waiting",
+      "type": "integer"
+     }
+    },
+    "title": "PulseCount",
+    "type": "object"
+   },
    "PutAwayHolding": {
     "properties": {
      "edition_id": {
@@ -14119,6 +14242,19 @@
      "verified"
     ],
     "title": "QuotaStatus",
+    "type": "object"
+   },
+   "ReadResult": {
+    "properties": {
+     "read": {
+      "title": "Read",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "read"
+    ],
+    "title": "ReadResult",
     "type": "object"
    },
    "ReadThrough": {
@@ -14263,6 +14399,37 @@
      "reason"
     ],
     "title": "ReplacementView",
+    "type": "object"
+   },
+   "ReplayedTradeSend": {
+    "description": "A historical send was applied; these are explicitly the current accessible terms.",
+    "properties": {
+     "label": {
+      "const": "Current Trade",
+      "title": "Label",
+      "type": "string"
+     },
+     "outcome": {
+      "const": "already_applied",
+      "title": "Outcome",
+      "type": "string"
+     },
+     "trade": {
+      "$ref": "#/components/schemas/TradeView"
+     },
+     "view": {
+      "const": "current",
+      "title": "View",
+      "type": "string"
+     }
+    },
+    "required": [
+     "outcome",
+     "view",
+     "label",
+     "trade"
+    ],
+    "title": "ReplayedTradeSend",
     "type": "object"
    },
    "ReportCollector": {
@@ -15938,7 +16105,7 @@
     "type": "object"
    },
    "SendBorrowRequest": {
-    "description": "A Borrow Request to a Friend (``lender_id``, a ``collector_id`` the Friends list or a Friend read gave).",
+    "additionalProperties": false,
     "properties": {
      "account_id": {
       "anyOf": [
@@ -15982,18 +16149,6 @@
       "minItems": 1,
       "title": "Lines",
       "type": "array"
-     },
-     "replaces": {
-      "anyOf": [
-       {
-        "format": "uuid",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Replaces"
      },
      "return_by": {
       "anyOf": [
@@ -16129,6 +16284,17 @@
       "format": "uuid",
       "title": "Idempotency Key",
       "type": "string"
+     },
+     "message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message"
      },
      "recipient_id": {
       "anyOf": [
@@ -16792,7 +16958,7 @@
     "type": "object"
    },
    "StartReturn": {
-    "description": "A return of some of the copies out from the caller's side (#255).",
+    "additionalProperties": false,
     "properties": {
      "account_id": {
       "anyOf": [
@@ -16805,6 +16971,11 @@
       ],
       "title": "Account Id"
      },
+     "all": {
+      "default": false,
+      "title": "All",
+      "type": "boolean"
+     },
      "idempotency_key": {
       "format": "uuid",
       "title": "Idempotency Key",
@@ -16815,9 +16986,13 @@
        "$ref": "#/components/schemas/ReturnedLine"
       },
       "maxItems": 50,
-      "minItems": 1,
       "title": "Lines",
       "type": "array"
+     },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
      },
      "revision": {
       "minimum": 1.0,
@@ -16826,11 +17001,78 @@
      }
     },
     "required": [
+     "loan_id",
      "revision",
-     "idempotency_key",
-     "lines"
+     "idempotency_key"
     ],
     "title": "StartReturn",
+    "type": "object"
+   },
+   "SummaryCard": {
+    "properties": {
+     "copies": {
+      "title": "Copies",
+      "type": "string"
+     },
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "image_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Image Url"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "side": {
+      "enum": [
+       "you_give",
+       "you_get"
+      ],
+      "title": "Side",
+      "type": "string"
+     }
+    },
+    "required": [
+     "edition_id",
+     "name",
+     "image_url",
+     "copies",
+     "side"
+    ],
+    "title": "SummaryCard",
+    "type": "object"
+   },
+   "SummaryCash": {
+    "properties": {
+     "cents": {
+      "title": "Cents",
+      "type": "string"
+     },
+     "payer": {
+      "enum": [
+       "you",
+       "them"
+      ],
+      "title": "Payer",
+      "type": "string"
+     }
+    },
+    "required": [
+     "cents",
+     "payer"
+    ],
+    "title": "SummaryCash",
     "type": "object"
    },
    "SurplusHolding": {
@@ -17117,8 +17359,174 @@
     "title": "SwitchedLine",
     "type": "object"
    },
+   "ThreadItem": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "kind": {
+      "enum": [
+       "trade",
+       "loan"
+      ],
+      "title": "Kind",
+      "type": "string"
+     },
+     "last_activity_at": {
+      "format": "date-time",
+      "title": "Last Activity At",
+      "type": "string"
+     },
+     "latest": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/TimelineItem"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "needs_you": {
+      "default": false,
+      "title": "Needs You",
+      "type": "boolean"
+     },
+     "other": {
+      "$ref": "#/components/schemas/ThreadParty"
+     },
+     "section": {
+      "enum": [
+       "needs_you",
+       "open",
+       "out_now",
+       "pending",
+       "done"
+      ],
+      "title": "Section",
+      "type": "string"
+     },
+     "state": {
+      "title": "State",
+      "type": "string"
+     },
+     "summary": {
+      "$ref": "#/components/schemas/OfferSummary"
+     },
+     "unread": {
+      "default": 0,
+      "title": "Unread",
+      "type": "integer"
+     },
+     "waiting": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Waiting"
+     },
+     "you_are": {
+      "enum": [
+       "low",
+       "high"
+      ],
+      "title": "You Are",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "kind",
+     "other",
+     "you_are",
+     "summary",
+     "section",
+     "state",
+     "last_activity_at"
+    ],
+    "title": "ThreadItem",
+    "type": "object"
+   },
+   "ThreadParty": {
+    "description": "Only the public trader address; never an account id or Handle.",
+    "properties": {
+     "available": {
+      "default": false,
+      "title": "Available",
+      "type": "boolean"
+     },
+     "display_name": {
+      "title": "Display Name",
+      "type": "string"
+     },
+     "friend": {
+      "default": false,
+      "title": "Friend",
+      "type": "boolean"
+     },
+     "trader_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trader Id"
+     }
+    },
+    "required": [
+     "trader_id",
+     "display_name"
+    ],
+    "title": "ThreadParty",
+    "type": "object"
+   },
+   "Timeline": {
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/TimelineItem"
+      },
+      "title": "Items",
+      "type": "array"
+     },
+     "next_before": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Next Before"
+     },
+     "you_are": {
+      "enum": [
+       "low",
+       "high"
+      ],
+      "title": "You Are",
+      "type": "string"
+     }
+    },
+    "required": [
+     "you_are",
+     "items"
+    ],
+    "title": "Timeline",
+    "type": "object"
+   },
    "TimelineItem": {
-    "description": "One item of a conversation: a message or a Trade round's card (the Trade as it stands now). ``cursor`` names the\nitem for ``before`` and for ``read``.",
     "properties": {
      "at": {
       "format": "date-time",
@@ -17129,10 +17537,20 @@
       "title": "Cursor",
       "type": "string"
      },
+     "event": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/EventView"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "kind": {
       "enum": [
        "message",
-       "trade"
+       "event"
       ],
       "title": "Kind",
       "type": "string"
@@ -17146,24 +17564,12 @@
         "type": "null"
        }
       ]
-     },
-     "trade": {
-      "anyOf": [
-       {
-        "$ref": "#/components/schemas/TradeView"
-       },
-       {
-        "type": "null"
-       }
-      ]
      }
     },
     "required": [
      "kind",
      "at",
-     "cursor",
-     "message",
-     "trade"
+     "cursor"
     ],
     "title": "TimelineItem",
     "type": "object"
@@ -17400,6 +17806,34 @@
      "payer"
     ],
     "title": "TradeCashRequest",
+    "type": "object"
+   },
+   "TradeDetail": {
+    "properties": {
+     "can_message": {
+      "title": "Can Message",
+      "type": "boolean"
+     },
+     "can_report": {
+      "title": "Can Report",
+      "type": "boolean"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "live_offer": {
+      "$ref": "#/components/schemas/TradeView"
+     }
+    },
+    "required": [
+     "id",
+     "live_offer",
+     "can_message",
+     "can_report"
+    ],
+    "title": "TradeDetail",
     "type": "object"
    },
    "TradeLineRequest": {
@@ -18123,6 +18557,20 @@
     "title": "TradeReportRow",
     "type": "object"
    },
+   "TradeResolution": {
+    "properties": {
+     "thread_id": {
+      "format": "uuid",
+      "title": "Thread Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "thread_id"
+    ],
+    "title": "TradeResolution",
+    "type": "object"
+   },
    "TradeSettings": {
     "description": "The collector's own trading settings. ``open_to_cash_offers``: Friends may send them a Trade Proposal in which\none side gives only cash (Trading #277); off by default.",
     "properties": {
@@ -18144,6 +18592,11 @@
       "title": "Idempotency Key",
       "type": "string"
      },
+     "offer_id": {
+      "format": "uuid",
+      "title": "Offer Id",
+      "type": "string"
+     },
      "revision": {
       "minimum": 1.0,
       "title": "Revision",
@@ -18151,6 +18604,7 @@
      }
     },
     "required": [
+     "offer_id",
      "revision",
      "idempotency_key"
     ],
@@ -18231,7 +18685,8 @@
         "confirm_swap",
         "use_suggested_picks",
         "withdraw",
-        "cancel"
+        "cancel",
+        "change_offer"
        ],
        "type": "string"
       },
@@ -18319,6 +18774,11 @@
       "title": "Needs You",
       "type": "boolean"
      },
+     "offer_id": {
+      "format": "uuid",
+      "title": "Offer Id",
+      "type": "string"
+     },
      "other": {
       "$ref": "#/components/schemas/TradeParty"
      },
@@ -18357,6 +18817,11 @@
       "title": "They Confirmed Swap",
       "type": "boolean"
      },
+     "thread_id": {
+      "format": "uuid",
+      "title": "Thread Id",
+      "type": "string"
+     },
      "waiting": {
       "anyOf": [
        {
@@ -18394,6 +18859,8 @@
     },
     "required": [
      "id",
+     "thread_id",
+     "offer_id",
      "state",
      "closed_reason",
      "closed_by",
@@ -18779,28 +19246,6 @@
      "add_friend"
     ],
     "title": "TraderView",
-    "type": "object"
-   },
-   "TradesView": {
-    "description": "The Trades list: open Trades newest first, then the newest closed ones. ``needs_you``: how many wait on the\nreader.",
-    "properties": {
-     "needs_you": {
-      "title": "Needs You",
-      "type": "integer"
-     },
-     "trades": {
-      "items": {
-       "$ref": "#/components/schemas/TradeView"
-      },
-      "title": "Trades",
-      "type": "array"
-     }
-    },
-    "required": [
-     "trades",
-     "needs_you"
-    ],
-    "title": "TradesView",
     "type": "object"
    },
    "TreeLocation": {
@@ -19700,6 +20145,7 @@
     "type": "object"
    },
    "WriteOff": {
+    "additionalProperties": false,
     "description": "The lender writes off some of the copies out (#257). Final: there is no Undo.",
     "properties": {
      "account_id": {
@@ -19727,6 +20173,11 @@
       "title": "Lines",
       "type": "array"
      },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
      "revision": {
       "minimum": 1.0,
       "title": "Revision",
@@ -19734,6 +20185,7 @@
      }
     },
     "required": [
+     "loan_id",
      "revision",
      "idempotency_key",
      "lines"
@@ -19761,6 +20213,7 @@
     "type": "object"
    },
    "WrittenOffChoice": {
+    "additionalProperties": false,
     "description": "The borrower's choice for the written-off copies they hold (#257): ``keep`` them as their own or ``remove``\nthem. ``places``: where those copies are, as ``LoanSide.awaiting_choice`` lists them.",
     "properties": {
      "account_id": {
@@ -19787,6 +20240,11 @@
       "title": "Idempotency Key",
       "type": "string"
      },
+     "loan_id": {
+      "format": "uuid",
+      "title": "Loan Id",
+      "type": "string"
+     },
      "places": {
       "items": {
        "$ref": "#/components/schemas/ChosenPlace"
@@ -19803,12 +20261,224 @@
      }
     },
     "required": [
+     "loan_id",
      "revision",
      "idempotency_key",
      "choice",
      "places"
     ],
     "title": "WrittenOffChoice",
+    "type": "object"
+   },
+   "_Cash": {
+    "additionalProperties": false,
+    "properties": {
+     "cents": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cents"
+     },
+     "payer": {
+      "anyOf": [
+       {
+        "enum": [
+         "low",
+         "high"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Payer"
+     }
+    },
+    "title": "_Cash",
+    "type": "object"
+   },
+   "_CashChange": {
+    "additionalProperties": false,
+    "properties": {
+     "from": {
+      "$ref": "#/components/schemas/_Cash"
+     },
+     "to": {
+      "$ref": "#/components/schemas/_Cash"
+     }
+    },
+    "required": [
+     "from",
+     "to"
+    ],
+    "title": "_CashChange",
+    "type": "object"
+   },
+   "_DateChange": {
+    "additionalProperties": false,
+    "properties": {
+     "from": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "From"
+     },
+     "to": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "To"
+     }
+    },
+    "required": [
+     "from",
+     "to"
+    ],
+    "title": "_DateChange",
+    "type": "object"
+   },
+   "_EventData": {
+    "additionalProperties": false,
+    "properties": {
+     "cash": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/_CashChange"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "lines": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/_EventLine"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lines"
+     },
+     "not_lent": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/_Quantity"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Not Lent"
+     },
+     "return_by": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/_DateChange"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "returned": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/_Quantity"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Returned"
+     }
+    },
+    "title": "_EventData",
+    "type": "object"
+   },
+   "_EventLine": {
+    "additionalProperties": false,
+    "properties": {
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "from_qty": {
+      "minimum": 0.0,
+      "title": "From Qty",
+      "type": "integer"
+     },
+     "giver": {
+      "enum": [
+       "low",
+       "high"
+      ],
+      "title": "Giver",
+      "type": "string"
+     },
+     "to_qty": {
+      "minimum": 0.0,
+      "title": "To Qty",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "giver",
+     "edition_id",
+     "from_qty",
+     "to_qty"
+    ],
+    "title": "_EventLine",
+    "type": "object"
+   },
+   "_Quantity": {
+    "additionalProperties": false,
+    "properties": {
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "quantity": {
+      "minimum": 0.0,
+      "title": "Quantity",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "edition_id",
+     "quantity"
+    ],
+    "title": "_Quantity",
     "type": "object"
    }
   }
@@ -29359,6 +30029,133 @@
    }
   },
   "/api/loans": {
+   "get": {
+    "operationId": "listing_api_loans_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "group",
+      "required": false,
+      "schema": {
+       "default": "open",
+       "title": "Group",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "with",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "With"
+      }
+     },
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 4000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Before"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ThreadItem"
+         },
+         "title": "Response Listing Api Loans Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Listing",
+    "tags": [
+     "threads"
+    ]
+   },
    "post": {
     "operationId": "send_borrow_request_api_loans_post",
     "parameters": [
@@ -29980,6 +30777,188 @@
     ]
    }
   },
+  "/api/loans/resolve/{identifier}": {
+   "get": {
+    "operationId": "resolve_loan_api_loans_resolve__identifier__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "identifier",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Identifier",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanResolution"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Resolve Loan",
+    "tags": [
+     "social"
+    ]
+   }
+  },
+  "/api/loans/{loan_id}": {
+   "get": {
+    "operationId": "read_loan_api_loans__loan_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanDetail"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Read Loan",
+    "tags": [
+     "social"
+    ]
+   }
+  },
   "/api/loans/{loan_id}/accept": {
    "post": {
     "operationId": "accept_api_loans__loan_id__accept_post",
@@ -30183,6 +31162,516 @@
     ]
    }
   },
+  "/api/loans/{loan_id}/cancel": {
+   "post": {
+    "description": "Either side cancels an accepted Loan nobody has confirmed a handover for: its copies stop being reserved, so the\nlender's revision moves. The lender locks only themself; the borrower locks both. The other side gets a 'cancelled'\nupdate (#259).",
+    "operationId": "cancel_api_loans__loan_id__cancel_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoanStep"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Cancel",
+    "tags": [
+     "social"
+    ]
+   }
+  },
+  "/api/loans/{loan_id}/decline": {
+   "post": {
+    "description": "The lender says no to a Borrow Request, locking only themself, or the borrower to a Lend Offer, which releases\nits copies and locks both (#258). The other side gets a 'declined' update (#259).",
+    "operationId": "decline_api_loans__loan_id__decline_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoanStep"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Decline",
+    "tags": [
+     "social"
+    ]
+   }
+  },
+  "/api/loans/{loan_id}/extension": {
+   "post": {
+    "description": "The borrower asks for a later return-by date (#256): 422 EXTENSION_NOT_LATER unless it is after the current\none, and INVALID_RETURN_BY for a day before today. Only the Loan row is locked.",
+    "operationId": "ask_for_more_time_api_loans__loan_id__extension_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AskForMoreTime"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Ask For More Time",
+    "tags": [
+     "social"
+    ]
+   }
+  },
+  "/api/loans/{loan_id}/extension/approve": {
+   "post": {
+    "description": "The lender approves the borrower's request for more time with one tap (#256); 422 INVALID_RETURN_BY when the\ndate asked for has passed. The borrower gets a 'return_by_changed' update (#259).",
+    "operationId": "approve_extension_api_loans__loan_id__extension_approve_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoanStep"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Approve Extension",
+    "tags": [
+     "social"
+    ]
+   }
+  },
+  "/api/loans/{loan_id}/extension/decline": {
+   "post": {
+    "description": "The lender says no to the borrower's request for more time (#256); the date stays.",
+    "operationId": "decline_extension_api_loans__loan_id__extension_decline_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoanStep"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Decline Extension",
+    "tags": [
+     "social"
+    ]
+   }
+  },
   "/api/loans/{loan_id}/handover": {
    "post": {
     "description": "One side confirms the handover for its own inventory, under its own lock. The lender's **Mark as handed over**\ntakes the picked copies out of their Locations (refused with 409 PICKS_OUT_OF_DATE while a pick is out of date);\nthe borrower's **Yes, I have them** puts the promised copies into the Loan's Deck, or Unsorted, as Borrowed Copies.\nNeither takes an Undo record.",
@@ -30285,6 +31774,108 @@
     ]
    }
   },
+  "/api/loans/{loan_id}/notices/seen": {
+   "post": {
+    "description": "Records that the reader was shown these notices (#256), so each shows once per side. A notice not showing now\nis ignored, so it can still show later. No step: no revision, no key; recording twice changes nothing.",
+    "operationId": "see_notices_api_loans__loan_id__notices_seen_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SeenNotices"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "See Notices",
+    "tags": [
+     "social"
+    ]
+   }
+  },
   "/api/loans/{loan_id}/picks/use-suggested": {
    "post": {
     "description": "The lender replaces every out-of-date pick with the suggested one (``LoanSide.suggested``), under their lock.\n409 PICKS_UP_TO_DATE when no pick is out of date.",
@@ -30384,6 +31975,108 @@
     "summary": "Use Suggested Picks",
     "tags": [
      "loans"
+    ]
+   }
+  },
+  "/api/loans/{loan_id}/return-by": {
+   "post": {
+    "description": "The lender changes or clears the return-by date of an open Loan (#256). Only the Loan row is locked. A date that\nchanged gives the borrower a 'return_by_changed' update (#259).",
+    "operationId": "change_return_by_api_loans__loan_id__return_by_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChangeReturnBy"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Change Return By",
+    "tags": [
+     "social"
     ]
    }
   },
@@ -30557,7 +32250,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/LoanStep"
+        "$ref": "#/components/schemas/ConfirmReturn"
        }
       }
      },
@@ -30784,6 +32477,108 @@
     ]
    }
   },
+  "/api/loans/{loan_id}/withdraw": {
+   "post": {
+    "description": "The borrower takes back a Borrow Request before it is answered, locking only the Loan row; or the lender a Lend\nOffer, which releases its copies under the lender's lock (#258). The other side gets a 'cancelled' update (#259),\nwhich the inbox reads as 'withdrawn' from the Loan's ``closed_reason``.",
+    "operationId": "withdraw_api_loans__loan_id__withdraw_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "loan_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Loan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LoanStep"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Withdraw",
+    "tags": [
+     "social"
+    ]
+   }
+  },
   "/api/loans/{loan_id}/write-off": {
    "post": {
     "description": "The lender writes off copies out on the Loan (**Write off\u2026**), under their own lock, once they confirmed the\nhandover. Each line is at most the copies out, less those a return the borrower confirmed gives back (409\nMORE_THAN_OUT); a line of 0 is left out (422 NOTHING_WRITTEN_OFF when all are). Final: no Undo, and no take-back\nof the handover after it. The copies leave the lender's Collection; the borrower's rows are untouched.",
@@ -30985,6 +32780,418 @@
     "summary": "Choose Written Off",
     "tags": [
      "loans"
+    ]
+   }
+  },
+  "/api/loans/{thread_id}/messages": {
+   "post": {
+    "operationId": "message_api_loans__thread_id__messages_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "thread_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Thread Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SendMessage"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Message"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Message",
+    "tags": [
+     "threads"
+    ]
+   }
+  },
+  "/api/loans/{thread_id}/read": {
+   "post": {
+    "operationId": "read_api_loans__thread_id__read_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "thread_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Thread Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReadThrough"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ReadResult"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Read",
+    "tags": [
+     "threads"
+    ]
+   }
+  },
+  "/api/loans/{thread_id}/terms": {
+   "post": {
+    "description": "Replace requested terms under both owners' ascending locks, before locking the old Loan.\n\nThe replacement's lender foreign key takes KEY SHARE. Locking the lender first prevents a cycle with a\ndisplay-name change, which holds that owner FOR UPDATE before its name trigger updates the old Loan.",
+    "operationId": "edit_terms_api_loans__thread_id__terms_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "thread_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Thread Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EditTerms"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoanView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Edit Terms",
+    "tags": [
+     "loans"
+    ]
+   }
+  },
+  "/api/loans/{thread_id}/timeline": {
+   "get": {
+    "operationId": "timeline_api_loans__thread_id__timeline_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "thread_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Thread Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 4000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Before"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Timeline"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Timeline",
+    "tags": [
+     "threads"
     ]
    }
   },
@@ -35426,803 +37633,6 @@
     ]
    }
   },
-  "/api/social/conversations": {
-   "get": {
-    "description": "The reader's conversations, newest activity first, 50 a page. ``archived=true`` lists the archived ones; an\narchived conversation is visible again once its last activity is newer than the archive time. Writes nothing.",
-    "operationId": "list_conversations_api_social_conversations_get",
-    "parameters": [
-     {
-      "in": "query",
-      "name": "archived",
-      "required": false,
-      "schema": {
-       "default": false,
-       "title": "Archived",
-       "type": "boolean"
-      }
-     },
-     {
-      "in": "query",
-      "name": "before",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "maxLength": 4000,
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "Before"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ConversationsView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "List Conversations",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/conversations/pulse": {
-   "get": {
-    "description": "How many visible conversations are unread, and the watermark of everything the shell shows: counts and sums\nover the reader's conversations and inbox updates (``Decimal`` sums are hashed as text). It moves on a message, a\nTrade step, an inbox update, a Block or Unblock between the pair (``pair_changed``), a suspension of either member\nor its lift (``account_changed``), and the reader's own read, archive and unarchive, and not on a rename. Writes\nnothing and makes no owner row.",
-    "operationId": "read_pulse_api_social_conversations_pulse_get",
-    "parameters": [
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ConversationPulse"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Read Pulse",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/conversations/with/{trader_id}": {
-   "get": {
-    "description": "The reader's conversation with the collector who has this trader id. A pair with a conversation answers it. A\ncollector in reach with none answers an empty one (``id`` null, no items) for the composer. Anyone else, an unknown\ntrader id and the reader's own are 404 CONVERSATION_NOT_FOUND. Writes nothing.",
-    "operationId": "read_with_trader_api_social_conversations_with__trader_id__get",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "trader_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Trader Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "query",
-      "name": "before",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "maxLength": 4000,
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "Before"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ConversationView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Read With Trader",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/conversations/{conversation_id}": {
-   "get": {
-    "description": "One conversation and a page of its items, newest first. 404 CONVERSATION_NOT_FOUND for an unknown id and for a\nreader who is not a member. Writes nothing.",
-    "operationId": "read_conversation_api_social_conversations__conversation_id__get",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "conversation_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Conversation Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "query",
-      "name": "before",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "maxLength": 4000,
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "Before"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ConversationView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Read Conversation",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/conversations/{conversation_id}/archive": {
-   "post": {
-    "description": "Hides the conversation from the reader's list until it has newer activity. Nobody deletes a conversation.",
-    "operationId": "archive_conversation_api_social_conversations__conversation_id__archive_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "conversation_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Conversation Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ConversationSummary"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Archive Conversation",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/conversations/{conversation_id}/messages": {
-   "post": {
-    "description": "Sends a message to a conversation the reader is a member of. Refusals and order: see the module docstring. A\nreplay by ``idempotency_key`` answers the stored message and is not counted.",
-    "operationId": "send_message_api_social_conversations__conversation_id__messages_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "conversation_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Conversation Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/SendMessage"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "201": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Message"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Send Message",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/conversations/{conversation_id}/read": {
-   "post": {
-    "description": "Moves the reader's read marker to the time of the item the cursor names, never back. 422 INVALID_CURSOR for a\nmalformed cursor, one naming no item of this conversation, or one whose time is not that item's. Writes only the\nreader's own member row.",
-    "operationId": "read_through_api_social_conversations__conversation_id__read_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "conversation_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Conversation Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/ReadThrough"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ConversationSummary"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Read Through",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/conversations/{conversation_id}/unarchive": {
-   "post": {
-    "description": "Shows an archived conversation in the reader's list again.",
-    "operationId": "unarchive_conversation_api_social_conversations__conversation_id__unarchive_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "conversation_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Conversation Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/ConversationSummary"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Unarchive Conversation",
-    "tags": [
-     "social"
-    ]
-   }
-  },
   "/api/social/discovery": {
    "get": {
     "description": "The caller's own Open discovery setting. Writes nothing and makes no owner row.",
@@ -37328,994 +38738,6 @@
     ]
    }
   },
-  "/api/social/loans": {
-   "get": {
-    "operationId": "list_loans_api_social_loans_get",
-    "parameters": [
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoansView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "List Loans",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}": {
-   "get": {
-    "operationId": "read_loan_api_social_loans__loan_id__get",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Read Loan",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}/cancel": {
-   "post": {
-    "description": "Either side cancels an accepted Loan nobody has confirmed a handover for: its copies stop being reserved, so the\nlender's revision moves. The lender locks only themself; the borrower locks both. The other side gets a 'cancelled'\nupdate (#259).",
-    "operationId": "cancel_api_social_loans__loan_id__cancel_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/LoanStep"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Cancel",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}/decline": {
-   "post": {
-    "description": "The lender says no to a Borrow Request, locking only themself, or the borrower to a Lend Offer, which releases\nits copies and locks both (#258). The other side gets a 'declined' update (#259).",
-    "operationId": "decline_api_social_loans__loan_id__decline_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/LoanStep"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Decline",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}/extension": {
-   "post": {
-    "description": "The borrower asks for a later return-by date (#256): 422 EXTENSION_NOT_LATER unless it is after the current\none, and INVALID_RETURN_BY for a day before today. Only the Loan row is locked.",
-    "operationId": "ask_for_more_time_api_social_loans__loan_id__extension_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/AskForMoreTime"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Ask For More Time",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}/extension/approve": {
-   "post": {
-    "description": "The lender approves the borrower's request for more time with one tap (#256); 422 INVALID_RETURN_BY when the\ndate asked for has passed. The borrower gets a 'return_by_changed' update (#259).",
-    "operationId": "approve_extension_api_social_loans__loan_id__extension_approve_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/LoanStep"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Approve Extension",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}/extension/decline": {
-   "post": {
-    "description": "The lender says no to the borrower's request for more time (#256); the date stays.",
-    "operationId": "decline_extension_api_social_loans__loan_id__extension_decline_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/LoanStep"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Decline Extension",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}/notices/seen": {
-   "post": {
-    "description": "Records that the reader was shown these notices (#256), so each shows once per side. A notice not showing now\nis ignored, so it can still show later. No step: no revision, no key; recording twice changes nothing.",
-    "operationId": "see_notices_api_social_loans__loan_id__notices_seen_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/SeenNotices"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "See Notices",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}/return-by": {
-   "post": {
-    "description": "The lender changes or clears the return-by date of an open Loan (#256). Only the Loan row is locked. A date that\nchanged gives the borrower a 'return_by_changed' update (#259).",
-    "operationId": "change_return_by_api_social_loans__loan_id__return_by_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/ChangeReturnBy"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Change Return By",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/loans/{loan_id}/withdraw": {
-   "post": {
-    "description": "The borrower takes back a Borrow Request before it is answered, locking only the Loan row; or the lender a Lend\nOffer, which releases its copies under the lender's lock (#258). The other side gets a 'cancelled' update (#259),\nwhich the inbox reads as 'withdrawn' from the Loan's ``closed_reason``.",
-    "operationId": "withdraw_api_social_loans__loan_id__withdraw_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "loan_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Loan Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/LoanStep"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/LoanView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Withdraw",
-    "tags": [
-     "social"
-    ]
-   }
-  },
   "/api/social/lookup": {
    "post": {
     "description": "Find a collector by their exact Handle, ignoring case. A Handle that can't exist is 422 INVALID_HANDLE and isn't\ncounted. Past the hourly limit it is 429 TOO_MANY_LOOKUPS with ``retry_after_minutes``, and isn't counted. Otherwise\nthe lookup is counted and answers the collector, or 404 COLLECTOR_NOT_FOUND, raised after the count commits.",
@@ -39343,7 +39765,7 @@
   },
   "/api/social/traders/{trader_id}": {
    "get": {
-    "description": "One collector's header by trader id: a pair with a conversation, or anyone the reach rule holds for. 404\nCOLLECTOR_NOT_FOUND for an unknown trader id, the viewer's own, and a collector out of reach. Writes nothing.",
+    "description": "One collector's header by trader id: a known Thread/legacy pair, or anyone in reach. 404\nCOLLECTOR_NOT_FOUND for an unknown trader id, the viewer's own, and a collector out of reach. Writes nothing.",
     "operationId": "trader_view_api_social_traders__trader_id__get",
     "parameters": [
      {
@@ -39627,108 +40049,6 @@
     ]
    }
   },
-  "/api/social/traders/{trader_id}/messages": {
-   "post": {
-    "description": "Sends a message to the collector who has this trader id, in the pair's conversation, which it opens when there\nis none (the other must then be in reach). An unknown trader id, the reader's own, a conversation that is\nnot open, and a collector outside reach with no conversation are all 409 COLLECTOR_UNAVAILABLE. After the hourly\nlimit (429 MESSAGE_RATE_LIMITED), a message that opens the conversation with a collector who is not a Friend is\ncounted: 429 TOO_MANY_NEW_CONVERSATIONS at 10 in 24 hours. Locks both owners.",
-    "operationId": "send_trader_message_api_social_traders__trader_id__messages_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "trader_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Trader Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/SendMessage"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "201": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Message"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Send Trader Message",
-    "tags": [
-     "social"
-    ]
-   }
-  },
   "/api/social/traders/{trader_id}/trade-list": {
    "get": {
     "description": "One page of the Trade List of a collector in reach: the cards they offer to trade now. 404 COLLECTOR_NOT_FOUND\nunless the reach rule holds.",
@@ -39946,178 +40266,6 @@
     ]
    }
   },
-  "/api/social/trades": {
-   "get": {
-    "operationId": "list_trades_api_social_trades_get",
-    "parameters": [
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/TradesView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "List Trades",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/trades/{trade_id}": {
-   "get": {
-    "operationId": "read_trade_api_social_trades__trade_id__get",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "trade_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Trade Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/TradeView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Read Trade",
-    "tags": [
-     "social"
-    ]
-   }
-  },
   "/api/social/trades/{trade_id}/add-friend": {
    "post": {
     "description": "Offer to become Friends with the other side of a Trade both sides confirmed. Refused in order: 403\nACCOUNT_SUSPENDED, 404 TRADE_NOT_FOUND, 409 TRADE_NOT_SWAPPED, 409 COLLECTOR_UNAVAILABLE (a deleted, blocked or\nsuspended other, all the same body). Then under both owner locks: the other's pending request is accepted\n('friends'); with no friendship a pending request is sent ('request_sent', 409 TRY_LATER within the decline\ncool-off); in any other state nothing changes and the relation is answered.",
@@ -40322,312 +40470,6 @@
     ]
    }
   },
-  "/api/social/trades/{trade_id}/cancel": {
-   "post": {
-    "description": "Either side calls off an accepted Trade nobody has confirmed. It releases both sides' copies in one transaction,\nunder both sides' locks, and moves the revision of each side that gives cards; the other side gets a 'cancelled'\nupdate that never says why. A proposal (withdraw or decline it) and a Trade either side confirmed are 409\nSTEP_NOT_ALLOWED.",
-    "operationId": "cancel_api_social_trades__trade_id__cancel_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "trade_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Trade Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/TradeStep"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/TradeView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Cancel",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/trades/{trade_id}/decline": {
-   "post": {
-    "description": "The recipient turns down a Trade Proposal, whole. It releases the copies the proposer gives, under both sides'\nlocks, which moves the proposer's revision when they gave cards; the proposer gets a 'declined' update. No\nfriendship check: unfriending and Blocking close the pair's open Trades first, under the same locks (#274).",
-    "operationId": "decline_api_social_trades__trade_id__decline_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "trade_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Trade Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/TradeStep"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/TradeView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Decline",
-    "tags": [
-     "social"
-    ]
-   }
-  },
-  "/api/social/trades/{trade_id}/withdraw": {
-   "post": {
-    "description": "The proposer takes back a Trade Proposal nobody has answered. It releases the copies they give, under the\nproposer's own lock, which moves their revision when they gave cards; the recipient gets a 'cancelled' update.",
-    "operationId": "withdraw_api_social_trades__trade_id__withdraw_post",
-    "parameters": [
-     {
-      "in": "path",
-      "name": "trade_id",
-      "required": true,
-      "schema": {
-       "format": "uuid",
-       "title": "Trade Id",
-       "type": "string"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-user",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-User"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-time",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Time"
-      }
-     },
-     {
-      "in": "header",
-      "name": "x-internal-signature",
-      "required": false,
-      "schema": {
-       "anyOf": [
-        {
-         "type": "string"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "X-Internal-Signature"
-      }
-     }
-    ],
-    "requestBody": {
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/TradeStep"
-       }
-      }
-     },
-     "required": true
-    },
-    "responses": {
-     "200": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/TradeView"
-        }
-       }
-      },
-      "description": "Successful Response"
-     },
-     "422": {
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/HTTPValidationError"
-        }
-       }
-      },
-      "description": "Validation Error"
-     }
-    },
-    "summary": "Withdraw",
-    "tags": [
-     "social"
-    ]
-   }
-  },
   "/api/social/want-list-matches": {
    "get": {
     "description": "Friends' cards for the Want List (#251): for each card the Want List still needs, over every Deck or the one in\n``deck`` and under the account's counting setting, the Friends' copies allowed by each card's Will accept choice.\nIts own read, apart from the Want List's: a Friend's change never moves the Want List's revisions. 404 DECK_NOT_FOUND for a\nDeck that isn't the viewer's.",
@@ -40724,6 +40566,87 @@
     "summary": "Want List Matches",
     "tags": [
      "social"
+    ]
+   }
+  },
+  "/api/threads/pulse": {
+   "get": {
+    "operationId": "read_pulse_api_threads_pulse_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Pulse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Read Pulse",
+    "tags": [
+     "threads"
     ]
    }
   },
@@ -41014,8 +40937,135 @@
    }
   },
   "/api/trades": {
+   "get": {
+    "operationId": "listing_api_trades_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "group",
+      "required": false,
+      "schema": {
+       "default": "open",
+       "title": "Group",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "with",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "format": "uuid",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "With"
+      }
+     },
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 4000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Before"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/ThreadItem"
+         },
+         "title": "Response Listing Api Trades Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Listing",
+    "tags": [
+     "threads"
+    ]
+   },
    "post": {
-    "description": "Sends a Trade Proposal to a Friend (by ``recipient_id``) or to any collector in reach (by\n``recipient_trader_id``) and reserves the copies the sender gives. Refused before anything is read, in this order:\n422 RECIPIENT_REQUIRED (neither or both recipient fields), 409 OWN_ACCOUNT (the user id is the sender's), 422\nINVALID_QUANTITY, 422 DUPLICATE_EDITION (one Edition twice on one side), 422 SAME_CARD_BOTH_SIDES, 422\nTOO_MANY_LINES, 422 TRADE_HAS_NO_CARDS, 422 INVALID_CASH. Then, after the command begins (a replay answers here):\n403 ACCOUNT_SUSPENDED (the sender), 409 COLLECTOR_UNAVAILABLE (an unknown trader id, the sender's own, or a\nrecipient outside reach; by user id the recipient must be a Friend), checked once before the locks and again under\nthem, 429 TOO_MANY_NEW_CONVERSATIONS (``retry_after_minutes``) when the send opens a conversation with a collector\nwho is not a Friend and the sender has started 10 in the last 24 hours, 409 CASH_ONLY_NOT_OPEN\n(``side``: the sender's side that gives no cards and pays, when the recipient isn't Open to cash offers), and 409\nNOT_TRADEABLE (``edition_id``, ``available`` and ``side``, 'you_give' or 'you_get') for the first line, the\nsender's lines first, that asks for more copies than are on that side's Trade List now. Locks both owners and\nopens the pair's conversation (attaching their earlier Trades), so the Trade carries it.",
+    "description": "Open a Trade thread with a first offer and optional message.\n\nShape and replay precede all reads. Message and contact advisory locks precede\nboth owner locks; reach, the stranger quota, cash eligibility and listable caps\nare checked before insertion. Only the proposer's cards are promised.",
     "operationId": "send_trade_proposal_api_trades_post",
     "parameters": [
      {
@@ -41082,7 +41132,15 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/TradeView"
+         "anyOf": [
+          {
+           "$ref": "#/components/schemas/TradeView"
+          },
+          {
+           "$ref": "#/components/schemas/ReplayedTradeSend"
+          }
+         ],
+         "title": "Response Send Trade Proposal Api Trades Post"
         }
        }
       },
@@ -41187,6 +41245,97 @@
     ]
    }
   },
+  "/api/trades/resolve/{identifier}": {
+   "get": {
+    "operationId": "resolve_trade_api_trades_resolve__identifier__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "identifier",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Identifier",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TradeResolution"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Resolve Trade",
+    "tags": [
+     "social"
+    ]
+   }
+  },
   "/api/trades/value": {
    "post": {
     "operationId": "trade_value_api_trades_value_post",
@@ -41275,6 +41424,407 @@
     "summary": "Trade Value",
     "tags": [
      "trades"
+    ]
+   }
+  },
+  "/api/trades/{thread_id}/messages": {
+   "post": {
+    "operationId": "message_api_trades__thread_id__messages_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "thread_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Thread Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SendMessage"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Message"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Message",
+    "tags": [
+     "threads"
+    ]
+   }
+  },
+  "/api/trades/{thread_id}/read": {
+   "post": {
+    "operationId": "read_api_trades__thread_id__read_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "thread_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Thread Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ReadThrough"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ReadResult"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Read",
+    "tags": [
+     "threads"
+    ]
+   }
+  },
+  "/api/trades/{thread_id}/timeline": {
+   "get": {
+    "operationId": "timeline_api_trades__thread_id__timeline_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "thread_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Thread Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 4000,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Before"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Timeline"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Timeline",
+    "tags": [
+     "threads"
+    ]
+   }
+  },
+  "/api/trades/{trade_id}": {
+   "get": {
+    "operationId": "read_trade_api_trades__trade_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "trade_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Trade Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TradeDetail"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Read Trade",
+    "tags": [
+     "social"
     ]
    }
   },
@@ -41380,6 +41930,108 @@
     ]
    }
   },
+  "/api/trades/{trade_id}/cancel": {
+   "post": {
+    "description": "Either side calls off an accepted Trade nobody has confirmed. It releases both sides' copies in one transaction,\nunder both sides' locks, and moves the revision of each side that gives cards; the other side gets a 'cancelled'\nupdate that never says why. A proposal (withdraw or decline it) and a Trade either side confirmed are 409\nSTEP_NOT_ALLOWED.",
+    "operationId": "cancel_api_trades__trade_id__cancel_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "trade_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Trade Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradeStep"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TradeView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Cancel",
+    "tags": [
+     "social"
+    ]
+   }
+  },
   "/api/trades/{trade_id}/confirm-swap": {
    "post": {
     "description": "One side confirms the in-person swap for their own inventory, under their own lock only. After\n``run_trade_step``'s checks (404 TRADE_NOT_FOUND, 409 TRADE_CHANGED, 409 STEP_NOT_ALLOWED, so a side confirms once),\nand before any write: 409 PICKS_OUT_OF_DATE while a pick of theirs is out of date; for a side that gets cards, 404\nLOCATION_NOT_FOUND or 409 UNSORTED_UNAVAILABLE for where they go; then 409 DECK_SWITCH_CHANGED when a Deck switch\nthey chose is not offered now (``want_list.deck_switch_candidates``, with at most the offered copies). Their\n``deck_switches`` are shape-checked before the transaction: 422 INVALID_QUANTITY, 422 DUPLICATE_EDITION, 422\nTOO_MANY_LINES. Then the copies they give leave, the copies they get arrive, their revision moves once, the Deck\nswitches apply as Deck List changes (each switched Deck's Deck List revision advances once for the switch; the\nanswer's ``switched_decks`` names it and the batch that undoes it), the copies they get beyond their Decks' needs lower their\nTrade Wants, and their swap time is set; when the other side already confirmed, the Trade closes as swapped and the\nother side gets a 'swapped' update. Nothing changes on a refusal, and nothing undoes the swap.",
@@ -41482,10 +42134,10 @@
     ]
    }
   },
-  "/api/trades/{trade_id}/counter": {
+  "/api/trades/{trade_id}/decline": {
    "post": {
-    "description": "The recipient counters a waiting Trade Proposal (Trading #278): it closes as 'countered', which frees the copies\nits sender gave, and the sender is sent the reply as a new proposal (``countered_from`` the old one), reserving the\ncopies the counterer gives. Answers the new Trade as the counterer reads it. One transaction, own flow rather than\n``run_trade_step``. Refused before anything is read or counted, in a send's order (without OWN_ACCOUNT): 422\nINVALID_QUANTITY, DUPLICATE_EDITION, SAME_CARD_BOTH_SIDES, TOO_MANY_LINES, TRADE_HAS_NO_CARDS, INVALID_CASH. Then,\nafter the command begins (a replay answers the stored view): 404 TRADE_NOT_FOUND for anyone but its two sides; both\nowners are locked (ascending) when the caller is the recipient, then the row; 409 TRADE_CHANGED; 409\nSTEP_NOT_ALLOWED unless 'counter' is allowed; 403 ACCOUNT_SUSPENDED (the counterer); 409 COLLECTOR_UNAVAILABLE (the\nsender isn't in the counterer's reach); 409 CASH_ONLY_NOT_OPEN (``side``) for a Counter with\na cash-only side to a sender who isn't Open to cash offers, unless the countered proposal had a cash-only side\nitself. The old row closes and its picks go in that close; only then are the caps read (409 NOT_TRADEABLE, the\ncounterer's lines first), so a Counter may ask for every copy the sender had listed. A refusal rolls everything\nback and leaves the original waiting with its picks. Nothing is stored for the inbox: the new proposal is the\nsender's waiting answer. A side's revision moves only when its cards are released (the sender, if they gave cards)\nor reserved (the counterer, if the Counter gives cards).",
-    "operationId": "counter_trade_api_trades__trade_id__counter_post",
+    "description": "The recipient turns down a Trade Proposal, whole. It releases the copies the proposer gives, under both sides'\nlocks, which moves the proposer's revision when they gave cards; the proposer gets a 'declined' update. No\nfriendship check: unfriending and Blocking close the pair's open Trades first, under the same locks (#274).",
+    "operationId": "decline_api_trades__trade_id__decline_post",
     "parameters": [
      {
       "in": "path",
@@ -41550,7 +42202,7 @@
      "content": {
       "application/json": {
        "schema": {
-        "$ref": "#/components/schemas/CounterTrade"
+        "$ref": "#/components/schemas/TradeStep"
        }
       }
      },
@@ -41578,7 +42230,108 @@
       "description": "Validation Error"
      }
     },
-    "summary": "Counter Trade",
+    "summary": "Decline",
+    "tags": [
+     "social"
+    ]
+   }
+  },
+  "/api/trades/{trade_id}/offer": {
+   "post": {
+    "operationId": "change_offer_api_trades__trade_id__offer_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "trade_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Trade Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChangeOffer"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TradeView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Change Offer",
     "tags": [
      "trades"
     ]
@@ -41792,6 +42545,108 @@
     "summary": "Trade Side",
     "tags": [
      "trades"
+    ]
+   }
+  },
+  "/api/trades/{trade_id}/withdraw": {
+   "post": {
+    "description": "The proposer takes back a Trade Proposal nobody has answered. It releases the copies they give, under the\nproposer's own lock, which moves their revision when they gave cards; the recipient gets a 'cancelled' update.",
+    "operationId": "withdraw_api_trades__trade_id__withdraw_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "trade_id",
+      "required": true,
+      "schema": {
+       "format": "uuid",
+       "title": "Trade Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TradeStep"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TradeView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Withdraw",
+    "tags": [
+     "social"
     ]
    }
   },

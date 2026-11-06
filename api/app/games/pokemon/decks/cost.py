@@ -36,7 +36,7 @@ from app.core.prices.cost import DeckCost, DeckCostFigures, summarize
 from app.core.decks.deck_list_capture import capture_deck_list
 from app.identity import verified_user
 from app.games.pokemon.prices import prices
-from app.price_budget import Budget, trusted_budget
+from app.core.prices.price_budget import Budget, trusted_budget
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 

@@ -1,57 +1,8 @@
-"""Conversations and messages (Trading #298, spec "Conversations and messages", resolution "Plumbing" and
-"API contract").
+"""Retained pair/header helpers for discovery and closure callers.
 
-**One conversation per pair of collectors** (migration 147): a row in ``conversation`` with a ``conversation_member``
-row for each side (the read and archive markers) and the pair's plain-text ``message`` rows. The pair's Trade rounds
-are shown in it as cards (``trade.conversation_id``, ``TradeView.conversation_id``). Opening follows the reach rule
-(Trading #299, ``discovery.reach_one``): a member of a conversation always reads it, and a message opens the pair's
-conversation when none exists and the other collector is in reach (a Friend, or nearby in open discovery); a pair that
-already has one keeps using it after Remove Friend. The band shown is the reach rule's, while both are in open
-discovery. ``open_conversation`` counts each conversation it creates (kind 'new_conversation', 10 per rolling 24
-hours), unless the other is a Friend or the pair has traded before. It checks in ``pg_locks`` that the caller holds
-``prizecheck.new_conversation:<user>``, which every step that may create a conversation takes before its owner locks.
-Only this module (and the future reports module) names the ``message`` and ``conversation_member`` tables
-(``test_social_contract``).
-
-**Routes.** ``GET /api/social/conversations`` (the list, ``archived`` and ``before``), ``GET .../pulse``, ``GET
-.../with/{trader_id}`` and ``GET .../{id}`` (a conversation and its newest page of items), ``POST .../{id}/messages``,
-``.../read``, ``.../archive`` and ``.../unarchive``, and ``POST /api/social/traders/{trader_id}/messages``, which
-sends to the pair's conversation and opens it when there is none. No route deletes a conversation or a message.
-
-**Locks** (spec "Locks"): advisory locks, then the ``inventory_owner`` rows ascending (``owners.lock_owners``), then
-``loan``, then ``trade``, then ``conversation``. A message takes ``prizecheck.message:<user>`` (it serialises the
-replay check and the hourly count), on the trader route also ``prizecheck.new_conversation:<user>``, then the sender's
-owner row (both owners on the trader route, because it may create the row). A message on the conversation route never
-touches ``trade``. The trader route, under both owner locks, attaches the pair's unattached Trades
-(``open_conversation``) before it locks the conversation row, so the order stays owners, ``trade``, ``conversation``.
-A message locks the conversation row ``FOR NO KEY UPDATE`` and writes it **once** (``write_message``), as
-``owners.lock_owners`` explains for ``loan``: a second write of a row the transaction already wrote re-checks its
-foreign keys late and can close a cycle with the commands that lock owners. The one allowed second write is a
-conversation the same transaction just created. A deadlock the database ends anyway answers 503
-INVENTORY_TEMPORARILY_UNAVAILABLE, which the client retries with the same key. ``open_conversation`` is the only place
-that attaches a pair's earlier Trades, under both owner locks; the BEFORE INSERT trigger on ``trade`` never does.
-
-**Limits.** 120 messages an hour per account under kind 'message' (``count_message``), 429 MESSAGE_RATE_LIMITED with
-``retry_after_minutes``. 10 new conversations per rolling 24 hours per account under kind 'new_conversation'
-(``count_new_conversation``), 429 TOO_MANY_NEW_CONVERSATIONS with ``retry_after_minutes``. A message is 1 to
-``MESSAGE_LENGTH`` code points after ``normalize_text``.
-
-**Refusals**, after the body is normalised (422 EMPTY_MESSAGE, MESSAGE_TOO_LONG), in this order, on both send routes:
-404 CONVERSATION_NOT_FOUND (conversation route: unknown or not a member) or 409 COLLECTOR_UNAVAILABLE (trader route:
-unknown or own trader id); a replay answers 201 with the stored message (the key is ``(conversation, side, client
-key)``); 403 ACCOUNT_SUSPENDED (the sender is suspended); 409 COLLECTOR_UNAVAILABLE (the conversation is not open, or
-there is none and the other is not in reach); 429 MESSAGE_RATE_LIMITED; on the trader route, when the message opens
-the pair's conversation, 429 TOO_MANY_NEW_CONVERSATIONS.
-
-**Cursors** are unpadded URL-safe base64 of ``<iso time>|<kind>|<id>``: kind 'message' or 'trade' for the timeline
-and ``read``, 'conversation' for the list. A malformed one is 422 INVALID_CURSOR. ``read`` takes its boundary from the
-stored time of the item the cursor names, never from the cursor's own time.
-
-**Pulse** (``GET .../pulse``): the unread count and a watermark, from two statements over the caller's member rows and
-their inbox updates. The watermark is a hash of counts and sums, so a change committed late still moves it; it is
-opaque and compared for equality only. It moves on a message, a Trade step, an inbox update, a Block or Unblock
-between the pair (``pair_changed``), a suspension of either member or its lift (``account_changed``), and the caller's
-own read, archive and unarchive, and not on a rename. It writes nothing.
+Conversation HTTP routes are removed at the thread cutover. The old archive is
+read only. Common message text and cursor rules live in threads.py; pair and
+account watermark helpers delegate their thread writes to touch_threads.
 """
 import base64
 import hashlib
@@ -70,6 +21,7 @@ from ..location_tree import error
 from ..db import connect
 from ..identity import verified_user
 from .discovery import Band, reach, reach_one, require_not_suspended
+from .threads import normalize_text, encode_cursor, decode_cursor, count_message, touch_threads, ThreadTouch
 from .owners import ensure_owner, lock_owners
 from .trades import (TRADES, TradeView, completed_trades, trade_facts, trade_views, waiting_trade_step)
 
@@ -194,41 +146,10 @@ class Standing:
     can_report: bool
 
 
-def normalize_text(text: str, limit: int = MESSAGE_LENGTH, *, empty_ok: bool = False) -> str:
-    """A message body as stored, rule by rule in this order: CRLF and CR become LF; Unicode NFC; each control character
-    (category Cc) but LF and TAB, and each bidirectional formatting character, is dropped; trimmed. Empty is 422
-    EMPTY_MESSAGE and more than ``limit`` code points is 422 MESSAGE_TOO_LONG. Plain text: no link detection. With
-    ``empty_ok`` an empty result is returned as ``''`` (the Report note, Trading #303)."""
-    text = unicodedata.normalize('NFC', text.replace('\r\n', '\n').replace('\r', '\n'))
-    text = ''.join(char for char in text
-                   if char not in BIDI and (char in '\n\t' or unicodedata.category(char) != 'Cc')).strip()
-    if not text:
-        if empty_ok:
-            return ''
-        error(422, 'EMPTY_MESSAGE')
-    if len(text) > limit:
-        error(422, 'MESSAGE_TOO_LONG')
-    return text
 
 
-def encode_cursor(at: datetime, kind: str, item_id: UUID) -> str:
-    return base64.urlsafe_b64encode(f'{at.isoformat()}|{kind}|{item_id}'.encode()).rstrip(b'=').decode()
 
 
-def decode_cursor(value: str, kinds: tuple[str, ...]) -> tuple[datetime, str, UUID]:
-    """The (time, kind, id) a cursor names, or 422 INVALID_CURSOR: over ``CURSOR_LENGTH`` characters, outside the
-    URL-safe alphabet, not three parts, a time without a zone or not ISO, a kind not in ``kinds`` or a bad id."""
-    try:
-        if len(value) > CURSOR_LENGTH or not CURSOR_TEXT.fullmatch(value):
-            raise ValueError
-        text = base64.b64decode(value + '=' * (-len(value) % 4), altchars=b'-_', validate=True).decode('ascii')
-        stamp, kind, item = text.split('|')
-        at = datetime.fromisoformat(stamp)
-        if at.tzinfo is None or kind not in kinds:
-            raise ValueError
-        return at, kind, UUID(item)
-    except ValueError:
-        error(422, 'INVALID_CURSOR')
 
 
 def standings(conn, user_id: str, others: dict) -> dict:
@@ -283,19 +204,6 @@ def standings(conn, user_id: str, others: dict) -> dict:
     return found
 
 
-def count_message(conn, user_id: str) -> None:
-    """Counts one message against the hourly limit: rows older than an hour pruned, and 429 MESSAGE_RATE_LIMITED with
-    ``retry_after_minutes`` at the limit. The caller holds the sender's message lock and has answered a replay. A
-    refused message rolls back with its count."""
-    conn.execute("""DELETE FROM handle_lookup_event
-      WHERE user_id=%s AND kind='message' AND created_at < now() - interval '1 hour'""", (user_id,))
-    recent = conn.execute("""SELECT count(*) AS sent, min(created_at) AS oldest FROM handle_lookup_event
-      WHERE user_id=%s AND kind='message'""", (user_id,)).fetchone()
-    if recent['sent'] >= MESSAGES_PER_HOUR:
-        wait = conn.execute("SELECT ceil(extract(epoch FROM %s + interval '1 hour' - now()) / 60) AS wait",
-                            (recent['oldest'],)).fetchone()['wait']
-        raise HTTPException(429, {'code': 'MESSAGE_RATE_LIMITED', 'retry_after_minutes': max(1, int(wait))})
-    conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'message')", (user_id,))
 
 
 def traded_before(conn, one: str, two: str) -> bool:
@@ -487,17 +395,6 @@ def summaries(conn, user_id: str, *, archived: bool | None, before: tuple | None
     return found, more
 
 
-@router.get('', response_model=ConversationsView)
-def list_conversations(archived: bool = False, before: str | None = Query(None, max_length=4000),
-                       user_id: str = Depends(verified_user)):
-    """The reader's conversations, newest activity first, 50 a page. ``archived=true`` lists the archived ones; an
-    archived conversation is visible again once its last activity is newer than the archive time. Writes nothing."""
-    cursor = decode_cursor(before, ('conversation',)) if before else None
-    with connect() as conn, conn.transaction():
-        found, more = summaries(conn, user_id, archived=archived, before=cursor, only=None)
-        profile = conn.execute('SELECT suspended_at IS NOT NULL AS suspended FROM collector_profile WHERE user_id = %s',
-                               (user_id,)).fetchone()
-    return ConversationsView(conversations=found, next_before=more, suspended=bool(profile and profile['suspended']))
 
 
 PULSE_CONVERSATIONS = """SELECT count(*) AS conversations, coalesce(sum(extract(epoch FROM c.changed_at)), 0) AS changed,
@@ -512,20 +409,6 @@ PULSE_UPDATES = """SELECT count(*) AS updates, coalesce(sum(extract(epoch FROM c
        count(dismissed_at) AS dismissed_n FROM inbox_update WHERE recipient_id = %s"""
 
 
-@router.get('/pulse', response_model=ConversationPulse)
-def read_pulse(user_id: str = Depends(verified_user)):
-    """How many visible conversations are unread, and the watermark of everything the shell shows: counts and sums
-    over the reader's conversations and inbox updates (``Decimal`` sums are hashed as text). It moves on a message, a
-    Trade step, an inbox update, a Block or Unblock between the pair (``pair_changed``), a suspension of either member
-    or its lift (``account_changed``), and the reader's own read, archive and unarchive, and not on a rename. Writes
-    nothing and makes no owner row."""
-    with connect() as conn, conn.transaction():
-        talk = conn.execute(PULSE_CONVERSATIONS, (user_id,)).fetchone()
-        news = conn.execute(PULSE_UPDATES, (user_id,)).fetchone()
-    parts = (talk['conversations'], talk['changed'], talk['read'], talk['archived'], talk['archived_n'],
-             news['updates'], news['created'], news['seen'], news['dismissed'], news['dismissed_n'])
-    watermark = hashlib.sha256(':'.join(str(part) for part in parts).encode()).hexdigest()[:32]
-    return ConversationPulse(unread_conversations=talk['unread'], watermark=watermark)
 
 
 def trader_profile(conn, trader_id: UUID):
@@ -543,10 +426,9 @@ PAIR_CHANGED = """UPDATE conversation SET changed_at = greatest(changed_at + int
 
 
 def pair_changed(conn, user_id: str, other_id: str) -> None:
-    """Moves the pair's conversation watermark with no new activity. A Block and an Unblock call it
-    (``friends.place_block``, ``friends._lift_block``). The caller holds both owners; the row is taken last (owners,
-    ``loan``, ``trade``, ``conversation``). A pair with no conversation updates nothing."""
-    conn.execute(PAIR_CHANGED, tuple(sorted((user_id, other_id))))
+    rows = conn.execute('SELECT id FROM thread WHERE user_low=%s AND user_high=%s',
+                        tuple(sorted((user_id, other_id)))).fetchall()
+    touch_threads(conn, [ThreadTouch(id=row['id'], activity=False) for row in rows])
 
 
 ACCOUNT_CONVERSATIONS = """SELECT id FROM conversation
@@ -558,50 +440,13 @@ ACCOUNT_CHANGED = """UPDATE conversation
 
 
 def account_changed(conn, user_id: str, skip: list[UUID]) -> None:
-    """Moves the watermark of every conversation the account is a member of, except ``skip``, the rows this transaction
-    already wrote. Suspension and its lift call it, so a Block can't be told from a suspension on the pulse. The caller
-    holds the account's owner row. It is the transaction's first write of each row, so no foreign-key re-check
-    key-shares the other members' rows, and the rows are taken in id order (the SELECT locks them, the UPDATE writes
-    rows already held). Invariant: every conversation row this transaction already wrote must be in ``skip`` or have
-    both its owners locked; any later change to the suspension path that writes a conversation row must keep that
-    true."""
-    ids = [row['id'] for row in conn.execute(ACCOUNT_CONVERSATIONS, {'a': user_id, 'skip': list(skip)})]
-    if ids:
-        conn.execute(ACCOUNT_CHANGED, {'ids': ids})
+    rows = conn.execute("SELECT id FROM thread WHERE (user_low=%s OR user_high=%s) "
+                        "AND NOT (id=ANY(%s::uuid[]))", (user_id, user_id, skip)).fetchall()
+    touch_threads(conn, [ThreadTouch(id=row['id'], activity=False) for row in rows])
 
 
-@router.get('/with/{trader_id}', response_model=ConversationView)
-def read_with_trader(trader_id: UUID, before: str | None = Query(None, max_length=4000),
-                     user_id: str = Depends(verified_user)):
-    """The reader's conversation with the collector who has this trader id. A pair with a conversation answers it. A
-    collector in reach with none answers an empty one (``id`` null, no items) for the composer. Anyone else, an unknown
-    trader id and the reader's own are 404 CONVERSATION_NOT_FOUND. Writes nothing."""
-    if before:
-        decode_cursor(before, ('message', 'trade'))
-    with connect() as conn, conn.transaction():
-        other = trader_profile(conn, trader_id)
-        if other is None or other['user_id'] == user_id:
-            error(404, 'CONVERSATION_NOT_FOUND')
-        row = pair_row(conn, user_id, other['user_id'])
-        if row is not None:
-            return conversation_view(conn, user_id, row, before)
-        if reach_one(conn, user_id, other['user_id']) is None:
-            error(404, 'CONVERSATION_NOT_FOUND')
-        standing = standings(conn, user_id, {0: (other['user_id'], other['display_name'])})[0]
-        return ConversationView(
-            id=None, other=standing.party, status=standing.status, can_message=standing.can_message,
-            can_propose=standing.can_propose, can_report=standing.can_report, items=[], next_before=None)
 
 
-@router.get('/{conversation_id}', response_model=ConversationView)
-def read_conversation(conversation_id: UUID, before: str | None = Query(None, max_length=4000),
-                      user_id: str = Depends(verified_user)):
-    """One conversation and a page of its items, newest first. 404 CONVERSATION_NOT_FOUND for an unknown id and for a
-    reader who is not a member. Writes nothing."""
-    if before:
-        decode_cursor(before, ('message', 'trade'))
-    with connect() as conn, conn.transaction():
-        return conversation_view(conn, user_id, member_conversation(conn, user_id, conversation_id), before)
 
 
 def new_conversation_lock(conn, user_id: str) -> None:
@@ -628,26 +473,6 @@ def message_locks(conn, user_id: str, both: bool) -> None:
         new_conversation_lock(conn, user_id)
 
 
-@router.post('/{conversation_id}/messages', response_model=Message, status_code=201)
-def send_message(conversation_id: UUID, command: SendMessage, user_id: str = Depends(verified_user)):
-    """Sends a message to a conversation the reader is a member of. Refusals and order: see the module docstring. A
-    replay by ``idempotency_key`` answers the stored message and is not counted."""
-    body = normalize_text(command.body)
-    try:
-        with connect() as conn, conn.transaction():
-            ensure_owner(conn, user_id)
-            message_locks(conn, user_id, both=False)
-            row = member_conversation(conn, user_id, conversation_id)
-            lock_owners(conn, user_id)
-            low, other_id, other_name = sides_of(row, user_id)
-            stored = stored_message(conn, conversation_id, low, command.idempotency_key)
-            if stored is not None:
-                return message_of(stored, low)
-            standing = standings(conn, user_id, {0: (other_id, other_name)})[0]
-            refuse_send(conn, user_id, standing, True)
-            return message_of(write_message(conn, conversation_id, low, command.idempotency_key, body), low)
-    except psycopg.errors.DeadlockDetected:
-        error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
 
 
 def refuse_send(conn, user_id: str, standing: Standing, allowed: bool) -> None:
@@ -659,55 +484,8 @@ def refuse_send(conn, user_id: str, standing: Standing, allowed: bool) -> None:
     count_message(conn, user_id)
 
 
-@traders_router.post('/{trader_id}/messages', response_model=Message, status_code=201)
-def send_trader_message(trader_id: UUID, command: SendMessage, user_id: str = Depends(verified_user)):
-    """Sends a message to the collector who has this trader id, in the pair's conversation, which it opens when there
-    is none (the other must then be in reach). An unknown trader id, the reader's own, a conversation that is
-    not open, and a collector outside reach with no conversation are all 409 COLLECTOR_UNAVAILABLE. After the hourly
-    limit (429 MESSAGE_RATE_LIMITED), a message that opens the conversation with a collector who is not a Friend is
-    counted: 429 TOO_MANY_NEW_CONVERSATIONS at 10 in 24 hours. Locks both owners."""
-    body = normalize_text(command.body)
-    try:
-        with connect() as conn, conn.transaction():
-            ensure_owner(conn, user_id)
-            message_locks(conn, user_id, both=True)
-            other = trader_profile(conn, trader_id)
-            if other is None or other['user_id'] == user_id:
-                error(409, 'COLLECTOR_UNAVAILABLE')
-            other_id = other['user_id']
-            lock_owners(conn, user_id, other_id)
-            row = pair_row(conn, user_id, other_id)
-            low = sorted((user_id, other_id))[0] == user_id
-            if row is not None:
-                stored = stored_message(conn, row['id'], low, command.idempotency_key)
-                if stored is not None:
-                    return message_of(stored, low)
-            standing = standings(conn, user_id, {0: (other_id, other['display_name'])})[0]
-            found = reach_one(conn, user_id, other_id)
-            refuse_send(conn, user_id, standing, row is not None or found is not None)
-            # Under both owner locks, also for an existing conversation: it attaches Trades the pair has left out.
-            conversation = open_conversation(conn, user_id, other_id, found.how if found else 'conversation')
-            return message_of(write_message(conn, conversation, low, command.idempotency_key, body), low)
-    except psycopg.errors.DeadlockDetected:
-        error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
 
 
-@router.post('/{conversation_id}/read', response_model=ConversationSummary)
-def read_through(conversation_id: UUID, command: ReadThrough, user_id: str = Depends(verified_user)):
-    """Moves the reader's read marker to the time of the item the cursor names, never back. 422 INVALID_CURSOR for a
-    malformed cursor, one naming no item of this conversation, or one whose time is not that item's. Writes only the
-    reader's own member row."""
-    at, kind, item = decode_cursor(command.through, ('message', 'trade'))
-    with connect() as conn, conn.transaction():
-        member_conversation(conn, user_id, conversation_id)
-        table = 'message' if kind == 'message' else 'trade'
-        named = conn.execute(f'SELECT created_at FROM {table} WHERE id = %s AND conversation_id = %s',
-                             (item, conversation_id)).fetchone()
-        if named is None or named['created_at'] != at:
-            error(422, 'INVALID_CURSOR')
-        conn.execute("""UPDATE conversation_member SET read_at = greatest(coalesce(read_at, '-infinity'), %s)
-          WHERE conversation_id = %s AND member_id = %s""", (named['created_at'], conversation_id, user_id))
-        return summaries(conn, user_id, archived=None, before=None, only=conversation_id)[0][0]
 
 
 def mark_archived(conversation_id: UUID, user_id: str, archive: bool) -> ConversationSummary:
@@ -716,15 +494,3 @@ def mark_archived(conversation_id: UUID, user_id: str, archive: bool) -> Convers
         conn.execute(f"""UPDATE conversation_member SET archived_at = {'clock_timestamp()' if archive else 'NULL'}
           WHERE conversation_id = %s AND member_id = %s""", (conversation_id, user_id))
         return summaries(conn, user_id, archived=None, before=None, only=conversation_id)[0][0]
-
-
-@router.post('/{conversation_id}/archive', response_model=ConversationSummary)
-def archive_conversation(conversation_id: UUID, user_id: str = Depends(verified_user)):
-    """Hides the conversation from the reader's list until it has newer activity. Nobody deletes a conversation."""
-    return mark_archived(conversation_id, user_id, True)
-
-
-@router.post('/{conversation_id}/unarchive', response_model=ConversationSummary)
-def unarchive_conversation(conversation_id: UUID, user_id: str = Depends(verified_user)):
-    """Shows an archived conversation in the reader's list again."""
-    return mark_archived(conversation_id, user_id, False)

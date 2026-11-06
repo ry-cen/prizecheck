@@ -9,12 +9,7 @@ import { randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Page } from "@playwright/test";
 import type { Pool } from "pg";
 import { expect, test } from "./support/collectors";
-import {
-  discoverable,
-  seedZips,
-  timeline,
-  traderIdOf,
-} from "./support/conversations";
+import { discoverable, seedZips, traderIdOf } from "./support/conversations";
 import {
   accountId,
   api,
@@ -40,6 +35,8 @@ const LIMIT =
   "You've started 10 new conversations in the last 24 hours. Try again in 1 hour.";
 const MEET =
   "Meet somewhere public, like a local game store, and check the cards before you swap.";
+const timeline = (page: Page) =>
+  page.getByRole("list", { name: "Messages and changes" });
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 const noArtwork = (page: Page) =>
   page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => route.abort());
@@ -122,10 +119,15 @@ async function messageOnCard(page: Page, s: Strangers, phone: boolean) {
     `a stranger's Trade List with Message at ${phone ? "375 px" : "desktop width"}`
   );
   await message.click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/with/${s.mistyTrader}`);
-  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(
-    QUESTION
-  );
+  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${s.mistyTrader}`);
+  if (phone)
+    await page
+      .getByRole("tablist", { name: "Proposal builder" })
+      .getByRole("tab", { name: /^Proposal/ })
+      .click();
+  await expect(
+    page.getByRole("textbox", { name: "Message (optional)" })
+  ).toHaveValue(QUESTION);
   await expectPageChecks(
     page,
     `the prefilled conversation at ${phone ? "375 px" : "desktop width"}`
@@ -144,7 +146,7 @@ test.describe("desktop, messaging strangers", () => {
     const s = await strangers(page, collectors, DESKTOP_SIZE);
     const ash = await accountId(page);
     await messageOnCard(page, s, false);
-    const composer = page.getByRole("textbox", { name: "Message" });
+    const composer = page.getByRole("textbox", { name: "Message (optional)" });
 
     // The limit refuses the first message, names the wait and keeps the draft.
     await collectors.pool.query(
@@ -152,7 +154,9 @@ test.describe("desktop, messaging strangers", () => {
        SELECT $1, 'new_conversation', now() - interval '23 hours' FROM generate_series(1, 10)`,
       [ash]
     );
-    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Send Trade Proposal", exact: true })
+      .click();
     await expect(
       page.getByRole("alert").filter({ hasText: LIMIT })
     ).toBeVisible();
@@ -163,12 +167,16 @@ test.describe("desktop, messaging strangers", () => {
       "DELETE FROM handle_lookup_event WHERE user_id = $1 AND kind = 'new_conversation'",
       [ash]
     );
-    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Send Trade Proposal", exact: true })
+      .click();
     await expect(timeline(page)).toContainText(QUESTION);
-    await expect(composer).toHaveValue("");
+    await expect(composer).toHaveCount(0);
+    const chat = page.getByRole("textbox", { name: /^Message / });
+    await expect(chat).toHaveValue("");
     await page.reload();
     await expect(timeline(page)).toContainText(QUESTION);
-    await expect(composer).toHaveValue("");
+    await expect(chat).toHaveValue("");
 
     // Misty proposes, Ash accepts: a stranger's accepted Trade carries the meetup tip.
     const sent = await api(s.misty, "POST", "/api/trades", {

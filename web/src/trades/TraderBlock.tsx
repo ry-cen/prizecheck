@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useNoteLoansChanged, usePollPulse } from "../inbox/Inbox";
+import { useNoteLoansChanged } from "../inbox/Inbox";
 import {
   BLOCK,
   blockedStatus,
@@ -8,7 +8,12 @@ import {
 } from "../social/blockMessages";
 import { endingText, traderEnding } from "../social/friendshipEnding";
 import { commandMessage } from "../social/socialMessages";
-import { blockTrader, getLoans, getTrades } from "../social_generated";
+import {
+  getFriends,
+  blockTrader,
+  getLoanViews,
+  getTradeViews,
+} from "../social_generated";
 import { Button } from "../ui/Button";
 import type { MenuItem } from "../ui/Menu";
 
@@ -17,6 +22,8 @@ export type BlockTarget = {
   traderId: string;
   name: string;
   handle: string | null;
+  /** An already-known Friend address from Loan terms, only for the ending summary. */
+  collectorId?: string | null;
 };
 
 type State =
@@ -43,7 +50,6 @@ export function useTraderBlock(
 ): { item: MenuItem | null; panel: ReactNode } {
   const [state, setState] = useState<State>({ kind: "idle" });
   const noteLoansChanged = useNoteLoansChanged();
-  const pollPulse = usePollPulse();
   const questionId = useId();
   const primary = useRef<HTMLButtonElement>(null);
   const reading = useRef<AbortController | null>(null);
@@ -62,17 +68,25 @@ export function useTraderBlock(
     const key = crypto.randomUUID();
     setState({ kind: "asking", target: who, key, cancels: "" });
     Promise.all([
-      getTrades(controller.signal),
-      who.handle ? getLoans(controller.signal) : Promise.resolve(null),
+      getTradeViews(controller.signal),
+      who.handle || who.collectorId
+        ? getLoanViews(controller.signal)
+        : Promise.resolve(null),
+      who.handle || who.collectorId ? getFriends() : Promise.resolve(null),
     ])
-      .then(([trades, loans]) => {
+      .then(([trades, loans, friends]) => {
         if (controller.signal.aborted) return;
         const cancels = endingText(
           traderEnding(
-            loans ? loans.loans : null,
-            trades.trades,
+            loans,
+            trades,
             who.traderId,
-            who.handle
+            who.handle,
+            friends?.friends.find(
+              (friend) =>
+                friend.collector_id === who.collectorId ||
+                friend.handle.toLowerCase() === who.handle?.toLowerCase()
+            )?.collector_id ?? null
           )
         );
         setState((current) =>
@@ -96,7 +110,6 @@ export function useTraderBlock(
         options.statusElsewhere ? { kind: "idle" } : { kind: "done", text }
       );
       noteLoansChanged();
-      pollPulse();
       options.onBlocked?.(text);
     } catch (cause) {
       setState({ kind: "failed", text: commandMessage(cause) });

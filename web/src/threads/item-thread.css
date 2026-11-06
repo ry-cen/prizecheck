@@ -1,0 +1,22 @@
+.item-thread {
+  display: grid;
+  min-width: 0;
+  gap: 24px;
+  align-items: start;
+}
+.item-thread-agreement,
+.item-thread-timeline {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+@media (min-width: 1550px) {
+  .item-thread {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+  .item-thread-timeline {
+    position: sticky;
+    top: 80px;
+  }
+}

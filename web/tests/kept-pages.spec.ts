@@ -1,3 +1,9 @@
+import {
+  itemRow,
+  itemOffer,
+  itemPage,
+  mockItemDetail,
+} from "./support/item-thread-fixtures";
 import { startAsNewOwner } from "./support/owner";
 import {
   api,
@@ -7,7 +13,7 @@ import {
   hold,
   unsorted,
 } from "./support/loans";
-import { traderIdOf } from "./support/conversations";
+import { forTradeLeaf } from "./support/trades";
 import { randomUUID } from "node:crypto";
 import { type Page, type Response } from "@playwright/test";
 import { execFileSync } from "node:child_process";
@@ -64,17 +70,24 @@ test("idle sign-in warms populated roots and their first opens never show loadin
   await befriend(page, lender.page);
   const deckName = `Warm Deck ${randomUUID()}`;
   const deckId = await createDeck(page, deckName);
-  await api(page, "POST", "/api/loans", {
+  const warmLoan = await api(page, "POST", "/api/loans", {
     lender_id: lender.userId,
     lines: [{ edition_id: ids["PAL 185"], quantity: "1" }],
     idempotency_key: randomUUID(),
   });
-  await api(
-    page,
-    "POST",
-    `/api/social/traders/${await traderIdOf(lender.page)}/messages`,
-    { body: "Warm message", idempotency_key: randomUUID() }
+  await hold(
+    lender.page,
+    await forTradeLeaf(lender.page, "Warm Trade Shelf"),
+    ids["PAL 185"],
+    1
   );
+  await api(page, "POST", "/api/trades", {
+    recipient_id: lender.userId,
+    you_give: [],
+    you_get: [{ edition_id: ids["PAL 185"], quantity: "1" }],
+    message: "Warm message",
+    idempotency_key: randomUUID(),
+  });
   await api(page, "POST", "/api/missing-card-reports", {
     kind: "printing",
     set_id: "warm-set",
@@ -109,8 +122,8 @@ test("idle sign-in warms populated roots and their first opens never show loadin
   await warmed(page);
   const endpoints = [
     "/api/decks",
-    "/api/social/loans",
-    "/api/social/conversations",
+    "/api/loans",
+    "/api/trades",
     "/api/missing-card-reports",
     "/api/catalog/editions",
     "/auth/sign-ins",
@@ -183,7 +196,7 @@ test("idle sign-in warms populated roots and their first opens never show loadin
       expect(costs).toBe(1);
     } else if (label === "Loans")
       await expect(
-        content.getByRole("link", { name: /You asked Warm lender for 1 card/ })
+        content.locator(`a[data-thread="${warmLoan.thread_id}"]`)
       ).toBeVisible({ timeout: 0 });
     else if (label === "Trades")
       await expect(
@@ -414,14 +427,15 @@ test("Loans retains its rows while a held show-time read fetches an API change",
   await tabs(page)
     .getByRole("button", { name: /^Loans/ })
     .click();
-  const old = main(page).getByRole("link", {
-    name: /You asked Kept lender for 1 card/,
-  });
+  const old = main(page)
+    .getByRole("region", { name: "Pending" })
+    .locator(`a[data-thread="${loan.thread_id}"]`);
   await expect(old).toBeVisible();
   await tabs(page)
     .getByRole("button", { name: "Collection", exact: true })
     .click();
-  await command(page, `/api/social/loans/${loan.id}/withdraw`, {
+  await command(page, `/api/loans/${loan.thread_id}/withdraw`, {
+    loan_id: loan.loan_id,
     revision: loan.revision,
     idempotency_key: randomUUID(),
   });
@@ -429,7 +443,7 @@ test("Loans retains its rows while a held show-time read fetches an API change",
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route(/\/api\/social\/loans$/, async (route) => {
+  await page.route(/\/api\/loans\?group=pending(?:&.*)?$/, async (route) => {
     await held;
     await route.continue();
   });
@@ -445,15 +459,13 @@ test("Loans retains its rows while a held show-time read fetches an API change",
     release();
   }
   await expect(old).toHaveCount(0);
-  await main(page)
-    .locator("summary")
-    .filter({ hasText: /^History/ })
-    .click();
-  await expect(
-    main(page).getByRole("link", {
-      name: /You withdrew your request to Kept lender/,
-    })
-  ).toBeVisible();
+  await main(page).locator("summary").filter({ hasText: /^Done/ }).click();
+  const closed = main(page).locator(`a[data-thread="${loan.thread_id}"]`);
+  await expect(closed).toContainText("Closed");
+  await closed.click();
+  await expect(main(page).getByRole("heading", { level: 1 })).toHaveText(
+    "You withdrew your request to Kept lender"
+  );
 });
 
 test("first activation keeps the warm read in flight, and a later quiet failure keeps its data", async ({
@@ -468,14 +480,24 @@ test("first activation keeps the warm read in flight, and a later quiet failure 
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route(/\/api\/social\/loans$/, async (route) => {
-    count++;
-    if (count === 1) {
-      arrived();
-      await held;
-      await route.fulfill({ json: { loans: [], needs_you: 0 } });
-    } else await route.fulfill({ status: 503, json: {} });
-  });
+  const groups = new Set<string>();
+  await page.route(
+    /\/api\/loans\?group=(?:needs_you|open|out_now|pending|done)(?:&.*)?$/,
+    async (route) => {
+      const group = new URL(route.request().url()).searchParams.get("group")!;
+      groups.add(group);
+      if (group !== "pending") {
+        await route.fulfill({ json: [] });
+        return;
+      }
+      count++;
+      if (count === 1) {
+        arrived();
+        await held;
+        await route.fulfill({ json: [] });
+      } else await route.fulfill({ status: 503, json: {} });
+    }
+  );
   await signInAsOwner(page);
   await started;
   try {
@@ -495,7 +517,8 @@ test("first activation keeps the warm read in flight, and a later quiet failure 
     .click();
   const failed = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/social/loans") && response.status() === 503
+      response.url().includes("/api/loans?group=pending") &&
+      response.status() === 503
   );
   await tabs(page)
     .getByRole("button", { name: /^Loans/ })
@@ -506,16 +529,30 @@ test("first activation keeps the warm read in flight, and a later quiet failure 
     main(page).getByText("Your Loans couldn't be loaded.", { exact: true })
   ).toHaveCount(0);
   expect(count).toBe(2);
+  expect([...groups].sort()).toEqual([
+    "done",
+    "needs_you",
+    "open",
+    "out_now",
+    "pending",
+  ]);
 });
 
 test("a failed hidden read retries on first activation", async ({ page }) => {
   let count = 0;
-  await page.route(/\/api\/social\/loans$/, (route) => {
-    count++;
-    return count === 1
-      ? route.fulfill({ status: 503, json: {} })
-      : route.fulfill({ json: { loans: [], needs_you: 0 } });
-  });
+  const groups = new Set<string>();
+  await page.route(
+    /\/api\/loans\?group=(?:needs_you|open|out_now|pending|done)(?:&.*)?$/,
+    (route) => {
+      const group = new URL(route.request().url()).searchParams.get("group")!;
+      groups.add(group);
+      if (group !== "pending") return route.fulfill({ json: [] });
+      count++;
+      return count === 1
+        ? route.fulfill({ status: 503, json: {} })
+        : route.fulfill({ json: [] });
+    }
+  );
   await signInAsOwner(page);
   await warmed(page);
   expect(count).toBe(1);
@@ -524,6 +561,13 @@ test("a failed hidden read retries on first activation", async ({ page }) => {
     .click();
   await expect(main(page).getByText(/^No Loans yet\./)).toBeVisible();
   expect(count).toBe(2);
+  expect([...groups].sort()).toEqual([
+    "done",
+    "needs_you",
+    "open",
+    "out_now",
+    "pending",
+  ]);
 });
 
 test("Settings preserves unsaved form fields across tab switches", async ({
@@ -548,105 +592,88 @@ test("Settings preserves unsaved form fields across tab switches", async ({
   await expect(field).toHaveValue("Unsaved collector name");
 });
 
-test("a late quiet read cannot restore a conversation after Archive completes", async ({
+test("a late quiet read cannot restore an open item after Withdraw completes", async ({
   page,
 }) => {
-  const id = randomUUID();
-  const row = {
-    id,
-    other: {
-      trader_id: randomUUID(),
-      display_name: "Pending archive",
-      friend: false,
-      handle: null,
-      band: null,
-      completed_trades: 0,
-    },
-    status: "open",
-    last_message: null,
-    open_trades: 0,
-    waiting_on_you: 0,
-    unread: false,
-    archived: false,
-    last_activity_at: new Date().toISOString(),
-  };
-  let count = 0;
-  let archiveComplete = false;
-  let releaseRead!: () => void;
-  let releaseArchive!: () => void;
-  let readStarted!: () => void;
-  let archiveStarted!: () => void;
-  const heldRead = new Promise<void>((resolve) => {
-    releaseRead = resolve;
-  });
-  const heldArchive = new Promise<void>((resolve) => {
-    releaseArchive = resolve;
-  });
-  const reading = new Promise<void>((resolve) => {
-    readStarted = resolve;
-  });
-  const archiving = new Promise<void>((resolve) => {
-    archiveStarted = resolve;
-  });
-  await page.route(/\/api\/social\/conversations(?:\?.*)?$/, async (route) => {
-    const rows = archiveComplete ? [] : [row];
-    count++;
-    if (count === 2) {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const row = itemRow("Pending withdrawal");
+  let count = 0,
+    closed = false;
+  let releaseRead!: () => void,
+    releaseCommand!: () => void,
+    readStarted!: () => void,
+    commandStarted!: () => void,
+    readAnswered!: () => void;
+  const heldRead = new Promise<void>((r) => (releaseRead = r)),
+    heldCommand = new Promise<void>((r) => (releaseCommand = r));
+  const reading = new Promise<void>((r) => (readStarted = r)),
+    commanding = new Promise<void>((r) => (commandStarted = r)),
+    answered = new Promise<void>((r) => (readAnswered = r));
+  await mockItemDetail(page, row, () => closed);
+  await page.route(/\/api\/trades\?.*$/, async (route) => {
+    const group = new URL(route.request().url()).searchParams.get("group");
+    const snapshot =
+      group === "open" && !closed
+        ? [row]
+        : group === "done" && closed
+          ? [{ ...row, section: "done", state: "closed" }]
+          : [];
+    const late = group === "open" && ++count === 2;
+    if (late) {
       readStarted();
       await heldRead;
     }
-    await route.fulfill({
-      json: { conversations: rows, next_before: null, suspended: false },
-    });
+    await route.fulfill({ json: snapshot });
+    if (late) readAnswered();
   });
-  await page.route(
-    `**/api/social/conversations/${id}/archive`,
-    async (route) => {
-      archiveStarted();
-      await heldArchive;
-      archiveComplete = true;
-      await route.fulfill({ json: { ...row, archived: true } });
-    }
-  );
+  await page.route(`**/api/trades/${row.id}/withdraw`, async (route) => {
+    commandStarted();
+    await heldCommand;
+    closed = true;
+    await route.fulfill({ json: itemOffer(row, true) });
+  });
   await signInAsOwner(page);
   await warmed(page);
   await tabs(page)
     .getByRole("button", { name: /^Trades/ })
     .click();
-  const conversation = main(page).getByRole("link", {
-    name: /Pending archive/,
-  });
-  await expect(conversation).toBeVisible();
+  const open = main(page)
+    .getByRole("list", { name: "Open Trades" })
+    .locator(`a[data-thread="${row.id}"]`);
+  await expect(open).toBeVisible();
+  await tabs(page)
+    .getByRole("button", { name: "Collection", exact: true })
+    .click();
+  await tabs(page)
+    .getByRole("button", { name: /^Trades/ })
+    .click();
+  await reading;
   try {
+    await open.click();
     await main(page)
-      .getByRole("button", { name: /Archive.*Pending archive/ })
+      .getByRole("button", { name: "More for this Trade" })
       .click();
-    await archiving;
-    await tabs(page)
-      .getByRole("button", { name: "Collection", exact: true })
-      .click();
-    await tabs(page)
-      .getByRole("button", { name: /^Trades/ })
-      .click();
-    await reading;
-    releaseArchive();
-    await expect(conversation).toHaveCount(0);
-    const answered = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/api/social/conversations"
-    );
+    await page.getByRole("menuitem", { name: "Withdraw", exact: true }).click();
+    await commanding;
+    releaseCommand();
+    await expect(open).toHaveCount(0);
     releaseRead();
     await answered;
-    // Allow the response body and React's commit to finish before checking the stale row stayed discarded.
     await page.evaluate(
       () =>
         new Promise<void>((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
         )
     );
-    await expect(conversation).toHaveCount(0);
+    await expect(open).toHaveCount(0);
+    await main(page).locator("summary", { hasText: "Done" }).click();
+    await expect(
+      main(page)
+        .getByRole("list", { name: "Done Trades" })
+        .locator(`a[data-thread="${row.id}"]`)
+    ).toContainText("Closed");
   } finally {
-    releaseArchive();
+    releaseCommand();
     releaseRead();
   }
 });
@@ -816,124 +843,120 @@ test("costs refresh after API inventory removal and a counting-settings change, 
   expect(count).toBe(3);
 });
 
-for (const first of ["archive", "page"] as const) {
-  test(`pagination remains usable when ${first} completes first during Archive`, async ({
+for (const first of ["withdraw", "page"] as const) {
+  test(`pagination remains usable when ${first} completes first during Withdraw`, async ({
     page,
   }) => {
-    const makeRow = (name: string) => ({
-      id: randomUUID(),
-      other: {
-        trader_id: randomUUID(),
-        display_name: name,
-        friend: false,
-        handle: null,
-        band: null,
-        completed_trades: 0,
-      },
-      status: "open",
-      last_message: null,
-      open_trades: 0,
-      waiting_on_you: 0,
-      unread: false,
-      archived: false,
-      last_activity_at: new Date().toISOString(),
-    });
-    const initial = makeRow("Archive row"),
-      second = makeRow("Second page row"),
-      third = makeRow("Third page row");
-    let releasePage!: () => void, releaseArchive!: () => void;
-    let pageStarted!: () => void, archiveStarted!: () => void;
-    const heldPage = new Promise<void>((resolve) => {
-      releasePage = resolve;
-    });
-    const heldArchive = new Promise<void>((resolve) => {
-      releaseArchive = resolve;
-    });
-    const paging = new Promise<void>((resolve) => {
-      pageStarted = resolve;
-    });
-    const archiving = new Promise<void>((resolve) => {
-      archiveStarted = resolve;
-    });
-    await page.route(
-      /\/api\/social\/conversations(?:\?.*)?$/,
-      async (route) => {
-        const before = new URL(route.request().url()).searchParams.get(
-          "before"
-        );
-        if (before === "page-2") {
-          pageStarted();
-          await heldPage;
-        }
-        await route.fulfill({
-          json: {
-            conversations:
-              before === "page-3"
-                ? [third]
-                : before
-                  ? [initial, second]
-                  : [initial],
-            next_before:
-              before === "page-3" ? null : before ? "page-3" : "page-2",
-            suspended: false,
-          },
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const initial = itemRow("Withdraw row"),
+      second = itemRow("Second page row"),
+      third = itemRow("Third page row");
+    const rows = [
+      initial,
+      ...Array.from({ length: 49 }, (_, i) =>
+        itemRow(`First page filler ${i}`)
+      ),
+      second,
+      ...Array.from({ length: 49 }, (_, i) =>
+        itemRow(`Second page filler ${i}`)
+      ),
+      third,
+    ];
+    let closed = false,
+      firstReads = 0,
+      heldOnce = false,
+      thirdReads = 0;
+    let releasePage!: () => void,
+      releaseCommand!: () => void,
+      pageStarted!: () => void,
+      commandStarted!: () => void,
+      pageAnswered!: () => void;
+    const heldPage = new Promise<void>((r) => (releasePage = r)),
+      heldCommand = new Promise<void>((r) => (releaseCommand = r)),
+      paging = new Promise<void>((r) => (pageStarted = r)),
+      commanding = new Promise<void>((r) => (commandStarted = r)),
+      answered = new Promise<void>((r) => (pageAnswered = r));
+    await mockItemDetail(page, initial, () => closed);
+    await page.route(/\/api\/trades\?.*$/, async (route) => {
+      const query = new URL(route.request().url()).searchParams,
+        group = query.get("group"),
+        before = query.get("before");
+      if (group !== "open")
+        return route.fulfill({
+          json:
+            group === "done" && closed
+              ? [{ ...initial, section: "done", state: "closed" }]
+              : [],
         });
+      if (!before) firstReads++;
+      const snapshot = itemPage(
+        rows.filter((row) => !closed || row.id !== initial.id),
+        before
+      );
+      const hold = !!before && firstReads === 2 && !heldOnce;
+      if (hold) {
+        heldOnce = true;
+        pageStarted();
+        await heldPage;
       }
-    );
-    await page.route(
-      `**/api/social/conversations/${initial.id}/archive`,
-      async (route) => {
-        archiveStarted();
-        await heldArchive;
-        await route.fulfill({ json: { ...initial, archived: true } });
-      }
-    );
+      if (before && snapshot.some((row) => row.id === third.id)) thirdReads++;
+      await route.fulfill({ json: snapshot });
+      if (hold) pageAnswered();
+    });
+    await page.route(`**/api/trades/${initial.id}/withdraw`, async (route) => {
+      commandStarted();
+      await heldCommand;
+      closed = true;
+      await route.fulfill({ json: itemOffer(initial, true) });
+    });
     await signInAsOwner(page);
     await warmed(page);
     await tabs(page)
       .getByRole("button", { name: /^Trades/ })
       .click();
-    const more = main(page).getByRole("button", {
-      name: "Show more conversations",
-      exact: true,
-    });
+    await expect(
+      main(page).locator(`a[data-thread="${third.id}"]`)
+    ).toBeVisible();
+    expect(thirdReads).toBe(1);
+    await tabs(page)
+      .getByRole("button", { name: "Collection", exact: true })
+      .click();
+    await tabs(page)
+      .getByRole("button", { name: /^Trades/ })
+      .click();
+    await paging;
+    const open = main(page).getByRole("list", { name: "Open Trades" });
     try {
-      await more.click();
-      await paging;
+      await open.locator(`a[data-thread="${initial.id}"]`).click();
       await main(page)
-        .getByRole("button", {
-          name: "Archive conversation with Archive row",
-          exact: true,
-        })
+        .getByRole("button", { name: "More for this Trade" })
         .click();
-      await archiving;
-      if (first === "archive") {
-        releaseArchive();
+      await page
+        .getByRole("menuitem", { name: "Withdraw", exact: true })
+        .click();
+      await commanding;
+      if (first === "withdraw") {
+        releaseCommand();
         await expect(
-          main(page).getByRole("link", { name: /^Archive row/ })
+          open.locator(`a[data-thread="${initial.id}"]`)
         ).toHaveCount(0);
         releasePage();
       } else {
         releasePage();
-        await expect(
-          main(page).getByRole("link", { name: /^Second page row/ })
-        ).toBeVisible();
-        releaseArchive();
+        await answered;
+        await expect.poll(() => thirdReads).toBe(2);
+        releaseCommand();
       }
-      await expect(
-        main(page).getByRole("link", { name: /^Second page row/ })
-      ).toBeVisible();
-      await expect(
-        main(page).getByRole("link", { name: /^Archive row/ })
-      ).toHaveCount(0);
-      await expect(more).toBeEnabled();
-      await more.click();
-      await expect(
-        main(page).getByRole("link", { name: /^Third page row/ })
-      ).toBeVisible();
+      await expect(open.locator(`a[data-thread="${initial.id}"]`)).toHaveCount(
+        0
+      );
+      await expect(open.locator(`a[data-thread="${second.id}"]`)).toBeVisible();
+      await expect(open.locator(`a[data-thread="${third.id}"]`)).toBeVisible();
+      await expect(open.getByRole("link")).toHaveCount(100);
+      await answered;
     } finally {
       releasePage();
-      releaseArchive();
+      releaseCommand();
     }
   });
 }
@@ -1171,61 +1194,56 @@ test("slow but healthy tile reads all finish, since waiting for a worker does no
   expect(costReads).toBe(3);
 });
 
-test("a late first-page refresh cannot collapse conversations after pagination", async ({
+test("a late first-page refresh cannot collapse items after pagination", async ({
   page,
 }) => {
-  const row = (name: string) => ({
-    id: randomUUID(),
-    other: {
-      trader_id: randomUUID(),
-      display_name: name,
-      friend: false,
-      handle: null,
-      band: null,
-      completed_trades: 0,
-    },
-    status: "open",
-    last_message: null,
-    open_trades: 0,
-    waiting_on_you: 0,
-    unread: false,
-    archived: false,
-    last_activity_at: new Date().toISOString(),
-  });
-  const initial = row("First-page conversation"),
-    second = row("Second-page conversation"),
-    third = row("Third-page conversation");
+  const initial = itemRow("First-page item"),
+    second = itemRow("Second-page item"),
+    third = itemRow("Third-page item");
+  const rows = [
+    initial,
+    ...Array.from({ length: 49 }, (_, i) => itemRow(`First filler ${i}`)),
+    second,
+    ...Array.from({ length: 49 }, (_, i) => itemRow(`Second filler ${i}`)),
+    third,
+  ];
   let firstReads = 0;
-  let release!: () => void, arrived!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const started = new Promise<void>((resolve) => {
-    arrived = resolve;
-  });
-  await page.route(/\/api\/social\/conversations(?:\?.*)?$/, async (route) => {
-    const before = new URL(route.request().url()).searchParams.get("before");
+  let release!: () => void,
+    arrived!: () => void,
+    releaseTail!: () => void,
+    tailArrived!: () => void;
+  const held = new Promise<void>((r) => (release = r)),
+    started = new Promise<void>((r) => (arrived = r)),
+    tailHeld = new Promise<void>((r) => (releaseTail = r)),
+    tailStarted = new Promise<void>((r) => (tailArrived = r));
+  await page.route(/\/api\/trades\?.*$/, async (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    if (query.get("group") !== "open") return route.fulfill({ json: [] });
+    const before = query.get("before");
     if (!before && ++firstReads === 2) {
       arrived();
       await held;
     }
-    await route.fulfill({
-      json: {
-        conversations:
-          before === "page-3" ? [third] : before ? [second] : [initial],
-        next_before: before === "page-3" ? null : before ? "page-3" : "page-2",
-        suspended: false,
-      },
-    });
+    const snapshot = itemPage(rows, before);
+    if (
+      before &&
+      snapshot.some((row) => row.id === third.id) &&
+      firstReads === 2
+    ) {
+      tailArrived();
+      await tailHeld;
+    }
+    await route.fulfill({ json: snapshot });
   });
   await signInAsOwner(page);
   await warmed(page);
   await tabs(page)
     .getByRole("button", { name: /^Trades/ })
     .click();
-  await expect(
-    main(page).getByRole("link", { name: /^First-page conversation/ })
-  ).toBeVisible();
+  const secondRow = main(page).locator(`a[data-thread="${second.id}"]`),
+    thirdRow = main(page).locator(`a[data-thread="${third.id}"]`);
+  await expect(secondRow).toBeVisible();
+  await expect(thirdRow).toBeVisible();
   await tabs(page)
     .getByRole("button", { name: "Collection", exact: true })
     .click();
@@ -1234,31 +1252,11 @@ test("a late first-page refresh cannot collapse conversations after pagination",
       .getByRole("button", { name: /^Trades/ })
       .click();
     await started;
-    const more = main(page).getByRole("button", {
-      name: "Show more conversations",
-      exact: true,
-    });
-    await more.click();
-    await expect(
-      main(page).getByRole("link", { name: /^Second-page conversation/ })
-    ).toBeVisible();
-    const refreshed = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/api/social/conversations" &&
-        !new URL(response.url()).searchParams.has("before")
-    );
+    await expect(secondRow).toBeVisible({ timeout: 0 });
+    await expect(thirdRow).toBeVisible({ timeout: 0 });
     release();
-    await (await refreshed).finished();
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-        )
-    );
-    await expect(
-      main(page).getByRole("link", { name: /^Second-page conversation/ })
-    ).toBeVisible({ timeout: 0 });
-    await expect(more).toBeEnabled();
+    await tailStarted;
+    await expect(secondRow).toBeVisible({ timeout: 0 });
     await tabs(page)
       .getByRole("button", { name: "Collection", exact: true })
       .click();
@@ -1266,15 +1264,16 @@ test("a late first-page refresh cannot collapse conversations after pagination",
       .getByRole("button", { name: /^Trades/ })
       .click();
     expect(firstReads).toBe(2);
+    await expect(secondRow).toBeVisible({ timeout: 0 });
+    releaseTail();
+    await expect(main(page).locator("a[data-thread]")).toHaveCount(101);
+    await expect(thirdRow).toBeVisible();
     await expect(
-      main(page).getByRole("link", { name: /^Second-page conversation/ })
-    ).toBeVisible({ timeout: 0 });
-    await more.click();
-    await expect(
-      main(page).getByRole("link", { name: /^Third-page conversation/ })
-    ).toBeVisible();
+      main(page).getByText("Loading Trades…", { exact: true })
+    ).toHaveCount(0);
   } finally {
     release();
+    releaseTail();
   }
 });
 

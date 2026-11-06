@@ -4,7 +4,7 @@ import hashlib
 import psycopg
 import pytest
 
-from app.art_storage import storage
+from app.core.art.art_storage import storage
 from app.core.art.public import public_address, pointer_key, read_pointer, write_pointer
 from test_art_store import client, get, pids, upstream  # noqa: F401
 from app.main import connect
