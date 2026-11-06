@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.core.ops.api_errors import api_error as fail
 from app.core.art.urls import route_address
 from app.db import connect
-from app.holdings import HoldingView
+from app.core.inventory.holdings import HoldingView
 from app.location_tree import LOCATION_PATHS
 from app.social import counts
 from .cursors import anchor_columns, anchor_json, anchor_value, cursor_key, decode_cursor, encode_cursor

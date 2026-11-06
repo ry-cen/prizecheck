@@ -1,3 +1,10 @@
+import { useNoteLoansChanged } from "../inbox/Inbox";
+import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
+import { PendingLoanNotice } from "./PendingLoanNotice";
+import { refusalError, type FlowOutcome } from "./loanIntents";
+import { threadIdOf } from "./loanAttempt";
+import { resultText, signInAs } from "./loanText";
+import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
 import {
   useEffect,
   useLayoutEffect,
@@ -7,7 +14,7 @@ import {
 } from "react";
 import {
   getFriends,
-  sendLendOffer,
+  type SendLendOffer,
   SocialError,
   type Collector,
 } from "../social_generated";
@@ -24,7 +31,7 @@ type Friends =
   | { kind: "failed" }
   | { kind: "ready"; friends: Collector[] };
 
-type Sent = { id: string; friend: string };
+type Sent = { id: string | null; friend: string };
 
 /** What an offer that couldn't be sent says. `card` names a selected card by its Edition id. */
 function offerMessage(
@@ -68,6 +75,7 @@ export function LendOfferDialog({
   rows,
   onClose,
   onSent,
+  onLoansChanged,
   onOpenLoan,
   returnFocus,
 }: {
@@ -76,6 +84,7 @@ export function LendOfferDialog({
   onClose: () => void;
   /** The offer went out: the selection is done with. */
   onSent: () => void;
+  onLoansChanged: () => void;
   onOpenLoan: (id: string) => void;
   returnFocus?: RefObject<HTMLElement | null>;
 }) {
@@ -86,7 +95,20 @@ export function LendOfferDialog({
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<Sent | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const key = useRef<string | null>(null);
+  const durable = useDurableSend();
+  const fence = durable.fence;
+  const { blockerFor, accountName } = useLoanRecovery();
+  const guard = useFlowGuard();
+  const noteLoansChanged = useNoteLoansChanged();
+  const blocker = blockerFor("lend_offer");
+  const retained = fence.pending;
+  const frozen = busy || retained || !!blocker;
+  const form = useRef<HTMLDivElement>(null);
+  const close = () =>
+    closeLoanRequest(form.current, fence.command.current !== null, onClose);
+  useEffect(() => {
+    guard.bump();
+  }, [open]);
   // Retry after the Friends couldn't be read stays, busy, while they are read again; then focus moves to the Friend
   // field, or stays on Retry if they still can't be read.
   const friendField = useRef<HTMLSelectElement>(null);
@@ -103,13 +125,13 @@ export function LendOfferDialog({
   }, [sent]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || fence.command.current) return;
+    setBusy(false);
     setFriendId("");
     setReturnBy("");
     setMessage("");
     setSent(null);
     setRetrying(false);
-    key.current = null;
   }, [open]);
 
   useEffect(() => {
@@ -139,39 +161,61 @@ export function LendOfferDialog({
     else cards.set(row.editionId, { card: row.card, count: row.count });
   }
 
+  function outcome(o: FlowOutcome, own: boolean) {
+    if (o.kind === "done" || o.kind === "voided") {
+      onLoansChanged();
+      noteLoansChanged();
+    }
+    if (o.kind === "done" && own) {
+      setSent({
+        id: threadIdOf(o.response),
+        friend: friendName,
+      });
+      onSent();
+    } else if ((o.kind === "pending" || o.kind === "voided") && o.refusal) {
+      setMessage(
+        offerMessage(
+          refusalError(o.refusal),
+          friendName,
+          (id) => cards.get(id)?.card ?? "a card"
+        )
+      );
+    } else
+      setMessage(
+        o.kind === "wrong_account"
+          ? signInAs(accountName)
+          : (resultText(o) ?? "")
+      );
+  }
   async function send() {
-    if (busy || !friendId) return;
+    if (busy || blocker || !friendId) return;
+    const tok = guard.capture();
+    const fields = {
+      borrower_id: friendId,
+      copies: rows.map((row) => ({
+        location_id: row.locationId,
+        edition_id: row.editionId,
+        quantity: String(row.count),
+      })),
+      return_by: returnBy || null,
+    } satisfies Omit<SendLendOffer, "account_id" | "idempotency_key">;
     setBusy(true);
     setMessage("");
-    key.current ??= crypto.randomUUID();
-    try {
-      const loan = await sendLendOffer({
-        borrower_id: friendId,
-        copies: rows.map((row) => ({
-          location_id: row.locationId,
-          edition_id: row.editionId,
-          quantity: String(row.count),
-        })),
-        return_by: returnBy || null,
-        idempotency_key: key.current,
-      });
-      key.current = null;
-      setSent({ id: loan.id, friend: friendName });
-      onSent();
-    } catch (cause) {
-      if (!outcomeUnknown(cause)) key.current = null;
-      setMessage(
-        offerMessage(cause, friendName, (id) => cards.get(id)?.card ?? "a card")
-      );
-    } finally {
-      setBusy(false);
-    }
+    const o = await durable.send({
+      kind: "lend_offer",
+      scope: "lend_offer",
+      path: "/api/loans/offers",
+      fields,
+    });
+    if (!guard.live(tok)) return;
+    setBusy(false);
+    if (o) outcome(o, true);
   }
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={close}
       title="Lend to a Friend"
       closeLabel="Close Lend to a Friend"
       returnFocus={returnFocus}
@@ -182,18 +226,31 @@ export function LendOfferDialog({
             Offer sent to {sent.friend}.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button
-              ref={openButton}
-              variant="primary"
-              onClick={() => onOpenLoan(sent.id)}
-            >
-              Open the Loan
+            {sent.id && (
+              <Button
+                ref={openButton}
+                variant="primary"
+                onClick={() => {
+                  if (sent.id) onOpenLoan(sent.id);
+                }}
+              >
+                Open the Loan
+              </Button>
+            )}
+            <Button ref={sent.id ? undefined : openButton} onClick={onClose}>
+              Done
             </Button>
-            <Button onClick={onClose}>Done</Button>
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div ref={form} className="flex flex-col gap-3">
+          {blocker && !busy && (
+            <PendingLoanNotice
+              view={blocker}
+              autoFocus
+              onOutcome={(o) => outcome(o, false)}
+            />
+          )}
           <ul
             aria-label="Cards to lend"
             className="m-0 flex list-none flex-col divide-y divide-border rounded-panel border border-border p-0"
@@ -216,9 +273,9 @@ export function LendOfferDialog({
               ref={friendField}
               label="Friend"
               value={friendId}
-              disabled={friends.kind !== "ready"}
+              disabled={frozen || friends.kind !== "ready"}
               onChange={(event) => {
-                key.current = null;
+                if (fence.command.current || blocker) return;
                 setFriendId(event.target.value);
               }}
             >
@@ -253,24 +310,32 @@ export function LendOfferDialog({
             label="Return by (optional)"
             min={today()}
             value={returnBy}
+            disabled={frozen}
             onChange={(event) => {
-              key.current = null;
+              if (fence.command.current || blocker) return;
               setReturnBy(event.target.value);
             }}
           />
           <p role="alert" className="m-0 text-meta text-danger empty:hidden">
             {message}
           </p>
+          {retained && (
+            <PendingLoanRequest
+              boundaryRef={fence.boundary}
+              busy
+              onRetry={() => {}}
+            />
+          )}
           <div className="flex flex-wrap gap-2">
             <Button
               variant="primary"
-              disabled={!friendId || copies === 0}
+              disabled={frozen || !friendId || copies === 0}
               aria-disabled={busy || undefined}
               onClick={() => void send()}
             >
               Send offer of {cardCount(copies)}
             </Button>
-            <Button onClick={onClose}>Cancel</Button>
+            <Button onClick={close}>Cancel</Button>
           </div>
         </div>
       )}

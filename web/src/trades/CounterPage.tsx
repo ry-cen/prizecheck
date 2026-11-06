@@ -54,7 +54,8 @@ export function CounterPage({
 
   if (
     load.kind === "ready" &&
-    load.trade.actions.includes("counter") &&
+    (load.trade.actions.includes("counter") ||
+      load.trade.actions.includes("change_offer")) &&
     load.trade.other.trader_id &&
     load.trade.other.available
   )

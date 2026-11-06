@@ -204,7 +204,7 @@ def test_only_the_anonymous_reads_the_art_route_and_the_paged_lists_select_the_s
     root = Path(__file__).resolve().parents[1] / "app"
     anonymous = {"games/pokemon/catalog/public_catalog.py", "games/pokemon/publications/publications.py",
                  "core/art/store.py", "games/pokemon/prices/card_art.py"}
-    paged = {"core/inventory/collection.py", "holdings.py", "games/pokemon/catalog/catalog_browse.py"}
+    paged = {"core/inventory/collection.py", "core/inventory/holdings.py", "games/pokemon/catalog/catalog_browse.py"}
     offenders = [str(path.relative_to(root)) for path in root.rglob("*.py")
                  if path.relative_to(root).as_posix() not in anonymous | paged
                  and re.search(r"\bart\.(low|high)_image_url\b", path.read_text())]

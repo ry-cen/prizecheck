@@ -1,66 +1,9 @@
-"""Trade Proposals and Trades as both sides read them (Trading #270, spec "Trade Proposals and the state model",
-resolution "Module boundary" and "API contract").
+"""Thread-addressed Trade reads and steps.
 
-Both sides read the same Trade facts here (``GET /api/social/trades`` and ``GET /api/social/trades/{id}``): the cards
-each side gives, each side's swap confirmation and the other collector's Display Name, Handle and whether they are Open
-to cash offers, never a pick, a Location or a Deck of either side. The steps that change no inventory of the reader's
-own are here too: the proposer's withdraw (Trading #270), the recipient's decline and either side's cancel (#271).
-Sending a Trade Proposal reads and reserves the sender's own inventory, so it is inventory code in
-``app.trade_inventory`` under ``/api/trades``; it answers ``trade_view`` too, so every step answers the same Trade. So
-are Confirm swap, which moves the confirmer's own cards, and Use suggested picks, which re-picks their own copies
-(Trading #272).
-
-**Steps** name the Trade ``revision`` they read (409 TRADE_CHANGED when it moved on) and an idempotency key (replayed
-from ``location_command``, as Loan commands are). ``allowed`` is the one rule for which steps a collector may take now:
-the view's ``actions`` list them and a step not in it is 409 STEP_NOT_ALLOWED. A collector who isn't one of the Trade's
-two sides gets 404 TRADE_NOT_FOUND, as for a Trade that doesn't exist. Every step on an existing Trade runs through
-``run_trade_step``, which writes the ``trade`` row exactly once: the step's own columns and the revision in one UPDATE.
-
-**Locks** follow the spec's table ("Locks and revisions"): owner rows in ascending ``user_id`` (``owners.lock_owners``),
-then any ``loan`` row, then the ``trade`` row. Withdraw locks the proposer, whose copies it releases; decline and cancel
-lock both sides. A step advances a side's inventory revision when it releases copies that side gives: withdraw and
-decline the proposer's, cancel each side's. A side that gives nothing has nothing released, so its revision stays.
-
-**Limit.** Trade steps count against ``COMMANDS_PER_HOUR`` per account under kind 'trade_command'
-(``owners.begin_owner_command``), apart from the Friend and Loan commands' counts, under a command lock of their own.
-A replay isn't counted again; a refused step rolls back with its count.
-
-**Updates** (``record_trade_update``): a withdraw stores a 'cancelled' update for the recipient, which the inbox reads
-as withdrawn from the Trade's ``closed_reason``; a decline stores a 'declined' update for the proposer; a cancel stores
-a 'cancelled' update for the other side, never saying why. The recipient's accept (Trading #271) reserves their own
-copies, so it is inventory code in ``app.trade_inventory`` and stores an 'accepted' update for the proposer there.
-A confirmed swap stores a 'swapped' update for the side that confirmed first, once the second side confirms
-(Trading #272, in ``app.trade_inventory``).
-
-**Waiting on you** (``waiting_trade_step``, Trading #273) is the one definition the Trades list, its tab badge and the
-inbox's bell read, worked out on every read and never stored: a proposal to answer, an accepted Trade whose picks a
-Move or a Removal left out of date (``TradeFacts.stale_picks``, from ``trade_picks.stale_pick_trades`` over the
-reader's own Holdings), or a swap the other side confirmed. ``trade_waiting_since`` says since when. The inbox
-(``social.inbox``) lists the waiting Trades and the stored Trade updates.
-
-**Ending a friendship** (``end_trades_between``, Trading #274): Remove Friend and Block, by either side, cancel every
-Trade Proposal and Trade between the two that nobody has confirmed the swap for, inside the Friend command that
-already locked both owners, after the pair's Loans (``loans.end_loans_between``): owner rows, then ``loan`` rows, then
-``trade`` rows. Each is closed as 'cancelled' by the collector who ended the friendship, its picks gone, and the other
-side gets the 'cancelled' update a plain cancel stores, which never says why, so an unfriend and a Block read the same.
-A Trade one side has confirmed stays open: the remaining side may still Confirm swap alone, and since no step checks
-the friendship once a Trade is accepted, nothing they see changes.
-
-**Cash and Open to cash offers** (Trading #277): ``TradeView.cash`` is the amount and payer relative to the reader. The
-Open to cash offers setting is changed through ``/api/social/trade-settings`` (``settings_router`` below). A Counter
-(#278) is inventory code in ``app.trade_inventory``; it stores no update, because the reply is the other side's waiting
-answer.
-
-**The other side** (``TradeParty``, Trading #299): the Display Name always (the Trade's own copy), the Handle and user
-id only for a Friend, the trader id while the account exists, and whether the other is in the reader's reach now
-(``discovery.reach``); the Open to cash offers setting and the completed-trade count only while they are.
-
-**Conversations and the completed-trade count** (Trading #298): every Trade row belongs to its pair's conversation when
-the pair has one (``TradeView.conversation_id``, set by migration 147's triggers and by ``conversations.open_conversation``;
-None for a Trade of a pair that never opened one). Conversations themselves are ``app.social.conversations``; nothing in
-this module reads or writes them. ``completed_trades`` counts the Trades a collector took part in that both sides
-confirmed the swap for, in one statement over two partial indexes: Friend Trades included, still counted for the remaining
-side after the other account is deleted, and never stored in a counter column.
+Commands replay before membership, owner locks, the live-round lock, eligibility
+and strict revision checks. Inventory steps share this runner; offer replacement
+has its own transaction because it closes one round and inserts another. Events
+record participant slots, and touch_threads takes the thread lock last.
 """
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -69,26 +12,27 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from psycopg import sql
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ..location_tree import error, record_response
 from ..db import connect
 from ..identity import verified_user
 from ..trade_picks import stale_pick_trades
 from ..core.catalog.card_facts import card_facts
+from .threads import TradeDetail, member_thread, thread_party, touch_threads, write_event
 from .discovery import reach
 from .owners import NOW, advance_revision, begin_owner_command, ensure_owner, lock_owners
 
-router = APIRouter(prefix='/api/social/trades', tags=['social'])
+router = APIRouter(prefix='/api/trades', tags=['social'])
 settings_router = APIRouter(prefix='/api/social/trade-settings', tags=['social'])
 
 # Closed Trades the Trades list shows, newest first.
 HISTORY = 50
 
-TradeAction = Literal['accept', 'decline', 'counter', 'confirm_swap', 'use_suggested_picks', 'withdraw', 'cancel']
-ACTION_ORDER = ('accept', 'decline', 'counter', 'confirm_swap', 'use_suggested_picks', 'withdraw', 'cancel')
+TradeAction = Literal['accept', 'decline', 'counter', 'confirm_swap', 'use_suggested_picks', 'withdraw', 'cancel', 'change_offer']
+ACTION_ORDER = ('accept', 'decline', 'counter', 'confirm_swap', 'use_suggested_picks', 'withdraw', 'cancel', 'change_offer')
 
 
 class TradeParty(BaseModel):
@@ -138,6 +82,8 @@ class TradeView(BaseModel):
     the pair's conversation (Trading #298), None for a Trade of a pair that has none; it defaults to None so a stored
     replay from before it existed still validates."""
     id: UUID
+    thread_id: UUID
+    offer_id: UUID
     state: Literal['proposed', 'accepted', 'closed']
     closed_reason: Literal['declined', 'withdrawn', 'countered', 'cancelled', 'swapped'] | None
     closed_by: Literal['you', 'them'] | None
@@ -158,6 +104,101 @@ class TradeView(BaseModel):
     conversation_id: UUID | None = None
 
 
+class ReplayedTradeSend(BaseModel):
+    """A historical send was applied; these are explicitly the current accessible terms."""
+    outcome: Literal['already_applied']
+    view: Literal['current']
+    label: Literal['Current Trade']
+    trade: TradeView
+
+
+class _LegacyInitialTradeSend(BaseModel):
+    """Pre-thread TradeView at dev 59f7dc57, limited to the initial-send snapshot.
+
+    Old party defaults validate historical receipts only; they are never returned.
+    No round/thread identifiers are synthesized into this historical family.
+    """
+    model_config = {'extra': 'forbid'}
+    id: UUID
+    state: Literal['proposed']
+    closed_reason: None
+    closed_by: None
+    role: Literal['proposer']
+    other: TradeParty
+    countered_from: None
+    you_give: list[TradeCard]
+    you_get: list[TradeCard]
+    cash: TradeCash | None
+    you_confirmed_swap: Literal[False]
+    they_confirmed_swap: Literal[False]
+    needs_you: bool
+    waiting: Literal['answer', 'fix_picks', 'confirm_swap'] | None
+    section: Literal['needs_you', 'to_swap', 'pending', 'history']
+    actions: list[Literal['accept', 'decline', 'counter', 'confirm_swap', 'use_suggested_picks', 'withdraw', 'cancel']]
+    revision: Literal[1]
+    created_at: datetime
+    conversation_id: UUID | None = None
+
+
+def _applied_trade_unavailable():
+    raise HTTPException(409, detail={'code': 'TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE',
+                                     'outcome': 'already_applied', 'view': 'unavailable'})
+
+
+def replay_initial_trade_send(user_id: str, stored: object) -> dict | ReplayedTradeSend:
+    """Called only after the owner/key/void/digest gate for an initial send.
+
+    Current receipts retain their bytes and historical receipts stay untouched.
+    Every matched receipt settles here, including one that cannot safely be read.
+    Unexpected database failures propagate as unknown outcomes.
+    """
+    if not isinstance(stored, dict):
+        _applied_trade_unavailable()
+    current_fields = ('thread_id' in stored, 'offer_id' in stored)
+    try:
+        if all(current_fields):
+            TradeView.model_validate(stored)
+            return stored
+        if any(current_fields):
+            _applied_trade_unavailable()
+        legacy = _LegacyInitialTradeSend.model_validate(stored)
+    except ValidationError:
+        _applied_trade_unavailable()
+
+    with connect() as conn, conn.transaction():
+        # Before the first SELECT: all mapping, membership, reach and view reads
+        # belong to one snapshot. This transaction never calls a write helper.
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        thread = conn.execute("""SELECT t.*, original.proposer_id, original.recipient_id
+          FROM thread_round_source s
+          JOIN trade original ON original.id=s.round_id AND original.thread_id=s.thread_id
+          JOIN thread t ON t.id=s.thread_id AND t.kind=s.kind
+          JOIN thread_member m ON m.thread_id=t.id AND m.member_id=%(caller)s
+          WHERE s.kind='trade' AND s.round_id=%(round)s AND original.proposer_id=%(caller)s""",
+                              {'caller': user_id, 'round': legacy.id}).fetchone()
+        if thread is None:
+            _applied_trade_unavailable()
+        pair = {thread['user_low'], thread['user_high']}
+        if (None in pair or len(pair) != 2 or user_id not in pair
+                or pair != {thread['proposer_id'], thread['recipient_id']}):
+            _applied_trade_unavailable()
+        other = thread['user_high'] if thread['user_low'] == user_id else thread['user_low']
+        if (conn.execute('SELECT 1 FROM collector_profile WHERE user_id=%s', (other,)).fetchone() is None
+                or conn.execute('SELECT 1 FROM thread_member WHERE thread_id=%s AND member_id=%s',
+                                (thread['id'], other)).fetchone() is None
+                or not thread_party(conn, user_id, thread).available):
+            _applied_trade_unavailable()
+        try:
+            current = current_trade_view(conn, user_id, thread['id'])
+        except HTTPException as cause:
+            if cause.status_code == 404 and cause.detail == {'code': 'TRADE_NOT_FOUND'}:
+                _applied_trade_unavailable()
+            raise
+        if not current.other.available:
+            _applied_trade_unavailable()
+        return ReplayedTradeSend(outcome='already_applied', view='current', label='Current Trade', trade=current)
+
+
 class TradesView(BaseModel):
     """The Trades list: open Trades newest first, then the newest closed ones. ``needs_you``: how many wait on the
     reader."""
@@ -166,6 +207,7 @@ class TradesView(BaseModel):
 
 
 class TradeStep(BaseModel):
+    offer_id: UUID
     revision: int = Field(ge=1)
     idempotency_key: UUID
 
@@ -213,31 +255,30 @@ def confirmed(user_id: str, row) -> tuple[bool, bool]:
 
 
 def waiting_trade_step(user_id: str, row, facts: TradeFacts | None = None) -> str | None:
-    """What the Trade waits on the reader for, or None, the first that applies: 'answer' when they received a proposal
-    nobody has answered (a Counter is the same step); 'fix_picks' once accepted, when the reader hasn't confirmed
-    the swap and a pick of theirs is out of date (``facts.stale_picks``; without facts, never); 'confirm_swap' once
-    accepted, when the other side confirmed the swap and the reader has not. An accepted Trade nobody has confirmed,
-    with the reader's picks up to date, waits on neither side. One Trade is one step, whatever else it needs."""
+    """Proposal answer, then stale own picks, then every eligible own confirmation.
+
+    An agreed Trade waits on each unconfirmed participant independently of the
+    other side. A participant who already confirmed has no waiting step.
+    """
     mine, theirs = confirmed(user_id, row)
     if row['state'] == 'proposed':
         return 'answer' if role_of(user_id, row) == 'recipient' else None
     if row['state'] == 'accepted' and not mine:
         if facts is not None and facts.stale_picks:
             return 'fix_picks'
-        if theirs:
-            return 'confirm_swap'
+        return 'confirm_swap'
     return None
 
 
 def trade_waiting_since(user_id: str, row, step: str) -> datetime:
-    """When the Trade began to wait on the reader for ``step`` (``waiting_trade_step``), from times the row holds: a
-    proposal to answer, its ``created_at``; a swap the other side confirmed, that confirmation. Out-of-date picks have
-    no moment of their own (a Move or a Removal made them so, and nothing records when) and use ``accepted_at``, as the
-    Loans' do (``inbox.waiting_since``)."""
+    """Answer begins at creation; own confirmation begins at agreement.
+
+    Keep the start when the counterpart confirms later. Stale own picks have no
+    independent invalidation timestamp, so also use accepted_at with a legacy
+    created_at fallback.
+    """
     if step == 'answer':
         return row['created_at']
-    if step == 'confirm_swap':
-        return row[f'{other_side(role_of(user_id, row))}_swap_at']
     return row['accepted_at'] or row['created_at']
 
 
@@ -270,9 +311,9 @@ def allowed(user_id: str, row, gives: bool) -> list[str]:
         if role_of(user_id, row) == 'recipient':
             found += ['accept', 'decline', 'counter']
         else:
-            found += ['withdraw', *(['use_suggested_picks'] if gives else [])]
+            found += ['change_offer', 'withdraw', *(['use_suggested_picks'] if gives else [])]
     elif row['state'] == 'accepted' and not mine:
-        found += ['confirm_swap', *(['use_suggested_picks'] if gives else []), *([] if theirs else ['cancel'])]
+        found += ['confirm_swap', *(['use_suggested_picks'] if gives else []), *([] if theirs else ['cancel', 'change_offer'])]
     return [action for action in ACTION_ORDER if action in found]
 
 
@@ -320,6 +361,13 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
     reachable = reach(conn, user_id, others)
     friends = friend_ids(conn, user_id) if others else set()
     counts = completed_trades(conn, [other for other in others if other in reachable])
+    # The stored parent links every replacement for history. Only an actual Counter
+    # answers the other participant's proposal; revisions and agreed edits must not
+    # inherit that collector-facing meaning. Preserve historical Counter placement.
+    edits = {event['round_id'] for event in conn.execute(
+        "SELECT round_id FROM thread_event WHERE thread_id=ANY(%s) AND round_id=ANY(%s) "
+        "AND kind IN ('revised','changed_after_agreement')",
+        ([row['thread_id'] for row in rows], [row['id'] for row in rows]))}
 
     def side_cards(trade_id: UUID, side_name: str) -> list[TradeCard]:
         found = []
@@ -345,14 +393,14 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
         cash = None if row['cash_cents'] == 0 else TradeCash(
             cents=str(row['cash_cents']), payer='you' if row['cash_payer'] == role else 'them')
         views.append(TradeView(
-            id=row['id'], state=row['state'], closed_reason=row['closed_reason'], closed_by=closed_by, role=role,
+            id=row['id'], thread_id=row['thread_id'], offer_id=row['id'], state=row['state'], closed_reason=row['closed_reason'], closed_by=closed_by, role=role,
             other=TradeParty(collector_id=other_id if is_friend else None, display_name=row[f'{other}_name'],
                              handle=profile['handle'] if is_friend else None,
                              trader_id=profile['trader_id'] if profile else None, friend=is_friend,
                              available=available,
                              open_to_cash_offers=bool(available and profile['open_to_cash_offers']),
                              completed_trades=counts.get(other_id, 0) if available else None),
-            countered_from=row['countered_from'], you_give=side_cards(row['id'], role),
+            countered_from=None if row['id'] in edits else row['countered_from'], you_give=side_cards(row['id'], role),
             you_get=side_cards(row['id'], other), cash=cash, you_confirmed_swap=mine, they_confirmed_swap=theirs,
             needs_you=needs_you(user_id, row, known), waiting=waiting_trade_step(user_id, row, known),
             section=section(user_id, row, known), actions=allowed(user_id, row, bool(lines.get((row['id'], role)))),
@@ -368,21 +416,65 @@ def trade_view(conn, user_id: str, trade_id: UUID) -> TradeView:
     return trade_views(conn, user_id, [row])[0]
 
 
-@router.get('', response_model=TradesView)
-def list_trades(user_id: str = Depends(verified_user)):
-    with connect() as conn, conn.transaction():
-        open_rows = conn.execute(TRADES + " AND t.state <> 'closed' ORDER BY t.created_at DESC, t.id",
-                                 {'me': user_id}).fetchall()
-        closed_rows = conn.execute(TRADES + " AND t.state = 'closed' ORDER BY t.closed_at DESC, t.id LIMIT %(limit)s",
-                                   {'me': user_id, 'limit': HISTORY}).fetchall()
-        views = trade_views(conn, user_id, open_rows + closed_rows)
-    return TradesView(trades=views, needs_you=sum(view.needs_you for view in views))
+class TradeResolution(BaseModel):
+    thread_id: UUID
 
 
-@router.get('/{trade_id}', response_model=TradeView)
+@router.get('/resolve/{identifier}', response_model=TradeResolution)
+def resolve_trade(identifier: UUID, user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        found = conn.execute("""SELECT t.id FROM thread t WHERE t.kind='trade'
+          AND (t.user_low=%s OR t.user_high=%s) AND (t.id=%s OR t.id IN (
+          SELECT thread_id FROM thread_round_source WHERE kind='trade' AND round_id=%s))
+          ORDER BY (t.id=%s) DESC LIMIT 1""", (user_id, user_id, identifier, identifier, identifier)).fetchone()
+        if found is None:
+            error(404, 'TRADE_NOT_FOUND')
+        return {'thread_id': found['id']}
+
+
+def current_trade_view(conn, user_id: str, thread_id: UUID) -> TradeView:
+    """The latest round, including a closed tip, with membership and pair checks."""
+    thread = member_thread(conn, user_id, thread_id, 'trade')
+    row = conn.execute('SELECT * FROM trade WHERE thread_id=%s ORDER BY created_at DESC, id DESC LIMIT 1',
+                       (thread_id,)).fetchone()
+    if (row is None or user_id not in {thread['user_low'], thread['user_high']}
+            or {row['proposer_id'], row['recipient_id']} != {thread['user_low'], thread['user_high']}):
+        error(404, 'TRADE_NOT_FOUND')
+    return trade_views(conn, user_id, [row])[0]
+
+
+@router.get('/{trade_id:uuid}', response_model=TradeDetail)
 def read_trade(trade_id: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
-        return trade_view(conn, user_id, trade_id)
+        thread = member_thread(conn, user_id, trade_id, 'trade')
+        current = current_trade_view(conn, user_id, trade_id)
+        other = thread['user_high'] if thread['user_low'] == user_id else thread['user_low']
+        return TradeDetail(id=trade_id, live_offer=current,
+                           can_message=thread_party(conn, user_id, thread).available, can_report=other is not None)
+
+
+def trade_slot(conn, thread_id, user_id):
+    thread = conn.execute('SELECT user_low FROM thread WHERE id=%s', (thread_id,)).fetchone()
+    return 'low' if thread['user_low'] == user_id else 'high'
+
+
+def offer_snapshot(conn, row):
+    return {(trade_slot(conn, row['thread_id'], row[f"{line['side']}_id"]), line['edition_id']): int(line['quantity'])
+            for line in conn.execute('SELECT side,edition_id,quantity FROM trade_line WHERE trade_id=%s', (row['id'],))}
+
+
+def offer_diff(conn, old, new):
+    before, after = offer_snapshot(conn, old), offer_snapshot(conn, new)
+    def cash(row):
+        return {'cents': row['cash_cents'] or None,
+                'payer': trade_slot(conn, row['thread_id'], row[f"{row['cash_payer']}_id"]) if row['cash_payer'] else None}
+    data = {'lines': [{'giver': side, 'edition_id': str(edition), 'from_qty': before.get((side, edition), 0),
+                       'to_qty': after.get((side, edition), 0)}
+                      for side, edition in sorted(before.keys() | after.keys(), key=str)
+                      if before.get((side, edition), 0) != after.get((side, edition), 0)]}
+    if cash(old) != cash(new):
+        data['cash'] = {'from': cash(old), 'to': cash(new)}
+    return data
 
 
 def store_trade(conn, user_id: str, key: UUID, digest: str, trade_id: UUID,
@@ -406,23 +498,35 @@ def run_trade_step(user_id: str, trade_id: UUID, step: TradeStep, action: str, a
     empty or None for none; ``NOW`` for the transaction's time). The Trade row is locked ``FOR NO KEY UPDATE``, like
     the owners, and written once, as ``loans.run_step`` says why. A deadlock the database ends anyway leaves nothing
     changed and answers 503 INVENTORY_TEMPORARILY_UNAVAILABLE, which the client retries with the same key."""
-    payload = {'action': f'trade_{action}', 'trade_id': str(trade_id), 'revision': step.revision, **(extra or {})}
+    payload = {'action': f'trade_{action}', 'thread_id': str(trade_id), 'offer_id': str(step.offer_id), 'revision': step.revision, **(extra or {})}
     try:
         with connect() as conn, conn.transaction():
             digest, stored = begin_owner_command(conn, user_id, step.idempotency_key, payload, 'trade')
             if stored is not None:
                 return stored
-            sides = conn.execute(TRADES + ' AND t.id = %(id)s', {'me': user_id, 'id': trade_id}).fetchone()
+            member_thread(conn, user_id, trade_id, 'trade')
+            sides = conn.execute(TRADES + ' AND t.thread_id = %(id)s ORDER BY t.created_at DESC, t.id DESC LIMIT 1', {'me': user_id, 'id': trade_id}).fetchone()
             if sides is None:
                 error(404, 'TRADE_NOT_FOUND')
             lock_owners(conn, *[owner for owner in locks(role_of(user_id, sides), sides) if owner is not None])
-            row = conn.execute('SELECT * FROM trade WHERE id = %s FOR NO KEY UPDATE', (trade_id,)).fetchone()
+            row = conn.execute('SELECT * FROM trade WHERE id = %s FOR NO KEY UPDATE', (sides['id'],)).fetchone()
+            if row['state'] == 'closed' or row['id'] != step.offer_id:
+                error(409, 'OFFER_CHANGED')
+            if action not in allowed(user_id, row, side_gives(conn, row['id'], role_of(user_id, row))):
+                error(409, 'STEP_NOT_ALLOWED')
             if row['revision'] != step.revision:
                 error(409, 'TRADE_CHANGED')
-            if action not in allowed(user_id, row, side_gives(conn, trade_id, role_of(user_id, row))):
-                error(409, 'STEP_NOT_ALLOWED')
-            write_trade(conn, trade_id, apply(conn, row) or {})
-            return store_trade(conn, user_id, step.idempotency_key, digest, trade_id, answer() if answer else None)
+            write_trade(conn, row['id'], apply(conn, row) or {})
+            kind = {'accept': 'accepted', 'decline': 'declined', 'withdraw': 'withdrawn',
+                    'cancel': 'cancelled', 'confirm_swap': 'swap_confirmed',
+                    'use_suggested_picks': 'picks_updated'}[action]
+            write_event(conn, trade_id, kind, row['id'], actor=trade_slot(conn, trade_id, user_id))
+            if action == 'confirm_swap':
+                after = conn.execute('SELECT state FROM trade WHERE id=%s', (row['id'],)).fetchone()
+                if after['state'] == 'closed':
+                    write_event(conn, trade_id, 'swapped', row['id'])
+            touch_threads(conn, [trade_id])
+            return store_trade(conn, user_id, step.idempotency_key, digest, row['id'], answer() if answer else None)
     except psycopg.errors.DeadlockDetected:
         error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
 
@@ -436,7 +540,7 @@ def side_gives(conn, trade_id: UUID, side: str) -> bool:
 def write_trade(conn, trade_id: UUID, changes: Mapping[str, object]) -> None:
     """The step's one write of its Trade row: ``changes`` (column -> value, ``NOW`` for the transaction's time) and the
     revision advanced. ``run_trade_step`` calls it, ``end_trades_between`` once for each Trade it cancels, and
-    ``trade_inventory.counter_trade`` once for the proposal it closes; nothing else writes the row of an existing
+    ``trade_inventory.change_offer`` once for the proposal it closes; nothing else writes the row of an existing
     Trade."""
     if 'revision' in changes or 'id' in changes:
         raise ValueError('run_trade_step owns the Trade id and revision')
@@ -472,7 +576,7 @@ def close_trade(conn, row, user_id: str, reason: str) -> dict:
     return {'state': 'closed', 'closed_reason': reason, 'closed_by': user_id, 'closed_at': NOW}
 
 
-def end_trades_between(conn, user_id: str, other_id: str) -> None:
+def end_trades_between(conn, user_id: str, other_id: str | list[str], kind: str) -> list[UUID]:
     """Ending a friendship with open Trades (Trading #274), from Remove Friend and Block (``friends.friendship_ended``)
     by ``user_id``, after ``loans.end_loans_between``, with both owners already locked in ascending ``user_id``. Each
     Trade Proposal and accepted Trade between the two, either way round, that nobody has confirmed the swap for is
@@ -480,22 +584,32 @@ def end_trades_between(conn, user_id: str, other_id: str) -> None:
     and the other side told it was cancelled (``record_trade_update``), as for any cancel and never why. A Trade either
     side confirmed stays open for the other side to finish. The copies a cancelled Trade's sides gave stop being
     reserved, so the revision of each side that gave cards in one moves, once: a proposal's proposer, and both sides
-    of an accepted Trade (a recipient reserves nothing before accepting). Suspension (``reports``) runs it for each of
-    the account's counterparties with the account as ``user_id``."""
-    rows = conn.execute("""SELECT * FROM trade
-      WHERE ((proposer_id = %(a)s AND recipient_id = %(b)s) OR (proposer_id = %(b)s AND recipient_id = %(a)s))
+    of an accepted Trade (a recipient reserves nothing before accepting). Suspension supplies all counterparties in
+    one call, so every Trade lock is acquired in id order across the account."""
+    # A suspension supplies all partners at once, preserving global round-id lock order.
+    others = [other_id] if isinstance(other_id, str) else other_id
+    rows = conn.execute("""SELECT r.*, t.user_low AS thread_user_low FROM trade r JOIN thread t ON t.id=r.thread_id
+      WHERE ((proposer_id = %(a)s AND recipient_id = ANY(%(b)s)) OR (proposer_id = ANY(%(b)s) AND recipient_id = %(a)s))
         AND state IN ('proposed', 'accepted')
         AND proposer_swap_at IS NULL AND recipient_swap_at IS NULL
-      ORDER BY id FOR NO KEY UPDATE""", {'a': user_id, 'b': other_id}).fetchall()
+      ORDER BY r.id FOR NO KEY UPDATE OF r""", {'a': user_id, 'b': others}).fetchall()
+    if kind not in ('closed_blocked', 'closed_unfriended', 'closed_suspended'):
+        raise ValueError('unknown Trade closure kind')
+    # One grouped read, rather than one giving-side lookup per side of each round.
+    gives = {r['trade_id']: r for r in conn.execute("""SELECT trade_id,
+      bool_or(side='proposer') AS proposer, bool_or(side='recipient') AS recipient
+      FROM trade_line WHERE trade_id=ANY(%s) GROUP BY trade_id""", ([row['id'] for row in rows],))} if rows else {}
     released = set()
     for row in rows:
         for side_name in ('proposer', 'recipient') if row['state'] == 'accepted' else ('proposer',):
-            if side_gives(conn, row['id'], side_name):
+            if gives.get(row['id'], {}).get(side_name, False):
                 released.add(row[f'{side_name}_id'])
         record_trade_update(conn, row, user_id, 'cancelled')
         write_trade(conn, row['id'], close_trade(conn, row, user_id, 'cancelled'))
+        write_event(conn, row['thread_id'], kind, row['id'], actor='low' if row['thread_user_low'] == user_id else 'high')
     for owner in sorted(released):
         advance_revision(conn, owner)
+    return sorted({row['thread_id'] for row in rows}, key=str)
 
 
 UNCONFIRMED_WITH = """SELECT CASE WHEN proposer_id = %(a)s THEN recipient_id ELSE proposer_id END AS other,
@@ -586,3 +700,6 @@ def set_trade_settings(command: SetTradeSettings, user_id: str = Depends(verifie
             conn.execute('SELECT create_collector_profile(%s)', (user_id,))
             conn.execute(update, (command.open_to_cash_offers, user_id))
         return read_trade_settings(conn, user_id)
+
+
+TradeDetail.model_rebuild(_types_namespace={"TradeView": TradeView})

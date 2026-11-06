@@ -19,11 +19,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.ops.api_errors import api_error
-from .core.art.urls import route_address
-from .db import connect
-from .identity import verified_user
-from .core.inventory.idempotency import expire
-from .inventory_core import MAX_QUANTITY, REPLAY, leaf, lock_owner, quantity, record_undo, undo_id_for
+from app.core.art.urls import route_address
+from app.db import connect
+from app.identity import verified_user
+from app.core.inventory.idempotency import expire
+from app.inventory_core import MAX_QUANTITY, REPLAY, leaf, lock_owner, quantity, record_undo, undo_id_for
 
 router = APIRouter(prefix="/api/holdings", tags=["holdings"])
 # The most Card Editions one batch add takes.
@@ -269,7 +269,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
                   name: str=Query(default='',max_length=120),set_id: str=Query(default='',max_length=80),
                   collector_number: str=Query(default='',max_length=40),sort: Literal['name','quantity']='name',
                   user_id: str = Depends(verified_user)):
-    from .core.inventory.cursors import decode_cursor, encode_cursor
+    from app.core.inventory.cursors import decode_cursor, encode_cursor
     with connect() as conn, conn.transaction():
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
         owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()

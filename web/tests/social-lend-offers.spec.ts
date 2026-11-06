@@ -86,7 +86,13 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await page.goto(`${ORIGIN}/loans`);
   await expect(
     page.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText("Misty W offered to lend you 1 card");
+  ).toContainText("Misty W");
+  await expect(
+    page.getByRole("region", { name: "Needs you" }).getByRole("link")
+  ).toContainText("Lend offer");
+  await expect(
+    page.getByRole("region", { name: "Needs you" }).getByRole("link")
+  ).toContainText("You give 0 · You get 1");
   // The kept /loans page may warm Decks while this navigation starts. Keep the failure active until
   // the Loan screen shows its own error, so an earlier warm read cannot consume the injection.
   const decksRead = /\/api\/decks(\?.*)?$/;
@@ -96,7 +102,10 @@ test("the lender offers selected copies from the Collection, and the borrower ac
     "Your Decks couldn't be loaded."
   );
   await page.unroute(decksRead);
-  await page.getByRole("button", { name: "Retry" }).click();
+  await page
+    .getByRole("group", { name: "Loan terms and actions" })
+    .getByRole("button", { name: "Retry", exact: true })
+    .click();
   await expect(
     page.getByRole("combobox", { name: "Put them in" })
   ).toBeFocused();
@@ -152,7 +161,15 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await expect(friend).toBeFocused();
   await expect(retry).toHaveCount(0);
   await friend.selectOption({ label: "Ash K" });
+  const newOffer = lender.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/loans/offers"
+  );
   await send.click();
+  const offered: import("../src/social_generated").LoanView = await (
+    await newOffer
+  ).json();
   await expect(dialog).toContainText("Offer sent to Ash K.");
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(dialog).toBeHidden();
@@ -160,7 +177,10 @@ test("the lender offers selected copies from the Collection, and the borrower ac
 
   // She withdraws that offer from its Loan screen: her heading says she did, and Ash's says so, naming the cards.
   await lender.goto(`${ORIGIN}/loans`);
-  await lender.getByRole("link", { name: /You offered Ash K 1 card/ }).click();
+  await lender
+    .getByRole("region", { name: "Pending" })
+    .locator(`a[href="/loans/${offered.thread_id}"]`)
+    .click();
   await expect(title(lender)).toHaveText("You offered Ash K 1 card");
   const second = new URL(lender.url()).pathname;
   await lender.getByRole("button", { name: "More for this Loan" }).click();

@@ -287,7 +287,7 @@ for (const width of [1280, 320, 375, 390]) {
     await expect(
       get
         .getByRole("group", { name: "Iono (PAL 254) you get", exact: true })
-        .locator("output")
+        .getByText("1", { exact: true })
     ).toHaveText("1");
     await expect(get.getByRole("button", { name: /^Increase/ })).toBeDisabled();
     await expect(

@@ -1,3 +1,8 @@
+import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
+import { PendingLoanNotice } from "./PendingLoanNotice";
+import { refusalError, type FlowOutcome } from "./loanIntents";
+import { resultText, signInAs } from "./loanText";
+import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
 import {
   useEffect,
   useLayoutEffect,
@@ -9,7 +14,7 @@ import {
 import { CardImage } from "../social/FriendCollectionPage";
 import {
   getBorrowed,
-  moveBorrowed,
+  type MoveBorrowed,
   SocialError,
   type BorrowedCard,
   type BorrowedCopies,
@@ -74,7 +79,19 @@ export function BorrowedDialog({
   const [copies, setCopies] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const pending = useRef<string | null>(null);
+  const durable = useDurableSend();
+  const fence = durable.fence;
+  const { blockerFor, accountName } = useLoanRecovery();
+  const guard = useFlowGuard();
+  const blocker = blockerFor("move_borrowed");
+  const retained = fence.pending;
+  const frozen = busy || retained || !!blocker;
+  const surface = useRef<HTMLDivElement>(null);
+  const close = () =>
+    closeLoanRequest(surface.current, fence.command.current !== null, onClose);
+  useEffect(() => {
+    guard.bump();
+  }, [open]);
   const leaves = useMemo(() => leavesOf(index), [index]);
   const focusNext = useRef<FocusNext | null>(null);
   const moveButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -84,7 +101,8 @@ export function BorrowedDialog({
 
   // Each opening starts afresh; a refusal that reads the list again keeps its message.
   useEffect(() => {
-    if (!open) return;
+    if (!open || fence.command.current) return;
+    setBusy(false);
     setMoving(null);
     setMessage("");
   }, [open]);
@@ -121,56 +139,63 @@ export function BorrowedDialog({
   });
 
   function startMove(card: BorrowedCard) {
+    if (frozen || fence.command.current) return;
+    if (fence.command.current || blocker) return;
     focusNext.current = { to: "form" };
     setMoving(rowKey(card));
     setDestination("");
     setCopies(Number(card.copies));
     setMessage("");
-    pending.current = null;
   }
 
-  async function confirmMove(card: BorrowedCard) {
-    if (busy || !destination) return;
-    setBusy(true);
-    setMessage("");
-    const key = pending.current ?? crypto.randomUUID();
-    pending.current = key;
-    try {
-      const view = await moveBorrowed({
-        loan_id: card.loan_id,
-        edition_id: card.edition_id,
-        from_location_id: card.location_id,
-        to_location_id: destination,
-        quantity: String(copies),
-        idempotency_key: key,
-      });
-      pending.current = null;
-      focusNext.current = { to: "row", key: rowKey(card) };
+  function outcome(o: FlowOutcome) {
+    if (o.kind === "done" || o.kind === "voided") onMoved();
+    if (o.kind === "done") {
+      focusNext.current = { to: "row", key: moving ?? "" };
       setMoving(null);
-      setLoad({ kind: "ready", view });
-      onMoved();
-    } catch (cause) {
-      if (!outcomeUnknown(cause)) pending.current = null;
+      // Keep the row focus request until the fresh list is ready.
+      setLoad({ kind: "loading" });
+      setAttempt((n) => n + 1);
+      setMessage(resultText(o) ?? "");
+    } else if ((o.kind === "pending" || o.kind === "voided") && o.refusal) {
+      const cause = refusalError(o.refusal);
       setMessage(moveMessage(cause));
-      if (
-        cause instanceof SocialError &&
-        cause.code === "NOT_ENOUGH_BORROWED"
-      ) {
+      if (o.kind === "voided" && cause.code === "NOT_ENOUGH_BORROWED") {
         focusNext.current = { to: "alert" };
         setMoving(null);
         setAttempt((n) => n + 1);
-      } else if (
-        cause instanceof SocialError &&
-        cause.code === "LOCATION_NOT_FOUND"
-      ) {
-        // The Location chosen is gone: the choices are read again without it, and focus waits on Move to.
+      } else if (o.kind === "voided" && cause.code === "LOCATION_NOT_FOUND") {
         focusNext.current = { to: "form" };
         setDestination("");
-        onMoved();
       }
-    } finally {
-      setBusy(false);
-    }
+    } else
+      setMessage(
+        o.kind === "wrong_account"
+          ? signInAs(accountName)
+          : (resultText(o) ?? "")
+      );
+  }
+  async function confirmMove(card: BorrowedCard) {
+    if (busy || blocker || !destination) return;
+    const tok = guard.capture();
+    const fields = {
+      loan_id: card.loan_id,
+      edition_id: card.edition_id,
+      from_location_id: card.location_id,
+      to_location_id: destination,
+      quantity: String(copies),
+    } satisfies Omit<MoveBorrowed, "account_id" | "idempotency_key">;
+    setBusy(true);
+    setMessage("");
+    const o = await durable.send({
+      kind: "move_borrowed",
+      scope: "move_borrowed",
+      path: "/api/loans/borrowed/move",
+      fields,
+    });
+    if (!guard.live(tok)) return;
+    setBusy(false);
+    if (o) outcome(o);
   }
 
   let body;
@@ -239,6 +264,7 @@ export function BorrowedDialog({
                       if (element) moveButtons.current.set(key, element);
                       else moveButtons.current.delete(key);
                     }}
+                    disabled={frozen}
                     onClick={() => startMove(card)}
                     aria-label={`Move ${card.name} from ${card.location_name}`}
                   >
@@ -259,9 +285,10 @@ export function BorrowedDialog({
                     ref={destinationField}
                     label="Move to"
                     value={destination}
+                    disabled={frozen}
                     onChange={(event) => {
+                      if (fence.command.current || blocker) return;
                       setDestination(event.target.value);
-                      pending.current = null;
                     }}
                   >
                     <option value="">Choose a Location</option>
@@ -275,31 +302,31 @@ export function BorrowedDialog({
                   </Select>
                   <Stepper
                     label="Copies"
+                    disabled={frozen}
                     value={copies}
                     min={1}
                     max={Number(card.copies)}
                     onChange={(value) => {
+                      if (fence.command.current || blocker) return;
                       setCopies(value);
-                      pending.current = null;
                     }}
                   />
                   <span className="flex gap-2">
-                    {/* Busy, it stays enabled and focused (confirmMove ignores the press), so a refusal's focus never
-                        falls to the page. */}
                     <Button
                       type="submit"
                       variant="primary"
-                      disabled={!destination}
+                      disabled={frozen || !destination}
                       aria-disabled={busy || undefined}
                     >
                       Move
                     </Button>
                     <Button
                       onClick={() => {
+                        if (fence.command.current || blocker) return;
                         focusNext.current = { to: "row", key };
                         setMoving(null);
                       }}
-                      disabled={busy}
+                      disabled={frozen}
                     >
                       Cancel
                     </Button>
@@ -315,12 +342,12 @@ export function BorrowedDialog({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={close}
       title="Borrowed"
       closeLabel="Close Borrowed"
       returnFocus={returnFocus}
     >
-      <div className="flex flex-col gap-3">
+      <div ref={surface} className="flex flex-col gap-3">
         {message && (
           <p
             ref={alert}
@@ -332,6 +359,16 @@ export function BorrowedDialog({
           </p>
         )}
         {body}
+        {retained && (
+          <PendingLoanRequest
+            boundaryRef={fence.boundary}
+            busy
+            onRetry={() => {}}
+          />
+        )}
+        {blocker && !busy && (
+          <PendingLoanNotice view={blocker} autoFocus onOutcome={outcome} />
+        )}
       </div>
     </Dialog>
   );

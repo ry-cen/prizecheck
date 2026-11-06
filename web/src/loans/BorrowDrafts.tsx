@@ -1,3 +1,9 @@
+import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
+import { PendingLoanNotice } from "./PendingLoanNotice";
+import { refusalError, type FlowOutcome } from "./loanIntents";
+import { threadIdOf } from "./loanAttempt";
+import { RECOVERY_TEXT, resultText, signInAs } from "./loanText";
+import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
 import {
   createContext,
   useCallback,
@@ -16,7 +22,7 @@ import { getDecks, type DeckIndexEntry } from "../decks_generated";
 import { useNoteLoansChanged } from "../inbox/Inbox";
 import { CardImage } from "../social/FriendCollectionPage";
 import {
-  sendBorrowRequest,
+  type SendBorrowRequest,
   SocialError,
   type FriendCopy,
   type LoanView,
@@ -29,13 +35,7 @@ import { Stepper } from "../ui/Stepper";
 import { TextField } from "../ui/TextField";
 import { useLift, useToast } from "../ui/Toast";
 import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
-import {
-  cardCount,
-  lineEdition,
-  outcomeUnknown,
-  sendMessage,
-  today,
-} from "./loanText";
+import { cardCount, lineEdition, sendMessage, today } from "./loanText";
 
 /** The Friend a draft goes to. */
 export type DraftFriend = {
@@ -90,13 +90,6 @@ type DraftsApi = {
   ) => void;
   /** Opens the composer on the draft to one Friend. */
   review: (friendId: string, opener?: HTMLElement | null) => void;
-  /** Edit and resend: a draft to the Loan's other side with its cards, Deck and date, replacing the request while it
-   * is unanswered, and the composer open on it. */
-  editAndResend: (
-    loan: LoanView,
-    deckId: string | null,
-    opener?: HTMLElement | null
-  ) => void;
 };
 
 const DraftsContext = createContext<DraftsApi | null>(null);
@@ -217,14 +210,31 @@ export function BorrowDraftsProvider({
   const [drafts, setDrafts] = useState<Draft[]>(() => readDrafts(userId));
   const [composing, setComposing] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
-  // Each draft's send key: kept while the draft is unchanged, so a send whose outcome is unknown is retried safely.
-  const keys = useRef(new Map<string, string>());
+  const { store } = useLoanRecovery();
+  const guard = useFlowGuard();
+  const toast = useToast();
 
   useEffect(() => writeDrafts(userId, drafts), [userId, drafts]);
 
   const change = useCallback(
-    (friendId: string, update: (draft: Draft | undefined) => Draft | null) => {
-      keys.current.delete(friendId);
+    (
+      friendId: string,
+      update: (draft: Draft | undefined) => Draft | null,
+      friendName?: string
+    ) => {
+      if (store.blockerFor("borrow_request:" + friendId)) {
+        const tok = guard.capture();
+        const name =
+          friendName ??
+          drafts.find((d) => d.friend.collector_id === friendId)?.friend
+            .display_name ??
+          "";
+        if (guard.live(tok))
+          toast.show({
+            message: RECOVERY_TEXT.blockedDraft.replace("{name}", name),
+          });
+        return;
+      }
       setDrafts((current) => {
         const index = current.findIndex(
           (draft) => draft.friend.collector_id === friendId
@@ -236,7 +246,7 @@ export function BorrowDraftsProvider({
           : current.filter((_, at) => at !== index);
       });
     },
-    []
+    [store, drafts, toast]
   );
 
   const api = useMemo<DraftsApi>(
@@ -247,87 +257,56 @@ export function BorrowDraftsProvider({
           .find((draft) => draft.friend.collector_id === friendId)
           ?.lines.find((line) => line.edition_id === editionId)?.quantity ?? 0,
       set: (friend, card, quantity, cap, lendable, deckId) =>
-        change(friend.collector_id, (draft) => {
-          const base: Draft = draft ?? {
-            friend,
-            lines: [],
-            deckId: deckId ?? null,
-            returnBy: "",
-            replaces: null,
-          };
-          const others = base.lines.filter(
-            (line) => line.edition_id !== card.edition_id
-          );
-          const existing = base.lines.find(
-            (line) => line.edition_id === card.edition_id
-          );
-          const lines =
-            quantity <= 0
-              ? others
-              : existing
-                ? base.lines.map((line) =>
-                    line === existing
-                      ? { ...line, quantity, cap: cap ?? line.cap }
-                      : line
-                  )
-                : [
-                    ...base.lines,
-                    {
-                      edition_id: card.edition_id,
-                      name: card.name,
-                      set_code: card.set_code,
-                      collector_number: card.collector_number,
-                      descriptor: card.descriptor,
-                      image_url: card.image_url,
-                      quantity,
-                      cap,
-                      lendable,
-                    },
-                  ];
-          // Only the Friend's id and names are kept, whatever object named them (a Friend copy, a Friend's page).
-          const named: DraftFriend = {
-            collector_id: friend.collector_id,
-            display_name: friend.display_name,
-            handle: friend.handle,
-          };
-          return lines.length ? { ...base, friend: named, lines } : null;
-        }),
+        change(
+          friend.collector_id,
+          (draft) => {
+            const base: Draft = draft ?? {
+              friend,
+              lines: [],
+              deckId: deckId ?? null,
+              returnBy: "",
+              replaces: null,
+            };
+            const others = base.lines.filter(
+              (line) => line.edition_id !== card.edition_id
+            );
+            const existing = base.lines.find(
+              (line) => line.edition_id === card.edition_id
+            );
+            const lines =
+              quantity <= 0
+                ? others
+                : existing
+                  ? base.lines.map((line) =>
+                      line === existing
+                        ? { ...line, quantity, cap: cap ?? line.cap }
+                        : line
+                    )
+                  : [
+                      ...base.lines,
+                      {
+                        edition_id: card.edition_id,
+                        name: card.name,
+                        set_code: card.set_code,
+                        collector_number: card.collector_number,
+                        descriptor: card.descriptor,
+                        image_url: card.image_url,
+                        quantity,
+                        cap,
+                        lendable,
+                      },
+                    ];
+            // Only the Friend's id and names are kept, whatever object named them (a Friend copy, a Friend's page).
+            const named: DraftFriend = {
+              collector_id: friend.collector_id,
+              display_name: friend.display_name,
+              handle: friend.handle,
+            };
+            return lines.length ? { ...base, friend: named, lines } : null;
+          },
+          friend.display_name
+        ),
       review: (friendId, from) => {
-        opener.current = from ?? null;
-        setComposing(friendId);
-      },
-      editAndResend: (loan, deckId, from) => {
-        const friendId = loan.other.collector_id;
-        if (!friendId) return;
-        const friend: DraftFriend = {
-          collector_id: friendId,
-          display_name: loan.other.display_name,
-          handle: loan.other.handle,
-        };
-        change(friendId, (draft) => {
-          const asked: DraftLine[] = loan.lines.map((line) => ({
-            edition_id: line.edition_id,
-            name: line.name,
-            set_code: line.set_code,
-            collector_number: line.collector_number,
-            descriptor: line.descriptor,
-            image_url: line.image_url,
-            quantity: Number(line.requested),
-            cap: null,
-            lendable: "",
-          }));
-          const kept = (draft?.lines ?? []).filter(
-            (line) =>
-              !asked.some((other) => other.edition_id === line.edition_id)
-          );
-          return {
-            friend,
-            lines: [...asked, ...kept],
-            deckId,
-            returnBy: loan.return_by ?? "",
-            replaces: loan.state === "requested" ? loan.id : null,
-          };
-        });
         opener.current = from ?? null;
         setComposing(friendId);
       },
@@ -357,13 +336,6 @@ export function BorrowDraftsProvider({
         <BorrowComposer
           key={draft.friend.collector_id}
           draft={draft}
-          sendKey={() => {
-            const id = draft.friend.collector_id;
-            const key = keys.current.get(id) ?? crypto.randomUUID();
-            keys.current.set(id, key);
-            return key;
-          }}
-          forgetKey={() => keys.current.delete(draft.friend.collector_id)}
           onChange={(update) => change(draft.friend.collector_id, update)}
           onClose={() => setComposing(null)}
           onOpenLoan={onOpenLoan}
@@ -428,7 +400,22 @@ function BorrowTray({
   const listOpener = useRef<HTMLButtonElement>(null);
   const [listing, setListing] = useState(false);
   const [height, setHeight] = useState(0);
-  const shown = drafts.length > 0;
+  const { intents } = useLoanRecovery();
+  const guard = useFlowGuard();
+  const noteLoansChanged = useNoteLoansChanged();
+  const orphaned = intents.filter(
+    (v) =>
+      (v.scope === "*" || v.scope.startsWith("borrow_request:")) &&
+      !drafts.some((d) => v.scope === "borrow_request:" + d.friend.collector_id)
+  );
+  const shown = drafts.length > 0 || orphaned.length > 0;
+  function recovered(o: FlowOutcome) {
+    const tok = guard.capture();
+    if (!guard.live(tok)) return;
+    if (o.kind === "done" || o.kind === "voided") noteLoansChanged();
+    const message = resultText(o);
+    if (message) toast.show({ message });
+  }
 
   useLayoutEffect(() => {
     const element = tray.current;
@@ -476,6 +463,13 @@ function BorrowTray({
             : "fixed bottom-[calc(var(--space-6)+var(--tray-lift))] right-6 z-(--layer-sticky) flex w-80 flex-col gap-2"
         }
       >
+        {orphaned.map((view) => (
+          <PendingLoanNotice
+            key={view.operationId}
+            view={view}
+            onOutcome={recovered}
+          />
+        ))}
         {phone && drafts.length > 1 ? (
           <div className={BAR}>
             <p className="m-0 min-w-0 flex-1 text-meta">
@@ -549,16 +543,12 @@ export async function readDecks(): Promise<DeckIndexEntry[]> {
 /** The composer: the draft's lines with steppers, For Deck, Return by, and Send Borrow Request. */
 function BorrowComposer({
   draft,
-  sendKey,
-  forgetKey,
   onChange,
   onClose,
   onOpenLoan,
   returnFocus,
 }: {
   draft: Draft;
-  sendKey: () => string;
-  forgetKey: () => void;
   onChange: (update: (draft: Draft | undefined) => Draft | null) => void;
   onClose: () => void;
   onOpenLoan: (id: string) => void;
@@ -572,6 +562,16 @@ function BorrowComposer({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const name = draft.friend.display_name;
+  const durable = useDurableSend();
+  const fence = durable.fence;
+  const { blockerFor, accountName } = useLoanRecovery();
+  const guard = useFlowGuard();
+  const scope = "borrow_request:" + draft.friend.collector_id;
+  const blocker = blockerFor(scope);
+  const frozen = busy || fence.pending || !!blocker;
+  const form = useRef<HTMLDivElement>(null);
+  const close = () =>
+    closeLoanRequest(form.current, fence.command.current !== null, onClose);
 
   useEffect(() => {
     let live = true;
@@ -585,212 +585,273 @@ function BorrowComposer({
   }, [attempt]);
 
   function edit(update: (current: Draft) => Draft | null) {
+    if (frozen || fence.command.current) return;
     setMessage("");
     onChange((current) => (current ? update(current) : null));
   }
   const cardName = (editionId: string) =>
     draft.lines.find((line) => line.edition_id === editionId)?.name ?? "a card";
 
-  async function send() {
-    if (busy) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const loan = await sendBorrowRequest({
-        lender_id: draft.friend.collector_id,
-        lines: draft.lines.map((line) => ({
-          edition_id: line.edition_id,
-          quantity: String(line.quantity),
-        })),
-        deck_id: draft.deckId,
-        return_by: draft.returnBy || null,
-        replaces: draft.replaces,
-        idempotency_key: sendKey(),
+  function refused(cause: unknown) {
+    const error = cause instanceof SocialError ? cause : null;
+    if (error?.code === "NOT_LENDABLE") {
+      const editionId = String(error.detail.edition_id ?? "");
+      const available = Number(error.detail.available ?? 0);
+      // Nothing left to ask for: the draft goes with the composer, so the refusal is said in a toast.
+      if (
+        available <= 0 &&
+        draft.lines.every((line) => line.edition_id === editionId)
+      ) {
+        onChange(() => null);
+        onClose();
+        toast.show({
+          message: sendMessage(cause, name, cardName),
+          focus: true,
+        });
+        return;
+      }
+      onChange((current) => {
+        if (!current) return null;
+        const lines = current.lines.flatMap((line) =>
+          line.edition_id !== editionId
+            ? [line]
+            : available > 0
+              ? [
+                  {
+                    ...line,
+                    cap: available,
+                    quantity: Math.min(line.quantity, available),
+                  },
+                ]
+              : []
+        );
+        return lines.length ? { ...current, lines } : null;
       });
+    } else if (error?.code === "DECK_NOT_FOUND") {
+      onChange((current) => (current ? { ...current, deckId: null } : null));
+      setAttempt((n) => n + 1);
+    }
+    setMessage(sendMessage(cause, name, cardName));
+  }
+  function outcome(o: FlowOutcome, recovered = false) {
+    if (o.kind === "done" || o.kind === "voided") noteLoansChanged();
+    if (o.kind === "done") {
+      const id = threadIdOf(o.response);
       onChange(() => null);
       onClose();
-      noteLoansChanged();
       toast.show({
-        message: `Borrow Request sent to ${endSentence(name)}`,
-        action: { label: "View", onAction: () => onOpenLoan(loan.id) },
+        message: recovered
+          ? RECOVERY_TEXT.done
+          : `Borrow Request sent to ${endSentence(name)}`,
+        ...(id
+          ? { action: { label: "View", onAction: () => onOpenLoan(id) } }
+          : {}),
         focus: true,
       });
-    } catch (cause) {
-      if (!outcomeUnknown(cause)) forgetKey();
-      const error = cause instanceof SocialError ? cause : null;
-      if (error?.code === "NOT_LENDABLE") {
-        const editionId = String(error.detail.edition_id ?? "");
-        const available = Number(error.detail.available ?? 0);
-        // Nothing left to ask for: the draft goes with the composer, so the refusal is said in a toast.
-        if (
-          available <= 0 &&
-          draft.lines.every((line) => line.edition_id === editionId)
-        ) {
-          onChange(() => null);
-          onClose();
-          toast.show({
-            message: sendMessage(cause, name, cardName),
-            focus: true,
-          });
-          return;
-        }
-        onChange((current) => {
-          if (!current) return null;
-          const lines = current.lines.flatMap((line) =>
-            line.edition_id !== editionId
-              ? [line]
-              : available > 0
-                ? [
-                    {
-                      ...line,
-                      cap: available,
-                      quantity: Math.min(line.quantity, available),
-                    },
-                  ]
-                : []
-          );
-          return lines.length ? { ...current, lines } : null;
-        });
-      } else if (error?.code === "DECK_NOT_FOUND") {
-        onChange((current) => (current ? { ...current, deckId: null } : null));
-        setAttempt((n) => n + 1);
-      } else if (error?.code === "LOAN_CHANGED")
-        onChange((current) =>
-          current ? { ...current, replaces: null } : null
-        );
-      setMessage(sendMessage(cause, name, cardName));
-    } finally {
-      setBusy(false);
-    }
+    } else if (o.kind === "voided" && o.refusal)
+      refused(refusalError(o.refusal));
+    else if (o.kind === "pending" && o.refusal)
+      setMessage(sendMessage(refusalError(o.refusal), name, cardName));
+    else
+      setMessage(
+        o.kind === "wrong_account"
+          ? signInAs(accountName)
+          : (resultText(o) ?? "")
+      );
+  }
+  async function send() {
+    if (draft.replaces || frozen || fence.command.current) return;
+    const tok = guard.capture();
+    const fields = {
+      lender_id: draft.friend.collector_id,
+      lines: draft.lines.map((line) => ({
+        edition_id: line.edition_id,
+        quantity: String(line.quantity),
+      })),
+      deck_id: draft.deckId,
+      return_by: draft.returnBy || null,
+    } satisfies Omit<SendBorrowRequest, "account_id" | "idempotency_key">;
+    setBusy(true);
+    setMessage("");
+    const o = await durable.send({
+      kind: "borrow_request",
+      scope,
+      path: "/api/loans",
+      fields,
+    });
+    if (!guard.live(tok)) return;
+    setBusy(false);
+    if (o) outcome(o);
   }
 
   return (
     <Dialog
       open
-      onClose={onClose}
+      onClose={close}
       title={`Borrow Request to ${name}`}
       closeLabel="Close Borrow Request"
       returnFocus={returnFocus}
     >
-      <div className="flex flex-col gap-4">
+      <div ref={form} className="flex flex-col gap-4">
         <p className="m-0 text-meta text-text-muted">
           {name} can accept all of it, part of it, or decline.
         </p>
-        <ul
-          aria-label="Cards to borrow"
-          className="m-0 flex list-none flex-col gap-3 p-0"
-        >
-          {draft.lines.map((line) => {
-            const edition = lineEdition(line);
-            return (
-              <li
-                key={line.edition_id}
-                className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 phone:grid-cols-[3rem_minmax(0,1fr)]"
+        <fieldset disabled={frozen} className="contents">
+          <ul
+            aria-label="Cards to borrow"
+            className="m-0 flex list-none flex-col gap-3 p-0"
+          >
+            {draft.lines.map((line) => {
+              const edition = lineEdition(line);
+              return (
+                <li
+                  key={line.edition_id}
+                  className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 phone:grid-cols-[3rem_minmax(0,1fr)]"
+                >
+                  <CardImage url={line.image_url} />
+                  <div className="min-w-0">
+                    <p className="m-0 text-body font-medium wrap-anywhere">
+                      {line.name}
+                    </p>
+                    <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                      {edition}
+                      {line.lendable && ` · ${line.lendable}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 phone:col-start-2">
+                    <Stepper
+                      label={`Copies of ${line.name}, ${edition}`}
+                      value={line.quantity}
+                      min={1}
+                      max={line.cap ?? undefined}
+                      onChange={(quantity) =>
+                        edit((current) => ({
+                          ...current,
+                          lines: current.lines.map((item) =>
+                            item.edition_id === line.edition_id
+                              ? { ...item, quantity }
+                              : item
+                          ),
+                        }))
+                      }
+                    />
+                    <Button
+                      variant="quiet"
+                      icon={X}
+                      label={`Remove ${line.name}, ${edition}`}
+                      onClick={() =>
+                        edit((current) => {
+                          const lines = current.lines.filter(
+                            (item) => item.edition_id !== line.edition_id
+                          );
+                          return lines.length ? { ...current, lines } : null;
+                        })
+                      }
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <Select
+            label="For Deck"
+            value={draft.deckId ?? ""}
+            onChange={(event) =>
+              edit((current) => ({
+                ...current,
+                deckId: event.target.value || null,
+              }))
+            }
+          >
+            <option value="">No Deck (they go to Unsorted)</option>
+            {decks.kind === "ready" &&
+              decks.decks.map((deck) => (
+                <option key={deck.id} value={deck.id}>
+                  {deck.name}
+                </option>
+              ))}
+            {decks.kind !== "ready" && draft.deckId && (
+              <option value={draft.deckId}>The Deck you chose</option>
+            )}
+          </Select>
+          {decks.kind === "failed" && (
+            <p className="m-0 text-meta text-text-muted">
+              Your Decks couldn't be loaded.{" "}
+              <button
+                type="button"
+                onClick={() => setAttempt((n) => n + 1)}
+                className="cursor-pointer border-0 bg-transparent p-0 font-sans text-meta text-accent-strong underline"
               >
-                <CardImage url={line.image_url} />
-                <div className="min-w-0">
-                  <p className="m-0 text-body font-medium wrap-anywhere">
-                    {line.name}
-                  </p>
-                  <p className="m-0 text-meta text-text-muted wrap-anywhere">
-                    {edition}
-                    {line.lendable && ` · ${line.lendable}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 phone:col-start-2">
-                  <Stepper
-                    label={`Copies of ${line.name}, ${edition}`}
-                    value={line.quantity}
-                    min={1}
-                    max={line.cap ?? undefined}
-                    onChange={(quantity) =>
-                      edit((current) => ({
-                        ...current,
-                        lines: current.lines.map((item) =>
-                          item.edition_id === line.edition_id
-                            ? { ...item, quantity }
-                            : item
-                        ),
-                      }))
-                    }
-                  />
-                  <Button
-                    variant="quiet"
-                    icon={X}
-                    label={`Remove ${line.name}, ${edition}`}
-                    onClick={() =>
-                      edit((current) => {
-                        const lines = current.lines.filter(
-                          (item) => item.edition_id !== line.edition_id
-                        );
-                        return lines.length ? { ...current, lines } : null;
-                      })
-                    }
-                  />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-        <Select
-          label="For Deck"
-          value={draft.deckId ?? ""}
-          onChange={(event) =>
-            edit((current) => ({
-              ...current,
-              deckId: event.target.value || null,
-            }))
-          }
-        >
-          <option value="">No Deck (they go to Unsorted)</option>
-          {decks.kind === "ready" &&
-            decks.decks.map((deck) => (
-              <option key={deck.id} value={deck.id}>
-                {deck.name}
-              </option>
-            ))}
-          {decks.kind !== "ready" && draft.deckId && (
-            <option value={draft.deckId}>The Deck you chose</option>
+                Retry
+              </button>
+            </p>
           )}
-        </Select>
-        {decks.kind === "failed" && (
-          <p className="m-0 text-meta text-text-muted">
-            Your Decks couldn't be loaded.{" "}
-            <button
-              type="button"
-              onClick={() => setAttempt((n) => n + 1)}
-              className="cursor-pointer border-0 bg-transparent p-0 font-sans text-meta text-accent-strong underline"
-            >
-              Retry
-            </button>
-          </p>
+          <TextField
+            type="date"
+            label="Return by (optional)"
+            min={today()}
+            value={draft.returnBy}
+            onChange={(event) =>
+              edit((current) => ({ ...current, returnBy: event.target.value }))
+            }
+          />
+        </fieldset>
+        {fence.pending && (
+          <PendingLoanRequest
+            boundaryRef={fence.boundary}
+            busy
+            onRetry={() => {}}
+          />
         )}
-        <TextField
-          type="date"
-          label="Return by (optional)"
-          min={today()}
-          value={draft.returnBy}
-          onChange={(event) =>
-            edit((current) => ({ ...current, returnBy: event.target.value }))
-          }
-        />
+        {blocker && !busy && (
+          <PendingLoanNotice
+            view={blocker}
+            autoFocus
+            onOutcome={(o) => outcome(o, true)}
+          />
+        )}
+
         <p role="alert" className="m-0 text-meta text-danger empty:hidden">
           {message}
         </p>
         <div className="flex flex-wrap justify-end gap-2">
           <Button
             variant="quiet"
+            disabled={busy || !!blocker}
             onClick={() => {
+              if (frozen || fence.command.current) return;
               onChange(() => null);
               onClose();
             }}
           >
             Discard
           </Button>
-          <Button onClick={onClose}>Keep draft</Button>
+          <Button onClick={close}>Keep draft</Button>
+          {draft.replaces && (
+            <>
+              <p>
+                This edit was started before an update. Open the Borrow Request
+                to edit it again.
+              </p>
+              <Button
+                onClick={() =>
+                  closeLoanRequest(
+                    form.current,
+                    fence.command.current !== null,
+                    () => {
+                      onClose();
+                      onOpenLoan(draft.replaces!);
+                    }
+                  )
+                }
+              >
+                View
+              </Button>
+            </>
+          )}
           <Button
             variant="primary"
-            aria-disabled={busy || undefined}
+            disabled={frozen || !!draft.replaces}
             onClick={() => void send()}
           >
             Send Borrow Request

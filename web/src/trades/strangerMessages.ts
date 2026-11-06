@@ -2,7 +2,7 @@
 import type { TradeView } from "../social_generated";
 
 /** The per-card button on a stranger's Trade List. */
-export const CARD_MESSAGE = "Message";
+export const CARD_MESSAGE = "Ask about this card";
 
 /** That button's accessible name: "Message Misty W. about Iono (PAL 185)". */
 export function cardMessageLabel(name: string, cardName: string): string {

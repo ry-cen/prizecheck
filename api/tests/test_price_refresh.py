@@ -14,7 +14,7 @@ import time
 import pytest
 
 from app import price_launcher, price_refresh, quote_contract as qc
-from app.price_budget import Budget
+from app.core.prices.price_budget import Budget
 from app.price_refresh import Row, classify, evaluate_and_admit
 from app.public_projection import ProjectionUnavailable
 from app.public_records import FilePublicRecords, HttpPublicRecords, QuoteState, quote_key, quote_states, result_key

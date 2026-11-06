@@ -1,4 +1,4 @@
-"""Borrow Requests and the Loans they become (social network #252): ``social.loans`` (``/api/social/loans``) and
+"""Borrow Requests and the Loans they become (social network #252): ``social.loans`` (``/api/loans``) and
 ``loan_inventory`` (``/api/loans``), through signed HTTP against PostgreSQL.
 
 A borrower sends a Friend a Borrow Request for Card Edition lines, each capped at what the Friend could lend now. The
@@ -31,22 +31,22 @@ def sent(borrower, lender, lines, **extra):
 
 
 def accept(lender, loan, promised, key=None):
-    return call('POST', f"/api/loans/{loan['id']}/accept", lender, {
-        'revision': loan['revision'], 'idempotency_key': str(key or uuid4()),
+    return call('POST', f"/api/loans/{loan['thread_id']}/accept", lender, {
+        'loan_id': loan['loan_id'], 'revision': loan['revision'], 'idempotency_key': str(key or uuid4()),
         'lines': [{'edition_id': edition, 'promised': str(count)} for edition, count in promised]})
 
 
 def step(user, loan, action, key=None, revision=None):
-    return call('POST', f"/api/social/loans/{loan['id']}/{action}", user,
-                {'revision': revision or loan['revision'], 'idempotency_key': str(key or uuid4())})
+    return call('POST', f"/api/loans/{loan['thread_id']}/{action}", user,
+                {'loan_id': loan['loan_id'], 'revision': revision or loan['revision'], 'idempotency_key': str(key or uuid4())})
 
 
 def view(user, loan):
-    return ok(call('GET', f"/api/social/loans/{loan['id']}", user))
+    return ok(call('GET', f"/api/loans/{loan['thread_id']}", user))['live_terms']
 
 
 def side(user, loan):
-    return ok(call('GET', f"/api/loans/{loan['id']}/side", user))
+    return ok(call('GET', f"/api/loans/{loan['thread_id']}/side", user))
 
 
 def lines_of(body):
@@ -166,7 +166,7 @@ def test_decline_withdraw_and_cancel_end_a_loan_and_release_what_it_reserved(sto
     assert (declined['state'], declined['closed_reason'], declined['closed_by'], declined['section']) == (
         'closed', 'declined', 'you', 'history')
     told = view(ash, declined)
-    assert (told['closed_by'], told['actions']) == ('them', ['edit_and_resend'])
+    assert (told['closed_by'], told['actions']) == ('them', [])
     withdrawn = ok(step(ash, sent(ash, misty, [(iono, 1)]), 'withdraw'))
     assert (withdrawn['closed_reason'], withdrawn['closed_by']) == ('withdrawn', 'you')
     # Cancel, by the borrower: the reservation goes and the lender's revision moves.
@@ -175,7 +175,7 @@ def test_decline_withdraw_and_cancel_end_a_loan_and_release_what_it_reserved(sto
     before = revision_of(misty)
     cancelled = ok(step(ash, view(ash, loan), 'cancel'))
     assert (cancelled['closed_reason'], cancelled['closed_by'], cancelled['actions']) == (
-        'cancelled', 'you', ['edit_and_resend'])
+        'cancelled', 'you', [])
     assert copies(ash, [misty]) == {(misty, iono): (2, 0)}
     assert revision_of(misty) == before + 1
     assert side(misty, cancelled)['picks'] == []
@@ -192,8 +192,8 @@ def test_a_step_names_the_revision_it_read_and_only_the_two_sides_may_take_the_s
     iono = ids['PAL 185']
     hold(misty, node(misty, 'Unsorted')['id'], iono, 2)
     loan = sent(ash, misty, [(iono, 1)])
-    for response in (call('GET', f"/api/social/loans/{loan['id']}", stranger),
-                     call('GET', f"/api/loans/{loan['id']}/side", stranger),
+    for response in (call('GET', f"/api/loans/{loan['thread_id']}", stranger),
+                     call('GET', f"/api/loans/{loan['thread_id']}/side", stranger),
                      step(stranger, loan, 'decline'), accept(stranger, loan, [(iono, 1)])):
         assert (response.status_code, response.json()['detail']['code']) == (404, 'LOAN_NOT_FOUND')
     assert step(ash, loan, 'decline').json()['detail']['code'] == 'STEP_NOT_ALLOWED'
@@ -275,14 +275,17 @@ def test_edit_and_resend_replaces_the_unanswered_request_in_one_step(store):
     iono = ids['PAL 185']
     hold(misty, node(misty, 'Unsorted')['id'], iono, 3)
     first = sent(ash, misty, [(iono, 1)])
-    second = sent(ash, misty, [(iono, 2)], replaces=first['id'])
-    assert (view(ash, first)['state'], view(ash, first)['closed_reason']) == ('closed', 'withdrawn')
+    from test_loan_threads import terms
+    second = ok(terms(ash, first, iono, 2))
+    assert first['thread_id'] == second['thread_id'] and first['loan_id'] != second['loan_id']
+    with connect() as conn:
+        closed = conn.execute('SELECT state, closed_reason FROM loan WHERE id=%s', (first['loan_id'],)).fetchone()
+    assert (closed['state'], closed['closed_reason']) == ('closed', 'withdrawn')
     assert lines_of(second) == [(iono, '2', '0')]
     ok(accept(misty, view(misty, second), [(iono, 2)]))
-    # Only an unanswered request of yours to the same Friend can be replaced.
-    for replaced in (second['id'], first['id'], str(uuid4())):
-        response = send(ash, misty, [(iono, 1)], replaces=replaced)
-        assert (response.status_code, response.json()['detail']['code']) == (409, 'LOAN_CHANGED')
+    for previous, expected in ((second, 'STEP_NOT_ALLOWED'), (first, 'LOAN_CHANGED')):
+        response = terms(ash, previous, iono, 1)
+        assert (response.status_code, response.json()['detail']['code']) == (409, expected)
 
 
 def test_the_loans_tab_lists_open_loans_then_history_and_counts_what_needs_you(store):
@@ -293,13 +296,16 @@ def test_the_loans_tab_lists_open_loans_then_history_and_counts_what_needs_you(s
     waiting = sent(ash, misty, [(iono, 1)])
     accepted = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 1)])), [(iono, 1)]))
     closed = ok(step(ash, sent(ash, misty, [(iono, 1)]), 'withdraw'))
-    tab = ok(call('GET', '/api/social/loans', misty))
-    assert [(loan['id'], loan['section']) for loan in tab['loans']] == [
-        (accepted['id'], 'pending'), (waiting['id'], 'needs_you'), (closed['id'], 'history')]
-    assert tab['needs_you'] == 1
-    mine = ok(call('GET', '/api/social/loans', ash))
-    assert [loan['section'] for loan in mine['loans']] == ['pending', 'pending', 'history'] and mine['needs_you'] == 0
-    assert ok(call('GET', '/api/social/loans', collector()[0])) == {'loans': [], 'needs_you': 0}
+    needs = ok(call('GET', '/api/loans?group=needs_you', misty))
+    pending = ok(call('GET', '/api/loans?group=pending', misty))
+    done = ok(call('GET', '/api/loans?group=done', misty))
+    assert [(item['id'], item['waiting']) for item in needs] == [(waiting['thread_id'], 'answer')]
+    assert [(item['id'], item['state']) for item in pending] == [(accepted['thread_id'], 'accepted')]
+    assert [(item['id'], item['state']) for item in done] == [(closed['thread_id'], 'closed')]
+    assert ok(call('GET', '/api/loans?group=needs_you', ash)) == []
+    assert {item['id'] for item in ok(call('GET', '/api/loans?group=pending', ash))} == {
+        waiting['thread_id'], accepted['thread_id']}
+    assert ok(call('GET', '/api/loans', collector()[0])) == []
 
 
 def test_loan_steps_have_an_hourly_limit_of_their_own(store):
@@ -333,12 +339,12 @@ def test_each_side_reads_its_own_locations_and_decks_and_never_the_others(store)
     assert borrower_side == {'loan_id': loan['id'], 'deck': {'id': ash_deck, 'name': node(ash, ash_deck)['name']},
                              'can_promise': [], 'picks': [], 'suggested': [], 'awaiting_choice': [], 'deck_use': None}
     seen_by_ash = ' '.join(call(method, path, ash).text for method, path in (
-        ('GET', '/api/social/loans'), ('GET', f"/api/social/loans/{loan['id']}"), ('GET', f"/api/loans/{loan['id']}/side")))
+        ('GET', '/api/loans'), ('GET', f"/api/loans/{loan['thread_id']}"), ('GET', f"/api/loans/{loan['thread_id']}/side")))
     seen_by_ash += str(loan)
     for secret in ('Misty Private Binder', binder, 'Misty Water Deck', misty_deck):
         assert secret not in seen_by_ash, secret
     seen_by_misty = ' '.join(call(method, path, misty).text for method, path in (
-        ('GET', '/api/social/loans'), ('GET', f"/api/social/loans/{loan['id']}"), ('GET', f"/api/loans/{loan['id']}/side")))
+        ('GET', '/api/loans'), ('GET', f"/api/loans/{loan['thread_id']}"), ('GET', f"/api/loans/{loan['thread_id']}/side")))
     seen_by_misty += str(accepted)
     for secret in ('Ash Secret Deck', ash_deck):
         assert secret not in seen_by_misty, secret

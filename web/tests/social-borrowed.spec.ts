@@ -99,11 +99,15 @@ test("borrowed copies fill the borrower's Deck, labelled with their lender, and 
   const move = form.getByRole("button", { name: "Move", exact: true });
   const alert = borrowed.getByRole("alert");
   const MOVE = "**/api/loans/borrowed/move";
-  // No answer: focus stays on Move, which stays enabled while the Move is out.
+  // An unanswered Move keeps the form frozen until replay or a server fence.
   await page.route(MOVE, (route) => route.abort(), { times: 1 });
   await move.click();
-  await expect(alert).toHaveText("The cards couldn't be moved. Try again.");
-  await expect(move).toBeFocused();
+  await expect(borrowed).toContainText(
+    "Your Move of borrowed cards may not have finished."
+  );
+  const replay = borrowed.getByRole("button", { name: "Send it again" });
+  await expect(replay).toBeFocused();
+  await expect(form.getByRole("combobox", { name: "Move to" })).toBeDisabled();
   // The Location is gone: the choices are read again and focus waits on Move to.
   const refuse = (code: string) =>
     page.route(
@@ -112,7 +116,7 @@ test("borrowed copies fill the borrower's Deck, labelled with their lender, and 
       { times: 1 }
     );
   await refuse("LOCATION_NOT_FOUND");
-  await move.click();
+  await replay.click();
   await expect(alert).toHaveText("That Location is gone. Choose another.");
   await expect(form.getByRole("combobox", { name: "Move to" })).toBeFocused();
   // The copies are no longer there: the form closes, the list is read again and the alert takes focus.

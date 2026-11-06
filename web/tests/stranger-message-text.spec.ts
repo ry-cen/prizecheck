@@ -25,7 +25,7 @@ test("the card question names the card as Trade messages do", () => {
 test("the prefill round-trips and refuses what it shouldn't take", () => {
   const text = "Is your Iono (PAL 185) still available? a&b #1 100% 🙂";
   const path = prefilledMessagePath("t-1", text);
-  expect(path.startsWith("/trades/with/t-1?draft=")).toBe(true);
+  expect(path.startsWith("/trades/new/t-1?draft=")).toBe(true);
   expect(readPrefill(new URL(path, "http://x").search)).toBe(text);
   expect(readPrefill("")).toBe("");
   expect(readPrefill("?draft=%20%20")).toBe("");

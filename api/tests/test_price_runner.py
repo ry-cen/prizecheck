@@ -29,7 +29,7 @@ from app.games.pokemon.prices import price_source
 from app.games.pokemon.prices import tcgdex_record
 from app.games.pokemon.prices.quote_values import CURRENCY, SOURCE
 from app import quote_contract as qc
-from app.price_budget import Budget
+from app.core.prices.price_budget import Budget
 from app.public_projection import ProjectionUnavailable
 from app.public_records import (catalog_edition_key, catalog_printing_key, quarantine_key, quote_key, quote_states, result_key)
 from public_records_fixture import backend_from_config, serve_relay, store_from_config

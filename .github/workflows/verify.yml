@@ -60,7 +60,7 @@ jobs:
   integration-legs:
     if: ${{ inputs.integration == 'sharded' || (github.event_name == 'pull_request' && github.base_ref == 'main') }}
     name: ${{ matrix.leg }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       # Every leg runs to the end, so one leg's failure doesn't hide another's.
@@ -151,7 +151,7 @@ jobs:
   # Optional (integration: full). The full gate, unsharded.
   integration-full:
     if: ${{ inputs.integration == 'full' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Well above the unsharded fast tier's 32 minutes on a hosted runner, since the full gate adds the slow tests and
     # the operations suite.
     timeout-minutes: 75

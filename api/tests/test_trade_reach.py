@@ -25,6 +25,7 @@ from test_open_discovery import discoverable
 from test_trade_migrations import collector as owner_row, run_again, scratch  # noqa: F401
 from test_trade_wants import set_want
 from test_trades import trading
+from test_threads import thread as make_thread
 
 MIGRATION = '148_trade_reach.sql'
 HERE = (40.0, -100.0)
@@ -56,8 +57,12 @@ def friends(conn, one, two):
                  (low, high, low))
 
 
-def talk(conn, one, two):
-    conn.execute("SELECT pair_conversation(%s, %s, 'A', 'B')", (one, two))
+def talk(conn, one, two, kind):
+    """The SQL label stays 'conversation'; its sources are Threads and imported legacy contacts."""
+    if kind == 'legacy':
+        conn.execute('INSERT INTO legacy_contact(user_low,user_high) VALUES (%s,%s)',tuple(sorted((one,two))))
+    else:
+        make_thread(one,two,kind=kind,closed=True,conn=conn)
 
 
 def blocks(conn, blocker, blocked):
@@ -77,7 +82,8 @@ def trader_of(conn, user):
     return conn.execute('SELECT trader_id FROM collector_profile WHERE user_id = %s', (user,)).fetchone()['trader_id']
 
 
-def test_each_branch_answers_how_and_band(store):
+@pytest.mark.parametrize('contact_kind',['trade','loan','legacy'])
+def test_each_branch_answers_how_and_band(store,contact_kind):
     with connect() as conn:
         viewer = person(conn, 'viewer')
         place(conn, viewer, *HERE)
@@ -86,10 +92,10 @@ def test_each_branch_answers_how_and_band(store):
         friends(conn, viewer, friend)
         partner = person(conn, 'partner')
         place(conn, partner, *NEAR)
-        talk(conn, viewer, partner)
+        talk(conn, viewer, partner,contact_kind)
         quiet = person(conn, 'quiet')
         place(conn, quiet, *NEAR, enabled=False)
-        talk(conn, viewer, quiet)
+        talk(conn, viewer, quiet,contact_kind)
         near = person(conn, 'near')
         place(conn, near, *NEAR)
         edge = person(conn, 'edge')
@@ -97,7 +103,7 @@ def test_each_branch_answers_how_and_band(store):
         both = person(conn, 'both')
         place(conn, both, *NEAR)
         friends(conn, viewer, both)
-        talk(conn, viewer, both)
+        talk(conn, viewer, both,contact_kind)
         out = person(conn, 'out')
         place(conn, out, *EDGE_OUT)
         off = person(conn, 'off')
@@ -108,7 +114,7 @@ def test_each_branch_answers_how_and_band(store):
                       near: ('near', 2), edge: ('near', 4), both: ('friend', None)}
 
 
-@pytest.mark.parametrize('branch', ['friend', 'conversation', 'near'])
+@pytest.mark.parametrize('branch', ['friend', 'trade', 'loan', 'legacy', 'near'])
 @pytest.mark.parametrize('direction', ['viewer_blocks', 'viewer_blocked'])
 def test_no_branch_crosses_a_block_either_way(store, branch, direction):
     with connect() as conn:
@@ -118,8 +124,8 @@ def test_no_branch_crosses_a_block_either_way(store, branch, direction):
         place(conn, other, *NEAR)
         if branch == 'friend':
             friends(conn, viewer, other)
-        elif branch == 'conversation':
-            talk(conn, viewer, other)
+        elif branch in ('trade','loan','legacy'):
+            talk(conn, viewer, other,branch)
         assert reached(conn, viewer, [other]) != {}
         blocks(conn, *((viewer, other) if direction == 'viewer_blocks' else (other, viewer)))
         assert reached(conn, viewer, [other]) == {}
@@ -131,13 +137,13 @@ def test_a_suspended_viewer_or_other_has_no_reach(store):
         viewer = person(conn, 'viewer')
         place(conn, viewer, *HERE)
         others = {}
-        for branch in ('friend', 'conversation', 'near'):
+        for branch in ('friend', 'trade', 'loan', 'legacy', 'near'):
             other = others[branch] = person(conn, branch)
             place(conn, other, *NEAR)
             if branch == 'friend':
                 friends(conn, viewer, other)
-            elif branch == 'conversation':
-                talk(conn, viewer, other)
+            elif branch in ('trade','loan','legacy'):
+                talk(conn, viewer, other,branch)
         ids = list(others.values())
         assert set(reached(conn, viewer, ids)) == set(ids)
         for branch, other in others.items():
@@ -171,13 +177,14 @@ def test_near_needs_both_sides_on_and_not_removed(store):
         assert reached(conn, viewer, [other]) == {}
 
 
-def test_the_conversation_branch_survives_switch_off_and_a_move(store):
+@pytest.mark.parametrize('contact_kind',['trade','loan','legacy'])
+def test_the_conversation_branch_survives_switch_off_and_a_move(store,contact_kind):
     with connect() as conn:
         viewer = person(conn, 'viewer')
         other = person(conn, 'other')
         place(conn, viewer, *HERE)
         place(conn, other, *NEAR)
-        talk(conn, viewer, other)
+        talk(conn, viewer, other,contact_kind)
         assert reached(conn, viewer, [other]) == {other: ('conversation', 2)}
         place(conn, other, *NEAR, enabled=False)
         assert reached(conn, viewer, [other]) == {other: ('conversation', None)}
@@ -185,12 +192,13 @@ def test_the_conversation_branch_survives_switch_off_and_a_move(store):
         assert reached(conn, viewer, [other]) == {other: ('conversation', None)}
 
 
-def test_a_deleted_other_has_no_reach(store):
+@pytest.mark.parametrize('contact_kind',['trade','loan','legacy'])
+def test_a_deleted_other_has_no_reach(store,contact_kind):
     with connect() as conn:
         viewer = person(conn, 'viewer')
         other = person(conn, 'other')
         friends(conn, viewer, other)
-        talk(conn, viewer, other)
+        talk(conn, viewer, other,contact_kind)
         assert reached(conn, viewer, [other]) == {other: ('friend', None)}
         conn.execute('DELETE FROM inventory_owner WHERE user_id = %s', (other,))
         assert reached(conn, viewer, [other]) == {}

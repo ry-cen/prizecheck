@@ -1,3 +1,4 @@
+import { tradeView } from "./support/trades";
 // Ticket #278, on the proposal builder of #284: Counter a Trade Proposal. Misty proposes her Iono for Ash's Arven. Only the
 // recipient sees Counter. Ash opens the Counter builder prefilled from the Trade: leaving it unchanged asks nothing, a
 // cash-only Counter is refused while Misty is not open to cash offers and leaves her proposal waiting, and after he adds
@@ -168,12 +169,12 @@ async function propose(
     you_get: get.map(line),
     idempotency_key: randomUUID(),
   });
-  return trade.id as string;
+  return trade.thread_id as string;
 }
 
 /** The Trade as `page`'s collector reads it, through the API. */
 const tradeState = async (page: Page, id: string) => {
-  const trade = await api(page, "GET", `/api/social/trades/${id}`);
+  const trade = await tradeView(page, id);
   return {
     state: trade.state as string,
     revision: trade.revision as number,
@@ -223,6 +224,7 @@ async function story(
     ],
     [[ids["SVI 166"], 1]]
   );
+  const originalOffer = await tradeView(page, original);
   const originalAddress = `${ORIGIN}/trades/${original}`;
 
   // 3: only the recipient may counter.
@@ -345,16 +347,23 @@ async function story(
   await expect(iono).toHaveAccessibleName(/2 of 3 in You get/);
   await show(ash.page, "Proposal");
   await amount.fill("5");
+  const diff = ash.page.getByRole("region", { name: "Proposed changes" });
+  await expect(diff).toContainText("You get Iono (PAL 185): 1 → 2");
+  await expect(diff).toContainText("Cash: No cash → You pay $5.00");
   await send.click();
   await expect(toast(ash.page)).toContainText("Counter sent to Misty W");
   await expect(ash.page).toHaveURL(
     new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`)
   );
-  await expect(ash.page).not.toHaveURL(originalAddress);
+  await expect(ash.page).toHaveURL(originalAddress);
+  const replacement = await tradeView(ash.page, original);
+  expect(replacement.thread_id).toBe(originalOffer.thread_id);
+  expect(replacement.offer_id).not.toBe(originalOffer.offer_id);
+  expect(replacement.countered_from).toBe(originalOffer.offer_id);
   await expect(heading(ash.page)).toHaveText("Waiting for Misty W to answer");
-  await expect(ash.page.getByRole("main")).toContainText(
-    "This is your Counter to Misty W's Trade Proposal."
-  );
+  await expect(
+    ash.page.getByRole("list", { name: "Messages and changes" })
+  ).toContainText("You: Sent a Counter");
   await expect(region(ash.page, "Cash")).toContainText("You pay Misty W $5.00");
   await expectPageChecks(ash.page, `a sent Counter at ${width}`);
 
@@ -368,9 +377,9 @@ async function story(
   await expectPageChecks(page, `a Counter in the inbox at ${width}`);
   await waitingOn(page).click();
   await expect(heading(page)).toHaveText("Ash K countered your Trade Proposal");
-  await expect(page.getByRole("main")).toContainText(
-    "This is a Counter to your Trade Proposal."
-  );
+  await expect(
+    page.getByRole("list", { name: "Messages and changes" })
+  ).toContainText("Ash K: Sent a Counter");
   await expect(region(page, "Cash")).toContainText("Ash K pays you $5.00");
 
   // 8: she accepts it whole, and a Trade that is no longer waiting offers no Counter.
@@ -383,13 +392,13 @@ async function story(
     page.getByRole("main").getByRole("button", { name: "Counter", exact: true })
   ).toHaveCount(0);
 
-  // 9: the link goes back to her original, which reads as countered.
-  await page
-    .getByRole("main")
-    .getByRole("link", { name: "your Trade Proposal" })
-    .click();
+  // Historical round links resolve to the one item; earlier terms remain a diff, not a second offer.
+  await page.goto(`${ORIGIN}/trades/${originalOffer.offer_id}`);
   await expect(page).toHaveURL(originalAddress);
-  await expect(heading(page)).toHaveText("Ash K countered this");
+  await expect(heading(page)).toHaveText("Ready to swap with Ash K");
+  await expect(
+    page.getByRole("list", { name: "Messages and changes" })
+  ).toContainText("Ash K: Sent a Counter");
 }
 
 test.describe("desktop", () => {

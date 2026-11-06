@@ -8,7 +8,7 @@ import psycopg  # noqa: E402
 from app.db import connect  # noqa: E402
 from app.core.art.public import delete_pointer  # noqa: E402
 from app.core.art.store import lock_pointer, sync_pointer  # noqa: E402
-from app.art_storage import storage  # noqa: E402
+from app.core.art.art_storage import storage  # noqa: E402
 from app.games.pokemon.art.hosts import TCGPLAYER_LARGE  # noqa: E402
 from app.games.pokemon.art.route import tcgplayer_source_enabled  # noqa: E402
 

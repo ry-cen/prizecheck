@@ -232,13 +232,14 @@ async function nearYouStory(
   await radio(page, "25 mi").click();
   await expect(nearRows(page)).toHaveCount(1);
 
-  // 5. Misty's open row: Message, her Trade List by trader id, Propose trade and its ⋯ menu.
+  // 5. Propose trade is available before expansion; the expanded row retains its public Trade List and moderation menu.
   const row = nearRows(page).first();
-  await row.getByRole("button", { name: /Misty W/ }).click();
-  const message = row.getByRole("link", { name: "Message Misty W" });
-  await expect(message).toHaveAttribute(
-    "href",
-    `/trades/with/${w.mistyTrader}`
+  await expect(
+    row.getByRole("button", { name: "Propose trade to Misty W" })
+  ).toBeVisible();
+  await row.getByRole("button", { name: /^Misty W/ }).click();
+  await expect(row.getByRole("link", { name: "Message Misty W" })).toHaveCount(
+    0
   );
   await expect(
     row.getByRole("link", { name: "See all of Misty W's Trade List" })
@@ -253,7 +254,9 @@ async function nearYouStory(
   await expectNoLeaks(page, w);
   if (phone) {
     await expectTouchTarget(propose);
-    await expectTouchTarget(message);
+    await expectTouchTarget(
+      row.getByRole("link", { name: "See all of Misty W's Trade List" })
+    );
     await expectTouchTarget(more);
   }
   await propose.click();
@@ -275,7 +278,7 @@ async function blockFromRowStory(
   const near = region(page, "Near you");
   await expect(nearRows(page)).toHaveCount(1);
   const row = nearRows(page).first();
-  await row.getByRole("button", { name: /Misty W/ }).click();
+  await row.getByRole("button", { name: /^Misty W/ }).click();
   const more = row.getByRole("button", { name: "More for Misty W" });
   const ask = async () => {
     await more.click();
@@ -410,7 +413,7 @@ async function cardSearchStory(
   await expect(nearHolders).not.toContainText("Brock T");
   await expect(friends).toContainText("Gary O");
 
-  // Each holder offers Propose trade and Message.
+  // Each holder opens an item proposal; there is no empty pair-chat mutation.
   for (const [holder, name] of [
     [friends.locator("> li").first(), "Gary O"],
     [nearHolders.locator("> li").first(), "Misty W"],
@@ -420,10 +423,10 @@ async function cardSearchStory(
     });
     const message = holder.getByRole("link", { name: `Message ${name}` });
     await expect(propose).toBeVisible();
-    await expect(message).toBeVisible();
+    await expect(message).toHaveCount(0);
     if (phone) {
       await expectTouchTarget(propose);
-      await expectTouchTarget(message);
+      await expect(propose).toHaveClass(/bg-accent/);
     }
   }
 

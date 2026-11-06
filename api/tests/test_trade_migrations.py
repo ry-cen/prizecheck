@@ -18,6 +18,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
 from test_catalog_references import migrate
+from test_threads import thread as make_thread
 
 ROOT = Path(__file__).resolve().parents[2]
 TRADING = ('141_trades.sql', '142_trade_promises.sql', '143_trade_wants.sql', '144_trade_inbox.sql')
@@ -212,9 +213,8 @@ def test_migration_144_lets_an_update_name_a_trade_and_an_older_build_never_sees
     run_again(scratch, '144_trade_inbox.sql')
     run_again(scratch, '144_trade_inbox.sql')
     with psycopg.connect(scratch, row_factory=dict_row) as conn:
-        trade = uuid4()
-        conn.execute("""INSERT INTO trade(id, state, proposer_id, recipient_id, proposer_name, recipient_name)
-          VALUES (%s, 'proposed', %s, %s, 'Misty W.', 'Ash K.')""", (trade, lender, borrower))
+        # migrate(scratch) above applied 162 too: this is current state, not a legacy seed.
+        _, trade = make_thread(lender, borrower, conn=conn)
         conn.execute("""INSERT INTO trade_line(trade_id, side, edition_id, position, quantity)
           VALUES (%s, 'recipient', %s, 0, 1)""", (trade, card))
         for kind in ('cancelled', 'swapped'):

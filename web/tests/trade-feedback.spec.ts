@@ -54,17 +54,17 @@ for (const viewport of [DESKTOP, PHONE]) {
       lines: [{ edition_id: ids["SVI 166"], quantity: "1" }],
       idempotency_key: randomUUID(),
     });
-    await loanStep(friend.page, loan.id, `/api/loans/${loan.id}/accept`, {
+    await loanStep(friend.page, loan.id, "accept", {
       lines: [{ edition_id: ids["SVI 166"], promised: "1" }],
     });
-    await loanStep(friend.page, loan.id, `/api/loans/${loan.id}/handover`);
+    await loanStep(friend.page, loan.id, "handover");
 
     // A real small/large art pair makes mounting unopened full artwork observable.
     const art = "/api/art/trade-popup-fixture/small?v=1";
-    await page.route(`**/api/social/trades/${swap}`, async (route) => {
+    await page.route(`**/api/trades/${swap}`, async (route) => {
       const response = await route.fetch();
       const body = await response.json();
-      body.you_get[0].image_url = art;
+      body.live_offer.you_get[0].image_url = art;
       await route.fulfill({ response, json: body });
     });
     await page.route(
@@ -110,27 +110,32 @@ for (const viewport of [DESKTOP, PHONE]) {
     await expect(card).toBeFocused();
     await expect(get.locator("dialog img")).toHaveCount(0);
     await expectPageChecks(page, "compact one-for-one terms");
-    await main
-      .getByRole("button", { name: "Confirm swap", exact: true })
-      .click();
-    const dialog = page.getByRole("dialog", {
-      name: "Confirm swap with Ash K?",
+    // The accepted inline disclosure replaces the former modal and its Back step.
+    // Inspecting its destination and irreversible terms must send no command.
+    let confirmations = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith(`/api/trades/${swap}/confirm-swap`)
+      )
+        confirmations++;
     });
-    await expect(dialog).toContainText("The swap can't be undone.");
+    const disclosure = page.getByRole("region", {
+      name: "Confirm swap with Ash K",
+    });
+    await expect(disclosure).toContainText("The swap can't be undone.");
     await expect(
-      dialog.getByRole("combobox", { name: "Put the cards you get in" })
+      disclosure.getByRole("combobox", { name: "Put the cards you get in" })
     ).toHaveValue("");
-    await dialog.getByRole("button", { name: "Back", exact: true }).click();
     await expect(
       main.getByRole("button", { name: "Confirm swap", exact: true })
-    ).toBeFocused();
-    await main
-      .getByRole("button", { name: "Confirm swap", exact: true })
-      .click();
-    await dialog
+    ).toHaveCount(1);
+    expect(confirmations).toBe(0);
+    await disclosure
       .getByRole("button", { name: "Confirm swap", exact: true })
       .click();
     await expect(notice(page)).toContainText("Swapped.");
+    expect(confirmations).toBe(1);
     await expect(notice(page)).toHaveAttribute("aria-live", "polite");
     await expect(
       notice(page).getByRole("button", { name: "Dismiss", exact: true })
@@ -139,22 +144,17 @@ for (const viewport of [DESKTOP, PHONE]) {
       .getByRole("navigation", { name: "Main views" })
       .getByRole("button", { name: /^Loans/ })
       .click();
-    await page.locator(`a[href="/loans/${loan.id}"]`).click();
-    await expect(page).toHaveURL(`${ORIGIN}/loans/${loan.id}`);
+    await page.locator(`a[href="/loans/${loan.thread_id}"]`).click();
+    await expect(page).toHaveURL(`${ORIGIN}/loans/${loan.thread_id}`);
     await expect(notice(page)).not.toContainText("Swapped.");
     await page
       .getByRole("button", { name: "Yes, I have them", exact: true })
       .click();
     await expect(
-      page.getByRole("button", { name: "Give cards back", exact: true })
+      page.getByRole("button", { name: "All back", exact: true })
     ).toBeVisible();
     await expect(notice(page)).not.toContainText("Swapped.");
-    await page
-      .getByRole("button", { name: "Give cards back", exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: "Give these back", exact: true })
-      .click();
+    await page.getByRole("button", { name: "All back", exact: true }).click();
     await expect(main).toContainText("Waiting for Ash K to confirm");
     await expect(notice(page)).not.toContainText("Swapped.");
 
@@ -170,10 +170,10 @@ for (const viewport of [DESKTOP, PHONE]) {
       [[ids["PAL 185"], 1]]
     );
     const longName = "Professor's Research (Professor Sada and Professor Turo)";
-    await page.route(`**/api/social/trades/${larger}`, async (route) => {
+    await page.route(`**/api/trades/${larger}`, async (route) => {
       const response = await route.fetch();
       const body = await response.json();
-      body.you_get.find(
+      body.live_offer.you_get.find(
         (card: { edition_id: string }) => card.edition_id === ids["SVI 166"]
       ).name = longName;
       await route.fulfill({ response, json: body });

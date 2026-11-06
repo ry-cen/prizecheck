@@ -1,3 +1,5 @@
+import { sendItemMessage, tradeThreadFor } from "./support/item-chat";
+import { tradeView } from "./support/trades";
 // Ticket #302 (Trading Stage 2, "Block for strangers"): Misty (zip 00010) and Ash (00011) are strangers in reach. Ash
 // blocks Misty from their conversation's ⋯ menu; the question counts the Trade Proposals it would cancel, both sides
 // go read-only (Misty's open page turns on the pulse, with no reload and no mention of a Block), Settings › Privacy
@@ -101,7 +103,9 @@ const MORE = "More for Misty W";
 
 /** Ash opens the conversation with Misty and chooses Block from its ⋯ menu; returns the confirming button. */
 async function askToBlock(page: Page, s: Strangers) {
-  await page.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);
+  await page.goto(
+    `${ORIGIN}/trades/${await tradeThreadFor(page, s.mistyTrader)}`
+  );
   await page.getByRole("button", { name: MORE }).click();
   await page.getByRole("menuitem", { name: "Block" }).click();
   return page.getByRole("button", { name: "Block", exact: true });
@@ -117,17 +121,20 @@ async function blockStory(
   const { misty } = s;
 
   // 1. Ash says hello by trader id; Misty opens the conversation and can write back.
-  await api(page, "POST", `/api/social/traders/${s.mistyTrader}/messages`, {
-    body: "Hi Misty",
-    idempotency_key: randomUUID(),
-  });
+  await sendItemMessage(page, s.mistyTrader, "Hi Misty");
   if (!phone) {
-    await misty.goto(`${ORIGIN}/trades/with/${s.ashTrader}`);
-    await expect(misty.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await misty.goto(
+      `${ORIGIN}/trades/${await tradeThreadFor(misty, s.ashTrader)}`
+    );
+    await expect(
+      misty.getByRole("textbox", { name: /^Message / })
+    ).toBeVisible();
   }
 
   // 2. Ash opens the conversation, chooses Block from the ⋯ menu and is asked first.
-  await page.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);
+  await page.goto(
+    `${ORIGIN}/trades/${await tradeThreadFor(page, s.mistyTrader)}`
+  );
   await expectPageChecks(page, "a stranger's conversation with a ⋯ menu");
   const more = page.getByRole("button", { name: MORE });
   if (phone) await expectTouchTarget(more);
@@ -148,7 +155,7 @@ async function blockStory(
   await expect(
     page.getByRole("link", { name: "You blocked Misty W." })
   ).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: /^Message / })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Propose trade to Misty W" })
   ).toHaveCount(0);
@@ -164,7 +171,9 @@ async function blockStory(
   await expect(
     misty.getByText("This collector is no longer available")
   ).toBeVisible();
-  await expect(misty.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+  await expect(misty.getByRole("textbox", { name: /^Message / })).toHaveCount(
+    0
+  );
   const mistyText = await misty.locator("body").innerText();
   expect(mistyText).not.toMatch(/block/i);
 
@@ -181,11 +190,13 @@ async function blockStory(
   await expect(blocked).toContainText("You haven't blocked anyone.");
 
   // 6. The conversation reopens for both.
-  await page.goto(`${ORIGIN}/trades/with/${s.mistyTrader}`);
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await page.goto(
+    `${ORIGIN}/trades/${await tradeThreadFor(page, s.mistyTrader)}`
+  );
+  await expect(page.getByRole("textbox", { name: /^Message / })).toBeVisible();
   await expectNoLeaks(page, s);
   await focusPulse(misty);
-  await expect(misty.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await expect(misty.getByRole("textbox", { name: /^Message / })).toBeVisible();
 }
 
 test.describe("desktop, Block for strangers", () => {
@@ -210,7 +221,7 @@ test.describe("desktop, Block for strangers", () => {
       you_get: [{ edition_id: s.ids["PAL 185"], quantity: "1" }],
       idempotency_key: randomUUID(),
     });
-    const read = () => api(page, "GET", `/api/social/trades/${sent.id}`);
+    const read = () => tradeView(page, sent.id);
 
     const confirm = await askToBlock(page, s);
     await expect(

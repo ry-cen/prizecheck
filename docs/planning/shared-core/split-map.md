@@ -1185,3 +1185,59 @@ below says where each group ended up; the module map in section 1 stays the plan
 - A repository-wide caller scan, including dynamic imports and monkeypatch paths, found no other
   consumer requiring the old path. The root module and its exact ownership row are removed without
   a compatibility shim. Test assertions, architecture rules and API snapshots are unchanged.
+
+**2026-11-05 — Price reads switch relocation (#528)**
+
+- The stdlib-only switch moved byte-for-byte from `app.price_reads` to
+  `app.core.prices.price_reads`, the destination planned in section 1. `PRICE_READS` parsing,
+  defaults and fail-safe behavior are unchanged.
+- Pokémon Public Catalog, Pokémon Prices and `test_prices.py` import the core helper directly;
+  the deployment comment names the new path. Test assertions and deployment configuration are unchanged.
+- A repository-wide caller scan, including dynamic imports, monkeypatch and patch strings, scripts,
+  deploy, auth, workflows, ownership lists and browser specs, found no other consumer requiring the old path.
+  The root module and its exact ownership row are removed without a compatibility shim.
+
+**2026-11-05 — Moves router relocation (#528)**
+
+- The whole Moves router moved from `app.moves` to `app.core.inventory.moves`, with only
+  its dependency imports changed. `app.inventory_core` stays in place; the moved module imports
+  the same helpers, and routes, responses, SQL, transactions, exceptions and business rules are unchanged.
+- Pick List, Pokémon composition, catalog reconciliation and Collection Import import the same
+  names and aliases from the new path. Reconciliation keeps its function-level import; the Moves
+  test still patches the moved module's `lock_owner` name without changing assertions.
+- A repository-wide caller scan, including dynamic imports, patch paths, ownership and dependency
+  scans, social caller scans, scripts, deploy, auth, workflows, Docker files, browser specs and web,
+  found no other consumer requiring the old path. The root module and its exact ownership row
+  are removed without a compatibility shim; core ownership is inferred from the destination.
+
+**2026-11-05 — Art storage relocation (#528)**
+
+- The stdlib-only module moved byte-for-byte from `app.art_storage` to `app.core.art.art_storage`,
+  the destination planned in section 1. Key validation, atomic writes, deletion and `ART_STORE_DIR`
+  resolution are unchanged.
+- The public art route, art store and `scripts/art_store.py`, plus the three existing test modules,
+  import the core module directly. Test assertions and class monkeypatches are unchanged.
+- A repository-wide caller scan found no other consumer requiring the old path. The root module and
+  its exact ownership row are removed without a compatibility shim; architecture rules are unchanged.
+
+**2026-11-05 — Price budget relocation (#528)**
+
+- The trusted budget module moved byte-identically from `app.price_budget` to
+  `app.core.prices.price_budget`. Budget values, signatures, deadlines and request handling are unchanged.
+- Production imports, test imports and the monotonic-clock patch path name the core module directly.
+  The gateway comment and price documentation name the destination; the root ownership row is removed.
+- A repository-wide caller scan, including dynamic imports, patch paths, scripts, deploy, auth, workflows,
+  browser specs and architecture tooling, found no other consumer requiring the old path. The root module
+  is removed without a compatibility shim; historical tables stay as written.
+
+**2026-11-05 — Holdings router relocation (#528)**
+
+- The whole Holdings router moved from `app.holdings` to `app.core.inventory.holdings`,
+  the destination planned in section 1A, with only its dependency imports changed.
+  Routes, responses, SQL, transactions, cursors, exceptions and business rules are unchanged.
+- #525 removed the Collection cursor dependency. The module's catalog reads moved unchanged,
+  including `leaf_holdings`; `app.inventory_core` stays in place. The twelve production consumers
+  now import the core module directly with the same names and aliases.
+- The root module and its exact ownership row are removed without a compatibility shim.
+  Architecture test paths are synthetic fixtures and remain unchanged; the catalog contract's
+  short `holdings.py` name stays accurate. No real test import or patch needs updating.

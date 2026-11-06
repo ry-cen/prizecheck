@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useNoteLoansChanged, usePollPulse } from "../inbox/Inbox";
+import { useNoteLoansChanged } from "../inbox/Inbox";
 import { CANCEL } from "../social/blockMessages";
 import { endingText, traderEnding } from "../social/friendshipEnding";
 import {
-  getLoans,
-  getTrades,
+  getFriends,
+  getLoanViews,
+  getTradeViews,
   reportCollector,
   type ReportCollector,
 } from "../social_generated";
@@ -30,6 +31,8 @@ export type ReportTarget = {
   traderId: string;
   name: string;
   handle: string | null;
+  /** An already-known Friend address from Loan terms, only for the ending summary. */
+  collectorId?: string | null;
   tradeId?: string;
 };
 
@@ -65,7 +68,6 @@ export function useTraderReport(
 ): { item: MenuItem | null; panel: ReactNode } {
   const [state, setState] = useState<State>({ kind: "idle" });
   const noteLoansChanged = useNoteLoansChanged();
-  const pollPulse = usePollPulse();
   const groupName = useId();
   const helpId = useId();
   const first = useRef<HTMLInputElement>(null);
@@ -94,18 +96,26 @@ export function useTraderReport(
     reading.current = controller;
     setEnding("");
     Promise.all([
-      getTrades(controller.signal),
-      who.handle ? getLoans(controller.signal) : Promise.resolve(null),
+      getTradeViews(controller.signal),
+      who.handle || who.collectorId
+        ? getLoanViews(controller.signal)
+        : Promise.resolve(null),
+      who.handle || who.collectorId ? getFriends() : Promise.resolve(null),
     ])
-      .then(([trades, loans]) => {
+      .then(([trades, loans, friends]) => {
         if (controller.signal.aborted) return;
         setEnding(
           endingText(
             traderEnding(
-              loans ? loans.loans : null,
-              trades.trades,
+              loans,
+              trades,
               who.traderId,
-              who.handle
+              who.handle,
+              friends?.friends.find(
+                (friend) =>
+                  friend.collector_id === who.collectorId ||
+                  friend.handle.toLowerCase() === who.handle?.toLowerCase()
+              )?.collector_id ?? null
             )
           )
         );
@@ -151,7 +161,6 @@ export function useTraderReport(
         options.statusElsewhere ? { kind: "idle" } : { kind: "done", text }
       );
       noteLoansChanged();
-      pollPulse();
       options.onReported?.(text);
     } catch (cause) {
       failed.current = true;

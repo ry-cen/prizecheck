@@ -481,7 +481,7 @@ test("a Near you row's ⋯ menu stays wholly on screen on a phone", async ({
         .getByRole("list", { name: "Matches near you" })
         .locator("> li")
         .first();
-      await row.getByRole("button", { name: /Misty W/ }).click();
+      await row.getByRole("button", { name: /^Misty W/ }).click();
       const more = row.getByRole("button", { name });
       await more.scrollIntoViewIfNeeded();
       await more.click();

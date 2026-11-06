@@ -57,6 +57,7 @@ from ..identity import verified_user
 from ..core.publications.publish import TOKEN
 from . import name_rules
 from .conversations import pair_changed
+from .threads import ThreadTouch, touch_threads
 from .discovery import reach_one, require_not_suspended, trader_user
 from .loans import end_loans_between
 from .owners import ensure_owner, lock_owners
@@ -183,14 +184,22 @@ def friend_ids(conn, viewer: str) -> set[str]:
     return {row['friend_id'] for row in conn.execute('SELECT friend_id FROM friends_of(%s)', ([viewer],))}
 
 
-def friendship_ended(conn, user_id: str, other_id: str) -> None:
+def friendship_ended(conn, user_id: str, other_id: str, kind: str) -> set[UUID]:
     """Runs when a friendship ends (Remove Friend) and on every Block, with both owners locked, before the friendship
     row is deleted, in the same transaction: the pair's Loans nobody has confirmed a handover for are cancelled
     (``loans.end_loans_between``, #260), then their Trade Proposals and Trades nobody has confirmed the swap for
     (``trades.end_trades_between``, Trading #274). Loans first, then Trades: the lock order is owners, then ``loan``
     rows, then ``trade`` rows."""
-    end_loans_between(conn, user_id, other_id)
-    end_trades_between(conn, user_id, other_id)
+    loans = end_loans_between(conn, user_id, other_id, kind)
+    trades = end_trades_between(conn, user_id, other_id, kind)
+    return set(loans) | set(trades)
+
+
+def touch_pair(conn, user_id: str, other_id: str, closed: set[UUID]) -> None:
+    """Finish one relationship change with a single sorted thread write pass."""
+    rows = conn.execute('SELECT id FROM thread WHERE user_low=%s AND user_high=%s',
+                        tuple(sorted((user_id, other_id)))).fetchall()
+    touch_threads(conn, [*closed, *[ThreadTouch(id=row['id'], activity=False) for row in rows]])
 
 
 @router.get('/friends', response_model=FriendsView)
@@ -534,8 +543,9 @@ def remove_friend(collector_id: str, command: FriendCommand, user_id: str = Depe
     def apply(conn, row):
         if relation(user_id, row) != 'friends':
             return relation(user_id, row)
-        friendship_ended(conn, user_id, collector_id)
+        closed = friendship_ended(conn, user_id, collector_id, 'closed_unfriended')
         conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', _pair(user_id, collector_id))
+        touch_pair(conn, user_id, collector_id, closed)
         return 'none'
     return _command(user_id, collector_id, command.idempotency_key, 'remove_friend', apply, blocked_you_ok=True)
 
@@ -598,13 +608,13 @@ def place_block(conn, user_id: str, other: str, via: Literal['collector', 'trade
     locked: Stage 1's effects first, then the row. A repeat leaves the first Block standing (its id, kind and
     ``handle_shown`` unchanged) and moves nothing."""
     shown = _handle_known(conn, user_id, other, via)
-    friendship_ended(conn, user_id, other)
+    closed = friendship_ended(conn, user_id, other, 'closed_blocked')
     conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', _pair(user_id, other))
     placed = conn.execute(
         'INSERT INTO block(blocker_id,blocked_id,via,handle_shown) VALUES (%s,%s,%s,%s) '
         'ON CONFLICT (blocker_id, blocked_id) DO NOTHING RETURNING id', (user_id, other, via, shown)).fetchone()
-    if placed:
-        pair_changed(conn, user_id, other)
+    if placed or closed:
+        touch_pair(conn, user_id, other, closed)
 
 
 def _lift_block(conn, user_id: str, other: str, *, via: str | None = None, block_id: UUID | None = None,

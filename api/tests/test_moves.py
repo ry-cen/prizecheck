@@ -256,7 +256,7 @@ def test_concurrent_no_undo_duplicates_apply_once():
 
 @pytest.mark.parametrize('extra', [{}, {'destination_id': None}, {'destination_id': str(uuid4()), 'put_away': True}])
 def test_no_undo_route_cannot_remove_or_put_away_before_locking(monkeypatch, extra):
-    from app import moves
+    from app.core.inventory import moves
     owner, _, _, _, _, _ = fixture()
     def must_not_lock(*args):
         pytest.fail('Invalid no-Undo commands must be refused before any lock or replay')

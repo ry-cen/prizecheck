@@ -23,11 +23,11 @@ import {
   hold,
   lendHandedOver,
   loanStep,
+  loanView,
   nameCollector,
   seedCatalog,
   unsorted,
 } from "./support/loans";
-import { openConversation, timelineTrades } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import {
@@ -72,8 +72,8 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
       deck_id: null,
       idempotency_key: randomUUID(),
     })
-  ).id as string;
-  await loanStep(lender, pending, `/api/loans/${pending}/accept`, {
+  ).thread_id as string;
+  await loanStep(lender, pending, "accept", {
     lines: [{ edition_id: ids["PAL 185"], promised: "1" }],
   });
 
@@ -81,7 +81,7 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   await page.goto(`${ORIGIN}/loans`);
   await expect(
     page.getByRole("region", { name: "Pending" }).getByRole("link")
-  ).toContainText("Misty W is lending you 1 card");
+  ).toContainText("You give 0 · You get 1");
   await page.getByRole("button", { name: "Friends", exact: true }).click();
   const yours = friends(page).getByRole("region", { name: "Your Friends" });
   await yours.getByRole("button", { name: "More for Misty W" }).click();
@@ -103,9 +103,9 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   await expect(page.getByRole("region", { name: "Pending" })).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Out now" }).getByRole("link")
-  ).toHaveText(/You have 1 card of Misty W's/);
-  await page.locator("summary", { hasText: "History" }).click();
-  await page.getByRole("link", { name: /You cancelled this Loan/ }).click();
+  ).toContainText("You give 0 · You get 1");
+  await page.locator("summary", { hasText: "Done" }).click();
+  await page.locator(`a[data-thread="${pending}"]`).click();
   await expect(page).toHaveURL(`${ORIGIN}/loans/${pending}`);
   // Misty isn't his Friend now, so the request offers no Edit and resend, its menu's only item.
   await expect(title(page)).toHaveText("You cancelled this Loan");
@@ -114,9 +114,7 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   ).toHaveCount(0);
   await page.goto(`${ORIGIN}/loans/${out}`);
   await expect(title(page)).toHaveText("You have 1 card of Misty W's");
-  await expect(
-    page.getByRole("button", { name: "Give cards back" })
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "All back" })).toBeVisible();
 
   // Misty: her bell says only that Ash cancelled it, five minutes ago by a clock fixed after it, and opens it; the Loan
   // handed over is still out.
@@ -130,7 +128,7 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   await lender.goto(`${ORIGIN}/loans`);
   await expect(
     lender.getByRole("region", { name: "Out now" }).getByRole("link")
-  ).toHaveText(/Ash K has 1 card of yours/);
+  ).toContainText("You give 1 · You get 0");
   await lender.setViewportSize(PHONE);
   await lender.getByRole("button", { name: /^Inbox/ }).click();
   const earlier = inbox(lender).getByRole("region", { name: "Earlier" });
@@ -169,7 +167,7 @@ test("the Block question says how many open Loans it cancels, and only that it i
       idempotency_key: randomUUID(),
     })
   ).id as string;
-  await loanStep(lender, pending, `/api/loans/${pending}/accept`, {
+  await loanStep(lender, pending, "accept", {
     lines: [{ edition_id: ids["PAL 185"], promised: "1" }],
   });
 
@@ -189,9 +187,18 @@ test("the Block question says how many open Loans it cancels, and only that it i
   await yours.getByRole("button", { name: "Cancel" }).click();
 
   // With the Loans unreadable, the question says nothing about them.
-  await page.route(/\/api\/social\/loans/, (route) => route.abort());
+  let unreadableReads = 0;
+  await page.route(
+    /\/api\/loans\?group=(?:needs_you|open|out_now|pending|done)(?:&.*)?$/,
+    (route) => {
+      unreadableReads++;
+      return route.abort();
+    }
+  );
   await page.reload();
+  const beforeQuestion = unreadableReads;
   const again = await openBlock();
+  await expect.poll(() => unreadableReads).toBeGreaterThan(beforeQuestion);
   await expect(again.getByText(/^Block Misty W\?/)).toHaveText(
     "Block Misty W? They won't be told."
   );
@@ -226,7 +233,7 @@ async function tradeStory(
   await befriend(page, lender);
   const ashId = await accountId(page);
   // Misty's proposal waits for Ash; he accepted her second; he accepted her gift, and only she confirmed it.
-  await propose(lender, ashId, [[iono, 1]], [[arven, 1]]);
+  const proposal = await propose(lender, ashId, [[iono, 1]], [[arven, 1]]);
   const accepted = await propose(lender, ashId, [[iono, 1]], [[arven, 1]]);
   await tradeStep(page, accepted, "accept");
   const half = await propose(lender, ashId, [[iono, 1]], []);
@@ -241,19 +248,28 @@ async function tradeStory(
       idempotency_key: randomUUID(),
     })
   ).id as string;
-  await loanStep(lender, loan, `/api/loans/${loan}/accept`, {
+  await loanStep(lender, loan, "accept", {
     lines: [{ edition_id: iono, promised: "1" }],
   });
 
-  // Ash's conversation with Misty: her three Trades are cards in it, oldest first, and two of them need him.
-  await openConversation(page, "Misty W");
-  await expect(timelineTrades(page)).toHaveText([
-    /sent you a Trade Proposal/,
-    /Ready to swap with Misty W/,
-    /Misty W confirmed the swap/,
-  ]);
-  await expect(tradesTab(page)).toHaveAccessibleName("Trades, 2 need you");
-
+  // Each agreement has one item; all three await Ash's own step, even before Misty confirms.
+  await page.goto(`${ORIGIN}/trades`);
+  // Kept Loans may own hidden item links; this story counts only visible Trades.
+  await expect(page.getByRole("main")).toHaveCount(1);
+  const rows = page.getByRole("main").locator("a[data-thread]");
+  await expect(rows).toHaveCount(3);
+  await expect(
+    page.getByRole("main").locator(`a[data-thread="${proposal}"]`)
+  ).toContainText("Accept or counter");
+  for (const id of [accepted, half])
+    await expect(
+      page.getByRole("main").locator(`a[data-thread="${id}"]`)
+    ).toContainText("Confirm swap");
+  await expect(tradesTab(page)).toHaveAccessibleName(
+    "Trades, 3 need you: 3 waiting on you, 0 with new messages"
+  );
+  // Keep the surviving item open while the Friend command runs, proving it refreshes in place.
+  await page.getByRole("main").locator(`a[data-thread="${half}"]`).click();
   // He removes Misty. The question counts what it cancels, in the prototype's Proposed wording, and what stays.
   await page.getByRole("button", { name: "Friends", exact: true }).click();
   const yours = friends(page).getByRole("region", { name: "Your Friends" });
@@ -272,28 +288,28 @@ async function tradeStory(
   );
   await friends(page).getByRole("button", { name: "Close Friends" }).click();
 
-  // The conversation underneath was read again: only the half-confirmed Trade is open, the two he cancelled are
-  // cancelled, and ex-Friends keep the conversation and its composer.
-  await expect(timelineTrades(page)).toHaveText([
-    /You cancelled this Trade/,
-    /You cancelled this Trade/,
-    /Misty W confirmed the swap/,
-  ]);
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(tradesTab(page)).toHaveAccessibleName("Trades, 1 needs you");
-
-  // Ash finishes the half-confirmed Trade alone: Misty's Iono goes to his Unsorted.
-  await timelineTrades(page)
-    .filter({ hasText: /Misty W confirmed the swap/ })
-    .click();
+  // Both cancelled items remain readable, and the half-confirmed item and chat survive.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Misty W confirmed the swap"
+  );
+  await expect(page.getByRole("textbox", { name: /^Message / })).toBeVisible();
+  await expect(tradesTab(page)).toHaveAccessibleName(
+    "Trades, 1 need you: 1 waiting on you, 0 with new messages"
+  );
+  for (const id of [proposal, accepted]) {
+    await page.goto(`${ORIGIN}/trades/${id}`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "You cancelled this Trade"
+    );
+  }
+  await page.goto(`${ORIGIN}/trades/${half}`);
   await expect(page).toHaveURL(`${ORIGIN}/trades/${half}`);
   const main = page.getByRole("main");
   await expect(main.getByRole("heading", { level: 1 })).toHaveText(
     "Misty W confirmed the swap"
   );
-  await main.getByRole("button", { name: "Confirm swap" }).click();
   await page
-    .getByRole("dialog", { name: "Confirm swap with Misty W?" })
+    .getByRole("region", { name: "Confirm swap with Misty W" })
     .getByRole("button", { name: "Confirm swap" })
     .click();
   await expect(main.getByRole("heading", { level: 1 })).toHaveText(

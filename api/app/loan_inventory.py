@@ -70,7 +70,7 @@ from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import psycopg
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .copy_allocation import allocate
@@ -86,9 +86,10 @@ from .inventory_core import MAX_QUANTITY, first_non_leaf, put_back, quantity, re
 from .social import counts, loans
 from .social.friend_copies import friend_copies
 from .core.catalog.card_facts import card_facts
-from .social.discovery import require_not_suspended
+from .social.discovery import reach_one, require_not_suspended
 from .social.friends import friend_ids
-from .social.loans import LoanStep, LoanView, close, record_update, return_by_columns, run_step, store, today, write_loan
+from .social.threads import touch_threads
+from .social.loans import event_snapshot, log_step, new_loan_thread, opened_loan, LoanStep, LoanView, close, record_update, return_by_columns, run_step, store, today, write_loan
 from .social.owners import NOW, advance_revision, begin_owner_command, count_owner_command, ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
@@ -135,16 +136,22 @@ class LoanLineRequest(BaseModel):
 
 
 class SendBorrowRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     """A Borrow Request to a Friend (``lender_id``, a ``collector_id`` the Friends list or a Friend read gave)."""
     lender_id: str = Field(min_length=1, max_length=200)
     lines: list[LoanLineRequest] = Field(min_length=1, max_length=MAX_LOAN_LINES)
     # One of the borrower's own Decks, or None for Unsorted.
     deck_id: UUID | None = None
     return_by: date | None = None
-    # A Borrow Request of the caller's to the same Friend, still unanswered, that this one replaces.
-    replaces: UUID | None = None
     account_id: str | None = None
+
     idempotency_key: UUID
+
+
+class EditTerms(LoanStep):
+    lines: list[LoanLineRequest] = Field(min_length=1, max_length=MAX_LOAN_LINES)
+    deck_id: UUID | None = None
+    return_by: date | None = None
 
 
 class PromisedLine(BaseModel):
@@ -189,9 +196,14 @@ class ReturnedLine(BaseModel):
     quantity: str
 
 
+class ConfirmReturn(LoanStep):
+    return_id: UUID
+
+
 class StartReturn(LoanStep):
+    all: bool = False
     """A return of some of the copies out from the caller's side (#255)."""
-    lines: list[ReturnedLine] = Field(min_length=1, max_length=MAX_LOAN_LINES)
+    lines: list[ReturnedLine] = Field(default_factory=list, max_length=MAX_LOAN_LINES)
 
 
 class WriteOffLine(BaseModel):
@@ -394,6 +406,22 @@ def replacement_picks(conn, lender_id: str, loan_id: UUID) -> dict[tuple[UUID, U
     return kept
 
 
+def legacy_loan_view(conn, user_id: str, stored: dict) -> dict:
+    """Only pre-thread send receipts need a current public Loan projection.
+
+    Current receipts remain byte replay. Never rewrite the historical receipt:
+    a pending return needs its real return_id, not fields patched onto old JSON.
+    """
+    if 'thread_id' in stored:
+        return stored
+    try:
+        return loans.loan_view(conn, user_id, UUID(stored['id'])).model_dump(mode='json')
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        error(409, 'ALREADY_APPLIED')
+
+
 @router.post('', response_model=LoanView, status_code=201)
 def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verified_user)):
     loans.assert_account(command.account_id, user_id)
@@ -402,19 +430,24 @@ def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verif
     lines = [(line.edition_id, quantity(line.quantity)) for line in command.lines]
     if len({edition for edition, _ in lines}) != len(lines):
         error(422, 'DUPLICATE_EDITION')
-    payload = {'action': 'loan_send', **command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'})}
+    # The retired nullable field is still part of historical send fingerprints.
+    # It is canonical data only: strict request bodies continue to reject replaces.
+    payload = {'action': 'loan_send', 'replaces': None,
+               **command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'})}
     with connect() as conn, conn.transaction():
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
-            return stored
+            return legacy_loan_view(conn, user_id, stored)
         if command.return_by is not None and command.return_by < conn.execute(
                 'SELECT current_date AS today').fetchone()['today']:
             error(422, 'INVALID_RETURN_BY')
-        # The borrower's own Deck is read under their lock; nothing of the lender's is locked, as nothing is reserved.
-        lock_owners(conn, user_id)
+        # Both owners serialize incoming creation with Block and Suspension.
+        lock_owners(conn, user_id, command.lender_id)
         require_not_suspended(conn, user_id)  # 403 ACCOUNT_SUSPENDED for a suspended sender, after their lock
         if command.lender_id not in friend_ids(conn, user_id):
             error(409, 'NOT_FRIENDS')
+        if reach_one(conn, user_id, command.lender_id) is None:
+            error(409, 'COLLECTOR_UNAVAILABLE')
         if command.deck_id is not None and conn.execute(
                 "SELECT 1 FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
                 (user_id, command.deck_id)).fetchone() is None:
@@ -424,25 +457,21 @@ def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verif
         for edition, copies in lines:
             if copies > lendable.get(edition, 0):
                 refuse(409, 'NOT_LENDABLE', edition_id=edition, available=lendable.get(edition, 0))
-        if command.replaces is not None:
-            earlier = conn.execute('SELECT id, state, lender_id FROM loan WHERE id=%s AND borrower_id=%s '
-                                   'FOR NO KEY UPDATE',
-                                   (command.replaces, user_id)).fetchone()
-            if earlier is None or earlier['state'] != 'requested' or earlier['lender_id'] != command.lender_id:
-                error(409, 'LOAN_CHANGED')
-            conn.execute("""UPDATE loan SET state='closed', closed_reason='withdrawn', closed_by=%s, closed_at=now(),
-              revision=revision+1 WHERE id=%s""", (user_id, command.replaces))
         names = {row['user_id']: row['display_name'] for row in conn.execute(
             'SELECT user_id, display_name FROM collector_profile WHERE user_id = ANY(%s)',
             ([user_id, command.lender_id],))}
         loan_id = uuid4()
-        conn.execute("""INSERT INTO loan(id, kind, state, lender_id, borrower_id, lender_name, borrower_name, deck_id,
-            return_by) VALUES (%s, 'borrow_request', 'requested', %s, %s, %s, %s, %s, %s)""",
+        thread_id = new_loan_thread(conn, command.lender_id, user_id)
+        conn.execute("""WITH inserted AS (INSERT INTO loan(id, kind, state, lender_id, borrower_id, lender_name, borrower_name, deck_id,
+            return_by, thread_id) VALUES (%s, 'borrow_request', 'requested', %s, %s, %s, %s, %s, %s, %s) RETURNING id, thread_id)
+          INSERT INTO thread_round_source(kind, round_id, thread_id)
+          SELECT 'loan', id, thread_id FROM inserted""",
                      (loan_id, command.lender_id, user_id, names[command.lender_id], names[user_id], command.deck_id,
-                      command.return_by))
+                      command.return_by, thread_id))
         for position, (edition, copies) in enumerate(lines):
             conn.execute('INSERT INTO loan_line(loan_id, edition_id, position, requested) VALUES (%s, %s, %s, %s)',
                          (loan_id, edition, position, copies))
+        opened_loan(conn, user_id, loan_id, 'requested')
         return store(conn, user_id, command.idempotency_key, digest, loan_id)
 
 
@@ -455,6 +484,7 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
         promised[line.edition_id] = copies_count(line.promised)
 
     def apply(conn, row):
+        loan_id = row['id']
         # 'accept' is also the borrower's answer to a Lend Offer, on its own route (#258).
         if row['state'] != 'requested':
             error(409, 'STEP_NOT_ALLOWED')
@@ -513,14 +543,16 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
     with connect() as conn, conn.transaction():
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
-            return stored
+            return legacy_loan_view(conn, user_id, stored)
         if command.return_by is not None and command.return_by < today(conn):
             error(422, 'INVALID_RETURN_BY')
-        # Only the lender's own rows are read and written; the borrower's are not locked.
-        lock_owners(conn, user_id)
+        # Both owners serialize incoming creation with Block and Suspension.
+        lock_owners(conn, user_id, command.borrower_id)
         require_not_suspended(conn, user_id)  # 403 ACCOUNT_SUSPENDED for a suspended sender, after their lock
         if command.borrower_id not in friend_ids(conn, user_id):
             error(409, 'NOT_FRIENDS')
+        if reach_one(conn, user_id, command.borrower_id) is None:
+            error(409, 'COLLECTOR_UNAVAILABLE')
         editions = sorted(lines, key=str)
         available = can_promise(conn, user_id, editions)
         _, _, covered = pick_shortfalls(conn, user_id, editions)
@@ -538,10 +570,13 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
             'SELECT user_id, display_name FROM collector_profile WHERE user_id = ANY(%s)',
             ([user_id, command.borrower_id],))}
         loan_id = uuid4()
-        conn.execute("""INSERT INTO loan(id, kind, state, lender_id, borrower_id, lender_name, borrower_name, return_by)
-            VALUES (%s, 'lend_offer', 'offered', %s, %s, %s, %s, %s)""",
+        thread_id = new_loan_thread(conn, user_id, command.borrower_id)
+        conn.execute("""WITH inserted AS (INSERT INTO loan(id, kind, state, lender_id, borrower_id, lender_name, borrower_name, return_by, thread_id)
+            VALUES (%s, 'lend_offer', 'offered', %s, %s, %s, %s, %s, %s) RETURNING id, thread_id)
+          INSERT INTO thread_round_source(kind, round_id, thread_id)
+          SELECT 'loan', id, thread_id FROM inserted""",
                      (loan_id, user_id, command.borrower_id, names[user_id], names[command.borrower_id],
-                      command.return_by))
+                      command.return_by, thread_id))
         for position, (edition, copies) in enumerate(lines.items()):
             conn.execute('INSERT INTO loan_line(loan_id, edition_id, position, requested, promised) '
                          'VALUES (%s, %s, %s, %s, %s)', (loan_id, edition, position, copies, copies))
@@ -550,6 +585,7 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
             conn.execute('INSERT INTO loan_pick(loan_id, owner_id, edition_id, source_location_id, quantity) '
                          'VALUES (%s, %s, %s, %s, %s)', (loan_id, user_id, edition, location, copies))
         advance_revision(conn, user_id)
+        opened_loan(conn, user_id, loan_id, 'offered')
         return store(conn, user_id, command.idempotency_key, digest, loan_id)
 
 
@@ -565,6 +601,7 @@ def accept_offer(loan_id: UUID, command: AcceptLendOffer, user_id: str = Depends
         taken[line.edition_id] = copies_count(line.promised)
 
     def apply(conn, row):
+        loan_id = row['id']
         if row['state'] != 'offered':
             error(409, 'STEP_NOT_ALLOWED')
         if row['lender_id'] not in friend_ids(conn, user_id):
@@ -750,9 +787,11 @@ def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
         # All own inventory and allocation below is read under the same owner lock, before any Loan row lock.
         lock_owners(conn, user_id)
         row = conn.execute('SELECT id, state, lender_id, borrower_id, deck_id, lender_handover_at FROM loan '
-                           'WHERE id=%s AND (lender_id=%s OR borrower_id=%s)', (loan_id, user_id, user_id)).fetchone()
+                           'WHERE thread_id=%s AND (lender_id=%s OR borrower_id=%s) ORDER BY created_at DESC LIMIT 1',
+                           (loan_id, user_id, user_id)).fetchone()
         if row is None:
             error(404, 'LOAN_NOT_FOUND')
+        loan_id = row['id']
         if row['borrower_id'] == user_id:
             deck = conn.execute("SELECT id, name FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
                                 (user_id, row['deck_id'])).fetchone() if row['deck_id'] else None
@@ -839,6 +878,7 @@ def confirm_handover(loan_id: UUID, step: LoanStep, user_id: str = Depends(verif
     the borrower's **Yes, I have them** puts the promised copies into the Loan's Deck, or Unsorted, as Borrowed Copies.
     Neither takes an Undo record."""
     def apply(conn, row):
+        loan_id = row['id']
         if row['lender_id'] == user_id:
             if replacement_picks(conn, user_id, loan_id) is not None:
                 error(409, 'PICKS_OUT_OF_DATE')
@@ -869,6 +909,7 @@ def take_back(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_use
     only its own inventory write is reversed: the lender's copies go back to their picks' Locations (Unsorted when one
     is gone), the borrower's Borrowed Copies leave. The Loan is accepted again, with its copies reserved."""
     def apply(conn, row):
+        loan_id = row['id']
         if row['lender_id'] == user_id:
             rows = _locations(conn, user_id)
             lent = conn.execute("""SELECT id, source_location_id, edition_id, quantity FROM loan_pick
@@ -891,13 +932,32 @@ def take_back(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_use
                                      sorted(items.items(), key=lambda item: (str(item[0][0]), str(item[0][1])))],
                      _owner_revision(conn, user_id))
             conn.execute("UPDATE loan_pick SET state='reserved' WHERE loan_id=%s AND state='lent'", (loan_id,))
-            return {'lender_handover_at': None}
+            changes = {'lender_handover_at': None}
+            other_column = 'borrower_handover_at'
         else:
             conn.execute('DELETE FROM borrowed_holding WHERE loan_id=%s AND borrower_id=%s', (loan_id, user_id))
             advance_revision(conn, user_id)
-            return {'borrower_handover_at': None}
+            changes = {'borrower_handover_at': None}
+            other_column = 'lender_handover_at'
 
-    return run_step(user_id, loan_id, step, 'take_back', apply, lambda role, row: [user_id])
+        # Both owners precede the Loan lock. Suspension and lift also lock their account's owner, so this read
+        # stays stable through commit; no discovery lock or late owner acquisition is needed.
+        participants = [owner for owner in (row['lender_id'], row['borrower_id']) if owner is not None]
+        suspended = {p['user_id'] for p in conn.execute(
+            'SELECT user_id FROM collector_profile WHERE user_id=ANY(%s) AND suspended_at IS NOT NULL', (participants,))}
+        if not suspended or row[other_column] is not None:
+            return changes
+        other = row['borrower_id'] if user_id == row['lender_id'] else row['lender_id']
+        # When both are suspended, choose the other participant: one valid serial order, not the only one.
+        actor = other if other in suspended else user_id
+        from .social.loans import cancel_unconfirmed
+        closing, lender = cancel_unconfirmed(conn, row, actor)
+        if lender is not None:
+            advance_revision(conn, lender)
+        return {**changes, **closing, '_closure': (actor, 'closed_suspended')}
+
+    return run_step(user_id, loan_id, step, 'take_back', apply,
+                    lambda role, row: [row['borrower_id'], row['lender_id']])
 
 
 @router.post('/{loan_id}/picks/use-suggested', response_model=LoanView)
@@ -905,6 +965,7 @@ def use_suggested_picks(loan_id: UUID, step: LoanStep, user_id: str = Depends(ve
     """The lender replaces every out-of-date pick with the suggested one (``LoanSide.suggested``), under their lock.
     409 PICKS_UP_TO_DATE when no pick is out of date."""
     def apply(conn, row):
+        loan_id = row['id']
         if row['lender_id'] != user_id:
             error(409, 'STEP_NOT_ALLOWED')
         replaced = replacement_picks(conn, user_id, loan_id)
@@ -1037,12 +1098,19 @@ def start_return(loan_id: UUID, command: StartReturn, user_id: str = Depends(ver
             error(422, 'DUPLICATE_EDITION')
         lines[line.edition_id] = copies_count(line.quantity)
     lines = {edition: copies for edition, copies in lines.items() if copies}
-    if not lines:
+    if command.all and command.lines:
+        error(422, 'RETURN_SHAPE')
+    if not lines and not command.all:
         error(422, 'NOTHING_RETURNED')
 
     def apply(conn, row):
+        loan_id = row['id']
         lender = row['lender_id'] == user_id
         out = lent_by_edition(conn, loan_id) if lender else borrowed_out(conn, loan_id)
+        if command.all:
+            lines.update({edition: copies for edition, copies in out.items() if copies > 0})
+        if not lines:
+            error(422, 'NOTHING_RETURNED')
         on_loan = {line['edition_id'] for line in conn.execute('SELECT edition_id FROM loan_line WHERE loan_id=%s',
                                                                  (loan_id,))}
         if set(lines) - on_loan:
@@ -1062,15 +1130,16 @@ def start_return(loan_id: UUID, command: StartReturn, user_id: str = Depends(ver
         return close_if_settled(conn, row, user_id)
 
     return run_step(user_id, loan_id, command, 'start_return', apply, lambda role, row: [user_id],
-                    {'lines': {str(edition): copies for edition, copies in sorted(lines.items(), key=str)}})
+                    {'all': command.all, 'lines': {str(edition): copies for edition, copies in sorted(lines.items(), key=str)}})
 
 
 @router.post('/{loan_id}/returns/confirm', response_model=LoanView)
-def confirm_return(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
+def confirm_return(loan_id: UUID, step: ConfirmReturn, user_id: str = Depends(verified_user)):
     """The other side confirms the pending return for its own inventory, which completes it. Once the other side's
     account is gone, the side that started the return finishes it alone: its own inventory already moved when it
     started, so finishing moves nothing and only completes the return, and the Loan closes once nothing is out."""
     def apply(conn, row):
+        loan_id = row['id']
         lender = row['lender_id'] == user_id
         side = 'lender' if lender else 'borrower'
         pending = conn.execute('SELECT id, started_by FROM loan_return WHERE loan_id=%s AND completed_at IS NULL',
@@ -1085,7 +1154,8 @@ def confirm_return(loan_id: UUID, step: LoanStep, user_id: str = Depends(verifie
                      (pending['id'],))
         return close_if_settled(conn, row, user_id)
 
-    return run_step(user_id, loan_id, step, 'confirm_return', apply, lambda role, row: [user_id])
+    return run_step(user_id, loan_id, step, 'confirm_return', apply, lambda role, row: [user_id],
+                    {'return_id': str(step.return_id)})
 
 
 def cut_picks(conn, user_id: str, loan_id: UUID, lines: dict[UUID, int], state: str = 'lent') -> None:
@@ -1122,6 +1192,7 @@ def write_off(loan_id: UUID, command: WriteOff, user_id: str = Depends(verified_
         error(422, 'NOTHING_WRITTEN_OFF')
 
     def apply(conn, row):
+        loan_id = row['id']
         on_loan = {line['edition_id'] for line in conn.execute('SELECT edition_id FROM loan_line WHERE loan_id=%s',
                                                                  (loan_id,))}
         if set(lines) - on_loan:
@@ -1185,6 +1256,7 @@ def choose_written_off(loan_id: UUID, command: WrittenOffChoice, user_id: str = 
         places[key] = quantity(place.copies)
 
     def apply(conn, row):
+        loan_id = row['id']
         expected = {(location, edition): copies for edition, location, _, copies in
                     awaiting_places(conn, user_id, loan_id)}
         if places != expected:
@@ -1279,11 +1351,14 @@ def follow_replacement(conn, user_id: str, edition: UUID, replacement: UUID, cop
             moving += reserving
     others: set[str] = set()
     for row in sorted(moving, key=lambda found: str(found['id'])):
+        before = event_snapshot(conn, row)
         _move_lines(conn, row['id'], edition, replacement)
         write_loan(conn, row['id'], {})
+        log_step(conn, user_id, row, row, 'edit_and_resend', before)
         others |= {side for side in (row['lender_id'], row['borrower_id']) if side not in (None, user_id)}
     for other in sorted(others):
         advance_revision(conn, other)
+    touch_threads(conn, [row['thread_id'] for row in moving])
 
 
 def _move_lines(conn, loan_id: UUID, edition: UUID, replacement: UUID) -> None:
@@ -1312,3 +1387,47 @@ def _move_lines(conn, loan_id: UUID, edition: UUID, replacement: UUID) -> None:
       DO UPDATE SET quantity = borrowed_holding.quantity + EXCLUDED.quantity""", args)
     conn.execute('DELETE FROM borrowed_holding WHERE loan_id = %(loan)s AND edition_id = %(old)s', args)
     conn.execute('DELETE FROM loan_line WHERE loan_id = %(loan)s AND edition_id = %(old)s', args)
+
+
+@router.post('/{thread_id}/terms', response_model=LoanView)
+def edit_terms(thread_id: UUID, command: EditTerms, user_id: str = Depends(verified_user)):
+    """Replace requested terms under both owners' ascending locks, before locking the old Loan.
+
+    The replacement's lender foreign key takes KEY SHARE. Locking the lender first prevents a cycle with a
+    display-name change, which holds that owner FOR UPDATE before its name trigger updates the old Loan.
+    """
+    lines = [(line.edition_id, quantity(line.quantity)) for line in command.lines]
+    if len({edition for edition, _ in lines}) != len(lines):
+        error(422, 'DUPLICATE_EDITION')
+
+    def apply(conn, row):
+        if row['state'] != 'requested' or row['borrower_id'] != user_id:
+            error(409, 'STEP_NOT_ALLOWED')
+        if command.return_by is not None and command.return_by < today(conn):
+            error(422, 'INVALID_RETURN_BY')
+        if command.deck_id is not None and conn.execute(
+                "SELECT 1 FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
+                (user_id, command.deck_id)).fetchone() is None:
+            error(404, 'DECK_NOT_FOUND')
+        lendable = {copy.edition_id: copy.spare + copy.in_deck for copy in friend_copies(
+            conn, user_id, [row['lender_id']], [edition for edition, _ in lines])}
+        for edition, copies in lines:
+            if copies > lendable.get(edition, 0):
+                refuse(409, 'NOT_LENDABLE', edition_id=edition, available=lendable.get(edition, 0))
+        # Close before inserting the replacement so loan_one_live holds throughout.
+        write_loan(conn, row['id'], close(conn, row, user_id, 'withdrawn'))
+        replacement = uuid4()
+        conn.execute("""WITH inserted AS (INSERT INTO loan(id, kind, state, lender_id, borrower_id, lender_name, borrower_name,
+          deck_id, return_by, thread_id) VALUES (%s,'borrow_request','requested',%s,%s,%s,%s,%s,%s,%s) RETURNING id, thread_id)
+          INSERT INTO thread_round_source(kind, round_id, thread_id)
+          SELECT 'loan', id, thread_id FROM inserted""",
+                     (replacement, row['lender_id'], user_id, row['lender_name'], row['borrower_name'],
+                      command.deck_id, command.return_by, row['thread_id']))
+        for position, (edition, copies) in enumerate(lines):
+            conn.execute('INSERT INTO loan_line(loan_id, edition_id, position, requested) VALUES (%s,%s,%s,%s)',
+                         (replacement, edition, position, copies))
+        return {'_replacement': replacement}
+
+    return run_step(user_id, thread_id, command, 'edit_and_resend', apply,
+                    lambda role, row: [row['borrower_id'], row['lender_id']],
+                    command.model_dump(mode='json', exclude={'idempotency_key', 'account_id'}))
