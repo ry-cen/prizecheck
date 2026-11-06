@@ -133,10 +133,10 @@ class DeployPipelineTest(unittest.TestCase):
             for deep in ('playwright', 'postgres', 'npm run verify'):
                 self.assertNotIn(deep, body.lower(), f'{name} must not run {deep}')
         legs = job_body('integration-legs')
-        for arg in ('--suite api --fast --shard 1/3', '--suite api --fast --shard 3/3', '--suite auth --fast',
-                    '--suite browser --fast --shard 1/10', '--suite browser --fast --shard 10/10'):
+        for arg in ('--suite api --shard 1/3', '--suite api --shard 3/3', '--suite auth', '--suite operations',
+                    '--suite browser --shard 1/10', '--suite browser --shard 10/10'):
             self.assertIn(arg, legs)
-        self.assertEqual(len(re.findall(r'(?m)^          - leg: ', legs)), 14)
+        self.assertEqual(len(re.findall(r'(?m)^          - leg: ', legs)), 15)
         self.assertIn('run: npm run verify\n', job_body('integration-full'))
 
     def test_the_verify_aggregator_requires_the_default_checks_and_every_requested_job(self):
