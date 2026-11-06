@@ -140,6 +140,8 @@ jobs:
       # API and operations legs start no browser, so they skip the download.
       - if: ${{ matrix.browsers }}
         run: npx playwright install --with-deps chromium
+      - name: Require fresh verification artifacts
+        run: test ! -e .scratch/verification && test ! -L .scratch/verification
       - run: npm run verify -- ${{ matrix.args }}
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
