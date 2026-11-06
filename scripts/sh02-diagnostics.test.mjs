@@ -352,3 +352,280 @@ test("a mid-capture write error is reported without throwing or exposing its mes
     fs.rmSync(root, { recursive: true });
   }
 });
+
+test("982 preload requests cannot consume the click-to-teardown capture budget", () => {
+  // The retained failure had 982 requests before Ctrl-click. Replay the six
+  // Network/Fetch messages per request through the actual bounded file sink.
+  for (const historyStress of [false, true]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sh02-replay-"));
+    try {
+      const capture = createCapture(createSink(root, "worker"));
+      const context = new EventEmitter();
+      context.pages = () => [];
+      const browser = { contexts: () => [context] };
+      const info = { file: "social-loans-desktop.spec.ts", line: 21 };
+      const openerSession = "a".repeat(32),
+        tabSession = "b".repeat(32);
+      const frame = "c".repeat(32),
+        loader = "d".repeat(32);
+      capture.start();
+      // Also prove that even unusually long fixture history leaves the window intact.
+      if (historyStress)
+        for (let i = 0; i < 400; i++) {
+          capture.boundary(
+            browser,
+            { file: "preload.spec.ts", line: 1 },
+            "begin"
+          );
+          capture.boundary(
+            browser,
+            { file: "preload.spec.ts", line: 1 },
+            "end"
+          );
+        }
+      capture.boundary(browser, info, "begin");
+      for (let i = 0; i < 982; i++) {
+        const requestId = `12345.${i}`,
+          fetchId = `interception-job-${i}.0`;
+        const url = `http://localhost/src/preload-${i}.js?token=${secret}`;
+        const send = (direction, message) =>
+          protocol(capture, direction, {
+            ...message,
+            sessionId: openerSession,
+          });
+        send("receive", {
+          method: "Network.requestWillBeSent",
+          params: {
+            requestId,
+            frameId: frame,
+            loaderId: loader,
+            type: "Script",
+            timestamp: i,
+            request: { url, headers: { Cookie: secret } },
+          },
+        });
+        send("receive", {
+          method: "Fetch.requestPaused",
+          params: {
+            requestId: fetchId,
+            networkId: requestId,
+            frameId: frame,
+            resourceType: "Script",
+            request: { url },
+          },
+        });
+        send("send", {
+          id: i + 100,
+          method: "Fetch.continueRequest",
+          params: { requestId: fetchId },
+        });
+        send("receive", { id: i + 100, result: {} });
+        send("receive", {
+          method: "Network.responseReceived",
+          params: {
+            requestId,
+            loaderId: loader,
+            type: "Script",
+            timestamp: i + 0.1,
+            response: { url, status: 200 },
+          },
+        });
+        send("receive", {
+          method: "Network.loadingFinished",
+          params: { requestId, timestamp: i + 0.2, encodedDataLength: 20000 },
+        });
+      }
+      protocol(capture, "send", {
+        id: 20000,
+        sessionId: openerSession,
+        method: "Input.dispatchMouseEvent",
+        params: { type: "mousePressed", modifiers: 2 },
+      });
+      protocol(capture, "receive", {
+        id: 20000,
+        sessionId: openerSession,
+        result: {},
+      });
+      protocol(capture, "receive", {
+        method: "Target.attachedToTarget",
+        params: {
+          sessionId: tabSession,
+          waitingForDebugger: true,
+          targetInfo: {
+            targetId: frame,
+            browserContextId: "e".repeat(32),
+            type: "page",
+            url: "",
+          },
+        },
+      });
+      // Include every initialization method, including the three repeated init-script calls.
+      const initialization = [
+        "Browser.getWindowForTarget",
+        "Page.enable",
+        "Page.getFrameTree",
+        "Log.enable",
+        "Page.setLifecycleEventsEnabled",
+        "Runtime.enable",
+        "Page.addScriptToEvaluateOnNewDocument",
+        "Network.enable",
+        "Network.setCacheDisabled",
+        "Network.setExtraHTTPHeaders",
+        "Fetch.enable",
+        "Target.setAutoAttach",
+        "Runtime.addBinding",
+        "Emulation.setFocusEmulationEnabled",
+        "Browser.setWindowBounds",
+        "Emulation.setDeviceMetricsOverride",
+        "Emulation.setTouchEmulationEnabled",
+        "Emulation.setUserAgentOverride",
+        "Emulation.setLocaleOverride",
+        "Emulation.setTimezoneOverride",
+        "Page.setFontFamilies",
+        "Emulation.setEmulatedMedia",
+        "Emulation.setEmulatedVisionDeficiency",
+        "Emulation.setDefaultBackgroundColorOverride",
+        "Page.setInterceptFileChooserDialog",
+        "Page.addScriptToEvaluateOnNewDocument",
+        "Page.addScriptToEvaluateOnNewDocument",
+        "Runtime.runIfWaitingForDebugger",
+        "Page.createIsolatedWorld",
+      ];
+      initialization.forEach((method, i) => {
+        const id = 30000 + i;
+        protocol(capture, "send", {
+          id,
+          sessionId: tabSession,
+          method,
+          params: { source: secret },
+        });
+        const result =
+          method === "Page.getFrameTree"
+            ? { frameTree: { frame: { id: frame, url: "about:blank" } } }
+            : {};
+        protocol(capture, "receive", { id, sessionId: tabSession, result });
+      });
+      protocol(capture, "receive", {
+        sessionId: tabSession,
+        method: "Fetch.requestPaused",
+        params: {
+          requestId: "interception-job-9999.0",
+          networkId: "12345.9999",
+          resourceType: "Document",
+          request: { url: `http://localhost/loans/${secret}?token=${secret}` },
+        },
+      });
+      protocol(capture, "send", {
+        sessionId: tabSession,
+        id: 40000,
+        method: "Fetch.continueRequest",
+        params: { requestId: "interception-job-9999.0" },
+      });
+      protocol(capture, "receive", {
+        sessionId: tabSession,
+        id: 40000,
+        result: {},
+      });
+      capture.boundary(browser, { ...info, status: "passed" }, "end");
+      capture.finish();
+      const data = fs.readFileSync(path.join(root, "worker.jsonl"), "utf8");
+      const statusText = fs.readFileSync(
+        path.join(root, "worker.status.json"),
+        "utf8"
+      );
+      const rows = data
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const status = JSON.parse(statusText);
+      console.log(
+        "SH02 replay",
+        JSON.stringify({
+          preload_requests: 982,
+          history_stress: historyStress,
+          initialization_pairs: initialization.length,
+          jsonl_bytes: Buffer.byteLength(data),
+          status_bytes: Buffer.byteLength(statusText),
+          pre_click_protocol_omitted: status.pre_click_protocol_omitted ?? null,
+          pre_click_dropped: status.pre_click_dropped ?? null,
+          dropped: status.dropped,
+        })
+      );
+      assert.ok(
+        rows.some(
+          (r) =>
+            r.method === "Input.dispatchMouseEvent" &&
+            r.id === 20000 &&
+            r.direction === "send"
+        ),
+        "modified click survives preload"
+      );
+      assert.ok(
+        rows.some(
+          (r) =>
+            r.method === "Target.attachedToTarget" &&
+            r.child_session === tabSession
+        ),
+        "new target attach survives preload"
+      );
+      initialization.forEach((method, i) => {
+        const pair = rows.filter(
+          (r) =>
+            r.id === 30000 + i &&
+            r.session === tabSession &&
+            r.method === method
+        );
+        assert.ok(
+          pair.some((r) => r.direction === "send" && !r.reply),
+          `${method}: command survives`
+        );
+        assert.ok(
+          pair.some(
+            (r) => r.direction === "receive" && r.reply && !r.has_error
+          ),
+          `${method}: reply survives`
+        );
+      });
+      assert.ok(
+        rows.some(
+          (r) =>
+            r.method === "Fetch.requestPaused" &&
+            r.session === tabSession &&
+            r.route === "loan-detail"
+        ),
+        "new-tab request is captured after preload filtering"
+      );
+      assert.ok(
+        rows.some(
+          (r) =>
+            r.method === "Fetch.continueRequest" && r.id === 40000 && r.reply
+        ),
+        "new-tab continuation reply survives"
+      );
+      assert.ok(
+        rows.some(
+          (r) =>
+            r.kind === "fixture-test" &&
+            r.file === info.file &&
+            r.phase === "end"
+        ),
+        "teardown survives"
+      );
+      assert.ok(status.pre_click_protocol_omitted >= 982 * 5);
+      assert.equal(status.io_errors, 0);
+      assert.equal(status.internal_errors, 0);
+      assert.equal(status.parse_errors, 0);
+      assert.equal(status.state_overflow, 0);
+      if (historyStress) {
+        assert.ok(status.pre_click_dropped > 0);
+        assert.equal(status.dropped, status.pre_click_dropped);
+      } else assert.equal(status.dropped, 0);
+      assert.ok(Buffer.byteLength(data) <= LIMITS.bytes);
+      assert.ok(Buffer.byteLength(statusText) <= LIMITS.statusBytes);
+      assert.ok(status.pre_click_bytes <= LIMITS.preClickBytes);
+      assert.ok(!`${data}${statusText}`.includes(secret));
+    } finally {
+      fs.rmSync(root, { recursive: true });
+    }
+  }
+});

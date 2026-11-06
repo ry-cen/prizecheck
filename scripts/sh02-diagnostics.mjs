@@ -6,6 +6,7 @@ import { performance } from "node:perf_hooks";
 
 export const LIMITS = Object.freeze({
   bytes: 1024 * 1024,
+  preClickBytes: 64 * 1024,
   statusBytes: 64 * 1024,
   messageBytes: 512 * 1024,
   entries: 256,
@@ -73,6 +74,19 @@ const events = new Set([
   "Network.loadingFailed",
   "Fetch.requestPaused",
 ]);
+// Keep the browser/context census, but omit high-volume preload exchanges before parsing.
+// They cannot consume the budget reserved for the actual new-tab startup window.
+const preloadTraffic = new Set([
+  "Network.requestWillBeSent",
+  "Network.responseReceived",
+  "Network.loadingFinished",
+  "Network.loadingFailed",
+  "Fetch.requestPaused",
+  "Fetch.continueRequest",
+  "Fetch.continueResponse",
+  "Fetch.failRequest",
+  "Fetch.fulfillRequest",
+]);
 const number = (v) =>
   typeof v === "number" && Number.isFinite(v) ? v : undefined;
 const identifier = (v) =>
@@ -88,6 +102,7 @@ const specFile = (v) =>
 
 /** Only fixed route classes survive. No host, path identifier, query, fragment or token is retained. */
 export function routeClass(value) {
+  if (typeof value !== "string") return undefined;
   if (value === "about:blank") return "blank";
   if (value === "" || value === ":") return "initial-empty";
   try {
@@ -187,8 +202,15 @@ export function createSink(directory, stem, io = fs) {
   let fd,
     statusFd,
     bytes = 0,
+    preClickBytes = 0,
+    preClickStopped = false,
     stopped = false;
-  const health = { dropped: 0, io_errors: 0, status_overflow: false };
+  const health = {
+    dropped: 0,
+    pre_click_dropped: 0,
+    io_errors: 0,
+    status_overflow: false,
+  };
   const attempt = (fn) => {
     try {
       return fn();
@@ -207,14 +229,31 @@ export function createSink(directory, stem, io = fs) {
     );
   });
   return {
-    event(record) {
+    event(record, preClick = false) {
       if (stopped || fd === undefined) {
         health.dropped++;
         return;
       }
+      if (preClick && preClickStopped) {
+        health.dropped++;
+        health.pre_click_dropped++;
+        return;
+      }
       attempt(() => {
         let line = JSON.stringify(record) + "\n";
-        if (bytes + Buffer.byteLength(line) > LIMITS.bytes - 256) {
+        if (
+          preClick &&
+          preClickBytes + Buffer.byteLength(line) > LIMITS.preClickBytes - 256
+        ) {
+          line =
+            JSON.stringify({
+              kind: "pre-click-limit",
+              limit_bytes: LIMITS.preClickBytes,
+            }) + "\n";
+          preClickStopped = true;
+          health.dropped++;
+          health.pre_click_dropped++;
+        } else if (bytes + Buffer.byteLength(line) > LIMITS.bytes - 256) {
           line =
             JSON.stringify({
               kind: "capture-limit",
@@ -225,6 +264,7 @@ export function createSink(directory, stem, io = fs) {
         }
         const written = io.writeSync(fd, line);
         bytes += written;
+        if (preClick) preClickBytes += written;
         if (written !== Buffer.byteLength(line))
           throw new Error("partial diagnostic write");
       });
@@ -232,7 +272,12 @@ export function createSink(directory, stem, io = fs) {
     status(record) {
       if (statusFd === undefined) return;
       attempt(() => {
-        let data = JSON.stringify({ ...record, ...health, bytes });
+        let data = JSON.stringify({
+          ...record,
+          ...health,
+          bytes,
+          pre_click_bytes: preClickBytes,
+        });
         if (Buffer.byteLength(data) > LIMITS.statusBytes) {
           health.status_overflow = true;
           data = JSON.stringify({ ...health, bytes, kind: "status-limit" });
@@ -261,11 +306,13 @@ export function createCapture(sink) {
     state_overflow: 0,
     target_tests: 0,
     modified_clicks: 0,
+    pre_click_protocol_omitted: 0,
     protocol_messages: 0,
     closed_pending_commands: 0,
     closed_pending_requests: 0,
   };
   let active = false,
+    detailed = false,
     browser,
     cleanup = [];
   const safe = (fn) => {
@@ -276,7 +323,14 @@ export function createCapture(sink) {
     }
   };
   const emit = (record) =>
-    sink.event({ wall_ms: Date.now(), mono_ms: performance.now(), ...record });
+    sink.event(
+      { wall_ms: Date.now(), mono_ms: performance.now(), ...record },
+      !detailed
+    );
+  const hasPendingId = (id) => {
+    for (const command of pending.values()) if (command.id === id) return true;
+    return false;
+  };
   const boundedSet = (map, key, value) => {
     if (key === undefined) return;
     if (!map.has(key) && map.size >= LIMITS.entries) {
@@ -367,12 +421,12 @@ export function createCapture(sink) {
         const prefix = text.slice(offset, offset + 256),
           method = /"method":"([^"]+)"/.exec(prefix)?.[1];
         if (method && !commands.has(method) && !events.has(method)) return;
+        if (!detailed && preloadTraffic.has(method)) {
+          flags.pre_click_protocol_omitted++;
+          return;
+        }
         const replyId = Number(/"id":(\d+)/.exec(prefix)?.[1]);
-        if (
-          !method &&
-          Number.isFinite(replyId) &&
-          ![...pending.values()].some((p) => p.id === replyId)
-        )
+        if (!method && Number.isFinite(replyId) && !hasPendingId(replyId))
           return;
         if (offset < 0 || text.length > LIMITS.messageBytes) {
           flags.parse_errors++;
@@ -447,17 +501,20 @@ export function createCapture(sink) {
           fields.mouse_type === "mousePressed" &&
           fields.modifiers & (2 | 4)
         ) {
+          // Switch before the census or the click record: neither uses pre-click capacity.
+          detailed = true;
           flags.modified_clicks++;
           snapshot("before-modified-click", flags.modified_clicks === 1);
           status();
         }
-        if (active)
+        if (active && detailed)
           emit({
             kind: "protocol",
             direction,
             reply: !message.method,
             ...fields,
           });
+        else flags.pre_click_protocol_omitted++;
       });
     },
     boundary(who, info, phase) {
@@ -466,6 +523,7 @@ export function createCapture(sink) {
         const file = specFile(info.file);
         if (phase === "begin" && file === "social-loans-desktop.spec.ts") {
           active = true;
+          detailed = false;
           flags.target_tests++;
         }
         emit({
@@ -486,6 +544,7 @@ export function createCapture(sink) {
           for (const remove of cleanup) safe(remove);
           cleanup = [];
           active = false;
+          detailed = false;
         }
         status();
       });
