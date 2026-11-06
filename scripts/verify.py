@@ -389,11 +389,37 @@ def run_gate(command, cwd, env, log, outcome):
     the checkout and the databases while it is False."""
     outcome.update(leftovers=[], stopped=False)
     process = subprocess.Popen(command, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    # TR01 diagnostic only: publish the count after both pytest passes for prompt cancellation.
+    from threading import Event, Thread
+    diagnostic_done, diagnostic_published = Event(), Event()
+
+    def report_tr01():
+        if not env.get('TEST_LOG_DIR') or diagnostic_published.is_set():
+            return False
+        directory = Path(env['TEST_LOG_DIR'])
+        count = directory / 'tr01-row-count.json'
+        if count.exists() and '== pytest total:' in (directory / 'verification.log').read_text():
+            print('::notice::TR01_API_FINISHED ' + count.read_text().strip(), flush=True)
+            diagnostic_published.set()
+            return True
+        return False
+
+    def watch_tr01():
+        while not diagnostic_done.wait(1):
+            if report_tr01():
+                return
+
+    diagnostic_thread = Thread(target=watch_tr01, daemon=True)
+    diagnostic_thread.start()
     try:
         code = process.wait()
     except BaseException:
         stop_gate(process, outcome)
         raise
+    finally:
+        diagnostic_done.set()
+        diagnostic_thread.join()
+        report_tr01()
     stop_gate(process, outcome)
     return code
 

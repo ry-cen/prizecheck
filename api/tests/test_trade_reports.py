@@ -682,6 +682,34 @@ def test_removal_switches_discovery_off_and_restore_lets_the_collector_switch_on
     ids, ash, misty, binder, box = strangers()
     owner = as_owner()
     stored = filed(ash, misty)
+    # TR01 diagnostic only: observe the uncapped candidate set without changing the assertions.
+    import logging
+    import os
+    from collections import Counter
+    from pathlib import Path
+    import subprocess
+    with connect() as conn:
+        eligible = conn.execute('SELECT * FROM nearby_collectors(%s, 4::smallint, 2147483647)', (ash,)).fetchall()
+        pair = conn.execute('''SELECT p.user_id, p.suspended_at, d.enabled, d.removed_at,
+          d.lat, d.lon, o.user_id IS NOT NULL AS open
+          FROM collector_profile p LEFT JOIN discovery_setting d USING (user_id)
+          LEFT JOIN open_discovery o USING (user_id) WHERE p.user_id = ANY(%s)''', ([ash, misty],)).fetchall()
+        friends = conn.execute('SELECT count(*) AS n FROM friends_of(ARRAY[%s]) WHERE friend_id=%s',
+                               (ash, misty)).fetchone()['n']
+        blocks = conn.execute('''SELECT count(*) AS n FROM block WHERE
+          (blocker_id=%s AND blocked_id=%s) OR (blocker_id=%s AND blocked_id=%s)''',
+                              (ash, misty, misty, ash)).fetchone()['n']
+    diagnostic = dict(eligible_count=len(eligible), bands=dict(Counter(r['band'] for r in eligible)),
+                      misty_rank=next((i+1 for i,r in enumerate(eligible) if r['other_id']==misty), None),
+                      misty_in_100=misty in {r['other_id'] for r in eligible[:100]},
+                      pair=pair, friends=friends, blocks=blocks,
+                      worker=os.environ.get('PYTEST_XDIST_WORKER', 'serial'),
+                      source_sha=subprocess.check_output(['git', '-C', os.environ['RELEASE_TEST_HISTORY_ROOT'],
+                                                          'rev-parse', 'HEAD'], text=True).strip(),
+                      workflow_sha=os.environ.get('GITHUB_WORKFLOW_SHA'), github_sha=os.environ.get('GITHUB_SHA'))
+    payload = json.dumps(diagnostic, default=str, sort_keys=True)
+    (Path(os.environ['TEST_LOG_DIR']) / 'tr01-row-count.json').write_text(payload + '\n')
+    logging.warning('[TR01-ROW-COUNT] %s', payload)
     with connect() as conn:
         assert misty in {row['other_id'] for row in conn.execute(
             'SELECT other_id FROM nearby_collectors(%s, 4::smallint, 100)', (ash,))}
