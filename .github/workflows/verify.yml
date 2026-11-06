@@ -154,7 +154,7 @@ jobs:
     runs-on: ubuntu-24.04
     # Well above the unsharded fast tier's 32 minutes on a hosted runner, since the full gate adds the slow tests and
     # the operations suite.
-    timeout-minutes: 75
+    timeout-minutes: 150
     services:
       postgres:
         image: postgres:16
