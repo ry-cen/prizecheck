@@ -8,6 +8,7 @@ import {
 } from "@playwright/test";
 import { Pool } from "pg";
 import { signInAsOwner } from "./sign-in";
+import { diagnosticTestBoundary } from "../../../scripts/sh02-diagnostics.mjs";
 
 // Journeys between collectors (social network, #247 onward) need several signed-in accounts on one stack. The stacks
 // run owner-only sign-up: only the owner email can make an account, and only while no existing account holds the owner
@@ -88,11 +89,23 @@ export async function signInOtherCollector(
  * the database pool ends, when the test ends.
  */
 export const test = base.extend<{
+  sh02Diagnostic: void;
   collectors: {
     signIn: (options?: OtherCollectorOptions) => Promise<OtherCollector>;
     pool: Pool;
   };
 }>({
+  sh02Diagnostic: [
+    async ({ browser }, use, testInfo) => {
+      diagnosticTestBoundary(browser, testInfo, "begin");
+      try {
+        await use();
+      } finally {
+        diagnosticTestBoundary(browser, testInfo, "end");
+      }
+    },
+    { auto: true },
+  ],
   collectors: async ({ browser }, use) => {
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
     const opened: OtherCollector[] = [];

@@ -1,8 +1,10 @@
 import { defineConfig } from "@playwright/test";
 import { applyBrowserStack } from "./web/tests/support/browser-stack";
+import { installDiagnostics } from "./scripts/sh02-diagnostics.mjs";
 
 // In the verification gate each worker gets its own stack; see web/tests/support/browser-stack.ts.
 applyBrowserStack();
+installDiagnostics();
 
 export default defineConfig({
   testDir: "./web/tests",
@@ -26,6 +28,10 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   reporter: process.env.VERIFY_PLAYWRIGHT_JSON
-    ? [["list"], ["json", { outputFile: process.env.VERIFY_PLAYWRIGHT_JSON }]]
+    ? [
+        ["list"],
+        ["json", { outputFile: process.env.VERIFY_PLAYWRIGHT_JSON }],
+        ["./scripts/sh02-diagnostics.mjs"],
+      ]
     : "list",
 });
