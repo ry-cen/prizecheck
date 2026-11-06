@@ -38,7 +38,7 @@ from .db import connect
 from .identity import verified_user
 from .core.inventory.idempotency import expire
 from .inventory_core import MAX_QUANTITY, first_non_leaf, quantity, record_undo, undo_id_for
-from .moves import MAX_BATCH
+from app.core.inventory.moves import MAX_BATCH
 from .social import counts
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])

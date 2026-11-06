@@ -18,6 +18,7 @@ import {
   type LibraryCard,
   type Proposal,
   type ProposalSide,
+  type ProposalCard,
 } from "./proposalModel";
 import { acceptsText, originText, wantText } from "./tradeMatchText";
 import { tradeCardName } from "./tradeText";
@@ -27,9 +28,10 @@ export type TheirsLoad =
   | { kind: "failed" }
   | {
       kind: "ready";
+      offerVersion?: string;
       /** The search the cards were read for. */
       q: string;
-      cards: FriendTradeCard[];
+      cards: ProposalCard[];
       nextPage: number | null;
       more: "idle" | "loading" | "failed";
     };
@@ -37,12 +39,12 @@ export type TheirsLoad =
 export type MineLoad =
   | { kind: "loading" }
   | { kind: "failed" }
-  | { kind: "ready"; cards: TradeListCard[] };
+  | { kind: "ready"; offerVersion?: string; cards: ProposalCard[] };
 
 export type MatchLoad =
   | { kind: "loading" }
   | { kind: "failed" }
-  | { kind: "ready"; row: TraderMatchRow };
+  | { kind: "ready"; offerVersion?: string; row: TraderMatchRow };
 
 type Choice = "theirs" | "mine";
 
@@ -65,6 +67,7 @@ const SIDE_LABEL: Record<ProposalSide, string> = {
  */
 export function ProposalLibrary({
   headingId,
+  announcement,
   ownScroll,
   friendName,
   theirs,
@@ -75,9 +78,10 @@ export function ProposalLibrary({
   onRetry,
   proposal,
   onAdd,
-  announce,
+  additionsBlocked = false,
 }: {
   headingId: string;
+  announcement: string | null;
   ownScroll: boolean;
   friendName: string;
   theirs: TheirsLoad;
@@ -88,7 +92,7 @@ export function ProposalLibrary({
   onRetry: (which: "theirs" | "mine" | "match") => void;
   proposal: Proposal;
   onAdd: (side: ProposalSide, card: LibraryCard) => void;
-  announce: string;
+  additionsBlocked?: boolean;
 }) {
   const [choice, setChoice] = useState<Choice>("theirs");
   const [theirText, setTheirText] = useState("");
@@ -182,9 +186,6 @@ export function ProposalLibrary({
             onChange={(event) => setMineText(event.target.value)}
           />
         )}
-        <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
-          {announce}
-        </p>
         {match.kind === "failed" && (
           <div className="flex flex-wrap items-center gap-3">
             <p role="alert" className="m-0 text-meta text-danger">
@@ -264,7 +265,9 @@ export function ProposalLibrary({
                           }
                         : null
                     }
-                    aria-disabled={onOther || held >= copies || undefined}
+                    aria-disabled={
+                      additionsBlocked || onOther || held >= copies || undefined
+                    }
                     onClick={() => onAdd(side, libraryCard)}
                   />
                   <Button
@@ -300,6 +303,11 @@ export function ProposalLibrary({
               )}
             </div>
           )}
+        {announcement !== null && (
+          <p role="status" className="m-0 min-h-5 text-meta text-text-muted">
+            {announcement}
+          </p>
+        )}
         <DetailsPopup
           details={details}
           proposal={proposal}

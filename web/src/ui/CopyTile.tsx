@@ -51,8 +51,10 @@ type Props = Omit<
 // ROOT, ART and LINE are exported for EditionTile (#173), which shares the button, the art frame and the Names line.
 export const ROOT =
   "group block box-border m-0 min-h-0 cursor-pointer rounded-card border-0 bg-transparent p-0 text-left [font:inherit] text-text aria-pressed:focus-visible:outline-offset-[calc(var(--tile-ring-gap)+var(--tile-ring-width)+var(--focus-offset))]";
+// Artwork is decorative. Keep the enclosing control as the gesture target when
+// an image error or retry replaces a child between pointerdown and click.
 export const ART =
-  "block w-full aspect-(--tile-aspect) overflow-hidden rounded-card bg-[linear-gradient(135deg,var(--color-art-start),var(--color-art-end))] shadow-[0_var(--space-1)_var(--space-3)_var(--color-shadow)]";
+  "pointer-events-none block w-full aspect-(--tile-aspect) overflow-hidden rounded-card bg-[linear-gradient(135deg,var(--color-art-start),var(--color-art-end))] shadow-[0_var(--space-1)_var(--space-3)_var(--color-shadow)]";
 const ART_SELECTED =
   "group-aria-pressed:shadow-[0_0_0_var(--tile-ring-gap)_var(--color-bg),0_0_0_calc(var(--tile-ring-gap)+var(--tile-ring-width))_var(--color-accent)]";
 /** Here: solid. Owned elsewhere: a dashed outline. Not owned: a ghost. */

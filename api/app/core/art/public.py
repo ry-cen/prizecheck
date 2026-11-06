@@ -5,7 +5,7 @@ import re
 
 from fastapi.responses import JSONResponse, Response
 
-from app.art_storage import check_key, storage
+from app.core.art.art_storage import check_key, storage
 from app.core.art.urls import SIZES
 
 REF = re.compile(r"[0-9a-f]{48}")

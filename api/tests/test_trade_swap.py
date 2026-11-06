@@ -47,7 +47,7 @@ from want_list_swap_fixtures import seed_swap_catalog
 
 
 def side(user, trade):
-    return call('GET', f"/api/trades/{trade['id']}/side", user)
+    return call('GET', f"/api/trades/{trade.get('thread_id', trade['id'])}/side", user)
 
 
 def picks(user, trade):
@@ -61,14 +61,14 @@ def suggested(user, trade):
 
 def confirm(user, trade, destination=None, key=None, revision=None):
     """``user``'s Confirm swap, on the revision they read now unless ``revision`` says otherwise."""
-    return call('POST', f"/api/trades/{trade['id']}/confirm-swap", user,
-                {'revision': revision or ok(read(user, trade))['revision'], 'idempotency_key': str(key or uuid4()),
+    return call('POST', f"/api/trades/{trade.get('thread_id', trade['id'])}/confirm-swap", user,
+                {'offer_id': trade['id'], 'revision': revision or ok(read(user, trade))['revision'], 'idempotency_key': str(key or uuid4()),
                  'destination_id': destination})
 
 
 def use_suggested(user, trade, key=None, revision=None):
-    return call('POST', f"/api/trades/{trade['id']}/picks/use-suggested", user,
-                {'revision': revision or ok(read(user, trade))['revision'], 'idempotency_key': str(key or uuid4())})
+    return call('POST', f"/api/trades/{trade.get('thread_id', trade['id'])}/picks/use-suggested", user,
+                {'offer_id': trade['id'], 'revision': revision or ok(read(user, trade))['revision'], 'idempotency_key': str(key or uuid4())})
 
 
 def held(owner, location):
@@ -179,10 +179,11 @@ def test_the_second_confirmation_closes_the_trade_as_swapped_and_tells_the_first
     seen = ok(read(ash, trade))
     assert (seen['state'], seen['closed_reason'], seen['closed_by'], seen['actions']) == (
         'closed', 'swapped', 'them', [])
-    # Nothing is left to do on a swapped Trade, by either side.
+    # A closed round fails the live-offer check before eligibility or revision, for either side.
     for user in (ash, misty):
-        assert code(confirm(user, trade)) == (409, 'STEP_NOT_ALLOWED')
-        assert code(use_suggested(user, trade)) == (409, 'STEP_NOT_ALLOWED')
+        for revision in (trade['revision'], done['revision']):
+            assert code(confirm(user, trade, revision=revision)) == (409, 'OFFER_CHANGED')
+            assert code(use_suggested(user, trade, revision=revision)) == (409, 'OFFER_CHANGED')
 
 
 def test_the_received_cards_go_to_the_chosen_storage_leaf_or_deck_and_a_deck_raises_its_lines(store):
@@ -290,7 +291,7 @@ def test_a_pick_a_move_left_out_of_date_is_flagged_and_replaced_before_the_swap(
     before, ash_before, revision = revision_of(misty), revision_of(ash), ok(read(misty, trade))['revision']
     ash_picks = [row for row in trade_picks(trade['id']) if row[0] == 'recipient']
     fixed = ok(use_suggested(misty, trade))
-    assert fixed['revision'] == revision + 1 and fixed['actions'] == ['confirm_swap', 'use_suggested_picks', 'cancel']
+    assert fixed['revision'] == revision + 1 and fixed['actions'] == ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer']
     assert sorted(picks(misty, trade)) == [('Shelf', '1', '0'), ('Trade Binder', '1', '0')]
     assert suggested(misty, trade) == []
     assert (revision_of(misty), revision_of(ash)) == (before + 1, ash_before)
@@ -374,7 +375,7 @@ def test_a_proposer_fixes_an_out_of_date_pick_while_the_proposal_waits(store):
     move_one(misty, binder, iono, shelf)
     assert picks(misty, trade) == [('Trade Binder', '3', '1')]
     fixed = ok(use_suggested(misty, trade))
-    assert (fixed['state'], fixed['actions']) == ('proposed', ['use_suggested_picks', 'withdraw'])
+    assert (fixed['state'], fixed['actions']) == ('proposed', ['use_suggested_picks', 'withdraw', 'change_offer'])
     assert sorted(picks(misty, trade)) == [('Shelf', '1', '0'), ('Trade Binder', '2', '0')]
     # The recipient gives nothing yet: the step isn't theirs.
     assert code(use_suggested(ash, trade)) == (409, 'STEP_NOT_ALLOWED')
@@ -404,9 +405,9 @@ def test_a_confirm_replayed_with_its_key_answers_the_same_and_writes_once(store)
     # The same key with another destination, or another revision, is another command.
     assert code(confirm(ash, trade, destination=box, key=key, revision=revision)) == (409, 'IDEMPOTENCY_KEY_REUSED')
     assert code(confirm(ash, trade, key=key, revision=revision + 1)) == (409, 'IDEMPOTENCY_KEY_REUSED')
-    # A new key: a second confirmation by the same side is refused, and a stale revision is refused first.
+    # A new key: eligibility precedes revision; only the remaining side reaches the strict revision check.
     assert code(confirm(ash, trade)) == (409, 'STEP_NOT_ALLOWED')
-    assert code(confirm(ash, trade, revision=revision)) == (409, 'TRADE_CHANGED')
+    assert code(confirm(ash, trade, revision=revision)) == (409, 'STEP_NOT_ALLOWED')
     assert code(confirm(misty, trade, revision=revision)) == (409, 'TRADE_CHANGED')
     assert row_of(trade)['revision'] == revision + 1
 
@@ -417,7 +418,7 @@ def test_the_remaining_side_confirms_alone_once_the_other_account_is_gone(store)
     # Account deletion is not built yet (spec, "Account deletion"): the recipient id goes NULL and
     # that side's inbox rows go.
     with connect() as conn:
-        conn.execute('UPDATE trade SET recipient_id=NULL WHERE id=%s', (trade['id'],))
+        conn.execute('DELETE FROM inventory_owner WHERE user_id=%s', (ash,))
         conn.execute('DELETE FROM inbox_update WHERE recipient_id=%s', (ash,))
     done = ok(confirm(misty, trade))
     assert (done['closed_reason'], done['other']['display_name']) == ('swapped', 'Ash K.')
@@ -680,7 +681,7 @@ def test_no_location_name_or_id_of_one_side_reaches_the_other(store):
     answers = [use_suggested(misty, trade), confirm(ash, trade, destination=ladder), confirm(misty, trade)]
     assert all(answer.status_code == 200 for answer in answers), [answer.text for answer in answers]
     for body in [answer.text for answer in answers] + [read(user, trade).text for user in (misty, ash)] + \
-            [call('GET', '/api/social/trades', user).text for user in (misty, ash)] + \
+            [call('GET', '/api/trades', user).text for user in (misty, ash)] + \
             [side(user, trade).text for user in (misty, ash)]:
         assert not any(secret in body for secret in misty_secrets | ash_secrets), body
     # The TradeView never grows a pick, a suggestion or a destination.
@@ -765,7 +766,7 @@ def test_a_confirm_and_a_cancel_run_one_after_the_other(store, first, ordered):
     finally:
         held_()
     assert winner.status_code == 200, winner.text
-    assert detail(loser) == (409, {'code': 'TRADE_CHANGED'})
+    assert detail(loser) == (409, {'code': 'STEP_NOT_ALLOWED' if first == 'confirm' else 'OFFER_CHANGED'})
     if first == 'confirm':
         assert row_of(trade)['state'] == 'accepted' and row_of(trade)['recipient_swap_at'] is not None
         assert held(ash, box) == {ids['SVI 166']: '1'}

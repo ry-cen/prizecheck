@@ -1,3 +1,4 @@
+import { auditPage } from "./support/responseAudit";
 // Ticket #269: My Trade List and a Friend's Trade List (Trading spec "For trade Locations and the Trade List",
 // prototype verdict variant A). Misty marks a binder For trade, and a binder she hid from Friends too; her Trade List
 // under the Trades tab shows each with its cards, says which one is hidden, and leaves out the cards she didn't mark.
@@ -12,7 +13,6 @@ import type { BrowserContextOptions, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
-import { bodyOf } from "./support/trades";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const HIDDEN_MARK = "Hidden from Friends";
@@ -255,107 +255,107 @@ async function story(
 
   // B: Ash, Misty's Friend, opens her Trade List from her Collection.
   await noArtwork(page);
-  await signInAsOwner(page, "/collection");
-  const ashHandle = await nameCollector(page, "Ash K");
-  await befriend(page, misty.page);
-  const pending: Promise<string | null>[] = [];
-  page.on("response", (response) => {
-    if (response.url().includes("/api/social/trade-lists/"))
-      pending.push(bodyOf(response));
-  });
-  await page.goto(`${ORIGIN}/friends/${mistyHandle}`);
-  await page
-    .getByRole("main")
-    .getByRole("link", { name: "See Misty W's Trade List" })
-    .click();
-  await expect(page).toHaveURL(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
-  await expect(heading(page)).toHaveText("Misty W's Trade List");
-  const friendMain = page.getByRole("main");
-  await expect(friendMain).toContainText(`@${mistyHandle}`);
-  const iono = friendMain.getByRole("list", { name: "Iono", exact: true });
-  await expect(iono.getByRole("listitem")).toHaveCount(2);
-  await expect(
-    iono.getByRole("listitem").filter({ hasText: "PAL 185" })
-  ).toContainText("×2");
-  // The hidden binder's card is on her Trade List too; where it sits isn't.
-  await expect(
-    friendMain.getByRole("list", { name: "Boss's Orders", exact: true })
-  ).toContainText("×1");
-  await expect(friendMain).not.toContainText("Arven");
-  await expect(friendMain).not.toContainText(secret);
-  await expect(friendMain).not.toContainText("Hidden from Friends");
-  await expectPageChecks(page, `a Friend's Trade List at ${width}`);
+  const audit = await auditPage(page, (url) =>
+    url.includes("/api/social/trade-lists/")
+  );
+  try {
+    await signInAsOwner(page, "/collection");
+    const ashHandle = await nameCollector(page, "Ash K");
+    await befriend(page, misty.page);
+    await page.goto(`${ORIGIN}/friends/${mistyHandle}`);
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "See Misty W's Trade List" })
+      .click();
+    await expect(page).toHaveURL(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
+    await expect(heading(page)).toHaveText("Misty W's Trade List");
+    const friendMain = page.getByRole("main");
+    await expect(friendMain).toContainText(`@${mistyHandle}`);
+    const iono = friendMain.getByRole("list", { name: "Iono", exact: true });
+    await expect(iono.getByRole("listitem")).toHaveCount(2);
+    await expect(
+      iono.getByRole("listitem").filter({ hasText: "PAL 185" })
+    ).toContainText("×2");
+    // The hidden binder's card is on her Trade List too; where it sits isn't.
+    await expect(
+      friendMain.getByRole("list", { name: "Boss's Orders", exact: true })
+    ).toContainText("×1");
+    await expect(friendMain).not.toContainText("Arven");
+    await expect(friendMain).not.toContainText(secret);
+    await expect(friendMain).not.toContainText("Hidden from Friends");
+    await expectPageChecks(page, `a Friend's Trade List at ${width}`);
 
-  // Search narrows by card name.
-  const search = page.getByRole("searchbox", { name: "Search by card name" });
-  await search.fill("ion");
-  await expect(
-    friendMain.getByRole("list", { name: "Boss's Orders", exact: true })
-  ).toHaveCount(0);
-  await expect(iono.getByRole("listitem")).toHaveCount(2);
-  await search.fill("zzz");
-  await expect(friendMain.getByRole("status")).toHaveText(
-    "No cards match that name."
-  );
-  // What reached Ash's browser names no Location of Misty's, by name or by id.
-  const answers = (await Promise.all(pending)).filter(
-    (answer): answer is string => answer !== null
-  );
-  expect(answers.length).toBeGreaterThan(0);
-  for (const answer of answers) {
-    expect(answer).not.toContain(secret);
-    expect(answer).not.toContain(binder);
-    expect(answer).not.toContain(vault);
+    // Search narrows by card name.
+    const search = page.getByRole("searchbox", { name: "Search by card name" });
+    await search.fill("ion");
+    await expect(
+      friendMain.getByRole("list", { name: "Boss's Orders", exact: true })
+    ).toHaveCount(0);
+    await expect(iono.getByRole("listitem")).toHaveCount(2);
+    await search.fill("zzz");
+    await expect(friendMain.getByRole("status")).toHaveText(
+      "No cards match that name."
+    );
+    // What reached Ash's browser names no Location of Misty's, by name or by id.
+    const answers = await audit.finish();
+    expect(answers.length).toBeGreaterThan(0);
+    for (const answer of answers) {
+      expect(answer).not.toContain(secret);
+      expect(answer).not.toContain(binder);
+      expect(answer).not.toContain(vault);
+    }
+
+    // A Friend who lists nothing says so even while a search is typed.
+    await misty.page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
+    await expect(misty.page.getByRole("status")).toHaveText(
+      "Ash K has nothing on their Trade List."
+    );
+    await misty.page
+      .getByRole("searchbox", { name: "Search by card name" })
+      .fill("zzz");
+    await expect(misty.page.getByRole("status")).toHaveText(
+      "Ash K has nothing on their Trade List."
+    );
+
+    // Ash's own Trade List is empty and says how to fill it.
+    await tradesTab(page).click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades`);
+    await expect(page.getByRole("main")).toContainText("No Trades yet.");
+    await expect(
+      page.getByRole("button", { name: "Archived conversations" })
+    ).toHaveCount(0);
+    await page.getByRole("tab", { name: "My Trade List", exact: true }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades/list`);
+    await expect(page.getByRole("main")).toContainText(
+      "Your Trade List is empty. Mark a Location For trade in Collection, and its cards show here."
+    );
+    await page
+      .getByRole("link", { name: "Trade Wants on the Want List" })
+      .click();
+    await expect(page).toHaveURL(`${ORIGIN}/decks/want-list`);
+    await expect(
+      page.getByRole("heading", { name: "Trade Wants", exact: true })
+    ).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(`${ORIGIN}/trades/list`);
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Open Collection", exact: true })
+      .click();
+    await expect(page).toHaveURL(`${ORIGIN}/collection`);
+
+    // C: Brock isn't Misty's Friend, so her Trade List is the unknown-Handle page.
+    await noArtwork(brock.page);
+    await brock.page.goto(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
+    await expect(heading(brock.page)).toHaveText("Friend's Trade List");
+    await expect(brock.page.getByRole("main")).toContainText(
+      "This collector isn't one of your Friends."
+    );
+    await expect(brock.page.getByRole("main")).not.toContainText("Iono");
+    await expectPageChecks(brock.page, `a stranger's Trade List at ${width}`);
+  } finally {
+    audit.dispose();
   }
-
-  // A Friend who lists nothing says so even while a search is typed.
-  await misty.page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
-  await expect(misty.page.getByRole("status")).toHaveText(
-    "Ash K has nothing on their Trade List."
-  );
-  await misty.page
-    .getByRole("searchbox", { name: "Search by card name" })
-    .fill("zzz");
-  await expect(misty.page.getByRole("status")).toHaveText(
-    "Ash K has nothing on their Trade List."
-  );
-
-  // Ash's own Trade List is empty and says how to fill it.
-  await tradesTab(page).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades`);
-  await expect(page.getByRole("main")).toContainText("No conversations yet.");
-  await expect(
-    page.getByRole("button", { name: "Archived conversations" })
-  ).toBeVisible();
-  await page.getByRole("tab", { name: "My Trade List", exact: true }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/list`);
-  await expect(page.getByRole("main")).toContainText(
-    "Your Trade List is empty. Mark a Location For trade in Collection, and its cards show here."
-  );
-  await page
-    .getByRole("link", { name: "Trade Wants on the Want List" })
-    .click();
-  await expect(page).toHaveURL(`${ORIGIN}/decks/want-list`);
-  await expect(
-    page.getByRole("heading", { name: "Trade Wants", exact: true })
-  ).toBeVisible();
-  await page.goBack();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/list`);
-  await page
-    .getByRole("main")
-    .getByRole("button", { name: "Open Collection", exact: true })
-    .click();
-  await expect(page).toHaveURL(`${ORIGIN}/collection`);
-
-  // C: Brock isn't Misty's Friend, so her Trade List is the unknown-Handle page.
-  await noArtwork(brock.page);
-  await brock.page.goto(`${ORIGIN}/friends/${mistyHandle}/trade-list`);
-  await expect(heading(brock.page)).toHaveText("Friend's Trade List");
-  await expect(brock.page.getByRole("main")).toContainText(
-    "This collector isn't one of your Friends."
-  );
-  await expect(brock.page.getByRole("main")).not.toContainText("Iono");
-  await expectPageChecks(brock.page, `a stranger's Trade List at ${width}`);
 }
 
 test.describe("desktop", () => {

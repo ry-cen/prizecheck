@@ -1,7 +1,7 @@
 """Send a Friend a Trade Proposal and withdraw it (Trading #270), accept, decline or cancel it (#271) and counter it
-(#278): ``POST /api/trades``, ``POST /api/trades/{id}/accept`` and ``POST /api/trades/{id}/counter``
+(#278): ``POST /api/trades``, ``POST /api/trades/{id}/accept`` and ``POST /api/trades/{thread_id}/offer``
 (``app.trade_inventory``), the Trade reads and the withdraw, decline
-and cancel steps under ``/api/social/trades`` (``app.social.trades``) and the Trade Pick List (``app.trade_picks``),
+and cancel steps under ``/api/trades`` (``app.social.trades``) and the Trade Pick List (``app.trade_picks``),
 through signed HTTP against PostgreSQL.
 
 Every test seeds the Swap catalog (``want_list_swap_fixtures``) and starts new collectors: Misty W. and Ash K. are
@@ -18,7 +18,7 @@ import pytest
 
 from app.main import connect  # noqa: F401
 from app.games.pokemon.trading import trade_inventory
-from app.social import conversations, owners, trades
+from app.social import owners, trades
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
@@ -63,26 +63,30 @@ def trade_settings(user, value=None):
 
 
 def trade_step(user, trade, action, key=None, revision=None):
-    return call('POST', f"/api/social/trades/{trade['id']}/{action}", user,
-                {'revision': revision or trade['revision'], 'idempotency_key': str(key or uuid4())})
+    return call('POST', f"/api/trades/{trade.get('thread_id', trade['id'])}/{action}", user,
+                {'offer_id': trade['id'], 'revision': revision or trade['revision'], 'idempotency_key': str(key or uuid4())})
 
 
 def read(user, trade):
-    return call('GET', f"/api/social/trades/{trade['id']}", user)
+    response = call('GET', f"/api/trades/{trade.get('thread_id', trade['id'])}", user)
+    if response.status_code == 200:
+        import json
+        response._content = json.dumps(response.json()['live_offer']).encode()
+    return response
 
 
 def accept_trade(user, trade, key=None, revision=None):
     """The recipient's accept, on the revision ``trade`` was read at unless ``revision`` says otherwise."""
-    return call('POST', f"/api/trades/{trade['id']}/accept", user,
-                {'revision': revision or trade['revision'], 'idempotency_key': str(key or uuid4())})
+    return call('POST', f"/api/trades/{trade.get('thread_id', trade['id'])}/accept", user,
+                {'offer_id': trade['id'], 'revision': revision or trade['revision'], 'idempotency_key': str(key or uuid4())})
 
 
 def counter(user, trade, give=(), get=(), cash=None, key=None, revision=None):
-    body = {'revision': revision or trade['revision'], 'idempotency_key': str(key or uuid4()),
+    body = {'offer_id': trade['id'], 'revision': revision or trade['revision'], 'idempotency_key': str(key or uuid4()),
             'you_give': lines(give), 'you_get': lines(get)}
     if cash is not None:
         body['cash'] = cash
-    return call('POST', f"/api/trades/{trade['id']}/counter", user, body)
+    return call('POST', f"/api/trades/{trade.get('thread_id', trade['id'])}/offer", user, body)
 
 
 def countered(user, trade, give=(), get=(), cash=None):
@@ -197,7 +201,7 @@ def test_a_swap_reserves_only_the_senders_copies_at_once_and_a_withdraw_releases
     trade = proposed(misty, ash, give=[(iono, 2)], get=[(arven, 1)])
     # A proposer who gives cards may also replace an out-of-date pick while the proposal waits (Trading #272).
     assert (trade['state'], trade['role'], trade['section'], trade['actions']) == (
-        'proposed', 'proposer', 'pending', ['use_suggested_picks', 'withdraw'])
+        'proposed', 'proposer', 'pending', ['use_suggested_picks', 'withdraw', 'change_offer'])
     assert sides(trade) == ([(iono, '2')], [(arven, '1')])
     assert (trade['waiting'], trade['needs_you'], trade['cash'], trade['countered_from']) == (None, False, None, None)
     # Misty's two copies are promised at once, from her For trade binder; nothing of Ash's is.
@@ -229,7 +233,7 @@ def test_a_gift_either_way_is_a_proposal_and_asking_reserves_and_moves_nothing(s
     assert sides(gift) == ([(iono, '1')], [])
     asked = proposed(misty, ash, get=[(arven, 2)])
     assert sides(asked) == ([], [(arven, '2')]) and trade_picks(asked['id']) == []
-    assert asked['actions'] == ['withdraw']
+    assert asked['actions'] == ['withdraw', 'change_offer']
     # Only the gift reserved, so only it moved Misty's revision; asking for Ash's cards reserves none of them.
     assert (revision_of(misty), revision_of(ash)) == (before[0] + 1, before[1])
     assert reserved(ash, arven) == (0, 0) and friend_cards(misty, handle_of(ash)) == {arven: '2'}
@@ -367,13 +371,14 @@ def test_the_friend_sees_the_proposal_from_their_side_and_a_stranger_gets_not_fo
     assert seen['other'] == {'collector_id': misty, 'display_name': 'Misty W.', 'handle': handle_of(misty),
                              'trader_id': trader_of(misty), 'friend': True, 'available': True,
                              'open_to_cash_offers': False, 'completed_trades': 0}
-    listed = ok(call('GET', '/api/social/trades', ash))
-    assert [item['id'] for item in listed['trades']] == [trade['id'], older['id']] and listed['needs_you'] == 2
-    assert ok(call('GET', '/api/social/trades', misty))['needs_you'] == 0
+    listed = ok(call('GET', '/api/trades?group=needs_you', ash))
+    assert [item['id'] for item in listed] == [trade['thread_id'], older['thread_id']]
+    assert all(item['needs_you'] for item in listed)
+    assert ok(call('GET', '/api/trades?group=needs_you', misty)) == []
     # A withdrawn proposal goes to history, after the open ones.
     ok(trade_step(misty, older, 'withdraw'))
-    assert [(item['id'], item['section']) for item in ok(call('GET', '/api/social/trades', ash))['trades']] == [
-        (trade['id'], 'needs_you'), (older['id'], 'history')]
+    assert [(item['id'], item['section']) for item in ok(call('GET', '/api/trades?group=done', ash))] == [
+        (older['thread_id'], 'done')]
     # A stranger and an unknown id get the same bytes, for a read and for a step.
     assert read(gary, trade).content == read(misty, {'id': str(uuid4())}).content == UNKNOWN
     assert trade_step(gary, trade, 'withdraw').content == trade_step(misty, {'id': str(uuid4()), 'revision': 1},
@@ -387,7 +392,7 @@ def test_the_friend_sees_the_proposal_from_their_side_and_a_stranger_gets_not_fo
     assert accept_trade(gary, trade).status_code == 404
     assert ok(read(ash, trade))['state'] == 'proposed' and commands(gary) == 0
     assert read(gary, trade).status_code == 404
-    assert ok(call('GET', '/api/social/trades', gary)) == {'trades': [], 'needs_you': 0}
+    assert ok(call('GET', '/api/trades', gary)) == []
 
 
 def test_withdraw_is_the_proposers_on_the_revision_they_read_and_tells_the_recipient(store):
@@ -406,18 +411,18 @@ def test_withdraw_is_the_proposers_on_the_revision_they_read_and_tells_the_recip
     assert ok(call('GET', '/api/social/inbox', ash))['updates'] == []
     # A closed Trade has no step left, on the revision it now has too.
     closed = ok(read(misty, trade))
-    assert detail(trade_step(misty, closed, 'withdraw')) == (409, {'code': 'STEP_NOT_ALLOWED'})
+    assert detail(trade_step(misty, closed, 'withdraw')) == (409, {'code': 'OFFER_CHANGED'})
 
 
 @pytest.mark.parametrize('state, reader, swaps, gives, expected', [
-    ('proposed', 'proposer', (None, None), True, ['use_suggested_picks', 'withdraw']),
-    ('proposed', 'proposer', (None, None), False, ['withdraw']),
+    ('proposed', 'proposer', (None, None), True, ['use_suggested_picks', 'withdraw', 'change_offer']),
+    ('proposed', 'proposer', (None, None), False, ['withdraw', 'change_offer']),
     ('proposed', 'recipient', (None, None), True, ['accept', 'decline', 'counter']),
     ('proposed', 'recipient', (None, None), False, ['accept', 'decline', 'counter']),
-    ('accepted', 'proposer', (None, None), True, ['confirm_swap', 'use_suggested_picks', 'cancel']),
-    ('accepted', 'proposer', (None, None), False, ['confirm_swap', 'cancel']),
-    ('accepted', 'recipient', (None, None), True, ['confirm_swap', 'use_suggested_picks', 'cancel']),
-    ('accepted', 'recipient', (None, None), False, ['confirm_swap', 'cancel']),
+    ('accepted', 'proposer', (None, None), True, ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer']),
+    ('accepted', 'proposer', (None, None), False, ['confirm_swap', 'cancel', 'change_offer']),
+    ('accepted', 'recipient', (None, None), True, ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer']),
+    ('accepted', 'recipient', (None, None), False, ['confirm_swap', 'cancel', 'change_offer']),
     # Once a side confirmed the swap (Trading #272) it has no step left, and the other side may only confirm theirs
     # (and fix its picks first): nobody cancels.
     ('accepted', 'proposer', ('now', None), True, []),
@@ -439,7 +444,7 @@ def test_allowed_lists_each_sides_steps_row_by_row(state, reader, swaps, gives, 
 @pytest.mark.parametrize('state, reader, swaps, waiting, section', [
     ('proposed', 'recipient', (None, None), 'answer', 'needs_you'),
     ('proposed', 'proposer', (None, None), None, 'pending'),
-    ('accepted', 'proposer', (None, None), None, 'to_swap'),
+    ('accepted', 'proposer', (None, None), 'confirm_swap', 'needs_you'),
     ('accepted', 'proposer', (None, 'now'), 'confirm_swap', 'needs_you'),
     ('accepted', 'proposer', ('now', None), None, 'pending'),
     ('closed', 'recipient', (None, None), None, 'history'),
@@ -558,8 +563,8 @@ def test_cash_is_kept_through_withdraw_and_confirm_swap_moves_only_the_cards(sto
     ok(accept_trade(ash, trade))
     for user in (misty, ash):
         revision = ok(read(user, trade))['revision']
-        ok(call('POST', f"/api/trades/{trade['id']}/confirm-swap", user,
-                {'revision': revision, 'idempotency_key': str(uuid4()), 'destination_id': None}))
+        ok(call('POST', f"/api/trades/{trade['thread_id']}/confirm-swap", user,
+                {'offer_id': trade['id'], 'revision': revision, 'idempotency_key': str(uuid4()), 'destination_id': None}))
     final = ok(read(misty, trade))
     assert (final['state'], final['closed_reason']) == ('closed', 'swapped')
     assert final['cash'] == {'cents': '500', 'payer': 'you'}
@@ -597,7 +602,7 @@ def test_no_location_or_deck_name_or_id_reaches_either_side(store):
     trade = proposed(misty, ash, give=[(iono, 4)], get=[(arven, 1)])
     secrets = {binder, shelf, box, 'Trade Binder', 'Secret Shelf', 'Box', 'Unsorted'}
     for user in (misty, ash):
-        for body in (read(user, trade).text, call('GET', '/api/social/trades', user).text):
+        for body in (read(user, trade).text, call('GET', '/api/trades', user).text):
             assert not any(secret in body for secret in secrets), (user, body)
     # Once accepted both sides have picks (#271); neither the step's answer nor either side's reads name one.
     answered = accept_trade(ash, ok(read(ash, trade)))
@@ -606,7 +611,7 @@ def test_no_location_or_deck_name_or_id_reaches_either_side(store):
     for body in (answered.text, cancelled.text):
         assert not any(secret in body for secret in secrets), body
     for user in (misty, ash):
-        for body in (read(user, trade).text, call('GET', '/api/social/trades', user).text):
+        for body in (read(user, trade).text, call('GET', '/api/trades', user).text):
             assert not any(secret in body for secret in secrets), (user, body)
 
 
@@ -630,14 +635,20 @@ def _without_command_lock(conn, user_id, key, payload, kind):
     return digest, stored
 
 
+def _without_replay_command_lock(conn, user_id, key, payload, kind):
+    """The initial-send prelude without its advisory lock; the real send still counts new work."""
+    owners.ensure_owner(conn, user_id)
+    return owners.replay_with_presence(conn, user_id, key, payload)
+
+
 @pytest.mark.parametrize('command_lock', [True, False])
 def test_two_sends_of_the_same_copies_run_one_after_the_other(store, monkeypatch, command_lock):
     if not command_lock:
-        monkeypatch.setattr(trade_inventory, 'begin_owner_command', _without_command_lock)
+        monkeypatch.setattr(trade_inventory, 'replay_owner_receipt', _without_replay_command_lock)
         # The send's new-conversation advisory lock would also serialise the two; only the owner row is left to test.
-        monkeypatch.setattr(trade_inventory, 'new_conversation_lock', lambda conn, user_id: None)
+        monkeypatch.setattr(trade_inventory, 'new_contact_lock', lambda conn, user_id: None)
         # ...and open_conversation's check of it.
-        monkeypatch.setattr(conversations, 'new_conversation_lock_held', lambda conn, user_id: True)
+        monkeypatch.setattr(trade_inventory, 'count_new_contact', lambda conn, user_id, other_id: None)
     ids, ash, misty, binder, box = trading()
     iono = ids['PAL 185']
     (brock, _) = collector('Brock S.')
@@ -711,7 +722,7 @@ def test_accept_reserves_the_recipients_copies_at_once_and_a_cancel_releases_bot
     accepted = ok(accept_trade(ash, ok(read(ash, trade))))
     assert (accepted['state'], accepted['role'], accepted['section'], accepted['waiting'], accepted['needs_you'],
             accepted['actions'], accepted['revision']) == (
-        'accepted', 'recipient', 'to_swap', None, False, ['confirm_swap', 'use_suggested_picks', 'cancel'],
+        'accepted', 'recipient', 'needs_you', 'confirm_swap', True, ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer'],
         trade['revision'] + 1)
     assert sides(accepted) == ([(arven, '1')], [(iono, '2')])
     assert row_of(trade)['accepted_at'] is not None
@@ -727,7 +738,7 @@ def test_accept_reserves_the_recipients_copies_at_once_and_a_cancel_releases_bot
     assert updates(trade) == [(misty, 'accepted', 'Ash K.')]
     seen = ok(read(misty, trade))
     assert (seen['state'], seen['section'], seen['actions'], seen['needs_you']) == (
-        'accepted', 'to_swap', ['confirm_swap', 'use_suggested_picks', 'cancel'], False)
+        'accepted', 'needs_you', ['confirm_swap', 'use_suggested_picks', 'cancel', 'change_offer'], True)
     # Either side may cancel while nobody has confirmed: Misty does, and both sides' copies come back at once.
     cancelled = ok(trade_step(misty, seen, 'cancel'))
     assert (cancelled['state'], cancelled['closed_reason'], cancelled['closed_by'], cancelled['section'],
@@ -749,7 +760,7 @@ def test_the_recipient_cancels_too_and_a_side_that_gives_nothing_keeps_its_revis
     gift = proposed(misty, ash, give=[(iono, 1)])
     before = revision_of(misty), revision_of(ash)
     accepted = ok(accept_trade(ash, gift))
-    assert (accepted['state'], accepted['actions']) == ('accepted', ['confirm_swap', 'cancel'])
+    assert (accepted['state'], accepted['actions']) == ('accepted', ['confirm_swap', 'cancel', 'change_offer'])
     assert trade_picks(gift['id']) == [('proposer', misty, binder, 1)]
     assert (revision_of(misty), revision_of(ash)) == before
     cancelled = ok(trade_step(ash, accepted, 'cancel'))
@@ -807,10 +818,11 @@ def test_every_closed_reason_so_far_reads_from_both_sides(store):
     expected = {withdrawn['id']: ('withdrawn', misty), declined['id']: ('declined', ash),
                 cancelled['id']: ('cancelled', ash)}
     for user in (misty, ash):
-        listed = ok(call('GET', '/api/social/trades', user))
-        assert listed['needs_you'] == 0
+        listed = ok(call('GET', '/api/trades?group=done', user))
+        assert len(listed) == 3 and all(not item['needs_you'] for item in listed)
+        rounds = [ok(read(user, {'id': item['id'], 'thread_id': item['id']})) for item in listed]
         found = {item['id']: (item['state'], item['closed_reason'], item['closed_by'], item['section'], item['actions'])
-                 for item in listed['trades']}
+                 for item in rounds}
         assert found == {trade_id: ('closed', reason, 'you' if by == user else 'them', 'history', [])
                          for trade_id, (reason, by) in expected.items()}
     assert reserved(misty, iono) == (0, 0) and trade_picks(cancelled['id']) == []
@@ -850,10 +862,12 @@ def test_only_the_recipient_answers_and_only_an_accepted_trade_nobody_confirmed_
         with connect() as conn:
             conn.execute(f'UPDATE trade SET {confirmed_column} = NULL WHERE id=%s', (trade['id'],))
     closed = ok(trade_step(ash, ok(read(ash, trade)), 'cancel'))
-    # A closed Trade has no step left.
+    # A closed round fails the live-offer check before eligibility or revision, even with its current revision.
     for user, step_ in ((misty, 'cancel'), (ash, 'cancel'), (ash, 'decline'), (misty, 'withdraw')):
-        assert detail(trade_step(user, ok(read(user, trade)), step_)) == refused
-    assert detail(accept_trade(ash, closed)) == refused
+        for revision in (trade['revision'], closed['revision']):
+            assert detail(trade_step(user, closed, step_, revision=revision)) == (409, {'code': 'OFFER_CHANGED'})
+    for revision in (trade['revision'], closed['revision']):
+        assert detail(accept_trade(ash, closed, revision=revision)) == (409, {'code': 'OFFER_CHANGED'})
 
 
 def test_accept_is_refused_across_a_block_and_changes_nothing(store):
@@ -953,7 +967,7 @@ def test_an_accept_and_a_withdraw_of_one_proposal_run_one_after_the_other(store,
     finally:
         held()
     assert winner.status_code == 200, winner.text
-    assert detail(loser) == (409, {'code': 'TRADE_CHANGED'})
+    assert detail(loser) == (409, {'code': 'STEP_NOT_ALLOWED' if first == 'accept' else 'OFFER_CHANGED'})
     if first == 'accept':
         assert row_of(trade)['state'] == 'accepted'
         assert reserved(misty, iono) == (1, 1) and reserved(ash, arven) == (1, 1)
@@ -981,7 +995,7 @@ def test_two_accepts_of_one_proposal_run_one_after_the_other(store, monkeypatch,
     finally:
         held()
     assert first.status_code == 200, first.text
-    assert detail(second) == (409, {'code': 'TRADE_CHANGED'})
+    assert detail(second) == (409, {'code': 'STEP_NOT_ALLOWED'})
     assert reserved(ash, arven) == (2, 2) and trade_picks(trade['id']).count(('recipient', ash, box, 2)) == 1
     assert updates(trade) == [(misty, 'accepted', 'Ash K.')] and row_of(trade)['revision'] == trade['revision'] + 1
 
@@ -1030,14 +1044,15 @@ def test_a_counter_closes_the_proposal_and_sends_the_reply_with_the_reserved_sid
         'proposer', 'proposed', original['id'], None, 'pending')
     assert sides(new) == ([(arven, '2')], [(iono, '1')])
     assert new['cash'] == {'cents': '500', 'payer': 'them'}
-    assert new['actions'] == ['use_suggested_picks', 'withdraw'] and new['other']['display_name'] == 'Misty W.'
+    assert new['actions'] == ['use_suggested_picks', 'withdraw', 'change_offer'] and new['other']['display_name'] == 'Misty W.'
     old = row_of(original)
     assert (old['state'], old['closed_reason'], old['closed_by'], old['revision']) == (
         'closed', 'countered', ash, original['revision'] + 1)
     assert trade_picks(original['id']) == []
     theirs, mine = ok(read(misty, original)), ok(read(ash, original))
-    assert sides(theirs) == ([(iono, '2')], [(arven, '1')])
-    assert (theirs['closed_by'], theirs['actions'], mine['closed_by']) == ('them', [], 'you')
+    assert sides(theirs) == ([(iono, '1')], [(arven, '2')])
+    assert theirs['offer_id'] == mine['offer_id'] == new['id']
+    assert theirs['actions'] == ['accept', 'decline', 'counter'] and mine['closed_by'] is None
     row = row_of(new)
     assert (row['proposer_id'], row['recipient_id'], row['countered_from'], row['cash_cents'], row['cash_payer'],
             row['proposer_name'], row['recipient_name'], row['revision']) == (
@@ -1161,32 +1176,21 @@ def test_a_counter_that_brings_a_cash_only_side_to_a_recipient_not_open_is_refus
     assert counter(ash, trade, **sells).status_code == 200
 
 
-def test_a_counter_is_the_recipients_on_the_revision_they_read_and_only_while_proposed(store):
+def test_offer_changes_require_membership_current_offer_and_allowed_state(store):
     ids, ash, misty, binder, box = trading()
     iono, arven = ids['PAL 185'], ids['SVI 166']
-    (gary, _) = collector('Gary O.')
+    gary, _ = collector('Gary O.')
     original = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
-    asked = dict(get=[(iono, 1)])
-    assert counter(gary, original, **asked).content == UNKNOWN
-    assert counter(ash, {'id': str(uuid4()), 'revision': 1}, **asked).content == UNKNOWN
-    assert commands(gary) == 0
-    assert detail(counter(misty, original, give=[(iono, 1)])) == (409, {'code': 'STEP_NOT_ALLOWED'})
-    assert detail(counter(ash, original, revision=original['revision'] + 1, **asked)) == (
-        409, {'code': 'TRADE_CHANGED'})
-    taken = ok(accept_trade(ash, proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])))
-    assert detail(counter(ash, taken, **asked)) == (409, {'code': 'STEP_NOT_ALLOWED'})
-    other = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
-    ok(trade_step(misty, other, 'withdraw'))
-    assert detail(counter(ash, ok(read(ash, other)), **asked)) == (409, {'code': 'STEP_NOT_ALLOWED'})
-    answered = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
-    countered(ash, answered, **asked)
-    assert detail(counter(ash, ok(read(ash, answered)), **asked)) == (409, {'code': 'STEP_NOT_ALLOWED'})
-    last = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
-    with connect() as conn:
-        conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', tuple(sorted([ash, misty])))
-        conn.execute('INSERT INTO block (blocker_id, blocked_id) VALUES (%s, %s)', (misty, ash))
-    assert detail(counter(ash, last, **asked)) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
-    assert row_of(last)['state'] == 'proposed' and trade_picks(last['id']) == [('proposer', misty, binder, 1)]
+    assert counter(gary, original, get=[(iono, 1)]).content == UNKNOWN
+    assert detail(counter(ash, original, revision=99, get=[(iono, 1)])) == (409, {'code': 'TRADE_CHANGED'})
+    changed = countered(misty, original, give=[(iono, 2)], get=[(arven, 1)])
+    assert row_of(original)['state'] == 'closed'
+    assert detail(counter(ash, original, get=[(iono, 1)])) == (409, {'code': 'OFFER_CHANGED'})
+    agreed = ok(accept_trade(ash, changed))
+    changed_again = countered(ash, agreed, give=[(arven, 1)], get=[(iono, 1)])
+    assert row_of(changed)['state'] == 'closed'
+    ok(trade_step(ash, changed_again, 'withdraw'))
+    assert detail(counter(misty, changed_again, give=[(iono, 1)])) == (409, {'code': 'OFFER_CHANGED'})
 
 
 def test_a_retried_counter_answers_the_same_trade_and_writes_once(store):
@@ -1250,7 +1254,7 @@ def test_a_counter_and_a_withdraw_of_one_proposal_run_one_after_the_other(store,
     finally:
         held()
     assert winner.status_code == 200, winner.text
-    assert detail(loser) == (409, {'code': 'TRADE_CHANGED'})
+    assert detail(loser) == (409, {'code': 'OFFER_CHANGED'})
     if first == 'counter':
         assert row_of(original)['closed_reason'] == 'countered' and len(counters_of(original)) == 1
         assert reserved(misty, iono) == (0, 0) and reserved(ash, arven) == (1, 1)
@@ -1290,7 +1294,7 @@ def test_nearby_strangers_send_counter_and_accept_with_caps_on_the_strangers_lis
     assert trade['other'] == {'collector_id': None, 'handle': None, 'trader_id': trader_of(ash),
                               'display_name': 'Ash K.', 'open_to_cash_offers': False, 'friend': False,
                               'available': True, 'completed_trades': 0}
-    assert trade['conversation_id'] is not None
+    assert trade['conversation_id'] is None and trade['thread_id'] != trade['id']
     seen = ok(read(ash, trade))
     assert detail(counter(ash, seen, give=[(arven, 1)], get=[(iono, 4)])) == (
         409, {'code': 'NOT_TRADEABLE', 'edition_id': iono, 'available': '3', 'side': 'you_get'})
@@ -1408,9 +1412,9 @@ def test_a_closed_trade_whose_pair_has_no_conversation_still_opens(store):
     trade = proposed(misty, ash, give=[(ids['PAL 185'], 1)])
     ok(trade_step(misty, trade, 'withdraw'))
     with connect() as conn:
-        conn.execute('DELETE FROM conversation WHERE id = %s', (trade['conversation_id'],))
+        assert conn.execute('SELECT count(*) AS n FROM conversation WHERE id=%s', (trade['conversation_id'],)).fetchone()['n'] == 0
     assert ok(read(misty, trade))['conversation_id'] is None
-    assert trade['id'] in [item['id'] for item in ok(call('GET', '/api/social/trades', misty))['trades']]
+    assert trade['thread_id'] in [item['id'] for item in ok(call('GET', '/api/trades?group=done', misty))]
 
 
 def test_a_stored_send_from_before_the_party_fields_replays(store):

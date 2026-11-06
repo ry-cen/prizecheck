@@ -51,16 +51,16 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   const account = await accountId(page);
   const selected = await request();
   const pending = await request();
-  await loanStep(page, pending.id, `/api/loans/${pending.id}/accept`, {
+  await loanStep(page, pending.thread_id, "accept", {
     lines: [{ edition_id: ids["PAL 185"], promised: "3" }],
   });
   const history = await request();
-  await loanStep(page, history.id, `/api/social/loans/${history.id}/decline`);
+  await loanStep(page, history.thread_id, "decline");
   // Enough real requests to exercise the queue's independent scroll region.
   for (const _ of Array.from({ length: 6 })) await request();
   let listReads = 0;
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/social/loans") listReads++;
+    if (new URL(request.url()).pathname === "/api/loans") listReads++;
   });
   await page.goto(`${ORIGIN}/loans`);
   await expect(page.getByRole("region", { name: "Needs you" })).toBeVisible();
@@ -81,8 +81,8 @@ test("Loans keep a stable queue, canonical selection and open forms across width
     });
   }
   await page.setViewportSize({ width: 1600, height: 650 });
-  const row = main.locator(`a[href="/loans/${selected.id}"]`);
-  await main.locator("summary", { hasText: "History" }).click();
+  const row = main.locator(`a[href="/loans/${selected.thread_id}"]`);
+  await main.locator("summary", { hasText: "Done" }).click();
   const queueViewport = main.locator(".list-detail-viewport");
   await row.scrollIntoViewIfNeeded();
   const shortWindowScroll = await queueViewport.evaluate(
@@ -136,22 +136,25 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   await expect(heading).not.toBeFocused();
   expect(listReads).toBe(initialReads);
   // Root → A → B → Back to A → Back to root restores A, not the last clicked B.
-  const secondRow = main.locator(`a[href="/loans/${pending.id}"]`);
+  const secondRow = main.locator(`a[href="/loans/${pending.thread_id}"]`);
   await secondRow.click();
-  await expect(page).toHaveURL(`${ORIGIN}/loans/${pending.id}`);
+  await expect(page).toHaveURL(`${ORIGIN}/loans/${pending.thread_id}`);
   await page.goBack();
-  await expect(page).toHaveURL(`${ORIGIN}/loans/${selected.id}`);
+  await expect(page).toHaveURL(`${ORIGIN}/loans/${selected.thread_id}`);
   await expect(row).toHaveAttribute("aria-current", "page");
   await page.goBack();
   await expect(page).toHaveURL(`${ORIGIN}/loans`);
   await expect(row).toBeFocused();
   expect(listReads).toBe(initialReads);
   // Modified clicks retain native new-tab navigation without changing this entry.
-  await expect(secondRow).toHaveAttribute("href", `/loans/${pending.id}`);
+  await expect(secondRow).toHaveAttribute(
+    "href",
+    `/loans/${pending.thread_id}`
+  );
   const newTab = page.context().waitForEvent("page");
   await secondRow.click({ modifiers: ["ControlOrMeta"] });
   const tab = await newTab;
-  await expect(tab).toHaveURL(`${ORIGIN}/loans/${pending.id}`);
+  await expect(tab).toHaveURL(`${ORIGIN}/loans/${pending.thread_id}`);
   await expect(page).toHaveURL(`${ORIGIN}/loans`);
   await tab.close();
   await page.goForward();
@@ -163,7 +166,7 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   await page.setViewportSize(PHONE);
   await expect(row).toBeHidden();
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(`${ORIGIN}/loans/${pending.id}`);
+  await page.goto(`${ORIGIN}/loans/${pending.thread_id}`);
   await page.getByRole("button", { name: "More for this Loan" }).click();
   await page.getByRole("menuitem", { name: "Change return-by date" }).click();
   const date = page.getByLabel("Return by", { exact: true });
@@ -177,26 +180,27 @@ test("Loans keep a stable queue, canonical selection and open forms across width
     });
   }
   // The queue failing on a fresh direct link cannot block the independent detail.
-  await page.route("**/api/social/loans", (route) =>
+  await page.route("**/api/loans?**", (route) =>
     route.fulfill({ status: 500, body: "{}" })
   );
-  await page.goto(`${ORIGIN}/loans/${selected.id}`);
+  await page.goto(`${ORIGIN}/loans/${selected.thread_id}`);
   await expect(heading).toHaveText("Ash K wants to borrow 3 cards");
   await page.setViewportSize({ width: 1440, height: 1000 });
   await expect(page.getByText("Your Loans couldn't be loaded.")).toBeVisible();
   await expect(page.getByRole("main")).not.toContainText(deckName);
-  await borrower.goto(`${ORIGIN}/loans/${selected.id}`);
+  await borrower.goto(`${ORIGIN}/loans/${selected.thread_id}`);
   await expect(
     borrower.getByRole("link", { name: deckName, exact: true })
   ).toBeVisible();
-  const unrelated = (await collectors.signIn({ next: `/loans/${selected.id}` }))
-    .page;
+  const unrelated = (
+    await collectors.signIn({ next: `/loans/${selected.thread_id}` })
+  ).page;
   await expect(unrelated.getByRole("heading", { level: 1 })).toHaveText(
     "Loan not found"
   );
   await expect(unrelated.getByRole("main")).not.toContainText(deckName);
   // A step can move the originating row into History while the detail is open.
-  await page.unroute("**/api/social/loans");
+  await page.unroute("**/api/loans?**");
   await page.goto(`${ORIGIN}/loans`);
   await row.click();
   await page.getByRole("button", { name: "Decline", exact: true }).click();
@@ -208,7 +212,7 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   const listHeld = new Promise<void>((resolve) => {
     noteListHeld = resolve;
   });
-  await page.route("**/api/social/loans", async (route) => {
+  await page.route("**/api/loans?**", async (route) => {
     const response = await route.fetch();
     noteListHeld();
     await releasedList;
@@ -225,11 +229,11 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   await expect(
     page
       .getByRole("region", { name: "Needs you" })
-      .locator(`a[href="/loans/${selected.id}"]`)
+      .locator(`a[href="/loans/${selected.thread_id}"]`)
   ).toBeVisible();
   releaseList();
   await expect(
-    main.locator("details").locator(`a[href="/loans/${selected.id}"]`)
+    main.locator("details").locator(`a[href="/loans/${selected.thread_id}"]`)
   ).toBeFocused();
   await expect(main.locator("details")).toHaveAttribute("open", "");
 });

@@ -75,8 +75,12 @@ test("the lender writes off copies, and the borrower keeps them or says they're 
   await page.goto(`${ORIGIN}/loans`);
   await expect(
     page.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText("Misty W wrote off 2 cards you have");
-  await page.goto(`${ORIGIN}/loans/${ionoLoan}`);
+  ).toContainText("Keep or remove");
+  await page
+    .getByRole("region", { name: "Needs you" })
+    .getByRole("link")
+    .click();
+  await expect(title(page)).toHaveText("Misty W wrote off 2 cards you have");
   await expectPageChecks(page, "a Write-off to answer");
   await page.setViewportSize(PHONE);
   await expectPageChecks(page, "a Write-off to answer on a phone");

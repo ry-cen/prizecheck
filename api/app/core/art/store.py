@@ -37,7 +37,7 @@ import psycopg
 import httpx
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from app.art_storage import storage
+from app.core.art.art_storage import storage
 from app.core.art.public import read_pointer, write_pointer, delete_pointer, same_object
 from app.core.art.urls import SIZES, art_version
 from app.core.art.dimensions import image_size

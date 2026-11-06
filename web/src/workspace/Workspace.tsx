@@ -936,6 +936,10 @@ export function Workspace({
         rows={lending ?? []}
         onClose={() => setLending(null)}
         onSent={actions.clearSelection}
+        onLoansChanged={() => {
+          void loadTree();
+          gallery.reload();
+        }}
         onOpenLoan={(id) => {
           setLending(null);
           onOpenLoan(id);

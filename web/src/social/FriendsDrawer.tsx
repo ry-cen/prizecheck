@@ -18,8 +18,8 @@ import {
   blockCollector,
   declineFriendRequest,
   getFriends,
-  getLoans,
-  getTrades,
+  getLoanViews,
+  getTradeViews,
   lookupHandle,
   removeFriend,
   sendFriendRequest,
@@ -344,11 +344,11 @@ function FriendsDialog({
     setEnding(null);
     if (!endingId) return;
     const abort = new AbortController();
-    Promise.all([getLoans(abort.signal), getTrades(abort.signal)])
+    Promise.all([getLoanViews(abort.signal), getTradeViews(abort.signal)])
       .then(([loans, trades]) =>
         setEnding({
           id: endingId,
-          ending: friendshipEnding(loans.loans, trades.trades, endingId),
+          ending: friendshipEnding(loans, trades, endingId),
         })
       )
       .catch(() => undefined);

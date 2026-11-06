@@ -7,7 +7,6 @@
 # A package that moves a module, or adds one, updates this file in the same change.
 app core
 app.api_errors core
-app.art_storage core
 app.borrowed_copies core
 app.card_accepts core
 app.copy_allocation core
@@ -15,18 +14,14 @@ app.copy_picks core
 app.db core
 app.deck_deletion core
 app.deck_pick_list core
-app.holdings core
 app.host_readiness root
 app.identity core
 app.inventory_core core
 app.loan_inventory core
 app.loan_picks core
 app.location_tree core
-app.moves core
 app.operations core
-app.price_budget core
 app.price_launcher core
-app.price_reads core
 app.price_refresh core
 app.price_runner root
 app.public_projection core
@@ -35,6 +30,7 @@ app.quote_contract root
 app.settings core
 app.social core
 app.social.conversations core
+app.social.threads core
 app.social.counts core
 app.social.discovery core
 app.social.friend_copies core

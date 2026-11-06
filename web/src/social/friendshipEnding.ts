@@ -51,14 +51,14 @@ export function traderEnding(
   loans: readonly LoanView[] | null,
   trades: readonly TradeView[],
   traderId: string,
-  handle: string | null
+  handle: string | null,
+  knownFriendId: string | null = null
 ): FriendshipEnding {
-  const wanted = handle?.toLowerCase() ?? null;
-  const loan =
-    loans && wanted !== null
-      ? loans.find((item) => item.other.handle?.toLowerCase() === wanted)
-      : undefined;
-  const collectorId = loan?.other.collector_id ?? null;
+  const collectorId =
+    knownFriendId ??
+    trades.find((trade) => trade.other.trader_id === traderId)?.other
+      .collector_id ??
+    null;
   return {
     loans: collectorId === null ? 0 : loansEnding(loans ?? [], collectorId),
     ...countEnding(

@@ -182,7 +182,7 @@ const tile = (scope: Locator, side: "get" | "give", card: string) =>
 const library = (page: Page) =>
   page.getByRole("complementary", { name: "Cards" });
 const group = (page: Page, name: string | RegExp) =>
-  page.getByRole("group", { name });
+  page.getByRole("group", { name, exact: true });
 const lists = (page: Page) => ({
   get: page.getByRole("list", { name: "You get", exact: true }),
   give: page.getByRole("list", { name: "You give", exact: true }),
@@ -268,10 +268,10 @@ async function story(
   );
   await show(page, "Proposal");
   await expect(
-    group(page, "Iono (PAL 185) you get").locator("output")
+    group(page, "Iono (PAL 185) you get").getByText("1", { exact: true })
   ).toHaveText("1");
   await expect(
-    group(page, "Iono (PAL 254) you give").locator("output")
+    group(page, "Iono (PAL 254) you give").getByText("1", { exact: true })
   ).toHaveText("1");
   await expect(
     page.getByRole("region", { name: /^Choose printings for You/ })
@@ -590,4 +590,175 @@ test.describe("phone", () => {
     test.slow();
     await story(page, collectors, size, "375 px");
   });
+});
+
+// T-A UI-only edge states forced at the transport boundary. The real legacy
+// receipt/migration proofs live in api/tests/test_trade_send_replay.py. These
+// scenarios exercise the real composer and its imported generated send client;
+// they do not establish the later full thread-detail navigation gate.
+async function replayComposer(
+  page: Page,
+  collectors: Parameters<typeof story>[1]
+) {
+  const ids = seedCatalog();
+  const ash = await collectors.signIn();
+  await nameCollector(ash.page, "Ash K");
+  const shelf = await forTradeBinder(ash.page, "Ash Shelf");
+  await hold(ash.page, shelf, ids["SVI 166"], 3);
+  await noArtwork(page);
+  await signInAsOwner(page, "/collection");
+  await nameCollector(page, "Misty W");
+  await befriend(page, ash.page);
+  const trader = await traderIdOf(ash.page);
+  const current = await api(page, "POST", "/api/trades", {
+    recipient_trader_id: trader,
+    you_give: [],
+    you_get: [{ edition_id: ids["SVI 166"], quantity: "2" }],
+    idempotency_key: randomUUID(),
+  });
+  await page.goto(`${ORIGIN}/trades/new/${trader}`);
+  await tile(
+    page.getByRole("list", { name: "Ash K's Trade List" }),
+    "get",
+    ARVEN
+  ).click();
+  return current;
+}
+
+for (const outcome of ["current", "unavailable"] as const) {
+  test(`an already-applied ${outcome} send settles the mounted draft after double-click and an in-flight edit`, async ({
+    page,
+    collectors,
+  }) => {
+    const current = await replayComposer(page, collectors);
+    const keys: string[] = [];
+    let release = () => {};
+    const responseReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(`${ORIGIN}/api/trades`, async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      keys.push(route.request().postDataJSON().idempotency_key);
+      await responseReady;
+      await route.fulfill(
+        outcome === "current"
+          ? {
+              status: 201,
+              json: {
+                outcome: "already_applied",
+                view: "current",
+                label: "Current Trade",
+                trade: current,
+              },
+            }
+          : {
+              status: 409,
+              json: {
+                detail: {
+                  code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+                  outcome: "already_applied",
+                  view: "unavailable",
+                },
+              },
+            }
+      );
+    });
+    try {
+      const send = page.getByRole("button", { name: "Send Trade Proposal" });
+      // Two DOM clicks in one event turn exercise the synchronous send guard,
+      // before React's disabled/busy render can protect a second invocation.
+      await send.evaluate((button) => {
+        button.click();
+        button.click();
+      });
+      await expect.poll(() => keys.length).toBe(1);
+      await page.getByRole("radio", { name: "You pay", exact: true }).click();
+      await page
+        .getByRole("textbox", { name: "Amount in US dollars" })
+        .fill("5.00");
+    } finally {
+      release();
+    }
+    if (outcome === "current") {
+      await expect(heading(page)).toHaveText("Current Trade");
+      await expect(page.getByRole("main").getByRole("status")).toContainText(
+        "Your proposal was already sent. These are the current terms."
+      );
+      await expect(
+        page.getByRole("link", { name: "View current Trade" })
+      ).toHaveAttribute("href", `/trades/${current.thread_id}`);
+      await expect(
+        page.getByRole("region", { name: "You get", exact: true })
+      ).toContainText("2 copies");
+    } else {
+      await expect(page.getByRole("main").getByRole("status")).toContainText(
+        "Your proposal was already sent. This Trade isn't available to view. Return to Trades to check your items."
+      );
+      await expect(
+        page.getByRole("link", { name: "View current Trade" })
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("region", { name: "You get", exact: true })
+      ).toHaveCount(0);
+    }
+    await expect(
+      page.getByRole("button", { name: "Send Trade Proposal" })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("textbox", { name: "Amount in US dollars" })
+    ).toHaveCount(0);
+    await expect(toast(page)).not.toContainText("Trade Proposal sent to Ash K");
+    expect(
+      await page.evaluate(() => {
+        const event = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      })
+    ).toBe(false);
+    await page
+      .getByRole("link", { name: "Back to Trades", exact: true })
+      .click();
+    await expect(page).toHaveURL(`${ORIGIN}/trades`);
+    await page.reload();
+    expect(keys).toHaveLength(1);
+  });
+}
+
+test("an unknown initial-send outcome keeps its key and a known nonterminal refusal allows a new one", async ({
+  page,
+  collectors,
+}) => {
+  await replayComposer(page, collectors);
+  const keys: string[] = [];
+  await page.route(`${ORIGIN}/api/trades`, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    keys.push(route.request().postDataJSON().idempotency_key);
+    const status = keys.length === 1 ? 503 : keys.length === 2 ? 422 : 409;
+    const detail =
+      keys.length === 1
+        ? { code: "INVENTORY_TEMPORARILY_UNAVAILABLE" }
+        : keys.length === 2
+          ? { code: "TOO_MANY_LINES" }
+          : {
+              code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+              outcome: "already_applied",
+              view: "unavailable",
+            };
+    await route.fulfill({ status, json: { detail } });
+  });
+  const send = page.getByRole("button", { name: "Send Trade Proposal" });
+  await send.click();
+  await expect(page.getByRole("main").getByRole("alert")).not.toBeEmpty();
+  await send.click();
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+    "A Trade Proposal can list up to 50 cards on each side. Remove some, then send again."
+  );
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+  await send.click();
+  await expect(
+    page.getByRole("button", { name: "Send Trade Proposal" })
+  ).toHaveCount(0);
+  expect(keys).toHaveLength(3);
+  expect(keys[2]).not.toBe(keys[1]);
 });

@@ -326,8 +326,10 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await lender.goto(`${ORIGIN}/loans`);
   const needsYou = lender.getByRole("region", { name: "Needs you" });
   await expect(needsYou.getByRole("link")).toHaveCount(1);
+  await expect(needsYou.getByRole("link")).toContainText("Ash K");
+  await expect(needsYou.getByRole("link")).toContainText("Borrow Request");
   await expect(needsYou.getByRole("link")).toContainText(
-    "Ash K wants to borrow 3 cards"
+    "You give 3 · You get 0"
   );
   await expect(lender.getByRole("main")).not.toContainText(deckName);
   await expectPageChecks(lender, "the Loans tab");
@@ -352,12 +354,18 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
     .getByRole("button", { name: /^Decrease Copies of Boss's Orders,/ })
     .click();
   await expect(loanCards(lender).nth(1)).toContainText("Not lent");
+  await expect(
+    lender.getByRole("region", { name: "Acceptance preview" })
+  ).toContainText("2 to lend; 1 not lent.");
   await expectPageChecks(lender, "answering a Borrow Request");
   await lender.setViewportSize(PHONE);
   await expectPageChecks(lender, "answering a Borrow Request on a phone");
   await lender.setViewportSize(DESKTOP);
   await lender.getByRole("button", { name: "Accept", exact: true }).click();
   await expect(title(lender)).toHaveText("You're lending Ash K 2 cards");
+  await expect(
+    lender.getByRole("region", { name: "Acceptance preview" })
+  ).toHaveCount(0);
   await expect(title(lender)).toBeFocused();
   await expect(loanCards(lender).nth(0)).toContainText(
     `From ${lugiaName} (1) · Unsorted (1)`
@@ -386,7 +394,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
     .click();
   await expect(
     page.getByRole("region", { name: "Pending" }).getByRole("link")
-  ).toContainText("Misty W is lending you 2 cards");
+  ).toContainText("You give 0 · You get 2");
   await expectPageChecks(page, "the Loans tab on a phone");
   await page.setViewportSize(DESKTOP);
   await page.goto(`${ORIGIN}/decks/want-list`);
@@ -432,7 +440,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   );
 });
 
-test("a Borrow Request drafted from a Friend's Collection and the card popup is declined, edited and resent, and withdrawn", async ({
+test("a Borrow Request drafted from a Friend's Collection and the card popup is declined, then explicitly requested again and withdrawn", async ({
   page,
   collectors,
 }) => {
@@ -590,14 +598,42 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   ).toEqual(["You declined Ash K's request for 2 cards"]);
   await lender.unroute(/\/api\/loans\/[^/]+\/side$/);
 
-  // Ash finds it under History and edits and resends it.
+  // Closed items are terminal: no edit-to-create fallback. A fresh explicit Borrow entry creates a new request.
   await page.goto(`${ORIGIN}/loans`);
-  await page.locator("summary", { hasText: "History" }).click();
-  await page
-    .getByRole("link", { name: /Misty W declined your request for 2 cards/ })
-    .click();
-  await page.getByRole("button", { name: "More for this Loan" }).click();
-  await page.getByRole("menuitem", { name: "Edit and resend" }).click();
+  await page.locator("summary", { hasText: "Done" }).click();
+  const declinedRow = page
+    .getByRole("list", { name: "Done Loans" })
+    .getByRole("link");
+  await expect(declinedRow).toContainText("Misty W");
+  await expect(declinedRow).toContainText("Closed");
+  await declinedRow.click();
+  await expect(title(page)).toHaveText(
+    "Misty W declined your request for 2 cards"
+  );
+  await expect(
+    page.getByRole("button", { name: "More for this Loan" })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("menuitem", { name: "Change terms" })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("menuitem", { name: "Edit and resend" })
+  ).toHaveCount(0);
+  const startFreshDraft = async () => {
+    await page.goto(`${ORIGIN}/friends/${mistyHandle}`);
+    await page.getByRole("button", { name: "All cards", exact: true }).click();
+    for (const name of ["Boss's Orders", "Iono"])
+      await page
+        .getByRole("button", {
+          name: `Ask to borrow ${name} from Misty W`,
+          exact: true,
+        })
+        .click();
+    await tray(page)
+      .getByRole("button", { name: "Review Borrow Request to Misty W" })
+      .click();
+  };
+  await startFreshDraft();
   await expect(
     composer
       .getByRole("list", { name: "Cards to borrow" })
@@ -627,14 +663,13 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   await withdraw.getByRole("button", { name: "Withdraw request" }).click();
   await expect(title(page)).toHaveText("You withdrew your request to Misty W");
   await expect(title(page)).toBeFocused();
-  await expect(more).toBeVisible();
+  await expect(more).toHaveCount(0);
   // A withdrawn Loan has no role fact and names no Deck.
   await expect(facts(page)).toHaveCount(0);
   await expect(deckLinks(page)).toHaveCount(0);
 
-  // Keep draft keeps an edited request as a draft; signing out forgets it.
-  await more.click();
-  await page.getByRole("menuitem", { name: "Edit and resend" }).click();
+  // Fresh explicit Borrow drafts still survive Keep draft and are forgotten at sign-out.
+  await startFreshDraft();
   await composer.getByRole("button", { name: "Keep draft" }).click();
   await expect(composer).toBeHidden();
   await expect(tray(page)).toContainText("2 cards");

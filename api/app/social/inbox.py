@@ -96,6 +96,7 @@ class InboxTradeUpdate(BaseModel):
     id: str
     kind: TradeUpdateKind
     trade_id: UUID
+    thread_id: UUID
     trade_state: Literal['proposed', 'accepted', 'closed']
     role: Literal['proposer', 'recipient']
     other_name: str
@@ -125,7 +126,7 @@ def notice_id(kind: str, loan_id) -> str:
 def waiting_since(user_id: str, row, facts, step: str) -> datetime:
     """When the Loan began to wait on the reader for ``step`` (``loans.Waiting``), from times the Loan already holds:
     a Borrow Request or Lend Offer to answer, its ``created_at``; a handover the other side confirmed (hand_over,
-    receive), that confirmation; a return to confirm or finish, the return's start; written-off copies to keep or
+    confirm_handover), that confirmation; a return to confirm or finish, the return's start; written-off copies to keep or
     remove, the newest Write-off (``written_off_at``); more time asked for, when it was asked (``extension_asked_at``).
     Three have no moment of their own and use the nearest one the Loan holds: out-of-date picks (fix_picks) and a
     Loan that predates ``written_off_at`` or ``extension_asked_at`` use ``accepted_at``, and copies still out once the
@@ -133,13 +134,14 @@ def waiting_since(user_id: str, row, facts, step: str) -> datetime:
     account went. Overdue isn't a waiting step; it is an update, whose time is ``at``."""
     if step == 'answer':
         return row['created_at']
-    if step in ('confirm_return', 'finish_return'):
-        return facts.pending['created_at']
-    if step in ('hand_over', 'receive'):
+    if step == 'confirm_return':
+        if facts.pending is not None:
+            return facts.pending['created_at']
+        # With the other account gone, copies still out await the reader's return.
+        return row[f'{role_of(user_id, row)}_handover_at'] or row['accepted_at'] or row['created_at']
+    if step in ('hand_over', 'confirm_handover'):
         return row['borrower_handover_at' if step == 'hand_over' else 'lender_handover_at']
-    if step == 'return':
-        return row[f'{role_of(user_id, row)}_handover_at'] or row['accepted_at']
-    named = {'choose': 'written_off_at', 'more_time': 'extension_asked_at'}.get(step)
+    named = {'choose_written_off': 'written_off_at', 'answer_more_time': 'extension_asked_at'}.get(step)
     return (row[named] if named else None) or row['accepted_at'] or row['created_at']
 
 
@@ -203,7 +205,7 @@ def trade_waiting(conn, user_id: str) -> list[InboxTradeWaiting]:
 
 
 # The Trade updates stored for the reader on Trades they are a side of, newest first.
-TRADE_UPDATES = """SELECT u.id, u.kind, u.trade_id, u.other_name, u.read_at, u.created_at, t.state AS trade_state,
+TRADE_UPDATES = """SELECT u.id, u.kind, u.trade_id, t.thread_id, u.other_name, u.read_at, u.created_at, t.state AS trade_state,
     t.closed_reason, t.proposer_id
   FROM inbox_update u JOIN trade t ON t.id = u.trade_id
   WHERE u.recipient_id = %(me)s AND u.dismissed_at IS NULL AND (t.proposer_id = %(me)s OR t.recipient_id = %(me)s)
@@ -216,7 +218,7 @@ def trade_updates(conn, user_id: str) -> list[InboxTradeUpdate]:
     return [InboxTradeUpdate(
         id=str(event['id']),
         kind='withdrawn' if event['kind'] == 'cancelled' and event['closed_reason'] == 'withdrawn' else event['kind'],
-        trade_id=event['trade_id'], trade_state=event['trade_state'],
+        trade_id=event['thread_id'], thread_id=event['thread_id'], trade_state=event['trade_state'],
         role='proposer' if event['proposer_id'] == user_id else 'recipient', other_name=event['other_name'],
         read=event['read_at'] is not None, at=event['created_at'])
         for event in conn.execute(TRADE_UPDATES, {'me': user_id, 'limit': UPDATES})]

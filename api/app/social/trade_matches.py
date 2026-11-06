@@ -740,12 +740,17 @@ def trader_other(conn, user_id: str, trader_id: UUID) -> str:
 
 @router.get('/traders/{trader_id}', response_model=TraderView)
 def trader_view(trader_id: UUID, user_id: str = Depends(verified_user)):
-    """One collector's header by trader id: a pair with a conversation, or anyone the reach rule holds for. 404
+    """One collector's header by trader id: a known Thread/legacy pair, or anyone in reach. 404
     COLLECTOR_NOT_FOUND for an unknown trader id, the viewer's own, and a collector out of reach. Writes nothing."""
     with connect() as conn, conn.transaction():
         other = trader_other(conn, user_id, trader_id)
         row = pair_row(conn, user_id, other)
-        if row is None and reach_one(conn, user_id, other) is None:
+        low,high=sorted((user_id,other))
+        known = conn.execute("""SELECT EXISTS(
+          SELECT 1 FROM thread WHERE user_low=%s AND user_high=%s
+          UNION ALL SELECT 1 FROM legacy_contact WHERE user_low=%s AND user_high=%s) AS found""",
+                             (low,high,low,high)).fetchone()['found']
+        if not known and reach_one(conn, user_id, other) is None:
             error(404, 'COLLECTOR_NOT_FOUND')
         profile = conn.execute('SELECT display_name, open_to_cash_offers FROM collector_profile WHERE user_id = %s',
                                (other,)).fetchone()

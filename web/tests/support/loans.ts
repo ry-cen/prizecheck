@@ -5,6 +5,12 @@ import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { expect } from "./collectors";
+import type {
+  LoanDetail,
+  LoanResolution,
+  LoanView,
+  ThreadItem,
+} from "../../src/social_generated";
 
 export const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 export const PHONE = { width: 390, height: 844 };
@@ -139,16 +145,48 @@ export async function setLine(
   });
 }
 
-/** One Loan step through the API, at the Loan's current revision. `path` is the step's route, such as
- * "/api/loans/<id>/handover"; `body` its own fields. */
+/** Read current terms through the round-or-thread resolver, keeping inventory assertions free to use round IDs. */
+export async function loanView(page: Page, id: string): Promise<LoanView> {
+  const found: LoanResolution = await api(
+    page,
+    "GET",
+    `/api/loans/resolve/${id}`
+  );
+  const detail: LoanDetail = await api(
+    page,
+    "GET",
+    `/api/loans/${found.thread_id}`
+  );
+  return detail.live_terms;
+}
+
+/** All item groups, including requests awaiting the other participant. */
+export async function loanItems(page: Page): Promise<ThreadItem[]> {
+  const pages: ThreadItem[][] = await Promise.all(
+    ["needs_you", "open", "out_now", "pending", "done"].map((group) =>
+      api(page, "GET", `/api/loans?group=${group}`)
+    )
+  );
+  return [...new Map(pages.flat().map((item) => [item.id, item])).values()];
+}
+
+/** One strict thread command, bound to the current Loan terms and revision. */
 export async function loanStep(
   page: Page,
   loanId: string,
-  path: string,
+  step:
+    | "accept"
+    | "decline"
+    | "withdraw"
+    | "cancel"
+    | "handover"
+    | "returns"
+    | "write-off",
   body: object = {}
 ) {
-  const loan = await api(page, "GET", `/api/social/loans/${loanId}`);
-  return api(page, "POST", path, {
+  const loan = await loanView(page, loanId);
+  return api(page, "POST", `/api/loans/${loan.thread_id}/${step}`, {
+    loan_id: loan.loan_id,
     revision: loan.revision,
     idempotency_key: randomUUID(),
     ...body,
@@ -178,13 +216,13 @@ export async function lendHandedOver(
     return_by: returnBy,
     idempotency_key: randomUUID(),
   });
-  await loanStep(lender, sent.id, `/api/loans/${sent.id}/accept`, {
+  await loanStep(lender, sent.id, "accept", {
     lines: lines.map(([edition, copies]) => ({
       edition_id: edition,
       promised: String(copies),
     })),
   });
-  await loanStep(lender, sent.id, `/api/loans/${sent.id}/handover`);
-  await loanStep(borrower, sent.id, `/api/loans/${sent.id}/handover`);
+  await loanStep(lender, sent.id, "handover");
+  await loanStep(borrower, sent.id, "handover");
   return sent.id as string;
 }

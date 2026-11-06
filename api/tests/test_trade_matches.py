@@ -863,13 +863,14 @@ def test_the_radius_filters_near_you_by_band_and_nobody_beyond_50_mi_appears(sto
         neighbour(name, zip, holds=[(iono, 1)])
     neighbour('Far', far_zip(), holds=[(iono, 1)])
     talk = neighbour('Talk', '00014', holds=[(iono, 1)])
-    with connect() as conn:
-        conn.execute("SELECT pair_conversation(%s, %s, 'A', 'B')", (talk, viewer))
+    # Contact comes from an item thread; pair Conversations are read-only archive data.
+    from test_threads import thread
+    thread(talk, viewer, closed=True)
     for radius, expected in ((5, ['One']), (10, ['One', 'Two']), (25, ['One', 'Three', 'Two']),
                              (50, ['Four', 'One', 'Talk', 'Three', 'Two'])):
         ok(put(viewer, {'radius_mi': radius}))
         body = near(viewer)
-        # A conversation reaches the Trade List but does not widen Near you: Talk (band 4) is in only at 50 mi.
+        # A shared thread reaches the Trade List but does not widen Near you: Talk (band 4) is in only at 50 mi.
         assert sorted(names(body['rows'])) == [name for name in expected if name != 'Talk' or radius == 50], radius
         assert body['radius_mi'] == radius and 'Far' not in names(body['rows'])
 

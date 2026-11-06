@@ -239,17 +239,22 @@ def for_trade_fields(row, marked: set[UUID], above: dict[UUID, UUID | None]) -> 
 VOID_DIGEST = 'void:v1'
 
 
-def replay(conn, user_id, key, payload):
+def replay_with_presence(conn, user_id, key, payload) -> tuple[str, bool, object]:
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
     row = conn.execute("SELECT request_digest,response FROM location_command WHERE owner_id=%s AND request_key=%s", (user_id, key)).fetchone()
-    if row:
+    if row is not None:
         if row["request_digest"] == VOID_DIGEST:
             error(409, "IDEMPOTENCY_KEY_VOID")
         if row["request_digest"] != digest:
             error(409, "IDEMPOTENCY_KEY_REUSED")
-        return digest, row["response"]
-    return digest, None
+        return digest, True, row["response"]
+    return digest, False, None
 
+
+
+def replay(conn, user_id, key, payload):
+    digest, _found, stored = replay_with_presence(conn, user_id, key, payload)
+    return digest, stored
 
 def record_response(conn, user_id, key, digest, stored) -> None:
     """Records ``stored`` (a JSON-ready dict) as the response of the command ``replay`` answers for this key."""

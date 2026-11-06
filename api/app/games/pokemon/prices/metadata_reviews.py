@@ -25,7 +25,7 @@ from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, Match
                               code_digest, fingerprint, is_unspecified,
                               load_active, refresh_editions, refresh_printing, reviewed_rule, rule_projection,
                               verified_elsewhere)
-from app.holdings import fail
+from app.core.inventory.holdings import fail
 from app.db import connect
 from app.identity import require_owner, verified_user
 

@@ -65,7 +65,7 @@ const ART_PATH = /^\/api\/art\/[^/]+\/[^/]+$/;
 const ART_LINK =
   /^https:\/\/tcgplayer-cdn\.tcgplayer\.com\/product\/[0-9]{1,9}_(?:200|400)w\.jpg$/;
 
-// Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/price_budget.py;
+// Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/core/prices/price_budget.py;
 // api/tests/test_trade_value.py fails when they differ.
 const BUDGETED_ROUTES: { method: string; pattern: RegExp }[] = [
   { method: "POST", pattern: /^\/api\/prices\/editions$/ },

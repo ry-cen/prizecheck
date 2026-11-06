@@ -3,7 +3,6 @@ import { Ellipsis } from "lucide-react";
 import type { NearbyMatchRow } from "../social_generated";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
-import { focusMenuTrigger } from "./ConversationMenu";
 import { rowMenuLabel } from "./nearYouMessages";
 import { useTraderBlock } from "./TraderBlock";
 import { useTraderReport } from "./TraderReport";
@@ -19,6 +18,10 @@ export function NearRowMenu(props: {
   onBlocked: (status: string) => void;
 }) {
   const anchor = useRef<HTMLDivElement>(null);
+  const returnFocus = () =>
+    anchor.current
+      ?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')
+      ?.focus();
   const block = useTraderBlock(
     {
       traderId: props.row.trader_id,
@@ -31,7 +34,7 @@ export function NearRowMenu(props: {
         props.onBlocked(status);
         props.onChanged();
       },
-      returnFocus: () => focusMenuTrigger(anchor),
+      returnFocus,
     }
   );
   const report = useTraderReport(
@@ -47,7 +50,7 @@ export function NearRowMenu(props: {
         props.onBlocked(status);
         props.onChanged();
       },
-      returnFocus: () => focusMenuTrigger(anchor),
+      returnFocus,
     }
   );
   const items: MenuItem[] = [];
