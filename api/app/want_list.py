@@ -48,6 +48,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.core.decks.needs import allocation_needs
+
 from .card_accepts import accepts
 from .copy_allocation import Allocation, LineCount, allocate, deck_order
 from .location_tree import error, owner_and_rows
@@ -217,16 +219,6 @@ def combined(capture: WantListCapture, needs: dict[UUID, list[LineCount]]) -> li
             rows.setdefault(line.edition_id, []).append(line)
     pick = sum if capture.counting == 'all_at_once' else max
     return [(edition, pick(line.need for line in lines), lines) for edition, lines in rows.items()]
-
-
-def allocation_needs(allocation: Allocation) -> dict[UUID, int]:
-    """The Want List's combined need from an existing allocation, without reading or allocating twice."""
-    lines: dict[UUID, list[int]] = {}
-    for (_, edition), line in allocation.lines.items():
-        if line.need > 0:
-            lines.setdefault(edition, []).append(line.need)
-    pick = sum if allocation.counting == 'all_at_once' else max
-    return {edition: pick(needs) for edition, needs in lines.items()}
 
 
 def edition_needs(conn, user_id: str, edition_ids=None) -> dict[UUID, int]:
