@@ -42,6 +42,60 @@ async function identifyOfferReads(
   }, id);
 }
 
+/** Snapshot before interception: recording a held route must not wait on backend
+ * I/O, which can finish out of order or survive until context teardown. */
+async function holdDetailReads(
+  page: import("@playwright/test").Page,
+  id: string
+) {
+  const response = await page.request.get(`${ORIGIN}/api/trades/${id}`);
+  expect(response.ok()).toBe(true);
+  const body: Record<string, unknown> = await response.json();
+  await response.dispose();
+  const reads: Route[] = [];
+  const released = new Set<Route>();
+  let holding = true;
+  await page.route(`**/api/trades/${id}`, (route) => {
+    if (
+      !holding ||
+      route.request().method() !== "GET" ||
+      route.request().headers()["x-prizecheck-test-reader"] === "offer"
+    )
+      return route.continue();
+    reads.push(route);
+  });
+  async function release(route: Route, outcome = "writable") {
+    released.add(route);
+    try {
+      if (outcome === "failed") await route.abort("failed");
+      else
+        await route.fulfill({
+          json: { ...body, can_message: outcome === "writable" },
+        });
+    } catch (error) {
+      expect(route.request().failure()?.errorText).toContain("ABORTED");
+    }
+  }
+  return {
+    reads,
+    release,
+    async finish() {
+      // Switch first: reads arriving while we drain must run normally.
+      holding = false;
+      await Promise.all(
+        reads
+          .filter((route) => !released.has(route))
+          .map((route) => release(route))
+      );
+      await page.unroute(`**/api/trades/${id}`);
+    },
+  };
+}
+
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 for (const outcome of ["writable", "read-only", "failed"] as const) {
   for (const order of ["obsolete-first", "newest-first"] as const) {
     test(`native held chat sends only after the newest read: ${outcome}, ${order}`, async ({
@@ -71,16 +125,8 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
         posts.push(route.request().postData()!);
         await route.continue();
       });
-      const reads: { route: Route; body: Record<string, unknown> }[] = [];
-      await page.route(`**/api/trades/${id}`, async (route) => {
-        if (
-          route.request().method() !== "GET" ||
-          route.request().headers()["x-prizecheck-test-reader"] === "offer"
-        )
-          return route.continue();
-        const response = await route.fetch();
-        reads.push({ route, body: await response.json() });
-      });
+      const held = await holdDetailReads(page, id);
+      const reads = held.reads;
       const recheck = () =>
         page.evaluate(() =>
           document.dispatchEvent(new Event("visibilitychange"))
@@ -97,23 +143,8 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
       expect(posts).toEqual([]);
       await recheck();
       await expect.poll(() => reads.length).toBe(2);
-      const obsolete = async () => {
-        // Superseded reads may already have been aborted by the real fetch signal.
-        try {
-          await reads[0].route.fulfill({ json: reads[0].body });
-        } catch (error) {
-          expect(reads[0].route.request().failure()?.errorText).toContain(
-            "ABORTED"
-          );
-        }
-      };
-      const newest = async () => {
-        if (outcome === "failed") await reads[1].route.abort("failed");
-        else
-          await reads[1].route.fulfill({
-            json: { ...reads[1].body, can_message: outcome === "writable" },
-          });
-      };
+      const obsolete = () => held.release(reads[0]);
+      const newest = () => held.release(reads[1], outcome);
       if (order === "obsolete-first") {
         await obsolete();
         expect(posts).toEqual([]);
@@ -123,6 +154,7 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
         await newest();
         await obsolete();
       }
+      await held.finish();
       if (outcome === "writable") {
         await expect(
           page.getByRole("list", { name: "Messages and changes" })
@@ -240,8 +272,7 @@ test("native held chat is dropped on a real document departure without a POST", 
   await page
     .getByRole("textbox", { name: /^Message / })
     .fill("Not sent after leaving");
-  let held: Route | undefined;
-  let detail: unknown;
+  const held = await holdDetailReads(page, id);
   const bodies: string[] = [];
   page.on("request", (request) => {
     if (
@@ -250,26 +281,16 @@ test("native held chat is dropped on a real document departure without a POST", 
     )
       bodies.push(request.postData()!);
   });
-  await page.route(`**/api/trades/${id}`, async (route) => {
-    if (route.request().headers()["x-prizecheck-test-reader"] === "offer")
-      return route.continue();
-    detail = await (await route.fetch()).json();
-    held = route;
-  });
   await page.evaluate(() =>
     document.dispatchEvent(new Event("visibilitychange"))
   );
-  await expect.poll(() => Boolean(held)).toBe(true);
+  await expect.poll(() => held.reads.length).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Sending…", exact: true })
   ).toBeDisabled();
   await page.goto(`${ORIGIN}/collection`);
-  try {
-    await held!.fulfill({ json: detail });
-  } catch {
-    expect(held!.request().failure()?.errorText).toContain("ABORTED");
-  }
+  await held.finish();
   await expect(page).toHaveURL(`${ORIGIN}/collection`);
   expect(bodies).toEqual([]);
 });
@@ -295,24 +316,18 @@ test("native unknown chat holds its exact replay body and key through a permissi
     .filter({ has: editor })
     .getByRole("button", { name: "Retry", exact: true });
   await expect(retry).toBeEnabled();
-  let held: Route | undefined;
-  let detail: unknown;
-  await page.route(`**/api/trades/${id}`, async (route) => {
-    if (route.request().headers()["x-prizecheck-test-reader"] === "offer")
-      return route.continue();
-    detail = await (await route.fetch()).json();
-    held = route;
-  });
+  const held = await holdDetailReads(page, id);
   await page.evaluate(() =>
     document.dispatchEvent(new Event("visibilitychange"))
   );
-  await expect.poll(() => Boolean(held)).toBe(true);
+  await expect.poll(() => held.reads.length).toBeGreaterThan(0);
   await retry.click();
   await expect(
     page.getByRole("button", { name: "Sending…", exact: true })
   ).toBeDisabled();
   expect(bodies).toHaveLength(1);
-  await held!.fulfill({ json: detail });
+  await expect(editor).toHaveAttribute("readonly", "");
+  await held.finish();
   await expect(editor).toHaveValue("");
   expect(bodies).toHaveLength(2);
   expect(bodies[1]).toBe(bodies[0]);
