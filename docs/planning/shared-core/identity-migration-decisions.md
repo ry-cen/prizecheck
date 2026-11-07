@@ -2,7 +2,8 @@
 
 **Status:** proposal for owner review, for [#531](https://github.com/ry-cen/prizecheck/issues/531) and
 [#533](https://github.com/ry-cen/prizecheck/issues/533). Nothing here is approved. It authorizes no migration, security
-change, cutover or deployment, and it adds no accepted ADR. Every recommendation is an input to Ryan's decision.
+change, cutover or deployment, and it adds no accepted ADR. Every recommendation is an input to Ryan's decision. Revised
+after independent review of `84879403` (findings ID564-01 to -05), which added IM-16 to IM-18. Earlier numbers are kept.
 
 **Evidence:** `dev` at `434f5b7adfac925c833a64e1e5e53b243bef7a81`. Paths with line numbers are at that commit. Counts are
 `grep` file counts on that commit. No database was touched, so schema statements come from reading migration text. What
@@ -21,25 +22,28 @@ migration numbered 100, and `deploy.sh`, `server.ts` and `auth.ts` are `deploy/h
 
 ## Decisions Ryan must make
 
-Decide IM-3, IM-7 and IM-11 first. Most of the others follow from them.
+Decide IM-3 with IM-16, then IM-7 and IM-11. Most of the others follow from them.
 
 | ID    | Question                                                       | Recommendation                                                          | ADR                 |
 | ----- | -------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------- |
 | IM-1  | Route all identity SQL through one seam before any split?      | Yes, and widen the checker first                                        | no                  |
-| IM-2  | How do gateway counters reach the operations panel?            | A signed internal gateway read; the panel still answers without it      | with identity       |
+| IM-2  | How do gateway counters reach the panel, and what if that read fails? | A signed internal read; on failure the whole read answers 503, with no invented numbers | with identity |
 | IM-3  | Who writes Handles?                                            | The gateway owns the store; the API keeps the rules and calls it        | proposed: identity  |
 | IM-4  | Is Display Name shared or per game?                            | Shared, stored with the Handle                                          | proposed: identity  |
-| IM-5  | How do backends receive identity, and what is first touch?     | An ordered change feed each backend pulls; first touch reads identity   | proposed: identity  |
+| IM-5  | How do backends receive identity, and what is first touch? | An ordered change feed each backend pulls; first touch reads identity under IM-17's rules | proposed: identity |
 | IM-6  | One signing secret, or one per backend?                        | One per backend; Pokémon keeps its current secret                       | proposed: identity  |
 | IM-7  | How does a backend prove the owner?                            | A local owner replica; no signed claim for now. Reverses an earlier answer | proposed: identity  |
 | IM-8  | Is account deletion part of #533?                              | No. Keep the path open and ticket it as a product feature               | proposed: deletion  |
-| IM-9  | What order does deletion run in?                               | Auth first, with a tombstone in the feed                                | proposed: deletion  |
-| IM-10 | How long can a game hold data, and how is a restore repaired?  | Ryan sets the limit; keep tombstones for now                            | proposed: deletion  |
+| IM-9  | What order does deletion run in? | Auth first, with a tombstone in the feed; a game's identity step stays in feed order, its closing rules do not | proposed: deletion |
+| IM-10 | How long can a game hold deleted data, and how does a game recover? | Ryan sets the limit; keep tombstones for now | proposed: deletion |
 | IM-11 | One migration track, or core and per-game tracks?              | Core, per-game and auth tracks; Pokémon's files stay put                | proposed: tracks    |
 | IM-12 | How does a database select its tracks without `GAME`?          | One explicit entry script per database                                  | proposed: tracks    |
 | IM-13 | How is the core baseline built, and when?                      | Curated from a schema dump, with proof, only when a second game is approved | proposed: tracks    |
 | IM-14 | Same PostgreSQL server? Co-located test harness?               | Same server, separate database; co-located by default, plus split tests | proposed: identity  |
-| IM-15 | What is the rollback window, and when do legacy tables go?     | Keep them through the backup window; dropping is a separate approval    | proposed: tracks    |
+| IM-15 | What is the rollback window, and when do legacy tables go? | Keep them for a window Ryan sets in days; dropping is a separate approval | proposed: tracks |
+| IM-16 | What must a backend prove to change shared identity? | A gateway-only authorization bound to the real request | proposed: identity |
+| IM-17 | How is the mirror kept consistent? | One mirror writer, vacate markers instead of removed rows, snapshot for recovery | proposed: identity |
+| IM-18 | What does an auth restore guarantee? | Fencing at any split; an external deletion journal before deletion ships | proposed: deletion |
 
 Three proposed ADRs would come out of these answers: shared identity, account deletion across games, and migration
 tracks with a baseline. The tracks ADR changes ADR 0023's "Migrations are not split" consequence, so it should say so.
@@ -124,11 +128,29 @@ The panel reads two event tables and three `operations_counter` names that the g
 | B. API reads the auth database                      | Simple SQL                                    | Puts auth credentials in every backend        |
 | C. Gateway pushes rollups into each game            | Panel stays local                             | Fans out sign-in data no game needs           |
 
-**Recommendation:** A, per panel rather than per game, with a short timeout. The response shape must not change, so the
-fields read as "unverified" or null when the gateway does not answer. `sign_in_delivery` already has an `'unverified'`
-state (`operations.py:81`), but the two 24-hour counts do not, so this needs checking against the API contract snapshot.
+**Recommendation on transport:** A, with a short timeout.
 
-**Ryan decides:** whether a game's operations panel shows sign-in numbers at all, or whether they belong on one panel.
+**What happens when that read fails is a real contract choice.** `OperationsStatus.sign_in_requests_24h` and `signups_24h`
+are required `int`s (`api/app/operations.py:40,45`), pinned in `api/tests/api_contract/openapi.json:12037-12045`, and
+`signup_warning` is computed from one of them (`:47,81`). They cannot be null or `'unverified'`. That state exists only for
+`sign_in_delivery` (`:41`), and only `sign_in_delivered` and `sign_in_failed` are nullable (`:42-43`). ADR 0023 makes any
+change to a response shape an owner decision.
+
+The failure is narrow. The panel's request reaches the API only after the gateway has found a session (`server.ts:583-590`),
+so a gateway or auth database that is fully down never gets as far as this read. What remains is the internal read failing
+or timing out while the gateway is otherwise serving.
+
+| Option | When the read fails | For | Against |
+| --- | --- | --- | --- |
+| 1. Fail the read with 503 | The whole panel read fails | No contract change; no false number; the web page already shows a failure state (`OwnerControlsPage.tsx:92-99`) | One failed read hides every other panel figure until a retry works |
+| 2. Change the contract | Counts become nullable, with the rest of the panel intact | Honest partial panel | Needs owner approval, a new snapshot, the generated client and `web/src/owner/health.ts:63,84-86`; `signup_warning` needs a defined value |
+| 3. Last-known values cached in the game database | Old numbers, same shape | Partial panel with no contract change | The response cannot say they are stale, and a new database has no honest value to return |
+| 4. Return 0 | Zero | None | Rejected: it reports an unknown as a measured zero and clears the sign-up warning |
+
+**Recommendation on failure:** option 1. The failure is rare, and it needs no contract change.
+
+**Ryan decides:** the failure option, and whether a game's operations panel shows sign-in numbers at all or they belong on
+one panel. Moving them is also a contract change.
 
 ## 2. Ownership of shared identity, Handle and Display Name
 
@@ -147,19 +169,52 @@ spec, from the same day, says a claim goes through the gateway. #531 voids both 
 | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | A. Gateway owns store and rules (split-map Design B)                        | One writer; matches ADR 0022                                                            | Ports `social/name_rules.py` and the word filter to TypeScript; two rule sets risk drift; moves 11 API test files' coverage |
 | B. API writes through a narrow auth role (brief D4)                         | Smallest diff; check order unchanged                                                    | Auth credentials in every backend; several writers                     |
-| C. Gateway owns the store behind a signed internal route; API keeps the rules | One writer; no auth credentials in backends; no rule port; `PUT /api/profile/*` unchanged | A network call inside the game transaction, under the owner lock; a new internal route to secure               |
+| C. Gateway owns the store behind a signed internal route; API keeps the rules | One writer; no auth credentials in backends; no rule port; `PUT /api/profile/*` unchanged | A network call inside the game transaction; a new internal route that gives backends write authority unless IM-16 binds it |
 | D. Per-game Handles                                                         | No shared write                                                                         | Excluded: Handles are shared                                                                                   |
 
 **Recommendation:** C. `set_handle`'s order stays. The format, filter, same-Handle and attempt-limit steps stay local.
 The 30-day check runs from the mirror and again in the auth transaction, so a stale mirror cannot pass it. The claim
 takes a request key and is idempotent in auth. If the game commit fails after auth commits, a retry with the same
 idempotency key gets the same answer, and the feed repairs the mirror if the client never retries. The call needs a hard
-timeout, because the owner lock is held across it.
+timeout, because locks are held across it. Removing database credentials does not remove write authority: IM-16 covers what
+the call must prove, and IM-17 covers how its answer reaches the mirror.
 
 **Accept with C:** the hourly attempt limit stays per game (`handle_lookup_event`), so a collector using both sides gets
 10 an hour on each. The 30-day limit and the hold are global.
 
 **Ryan decides:** A, B or C.
+
+### IM-16: what a backend must prove to change shared identity
+
+Today `set_handle` takes its subject only from `Depends(verified_user)` (`profile.py:214`). IM-3 C adds a hop, and a backend
+can sign anything with a key it holds. Its own valid internal key proves which backend is calling, not that a collector asked
+for this change. If auth trusts the subject a backend names, a compromised game can change any collector's shared Handle and
+Display Name, on every side, and start their global 30-day limit. It cannot sign in as them. IM-6 does not contain this, and
+under this model a breach of one game reaches the other's identity data.
+
+| Option | What a compromised backend can do | For | Against |
+| --- | --- | --- | --- |
+| A. Trusted backends: the internal key is enough | Rewrite or squat any collector's shared identity | Least work | Largest blast radius; must be accepted knowingly |
+| B. Gateway-bound authorization | Act only on a request a live session really made, in a short window | Keeps IM-3 C; containment holds for writes | Gateway must recognize the two routes, as it does `BUDGETED_ROUTES` (`server.ts:70`); a new signature to test |
+| C. Gateway answers the routes itself (IM-3 A) | Nothing: backends leave the write path | Cleanest boundary | Needs the rule port and its drift risk |
+| D. A with audit and rate alarms | As A, but noticed later | Cheap add-on | Detects, does not prevent |
+
+**Recommendation:** B. For `PUT /api/profile/handle` and `/display-name` only, the gateway adds a second signature under a key
+no backend holds, over a purpose prefix, the target backend, the subject, the method and path, the body hash and a stamp. The
+backend passes it on with the original body bytes. Auth verifies it, reads the requested value from those bytes rather than
+from a caller field, and ties the claim's idempotency to subject, operation and payload. The body already holds the
+idempotency key, so one authorization cannot be reused for another collector, operation or value.
+
+**Residual risk under B, to accept:** a compromised backend can skip local name rules for a request its own collector really
+made, can drop a request, and can resend the same one inside the window, which idempotency absorbs. If IM-3 is B, this has no
+equivalent and A's blast radius applies at the SQL level.
+
+**Reads are a different case.** Feed and counter reads name no subject, so the per-backend key is the right check. Each game
+still receives every collector's Handle and Display Name, whether or not they ever open that side, and has to discard the
+rest. Responses must be bound to the backend, operation, cursor, epoch and request, so that an old valid response cannot roll
+a mirror back.
+
+**Ryan decides:** A, B or C, with or without D, and whether every game seeing all Handles is acceptable.
 
 ### IM-4: Display Name
 
@@ -193,24 +248,66 @@ These are product results, not technical limits:
 | C. Read per lookup                                      | No mirror                                                                                      | Rewrites 13 modules; every social read depends on the gateway               |
 | D. Sign the Handle into requests                        | No store                                                                                       | Covers the caller only, not the Friends shown to them                       |
 
-**Recommendation:** A. The change made in one game shows at once there, because the claim's answer updates its mirror.
-Other games catch up on their next pull. Applying in feed order also deals with the non-deferrable `handle_key` UNIQUE
-(`100:11`) after a long absence.
+**Recommendation:** A, under IM-17's rules. The game where a collector made the change waits for the feed to reach that
+change before answering, so it shows at once there. Other games catch up on their next pull.
 
-**Two hazards to carry into acceptance:**
+**Three hazards to carry into acceptance:**
 
 - A sequence value is not commit order. A pull that passes a value can miss a lower one that commits later. Feed appends
   must be serialized in auth.
-- A restored auth database rewinds the feed. See [IM-10](#im-10-absence-retention-and-restore).
+- Feed order alone does not protect the mirror. See [IM-17](#im-17-keeping-the-mirror-consistent).
+- A restored auth database rewinds the feed. See [IM-18](#im-18-what-an-auth-restore-guarantees).
 
 **First touch.** A game creates `inventory_owner` lazily at 10 API sites, and the insert fires a trigger that generates a
 **local** random Handle (`100:89-96`). In a split that Handle would be unknown to auth. Every one of those sites must go
-through one helper, in the game transaction, that reads the identity and overwrites the placeholder. The design brief's
-D6 proposed this as `adopt_new_owner`, and the site list has since moved. Sign-up must also create the auth identity
-atomically, replacing what `020` and `100` give today. `auth/tests/signup.test.ts:81-84` currently asserts that a new
-account has an owner row and Unsorted, so a split topology changes when those rows appear.
+through one helper, in the game transaction, that takes the identity under IM-17's rules and overwrites the placeholder. The
+design brief's D6 proposed this as `adopt_new_owner`, and the site list has since moved. First touch now needs auth to answer,
+which is a new availability dependency. Sign-up must also create the auth identity atomically, replacing what `020` and `100`
+give today. `auth/tests/signup.test.ts:81-84` currently asserts that a new account has an owner row and Unsorted, so a split
+topology changes when those rows appear.
 
 **Ryan decides:** A or B, and an acceptable lag for a Handle change to reach the other game.
+
+### IM-17: keeping the mirror consistent
+
+The first draft claimed that applying the feed in order protects the non-deferrable `handle_key` UNIQUE (`100:11`). That only
+holds if the feed is the sole writer and its history stays intact. Two independent review counterexamples break it, and both
+reproduce in an in-memory schedule check:
+
+- **Out-of-band writes.** Auth records A→`ccc`, B→`aaa`, A→`ddd`, B→`ccc`, with the required waits. A stale game applies B's
+  command answer directly, so B holds `ccc`. Replay then fails on A→`ccc` at the first event and can never reach the fourth. An
+  old event can also overwrite a newer answer, and a first-touch snapshot ahead of the cursor collides the same way.
+- **Redaction.** A→`ccc`, B→`aaa`, A is deleted. Removing A's earlier rows means replay reaches B→`aaa` while the stale game's A
+  still holds `aaa`, so it fails before reaching A's tombstone.
+
+The invariant worth having: **a game's mirror equals auth's identity at the game's cursor, for the collectors it has rows
+for.** Auth's own UNIQUE then guarantees the mirror's at every step.
+
+| Option | For | Against |
+| --- | --- | --- |
+| A. One mirror writer, plus vacate markers | The invariant holds; a simple rule to test; both schedules pass the in-memory check | Answers and first touch wait for catch-up; a long backlog must fail, not block |
+| B. Versions per collector, with direct writes and a closure repair (`design-brief.md:397-408`) | Answers need no catch-up | Skipping old versions does not make cross-collector keys safe; every path needs the placeholder repair; more states |
+| C. Snapshot reconcile only, with no replay | One mechanism | Every absence costs a full reconcile; no ordering guarantee between snapshots |
+
+**Recommendation:** A, keeping a snapshot reconcile for recovery only. The rules:
+
+- **One writer.** Only feed apply writes mirror identity columns. A command answer returns the claim's sequence, and the game
+  catches up to that sequence before answering. First touch takes a snapshot with its sequence and, holding the apply lock,
+  catches up to it before inserting. Collectors with no row in that game are skipped.
+- **Vacate markers.** Deletion redacts by rewriting a collector's earlier rows, not removing them. A rewritten row keeps its
+  sequence and opaque id and carries no Handle or name; it tells a stale game to replace that collector's Handle with a
+  placeholder that can never be a real Handle and that passes the `100:8-14` CHECKs. The release dependency survives without
+  the value.
+- **Two-part tombstones.** See [IM-9](#im-9-order). The part that frees the Handle stays in feed order and cannot fail on domain
+  rules.
+- **Snapshot reconcile** rewrites a game's identity columns from auth at one sequence, with a placeholder phase. It is for when
+  replay is impossible, such as after IM-18's fence, not for routine use.
+- **Lock order.** Apply writes `collector_profile`, whose outbox relies on holding that collector's `inventory_owner` lock
+  (`100:34-35`), and ADR 0015 fixes owner locks in ascending order. So the apply lock must come before any owner lock, and
+  catch-up may not start while one is held. `set_handle` takes the owner lock first today (`profile.py:223`), so this changes
+  its order under a split. S6 must also check the 10 lazy sites against this order.
+
+**Ryan decides:** A, B or C, and how long a Handle command may wait on catch-up before it fails with a retryable error.
 
 ## 3. Signed-owner checks
 
@@ -255,7 +352,8 @@ With a path-stripping gateway, the same signed request is also valid on either b
 (`core/inventory/cursors.py:17`, `core/decks/index.py:16` and others), so rotating Pokémon's would invalidate them;
 leaving it alone avoids that entirely. This is security-sensitive, and the recommendation changes nothing until a second
 backend exists. Internal routes from IM-2, IM-3 and IM-5 need a signing scheme of their own, with a prefix as the budget
-signature has, so no response or internal call can be replayed as a user request.
+signature has, so no response or internal call can be replayed as a user request. Separate keys stop direct cross-backend
+forgery. They do not, by themselves, limit what a backend may ask auth to do: that is IM-16.
 
 **Ryan decides:** A, B or C.
 
@@ -268,25 +366,28 @@ Riftbound spec and ADR 0022 say a flag on the user, signed by the gateway, with 
 | Option                                                        | Revocation                    | API credentials | Jobs (`rule_rollout`, readiness)  | Tests                                                 |
 | ------------------------------------------------------------- | ----------------------------- | --------------- | --------------------------------- | ----------------------------------------------------- |
 | A. Local replica: `owner_binding` per game, auth authoritative | On next apply, or by tool     | None            | Work unchanged                    | None change                                           |
-| B. Signed claim (ADR 0022), plus a replica for jobs           | Immediate for routes          | None            | Still need the replica            | 19 API files seed `owner_binding`; some must change   |
+| B. Signed claim (ADR 0022), plus an owner source for jobs | Immediate for routes | None | A replica, or a gateway read at job time (split-map 5.2); the read makes startup rollout and restore depend on the gateway | 19 API files seed `owner_binding`; some must change |
 | C. API reads auth `owner_binding`                             | Immediate                     | Auth role       | Read auth too                     | Few                                                   |
 
 **Recommendation:** A, which **reverses the 2026-10-29 signed-flag answer**, so it needs Ryan's explicit choice. The
 reasoning:
 
-- Exception 6 means B cannot remove a game-side owner read. Jobs have no request. So both A and B keep an owner copy per game,
-  and B adds a new signed fact on top.
-- B's real advantage is immediate revocation when the owner changes, and the product has no way to change the owner.
-  Ending the owner's sessions already works at once in auth under either option.
+- Exception 6 means a claim alone cannot replace every owner read, because jobs have no request. B needs a replica or a gateway
+  read at job time. The read avoids a local copy but ties `rule_rollout` to the gateway. This narrows B, and does not rule it out.
+- B's real advantage is immediate revocation when the owner changes, and the product has no way to change the owner. Ending
+  the owner's sessions stops new requests at once under either option. A request already signed stays valid for up to 30
+  seconds under both.
 - A keeps `require_owner`, its 35 calls and today's failure behaviour exactly. That matches "no security change".
-- A compromised game can fake owner on that game alone in either design, given IM-6.
+- A compromised game can pass that game's own owner checks in either design, given IM-6. That is a statement about direct
+  owner checks only. It says nothing about shared identity writes (IM-16).
 - B is additive later, through a prefixed second signature, if owner transfer ever becomes a feature.
 
-A's risk is a stale replica after an owner change, and it fails open for the former owner. If a transfer is ever built, it
-must rebind every game and include disabled ones when they return. Auth keeps its own owner record for the sign-up gate
+A's risk is a stale replica after an owner change, and it fails open for the former owner. This is a limit of A, not a detail,
+so it does not make A security-neutral across a split. Initialization, restore and any later rebind must fail closed. If a
+transfer is ever built, it must rebind every game and include disabled ones when they return. Auth keeps its own owner record for the sign-up gate
 under every option. `bind_owner.py` gets a defined per-database behaviour, and its `"user"` check moves to auth.
 
-**Ryan decides:** A, B or C, and if the signed flag stands, that the replica for jobs is accepted alongside it.
+**Ryan decides:** A, B or C, and if the signed flag stands, whether jobs use a replica or a gateway read.
 
 ## 4. Deletion and replay when a game is unavailable
 
@@ -333,19 +434,19 @@ ships first, the gap covers two databases.
 The spec's "calls each enabled backend's deletion route" is a form of A, with a separate rule for disabled backends.
 
 **Recommendation:** B. In one auth transaction: delete `"user"` (which cascades `session` and `account`), remove the
-identity, hold the Handle in `released_handle`, append a tombstone, and redact that user's earlier feed rows. A game
-applies a tombstone in one local transaction:
+identity, hold the Handle in `released_handle`, append a tombstone, and rewrite that user's earlier feed rows as vacate markers
+([IM-17](#im-17-keeping-the-mirror-consistent)). A game then handles the tombstone in two parts, because Handles are one global,
+reusable namespace and ordering does not stop at one collector:
 
-1. Record the id in a table outside the owner cascade. This is the idempotency proof.
-2. Run the closing rules.
-3. Remove the collector's rows.
-4. Queue public removals.
-5. Advance the cursor.
+1. **Identity step, in feed order, in the transaction that advances the cursor.** Record the id in a table outside the owner
+   cascade, which is the idempotency proof, and move the collector's Handle to a placeholder. This frees the Handle for later
+   events, and domain rules cannot make it fail.
+2. **Closing step, off the cursor, retryable.** Run the closing rules, remove the collector's rows and queue public removals.
+   A failure here parks that one collector and alerts the owner, and later identity changes keep flowing.
 
-Lazy creation checks that table first, which closes the in-flight case.
-
-**Open under B:** one tombstone that cannot apply would stall every later identity change for that game. Parking it with
-an owner alert needs designing, because ordering matters only per collector. The owner's own account must be refused.
+Lazy creation must refuse a recorded id, and that check must be serialized with creation and with the identity step, not merely
+run earlier in a racing transaction. A closing step that stays parked leaves data in the game, so it counts against IM-10's
+limit. The owner's own account must be refused.
 
 **Ryan decides:** A, B or C.
 
@@ -358,24 +459,64 @@ With the recommended feed:
 | Game down for minutes                          | It pulls from its cursor on return                                                                                                            |
 | Duplicate delivery                             | The tombstone table and the cursor make it a no-op                                                                                            |
 | Game disabled for weeks                        | It must drain the feed before taking traffic, so "switching back on needs no migration step" gains a readiness gate                          |
-| Handle released, reused while a game is stale  | Feed order applies the release first, so the mirror's UNIQUE holds. The 30-day hold narrows this but does not close it                        |
-| Game wiped                                     | Nothing to apply; its cursor no longer holds retention back                                                                                   |
+| Handle released, reused while a game is stale | Safe only under IM-17, where the feed is the sole writer and vacate markers keep the dependency |
+| Game wiped | Nothing to apply, and its cursor stops holding retention back, unless a retained dump of it may still be restored |
 | Game restored from an older dump               | The cursor rewinds with the data, so deletions after the dump apply again. Push needs a manual resend here                                    |
-| Auth restored from an older dump               | **Not solved by the feed.** Deleted accounts return, and game cursors run ahead of the feed. Needs a feed epoch that makes a game refuse to pull, and a repair from game tombstone tables |
-| In-flight signed request after deletion        | Refused by the tombstone check at lazy creation                                                                                               |
+| Auth restored from an older dump | **Not solved by the feed.** See [IM-18](#im-18-what-an-auth-restore-guarantees) |
+| In-flight signed request after deletion | Refused by the recorded id, if that check is serialized with lazy creation |
 
 **Backups stop being one snapshot.** `backup_database` dumps one database (`deploy.sh:708`), `scripts/recovery.py:65`
 walks one database's tables, and the guides warn that anything after a dump is lost (`docs/deployment-oracle.md:889`).
 After a split, a restore of either database means reconciling against the other. This is a new operating cost whatever is
 chosen here.
 
-**Recommendation:** keep tombstones with no pruning for now, because `KEEP_BACKUPS=10` (`deploy.sh:59`) and manual dumps
-set how far a restore can rewind. A tombstone holds an opaque id only. Write the restore procedure for both directions
-before any production split.
+**Recommendation:** keep tombstones and vacate markers with no pruning for now. `KEEP_BACKUPS=10` (`deploy.sh:59`) counts dumps,
+not days, and manual dumps sit beside it, so together they set how far a restore can rewind. Both record types hold an opaque
+id and no Handle or name. Write the restore procedure for both directions before any production split.
 
 **Ryan decides:** how long a disabled game may keep a deleted collector's data, and whether backups of deleted data are
 acceptable until they age out. Riftbound's spec says "when it is re-enabled or wiped", which has no upper limit. Whether a
 limit is legally required, and whether an opaque id counts as personal data, is **not assessed here**.
+
+### IM-18: what an auth restore guarantees
+
+A game's tombstone table cannot repair an auth restore in general. If a deletion commits in auth while every game is down, and
+auth is then restored from an earlier dump, the tombstone and its feed history are gone, and no game ever saw them. **That fact
+cannot be derived from anything left in the system.** The first draft implied otherwise.
+
+A restore also brings back sessions: `session` lives in the auth database (`002:3`), the gateway authorizes from that lookup
+(`server.ts:583-590`) and `auth.ts` configures no cookie cache. So a game refusing to pull does not stop a restored session
+signing requests. An epoch stored in the auth database rewinds with the dump, so it identifies nothing unless the procedure
+replaces it.
+
+**Fencing is needed at any split, whichever option below is chosen, and whether or not deletion exists.** Handle changes and
+sign-ups after the dump are lost in the same way. The proposed procedure, extending the guide's stop step
+(`docs/deployment-unraid.md:526-530`):
+
+1. Keep the gateway stopped, past the 30-second signature window, and record a fence on the host, outside any restored
+   database, which the gateway checks at start so a restart cannot skip it.
+2. Restore auth, then mint a new feed epoch from the procedure, not from the dump.
+3. Delete every restored `session` row, and `verification` rows. Everyone signs in again. A restored session may belong to an
+   account deleted or signed out after the dump.
+4. Apply whatever deletion evidence exists from the option below.
+5. A game that sees the new epoch stops pulling and refuses identity commands until a snapshot reconcile
+   ([IM-17](#im-17-keeping-the-mirror-consistent)) completes. Auth wins for identity. Compare each owner replica.
+6. List game rows with no auth user. These collectors signed up after the dump and have lost their sign-in, and signing in
+   again would make a new user id. Re-linking them is a manual owner decision.
+7. Lift the fence only after readiness passes for every enabled game.
+
+| Option | Guarantee | For | Against |
+| --- | --- | --- | --- |
+| A. Accept the loss | Deletions after the dump that reached no game are undone; those accounts return | No new parts | Breaks a promise made to a collector; must be accepted in writing |
+| B. Deletion journal outside auth and its backups | Deletions survive any auth restore | The only option that keeps the guarantee | A new durable dependency. It must be written before the collector is told deletion is done, and refuse otherwise. A store on the same host fails with it |
+| C. Continuous WAL archiving | Narrows the window | Also shrinks loss of sign-ups and Handle changes | Nothing is configured today; heavier to run; a restore to before corruption still loses evidence |
+
+**Recommendation:** fencing in S7, and B before account deletion ships. Deletion is unbuilt, so nothing can be lost yet. The
+`PrivateBackupStore` protocol (`scripts/private_backup_store.py`) is a candidate home if its target is truly off-host, which was
+not checked. A journal entry holds an opaque id and a time.
+
+**Ryan decides:** A, B or C, as a gate on the deletion ticket, and whether signing everyone out after an auth restore is
+acceptable.
 
 ## 5. Migration tracks and a fresh baseline
 
@@ -519,7 +660,7 @@ real undo, and anything written after it is lost.
 | Split, before a second game         | Stop new release; copy changed identity back; start old release (brief 3.5). Legacy tables must still exist                              | Lost writes if the copy-back is skipped                                                |
 | Split, after second-game users      | Copy-back also carries users who never opened Pokémon                                                                                    | See below                                                                              |
 
-**Copy-back has a trap.** An upsert into legacy `"user"` fires `onboard_auth_account` (`020:11-12`), which creates
+**Copy-back has a trap.** The insert arm of an upsert into legacy `"user"` fires `onboard_auth_account` (`020:11-12`), which creates
 `inventory_owner`, Unsorted and a profile with a fresh generated Handle, for anyone new since the cutover. The copy must
 order its work so that profile takes the auth Handle, and must decide what to do about Riftbound-only users. `identity_cutover.py`
 in the brief does not exist and has not been designed against this.
@@ -532,8 +673,8 @@ cannot restore a deleted collector's sign-in.
 
 **Recommendation:**
 
-- Legacy identity tables stay in the Pokémon database, unused, through at least one full `KEEP_BACKUPS` cycle after
-  cutover and until the second game opens.
+- Legacy identity tables stay in the Pokémon database, unused, for a window Ryan sets in days, and until the second game opens.
+  `KEEP_BACKUPS` counts dumps, not days, so check the window against how often dumps are actually taken.
 - A read-only reconcile between auth and the legacy tables runs before the window closes.
 - Any drop is a new root migration under a separate, later approval. It is never in the cutover release, and it ends the
   copy-back path, so it needs an explicit sign-off.
@@ -576,25 +717,35 @@ chains: S3 leads to both S4 and S10, and S10 does not depend on S5 to S9.
   unchanged; all existing suites pass unchanged; empty-database installs of each track pass in CI.
 - Rollback: unset the setting. Extra ledger rows are harmless to older releases.
 
-### S5. Internal identity API and feed, on a disposable split stack (IM-3, IM-4, IM-5, IM-6)
+### S5. Internal identity API and feed, on a disposable split stack (IM-3, IM-4, IM-5, IM-6, IM-16)
 
 - Acceptance: claims are idempotent; the check order and error codes match `set_handle`; feed appends are serialized with
   a test that holds a lower sequence open; internal routes refuse bad signatures, stale stamps, another backend's secret
   and edge traffic; a killed game transaction after an auth commit converges; split tests are required in CI.
+- Negative cases under the IM-16 choice: a caller using **its own valid key** with a forged subject is refused; an
+  authorization is refused for a different subject, operation, backend or body, and after its window; an old feed or counter
+  response is refused when replayed against a new request.
 - Rollback: co-located default remains; disable by configuration. Nothing in production uses it.
 
-### S6. Mirror apply, first touch and owner replica (IM-5, IM-7)
+### S6. Mirror apply, first touch and owner replica (IM-5, IM-7, IM-17)
 
 - Acceptance: social reads are unchanged; first touch never publishes a local random Handle; `require_owner` denies by
   default with no replica row; all 35 `require_owner` calls keep their behaviour; `rule_rollout` still applies and
-  restores; readiness reports an unbound game.
+  restores; readiness reports an unbound game; a missing or mismatched replica fails closed at initialization, restore and
+  rebind.
+- Mirror cases under the IM-17 choice: a lagged game with a reused Handle converges with no UNIQUE failure; an old event
+  arriving after a newer answer or snapshot changes nothing; a snapshot reconcile finishes from a deliberately collided state;
+  a backlog past the limit fails with a retryable error; feed apply and owner commands run concurrently with no deadlock.
 - Rollback: co-located mode makes the apply a no-op; revert the code. Replica rows are harmless.
 
-### S7. Operations panel and multi-database operations (IM-2, IM-10)
+### S7. Operations panel and multi-database operations (IM-2, IM-10, IM-18)
 
-- Acceptance: the panel's response shape is unchanged, and it answers when the gateway is down; deploy backs up every
-  database; `recovery.py` covers each; the restore procedure for each direction is written and rehearsed on disposable
-  databases.
+- Acceptance: the panel's 200 response matches the contract, or the approved new one if Ryan chooses that; when the internal
+  read fails the behaviour matches the IM-2 choice and never reports a false number; deploy backs up every database;
+  `recovery.py` covers each; the restore procedure for each direction is written and rehearsed on disposable databases.
+- Restore cases: the gateway will not start under the fence; restored sessions stop working; a game refuses the new epoch until
+  reconciled; a synthetic tombstone written while all games are down, followed by an auth restore, gives the outcome the IM-18
+  choice promises, and the rehearsal records what was lost.
 - Rollback: revert code; added backups are harmless.
 
 ### S8. Cutover tooling and rehearsal (IM-15)
@@ -614,9 +765,12 @@ chains: S3 leads to both S4 and S10, and S10 does not depend on S5 to S9.
   populated paths record it without running it; a stub game track proves the install order; no Riftbound product code ships.
 - Rollback: revert. A recorded ledger row is harmless; Pokémon's schema is untouched.
 
-### Separate ticket: account deletion (IM-8, IM-9, IM-10)
+### Separate ticket: account deletion (IM-8, IM-9, IM-10, IM-17, IM-18)
 
-Depends on S5 and S6. It is a collector-facing feature with its own spec, and it must resolve the 15 no-action foreign keys.
+Depends on S5, S6 and the IM-18 choice. It is a collector-facing feature with its own spec, and it must resolve the 15 no-action
+foreign keys. Its acceptance includes replaying a change, a deletion, its redaction and a later reuse of the same Handle against
+a stale game; a parked closing step with later Handle reuse continuing; and a real deletion with all games down, followed by an
+auth restore.
 
 ## Validation summary
 
@@ -628,9 +782,10 @@ This covers #531's fourth criterion. No check here has been run.
   rehearsals use disposable databases only.
 - **Security:** the owner check denies by default; a signature from one backend fails on another; internal routes are
   unreachable from the edge, where nginx proxies only `/api` and `/auth` (`nginx.conf:30`), so any internal path must stay
-  outside both; the API holds no auth credentials under the recommended options.
+  outside both; the API holds no auth credentials under the recommended options, and holding its own valid key does not let a
+  backend act for a collector who made no request.
 - **Failure:** kill each side of a two-database write; take a game down during identity changes; restore each database from
-  an older dump.
+  an older dump; run the IM-17 and IM-18 schedules.
 
 ## #531 acceptance status
 
@@ -664,4 +819,7 @@ This covers #531's fourth criterion. No check here has been run.
 - **Compose beyond the deploy file.** Port exposure was read from `compose.deploy.yml` only.
 - **Legal retention.** No legal assessment of deletion, backups or opaque ids was made.
 - **Feed volume, poll cost and latency.** No measurement. The designs above are untested.
+- **IM-17's schedules.** Checked in memory against the two review counterexamples only, with no database and no concurrency.
+- **Session state after a restore.** Read from `auth/src/auth.ts` configuration, not traced through Better Auth.
+- **`PrivateBackupStore` targets.** Whether a configured store is off-host was not checked.
 - **Riftbound facts.** The spec's claims are unconfirmed and it is behind `dev`.
