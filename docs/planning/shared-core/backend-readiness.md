@@ -6,7 +6,7 @@
 
 **Companion:** [Riftbound catalog acceptance](riftbound-catalog-acceptance.md) holds the synthetic cases that run before any real ingestion.
 
-**Parallel tracks.** The identity and migration decision package owns #531 and #533. This plan lists their gaps and designs nothing for them. A separate track audits the matching and inventory seams and picks the slices, so this plan states that area's gap at plan level only. [#530](https://github.com/ry-cen/prizecheck/issues/530) found no useful Card Reports extraction ([assessment](card-reports-assessment.md)) and is not reopened.
+**Parallel tracks.** The identity and migration decision package owns #531 and #533. This plan lists their gaps and designs nothing for them. A separate track audits the matching and inventory seams and picks the slices, so this plan states that area's gap at plan level only. Its audit is at `/home/t3/.t3/task-artifacts/backend-readiness-20261107/seam-audit.md`. Its first slice, pick-order extraction, is on `refactor/matching-inventory-seams`. [#530](https://github.com/ry-cen/prizecheck/issues/530) found no useful Card Reports extraction ([assessment](card-reports-assessment.md)) and is not reopened.
 
 **Status words.** Completed: the tree meets the requirement. Partial: some of it does, and the gap is named. Remaining: not started.
 
@@ -30,7 +30,7 @@ That boundary is no longer what stands between this tree and a second backend:
 | A3 | A core function needing a game value takes a keyword-only parameter with no default (`0023:10`) | Partial | Done for art (`core/art/store.py:75`, `:230`), quotes (`core/prices/quote_contract.py:565`), the runner (`core/prices/runner.py:134`), Collection (`core/inventory/collection.py:124`, `:210`) and publishing (`core/publications/publish.py:118`). | The `cost.py` model default in A2 is the one exception found. |
 | A4 | A route that needs a Pokémon value moves whole to the game (`0023:11`) | Partial | Done for Decks, Collection, the Borrowed gallery, publishing and imports. `api/app/social/friend_reads.py` and `api/app/social/trade_matches.py` keep routers in `mixed` modules. | Matching track (R7). |
 | A5 | `main.py` mounts the Pokémon app: `ROUTERS` and `LIFESPAN_HOOKS` (`0023:12`) | Partial | `api/app/main.py:13`, `:43-44`, but `api/app/main.py:9`, `:41` also import and mount the Borrowed gallery router outside `ROUTERS`. | A second mount would have to edit around a Pokémon router (R2). |
-| A6 | `main.py` chooses which game to mount, with no `GAME` setting and no registry (`0023:12`) | Remaining | One game is hard-wired at `api/app/main.py:13`. No mechanism exists, and any choice inside one module needs an input the ADR rejects. | Decision D5. |
+| A6 | When Riftbound arrives, `main.py` chooses which game's app to mount, with no `GAME` setting and no registry (`0023:12`, `:24`) | Remaining | Only Pokémon is mounted today (`api/app/main.py:13`, `:43-44`), which is the ADR's intended present state. | Deferred by the ADR to the second game. How a deployed container gives `main.py` that choice is open, for slice planning under R13. |
 | A7 | No registry, no `GAME` setting, no protocols (`0023:12`) | Completed | `games/pokemon/app.py:67-95` is plain tuples. The Riftbound spec's `GAME` setting and interface list are obsolete. | None. |
 | A8 | Root shims only for named entry points and old import names (`0023:13`) | Partial | `app.catalog_import`, `catalog_refresh`, `catalog_targets`, `public_catalog`, `public_prices`, `price_runner`, `quote_contract` and `host_readiness` are thin. `api/app/api_errors.py` remains for one caller, `api/app/location_tree.py:10`. | `host_readiness.py:24` holds identity SQL (#531 gap). `api_errors` can go (R3). |
 | A9 | Phasing: Now packages (`0023:14`) | Completed | Split-map section 10 records WP-S1 to WP-D2. The owners file has no `pokemon` line left outside `games/`. | None. |
@@ -50,7 +50,7 @@ That boundary is no longer what stands between this tree and a second backend:
 | C4 | Real shared readers are exercised | Partial | The test runs `CARD_FACTS`, `card_facts`, `Card.order`, `AVAILABLE`, `accepts`, `resolve` and Deck capture (`api/tests/test_catalog_data_contract.py:117-247`). Holdings and Collection rest on separate suites, as the contract says. | Accepted limit. Riftbound-shaped coverage is the acceptance spec. |
 | C5 | Write-side requirements | Remaining | Contract columns are consumed columns only. Unlisted requirements include `catalog_printing.source` and its pairing check (`migrations/003_catalog.sql:33`, `:38`), `identity_key` (`:28`), `descriptor_key` (`:43`), and `basic_energy` and `source_fingerprint` in generation rows (`:67-68`). | Decision D4. Blocks a Printing that records its TCGCSV source. |
 | C6 | Second-game contract | Remaining | Ruled out of scope by the contract itself (`catalog-data-contract.md:6`, `:159`). | Decision D4. |
-| C7 | Set-code view has a row for every Printing | Partial | The contract calls this essential (`catalog-data-contract.md:62`). Design brief lines 810-811 say no Riftbound filling is planned, which holds for `catalog_set_code` but not for the view that core inner joins. | Case RB-REF-03 pins this. |
+| C7 | Set-code view has a row for every Printing | Completed | The view starts from every Printing and left joins the optional tables (`migrations/160_catalog_set_code.sql:10-14`). `api/tests/test_catalog_data_contract.py:117` covers a missing display. | None today. Design brief lines 810-811 say no Riftbound filling is planned. That holds for `catalog_set_code`, but a second game still needs the view core inner joins, so RB-REF-03 stays its requirement. |
 | C8 | Generation promotion is reusable | Remaining | It exists only in `api/app/games/pokemon/catalog/catalog.py:605-790` and includes Pokémon steps at `:777-783`. | Do not extract now: ADR `0023:12` says invent nothing for a second game. Revisit at slice planning under #534. |
 
 ## Audit: module owners
@@ -69,7 +69,7 @@ What still sits at the root, grouped by what governs it:
 | Identity-bearing | `operations` (81), `identity` (39) | Remaining | #531: SQL exceptions |
 | Base | `db` (9), `api_errors` (2) | Partial | R3 for `api_errors`. Moving `db` touches 60 importers for no readiness gain. |
 
-Two facts shape any batching. A strongly connected scan of these modules finds two cycles: the five `social` modules above, and `public_projection` with `public_records`. Each must move as a unit. Everything else can move in any order, because core may import a core-owned root module; `holdings` moved while `inventory_core` stayed.
+Two facts shape any batching. A strongly connected scan of these modules finds two cycles: the five `social` modules above, and `public_projection` with `public_records`. Each must move as a unit. The rest have no cycle, and core may import a core-owned root module, which is how `holdings` moved while `inventory_core` stayed. The exception is a module that imports a `mixed` one: `loan_inventory` imports `want_list` (`api/app/loan_inventory.py:78`), and the checker refuses that edge once the importer sits under `app.core` (`scripts/check_python_boundaries.py:162-163`).
 
 ## Audit: issue acceptance criteria
 
@@ -81,17 +81,17 @@ Two facts shape any batching. A strongly connected scan of these modules finds t
 | Keep operations identity SQL a separate decision | Completed | `api/app/operations.py:75-76` unchanged and still allow-listed. |
 | Preserve the six caller scans before social or `trade_list` moves | Remaining | `api/tests/test_social_contract.py:50-67` keys them on `social/…` and `trade_list.py` paths. No planted-violation test exists for them under `tests/tooling`. R4. |
 | Update owners, paths, docs and pins without weakening them | Partial | Met for every landed batch: owners and pins match, and split-map section 10 dates each one. Applies again to each later batch. |
-| Coordinate with #478 and #356 | Partial | #478 landed through #562 but stays open until `main`, and `location_tree.py` was reserved for it. Decision D6. #356 is open. |
+| Coordinate with #478 and #356 | Partial | #478 is cleared: #562 landed at `434f5b7a`, and Trade confirmed in writing on 2026-11-07 that it clears the #478 block on Trade, social, Loan and Location Tree moves and that it has no active work on those files. The issue stays open only for the release. #356 is open. |
 | Each batch has focused validation and independent review | Partial | The issue records this for two batches. Later moves landed together in #562, with validation on the combination. |
 
 ### #529 complete ReprintRules composition
 
 | Criterion | Status | Evidence and gap |
 | --- | --- | --- |
-| Characterize acceptance, equivalence, quantities, ranking, ties and privacy | Remaining | Matching track. |
+| Characterize acceptance, equivalence, quantities, ranking, ties and privacy | Partial | Checked-in tests already assert much of this: acceptance rules (`api/tests/test_trade_wants.py:226`), quantity ranking, same-Printing Editions and reprint exclusions (`api/tests/test_want_list_swap.py:194`, `:205`, `:217`), ranking, ties, Will accept and privacy (`api/tests/test_trade_matches.py:121`, `:154`, `:478`, `:505`). Read, not rerun, and not proof that #529's criterion is met. The matching track names any missing seam-specific cases before extraction. |
 | Pokémon supplies policy; core has no Pokémon SQL or defaults | Remaining | `api/app/swap_hints.py:64`, `:76` and `api/app/social/friend_reads.py:98-99` read `catalog_reprint_group_member`. |
 | Audit `card_accepts` | Partial | `api/app/card_accepts.py:24-37` reads only contract relations through `identity_id`, so its SQL is game-free. Whether its three rules are reusable policy has not been judged. Matching track. |
-| Preserve the choke point, bounds, ordering and snapshots | Remaining | Nothing has been extracted yet. |
+| Preserve the choke point, bounds, ordering and snapshots | Remaining | Nothing has been extracted, so nothing has been proved preserved. Existing tests to carry forward include `api/tests/test_friend_matches.py:183` and `api/tests/test_trade_matches.py:478`, `:505`. |
 
 ### #531 decide identity, migration tracks and baseline
 
@@ -135,22 +135,23 @@ Kind is **Mechanical** when the requirement is settled, or **Decision** when som
 | --- | --- | --- | --- | --- | --- |
 | 1 | R1 Contract drift and schema test gap | #520 follow-up | None | Mechanical | No |
 | 2 | R2 Mount the Borrowed gallery from the Pokémon app | #534 prep | None | Mechanical | No |
-| 3 | D1, D3, D4, D5 Approvals | #534 | Evidence in this plan | Decision | **Yes** |
-| 4 | D2 Identity and migration package | #531 | Parallel track | Decision | **Yes** |
-| 5 | D6 Lift the #478 reservation | #528 | #562 on `dev` | Decision | **Yes** |
-| 6 | R3 Remove the `api_errors` shim | #528 | D6 | Mechanical | No |
-| 7 | R4 Port six caller scans | #528 | D6 | Mechanical | No |
-| 8 | R5 Currency literal in core cost | #528 | None | Decision | Only if OpenAPI changes |
-| 9 | R6 Finish labels in core threads | #528 | D6 | Decision | No |
-| 10 | R7 Matching seam | #529 | Matching track, D6 | Decision | Slice scope |
-| 11 | R8 Inventory relocation | #528 | Inventory track, D6 | Mechanical | No |
-| 12 | R9 Identity and migration slices | #533 | D2 | Mechanical once approved | **Yes** |
-| 13 | R10 Retire the price runner | #356 | Production cutover plus 7 days | Mechanical | **Yes** (issue requires it) |
-| 14 | R11 Public records and social moves | #528 | R4, R10 | Mechanical | No |
-| 15 | R12 Run the synthetic catalog cases | #534 | D3 scope, D4 | Mechanical | No |
-| 16 | R13 Riftbound backend slices | #534 | D1 to D5, R7, R9, R12 | Decision | **Yes** |
+| 3 | R3 Remove the `api_errors` shim | #528 | None | Mechanical | No |
+| 4 | R4 Port six caller scans | #528 | None | Mechanical | No |
+| 5 | D1, D3, D4 Approvals | #534 | Evidence in this plan | Decision | **Yes** |
+| 6 | D2 Identity and migration package | #531 | Parallel track | Decision | **Yes** |
+| 7 | R5 Currency literal in core cost | #528 | None | Decision | Only if OpenAPI changes |
+| 8 | R6 Finish labels in core threads | #528 | None | Decision | No |
+| 9 | R7 Matching seam | #529 | Matching track | Decision | Slice scope |
+| 10 | R8 Inventory relocation | #528 | Inventory track | Mechanical | No |
+| 11 | R9 Identity and migration slices | #533 | D2 | Mechanical once approved | **Yes** |
+| 12 | R10 Retire the price runner | #356 | Production cutover plus 7 days | Mechanical | **Yes** (issue requires it) |
+| 13 | R11 Public records and social moves | #528 | R4, R10 | Mechanical | No |
+| 14 | R12a Reader and schema probes | #534 | None | Mechanical | No |
+| 15 | R12b Synthetic normaliser and harness | #534 | D1, D4, and D2 for any schema it needs | Decision | **Yes** (slice approval) |
+| 16 | R12c Synthetic writer gate | #534 | R12a, R12b | Mechanical | No |
+| 17 | R13 Riftbound backend slices on real data | #534 | D1 to D4, R7, R9, R12c, data gate | Decision | **Yes** |
 
-Items 1 and 2 can run now. R8 and R11 are not prerequisites for R13 and can be deferred without blocking Riftbound. Decision D7 asks whether to defer them.
+R1 to R4 and R12a can run now. R8 and R11 are not prerequisites for R13 and can be deferred without blocking Riftbound. Decision D7 asks whether to defer them. R12b is the only Riftbound writer code before R13, and it stays synthetic.
 
 ### Acceptance criteria
 
@@ -166,9 +167,9 @@ Items 1 and 2 can run now. R8 and R11 are not prerequisites for R13 and can be d
 
 **R6.** The finish-to-label mapping in `public_variant_label` comes from the game at the call site, or Ryan accepts it as shared display vocabulary. Trade and Loan event labels are unchanged for every existing descriptor.
 
-**R7.** Set by the matching track. At plan level: no core-owned or shared module names `catalog_reprint_group_member`, the four `mixed` modules are reclassified, and `python_module_owners.txt` has no `mixed` line. Pokémon matching results are unchanged, as #529 lists. If R13 needs no social matching on Riftbound at first, D1 can shrink this.
+**R7.** Set by the matching track's audit. At plan level: no core-owned or shared module names `catalog_reprint_group_member`, the four `mixed` modules are reclassified, and `python_module_owners.txt` has no `mixed` line. Pokémon matching results are unchanged, as #529 lists. If R13 needs no social matching on Riftbound at first, D1 can shrink this.
 
-**R8.** Set by the inventory track, within #528's exclusions.
+**R8.** Set by the same audit, within #528's exclusions.
 
 **R9.** Set by the approved #531 package.
 
@@ -176,9 +177,13 @@ Items 1 and 2 can run now. R8 and R11 are not prerequisites for R13 and can be d
 
 **R11.** Each cycle moves as one batch. Owners, pins and scans follow in the same change, with cursor bytes, OpenAPI and route order unchanged.
 
-**R12.** Every case in [Riftbound catalog acceptance](riftbound-catalog-acceptance.md) has a recorded result on synthetic data. Each case that the spec marks as red under today's constraints either passes under the D4 outcome or carries a recorded decision.
+**R12a.** Reader cases in [Riftbound catalog acceptance](riftbound-catalog-acceptance.md), and the reader half of `Reader and Writer` cases, run on synthetic rows against today's shared readers, and every one passes. Each Red case is run and shows the rejection its row states. That confirms the gap and does not close it.
 
-**R13.** Set by #534 after approval. At minimum: the data gate in the companion spec is passed, Pokémon's OpenAPI and route snapshots are unchanged, and the checker forbids `games/riftbound` from reaching `games/pokemon`. The checker's existing game-to-game rule already covers this and needs a fixture for the new package.
+**R12b.** A separately approved slice adds a synthetic-only normaliser and test harness. Its input is synthetic records supplied by the tests, with no network, no real data and no production activation. Any schema it needs comes from the D4 and D2 outcomes. Approving this slice approves no ingestion.
+
+**R12c.** Every applicable non-Red case passes. Each Red case is resolved and rerun until it passes, or is excluded from the approved slice with the reason, Ryan's decision and the affected cases recorded. An excluded case's behaviour does not ship in that slice. A recorded failure never satisfies acceptance. An unresolved failure of retained identity, Holdings, Deck List or other inventory references stops ingestion and release of the affected slice.
+
+**R13.** Set by #534 after approval. At minimum: R12c is met and the data gate in the companion spec is passed, both before any real ingestion. Pokémon's OpenAPI and route snapshots are unchanged, and the checker forbids `games/riftbound` from reaching `games/pokemon`. The checker's existing game-to-game rule already covers this and needs a fixture for the new package. The mount follows ADR `0023:12` and `:24`: `main.py` chooses, with no `GAME` setting and no registry. A design that departs from that wording, such as one entry per game, would be an ADR amendment for Ryan and is not a prerequisite here.
 
 ## Decisions for Ryan
 
@@ -188,12 +193,12 @@ Items 1 and 2 can run now. R8 and R11 are not prerequisites for R13 and can be d
 | D2 | Identity and migration package | Everything game-facing depends on it. | Parallel track. |
 | D3 | Accept the data-rights and coverage gate | Real content is blocked until it passes. | Adopt the gate in the companion spec as written. |
 | D4 | Does a Riftbound database reuse catalog relation names and write constraints, or does a contract go in front? | Shared SQL names these relations. Today's constraints reject a Printing with a TCGCSV source. Must align with D2. | Reuse the names ADR `0023:23` already expects, and change only what the red cases prove. Add write-side clauses to the contract. |
-| D5 | How does a container pick its game with no `GAME` setting? | `0023:12` says `main.py` chooses, but a choice in one module needs an input, and the rejected setting is that input. | One ASGI entry per game, chosen by the deployed command. Shared assembly takes the game's `ROUTERS` and `LIFESPAN_HOOKS` as arguments, once the second game exists. This amends the ADR's wording. |
-| D6 | Is #478's reservation on Trade, social, pins and `location_tree.py` lifted now that #562 is on `dev`? | R3, R4, R6, R7, R8 and R11 all touch it. | Lift it, since the issue stays open only for the release. |
-| D7 | Keep relocating root modules before Riftbound, or defer? | Location blocks nothing, and each batch costs review. | Defer R8 and R11 until a slice needs them. |
+| D7 | Keep relocating root modules before Riftbound, or defer? | Location blocks nothing, and each batch costs review. | Defer moves no slice needs, including R11. Extractions the seam audit picks, starting with pick order, continue. |
+
+D5 and D6 are withdrawn, and their IDs are not reused. D5: ADR 0023 already says `main.py` chooses, and second-game wiring is deferred work, so nothing needs deciding now (A6, R13). D6: Trade's confirmation cleared the #478 block, so no decision remains.
 
 ## Risks
 
 - **Riftbound constraints are dated.** The spec's data checks are from 2026-10-29, on one group. They are hypotheses, not facts about the source.
-- **#534's approval gate may reshape this order.** If D1 narrows scope to Collection without social features, R7 shrinks. If D1 is refused, R12 and R13 fall away while the rest stays useful clean-up.
+- **#534's approval gate may reshape this order.** If D1 narrows scope to Collection without social features, R7 shrinks. If D1 is refused, R12b, R12c and R13 fall away while the rest stays useful clean-up.
 - **The audit is static.** It read the tree and ran the import checker and module scans. It ran no database tests.
