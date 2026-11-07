@@ -119,7 +119,7 @@ class DeployPipelineTest(unittest.TestCase):
         on = VERIFY[:VERIFY.index('\njobs:')]
         self.assertRegex(on, r'(?m)^  workflow_dispatch:$')
         self.assertRegex(on, r'(?m)^      integration:$')
-        self.assertRegex(on, r'(?m)^        options:\n          - none\n          - sharded\n          - full\n        default: none$')
+        self.assertRegex(on, r'(?m)^        options:\n          - none\n          - sharded\n          - full\n          - held-send-repeat\n        default: none$')
         self.assertNotIn('inputs.full', VERIFY)
         # Sharded is also due on every pull request to main (a release); the unsharded full gate only on request.
         self.assertIn(f"    if: ${{{{ inputs.integration == 'sharded' || ({RELEASE_PR}) }}}}", job_body('integration-legs'))
@@ -141,7 +141,7 @@ class DeployPipelineTest(unittest.TestCase):
 
     def test_the_verify_aggregator_requires_the_default_checks_and_every_requested_job(self):
         verify = job_body('verify')
-        jobs = ['checks', 'scanner-index-image', 'integration-legs', 'integration-full', 'integration-scanner-model']
+        jobs = ['checks', 'scanner-index-image', 'integration-legs', 'integration-full', 'integration-scanner-model', 'held-send-repeat']
         needs = re.search(r'needs:\s*\[([^\]]*)\]', verify).group(1)
         self.assertEqual([n.strip() for n in needs.split(',') if n.strip()], jobs)
         # always() keeps it from being skipped with a failed or cancelled job; a skipped check counts as passing.
