@@ -29,7 +29,7 @@ DISPLAY_QUERY = """SELECT e.id AS edition_id,coalesce(pd.display_name,ci.display
   FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
   JOIN catalog_identity ci ON ci.id=p.identity_id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
-  LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
+  LEFT JOIN catalog_edition_art art ON art.edition_id=e.id
   LEFT JOIN catalog_card_attribute ca ON ca.printing_id=p.id
   LEFT JOIN catalog_evolution_root er ON er.identity_key=ci.identity_key AND ca.card_kind='pokemon'
   WHERE e.id=ANY(%s)"""
@@ -40,7 +40,7 @@ DISPLAY_KEYS = frozenset(('name', 'set_id', 'set_name', 'collector_number', 'des
 
 
 def read_line_display(conn, edition_ids) -> dict[UUID, dict]:
-    """Display fields by Edition id for ``edition_ids``. The image is the small artwork as an art-route URL (``catalog_printing_art.small_art_url``,
+    """Display fields by Edition id for ``edition_ids``. The image is the small artwork as an art-route URL (``catalog_edition_art.small_art_url``,
     ADR 0020), or None when the catalog has none."""
     ids = list(edition_ids)
     if not ids:
@@ -57,16 +57,16 @@ def with_line_display(conn, response: dict) -> dict:
 
     Responses stored before #176 carry no display data, and those stored before the evolution roots carry no
     ``evolution_root`` or ``evolution_stage``; replaying either as stored would fail the response model. A line missing
-    any display field gets today's values for the fields it lacks, and keeps every field it has: display data is catalog
+    any display field gets today's values for the fields it lacks. Every line gets its current image selection: display data is catalog
     data about each line's Edition, not part of the Deck List the command changed, so the replay still returns the Deck
     List, revision and format results exactly as computed then."""
     deck_list = response.get('deck_list') or {}
     lines = deck_list.get('lines') or []
-    bare = [UUID(line['edition_id']) for line in lines if DISPLAY_KEYS - line.keys()]
-    if not bare:
+    if not lines:
         return response
-    display = read_line_display(conn, bare)
-    # Every stored line names a catalog Edition (deck_list_line.edition_id references catalog_edition, and the
-    # application never deletes an Edition), so the lookup below finds it.
+    display = read_line_display(conn, [UUID(line['edition_id']) for line in lines])
+    # Image selection is mutable display state even for a complete historical
+    # reply. Preserve its command identity, quantities and logical outcome.
     return {**response, 'deck_list': {**deck_list, 'lines': [
-        {**display[UUID(line['edition_id'])], **line} if DISPLAY_KEYS - line.keys() else line for line in lines]}}
+        {**display[UUID(line['edition_id'])], **line,
+         'image_url': display[UUID(line['edition_id'])]['image_url']} for line in lines]}}

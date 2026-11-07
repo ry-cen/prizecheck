@@ -12,6 +12,7 @@ import type { HoldingView } from "../holdings_generated";
 export type PopupEdition = {
   id: string;
   descriptor: Record<string, unknown>;
+  imageUrl: string | null;
   /** False for a retired ("unavailable") Edition: it has no tile, no price and can't be added. */
   active: boolean;
   /** Owner reviewed (a manual Edition), with its evidence. */
@@ -112,6 +113,7 @@ export function useCardDetails(printingId: string | null): {
             ].map((edition) => ({
               id: edition.id,
               descriptor: edition.descriptor,
+              imageUrl: edition.image_url ?? null,
               active: edition.active,
               reviewed: edition.source === "manual",
               evidenceUrl: edition.evidence_url ?? null,

@@ -316,6 +316,30 @@ describe("card art", () => {
 const publicArt = `/api/public/art/${"a".repeat(48)}/small?v=abcd1234`;
 
 describe("public card art", () => {
+  it("Edition art relays only the reviewed CDN link with no-store", async () => {
+    const target =
+      "https://tcgplayer-cdn.tcgplayer.com/product/610757_200w.jpg";
+    behaviour = (_, response) => {
+      response.writeHead(302, {
+        location: target,
+        "cache-control": "no-store",
+      });
+      response.end();
+    };
+    const path = `/api/public/edition-art/${"b".repeat(48)}/large?v=abcd1234`;
+    const response = await fetch(base + path, { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(target);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    behaviour = (_, answer) => {
+      answer.writeHead(302, {
+        location: "https://example.test/unreviewed.jpg",
+      });
+      answer.end();
+    };
+    const denied = await fetch(base + path, { redirect: "manual" });
+    expect(denied.headers.get("location")).toBeNull();
+  });
   it("anonymous art bytes pass unchanged with public cache and isolation headers", async () => {
     const bytes = pixels(200 * 1024 + 3);
     const publicCache = "public, max-age=31536000, immutable";

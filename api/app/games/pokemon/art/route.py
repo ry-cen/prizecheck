@@ -1,10 +1,11 @@
 """The Pokémon card art route (#358, ADR 0020): ``GET /api/art/{printing_id}/{size}`` over the core art store, bound to
 the Pokémon allowed host and linked-art pattern, with the module-level fetcher."""
 import os
+import re
 import threading
 
 from fastapi import APIRouter, Depends, Path, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, RedirectResponse, JSONResponse
 
 from app.core.art import store
 from app.games.pokemon.art.hosts import ALLOWED_HOST, KEY_PREFIX, LINKED_ART, TCGPLAYER_HOST, TCGPLAYER_LARGE, TCGPLAYER_KEY_PREFIX, tcgplayer_beats
@@ -48,9 +49,9 @@ router = APIRouter(prefix="/api/art")
 
 @router.get("/{printing_id}/{size}", response_class=Response, responses={200: {"content": {"image/webp": {}}}})
 async def art(printing_id: str = Path(max_length=64), size: str = Path(max_length=16),
-              v: str | None = Query(None, max_length=16), user_id: str = Depends(verified_user)):
-    return await store.serve_admitted(printing_id, size, v, allowed_host=ALLOWED_HOST, linked_art=LINKED_ART,
-                                      fetcher=fetcher, key_prefix=KEY_PREFIX, upgrade=upgrade())
+              v: str | None = Query(None, max_length=16), reference: bool = False, user_id: str = Depends(verified_user)):
+    return await store.serve_admitted(printing_id, size, v, allowed_host=ALLOWED_HOST, linked_art=re.compile(r"(?!)") if reference else LINKED_ART,
+                                      fetcher=fetcher, key_prefix=KEY_PREFIX, upgrade=None if reference else upgrade())
 
 
 def excluded_prefixes() -> tuple:
@@ -65,3 +66,16 @@ public_router = APIRouter()
 def public_art(printing_ref: str = Path(max_length=64), size: str = Path(max_length=16),
                v: str | None = Query(None, max_length=16)):
     return serve_public(printing_ref, size, v, excluded_prefixes=excluded_prefixes())
+
+
+@public_router.get("/api/public/edition-art/{edition_ref}/{size}", response_class=Response,
+                   responses={302: {"description": "Reviewed linked image"}})
+def edition_art(edition_ref: str = Path(max_length=64), size: str = Path(max_length=16),
+                v: str | None = Query(None, max_length=32)):
+    from app.core.art.editions import read_selections
+    from .hosts import linked_product_url
+    selected = read_selections([edition_ref]).get(edition_ref) if size in ('small', 'large') else None
+    if selected is None or selected['mode'] != 'linked' or v != selected['version']:
+        return JSONResponse({'detail': {'code': 'ART_NOT_FOUND'}}, status_code=404, headers={'Cache-Control': 'no-store'})
+    return RedirectResponse(linked_product_url(selected['product_id'], size), status_code=302,
+                            headers={'Cache-Control': 'no-store'})

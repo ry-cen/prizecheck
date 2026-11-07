@@ -16,15 +16,18 @@ import hashlib
 SIZES = {"small": "low.webp", "large": "high.webp"}
 
 
-def route_address(printing_id, small_source: str | None, size: str = "small", upgrade: str | None = None) -> str | None:
-    """The route address for a Printing from the view's small source URL (``catalog_printing_art.low_image_url``), the
+def route_address(printing_id, small_source: str | None, size: str = "small", upgrade: str | None = None, *, reference_only: bool = False) -> str | None:
+    """The address for a linked Edition image or a Printing reference from the view's small source URL (``catalog_printing_art.low_image_url``), the
     Python twin of ``catalog_art_route``. List reads over many rows select the raw source and call this on the page's rows
     only, so the version is not hashed for every catalog row."""
     if size not in SIZES:
         raise ValueError(f"unknown art size: {size!r}")
     if not small_source:
         return None
-    return f"/api/art/{printing_id}/{size}?v={art_version(small_source, upgrade)}"
+    if small_source.startswith("/api/public/edition-art/"):
+        return small_source.replace("/small?", f"/{size}?")
+    suffix = "&reference=1" if reference_only else ""
+    return f"/api/art/{printing_id}/{size}?v={art_version(small_source, None if reference_only else upgrade)}{suffix}"
 
 
 def art_version(source_url: str, upgrade: str | None = None) -> str:

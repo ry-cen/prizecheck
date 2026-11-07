@@ -104,6 +104,8 @@ def test_catalog_printing_and_edition_keys_are_namespaced_and_protected():
     assert records.key_family(edition).name == 'catalog_edition'
     assert not records.key_family(printing).evictable
     assert not records.key_family(edition).evictable
+    art = records.edition_art_key(REF)
+    assert records.key_family(art).name == 'edition_art' and not records.key_family(art).evictable
     assert not records.key_family(records.quarantine_key(REF)).evictable
     # Deck Lists 18: a Printing's format facts are their own protected family under the same reference.
     format_key = records.catalog_format_key(REF)
@@ -111,6 +113,8 @@ def test_catalog_printing_and_edition_keys_are_namespaced_and_protected():
     assert records.key_family(format_key).name == 'catalog_format' and not records.key_family(format_key).evictable
     with pytest.raises(ValueError):
         records.catalog_format_key('A' * 48)
+    with pytest.raises(ValueError):
+        records.edition_art_key('A' * 48)
 
 
 def test_price_keys_are_one_protected_family_per_edition_without_a_revision():
@@ -896,3 +900,18 @@ def test_empty_legacy_records_store_is_upgraded_and_populated_one_is_refused(tmp
     assert run_records_init(populated_dir).returncode != 0
     with pytest.raises(ProjectionUnavailable):
         FilePublicRecords(populated_dir).read_records([catalog_edition_key(REF)], deadline=deadline())
+
+
+def test_art_sidecar_is_protected_and_commits_atomically_with_parent(adapter):
+    store, _ = adapter
+    parent, art = records.catalog_edition_key(REF), records.edition_art_key(REF)
+    write(store, {parent: {'revision': 1}, art: {'revision': 1, 'mode': 'linked'}})
+    before = store.read_all([parent, art], deadline=deadline())
+    assert before.records[parent].value['revision'] == before.records[art].value['revision'] == 1
+    write(store, {parent: {'revision': 2}, art: {'revision': 2, 'mode': 'withheld'}})
+    assert not store.compare_and_swap({key: before.records[key].version for key in (parent, art)},
+        {parent: {'revision': 1}, art: {'revision': 1, 'mode': 'linked'}}, deadline=deadline())
+    assert values(store, [parent, art])[art] == {'revision': 2, 'mode': 'withheld'}
+    for revision in range(1, 5):
+        write(store, {records.quote_key(OTHER, revision): {'amount': '5.00'}})
+    assert values(store, [art])[art]['mode'] == 'withheld'

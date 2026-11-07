@@ -18,7 +18,7 @@ CARD_FACTS = """SELECT e.id AS edition_id, e.printing_id, p.identity_id,
   JOIN catalog_identity ci ON ci.id = p.identity_id
   JOIN catalog_printing_set_code psc ON psc.printing_id = p.id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id = p.id
-  LEFT JOIN catalog_printing_art art ON art.printing_id = p.id
+  LEFT JOIN catalog_edition_art art ON art.edition_id = e.id
   WHERE e.id = ANY(%s)"""
 
 NUMBER_PARTS = re.compile(r'^([a-z]*)(\d*)(.*)$', re.DOTALL)
