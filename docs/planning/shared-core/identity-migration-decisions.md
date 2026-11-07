@@ -301,14 +301,14 @@ change before answering, so it shows at once there. Other games catch up on thei
 - A restored auth database rewinds the feed. See [IM-18](#im-18-what-an-auth-restore-guarantees).
 
 **First touch.** A game creates `inventory_owner` lazily at 10 API sites, and the insert fires a trigger that generates a
-**local** random Handle (`100:89-96`). In a split that Handle would be unknown to auth. So in a split no site inserts an owner row
-itself. Each goes through one helper, which runs IM-17's first-touch rule as its own transaction, before the request takes any
-owner lock, and makes what the `020` trigger gives today: the owner row, Unsorted and the profile. Two writers outside those 10
-sites need the same rule: `read_profile` makes a generated Handle for an owner row restored without a profile
-(`profile.py:90-91`), and `scripts/bind_owner.py:14` inserts an owner row. The design brief's D6 proposed `adopt_new_owner` for
-this, and the site list has since moved. First touch now needs auth to answer, which is a new availability dependency. Sign-up
-must also create the auth identity atomically, replacing what `020` and `100` give today. `auth/tests/signup.test.ts:81-84`
-currently asserts that a new account has an owner row and Unsorted, so a split topology changes when those rows appear.
+**local** random Handle (`100:89-96`). In a split that Handle would be unknown to auth. Three routes repair a missing profile with
+the same generator, and one script inserts an owner row. IM-17's [writer inventory](#im-17-keeping-the-mirror-consistent) lists
+them all. So in a split none of them writes those rows itself. Each goes through one helper, which runs IM-17's first-touch rule
+as its own transaction, before the request takes any owner lock, and makes only what is missing: for a new collector, what the
+`020` trigger gives today, the owner row, Unsorted and the profile. The design brief's D6 proposed `adopt_new_owner` for this, and
+the site list has since moved. First touch now needs auth to answer, which is a new availability dependency. Sign-up must also
+create the auth identity atomically, replacing what `020` and `100` give today. `auth/tests/signup.test.ts:81-84` currently
+asserts that a new account has an owner row and Unsorted, so a split topology changes when those rows appear.
 
 **Ryan decides:** A or B, and an acceptable lag for a Handle change to reach the other game.
 
@@ -327,12 +327,12 @@ reproduce in an in-memory schedule check:
 - **Redaction.** A→`ccc`, B→`aaa`, A is deleted. Removing A's earlier rows means replay reaches B→`aaa` while the stale game's A
   still holds `aaa`, so it fails before reaching A's tombstone.
 
-The invariant worth having: **a game's mirror equals auth's identity at the game's cursor, for the collectors it has rows
+The invariant worth having: **a game's mirror equals auth's identity at the game's cursor, for the collectors it has a profile
 for.** Auth's own UNIQUE then guarantees the mirror's at every step.
 
 | Option | For | Against |
 | --- | --- | --- |
-| A. One mirror writer, plus vacate markers | The invariant holds; a simple rule to test; all three schedules pass the in-memory check | Answers and first touch wait for catch-up; a long backlog must fail, not block |
+| A. One mirror writer, plus vacate markers | Designed to keep the invariant; a simple rule to test; the three schedules above no longer fail the in-memory check | Answers and first touch wait for catch-up; a long backlog must fail, not block |
 | B. Versions per collector, with direct writes and a closure repair (`design-brief.md:397-408`) | Answers need no catch-up | Skipping old versions does not make cross-collector keys safe; every path needs the placeholder repair; more states |
 | C. Snapshot reconcile only, with no replay | One mechanism | Every absence costs a full reconcile; no ordering guarantee between snapshots |
 
@@ -340,7 +340,7 @@ for.** Auth's own UNIQUE then guarantees the mirror's at every step.
 
 - **One writer.** Only feed apply and the first-touch rule write mirror identity columns. Both fetch and apply under the apply lock,
   and a batch applies only if it starts at the cursor. A command answer returns the claim's sequence, and the game catches up to
-  that sequence before answering. Collectors with no row in that game are skipped.
+  that sequence before answering. Collectors with no profile in that game are skipped.
 - **Vacate markers.** Deletion redacts by rewriting a collector's earlier rows, not removing them. A rewritten row keeps its
   sequence and opaque id and carries no Handle or name; it tells a stale game to replace that collector's Handle with a
   placeholder that can never be a real Handle and that passes the `100:8-14` CHECKs. The release dependency survives without
@@ -350,37 +350,95 @@ for.** Auth's own UNIQUE then guarantees the mirror's at every step.
 - **Snapshot reconcile** rewrites a game's identity columns from auth at one sequence, with a placeholder phase. It is for when
   replay is impossible, such as after IM-18's fence, not for routine use.
 - **Lock order.** Apply writes `collector_profile`, whose outbox relies on holding that collector's `inventory_owner` lock
-  (`100:34-35`), and ADR 0015 fixes owner locks in ascending order. So the apply lock must come before any owner lock, catch-up may
-  not start while one is held, and a batch takes its owner locks in ascending order before applying in sequence. `set_handle` takes the owner lock first today (`profile.py:223`), so this changes
-  its order under a split. S6 must also check the 10 lazy sites against this order.
+  (`100:34-35`), and ADR 0015 fixes owner locks in ascending order. So the apply lock comes before any owner lock, and catch-up
+  may not start while one is held. One transaction applies one batch: it fetches every feed row it will apply, locks the owners
+  those rows write once, in ascending order, then applies in sequence. It never fetches more after taking owner locks, because a
+  second batch in the same transaction would lock Z and then A against a command holding A and waiting on Z. `set_handle` takes the
+  owner lock first today (`profile.py:223`), so this changes its order under a split.
+
+**Who writes these rows.** The rule below has to cover every writer of an owner row or a profile, so this list comes from
+searches, not from the owner inserts alone. All four ran at `434f5b7a`:
+
+```sh
+grep -rn 'INSERT INTO inventory_owner' api/app scripts auth/src --include=*.py --include=*.ts
+grep -rn 'create_collector_profile' api/app scripts auth/src migrations --include=*.py --include=*.ts --include=*.sql
+grep -rnE '(INSERT INTO|DELETE FROM|TRUNCATE|COPY) +(collector_profile|inventory_owner)\b' api/app scripts auth/src migrations deploy
+grep -rnE '\b(owner_and_rows|ensure_owner|lock_owner)\(' api/app --include=*.py | grep -v 'def '
+```
+
+| Writer | Today | In a split |
+| --- | --- | --- |
+| Three shared helpers: `lock_owner` (`inventory_core.py:136`), `owner_and_rows` (`location_tree.py:148`), `ensure_owner` (`owners.py:25`) | Insert the owner row inside the caller's transaction, at 51 call sites, each for the caller's own id | They stop inserting. A missing row sends the request through the first-touch helper |
+| Seven inline inserts: `core/inventory/holdings.py:110`, `core/inventory/locations.py:30`, `decks/routes.py:54`, `catalog/attribute_corrections.py:178`, `catalog/catalog_reconciliation.py:189`, `catalog/missing_cards.py:105`, `prices/metadata_reviews.py:117` | Same, each inside its route's transaction | The same |
+| `read_profile` (`profile.py:85-92`) | Generates a Handle for an owner row with no profile, holding the owner lock from `owner_and_rows` | The helper moves ahead of `owner_and_rows` in the routes that reach it (`profile.py:172,183,202,223`). `read_profile` stops creating |
+| `set_discovery` (`discovery.py:269-272`) | `ensure_owner`, the discovery lock, the owner lock, then `create_collector_profile` | The helper moves ahead of the transaction at `discovery.py:268`. Line 272 goes |
+| `set_trade_settings` (`trades.py:697-701`) | `ensure_owner`, an update, and `create_collector_profile` if that finds no profile | The helper moves ahead of the transaction at `trades.py:696`. The fallback goes |
+| `scripts/bind_owner.py:14` | Checks `"user"`, then inserts the owner row and the binding | The helper runs first, and its unknown outcome replaces the `"user"` read. The binding follows in its own transaction |
+| Sign-up and migration paths: `020:5`, `100:67-85`, `100:89-96`, `100:125` | Documented paths, not request code | Sign-up is covered under [IM-5](#im-5-how-backends-receive-identity-and-first-touch); the trigger must leave no generated Handle at commit |
+| `scripts/recovery.py:130` | Copies whole tables into a new disposable database | A restore, not a first touch. See [IM-10](#im-10-absence-retention-and-restore) |
+
+The helper must not run with the request's transaction open. Whether each entry calls it first, or rolls back on a missing row and
+retries once, is an S6 choice.
+
+**What each state requires.** A profile cannot exist without its owner row, because of the foreign key at `100:9`. "Recorded" means
+the id is in the game's tombstone table. "Auth says" is the answer at sequence S on the stored epoch.
+
+| Owner row | Profile | Recorded | Auth says | Outcome | State at commit |
+| --- | --- | --- | --- | --- | --- |
+| Yes | Yes | No | Not asked | Fast path: no cursor, no auth call | Unchanged; the feed keeps it current |
+| Yes | Yes | Yes | Not asked | Fast path. Nothing is created, and the closing step owns these rows | Handle is the placeholder until the closing step removes the rows |
+| No | No | No | Live | **Create** owner row, Unsorted and profile | Profile equals auth at S; cursor at S |
+| Yes | No | No | Live | **Repair**: profile only | Profile equals auth at S; cursor at S; owner row, Unsorted and domain rows as they were; no generated Handle |
+| Any row missing | | Yes | Not asked | Refuse | Nothing written |
+| Any row missing | | No | Deleted | Refuse; the consumer applies the tombstone in order | Nothing written |
+| No | No | No | Unknown | Refuse | Nothing written |
+| Yes | No | No | Unknown | Refuse and report it to the owner. Same-epoch auth should never say this, and the rows may hold a collector's data | Nothing written; the rows stay |
+| Any row missing | | Any | Other epoch, or S below the cursor | Refuse. [IM-18](#im-18-what-an-auth-restore-guarantees) owns this | Nothing written |
+| Any row missing | | No | No answer, deadline passed, or backlog past one batch | Retryable failure | Rolled back, nothing written; cursor free for the consumer |
+
+So the fast path is defined over both rows: **a collector is ready when they have an owner row and a profile.** Anything else takes
+the rule, and only the rule writes them. Every row above needs an S6 test.
 
 **The first-touch rule is one transaction, and its steps cannot be separated:**
 
-1. **Lock.** Take the game's cursor row `FOR UPDATE`. That row lock is the apply lock, held to commit, so nothing can move the cursor
-   or apply a tombstone until this transaction ends. No owner lock may be held yet.
-2. **Recheck.** Read the cursor and stored epoch. If the collector now has a row, stop. If their id is recorded as deleted, refuse.
+1. **Freeze.** Take the game's cursor row `FOR UPDATE`. That row lock is the apply lock, held to commit, so nothing can move the
+   cursor, apply a tombstone or make these rows until this transaction ends. No owner lock may be held yet.
+2. **Recheck.** Read the cursor, the stored epoch and the state again. If the collector is now ready, stop. If their id is recorded,
+   refuse.
 3. **Sample.** Ask auth for the epoch, a sequence S and the collector's identity, read in one auth transaction serialized with feed
    appends, so S is exactly the state returned. The sample happens here, under the frozen cursor, so no older snapshot exists to
-   insert later.
-4. **Validate.** A different epoch means refuse: [IM-18](#im-18-what-an-auth-restore-guarantees) owns that path. S below the cursor
-   cannot happen on one epoch, so it is treated the same. If the snapshot says the collector is deleted or unknown, insert nothing.
-5. **Catch up to exactly S.** Apply feed rows after the cursor up to S and no further. Going past S would skip this collector's own
-   events while they still have no row, which is the bug above. A backlog past the limit fails with a retryable error, and the
-   transaction rolls back.
-6. **Insert and commit.** Insert the owner row, Unsorted and the profile, overwrite the trigger's placeholder with the snapshot's
-   identity, set the cursor to S and commit.
+   write later.
+4. **Validate.** Refuse every case the matrix refuses. Nothing has been written yet.
+5. **Fetch.** Read the feed rows from the cursor to exactly S as one complete batch. Going past S would skip this collector's own
+   events while they have no profile, which is the bug above. More rows than one batch allows is a retryable failure: the consumer
+   keeps draining in its own batches, and a retry can then fit. This bound keeps the rule to one lock plan.
+6. **Lock.** Lock once, in ascending order, the owners those rows write, plus this collector if their owner row exists. All reads
+   from auth are finished, so no owner lock waits on auth.
+7. **Apply and write.** Apply the rows in sequence. Add the owner row and Unsorted only if the owner row was missing. Put the
+   snapshot's Handle and Display Name in the profile, set the cursor to S and commit.
 
-Events up to S are in the snapshot, and the row exists before the cursor can pass S, so every later event reaches it. If an ordinary
-pull gets the lock first, step 3 simply samples the newer state. A random-schedule model found stale state in 6,268 of 200,000 runs
-with sampling before the lock, and in none with this rule. That model uses dictionaries and atomic steps, and it is not a
-concurrency test.
+Events up to S are in the snapshot, and the profile exists before the cursor can pass S, so every later event reaches it. If an
+ordinary pull gets the lock first, step 3 simply samples the newer state. The helper's work commits on its own, so the request
+then starts fresh; if it finds the row gone, which only the closing step can cause, it re-enters the helper once and is refused.
 
-Sampling first and refetching whenever the cursor has passed S also works, and holds the lock for less time, but adds a retry loop
-for the same result. This rule holds the cursor across one auth call, so it needs the same hard timeout. First touch happens once per
-collector per game. The mechanism is an implementation choice; the wait limit below is Ryan's.
+That is an argument, not evidence. An earlier in-memory script covered only the no-row state, with atomic steps and no locks, so it
+says nothing about repair, tombstones, the lock plan or the deadline. **This protocol is unproven until a real concurrent
+PostgreSQL test in S6 passes.**
 
-**Ryan decides:** A, B or C, and how long a Handle command or first touch may wait on catch-up before it fails with a retryable
-error.
+**What the rule costs.** It holds the game's one cursor across the sample, the feed read and every owner-lock wait. Until it ends,
+the consumer cannot advance, and other first touches and Handle commands' catch-up queue behind it, so a slow auth or a long-held
+owner lock stalls identity apply for every collector in that game. So the rule needs one total deadline, separate from the timeout
+on each request it makes. The deadline covers waiting for the cursor, the sample, feed reads, owner-lock waits and apply, and leaves
+time for rollback. Expiry rolls back with a retryable error and the consumer resumes. First touch happens once per collector per
+game, which limits how often this happens, not how long it lasts.
+
+Sampling before the lock and refetching whenever the cursor has passed S would shorten the hold, but adds a retry loop. S6 may
+choose it only if it meets every row of the matrix. How the trigger is kept from leaving a generated Handle is also an S6 choice.
+
+**Ryan decides:** A, B or C; how long a Handle command may wait on catch-up before it fails with a retryable error; and the total
+first-touch deadline. While one first touch runs, the consumer and every other first touch in that game wait on the same cursor, up
+to that deadline. A shorter one fails new collectors sooner when auth is slow, and a longer one stalls identity changes for everyone
+in that game for longer.
 
 ## 3. Signed-owner checks
 
@@ -518,7 +576,7 @@ reusable namespace and ordering does not stop at one collector:
    A failure here parks that one collector and alerts the owner, and later identity changes keep flowing.
 
 First touch refuses a recorded id inside IM-17's rule, under the same lock as the identity step, and no other path may insert an
-owner row in a split. So a request that finds its row removed re-enters the rule and is refused. A closing step that stays parked leaves data in the game, so it counts against IM-10's
+owner row or profile in a split. So a request that finds its row removed re-enters the rule and is refused. A closing step that stays parked leaves data in the game, so it counts against IM-10's
 limit. The owner's own account must be refused.
 
 **Ryan decides:** A, B or C.
@@ -532,11 +590,11 @@ With the recommended feed:
 | Game down for minutes                          | It pulls from its cursor on return                                                                                                            |
 | Duplicate delivery                             | The tombstone table and the cursor make it a no-op                                                                                            |
 | Game disabled for weeks                        | It must drain the feed before taking traffic, so "switching back on needs no migration step" gains a readiness gate                          |
-| Handle released, reused while a game is stale | Safe only under IM-17, where the feed is the sole writer and vacate markers keep the dependency |
+| Handle released, reused while a game is stale | Safe only under IM-17, where feed apply and the first-touch rule are the only writers and vacate markers keep the dependency |
 | Game wiped | Nothing to apply, and its cursor stops holding retention back, unless a retained dump of it may still be restored |
 | Game restored from an older dump               | The cursor rewinds with the data, so deletions after the dump apply again. Push needs a manual resend here                                    |
 | Auth restored from an older dump | **Not solved by the feed.** See [IM-18](#im-18-what-an-auth-restore-guarantees) |
-| In-flight signed request after deletion | Refused inside IM-17's first-touch rule, the only path that may insert an owner row in a split |
+| In-flight signed request after deletion | Refused inside IM-17's first-touch rule, the only path that may insert an owner row or profile in a split |
 
 **Backups stop being one snapshot.** `backup_database` dumps one database (`deploy.sh:708`), `scripts/recovery.py:65`
 walks one database's tables, and the guides warn that anything after a dump is lost (`docs/deployment-oracle.md:889`).
@@ -772,7 +830,7 @@ chains: S3 leads to both S4 and S10, and S10 does not depend on S5 to S9.
 
 ### S2. Identity seam, same database (IM-1, and the shape of IM-3 and IM-7)
 
-- Acceptance: all seven lines leave the allow-list; exception 2's hint is reworded; the 10 lazy sites go through one helper; SQL,
+- Acceptance: all seven lines leave the allow-list; exception 2's hint is reworded; the 10 lazy sites and the three `create_collector_profile` callers go through one seam; SQL,
   order, locks and transactions are unchanged; OpenAPI and route snapshots are byte-identical; `npm run guardrails` and
   the touched API tests pass.
 - Rollback: revert. No schema or data change.
@@ -813,11 +871,24 @@ chains: S3 leads to both S4 and S10, and S10 does not depend on S5 to S9.
   rebind.
 - Mirror cases under the IM-17 choice: a lagged game with a reused Handle converges with no UNIQUE failure; an old event
   arriving after a newer answer or snapshot changes nothing; a snapshot reconcile finishes from a deliberately collided state;
-  a backlog past the limit fails with a retryable error; feed apply and owner commands run concurrently with no deadlock.
+  a backlog past the limit fails with a retryable error; feed apply and owner commands run concurrently with no deadlock,
+  including a batch that changes one collector's name twice while they share a Loan or Trade. The name triggers (`105:81-82`,
+  `141:88-91`) then write that row twice, and the repo's own note says a second write key-shares the other collector's owner row
+  (`owners.py:40`, `loans.py:551`), which breaks the lock plan unless S6 prevents it.
 - First-touch cases under the IM-17 choice: a newer feed event is applied or skipped for the absent collector before an older
   first-touch snapshot would be inserted, and the insert retries or adopts the newer state, never the older value; catch-up stops
-  at exactly S; a snapshot from another epoch, below the cursor, or naming a deleted collector inserts nothing; `read_profile`'s
-  repair and `bind_owner.py` take the same rule; no site inserts an owner row outside it in a split.
+  at exactly S; every row of IM-17's state matrix has a test; no writer in the inventory inserts an owner row or profile outside
+  the rule in a split, none enters the rule with a transaction open, and `bind_owner.py` takes the rule.
+- Repair cases: an existing owner with no profile, reached through `read_profile`, `set_discovery` and `set_trade_settings`, gets
+  auth's identity with no generated Handle, and their owner row, Unsorted and domain rows are unchanged. Each route also runs against
+  a concurrent consumer apply, and against deletion of that collector, and ends in the matrix's state. No route waits for the cursor
+  while holding an owner lock.
+- Lock cases: a catch-up longer than one batch fails with a retryable error and nothing applied while a two-owner command completes,
+  and it succeeds on retry once the consumer has drained; a batch whose rows arrive Z then A runs against an A-then-Z command with no
+  deadlock; nothing commits part way through the rule.
+- Deadline cases: auth slow, auth unavailable and a long-held owner lock each end at the total deadline with a retryable error, and
+  the consumer then resumes from the same cursor.
+- All of these run on real PostgreSQL with concurrent connections. IM-5 and IM-17 are not proven until they pass.
 - Rollback: co-located mode makes the apply a no-op; revert the code. Replica rows are harmless.
 
 ### S7. Operations panel and multi-database operations (IM-2, IM-10, IM-18)
@@ -901,8 +972,9 @@ This covers #531's fourth criterion. No check here has been run.
 - **Compose beyond the deploy file.** Port exposure was read from `compose.deploy.yml` only.
 - **Legal retention.** No legal assessment of deletion, backups or opaque ids was made.
 - **Feed volume, poll cost and latency.** No measurement. The designs above are untested.
-- **IM-17's schedules.** Checked in memory against the review counterexamples and a random-schedule model, with no database and
-  no real concurrency.
+- **IM-17's first-touch protocol.** Unproven until S6's concurrent PostgreSQL tests pass. In-memory scripts replayed the review
+  counterexamples and random schedules for the no-row state only, with no database and no real concurrency, and they were not kept.
+  The state matrix, the existing-owner repair, the lock plan and the deadline have never been run in any form.
 - **IM-16's comparison.** The strip sets, surrogate, length and UUID checks ran on local Python 3.13 (Unicode 15.1) and Node 24
   (Unicode 17), not on the `python:3.14-slim` and `node:22-bookworm-slim` images. No TypeScript port or shared vector file exists.
 - **Session state after a restore.** Read from `auth/src/auth.ts` configuration, not traced through Better Auth.
