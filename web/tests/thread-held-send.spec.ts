@@ -90,6 +90,17 @@ async function holdDetailReads(page: Page, id: string) {
           !failure ||
           (outcome === "failed" && failure.errorText.includes("ERR_FAILED"));
       } catch (error) {
+        // Navigation/teardown can settle a route without an ABORTED failure on
+        // its Request. Only teardown may tolerate Playwright's handled state;
+        // a failed outcome delivery in the test body must still fail the test.
+        if (
+          outcome === undefined &&
+          error instanceof Error &&
+          /(?:^|: )Route is already handled!$/.test(error.message)
+        ) {
+          read.delivered = false;
+          return;
+        }
         // Real supersession/departure aborts older requests. A current request's
         // failure must not be treated as delivery; assertLatestOutcome checks it.
         if (!read.route.request().failure()?.errorText.includes("ABORTED"))
@@ -119,18 +130,24 @@ async function holdDetailReads(page: Page, id: string) {
     if (cleanupPromise) return cleanupPromise;
     closing = true;
     cleanupPromise = (async () => {
-      // Remove interception before draining; callbacks already in flight see
-      // closing and abort. Do not wait for unanswered handlers while removing.
-      const removal = await Promise.allSettled([
-        page.unroute(pattern, handler),
-      ]);
-      const results = await Promise.allSettled(
-        reads.map((read) => settle(read))
-      );
-      const failure = [...removal, ...results].find(
-        (result) => result.status === "rejected"
-      );
+      // Abort before removing interception: Playwright 1.63 forwards in-flight
+      // routes when the last interceptor is removed. Forwarding an unanswered
+      // permission read could grant a held send and makes a later abort fail.
+      // New callbacks see closing and abort; collect their settlements as well.
+      const results: PromiseSettledResult<void>[] = [];
+      let drained = 0;
+      while (drained < reads.length) {
+        const batch = reads.slice(drained);
+        drained = reads.length;
+        results.push(
+          ...(await Promise.allSettled(batch.map((read) => settle(read))))
+        );
+      }
+      const failure = results.find((result) => result.status === "rejected");
+      // If an abort failed for a real reason, retain the abort-only interceptor
+      // until context teardown rather than forwarding its unanswered request.
       if (failure?.status === "rejected") throw failure.reason;
+      await page.unroute(pattern, handler);
     })();
     return cleanupPromise;
   }
@@ -192,9 +209,14 @@ test.afterEach(async ({ page }, info) => {
   holdCleanups.delete(page);
   // On failure, do not wait on unrelated callbacks or replace the first error.
   const failed = info.status !== info.expectedStatus;
-  const removal = await Promise.allSettled([
-    page.unrouteAll({ behavior: failed ? "ignoreErrors" : "wait" }),
-  ]);
+  // A failed abort leaves the closing interceptor installed until the page's
+  // fixture closes its context; removing it here could resume that request.
+  const cleanupFailed = results.some((result) => result.status === "rejected");
+  const removal = cleanupFailed
+    ? []
+    : await Promise.allSettled([
+        page.unrouteAll({ behavior: failed ? "ignoreErrors" : "wait" }),
+      ]);
   const errors = [...results, ...removal].filter(
     (result) => result.status === "rejected"
   );
