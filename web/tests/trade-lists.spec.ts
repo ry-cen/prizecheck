@@ -417,72 +417,75 @@ test("Trades views keep their title and switch in place across navigation", asyn
       page.getByRole("tabpanel", { name: views[index].name, exact: true })
     ).toBeVisible();
   }
-  for (const width of [1024, 1440, 1920, 390]) {
+  for (const width of [1024, 1200, 1440, 1920, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await tab("Trades").click();
     await current(0);
-    const measurements = [];
-    for (const [index, view] of views.entries()) {
-      await tab(view.name).click();
-      await current(index);
-      const title = page.getByRole("heading", {
-        name: "Trades",
-        exact: true,
-        level: 1,
-      });
-      const heading = await title.boundingBox();
-      const control = await switcher().boundingBox();
-      expect(heading).not.toBeNull();
-      expect(control).not.toBeNull();
-      const typography = await title.evaluate((el) => ({
-        size: getComputedStyle(el).fontSize,
-        weight: getComputedStyle(el).fontWeight,
-      }));
-      measurements.push({
-        view: view.name,
-        heading: heading!,
-        control: control!,
-        typography,
-      });
-      const main = page.getByRole("main").filter({ has: title });
-      if (index === 1 && width >= 1440) {
-        expect((await main.boundingBox())!.width).toBe(Math.min(width, 1536));
-      }
-      await expect
-        .poll(() => main.evaluate((el) => getComputedStyle(el).paddingLeft))
-        .toBe(width === 390 ? "16px" : "28px");
-      await expect
-        .poll(() =>
-          page.evaluate(
-            () =>
-              document.documentElement.scrollWidth -
-              document.documentElement.clientWidth
-          )
-        )
-        .toBeLessThanOrEqual(0);
-      if (width === 1440 || width === 390) {
-        await page.screenshot({
-          path: testInfo.outputPath(`after-${width}-${index}.png`),
-          fullPage: true,
+    // Retry the whole comparison so every attempt visits and remeasures all views.
+    await expect(async () => {
+      const measurements = [];
+      for (const [index, view] of views.entries()) {
+        await tab(view.name).click();
+        await current(index);
+        const title = page.getByRole("heading", {
+          name: "Trades",
+          exact: true,
+          level: 1,
         });
+        const heading = await title.boundingBox();
+        const control = await switcher().boundingBox();
+        expect(heading).not.toBeNull();
+        expect(control).not.toBeNull();
+        const typography = await title.evaluate((el) => ({
+          size: getComputedStyle(el).fontSize,
+          weight: getComputedStyle(el).fontWeight,
+        }));
+        measurements.push({
+          view: view.name,
+          heading: heading!,
+          control: control!,
+          typography,
+        });
+        const main = page.getByRole("main").filter({ has: title });
+        expect((await main.boundingBox())!.width).toBe(
+          Math.min(width, width >= 1440 ? 1536 : 1024)
+        );
+        await expect
+          .poll(() => main.evaluate((el) => getComputedStyle(el).paddingLeft))
+          .toBe(width === 390 ? "16px" : "28px");
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                document.documentElement.scrollWidth -
+                document.documentElement.clientWidth
+            )
+          )
+          .toBeLessThanOrEqual(0);
+        if (width === 1440 || width === 390) {
+          await page.screenshot({
+            path: testInfo.outputPath(`after-${width}-${index}.png`),
+            fullPage: true,
+          });
+        }
       }
-    }
-    console.log(JSON.stringify({ width, measurements }));
-    for (const measured of measurements.slice(1)) {
-      const baseline = measurements[0];
-      for (const dimension of ["x", "y"] as const) {
-        expect(
-          Math.abs(measured.heading[dimension] - baseline.heading[dimension])
-        ).toBeLessThanOrEqual(1);
-        expect(
-          Math.abs(measured.control[dimension] - baseline.control[dimension])
-        ).toBeLessThanOrEqual(1);
+      console.log(JSON.stringify({ width, measurements }));
+      for (const measured of measurements.slice(1)) {
+        const baseline = measurements[0];
+        for (const dimension of ["x", "y"] as const) {
+          expect(
+            Math.abs(measured.heading[dimension] - baseline.heading[dimension])
+          ).toBeLessThanOrEqual(1);
+          expect(
+            Math.abs(measured.control[dimension] - baseline.control[dimension])
+          ).toBeLessThanOrEqual(1);
+        }
+        expect(measured.typography).toEqual(baseline.typography);
+        expect(measured.control.height).toBe(baseline.control.height);
+        if (width < 1440)
+          expect(measured.control.width).toBe(baseline.control.width);
       }
-      expect(measured.typography).toEqual(baseline.typography);
-      expect(measured.control.height).toBe(baseline.control.height);
-      if (width < 1440)
-        expect(measured.control.width).toBe(baseline.control.width);
-    }
+    }).toPass({ timeout: 15_000 });
     // Complete the round trip twice, then restore each address through history.
     for (let round = 0; round < 2; round++) {
       for (const index of [0, 1, 2, 0]) {
