@@ -6,9 +6,10 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
-import { signInWithButton } from "./support/sign-in";
+import { signInAsOwner, signInWithButton } from "./support/sign-in";
 import { expectTouchTarget } from "./support/touch-target";
 import { test, artUpstream } from "./support/art-upstream";
+import { createDeck } from "./support/loans";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -970,4 +971,475 @@ test.describe("phone", () => {
     await expect(heading(page)).toHaveText("Settings");
     await expectPageChecks(page, "Settings");
   });
+});
+
+async function settleFocus(page: Page) {
+  await page.evaluate(async () => {
+    let previous = "",
+      stable = 0;
+    for (let frame = 0; frame < 120; frame++) {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve())
+      );
+      const current = JSON.stringify([
+        scrollY,
+        document.activeElement?.getBoundingClientRect().toJSON(),
+      ]);
+      stable = previous === current ? stable + 1 : 0;
+      previous = current;
+      if (stable >= 4) return;
+    }
+    throw new Error("Focus geometry failed to settle");
+  });
+}
+async function focusObservation(page: Page) {
+  return page.evaluate(() => {
+    const el = document.activeElement!;
+    const rect = el.getBoundingClientRect();
+    const header = document
+      .querySelector("[data-app-shell] > header.sticky")!
+      .getBoundingClientRect();
+    // The full rectangle is checked separately; surface probes avoid empty rounded corners.
+    const points = [0.25, 0.5, 0.75].flatMap((xFraction) =>
+      [0.25, 0.5, 0.75].map((yFraction) => {
+        const x = rect.left + rect.width * xFraction;
+        const y = rect.top + rect.height * yFraction;
+        const hit = document.elementFromPoint(x, y);
+        return {
+          x,
+          y,
+          ok: !!hit && el.contains(hit),
+          hit: hit?.outerHTML.slice(0, 350),
+        };
+      })
+    );
+    return {
+      tag: el.tagName,
+      text: el.textContent?.trim().slice(0, 100),
+      label: el.getAttribute("aria-label"),
+      inputType: el instanceof HTMLInputElement ? el.type : null,
+      labels:
+        el instanceof HTMLInputElement
+          ? [...(el.labels ?? [])].map((l) => l.textContent)
+          : [],
+      main: !!el.closest("#main-content"),
+      headerControl: !!el.closest("header.sticky"),
+      rect: rect.toJSON(),
+      header: header.toJSON(),
+      scrollY,
+      points,
+      focusVisible: el.matches(":focus-visible"),
+      margin: getComputedStyle(el).scrollMarginTop,
+      bottomMargin: getComputedStyle(el).scrollMarginBottom,
+      viewport: { width: innerWidth, height: innerHeight },
+      focusWidth: getComputedStyle(document.documentElement)
+        .getPropertyValue("--focus-width")
+        .trim(),
+      focusOffset: getComputedStyle(document.documentElement)
+        .getPropertyValue("--focus-offset")
+        .trim(),
+      bottomPadding: getComputedStyle(document.documentElement)
+        .scrollPaddingBottom,
+      padding: getComputedStyle(document.documentElement).scrollPaddingTop,
+      token: getComputedStyle(document.documentElement)
+        .getPropertyValue("--layout-header-height")
+        .trim(),
+      clear:
+        rect.left >= 0 &&
+        rect.right <= innerWidth &&
+        rect.top >= 0 &&
+        rect.bottom <= innerHeight &&
+        (!el.closest("#main-content") || rect.top >= header.bottom) &&
+        points.every((p) => p.ok),
+    };
+  });
+}
+
+test("desktop shell reverse Tab clears the header without a summary panel", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await signInAsOwner(page, "/decks");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Decks");
+  await page.locator("#main-content").evaluate((main) => {
+    const fixture = document.createElement("section");
+    fixture.id = "test-only-focus-clearance";
+    for (const name of ["A", "B", "C"]) {
+      const spacer = document.createElement("div");
+      spacer.style.height = "900px";
+      fixture.append(spacer);
+      const button = document.createElement("button");
+      button.textContent = `Test-only focus ${name}`;
+      button.className = "btn btn-secondary";
+      fixture.append(button);
+    }
+    const tail = document.createElement("div");
+    tail.style.height = "900px";
+    fixture.append(tail);
+    main.append(fixture);
+  });
+  const observations: Awaited<ReturnType<typeof focusObservation>>[] = [];
+  const press = async (key: string) => {
+    await page.keyboard.press(key);
+    await settleFocus(page);
+    const o = await focusObservation(page);
+    observations.push(o);
+    return o;
+  };
+  try {
+    let reached = false;
+    for (let i = 0; i < 100; i++) {
+      const o = await press("Tab");
+      if (o.text === "Test-only focus A") {
+        reached = true;
+        break;
+      }
+    }
+    expect(reached).toBe(true);
+    expect
+      .soft(observations.at(-1)!.clear, JSON.stringify(observations.at(-1)))
+      .toBe(true);
+    for (const [key, name] of [
+      ["Tab", "B"],
+      ["Tab", "C"],
+      ["Shift+Tab", "B"],
+      ["Shift+Tab", "A"],
+    ]) {
+      const o = await press(key);
+      expect(o.text).toBe(`Test-only focus ${name}`);
+      expect.soft(o.clear, JSON.stringify(o)).toBe(true);
+      expect(o.scrollY).toBeGreaterThan(0);
+    }
+    let header = false;
+    for (let i = 0; i < 100; i++) {
+      const o = await press("Shift+Tab");
+      if (o.headerControl) {
+        header = true;
+        expect(o.clear).toBe(true);
+        expect(["auto", "0px"]).toContain(o.padding);
+        expect(["auto", "0px"]).toContain(o.bottomPadding);
+        expect(o.margin).toBe("0px");
+        expect(o.bottomMargin).toBe("0px");
+        break;
+      }
+    }
+    expect(header).toBe(true);
+    let main = false;
+    for (let i = 0; i < 100; i++) {
+      const o = await press("Tab");
+      if (o.main) {
+        main = true;
+        expect(o.clear).toBe(true);
+        expect(o.focusVisible).toBe(true);
+        const ring = parseFloat(o.focusWidth) + parseFloat(o.focusOffset);
+        expect(o.margin).toBe(`${parseFloat(o.token) + ring}px`);
+        expect(o.bottomMargin).toBe(`${ring}px`);
+        expect(["auto", "0px"]).toContain(o.padding);
+        expect(["auto", "0px"]).toContain(o.bottomPadding);
+        break;
+      }
+    }
+    expect(main).toBe(true);
+  } finally {
+    await test.info().attach("independent-shell-focus", {
+      body: JSON.stringify(observations),
+      contentType: "application/json",
+    });
+    await page
+      .locator("#test-only-focus-clearance")
+      .evaluate((el) => el.remove());
+  }
+});
+
+test("desktop focus clearance is limited to the app shell", async ({
+  page,
+  browser,
+}) => {
+  const clearance = async (target: Page) =>
+    target.evaluate(() => {
+      const root = document.documentElement;
+      const css = getComputedStyle(root);
+      return {
+        shell: root.hasAttribute("data-app-shell"),
+        publicHeader: css.getPropertyValue("--public-header-height").trim(),
+        top: css.scrollPaddingTop,
+        bottom: css.scrollPaddingBottom,
+        header: parseFloat(css.getPropertyValue("--layout-header-height")),
+        ring:
+          parseFloat(css.getPropertyValue("--focus-width")) +
+          parseFloat(css.getPropertyValue("--focus-offset")),
+        visible: document.activeElement?.matches(":focus-visible"),
+        margin: getComputedStyle(document.activeElement!).scrollMarginTop,
+        bottomMargin: getComputedStyle(document.activeElement!)
+          .scrollMarginBottom,
+      };
+    });
+  const inactive = (css: Awaited<ReturnType<typeof clearance>>) => {
+    expect(css.margin).toBe("0px");
+    expect(css.bottomMargin).toBe("0px");
+    expect(["auto", "0px"]).toContain(css.top);
+    expect(["auto", "0px"]).toContain(css.bottom);
+  };
+  await page.setViewportSize({ width: 761, height: 800 });
+  await signInAsOwner(page, "/decks");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Decks");
+  expect((await clearance(page)).shell).toBe(true);
+  inactive(await clearance(page));
+  await page.locator("#main-content").evaluate((main) => {
+    const fixture = document.createElement("section");
+    fixture.id = "test-only-scope";
+    for (const name of ["Scope ordinary", "Scope trailing"]) {
+      const button = document.createElement("button");
+      button.textContent = name;
+      fixture.append(button);
+    }
+    const queue = document.createElement("div");
+    queue.className = "list-detail-viewport";
+    queue.dataset.scrollViewport = "y";
+    const loan = document.createElement("button");
+    loan.textContent = "Scope Loan queue";
+    queue.append(loan);
+    fixture.append(queue);
+    main.append(fixture);
+  });
+  try {
+    let header = false;
+    for (let i = 0; i < 100; i++) {
+      await page.keyboard.press("Tab");
+      if (
+        await page.evaluate(
+          () => !!document.activeElement?.closest("header.sticky")
+        )
+      ) {
+        header = true;
+        break;
+      }
+    }
+    expect(header).toBe(true);
+    inactive(await clearance(page));
+    const button = page.getByRole("button", {
+      name: "Scope ordinary",
+      exact: true,
+    });
+    for (let i = 0; i < 100; i++) {
+      await page.keyboard.press("Tab");
+      if (await button.evaluate((el) => el === document.activeElement)) break;
+    }
+    await expect(button).toBeFocused();
+    for (const width of [761, 760, 761]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect(button).toBeFocused();
+      const css = await clearance(page);
+      expect(css.visible).toBe(true);
+      if (width > 760) {
+        expect(css.margin).toBe(`${css.header + css.ring}px`);
+        expect(css.bottomMargin).toBe(`${css.ring}px`);
+        expect(["auto", "0px"]).toContain(css.top);
+        expect(["auto", "0px"]).toContain(css.bottom);
+      } else {
+        expect(css.margin).toBe("0px");
+        expect(css.bottomMargin).toBe("0px");
+        expect(["auto", "0px"]).toContain(css.top);
+        expect(["auto", "0px"]).toContain(css.bottom);
+      }
+    }
+    await page.keyboard.press("Tab");
+    await expect(
+      page.getByRole("button", { name: "Scope trailing", exact: true })
+    ).toBeFocused();
+    await button.click();
+    await expect(button).toBeFocused();
+    expect((await clearance(page)).visible).toBe(false);
+    inactive(await clearance(page));
+
+    await page.keyboard.press("Tab");
+    const loan = page.getByRole("button", { name: "Scope Loan queue" });
+    await loan.focus();
+    await expect(loan).toBeFocused();
+    for (const [width, height] of [
+      [1439, 800],
+      [1440, 800],
+      [1439, 800],
+      [1440, 699],
+      [1440, 700],
+      [1440, 699],
+    ]) {
+      await page.setViewportSize({ width, height });
+      const css = await clearance(page);
+      expect(css.visible).toBe(true);
+      if (width < 1440 || height < 700) {
+        expect(css.margin).toBe(`${css.header + css.ring}px`);
+        expect(css.bottomMargin).toBe(`${css.ring}px`);
+        expect(["auto", "0px"]).toContain(css.top);
+        expect(["auto", "0px"]).toContain(css.bottom);
+      } else inactive(css);
+    }
+
+    await button.focus();
+    await page
+      .locator(":root")
+      .evaluate((root) => root.removeAttribute("data-app-shell"));
+    try {
+      await expect(button).toBeFocused();
+      expect((await clearance(page)).visible).toBe(true);
+      inactive(await clearance(page));
+    } finally {
+      await page
+        .locator(":root")
+        .evaluate((root) => root.setAttribute("data-app-shell", ""));
+    }
+  } finally {
+    await page.locator("#test-only-scope").evaluate((el) => el.remove());
+  }
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${ORIGIN}/catalog`);
+  const filters = page.getByRole("group", { name: "Filters", exact: true });
+  const format = filters.getByRole("button", {
+    name: "Any format",
+    exact: true,
+  });
+  await page.keyboard.press("Tab");
+  await format.focus();
+  await expect(format).toBeFocused();
+  const horizontalCSS = await clearance(page);
+  expect(horizontalCSS.visible).toBe(true);
+  expect(horizontalCSS.margin).toBe(
+    `${horizontalCSS.header + horizontalCSS.ring}px`
+  );
+  expect(horizontalCSS.bottomMargin).toBe(`${horizontalCSS.ring}px`);
+  expect(["auto", "0px"]).toContain(horizontalCSS.top);
+  expect(["auto", "0px"]).toContain(horizontalCSS.bottom);
+
+  await filters.getByRole("button", { name: "Any set", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Choose a set" });
+  const setFilter = dialog.getByRole("searchbox", { name: "Filter sets" });
+  await expect(setFilter).toBeFocused();
+  expect((await clearance(page)).visible).toBe(true);
+  inactive(await clearance(page));
+  // The dialog header is outside its scrolling body, so this also checks the dialog exclusion itself.
+  await page.keyboard.press("Shift+Tab");
+  await expect(
+    dialog.getByRole("button", { name: "Close set picker" })
+  ).toBeFocused();
+  expect((await clearance(page)).visible).toBe(true);
+  inactive(await clearance(page));
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+
+  const deck = await createDeck(page, `Focus clearance ${randomUUID()}`);
+  await page.goto(`${ORIGIN}/decks/${deck}`);
+  const librarySearch = page.getByRole("searchbox", {
+    name: "Search the library",
+  });
+  await page.keyboard.press("Tab");
+  await librarySearch.focus();
+  await expect(librarySearch).toBeFocused();
+  await expect(
+    librarySearch.locator('xpath=ancestor::*[@data-scroll-viewport="y"]')
+  ).toHaveCount(1);
+  expect((await clearance(page)).visible).toBe(true);
+  inactive(await clearance(page));
+
+  await page.goto(`${ORIGIN}/decks/want-list`);
+  const tradeWants = page.getByRole("heading", {
+    name: "Trade Wants",
+    exact: true,
+  });
+  await page.keyboard.press("Tab");
+  await tradeWants.focus();
+  await expect(tradeWants).toBeFocused();
+  expect((await clearance(page)).visible).toBe(true);
+  const ownMargin = await page.evaluate(() => {
+    const css = getComputedStyle(document.documentElement);
+    return (
+      parseFloat(css.getPropertyValue("--layout-sticky-top")) +
+      parseFloat(css.getPropertyValue("--space-4"))
+    );
+  });
+  await expect(tradeWants).toHaveCSS("scroll-margin-top", `${ownMargin}px`);
+  const tradeCSS = await clearance(page);
+  expect(tradeCSS.bottomMargin).toBe(`${tradeCSS.ring}px`);
+  expect(["auto", "0px"]).toContain(tradeCSS.top);
+  expect(["auto", "0px"]).toContain(tradeCSS.bottom);
+
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+  });
+  try {
+    const publicPage = await context.newPage();
+    await publicPage.goto(`${ORIGIN}/`);
+    await expect(
+      publicPage
+        .getByRole("navigation", { name: "Public pages" })
+        .getByRole("link", { name: "Sign in", exact: true })
+    ).toBeVisible();
+    expect((await clearance(publicPage)).shell).toBe(false);
+    const publicCSS = await clearance(publicPage);
+    expect(publicCSS.margin).toBe("0px");
+    expect(publicCSS.bottomMargin).toBe("0px");
+    expect(publicCSS.top).toBe(publicCSS.publicHeader);
+    expect(["auto", "0px"]).toContain(publicCSS.bottom);
+    let main = false;
+    for (let i = 0; i < 100; i++) {
+      await publicPage.keyboard.press("Tab");
+      if (
+        await publicPage.evaluate(
+          () => !!document.activeElement?.closest("main")
+        )
+      ) {
+        main = true;
+        break;
+      }
+    }
+    expect(main).toBe(true);
+    expect((await clearance(publicPage)).visible).toBe(true);
+    const focusedPublicCSS = await clearance(publicPage);
+    expect(focusedPublicCSS.shell).toBe(false);
+    expect(focusedPublicCSS.margin).toBe("0px");
+    expect(focusedPublicCSS.bottomMargin).toBe("0px");
+    expect(focusedPublicCSS.top).toBe(publicCSS.top);
+    expect(focusedPublicCSS.bottom).toBe(publicCSS.bottom);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a header tab preserves desktop root scroll before navigating away from focused main content", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signInAsOwner(page, "/decks");
+  const draft = page.getByRole("textbox", { name: "Deck name" });
+  await draft.fill("Unsubmitted focus clearance draft");
+  await expect(draft).toBeFocused();
+  await page.evaluate(() => {
+    document.body.style.minHeight = "4000px";
+    window.scrollTo(0, 350);
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        document.documentElement.dataset.testOnlyHeaderPointerScroll = String(
+          window.scrollY
+        );
+      },
+      { capture: true, once: true }
+    );
+  });
+  try {
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(350);
+    await tab(page, "Collection").click();
+    await expect(page.locator(":root")).toHaveAttribute(
+      "data-test-only-header-pointer-scroll",
+      "350"
+    );
+    await tab(page, "Decks").click();
+    await expect(draft).toHaveValue("Unsubmitted focus clearance draft");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(350);
+  } finally {
+    await page.evaluate(() => {
+      document.body.style.removeProperty("min-height");
+      delete document.documentElement.dataset.testOnlyHeaderPointerScroll;
+    });
+  }
 });

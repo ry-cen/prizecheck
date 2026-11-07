@@ -119,6 +119,34 @@
 /* Collection pins controls only when a phone has enough vertical room. */
 @custom-variant collection-pinned (@media (max-width: 760px) and (min-height: 481px));
 
+@layer base {
+  /* Keep desktop keyboard focus below the shell header, including its focus ring. */
+  @media (width > 760px) {
+    :where(
+      :root[data-app-shell]
+        #main-content
+        :focus-visible:not(
+          dialog *,
+          [data-scroll-viewport="y"]:not(.list-detail-viewport) *
+        )
+    ) {
+      scroll-margin-top: calc(
+        var(--layout-header-height) + var(--focus-width) + var(--focus-offset)
+      );
+      scroll-margin-bottom: calc(var(--focus-width) + var(--focus-offset));
+    }
+    /* The pinned Loans queue already clears the shell header. */
+    @media (width >= 1440px) and (min-height: 700px) {
+      :where(
+        :root[data-app-shell] #main-content .list-detail-viewport :focus-visible
+      ) {
+        scroll-margin-top: 0px;
+        scroll-margin-bottom: 0px;
+      }
+    }
+  }
+}
+
 @media (max-width: 760px) {
   :root:has(#main-content [data-collection-page][data-phone-search-header]) {
     scroll-padding-top: calc(
