@@ -121,8 +121,8 @@ async function holdDetailReads(page: Page, id: string) {
     );
     const read: HeldRead = { route, sequence };
     reads.push(read);
-    expect(sequence).toBeGreaterThan(0);
     if (closing) return settle(read);
+    expect(sequence).toBeGreaterThan(0);
     if (policy && sequence >= outcomeFrom) return settle(read, policy);
     if (sequence <= obsoleteThrough) return settle(read, "writable");
   };
@@ -130,10 +130,10 @@ async function holdDetailReads(page: Page, id: string) {
     if (cleanupPromise) return cleanupPromise;
     closing = true;
     cleanupPromise = (async () => {
-      // Abort before removing interception: Playwright 1.63 forwards in-flight
-      // routes when the last interceptor is removed. Forwarding an unanswered
-      // permission read could grant a held send and makes a later abort fail.
-      // New callbacks see closing and abort; collect their settlements as well.
+      // Keep the handler installed until the page/context closes. A server-held
+      // request may still be queued outside reads when this drain completes;
+      // its eventual callback must see closing and abort, never fall through.
+      // Drain captured callbacks too, including arrivals during an awaited abort.
       const results: PromiseSettledResult<void>[] = [];
       let drained = 0;
       while (drained < reads.length) {
@@ -144,10 +144,7 @@ async function holdDetailReads(page: Page, id: string) {
         );
       }
       const failure = results.find((result) => result.status === "rejected");
-      // If an abort failed for a real reason, retain the abort-only interceptor
-      // until context teardown rather than forwarding its unanswered request.
       if (failure?.status === "rejected") throw failure.reason;
-      await page.unroute(pattern, handler);
     })();
     return cleanupPromise;
   }
@@ -207,19 +204,10 @@ test.afterEach(async ({ page }, info) => {
     [...(holdCleanups.get(page) ?? [])].map((cleanup) => cleanup())
   );
   holdCleanups.delete(page);
-  // On failure, do not wait on unrelated callbacks or replace the first error.
+  // The permission handler remains installed in closing mode through context
+  // teardown, including after a failure. Preserve the first test error.
   const failed = info.status !== info.expectedStatus;
-  // A failed abort leaves the closing interceptor installed until the page's
-  // fixture closes its context; removing it here could resume that request.
-  const cleanupFailed = results.some((result) => result.status === "rejected");
-  const removal = cleanupFailed
-    ? []
-    : await Promise.allSettled([
-        page.unrouteAll({ behavior: failed ? "ignoreErrors" : "wait" }),
-      ]);
-  const errors = [...results, ...removal].filter(
-    (result) => result.status === "rejected"
-  );
+  const errors = results.filter((result) => result.status === "rejected");
   if (errors.length) {
     if (!failed) throw errors[0].reason;
     await info.attach("permission-hold-cleanup-errors", {
