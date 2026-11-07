@@ -1,6 +1,6 @@
 # Riftbound catalog compatibility acceptance
 
-**Status:** proposed 2026-11-07, from `dev` at `434f5b7a`, for [#534](https://github.com/ry-cen/prizecheck/issues/534). Specification only. It contains no fixture data, ingestion code, migrations or real card data, and it authorizes none of them. Companion to the [backend readiness plan](backend-readiness.md), where running these cases is item R12.
+**Status:** proposed 2026-11-07, from `dev` at `434f5b7a`, for [#534](https://github.com/ry-cen/prizecheck/issues/534). Specification only. It contains no fixture data, ingestion code, migrations or real card data, and it authorizes none of them. Companion to the [backend readiness plan](backend-readiness.md), where running these cases is items R12a and R12c.
 
 **Purpose.** Before any real ingestion, show on synthetic records that Riftbound-shaped catalog data can meet what shared SQL and inventory require. A failure here costs a schema decision. The same failure after ingestion could cost collectors' Holdings.
 
@@ -22,7 +22,7 @@
 
 Rules for this gate:
 
-- [ADR 0019](../../adr/0019-tcgcsv-daily-prices.md) took TCGCSV's FAQ as permission for **Pokémon prices**. That decision does not extend to Riftbound or to catalog content, and this document assumes no rights.
+- [ADR 0019](../../adr/0019-tcgcsv-daily-prices.md) took TCGCSV's FAQ as permission for **Pokémon pricing** and the product data and fallback art uses it names, which [ADR 0024](../../adr/0024-store-tcgplayer-art-copies.md) later changed. That is not blanket permission for Riftbound catalog or content ingestion. This document assumes no rights and makes no legal finding.
 - If the gate fails, the outcome returns to Ryan. TCGCSV is not silently replaced by another source, and no fallback source is added. Choosing one is a new owner decision.
 - Real data stays out of this repository, in the private fixture repository the spec names.
 
@@ -35,8 +35,10 @@ Rules for this gate:
 **Runs on** says what each case needs:
 
 - **Reader:** seed rows directly and call today's shared readers, as `api/tests/test_catalog_data_contract.py` does. Can run now with `source='manual'`.
-- **Writer:** needs a game-owned normaliser, which does not exist. The expected result is the requirement for it.
-- **Red:** expected to fail under today's constraints. A red case records a known schema gap for D4, not a defect.
+- **Writer:** needs the synthetic-only normaliser and harness in readiness item R12b, which does not exist yet. The expected result is the requirement for it.
+- **Red:** expected to fail under today's constraints. A red case records a known schema gap for D4, not a defect, and a red result is never a pass.
+
+**Passing.** Reader cases must pass at R12a, and Writer cases at R12c. A failure that is only recorded does not satisfy acceptance. Red cases close as R12c says.
 
 **Clauses** cite the contract by relation or heading, as `CDC`. `CDC join rules` is its paragraph beginning "Required Edition → Printing → Identity joins". `ADR 0019` and `CONTEXT` cite those documents. **PC** clauses are listed at the end.
 
@@ -91,8 +93,8 @@ The spec reads an Edition as a product and a finish, taken from price subtypes. 
 
 | ID | Synthetic input | Expected behaviour | Clause | Runs on |
 | --- | --- | --- | --- | --- |
-| RB-PRICE-01 | **A disappearing price must not delete an Edition.** Foil Edition with Holdings, a Deck List line and a Trade Wants line. In the next pull the product stays, and its `Foil` price row is absent. | The `catalog_edition` row, its ID and `public_ref` stay. It stays active in the next generation, and `AVAILABLE` still passes. Holdings, Deck Lists and Trade Wants are untouched. No catalog revision moves. | PC-7. CDC Scope and consumers: inventory foreign keys. ADR 0019 Never blank. | Writer |
-| RB-PRICE-02 | As RB-PRICE-01, but for every subtype of the product. | No Edition is withdrawn, and none becomes Unspecified Variant. | PC-7. | Writer |
+| RB-PRICE-01 | **A disappearing price must not delete an Edition.** Foil Edition with Holdings, a Deck List line and a Trade Wants line. In the next price import the product stays, and its `Foil` price row is absent. | The `catalog_edition` row, its ID and `public_ref` stay, and `AVAILABLE` still passes. Holdings, Deck Lists and Trade Wants are untouched. A price-only import moves neither revision. If a catalog pull promotes a generation as well, the Edition stays active and the catalog revision rises once, as in RB-REV-01. The missing price adds no catalog change of its own. | PC-7. CDC Scope and consumers: inventory foreign keys. ADR 0019 Never blank. | Writer |
+| RB-PRICE-02 | As RB-PRICE-01, but for every subtype of the product. | No Edition is withdrawn, and none becomes Unspecified Variant, with or without a promotion. | PC-7. | Writer |
 | RB-PRICE-03 | `marketPrice` turns null while the row stays. | Edition unchanged. It counts as unpriced and lowers Pricing Coverage. No mid or low fallback. | ADR 0019 Market price only. CONTEXT Pricing Coverage. | Writer |
 | RB-PRICE-04 | A price row is absent after a price was stored. | The stored row and date stay, and it is never deleted. | ADR 0019 Never blank; delisted product keeps its last known price. | Writer |
 | RB-PRICE-05 | Group returns an empty price list where rows are stored. | The group is left as stored. The run is recorded partial or failed. | ADR 0019 Never blank. Pokémon precedent `api/app/games/pokemon/prices/price_import.py:215-220`. | Writer |
@@ -135,7 +137,7 @@ Facets are game-supplied SQL. Core takes them as required arguments, so these ca
 | --- | --- | --- | --- | --- |
 | RB-REV-01 | A pull promotes a new generation. | `catalog_state.revision` rises once. A Collection or Holdings cursor from before answers 409 `CATALOG_CHANGED`. | CDC `catalog_attribute_state`. Evidence `api/app/core/inventory/cursors.py:32`. | Reader |
 | RB-REV-02 | Only a card attribute changes. | The attribute revision rises and the catalog revision does not. The Collection cursor still answers 409 `CATALOG_CHANGED`. | CDC `catalog_attribute_state`: either change invalidates it. | Reader |
-| RB-REV-03 | A price import with changed amounts. | Neither revision moves. An open cursor still works. | PC-7. Evidence: `price_import.py` and `price_binding.py` never touch `catalog_state`. | Writer |
+| RB-REV-03 | A price-only import with changed amounts. | Neither revision moves. An open cursor still works. | PC-7. Evidence: `price_import.py` and `price_binding.py` never touch `catalog_state`. | Writer |
 | RB-REV-04 | Owner and catalog revisions both moved. | Answers 409 `INVENTORY_CHANGED`, which is checked first. | Evidence `cursors.py:31-32`. | Reader |
 | RB-REV-05 | Tampered cursor, or one from another context. | 400 `INVALID_CURSOR`. | Evidence `cursors.py:21-35`. | Reader |
 | RB-REV-06 | Deck capture during a promotion. | The capture reads the revision under `FOR SHARE` and binds it. It sees one catalog revision. | CDC `catalog_state`. The contract does not claim to prove every concurrency schedule, so this case states the requirement. | Reader |
@@ -153,7 +155,7 @@ None has force until decision D4 adopts it into the contract.
 | PC-4 | Source changes to name, set or number do not rewrite retained display. They wait for owner review. |
 | PC-5 | Editions come only from finishes the source shows or the Unspecified Variant. Finishes outside the known set wait for review. |
 | PC-6 | Adding an Edition never moves Holdings. Reassignment is an explicit owner decision. |
-| PC-7 | **Price data never decides whether an Edition exists or is available.** Absent, null or stale prices change pricing only: no Edition is deleted, deactivated or replaced, and no catalog or attribute revision moves. A finish first seen in price data stays until an owner review retires it. |
+| PC-7 | **Price data never decides whether an Edition exists or is available.** Absent, null or stale prices change pricing only: no Edition is deleted, deactivated or replaced, and they cause no catalog change. A price-only import moves no catalog or attribute revision. A catalog pull that promotes a generation still advances the catalog revision as usual. A finish first seen in price data stays until an owner review retires it. |
 | PC-8 | A source drop or empty group refuses promotion. It never retires Printings in bulk. |
 | PC-9 | Multi-value fields use a delimiter proved by the coverage gate. Anything else is flagged, not guessed. |
 
