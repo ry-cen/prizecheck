@@ -1241,3 +1241,14 @@ below says where each group ended up; the module map in section 1 stays the plan
 - The root module and its exact ownership row are removed without a compatibility shim.
   Architecture test paths are synthetic fixtures and remain unchanged; the catalog contract's
   short `holdings.py` name stays accurate. No real test import or patch needs updating.
+
+**2026-11-07 — Shared pick ordering (#528)**
+
+- `order_key` and `suggest` moved unchanged from `app.deck_pick_list` to
+  `core/inventory/pick_order.py`. The shared helper has no imports, routes or I/O.
+- Deck Pick List, Loan source selection (`copy_picks`) and Trade source selection (`trade_picks`)
+  import the same helper directly. Loan and Trade picks no longer import the Deck Pick List router.
+- The ordering tiers, tie-breaks, reserved-copy handling, returned row order and zero-suggestion
+  rows are unchanged. SQL, routes, models, transactions and idempotency stay in their existing modules.
+- The three root modules remain in place with their existing ownership rows. No compatibility shim,
+  boundary allow-list, architecture rule or social caller scan changes are needed.

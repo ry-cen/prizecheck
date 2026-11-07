@@ -5,7 +5,7 @@ in the Deck Pick List's order (``deck_pick_list.suggest``), so ``suggest_picks``
 """
 from uuid import UUID
 
-from .deck_pick_list import suggest
+from app.core.inventory.pick_order import suggest
 
 
 def _places(conn, lender_id: str, editions) -> dict[UUID, list[dict]]:
