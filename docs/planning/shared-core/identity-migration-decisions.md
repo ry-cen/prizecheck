@@ -3,7 +3,8 @@
 **Status:** proposal for owner review, for [#531](https://github.com/ry-cen/prizecheck/issues/531) and
 [#533](https://github.com/ry-cen/prizecheck/issues/533). Nothing here is approved. It authorizes no migration, security
 change, cutover or deployment, and it adds no accepted ADR. Every recommendation is an input to Ryan's decision. Revised
-after independent review of `84879403` (findings ID564-01 to -05), which added IM-16 to IM-18. Earlier numbers are kept.
+after independent review of `84879403` (findings ID564-01 to -05), which added IM-16 to IM-18, and after re-review of
+`47fab7a8` (ID564-02 and ID564-R2-01). Earlier numbers are kept.
 
 **Evidence:** `dev` at `434f5b7adfac925c833a64e1e5e53b243bef7a81`. Paths with line numbers are at that commit. Counts are
 `grep` file counts on that commit. No database was touched, so schema statements come from reading migration text. What
@@ -28,7 +29,7 @@ Decide IM-3 with IM-16, then IM-7 and IM-11. Most of the others follow from them
 | ----- | -------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------- |
 | IM-1  | Route all identity SQL through one seam before any split?      | Yes, and widen the checker first                                        | no                  |
 | IM-2  | How do gateway counters reach the panel, and what if that read fails? | A signed internal read; on failure the whole read answers 503, with no invented numbers | with identity |
-| IM-3  | Who writes Handles?                                            | The gateway owns the store; the API keeps the rules and calls it        | proposed: identity  |
+| IM-3  | Who writes Handles? | The gateway owns the store; the API keeps the content rules and calls it; auth derives the stored value (IM-16) | proposed: identity |
 | IM-4  | Is Display Name shared or per game?                            | Shared, stored with the Handle                                          | proposed: identity  |
 | IM-5  | How do backends receive identity, and what is first touch? | An ordered change feed each backend pulls; first touch reads identity under IM-17's rules | proposed: identity |
 | IM-6  | One signing secret, or one per backend?                        | One per backend; Pokémon keeps its current secret                       | proposed: identity  |
@@ -41,8 +42,8 @@ Decide IM-3 with IM-16, then IM-7 and IM-11. Most of the others follow from them
 | IM-13 | How is the core baseline built, and when?                      | Curated from a schema dump, with proof, only when a second game is approved | proposed: tracks    |
 | IM-14 | Same PostgreSQL server? Co-located test harness?               | Same server, separate database; co-located by default, plus split tests | proposed: identity  |
 | IM-15 | What is the rollback window, and when do legacy tables go? | Keep them for a window Ryan sets in days; dropping is a separate approval | proposed: tracks |
-| IM-16 | What must a backend prove to change shared identity? | A gateway-only authorization bound to the real request | proposed: identity |
-| IM-17 | How is the mirror kept consistent? | One mirror writer, vacate markers instead of removed rows, snapshot for recovery | proposed: identity |
+| IM-16 | What must a backend prove to change shared identity, and how does auth get the stored value? | A gateway-only authorization bound to the real request; auth derives the canonical value from the signed bytes and compares it | proposed: identity |
+| IM-17 | How is the mirror kept consistent? | One mirror writer, one serialized first-touch rule, vacate markers, snapshot for recovery | proposed: identity |
 | IM-18 | What does an auth restore guarantee? | Fencing at any split; an external deletion journal before deletion ships | proposed: deletion |
 
 Three proposed ADRs would come out of these answers: shared identity, account deletion across games, and migration
@@ -147,7 +148,8 @@ or timing out while the gateway is otherwise serving.
 | 3. Last-known values cached in the game database | Old numbers, same shape | Partial panel with no contract change | The response cannot say they are stale, and a new database has no honest value to return |
 | 4. Return 0 | Zero | None | Rejected: it reports an unknown as a measured zero and clears the sign-up warning |
 
-**Recommendation on failure:** option 1. The failure is rare, and it needs no contract change.
+**Recommendation on failure:** option 1. It needs no contract change, and the page already handles a failed read. How often
+the read would fail is unmeasured, so revisit option 2 if it proves frequent.
 
 **Ryan decides:** the failure option, and whether a game's operations panel shows sign-in numbers at all or they belong on
 one panel. Moving them is also a contract change.
@@ -169,7 +171,7 @@ spec, from the same day, says a claim goes through the gateway. #531 voids both 
 | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | A. Gateway owns store and rules (split-map Design B)                        | One writer; matches ADR 0022                                                            | Ports `social/name_rules.py` and the word filter to TypeScript; two rule sets risk drift; moves 11 API test files' coverage |
 | B. API writes through a narrow auth role (brief D4)                         | Smallest diff; check order unchanged                                                    | Auth credentials in every backend; several writers                     |
-| C. Gateway owns the store behind a signed internal route; API keeps the rules | One writer; no auth credentials in backends; no rule port; `PUT /api/profile/*` unchanged | A network call inside the game transaction; a new internal route that gives backends write authority unless IM-16 binds it |
+| C. Gateway owns the store behind a signed internal route; API keeps the content rules | One writer; no auth credentials in backends; reserved names and the word filter stay in Python; `PUT /api/profile/*` unchanged | Not free of porting: canonicalization and structural checks must exist in TypeScript too, with cross-language equivalence checks (IM-16); a network call inside the game transaction; a new internal route that gives backends write authority unless IM-16 binds it |
 | D. Per-game Handles                                                         | No shared write                                                                         | Excluded: Handles are shared                                                                                   |
 
 **Recommendation:** C. `set_handle`'s order stays. The format, filter, same-Handle and attempt-limit steps stay local.
@@ -177,7 +179,7 @@ The 30-day check runs from the mirror and again in the auth transaction, so a st
 takes a request key and is idempotent in auth. If the game commit fails after auth commits, a retry with the same
 idempotency key gets the same answer, and the feed repairs the mirror if the client never retries. The call needs a hard
 timeout, because locks are held across it. Removing database credentials does not remove write authority: IM-16 covers what
-the call must prove, and IM-17 covers how its answer reaches the mirror.
+the call must prove and how auth gets the value it stores, and IM-17 covers how its answer reaches the mirror.
 
 **Accept with C:** the hourly attempt limit stays per game (`handle_lookup_event`), so a collector using both sides gets
 10 an hour on each. The 30-day limit and the hold are global.
@@ -196,17 +198,56 @@ under this model a breach of one game reaches the other's identity data.
 | --- | --- | --- | --- |
 | A. Trusted backends: the internal key is enough | Rewrite or squat any collector's shared identity | Least work | Largest blast radius; must be accepted knowingly |
 | B. Gateway-bound authorization | Act only on a request a live session really made, in a short window | Keeps IM-3 C; containment holds for writes | Gateway must recognize the two routes, as it does `BUDGETED_ROUTES` (`server.ts:70`); a new signature to test |
-| C. Gateway answers the routes itself (IM-3 A) | Nothing: backends leave the write path | Cleanest boundary | Needs the rule port and its drift risk |
+| C. Gateway answers the routes itself (IM-3 A) | Nothing: backends leave the write path | Cleanest boundary | Needs the full rule port, including the word filter, and its drift risk |
 | D. A with audit and rate alarms | As A, but noticed later | Cheap add-on | Detects, does not prevent |
 
 **Recommendation:** B. For `PUT /api/profile/handle` and `/display-name` only, the gateway adds a second signature under a key
 no backend holds, over a purpose prefix, the target backend, the subject, the method and path, the body hash and a stamp. The
-backend passes it on with the original body bytes. Auth verifies it, reads the requested value from those bytes rather than
-from a caller field, and ties the claim's idempotency to subject, operation and payload. The body already holds the
-idempotency key, so one authorization cannot be reused for another collector, operation or value.
+backend passes it on with the original body bytes. Auth verifies it, derives the value to store from those bytes as described
+below, and ties the claim's idempotency to subject, operation and payload. The body already holds the idempotency key, so one
+authorization cannot be reused for another collector, operation or value.
 
-**Residual risk under B, to accept:** a compromised backend can skip local name rules for a request its own collector really
-made, can drop a request, and can resend the same one inside the window, which idempotency absorbs. If IM-3 is B, this has no
+**The signed body holds what the collector typed, not what gets stored.** `clean_handle` trims (`name_rules.py:101-110`),
+`clean_display_name` applies NFC and then trims (`:113-120`), and the routes store the result (`profile.py:191,236,264`). Tests pin
+both (`api/tests/test_name_rules.py:20-21,45-46`, `test_profile.py:95-107`). Storing raw input would fail the Handle CHECK
+(`100:10`) for `"  MistyW  "` and change a Display Name. Trusting a value the backend supplies would reopen the substitution this
+option exists to close.
+
+| Option | For | Against |
+| --- | --- | --- |
+| 1. Auth derives the value, and compares it with the backend's cleaned value | Backend cannot substitute a value; language drift is caught at the boundary instead of stored | A small TypeScript port and shared test vectors; a mismatch refuses a valid change until fixed |
+| 2. Auth derives the value; the backend sends none | Smaller call | Drift is silent: what Python checked and what auth stored can differ |
+| 3. Refuse non-canonical input at the gateway | No derivation | Changes API behaviour that tests pin; padded input works today |
+| 4. Accept the backend's value | No port | Rejected: reopens substitution |
+
+**Recommendation:** option 1, in this order:
+
+1. **Parse.** Decode the signed bytes as strict UTF-8 and parse the JSON. The route's field must be a string and the key a UUID,
+   and any other shape is refused. Python's `json.loads` also takes UTF-16 and UTF-32 bytes, so this is narrower than today for a
+   non-browser client. Both parsers keep the last duplicate key.
+2. **Canonicalize.** Handle: strip. Display Name: NFC, then strip, in that order. The strip is a fixed list equal to Python's 29
+   code points, not JavaScript's `trim()`. Compared across all code points, the two differ on six: U+001C to U+001F and U+0085 are
+   stripped only by Python, and U+FEFF only by JavaScript.
+3. **Check structure.** Handle format as `100:10`, with `handle_key` as the ASCII lowercase. Display Name of 1 to 40 **code
+   points** as `100:12`, because JavaScript's `.length` counts 40 emoji as 80. No lone surrogates, and none of the refused
+   categories except `Cn`: Cc, Cf, Cs, Co, Zl, Zp. A bidirectional control in a shared name would reach every side. `Cn` stays in
+   Python, because each runtime's Unicode tables disagree on it.
+4. **Compare.** The backend's cleaned value must equal auth's. If it does not, store nothing and alert. A mismatch means a
+   compromised backend or drift between the languages.
+5. **Store** auth's derived value.
+
+**Idempotency stays on the authenticated payload.** The digest covers the action and the raw signed field, as `replay` does today
+(`profile.py:181,220`), not the canonical value. So reusing a key with differently padded input still answers
+`IDEMPOTENCY_KEY_REUSED`. Keys compare by UUID value, because the API accepts unhyphenated, braced and `urn:uuid:` forms.
+
+**Equivalence checks.** One vector file runs in a Python test against `name_rules` and in an auth test: every code point in the
+union of both strip sets, NFC cases, padded and decomposed names, and lengths at 40 and 41 astral characters. The images use
+different runtimes (`python:3.14-slim`, `node:22-bookworm-slim`), each with its own Unicode tables, so a recently assigned character
+can normalize differently. Step 4 then refuses instead of storing a diverged value. The vectors run again when either image moves.
+
+**Residual risk under B, to accept:** a compromised backend can skip the local reserved-name, word-filter and `Cn` checks for a
+value its own collector really signed. It can also drop a request, and resend the same one inside the window, which idempotency
+absorbs. Steps 1 to 4 still hold at auth. If IM-3 is B, this has no
 equivalent and A's blast radius applies at the SQL level.
 
 **Reads are a different case.** Feed and counter reads name no subject, so the per-backend key is the right check. Each game
@@ -214,7 +255,8 @@ still receives every collector's Handle and Display Name, whether or not they ev
 rest. Responses must be bound to the backend, operation, cursor, epoch and request, so that an old valid response cannot roll
 a mirror back.
 
-**Ryan decides:** A, B or C, with or without D, and whether every game seeing all Handles is acceptable.
+**Ryan decides:** A, B or C, with or without D; options 1 to 3 for the stored value; and whether every game seeing all Handles is
+acceptable.
 
 ### IM-4: Display Name
 
@@ -259,24 +301,29 @@ change before answering, so it shows at once there. Other games catch up on thei
 - A restored auth database rewinds the feed. See [IM-18](#im-18-what-an-auth-restore-guarantees).
 
 **First touch.** A game creates `inventory_owner` lazily at 10 API sites, and the insert fires a trigger that generates a
-**local** random Handle (`100:89-96`). In a split that Handle would be unknown to auth. Every one of those sites must go
-through one helper, in the game transaction, that takes the identity under IM-17's rules and overwrites the placeholder. The
-design brief's D6 proposed this as `adopt_new_owner`, and the site list has since moved. First touch now needs auth to answer,
-which is a new availability dependency. Sign-up must also create the auth identity atomically, replacing what `020` and `100`
-give today. `auth/tests/signup.test.ts:81-84` currently asserts that a new account has an owner row and Unsorted, so a split
-topology changes when those rows appear.
+**local** random Handle (`100:89-96`). In a split that Handle would be unknown to auth. So in a split no site inserts an owner row
+itself. Each goes through one helper, which runs IM-17's first-touch rule as its own transaction, before the request takes any
+owner lock, and makes what the `020` trigger gives today: the owner row, Unsorted and the profile. Two writers outside those 10
+sites need the same rule: `read_profile` makes a generated Handle for an owner row restored without a profile
+(`profile.py:90-91`), and `scripts/bind_owner.py:14` inserts an owner row. The design brief's D6 proposed `adopt_new_owner` for
+this, and the site list has since moved. First touch now needs auth to answer, which is a new availability dependency. Sign-up
+must also create the auth identity atomically, replacing what `020` and `100` give today. `auth/tests/signup.test.ts:81-84`
+currently asserts that a new account has an owner row and Unsorted, so a split topology changes when those rows appear.
 
 **Ryan decides:** A or B, and an acceptable lag for a Handle change to reach the other game.
 
 ### IM-17: keeping the mirror consistent
 
 The first draft claimed that applying the feed in order protects the non-deferrable `handle_key` UNIQUE (`100:11`). That only
-holds if the feed is the sole writer and its history stays intact. Two independent review counterexamples break it, and both
+holds if the feed is the sole writer and its history stays intact. Independent review counterexamples break it, and all of them
 reproduce in an in-memory schedule check:
 
 - **Out-of-band writes.** Auth records A→`ccc`, B→`aaa`, A→`ddd`, B→`ccc`, with the required waits. A stale game applies B's
   command answer directly, so B holds `ccc`. Replay then fails on A→`ccc` at the first event and can never reach the fourth. An
   old event can also overwrite a newer answer, and a first-touch snapshot ahead of the cursor collides the same way.
+- **Stale first touch.** B has no row here. First touch gets B=`bbb` at sequence S. B then changes to `ccc` at S+1, and the
+  ordinary pull skips that event, because B has no row, and moves the cursor past it. First touch inserts its saved `bbb`, and no
+  later pull repairs it until B changes again.
 - **Redaction.** A→`ccc`, B→`aaa`, A is deleted. Removing A's earlier rows means replay reaches B→`aaa` while the stale game's A
   still holds `aaa`, so it fails before reaching A's tombstone.
 
@@ -285,15 +332,15 @@ for.** Auth's own UNIQUE then guarantees the mirror's at every step.
 
 | Option | For | Against |
 | --- | --- | --- |
-| A. One mirror writer, plus vacate markers | The invariant holds; a simple rule to test; both schedules pass the in-memory check | Answers and first touch wait for catch-up; a long backlog must fail, not block |
+| A. One mirror writer, plus vacate markers | The invariant holds; a simple rule to test; all three schedules pass the in-memory check | Answers and first touch wait for catch-up; a long backlog must fail, not block |
 | B. Versions per collector, with direct writes and a closure repair (`design-brief.md:397-408`) | Answers need no catch-up | Skipping old versions does not make cross-collector keys safe; every path needs the placeholder repair; more states |
 | C. Snapshot reconcile only, with no replay | One mechanism | Every absence costs a full reconcile; no ordering guarantee between snapshots |
 
 **Recommendation:** A, keeping a snapshot reconcile for recovery only. The rules:
 
-- **One writer.** Only feed apply writes mirror identity columns. A command answer returns the claim's sequence, and the game
-  catches up to that sequence before answering. First touch takes a snapshot with its sequence and, holding the apply lock,
-  catches up to it before inserting. Collectors with no row in that game are skipped.
+- **One writer.** Only feed apply and the first-touch rule write mirror identity columns. Both fetch and apply under the apply lock,
+  and a batch applies only if it starts at the cursor. A command answer returns the claim's sequence, and the game catches up to
+  that sequence before answering. Collectors with no row in that game are skipped.
 - **Vacate markers.** Deletion redacts by rewriting a collector's earlier rows, not removing them. A rewritten row keeps its
   sequence and opaque id and carries no Handle or name; it tells a stale game to replace that collector's Handle with a
   placeholder that can never be a real Handle and that passes the `100:8-14` CHECKs. The release dependency survives without
@@ -303,11 +350,37 @@ for.** Auth's own UNIQUE then guarantees the mirror's at every step.
 - **Snapshot reconcile** rewrites a game's identity columns from auth at one sequence, with a placeholder phase. It is for when
   replay is impossible, such as after IM-18's fence, not for routine use.
 - **Lock order.** Apply writes `collector_profile`, whose outbox relies on holding that collector's `inventory_owner` lock
-  (`100:34-35`), and ADR 0015 fixes owner locks in ascending order. So the apply lock must come before any owner lock, and
-  catch-up may not start while one is held. `set_handle` takes the owner lock first today (`profile.py:223`), so this changes
+  (`100:34-35`), and ADR 0015 fixes owner locks in ascending order. So the apply lock must come before any owner lock, catch-up may
+  not start while one is held, and a batch takes its owner locks in ascending order before applying in sequence. `set_handle` takes the owner lock first today (`profile.py:223`), so this changes
   its order under a split. S6 must also check the 10 lazy sites against this order.
 
-**Ryan decides:** A, B or C, and how long a Handle command may wait on catch-up before it fails with a retryable error.
+**The first-touch rule is one transaction, and its steps cannot be separated:**
+
+1. **Lock.** Take the game's cursor row `FOR UPDATE`. That row lock is the apply lock, held to commit, so nothing can move the cursor
+   or apply a tombstone until this transaction ends. No owner lock may be held yet.
+2. **Recheck.** Read the cursor and stored epoch. If the collector now has a row, stop. If their id is recorded as deleted, refuse.
+3. **Sample.** Ask auth for the epoch, a sequence S and the collector's identity, read in one auth transaction serialized with feed
+   appends, so S is exactly the state returned. The sample happens here, under the frozen cursor, so no older snapshot exists to
+   insert later.
+4. **Validate.** A different epoch means refuse: [IM-18](#im-18-what-an-auth-restore-guarantees) owns that path. S below the cursor
+   cannot happen on one epoch, so it is treated the same. If the snapshot says the collector is deleted or unknown, insert nothing.
+5. **Catch up to exactly S.** Apply feed rows after the cursor up to S and no further. Going past S would skip this collector's own
+   events while they still have no row, which is the bug above. A backlog past the limit fails with a retryable error, and the
+   transaction rolls back.
+6. **Insert and commit.** Insert the owner row, Unsorted and the profile, overwrite the trigger's placeholder with the snapshot's
+   identity, set the cursor to S and commit.
+
+Events up to S are in the snapshot, and the row exists before the cursor can pass S, so every later event reaches it. If an ordinary
+pull gets the lock first, step 3 simply samples the newer state. A random-schedule model found stale state in 6,268 of 200,000 runs
+with sampling before the lock, and in none with this rule. That model uses dictionaries and atomic steps, and it is not a
+concurrency test.
+
+Sampling first and refetching whenever the cursor has passed S also works, and holds the lock for less time, but adds a retry loop
+for the same result. This rule holds the cursor across one auth call, so it needs the same hard timeout. First touch happens once per
+collector per game. The mechanism is an implementation choice; the wait limit below is Ryan's.
+
+**Ryan decides:** A, B or C, and how long a Handle command or first touch may wait on catch-up before it fails with a retryable
+error.
 
 ## 3. Signed-owner checks
 
@@ -444,8 +517,8 @@ reusable namespace and ordering does not stop at one collector:
 2. **Closing step, off the cursor, retryable.** Run the closing rules, remove the collector's rows and queue public removals.
    A failure here parks that one collector and alerts the owner, and later identity changes keep flowing.
 
-Lazy creation must refuse a recorded id, and that check must be serialized with creation and with the identity step, not merely
-run earlier in a racing transaction. A closing step that stays parked leaves data in the game, so it counts against IM-10's
+First touch refuses a recorded id inside IM-17's rule, under the same lock as the identity step, and no other path may insert an
+owner row in a split. So a request that finds its row removed re-enters the rule and is refused. A closing step that stays parked leaves data in the game, so it counts against IM-10's
 limit. The owner's own account must be refused.
 
 **Ryan decides:** A, B or C.
@@ -463,7 +536,7 @@ With the recommended feed:
 | Game wiped | Nothing to apply, and its cursor stops holding retention back, unless a retained dump of it may still be restored |
 | Game restored from an older dump               | The cursor rewinds with the data, so deletions after the dump apply again. Push needs a manual resend here                                    |
 | Auth restored from an older dump | **Not solved by the feed.** See [IM-18](#im-18-what-an-auth-restore-guarantees) |
-| In-flight signed request after deletion | Refused by the recorded id, if that check is serialized with lazy creation |
+| In-flight signed request after deletion | Refused inside IM-17's first-touch rule, the only path that may insert an owner row in a split |
 
 **Backups stop being one snapshot.** `backup_database` dumps one database (`deploy.sh:708`), `scripts/recovery.py:65`
 walks one database's tables, and the guides warn that anything after a dump is lost (`docs/deployment-oracle.md:889`).
@@ -499,7 +572,7 @@ sign-ups after the dump are lost in the same way. The proposed procedure, extend
 3. Delete every restored `session` row, and `verification` rows. Everyone signs in again. A restored session may belong to an
    account deleted or signed out after the dump.
 4. Apply whatever deletion evidence exists from the option below.
-5. A game that sees the new epoch stops pulling and refuses identity commands until a snapshot reconcile
+5. A game that sees the new epoch stops pulling and refuses identity commands and first touch until a snapshot reconcile
    ([IM-17](#im-17-keeping-the-mirror-consistent)) completes. Auth wins for identity. Compare each owner replica.
 6. List game rows with no auth user. These collectors signed up after the dump and have lost their sign-in, and signing in
    again would make a new user id. Re-linking them is a manual owner decision.
@@ -725,6 +798,11 @@ chains: S3 leads to both S4 and S10, and S10 does not depend on S5 to S9.
 - Negative cases under the IM-16 choice: a caller using **its own valid key** with a forged subject is refused; an
   authorization is refused for a different subject, operation, backend or body, and after its window; an old feed or counter
   response is refused when replayed against a new request.
+- Canonical cases under the IM-16 choice: `"  MistyW  "` stores `MistyW`; a space-padded, decomposed `Zoë` stores the trimmed NFC
+  form; a backend value unrelated to the signed input is refused with nothing stored, even when it is a valid Handle; each of the
+  six differing code points behaves as in Python; 40 astral characters pass and 41 fail; lone surrogates and non-UTF-8 bodies are
+  refused; the shared vectors pass in both languages; the same key with differently padded input answers
+  `IDEMPOTENCY_KEY_REUSED`.
 - Rollback: co-located default remains; disable by configuration. Nothing in production uses it.
 
 ### S6. Mirror apply, first touch and owner replica (IM-5, IM-7, IM-17)
@@ -736,6 +814,10 @@ chains: S3 leads to both S4 and S10, and S10 does not depend on S5 to S9.
 - Mirror cases under the IM-17 choice: a lagged game with a reused Handle converges with no UNIQUE failure; an old event
   arriving after a newer answer or snapshot changes nothing; a snapshot reconcile finishes from a deliberately collided state;
   a backlog past the limit fails with a retryable error; feed apply and owner commands run concurrently with no deadlock.
+- First-touch cases under the IM-17 choice: a newer feed event is applied or skipped for the absent collector before an older
+  first-touch snapshot would be inserted, and the insert retries or adopts the newer state, never the older value; catch-up stops
+  at exactly S; a snapshot from another epoch, below the cursor, or naming a deleted collector inserts nothing; `read_profile`'s
+  repair and `bind_owner.py` take the same rule; no site inserts an owner row outside it in a split.
 - Rollback: co-located mode makes the apply a no-op; revert the code. Replica rows are harmless.
 
 ### S7. Operations panel and multi-database operations (IM-2, IM-10, IM-18)
@@ -783,7 +865,7 @@ This covers #531's fourth criterion. No check here has been run.
 - **Security:** the owner check denies by default; a signature from one backend fails on another; internal routes are
   unreachable from the edge, where nginx proxies only `/api` and `/auth` (`nginx.conf:30`), so any internal path must stay
   outside both; the API holds no auth credentials under the recommended options, and holding its own valid key does not let a
-  backend act for a collector who made no request.
+  backend act for a collector who made no request, or store a value that does not derive from the signed input.
 - **Failure:** kill each side of a two-database write; take a game down during identity changes; restore each database from
   an older dump; run the IM-17 and IM-18 schedules.
 
@@ -819,7 +901,10 @@ This covers #531's fourth criterion. No check here has been run.
 - **Compose beyond the deploy file.** Port exposure was read from `compose.deploy.yml` only.
 - **Legal retention.** No legal assessment of deletion, backups or opaque ids was made.
 - **Feed volume, poll cost and latency.** No measurement. The designs above are untested.
-- **IM-17's schedules.** Checked in memory against the two review counterexamples only, with no database and no concurrency.
+- **IM-17's schedules.** Checked in memory against the review counterexamples and a random-schedule model, with no database and
+  no real concurrency.
+- **IM-16's comparison.** The strip sets, surrogate, length and UUID checks ran on local Python 3.13 (Unicode 15.1) and Node 24
+  (Unicode 17), not on the `python:3.14-slim` and `node:22-bookworm-slim` images. No TypeScript port or shared vector file exists.
 - **Session state after a restore.** Read from `auth/src/auth.ts` configuration, not traced through Better Auth.
 - **`PrivateBackupStore` targets.** Whether a configured store is off-host was not checked.
 - **Riftbound facts.** The spec's claims are unconfirmed and it is behind `dev`.
