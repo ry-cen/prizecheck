@@ -1,4 +1,4 @@
-import type { Route } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import {
   ORIGIN,
@@ -21,6 +21,10 @@ async function identifyOfferReads(
   await page.addInitScript((thread) => {
     const original = window.fetch.bind(window);
     const offerSignals = new WeakSet<AbortSignal>();
+    let permissionRead = 0;
+    Object.defineProperty(window, "__prizecheckPermissionRead", {
+      get: () => permissionRead,
+    });
     window.fetch = (input, init) => {
       const path = new URL(
         input instanceof Request ? input.url : String(input),
@@ -28,13 +32,15 @@ async function identifyOfferReads(
       ).pathname;
       if (path === `/api/trades/resolve/${thread}` && init?.signal)
         offerSignals.add(init.signal);
-      if (
-        path === `/api/trades/${thread}` &&
-        init?.signal &&
-        offerSignals.has(init.signal)
-      ) {
+      if (path === `/api/trades/${thread}` && init?.signal) {
         const headers = new Headers(init.headers);
-        headers.set("x-prizecheck-test-reader", "offer");
+        if (offerSignals.has(init.signal))
+          headers.set("x-prizecheck-test-reader", "offer");
+        else
+          headers.set(
+            "x-prizecheck-test-permission-read",
+            String(++permissionRead)
+          );
         init = { ...init, headers };
       }
       return original(input, init);
@@ -42,58 +48,163 @@ async function identifyOfferReads(
   }, id);
 }
 
-/** Snapshot before interception: recording a held route must not wait on backend
- * I/O, which can finish out of order or survive until context teardown. */
-async function holdDetailReads(
-  page: import("@playwright/test").Page,
-  id: string
-) {
+type PermissionOutcome = "writable" | "read-only" | "failed";
+type HeldRead = {
+  route: Route;
+  sequence: number;
+  settled?: Promise<void>;
+  outcome?: PermissionOutcome;
+  delivered?: boolean;
+};
+const holdCleanups = new WeakMap<Page, Set<() => Promise<void>>>();
+
+/** Snapshot before interception; route arrival does no backend/body I/O. Source
+ * sequence numbers distinguish an obsolete request even if it arrives late. */
+async function holdDetailReads(page: Page, id: string) {
   const response = await page.request.get(`${ORIGIN}/api/trades/${id}`);
   expect(response.ok()).toBe(true);
   const body: Record<string, unknown> = await response.json();
   await response.dispose();
-  const reads: Route[] = [];
-  const released = new Set<Route>();
-  let holding = true;
-  await page.route(`**/api/trades/${id}`, (route) => {
+  const reads: HeldRead[] = [];
+  let closing = false;
+  let cleanupPromise: Promise<void> | undefined;
+  let obsoleteThrough = 0;
+  let outcomeFrom = Infinity;
+  let policy: PermissionOutcome | undefined;
+  const pattern = `**/api/trades/${id}`;
+
+  function settle(read: HeldRead, outcome?: PermissionOutcome): Promise<void> {
+    if (read.settled) return read.settled;
+    read.outcome = outcome;
+    read.settled = (async () => {
+      try {
+        // Teardown aborts; it must never grant permission to a held send.
+        if (outcome === undefined || outcome === "failed")
+          await read.route.abort("failed");
+        else
+          await read.route.fulfill({
+            json: { ...body, can_message: outcome === "writable" },
+          });
+        const failure = read.route.request().failure();
+        read.delivered =
+          !failure ||
+          (outcome === "failed" && failure.errorText.includes("ERR_FAILED"));
+      } catch (error) {
+        // Real supersession/departure aborts older requests. A current request's
+        // failure must not be treated as delivery; assertLatestOutcome checks it.
+        if (!read.route.request().failure()?.errorText.includes("ABORTED"))
+          throw error;
+        read.delivered = false;
+      }
+    })();
+    return read.settled;
+  }
+  const handler = (route: Route) => {
     if (
-      !holding ||
       route.request().method() !== "GET" ||
       route.request().headers()["x-prizecheck-test-reader"] === "offer"
     )
       return route.continue();
-    reads.push(route);
-  });
-  async function release(route: Route, outcome = "writable") {
-    released.add(route);
-    try {
-      if (outcome === "failed") await route.abort("failed");
-      else
-        await route.fulfill({
-          json: { ...body, can_message: outcome === "writable" },
-        });
-    } catch (error) {
-      expect(route.request().failure()?.errorText).toContain("ABORTED");
-    }
+    const sequence = Number(
+      route.request().headers()["x-prizecheck-test-permission-read"]
+    );
+    const read: HeldRead = { route, sequence };
+    reads.push(read);
+    expect(sequence).toBeGreaterThan(0);
+    if (closing) return settle(read);
+    if (policy && sequence >= outcomeFrom) return settle(read, policy);
+    if (sequence <= obsoleteThrough) return settle(read, "writable");
+  };
+  function cleanup(): Promise<void> {
+    if (cleanupPromise) return cleanupPromise;
+    closing = true;
+    cleanupPromise = (async () => {
+      // Remove interception before draining; callbacks already in flight see
+      // closing and abort. Do not wait for unanswered handlers while removing.
+      const removal = await Promise.allSettled([
+        page.unroute(pattern, handler),
+      ]);
+      const results = await Promise.allSettled(
+        reads.map((read) => settle(read))
+      );
+      const failure = [...removal, ...results].find(
+        (result) => result.status === "rejected"
+      );
+      if (failure?.status === "rejected") throw failure.reason;
+    })();
+    return cleanupPromise;
   }
+  const cleanups = holdCleanups.get(page) ?? new Set<() => Promise<void>>();
+  holdCleanups.set(page, cleanups);
+  cleanups.add(cleanup); // Registered before interception, including timeout paths.
+  await page.route(pattern, handler);
+  const startedSequence = () =>
+    page.evaluate(() =>
+      Number(Reflect.get(window, "__prizecheckPermissionRead"))
+    );
   return {
-    reads,
-    release,
-    async finish() {
-      // Switch first: reads arriving while we drain must run normally.
-      holding = false;
+    cleanup,
+    startedSequence,
+    async waitForNewer(sequence = 0) {
+      await expect
+        .poll(() => Math.max(0, ...reads.map((read) => read.sequence)))
+        .toBeGreaterThan(sequence);
+      return reads.reduce((latest, read) =>
+        read.sequence > latest.sequence ? read : latest
+      );
+    },
+    async releaseObsolete(before: number) {
+      obsoleteThrough = before - 1;
       await Promise.all(
         reads
-          .filter((route) => !released.has(route))
-          .map((route) => release(route))
+          .filter((read) => read.sequence <= obsoleteThrough)
+          .map((read) => settle(read, "writable"))
       );
-      await page.unroute(`**/api/trades/${id}`);
+    },
+    async settleNewest(outcome: PermissionOutcome, from = 1) {
+      outcomeFrom = from;
+      policy = outcome;
+      // Deliberately include the actual newest owner and every superseding read.
+      // Keep this policy installed through the terminal assertions, for every
+      // outcome. No later real-backend writable read can substitute for it.
+      await Promise.all(
+        reads
+          .filter((read) => read.sequence >= outcomeFrom)
+          .map((read) => settle(read, outcome))
+      );
+    },
+    async assertLatestOutcome(outcome: PermissionOutcome) {
+      await expect
+        .poll(async () => {
+          const sequence = await startedSequence();
+          const latest = reads.find((read) => read.sequence === sequence);
+          return { outcome: latest?.outcome, delivered: latest?.delivered };
+        })
+        .toEqual({ outcome, delivered: true });
     },
   };
 }
 
-test.afterEach(async ({ page }) => {
-  await page.unrouteAll({ behavior: "wait" });
+test.afterEach(async ({ page }, info) => {
+  const results = await Promise.allSettled(
+    [...(holdCleanups.get(page) ?? [])].map((cleanup) => cleanup())
+  );
+  holdCleanups.delete(page);
+  // On failure, do not wait on unrelated callbacks or replace the first error.
+  const failed = info.status !== info.expectedStatus;
+  const removal = await Promise.allSettled([
+    page.unrouteAll({ behavior: failed ? "ignoreErrors" : "wait" }),
+  ]);
+  const errors = [...results, ...removal].filter(
+    (result) => result.status === "rejected"
+  );
+  if (errors.length) {
+    if (!failed) throw errors[0].reason;
+    await info.attach("permission-hold-cleanup-errors", {
+      body: errors.map((error) => String(error.reason)).join("\n"),
+      contentType: "text/plain",
+    });
+  }
 });
 
 for (const outcome of ["writable", "read-only", "failed"] as const) {
@@ -126,7 +237,6 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
         await route.continue();
       });
       const held = await holdDetailReads(page, id);
-      const reads = held.reads;
       const recheck = () =>
         page.evaluate(() =>
           document.dispatchEvent(new Event("visibilitychange"))
@@ -134,17 +244,18 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
       await send.hover();
       await page.mouse.down();
       await recheck();
-      await expect.poll(() => reads.length).toBe(1);
+      await held.waitForNewer();
       await page.mouse.up();
       await expect(
         page.getByRole("button", { name: "Sending…", exact: true })
       ).toBeDisabled();
       await expect(editor).toHaveAttribute("readonly", "");
       expect(posts).toEqual([]);
+      const previous = await held.startedSequence();
       await recheck();
-      await expect.poll(() => reads.length).toBe(2);
-      const obsolete = () => held.release(reads[0]);
-      const newest = () => held.release(reads[1], outcome);
+      const selected = await held.waitForNewer(previous);
+      const obsolete = () => held.releaseObsolete(selected.sequence);
+      const newest = () => held.settleNewest(outcome, selected.sequence);
       if (order === "obsolete-first") {
         await obsolete();
         expect(posts).toEqual([]);
@@ -154,7 +265,6 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
         await newest();
         await obsolete();
       }
-      await held.finish();
       if (outcome === "writable") {
         await expect(
           page.getByRole("list", { name: "Messages and changes" })
@@ -164,9 +274,9 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
         expect(JSON.parse(posts[0]).idempotency_key).toMatch(/^[0-9a-f-]{36}$/);
         await expect(editor).toHaveValue("");
       } else {
-        expect(posts).toEqual([]);
         if (outcome === "failed") {
           await expect(editor).toHaveValue("Held body 日本語");
+          await expect(editor).not.toHaveAttribute("readonly", "");
           await expect(
             page
               .getByRole("status")
@@ -179,8 +289,13 @@ for (const outcome of ["writable", "read-only", "failed"] as const) {
           await expect(
             page.getByRole("heading", { name: "Chat and changes", exact: true })
           ).toBeFocused();
+          await expect(editor).toHaveCount(0);
         }
+        // Check no POST only after the held intent reached its terminal state.
+        expect(posts).toEqual([]);
       }
+      await held.assertLatestOutcome(outcome);
+      if (outcome !== "writable") expect(posts).toEqual([]);
     });
   }
 }
@@ -284,13 +399,13 @@ test("native held chat is dropped on a real document departure without a POST", 
   await page.evaluate(() =>
     document.dispatchEvent(new Event("visibilitychange"))
   );
-  await expect.poll(() => held.reads.length).toBeGreaterThan(0);
+  await held.waitForNewer();
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Sending…", exact: true })
   ).toBeDisabled();
   await page.goto(`${ORIGIN}/collection`);
-  await held.finish();
+  await held.cleanup();
   await expect(page).toHaveURL(`${ORIGIN}/collection`);
   expect(bodies).toEqual([]);
 });
@@ -320,14 +435,14 @@ test("native unknown chat holds its exact replay body and key through a permissi
   await page.evaluate(() =>
     document.dispatchEvent(new Event("visibilitychange"))
   );
-  await expect.poll(() => held.reads.length).toBeGreaterThan(0);
+  await held.waitForNewer();
   await retry.click();
   await expect(
     page.getByRole("button", { name: "Sending…", exact: true })
   ).toBeDisabled();
   expect(bodies).toHaveLength(1);
   await expect(editor).toHaveAttribute("readonly", "");
-  await held.finish();
+  await held.settleNewest("writable");
   await expect(editor).toHaveValue("");
   expect(bodies).toHaveLength(2);
   expect(bodies[1]).toBe(bodies[0]);
@@ -336,4 +451,5 @@ test("native unknown chat holds its exact replay body and key through a permissi
       .getByRole("list", { name: "Messages and changes" })
       .getByText("You: One message, one key", { exact: true })
   ).toHaveCount(1);
+  await held.assertLatestOutcome("writable");
 });
