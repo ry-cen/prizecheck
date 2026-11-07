@@ -793,3 +793,65 @@ test.describe("phone", () => {
     await expectPageChecks(page, "phone Collection, after Add cards");
   });
 });
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`owned badge at ${viewport.width}×${viewport.height}`, () => {
+    test.use({ viewport });
+
+    test("ownership stays clear of collapsed and queued quick add in Catalog and Collection", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      await addBar(page).getByRole("button", { name: "Add 1 card" }).click();
+      await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+
+      async function checkBadge(scope: Page | Locator, count: number) {
+        const ownedTile = tile(
+          scope,
+          "Bulbasaur, MEG 001, Mega Evolution, Normal"
+        );
+        await expect(ownedTile).toHaveAccessibleName(
+          `Bulbasaur, MEG 001, Mega Evolution, Normal, 1 owned${count ? `, ${count} to add` : ""}`
+        );
+        const badge = ownedTile.getByText("×1", { exact: true });
+        const control = results(scope).getByRole("group", {
+          name: `${BULBASAUR}: ${count} to add`,
+          exact: true,
+        });
+        await expect(badge).toBeVisible();
+        await expect(control).toBeVisible();
+        await expect
+          .poll(async () => {
+            const a = await badge.boundingBox();
+            const b = await control.boundingBox();
+            if (!a || !b) return false;
+            return (
+              a.x + a.width <= b.x ||
+              b.x + b.width <= a.x ||
+              a.y + a.height <= b.y ||
+              b.y + b.height <= a.y
+            );
+          })
+          .toBe(true);
+      }
+
+      await checkBadge(page, 0);
+      await more(page, BULBASAUR).click();
+      await checkBadge(page, 1);
+      await page.goto(`${ORIGIN}/collection`);
+      await page
+        .getByRole("button", { name: "Add cards", exact: true })
+        .click();
+      const add = page.getByRole("dialog", { name: "Add cards", exact: true });
+      await checkBadge(add, 0);
+      await more(add, BULBASAUR).click();
+      await checkBadge(add, 1);
+    });
+  });
+}

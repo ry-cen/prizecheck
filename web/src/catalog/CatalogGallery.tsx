@@ -460,6 +460,7 @@ export function CatalogGallery({
                     <CatalogTile
                       edition={edition}
                       format={format}
+                      adding={adding}
                       queued={count}
                       onOpen={(element) => {
                         opener.current = element;
@@ -544,11 +545,13 @@ function CatalogTile({
   edition,
   format,
   queued,
+  adding,
   onOpen,
 }: {
   edition: BrowseEdition;
   format: BrowseFormat | null;
   queued: number;
+  adding: boolean;
   onOpen: (element: HTMLElement) => void;
 }) {
   const priceId = useId();
@@ -562,6 +565,7 @@ function CatalogTile({
       variant={variantLabel(edition.descriptor)}
       imageUrl={edition.image_url}
       owned={edition.owned}
+      ownedBadgePosition={adding ? "top-right" : "bottom-right"}
       flag={
         unknown
           ? { text: "?", label: `${FORMAT_NAMES[format]} legality unknown` }
