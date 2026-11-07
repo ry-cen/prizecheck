@@ -17,6 +17,7 @@ on:
           - none
           - sharded
           - full
+          - held-send-repeat
         default: none
   workflow_call:
 permissions:
@@ -195,6 +196,72 @@ jobs:
           path: .scratch/verification/
           retention-days: 7
           include-hidden-files: true
+  # Never-merged validation branch: compare the unfixed and fixed held-send spec.
+  held-send-repeat:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.integration == 'held-send-repeat' }}
+    name: held-send-repeat (${{ matrix.leg }})
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: control
+            sha: 800b8fbde513c9fb50e7e4b51fc144a13420358b
+          - leg: fixed
+            sha: 24136a8a7b7fcef1e645cff03d66a1dbbad281bf
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert and record exact tested source
+        env:
+          SOURCE_SHA: ${{ matrix.sha }}
+          LEG: ${{ matrix.leg }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p .scratch/verification
+          printf 'Leg: %s\nTested source SHA: %s\nWorkflow commit: %s\n' "$LEG" "$SOURCE_SHA" "$GITHUB_SHA" | tee .scratch/verification/source.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: npm ci
+      - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npx playwright install --with-deps chromium
+      - name: Repeat held-send spec twenty times without retries
+        run: npm run verify -- --suite browser --shard 1/1 --browser-workers 2 --repeat 20 -- web/tests/thread-held-send.spec.ts --retries=0
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-held-send-repeat-${{ matrix.leg }}
+          path: .scratch/verification/
+          retention-days: 7
+          include-hidden-files: true
   # The scanner index job's image (deploy/docker/scanner-index.Dockerfile): a build check of the job image, on both
   # architectures because production runs the arm64 image. The image's default stage does not depend on the test stage,
   # so the real-model test is not built or run here; integration-scanner-model does that on demand. build-images.yml
@@ -268,6 +335,7 @@ jobs:
         integration-legs,
         integration-full,
         integration-scanner-model,
+        held-send-repeat,
       ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -281,6 +349,7 @@ jobs:
           SCANNER_INDEX_RESULT: ${{ needs.scanner-index-image.result }}
           LEGS_RESULT: ${{ needs.integration-legs.result }}
           FULL_RESULT: ${{ needs.integration-full.result }}
+          HELD_SEND_RESULT: ${{ needs.held-send-repeat.result }}
           SCANNER_MODEL_RESULT: ${{ needs.integration-scanner-model.result }}
         run: |
           echo "integration: $INTEGRATION; release pull request: $RELEASE_PR; checks: $CHECKS_RESULT; scanner index image: $SCANNER_INDEX_RESULT; legs: $LEGS_RESULT; full: $FULL_RESULT; scanner model: $SCANNER_MODEL_RESULT"
@@ -292,8 +361,16 @@ jobs:
             none) legs=skipped; full=skipped; model=skipped ;;
             sharded) legs=success; full=skipped; model=success ;;
             full) legs=skipped; full=success; model=success ;;
+            held-send-repeat) legs=skipped; full=skipped; model=skipped ;;
             *) echo "unknown integration choice: $INTEGRATION"; exit 1 ;;
           esac
           test "$LEGS_RESULT" = "$legs"
           test "$FULL_RESULT" = "$full"
           test "$SCANNER_MODEL_RESULT" = "$model"
+          # Both matrix legs preserve their exit status; an expected control failure can make this red.
+          # In particular, a fixed-leg failure must never produce a successful aggregate.
+          if [ "$INTEGRATION" = held-send-repeat ]; then
+            test "$HELD_SEND_RESULT" = success
+          else
+            test "$HELD_SEND_RESULT" = skipped
+          fi
