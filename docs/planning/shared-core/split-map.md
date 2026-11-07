@@ -1018,6 +1018,17 @@ same way as WP-B3, before `social/` and `trade_list` move.
 
 ## 10. Notes as built (dated)
 
+**2026-11-07 — Allocation needs fold extraction (#528)**
+
+Moved the unchanged `allocation_needs` fold into `core/decks/needs.py`. Loan inventory
+and root Want List now import it there, removing Loan inventory's direct dependency
+on mixed `want_list`. `Allocation` remains in core-owned `app.copy_allocation`.
+`app.want_list mixed` and `app.loan_inventory core` remain unchanged; no owner rows
+or allowlist entries were added. `edition_needs`, capture, Deck switches, social
+imports, SQL and locking stay in place. Loan inventory has no remaining direct
+mixed import. The existing `Allocation` import still reaches the core-owned
+settings and Location routers; separating the allocation reader is a later slice.
+
 These notes record where the work differs from, or settles, the map above. The sections above stay as written on
 2026-10-29.
 
