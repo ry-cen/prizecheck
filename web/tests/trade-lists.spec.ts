@@ -390,6 +390,126 @@ test.describe("phone", () => {
   });
 });
 
+test("Trades views keep their title and switch in place across navigation", async ({
+  page,
+}, testInfo) => {
+  test.slow();
+  await noArtwork(page);
+  await signInAsOwner(page, "/trades");
+  const views = [
+    { name: "Trades", path: "/trades" },
+    { name: "Find trades", path: "/trades/find" },
+    { name: "My Trade List", path: "/trades/list" },
+  ];
+  const switcher = () => page.getByRole("tablist", { name: "Trades view" });
+  const tab = (name: string) =>
+    switcher().getByRole("tab", { name, exact: true });
+  async function current(index: number) {
+    await expect(page).toHaveURL(`${ORIGIN}${views[index].path}`);
+    await expect(tab(views[index].name)).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    await expect(switcher().getByRole("tab", { selected: true })).toHaveCount(
+      1
+    );
+    await expect(
+      page.getByRole("tabpanel", { name: views[index].name, exact: true })
+    ).toBeVisible();
+  }
+  for (const width of [1024, 1440, 1920, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await tab("Trades").click();
+    await current(0);
+    const measurements = [];
+    for (const [index, view] of views.entries()) {
+      await tab(view.name).click();
+      await current(index);
+      const title = page.getByRole("heading", {
+        name: "Trades",
+        exact: true,
+        level: 1,
+      });
+      const heading = await title.boundingBox();
+      const control = await switcher().boundingBox();
+      expect(heading).not.toBeNull();
+      expect(control).not.toBeNull();
+      const typography = await title.evaluate((el) => ({
+        size: getComputedStyle(el).fontSize,
+        weight: getComputedStyle(el).fontWeight,
+      }));
+      measurements.push({
+        view: view.name,
+        heading: heading!,
+        control: control!,
+        typography,
+      });
+      const main = page.getByRole("main").filter({ has: title });
+      if (index === 1 && width >= 1440) {
+        expect((await main.boundingBox())!.width).toBe(Math.min(width, 1536));
+      }
+      await expect
+        .poll(() => main.evaluate((el) => getComputedStyle(el).paddingLeft))
+        .toBe(width === 390 ? "16px" : "28px");
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              document.documentElement.scrollWidth -
+              document.documentElement.clientWidth
+          )
+        )
+        .toBeLessThanOrEqual(0);
+      if (width === 1440 || width === 390) {
+        await page.screenshot({
+          path: testInfo.outputPath(`after-${width}-${index}.png`),
+          fullPage: true,
+        });
+      }
+    }
+    console.log(JSON.stringify({ width, measurements }));
+    for (const measured of measurements.slice(1)) {
+      const baseline = measurements[0];
+      for (const dimension of ["x", "y"] as const) {
+        expect(
+          Math.abs(measured.heading[dimension] - baseline.heading[dimension])
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(measured.control[dimension] - baseline.control[dimension])
+        ).toBeLessThanOrEqual(1);
+      }
+      expect(measured.typography).toEqual(baseline.typography);
+      expect(measured.control.height).toBe(baseline.control.height);
+      if (width < 1440)
+        expect(measured.control.width).toBe(baseline.control.width);
+    }
+    // Complete the round trip twice, then restore each address through history.
+    for (let round = 0; round < 2; round++) {
+      for (const index of [0, 1, 2, 0]) {
+        await tab(views[index].name).click();
+        await current(index);
+      }
+    }
+    for (const index of [2, 1, 0]) {
+      await page.goBack();
+      await current(index);
+    }
+    for (const index of [1, 2, 0]) {
+      await page.goForward();
+      await current(index);
+    }
+    // Tabs use manual activation: arrows move focus, Enter changes the view.
+    await tab("Trades").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(tab("Find trades")).toBeFocused();
+    await current(0);
+    await page.keyboard.press("Enter");
+    await current(1);
+    await expect(tab("Find trades")).toHaveAttribute("tabindex", "0");
+    await expect(tab("Trades")).toHaveAttribute("tabindex", "-1");
+  }
+});
+
 test("My Trade List uses desktop width with capped art and keeps Location quantities at 390 px", async ({
   page,
 }) => {
