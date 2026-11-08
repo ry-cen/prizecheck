@@ -9,6 +9,8 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
+from .catalog_run_states import LEASE_END_SQL, OUTCOME_FAILED, PHASE_FAILED
+
 DISPATCH_LOCK = 914702
 RUNNER_LOCK = 914703
 
@@ -52,7 +54,7 @@ def dispatch_import_detailed(conn, on_reserved=None, guard=None) -> Dispatch:
     try:
         runner_owned = conn.execute('SELECT pg_try_advisory_lock(%s) AS acquired',(RUNNER_LOCK,)).fetchone()['acquired']
         with conn.transaction():
-            active = conn.execute("""SELECT id,coalesce(lease_until,started_at+interval '2 minutes')>clock_timestamp() AS healthy
+            active = conn.execute(f"""SELECT id,{LEASE_END_SQL}>clock_timestamp() AS healthy
               FROM catalog_run WHERE outcome IS NULL FOR UPDATE""").fetchone()
             if active and (not runner_owned or active['healthy']):
                 return Dispatch(active['id'], False)
@@ -63,7 +65,7 @@ def dispatch_import_detailed(conn, on_reserved=None, guard=None) -> Dispatch:
             if guard is not None and not guard(conn):
                 return Dispatch(None, False, declined=True)
             if active:
-                conn.execute("""UPDATE catalog_run SET phase='failed',outcome='failed',
+                conn.execute(f"""UPDATE catalog_run SET phase='{PHASE_FAILED}',outcome='{OUTCOME_FAILED}',
                   error='Catalog import interrupted; start a new pull',finished_at=now(),lease_until=NULL
                   WHERE id=%s AND outcome IS NULL""",(active['id'],))
             run_id = conn.execute('INSERT INTO catalog_run DEFAULT VALUES RETURNING id').fetchone()['id']
@@ -78,7 +80,7 @@ def dispatch_import_detailed(conn, on_reserved=None, guard=None) -> Dispatch:
             child = launch_import(run_id)
         except Exception:
             conn.rollback()
-            conn.execute("""UPDATE catalog_run SET phase='failed',outcome='failed',error='CATALOG_DISPATCH_FAILED',
+            conn.execute(f"""UPDATE catalog_run SET phase='{PHASE_FAILED}',outcome='{OUTCOME_FAILED}',error='CATALOG_DISPATCH_FAILED',
               finished_at=now(),lease_until=NULL WHERE id=%s AND outcome IS NULL""",(run_id,))
             conn.commit()
             raise HTTPException(503,{'code':'CATALOG_DISPATCH_FAILED'}) from None
