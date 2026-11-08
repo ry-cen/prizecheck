@@ -46,8 +46,8 @@ ALLOWED_IMPORTS = {
     # Pure owner/key receipt presence; no inventory or hidden-Location access.
     'app.social.owners': {('app.location_tree', 'replay'), ('app.location_tree', 'replay_with_presence')},
     # The choke point counts each Friend's wants with the pure allocation over rows it reads itself (trading #276).
-    'app.social.friend_copies': {('app.social', 'counts'), ('app', 'copy_allocation'), ('app.copy_allocation', 'allocate_rows'),
-                                ('app.copy_allocation', 'AllocationRows')},
+    'app.social.friend_copies': {('app.social', 'counts'), ('app.core.inventory', 'allocation'), ('app.core.inventory.allocation', 'allocate_rows'),
+                                ('app.core.inventory.allocation', 'AllocationRows')},
     'app.social.friend_reads': {
         ('app.card_accepts', 'accepts'), ('app.core.trading.trade_wants', 'own_rules'),
         ('app.social', 'name_rules'), ('app', 'set_codes'), ('app.db', 'connect'), ('app.identity', 'verified_user'),

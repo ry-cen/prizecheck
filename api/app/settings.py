@@ -12,21 +12,17 @@ and Buy missing read it under the owner row lock in the same transaction as the 
 revision, because the inventory and Deck List revisions don't move when it changes.
 """
 import json
-from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from .core.inventory.allocation import WantListCounting
 from .db import connect
 from .identity import verified_user
 from .location_tree import error, owner_and_rows, replay
 
 router = APIRouter(prefix='/api/settings', tags=['settings'])
-
-# **Every Deck built at once** (the default) gives each Spare Copy to one Deck only, oldest Deck first; **One Deck at a
-# time** counts every copy outside a Deck for that Deck. Migration 049 checks the same two names.
-WantListCounting = Literal['all_at_once', 'one_at_a_time']
 
 
 class AccountSettings(BaseModel):
