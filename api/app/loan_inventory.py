@@ -79,7 +79,8 @@ from app.core.decks.needs import allocation_needs
 from .deck_deletion import unsorted_leaf
 from .copy_picks import suggest_picks
 from .loan_picks import pick_shortfalls
-from .location_tree import VOID_DIGEST, error, location_paths, refuse, replay
+from app.core.inventory.location_paths import location_paths
+from .location_tree import VOID_DIGEST, error, refuse, replay
 from .db import connect
 from .identity import verified_user
 from .inventory_core import MAX_QUANTITY, first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for

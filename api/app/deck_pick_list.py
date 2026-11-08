@@ -33,7 +33,8 @@ from app.core.ops.api_errors import api_error
 from .copy_allocation import spare_rule
 from app.core.decks.ownership import CompetitionWarning, read_ownership
 from app.core.decks.store import check_revision, read_deck_list_revision, require_deck
-from .location_tree import location_paths, owner_and_rows
+from app.core.inventory.location_paths import location_paths
+from .location_tree import owner_and_rows
 from .db import connect
 from .identity import verified_user
 from .core.inventory.idempotency import expire

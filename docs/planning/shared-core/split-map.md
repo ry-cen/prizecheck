@@ -1128,6 +1128,16 @@ below says where each group ended up; the module map in section 1 stays the plan
   The [catalog contract inventory](catalog-data-contract.md) records the resulting shared Collection reads, with
   #521 attribution; #520's contract tests remain unchanged.
 
+**2026-11-08 — Shared own-inventory Location paths (#528)**
+
+- Extracted the existing `LOCATION_PATHS` CTE and `location_paths` reader unchanged into
+  `core/inventory/location_paths.py`. Collection, Deck Pick List, Loan inventory and Pokémon Trade
+  inventory now import those definitions directly, rather than reaching through the Location command router.
+- Location commands, `owner_and_rows`, social locks and receipt helpers remain in place. SQL, query
+  parameters, ordering, route snapshots and all existing test assertions are unchanged.
+- No ownership row is needed for the inferred core path. Social rules, pins and allow-lists are unchanged,
+  including the rule preventing Trade inventory from naming `friend_ids`.
+
 **2026-11-03 — API error helper (#527)**
 
 - The existing error raiser moved unchanged from `app.api_errors` to `core/ops/api_errors.py`.
