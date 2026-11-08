@@ -407,7 +407,9 @@ def rule_string_callers(tree, data, rules):
     if not data['exact'] and data['required'] - found:
         failures.append('missing ' + ', '.join(sorted(data['required'] - found)))
     for name, pattern in data.get('caller_patterns', {}).items():
-        if any(not pattern.search(text) for text in matches.get(name, [])):
+        if name not in data['callers'] or name not in found:
+            failures.append(f'caller pattern for {name} must name an allowed matching caller')
+        elif any(not pattern.search(text) for text in matches[name]):
             failures.append(f'{name} must match {pattern.pattern} in every matching string constant')
     return sorted(found), failures
 

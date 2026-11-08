@@ -338,7 +338,10 @@ class StringCallersTest(unittest.TestCase):
                 for source in (None, '', 'NOTE = "no call here"'):
                     with self.subTest(rule=rule, name=name, source=source):
                         files = {**self.files(rule), self.path(name): source}
-                        self.assertEqual(run(rule, files, **REAL.RULES[rule]), [f'{rule}: missing {name}'])
+                        expected = [f'{rule}: missing {name}']
+                        if name in REAL.RULES[rule].get('caller_patterns', {}):
+                            expected.append(f'{rule}: caller pattern for {name} must name an allowed matching caller')
+                        self.assertEqual(run(rule, files, **REAL.RULES[rule]), expected)
 
     def test_optional_callers_may_stop_matching_or_disappear(self):
         for rule, (_, callers, required) in self.CASES.items():
@@ -437,6 +440,41 @@ class StringCallersTest(unittest.TestCase):
         sql = 'FROM reserving_picks ( ARRAY[%s]::text[], NULL) JOIN reserving_picks(%s) ON true'
         files = {**self.files(rule), 'api/app/social/counts.py': f'SQL = {sql!r}\n'}
         self.assertEqual(run(rule, files, **REAL.RULES[rule]), [])
+
+    def test_a_stale_caller_pattern_fails_after_the_caller_sets_move_even_with_an_old_shim(self):
+        rule = 'reserving-picks-callers'
+        data = {**REAL.RULES[rule], 'callers': {'app.core.social.counts', 'app.social.friend_copies'},
+                'required': {'app.core.social.counts'}}
+        # The caller sets moved, but caller_patterns still names app.social.counts. Neither removing the old module
+        # nor leaving an import-only shim may silently discard its single-owner constraint.
+        for old_source in (None, 'from app.core.social.counts import SQL\n'):
+            files = {**self.files(rule), 'api/app/social/counts.py': old_source,
+                     'api/app/core/social/counts.py': 'SQL = "FROM reserving_picks(%s)"\n'}
+            with self.subTest(old_source=old_source):
+                self.assertEqual(run(rule, files, **data),
+                                 [f'{rule}: caller pattern for app.social.counts must name an allowed matching caller'])
+        # A matching key must also be allowed; a matching old caller cannot keep a stale pattern pin valid.
+        files['api/app/social/counts.py'] = self.files(rule)['api/app/social/counts.py']
+        self.assertEqual(run(rule, files, **data),
+                         [f'{rule}: unexpected app.social.counts',
+                          f'{rule}: caller pattern for app.social.counts must name an allowed matching caller'])
+
+    def test_a_relocated_caller_still_enforces_its_updated_pattern(self):
+        rule = 'reserving-picks-callers'
+        pattern = REAL.RULES[rule]['caller_patterns']['app.social.counts']
+        data = {**REAL.RULES[rule], 'callers': {'app.core.social.counts', 'app.social.friend_copies'},
+                'required': {'app.core.social.counts'}, 'caller_patterns': {'app.core.social.counts': pattern}}
+        files = {**self.files(rule), 'api/app/social/counts.py': 'from app.core.social.counts import SQL\n',
+                 'api/app/core/social/counts.py': self.files(rule)['api/app/social/counts.py']
+                 + 'OTHER = "FROM reserving_picks(%s)"\n'}
+        self.assertEqual(run(rule, files, **data),
+                         [f'{rule}: app.core.social.counts must match '
+                          r'\breserving_picks\s*\(\s*ARRAY\[%s\] in every matching string constant'])
+        # Even an allowed pattern key must still match; an import-only module is not a constrained SQL caller.
+        files['api/app/core/social/counts.py'] = 'from app.social.friend_copies import SQL\n'
+        self.assertEqual(run(rule, files, **data),
+                         [f'{rule}: missing app.core.social.counts',
+                          f'{rule}: caller pattern for app.core.social.counts must name an allowed matching caller'])
 
     def test_a_later_move_updates_only_module_identities_in_rule_data(self):
         def moved(name):
