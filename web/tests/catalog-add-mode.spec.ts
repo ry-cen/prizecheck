@@ -447,6 +447,8 @@ test.describe("desktop", () => {
 
     // What is still queued goes on its own key when the collector presses Add again.
     await bar.getByRole("button", { name: "Add 1 card" }).click();
+    // The earlier toast has identical text: wait for this request before checking its key.
+    await expect.poll(() => keys.length).toBe(3);
     await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
     await expect(bar).not.toContainText("Your earlier add finished");
     expect(keys).toHaveLength(3);
