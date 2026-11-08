@@ -432,7 +432,7 @@ function DeckSection({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
         <h3
           id={`${idBase}-deck`}
-          className="m-0 min-w-0 flex-1 text-body font-semibold wrap-anywhere"
+          className="m-0 min-w-0 flex-1 text-body font-semibold wrap-anywhere phone:basis-full"
         >
           {section.name}
         </h3>

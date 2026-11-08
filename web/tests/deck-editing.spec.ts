@@ -556,7 +556,9 @@ test.describe("on a desktop", () => {
     );
     await expect(popup).toContainText("Alpha Set (set-a) · #25 · Normal");
     await expect(popup).toContainText("Not owned");
-    await expect(popup).toContainText("Standard legality unknown");
+    await expect(popup).toContainText(
+      "Standard, Expanded, and GLC legality unknown"
+    );
     const stepper = popup.getByRole("group", { name: "Deck List copies" });
     await expect(stepper).toContainText("0 on Deck List");
     await expect(stepper.getByRole("button", { name: "−1" })).toBeDisabled();
