@@ -1,6 +1,6 @@
 """Fail-closed accounting for the never-merged combined-sharded validation branch.
 
-Selected counts: real collection on dev 800b8fbd plus this validation tooling.
+Selected counts: real collection on the #569 candidate 939a5404 plus this validation tooling.
 Skip counts: collected declarations and source-verified runtime skip identities.
 Exact per-identity comparison is performed offline against the uploaded artifacts and identity lists.
 """
@@ -25,7 +25,7 @@ EXPECTED = {
     'browser-5': {'playwright-parallel.json': (85, 0), 'playwright-serial.json': (0, 0)},
     'browser-6': {'playwright-parallel.json': (91, 0), 'playwright-serial.json': (0, 0)},
     'browser-7': {'playwright-parallel.json': (88, 0), 'playwright-serial.json': (0, 0)},
-    'browser-8': {'playwright-parallel.json': (96, 0), 'playwright-serial.json': (0, 0)},
+    'browser-8': {'playwright-parallel.json': (97, 0), 'playwright-serial.json': (0, 0)},
     'browser-9': {'playwright-parallel.json': (80, 0), 'playwright-serial.json': (0, 0)},
     'browser-10': {'playwright-parallel.json': (84, 0), 'playwright-serial.json': (0, 0)},
 }
