@@ -75,7 +75,7 @@ from pydantic import BaseModel, Field
 
 from .copy_allocation import allocate
 from .settings import read_settings
-from .want_list import allocation_needs
+from app.core.decks.needs import allocation_needs
 from .deck_deletion import unsorted_leaf
 from .copy_picks import suggest_picks
 from .loan_picks import pick_shortfalls

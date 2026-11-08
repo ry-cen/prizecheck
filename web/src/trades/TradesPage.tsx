@@ -1,8 +1,8 @@
 import { ListDetailLayout } from "../ui/ListDetailLayout";
 import { LegacyThreadLink } from "../threads/LegacyThreadLink";
 import { useId, useState } from "react";
-import { PageHeader } from "../shell/PageHeader";
-import { Segmented, segmentId } from "../ui/Segmented";
+import { TradesViewHeader } from "./TradesViewHeader";
+import { segmentId } from "../ui/Segmented";
 import { ThreadList } from "../threads/ThreadList";
 
 import { CounterPage } from "./CounterPage";
@@ -12,12 +12,7 @@ import { ProposalBuilderPage } from "./ProposalBuilderPage";
 import { ProposalRedirect } from "./ProposalRedirect";
 import { TradeScreen } from "./TradeScreen";
 import { TraderTradeListPage } from "./TraderTradeListPage";
-import {
-  TRADES_PATH,
-  TRADES_VIEWS,
-  tradesRoute,
-  tradesViewPath,
-} from "./tradeListModel";
+import { TRADES_PATH, tradesRoute } from "./tradeListModel";
 
 type Props = {
   /** The section the address names (``sectionAt``): null for /trades, "find", "list", "new/<trader id>" (or "new/<Handle>", which redirects), "trader/<trader id>", "with/<trader id>", "conversation/<conversation id>", "<id>/counter", or a Trade id. */
@@ -85,18 +80,12 @@ export function TradesPage({ active, section, onNavigate }: Props) {
         selected={route.kind !== "view"}
         queue={
           <div className="flex min-w-0 flex-col gap-4">
-            {route.kind === "view" ? (
-              <h1 className="text-display font-semibold">Trades</h1>
-            ) : (
-              <h2 className="text-heading">Trades</h2>
-            )}
-            <Segmented
-              label="Trades view"
+            <TradesViewHeader
+              selected={route.kind !== "view"}
               idBase={idBase}
               panelId={panelId}
-              value="trades"
-              onChange={(next) => onNavigate(tradesViewPath(next))}
-              options={TRADES_VIEWS}
+              view="trades"
+              onNavigate={onNavigate}
             />
             <div
               role="tabpanel"
@@ -130,24 +119,16 @@ export function TradesPage({ active, section, onNavigate }: Props) {
       />
     );
   const view = route.view;
-  // Find trades keeps search above stacked Friends / Near you groups: no prototype
-  // evidence supports two columns, so its existing frame stays unchanged.
+  // Find trades shares the tab's wider frame while keeping search above the
+  // stacked Friends / Near you groups: no prototype evidence supports columns.
   return (
-    <main
-      className={`mx-auto box-border flex w-full min-w-0 ${view === "list" ? "max-w-[1536px]" : "max-w-5xl"} flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5`}
-    >
-      {/* The switch sits right under the title, closer than the page's sections are to each other. */}
-      <div className="flex min-w-0 flex-col gap-1 border-b border-border pb-4">
-        <PageHeader title="Trades" />
-        <Segmented
-          label="Trades view"
-          idBase={idBase}
-          panelId={panelId}
-          value={view}
-          onChange={(next) => onNavigate(tradesViewPath(next))}
-          options={TRADES_VIEWS}
-        />
-      </div>
+    <main className="mx-auto box-border flex w-full min-w-0 max-w-5xl min-[1440px]:max-w-[1536px] flex-col gap-6 px-7 py-7 phone:px-4 phone:py-5">
+      <TradesViewHeader
+        idBase={idBase}
+        panelId={panelId}
+        view={view}
+        onNavigate={onNavigate}
+      />
       <div
         role="tabpanel"
         id={panelId}
