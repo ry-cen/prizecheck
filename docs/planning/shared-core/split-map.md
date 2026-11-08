@@ -1018,6 +1018,124 @@ same way as WP-B3, before `social/` and `trade_list` move.
 
 ## 10. Notes as built (dated)
 
+**2026-11-08 — Matching characterization and `card_accepts` audit (#529)**
+
+Scope: #529's pre-extraction characterization criterion and the `card_accepts` audit only,
+against dev `3e921b0d86c81927d0167b35719d1498dcf85c17`. No production code, owner rows,
+matching rules, API snapshots, or extraction decisions change.
+
+`card_accepts` implements **game-free reusable relation expansion under the existing
+Edition/Printing/Identity catalog contract**, rather than Pokémon Reprint Group policy.
+That judgment follows its behavior, not its current `core` owner label:
+
+- Exact acceptance is singleton Edition equality; it reads nothing, including for an
+  unknown Edition (`api/app/card_accepts.py:40-48`). Finish acceptance traverses only
+  `catalog_edition.printing_id` (`:24-32`). It does not inspect finish descriptors.
+- Identity acceptance traverses `catalog_printing.identity_id` (`:33-37`), irrespective
+  of rules text, artwork, language, generation eligibility or Reprint Group membership.
+  The retained catalog and cross-language tests below pin this. It compares identity
+  keys, not display-name strings. In particular it does **not** implement functional
+  reprint equivalence, a fourth `reprint_group` rule, or a Basic Energy rule.
+- These are reusable relation operations, conditional on the documented catalog
+  contract; their SQL being game-free alone would not establish reusable policy.
+  Pokémon's Card Identity definition (`CONTEXT.md:27-36`) and the product decision to offer these three Will accept choices remain
+  composition concerns. This audit does not prescribe those choices for another game.
+- Callers own applicability: `social/friend_reads.py:251-258` supplies default exact
+  rules for needed cards, while its Collection/card-popup `reach` separately expands
+  effective Reprint Groups (`:91-115`, `:263-273`). `social/trade_matches.py:431-463`
+  widens only Want List needs, retains exact Trade Wants, and folds quantities; its
+  discovery uses Identity expansion to bound candidate friend wants (`:557-599`).
+  `swap_hints.py:147-163` unions accepted alternatives with Reprint Group members;
+  `:190-236` owns candidate eligibility, availability, ranking and depletion.
+  `want_list.py:256-312` uses the expansion for received-card Deck switches, with its
+  own exact-need/Trade-Wants depletion, destination and eligibility rules.
+- The other two production importers, `core/trading/trade_wants.py:25` and
+  `games/pokemon/trading/trade_wants.py:4`, import only `WillAcceptRule`. The Pokémon
+  router owns choice persistence/default removal (`:100-113`); neither calls `accepts`.
+
+Keep the existing owner classifications. Reprint Group semantics, new-line eligibility,
+counting and Friend authorization must not be inferred from this helper or moved into it.
+The coverage matrix below records evidence to carry forward when extraction is separately
+scoped; this note does not claim the remaining #529 composition criteria are complete.
+
+Coverage matrix (2026-11-08; base `3e921b0d`). **C** = covered by the named test(s)
+in the index below; **G → C** = real baseline gap closed by a new characterization.
+**—** = no operation at this seam, with the behavior that establishes that boundary
+identified below. These are not claims of a second game's compatibility.
+
+| Seam | Exact acceptance | Finish acceptance | Identity acceptance | Reprint expansion / exclusions | Quantity folding | Ranking | Ties / order | Privacy / authorization | Query bounds |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `friend_reads` | C F1 | C F1, F2 | C F1 | C F2, F3; G → C N4 (ungrouped Energy) | C F4 (spare/in-Deck counts); F5 (scope/counting) | C F6 (spare, own Printing, Friend, card) | G → C N3 (casefolded name, Handle, Edition UUID, wanted UUID) | C F7, F8, P1 | C F9, F10 |
+| `trade_matches` | C T1, T2 | C T1 | C T1 | G → C N8 (group membership alone never widens a want) | C T3, T4, T5 | C T6 (match kind); T7 (card order) | C T6 (casefolded name, Handle), T7 (Edition UUID) | C T8, T9, T10, P1 | C T11; G → C N9 (bounded calls for both sides) |
+| `swap_hints` | C S1, S2 (exact choice preserves group hints) | C S3 | C S4 | C S5, S6; G → C N7 (inactive/tombstoned unless already listed) | C S7, S8 (need cap and one-pass depletion) | C S9 (most copies) | G → C N5, N6 (card order, Edition UUID) | C W4 (own Deck scope); no cross-owner read | C S10 (unrelated groups add no rows) |
+| `want_list` | C W1 (counts stay per Edition) | C W1 (choice changes no count) | C W1 (choice changes no count) | C S5, S6 (hints only); W1 (no equivalence in counts) | C W2, W3 (sum/max and scoped totals) | C W5 (oldest Deck first), W6 (number order) | C W5 (Deck UUID); G → C N10 (combined first appearance before global card order) | C W4 (missing/foreign/non-Deck scope) | C W7, S10 |
+| `card_accepts` | C A1; G → C N1 (zero reads, unknown id) | C A1, A2 | C A1, A2 | C A1 (Identity expansion without a group); no Reprint Group operation | — sets only (N2 pins full set results) | — no candidate choice (A1, N2 return sets) | — result members are unordered; G → C N2 pins sorted input batching | C N1, N2 (only catalog reads; caller authorizes inventory) | G → C N1, N2 (zero reads / one batch, exact rows excluded) |
+
+Test index: all paths are under `api/tests/`. N tests are new in
+`test_matching_characterization.py`; all other tests are unchanged at the base.
+
+| Key | File | Test name |
+| --- | --- | --- |
+| F1 | `test_friend_matches.py` | `test_will_accept_controls_friend_editions_without_changing_want_list_counts` |
+| F2 | `test_friend_matches.py` | `test_the_card_popup_lists_friends_copies_of_the_printing_and_its_reprint_group` |
+| F3 | `test_friend_copies.py` | `test_a_friends_collection_shows_on_my_want_list_by_default_and_follows_the_printings_choice` |
+| F4 | `test_friend_copies.py` | `test_a_friend_sees_spare_and_in_deck_copies_per_edition_and_nothing_else` |
+| F5 | `test_friend_matches.py` | `test_the_cards_follow_the_counting_setting_and_the_deck_in_scope` |
+| F6 | `test_friend_matches.py` | `test_each_needed_card_lists_its_friends_copies_spare_first_then_its_own_printing` |
+| F7 | `test_friend_matches.py` | `test_no_friends_strangers_blocks_and_hidden_locations_answer_nothing` |
+| F8 | `test_friend_copies.py` | `test_no_location_or_deck_name_or_id_reaches_the_viewer` |
+| F9 | `test_friend_matches.py` | `test_one_friend_copies_read_covers_every_friend_and_card` |
+| F10 | `test_friend_copies.py` | `test_one_statement_and_one_reserved_read_cover_every_friend_and_edition` |
+| T1 | `test_trade_matches.py` | `test_each_will_accept_rule_matches_its_cards_and_says_the_narrowest_way` |
+| T2 | `test_trade_matches.py` | `test_trade_wants_always_match_the_exact_card_even_with_a_widened_choice_left_over` |
+| T3 | `test_trade_matches.py` | `test_need_adds_trade_wants_to_what_the_decks_need_and_origin_says_which` |
+| T4 | `test_trade_matches.py` | `test_a_need_follows_each_sides_counting_setting` |
+| T5 | `test_trade_need_groups.py` | `test_exact_trade_want_overlaps_a_widened_want_without_merging_groups`; `test_two_widened_wants_reach_one_card_as_separate_parts` |
+| T6 | `test_trade_matches.py` | `test_rows_come_two_way_first_then_has_then_wants_and_ties_break_by_display_name_then_handle` |
+| T7 | `test_trade_matches.py` | `test_a_row_carries_20_cards_a_side_and_counts_the_rest_and_the_friends_read_has_every_card` |
+| T8 | `test_trade_matches.py` | `test_strangers_requests_and_blocks_either_way_see_no_row_and_their_read_answers_as_an_unknown_id` |
+| T9 | `test_trade_matches.py` | `test_no_answer_names_a_location_or_a_deck_or_carries_a_value` |
+| T10 | `test_trade_matches.py` | `test_a_hidden_older_deck_still_takes_spare_copies_from_a_friends_view`; `test_wants_from_decks_in_hidden_locations_are_absent_while_the_viewers_own_hidden_decks_count` |
+| T11 | `test_trade_matches.py` | `test_friend_wants_reads_as_many_statements_for_one_friend_as_for_many` |
+| S1 | `test_want_list_swap.py` | `test_the_spec_example_swap_moves_only_the_spare_copy_and_undo_puts_the_line_back` |
+| S2 | `test_want_list_swap_will_accept.py` | `test_this_exact_card_and_a_choice_on_a_covered_line_change_no_hint` |
+| S3 | `test_want_list_swap_will_accept.py` | `test_any_finish_offers_another_finish_of_a_printing_in_no_reprint_group` |
+| S4 | `test_want_list_swap_will_accept.py` | `test_any_card_with_the_same_name_offers_an_owned_spare_and_taking_it_lowers_the_need` |
+| S5 | `test_want_list_swap.py` | `test_another_edition_of_the_same_printing_is_offered_when_the_printing_is_in_a_group` |
+| S6 | `test_want_list_swap.py` | `test_basic_energy_and_cards_in_no_reprint_group_get_no_hint` |
+| S7 | `test_want_list_swap.py` | `test_swap_raises_a_line_the_deck_already_has_and_moves_only_as_many_as_it_still_needs` |
+| S8 | `test_want_list_swap_will_accept.py` | `test_an_accepted_spare_is_offered_to_one_line_only_oldest_deck_first`; `test_a_scoped_read_offers_what_the_all_decks_read_offers_that_deck` |
+| S9 | `test_want_list_swap.py` | `test_the_hint_names_the_edition_with_the_most_copies_available` |
+| S10 | `test_want_list_swap.py` | `test_the_hint_reads_only_the_groups_of_lines_that_need_copies` |
+| W1 | `test_trade_wants.py` | `test_trade_wants_and_will_accept_change_no_want_list_deck_export_or_friend_figure` |
+| W2 | `test_want_list.py` | `test_the_worked_iono_example_under_both_settings`; `test_one_deck_at_a_time_names_the_deck_whose_copies_a_line_counts_and_the_total_takes_the_largest_need` |
+| W3 | `test_want_list.py` | `test_the_scoped_read_is_that_decks_section_and_its_needs` |
+| W4 | `test_want_list.py` | `test_a_scope_that_is_not_one_of_the_owners_decks_is_not_found` |
+| W5 | `test_want_list.py` | `test_sections_follow_creation_order_with_the_deck_id_breaking_a_tie_and_spares_go_oldest_first` |
+| W6 | `test_want_list.py` | `test_lines_of_one_card_read_collector_numbers_the_way_catalog_search_compares_them` |
+| W7 | `test_want_list.py` | `test_the_read_is_bounded_by_deck_list_lines_not_the_collection` |
+| A1 | `test_trade_wants.py` | `test_accepts_expands_each_rule_by_the_catalogs_card_identity_in_any_language` |
+| A2 | `test_catalog_data_contract.py` | `test_availability_is_generation_scoped_but_shared_facts_and_acceptance_are_retained` |
+| P1 | `test_social_contract.py` | `test_no_social_response_has_a_location_or_deck_field`; `test_the_several_owners_guard_catches_a_filter_on_a_list_of_owners`; `test_each_sides_own_trade_reads_and_inventory_steps_stay_outside_the_social_area` |
+| N1 | `test_matching_characterization.py` | `test_exact_acceptance_including_unknown_editions_never_reads_catalog` |
+| N2 | `test_matching_characterization.py` | `test_widened_acceptance_is_one_sorted_batch_and_keeps_unknown_editions` |
+| N3 | `test_matching_characterization.py` | `test_friend_copy_ties_use_handle_then_edition_and_wanted_cards_use_uuid` |
+| N4 | `test_matching_characterization.py` | `test_friend_popup_does_not_expand_ungrouped_energy_by_identity` |
+| N5 | `test_matching_characterization.py` | `test_swap_equal_quantities_use_card_order_before_candidate_insertion_order` |
+| N6 | `test_matching_characterization.py` | `test_swap_identical_card_order_falls_to_edition_uuid` |
+| N7 | `test_matching_characterization.py` | `test_swap_unavailable_candidates_only_count_when_the_deck_already_lists_them` (inactive and tombstoned) |
+| N8 | `test_matching_characterization.py` | `test_trade_matching_does_not_implicitly_accept_reprint_group_members` |
+| N9 | `test_matching_characterization.py` | `test_trade_discovery_bounds_both_choke_point_reads_to_relevant_editions` |
+| N10 | `test_matching_characterization.py` | `test_want_list_combined_order_keeps_first_deck_appearance_before_global_card_order` (sum and max) |
+
+The readiness plan's cited base line references still resolve as supplied:
+`test_trade_wants.py:226`, `test_want_list_swap.py:194,205,217`,
+`test_trade_matches.py:121,154,478,505`, and `test_friend_matches.py:183`.
+The matrix records behavior-level coverage, not proof of every possible SQL shape:
+ADR 0015 and the static privacy guard document their limits, so an extraction still
+needs independent source review and the contract/snapshot checks. No existing test
+is weakened or replaced. No production matching rule is changed.
+
 **2026-11-07 — Allocation needs fold extraction (#528)**
 
 Moved the unchanged `allocation_needs` fold into `core/decks/needs.py`. Loan inventory
