@@ -21,7 +21,7 @@ This is the giver's own read and write, outside ``/api/social``.
 from uuid import UUID
 
 from .copy_picks import suggest_picks
-from .deck_pick_list import suggest
+from app.core.inventory.pick_order import suggest
 from .loan_picks import pick_shortfalls
 from .trade_list import for_trade_places
 
