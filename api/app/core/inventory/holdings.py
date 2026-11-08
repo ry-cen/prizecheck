@@ -6,16 +6,13 @@ owner revision and one Inventory Undo record of the ``add`` kind (migration 046)
 out again, as one action. Like every inventory command's replay row, a batch add's keeps counts only: no Edition or
 Location IDs.
 """
-import base64
 import hashlib
-import hmac
 import json
-import os
 from typing import Literal
 from uuid import UUID
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.core.ops.api_errors import api_error
@@ -231,37 +228,6 @@ def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
                                   owner_revision=new_revision, undo_id=undo_id)
     except psycopg.Error:
         api_error(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
-
-
-def cursor_encode(user_id: str, location_id: UUID, owner_revision: int, catalog_revision: int, row: dict) -> str:
-    data = json.dumps({"v": 1, "u": user_id, "l": str(location_id), "r": owner_revision,
-                       "c": catalog_revision, "k": [row["search_name"], str(row["edition_id"])]},
-                      separators=(",", ":")).encode()
-    signature = hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), data, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(data + signature).decode().rstrip("=")
-
-
-def cursor_decode(token: str, user_id: str, location_id: UUID, owner_revision: int, catalog_revision: int):
-    try:
-        raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
-        data, signature = raw[:-32], raw[-32:]
-        if not hmac.compare_digest(signature, hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), data, hashlib.sha256).digest()):
-            raise ValueError
-        payload = json.loads(data)
-        if payload["v"] != 1 or payload["u"] != user_id or payload["l"] != str(location_id):
-            raise ValueError
-        if payload["r"] != owner_revision:
-            api_error(409, "INVENTORY_CHANGED")
-        if payload["c"] != catalog_revision:
-            api_error(409, "CATALOG_CHANGED")
-        key = payload["k"]
-        if not isinstance(key, list) or len(key) != 2 or not isinstance(key[0], str):
-            raise ValueError
-        return key[0], UUID(key[1])
-    except HTTPException:
-        raise
-    except (ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
-        api_error(400, "INVALID_CURSOR")
 
 
 @router.get("/{location_id}", response_model=LeafHoldings)
