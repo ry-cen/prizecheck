@@ -37,8 +37,9 @@ confirm or replace it under D1**:
 
 > **RB-1.** A Riftbound API, served by its own process against its own database, that mounts a Riftbound app with its
 > catalog and the game-free core routes the catalog slice needs. Its catalog is filled only by the synthetic
-> normaliser (#563 R12b) until the data gate passes. It mounts no social, Trade, Loan or Want List route. Pokémon's
-> API, routes and data are unchanged.
+> normaliser (#563 R12b) and accepted through #563's synthetic writer gate (R12c). It ingests no real content: real
+> data is #563's R13, which comes after the data gate passes (H10). It mounts no social, Trade, Loan or Want List
+> route. Pokémon's API, routes and data are unchanged.
 
 This follows the spec's own order: catalog in its phase 5, Collection and social in phase 6, Want List in phase 7
 (`spec.md:224-225`). If Ryan wants social or Want List features in RB-1, decisions 2a and 2b below become hard
@@ -59,11 +60,23 @@ Ryan first. **Not started**: settled and nobody has it.
 | H4   | A core baseline a fresh Riftbound database can install                                                                                       | Blocked on decision | No baseline exists. IM-13 recommends cutting it only once a second game is approved.                                                                                                                                                                                                                                                                                                                                      | #531, #533 | IM-13, then slice S10 (it depends on S3, not on S5 to S9)                                                                           |
 | H5   | Hosting and test topology for a second database                                                                                               | Blocked on decision | `api/app/db.py:8-9` reads one `DATABASE_URL` per process, so a separate process can point at a separate database with no code change.                                                                                                                                                                                                                                                                                      | #531       | IM-14                                                                                                                                |
 | H6   | A second backend checks the gateway's signature with its own secret                                                                          | Blocked on decision | `api/app/identity.py:17` reads one `INTERNAL_AUTH_SECRET`.                                                                                                                                                                                                                                                                                                                                                                 | #531, #533 | IM-6                                                                                                                                 |
-| H7   | A second backend can prove the owner, for owner routes such as catalog import review                                                         | Blocked on decision | `require_owner` reads the singleton `owner_binding` (`api/app/identity.py:35-37`). A fresh Riftbound database has no row, so every owner route would deny. See 2c on why this is the costliest identity item for RB-1.                                                                                                                                                                                                       | #531, #533 | IM-7, then slices S2 and S6 as #564 orders them, or an interim Ryan approves (question Q-C2)                                        |
+| H7 | If RB-1 has owner routes (Q-C2), such as catalog import review, a second backend can prove the owner | Blocked on decision, conditional | `require_owner` reads the singleton `owner_binding` (`api/app/identity.py:35-37`). A fresh Riftbound database has no row, so every owner route would deny. An RB-1 with no owner routes doesn't need this. See 2c on why, when it applies, this is the costliest identity item for RB-1. | #531, #533 | IM-7, then slices S2 and S6 as #564 orders them, or an interim Ryan approves (Q-C2) |
 | H8   | How `main.py`, a second app and the service entry are composed                                                                               | Blocked on decision | `api/app/main.py:9`, `:13`, `:41-44` mount only Pokémon. `deploy/docker/api.Dockerfile:34` starts `app.main:app`. `api/tests/test_api_contract.py:8` pins one app's OpenAPI and route table. ADR `0023:12` says `main.py` chooses the game, while IM-12 recommends a per-game entry chosen by the service command. Neither has been reconciled.                                                                              | #534       | Decision 2d, question Q-D1                                                                                                          |
 | H9   | Synthetic catalog acceptance runs before any real ingestion                                                                                  | Not started         | No Riftbound reader or writer probe exists under `api/tests`. The only Riftbound fixture in tooling tests the game-to-game import rule in one direction (`tests/tooling/test_python_boundaries.py:55-58`).                                                                                                                                                                                                                  | #534       | R12a now. R12b and R12c after H1 and H2                                                                                              |
-| H10  | The data-rights and coverage gate passes before real content                                                                                  | Blocked on decision | Riftbound's only planned source is TCGCSV for catalog and prices (`spec.md:180`), and its images are TCGplayer CDN URLs whose caching is left open (`spec.md:204-205`). ADR 0024's context says no TCGplayer or TCGCSV terms that could be read permit storing images (`0024:5`), while its decision stores them for Pokémon (`0024:9`).                                                                                                                                                                 | #534       | #563 D3. It must say whether ADR 0024's storage decision extends to Riftbound art                                                   |
 | H11  | `main.py` imports nothing Pokémon except the Pokémon app                                                                                     | Not started         | `api/app/main.py:9` imports the Borrowed gallery router directly and `:41` mounts it outside `ROUTERS`.                                                                                                                                                                                                                                                                                                                    | #534 prep  | R2. A second mount would otherwise edit around a Pokémon router                                                                     |
+
+### Required before any real ingestion or release (R13), not before synthetic RB-1
+
+RB-1 as defined above uses synthetic records only, so the data gate does not block it. The gate is still mandatory
+before any real content is ingested or released, which is #563's R13. Two steps are separate here: Ryan accepting the
+gate as a requirement (D3), and the gate actually passing on real-source evidence.
+
+| ID  | Condition                                                         | Status                                                                                                    | Evidence at `3e921b0d`                                                                                                                                                                                                                                                                                                | Issue | What closes it                                                                                                                                                       |
+| --- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H10 | The data-rights and coverage gate passes before any real content | Accepting it: blocked on decision (D3). Satisfying it: not started, and needs evidence about the real source | Riftbound's only planned source is TCGCSV for catalog and prices (`spec.md:180`), and its images are TCGplayer CDN URLs whose caching is left open (`spec.md:204-205`). ADR 0024's context says no TCGplayer or TCGCSV terms that could be read permit storing images (`0024:5`), while its decision stores them for Pokémon (`0024:9`). | #534  | Ryan accepts the gate under #563 D3, deciding whether ADR 0024's storage decision extends to Riftbound art. Then the gate's checks pass on the real source before R13 |
+
+- **Q-G1.** Do you want a stricter gate before synthetic RB-1 too, for example accepting the data gate (D3) before any
+  synthetic writer code lands? As written, D3 is required only before R13.
 
 ### Can follow RB-1
 
@@ -96,8 +109,8 @@ Each row is useful clean-up or a later Riftbound slice's prerequisite, but RB-1 
   remove real dependencies, not because Riftbound needs the files moved.
 - **#563 withdrew D5, so the mount was "nothing to decide now".** This plan reopens the question as H8. RB-1 is exactly
   when it needs answering, and #564's IM-12 recommendation reads differently from ADR `0023:12`'s wording.
-- **The identity cost of RB-1 is larger than #563's table suggests.** H7 alone pulls in #564's slices S2 and S6 under
-  the IM-7 recommendation (see 2c).
+- **The identity cost of RB-1 is larger than #563's table suggests.** If RB-1 has owner routes, H7 alone pulls in #564's
+  slices S2, S5 and S6 under the IM-7 recommendation (see 2c and Q-C2). An RB-1 with no owner routes avoids that cost.
 
 ## 2. Decisions for Ryan
 
@@ -187,12 +200,47 @@ transaction, which is ADR 0023's model. Pydantic models move with the route, cla
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A. Empty relation.** Riftbound's track creates an empty `catalog_reprint_group_member`, and shared SQL runs unchanged.                                                                                                                                                                                                                                                                                                                         | No extraction. Matches today's contract wording.                                                                                                                                                                                                                                                                                                                                          | Puts a Pokémon term in Riftbound's schema against `spec.md:176`. The four mixed modules stay mixed, so R7's goal is never met. Riftbound's API would expose `printings=reprint_group` meaning nothing.                                                                                      |
 | **B. Required SQL fragment.** Core holds `REACH` and the hint read with an equivalence fragment as a keyword-only argument with no default. Each game's router passes its fragment.                                                                                                                                                                                                                                                                 | One shared statement. Follows ADR `0023:10` literally.                                                                                                                                                                                                                                                                                                                                      | A SQL-fragment contract (columns, keys, bounds) has to be specified and tested for each game. Fragments are harder to review than data.                                                                                                                                                       |
-| **C. Equivalence as data.** The game reads equivalence itself, with its own SQL in `games/<game>/`, and passes the result to core: the `reached` map for `matches`, and group members for the hint capture. Core keeps `matches`, `hints`, ranking, ties and need folds. Routers that name `printings` move whole to `games/pokemon/social/`, and `trade_matches` may become core by retargeting imports once slice 6 and the `friend_reads` split land. | Uses seams that already exist (`friend_reads.py:213`, `swap_hints.py:171`). Equivalence reads are already their own statements, so the number of round trips doesn't change. The choke point is untouched: equivalence is catalog-only. A game with no equivalence passes "itself only", which is today's `exact`. Bounds stay keyed by the wanted Editions. | Router moves need the six caller scans in tooling first (F7), every new `social` directory added to `SOCIAL_PACKAGES` (`python_architecture_rules.py:14`), and byte-identical snapshots. More files move than in B.                                                                |
+| **C. Equivalence as data.** The game reads equivalence itself, with its own SQL in `games/<game>/`, and passes the result to core as two named payloads, defined below the table. Core keeps `matches`, `hints`, ranking, ties, need folds and Will accept expansion. Routers that name `printings` move whole to `games/pokemon/social/`, and `trade_matches` may become core by retargeting imports once slice 6 and the `friend_reads` split land. | Uses seams that already exist (`friend_reads.py:213`, `swap_hints.py:171`). Equivalence reads are already their own statements, so the number of round trips doesn't change. The choke point is untouched: equivalence is catalog-only. A game with no equivalence still gets today's `exact` and today's no-group hint behaviour, as defined below. Bounds stay keyed by the wanted Editions. | Router moves need the six caller scans in tooling first (F7), every new `social` directory added to `SOCIAL_PACKAGES` (`python_architecture_rules.py:14`), and byte-identical snapshots. More files move than in B. Two payloads to specify, not one. |
 | **D. Defer.** Do none of it until a Riftbound slice mounts Friend reads, Trade matches or the Want List.                                                                                                                                                                                                                                                                                                                                           | Follows #534's "only where the approved game demonstrates that need". RB-1 doesn't need it. #529's characterization tests still land and pin behaviour for whichever shape comes later.                                                                                                                                                                                                         | R7 and the `mixed` lines stay open. A later social slice carries the extraction on its critical path.                                                                                                                                                                                       |
 
+**Option C's payloads.** Friend reads and Swap hints fall back differently today, so C names one payload for each.
+Neither fallback is "the Edition itself".
+
+1. **Friend reach map**, for the Collection and card-popup reads. Its type is
+   `dict[wanted Edition id, dict[reached Edition id, other_printing bool]]`. That is the shape `reach()` returns today
+   (`friend_reads.py:106-116`) and `matches` takes (`:213`). With no equivalence, each wanted Edition reaches **every
+   Edition of its own Card Printing**, all with `other_printing=False`. That is today's `exact`: the original Printing's
+   row joined to all its Editions (`friend_reads.py:92-103`, docstring `:25-29`). Another finish of the same Printing
+   is the same card under `exact` (`api/tests/test_friend_matches.py:174-176`). With Pokémon's Reprint Groups, it also
+   reaches the other Printings' Editions with `other_printing=True` (`:170-173`). The Want List Friend matches read
+   builds its map from Will accept, not from Reprint Groups (`friend_reads.py:246-258`), and is unchanged.
+2. **Hint group rows**, for the Swap hint capture. These are the `GroupEdition` rows keyed by Edition id, each with its
+   `group_id` (`swap_hints.py:116-126`, `:159`), which core's `hints` groups (`:184-187`). With no equivalence, the game
+   passes **no group rows**. A Printing in no group then gets **no hint**, not even for another finish of its own
+   Printing (`swap_hints.py:32-33`; `api/tests/test_want_list_swap.py:217-229`).
+
+**Will accept stays in core, separate from equivalence.** `card_accepts.accepts` widens hints to the Editions a
+`printing` or `identity` rule accepts, even for a Printing in no group (`swap_hints.py:35-42`, `:153-163`;
+`api/tests/test_want_list_swap_will_accept.py:52-63`). No game payload replaces it.
+
+**Exact-Edition semantics for Riftbound would be a new choice, not today's `exact`.** A Riftbound Friend read where a
+wanted Edition reaches only that Edition, with no other finish, would change what `exact` means. It is offered only as
+Q-B5.
+
+**Acceptance for the C extraction, when it is built,** on top of #529's criteria:
+
+- The Friend reach map regressions pass unchanged: `test_friend_matches.py:170-176`, covering other Printings of the
+  group and every finish under `exact`.
+- The no-group hint regression passes unchanged: `test_want_list_swap.py:217-229`, under both counting settings.
+- Will accept widening of an ungrouped Printing passes unchanged: `test_want_list_swap_will_accept.py:52-63`.
+- The tests #563 lists for #529 still pass (`test_friend_matches.py:183`, `test_trade_matches.py:478`, `:505`).
+- `friend_copies` stays the only multi-collector inventory reader. Equivalence reads stay keyed by the wanted Editions,
+  and the OpenAPI and route snapshots stay byte-identical.
+
 **Recommendation:** D for timing and C for shape. Land #529's characterization and audit now, and leave equivalence in
-Pokémon until the first Riftbound social slice. Then do C, with Riftbound passing "itself only" unless Ryan approves a
-Riftbound equivalence. Reject A as a permanent design. Remove `catalog_reprint_group_member` from the contract's
+Pokémon until the first Riftbound social slice. Then do C. Unless Ryan approves a Riftbound equivalence, Riftbound
+passes the no-equivalence payloads above: same-Printing, all-Editions reach and no hint group rows. Reject A as a
+permanent design. Remove `catalog_reprint_group_member` from the contract's
 consumed list when C lands. That amends the contract, a doc change to make with C. This shrinks the work for RB-1 to zero.
 
 **Questions for Ryan.**
@@ -204,6 +252,8 @@ consumed list when C lands. That amends the contract, a doc change to make with 
   stays Pokémon's, and Riftbound's router shape is its own API decision.
 - **Q-B4.** _Proposed ADR or contract amendment:_ remove `catalog_reprint_group_member` from the shared catalog
   contract once no shared module reads it.
+- **Q-B5.** _Separately proposed, not today's behaviour:_ should a Riftbound Friend read reach only the wanted Edition
+  (exact-Edition semantics), rather than every Edition of its Printing? A yes is a Riftbound API choice of its own.
 
 ### 2c. Identity, auth and migration (#564)
 
@@ -278,10 +328,13 @@ API shapes or Riftbound code.
 | 5     | R2 (H11) Borrowed gallery into Pokémon's `ROUTERS`, snapshots byte-identical                                                                 | None              | Not started        |
 | 6     | R12a (H9) synthetic reader probes against today's shared readers                                                                             | 4                 | Not started        |
 | 7     | Q-D5's reverse game-to-game fixture                                                                                                          | None              | Not started        |
-| 8     | Move `edition_needs` and `combined` to core beside `needs.py`, retargeting the two social pins one for one. This is common to every 2a option | None              | Not started        |
+| 8 | Move `edition_needs` alone to core beside `needs.py`. Retarget its one social pin, `app.social.trade_matches -> app.want_list.edition_needs` (`python_architecture_rules.py:71`), and its two callers (`social/trade_matches.py:89`, `games/pokemon/trading/trade_inventory.py:36`) | None | Not started |
 | 9     | IM-1's checker widening (S1), if Ryan answers #564's IM-1 question yes. It changes no runtime file                                           | Ryan's IM-1 answer | Not started        |
 
-Item 8 is safe only because all three 2a options agree on it. If Ryan wants slice 6 reviewed as one unit, drop it.
+Item 8 is safe because `edition_needs` (`want_list.py:224-236`) reads only core-owned modules (`settings`,
+`copy_allocation`, `core/decks/needs.py`) and takes no capture type. `combined` stays with the 2a split: it takes
+`WantListCapture` (`want_list.py:211`), which still holds the mixed `SwapCapture` (`:153`), so moving it now would make
+core import a mixed module. If Ryan wants slice 6 reviewed as one unit, drop item 8.
 
 **What each decision unblocks:**
 
@@ -289,7 +342,7 @@ Item 8 is safe only because all three 2a options agree on it. If Ryan wants slic
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
 | D1 with the RB-1 definition  | R12b, all Riftbound slice planning, and the #534 amendment                                       |
 | D4                           | R12b's schema, the contract's write-side clauses and part of the core baseline (H4)              |
-| D3                           | R12c with real data, and Riftbound art and prices                                                 |
+| D3 accepted, then the gate passing | R13, real ingestion and release, plus Riftbound art and prices. RB-1 and R12c stay synthetic and don't wait on it unless Ryan answers Q-G1 yes |
 | IM-11, IM-12, IM-13          | S3, then S10: a fresh Riftbound database                                                         |
 | IM-6, IM-14                  | A second backend process that verifies signed requests                                           |
 | IM-7 with Q-C2               | Owner routes on Riftbound                                                                        |
