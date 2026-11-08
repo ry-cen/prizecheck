@@ -298,6 +298,10 @@ questions that neither #563 nor #564 answers:
 
   **Recommendation:** A, recorded as a _proposed ADR amendment_ to ADR 0023, alongside IM-12's track entries.
 
+  If Ryan picks A, #563's wording that `main.py` chooses the game (`backend-readiness.md:33` A6, `:186` R13) would be
+  superseded together with that ADR 0023 amendment. #563's R13 already names one entry per game as an ADR amendment for
+  Ryan. This is a proposal, and #563 is not edited here.
+
 - **Q-D2. Which core-owned routers does a Riftbound app mount, in what order?** Pokémon's `ROUTERS` interleaves core and
   Pokémon routers in one order (`games/pokemon/app.py:67-89`). Riftbound needs its own tuple, its own OpenAPI and route
   snapshots, and a test like `api/tests/test_api_contract.py:21-27` for its app. **Recommendation:** RB-1 mounts the
@@ -356,7 +360,8 @@ core import a mixed module. If Ryan wants slice 6 reviewed as one unit, drop ite
 None is accepted. Each needs Ryan's decision recorded in an ADR before work starts:
 
 1. Riftbound backend scope and the RB-1 definition (#563 D1).
-2. An amendment to ADR 0023's composition wording for per-game entries and a core app builder (Q-D1, with IM-12).
+2. An amendment to ADR 0023's composition wording for per-game entries and a core app builder (Q-D1, with IM-12). If
+   adopted, it supersedes #563's A6 and R13 wording that `main.py` chooses the game.
 3. The migration tracks ADR that #564 already proposes (IM-11 to IM-13).
 4. Removing Reprint Group membership from the shared catalog contract, when 2b's option C lands (Q-B4).
 
