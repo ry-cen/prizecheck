@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -8,6 +9,13 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('propose_set_groups', ROOT / 'scripts/propose_set_groups.py')
 propose = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(propose)
+
+# The API rules use only the standard library; importing them needs no database.
+sys.path.insert(0, str(ROOT / 'api'))
+try:
+    from app.games.pokemon.prices.catalog_targets import MatchingRulesV4
+finally:
+    sys.path.remove(str(ROOT / 'api'))
 
 CORE = propose.CORE_EQUIVALENCES
 ALL = propose.ALL_EQUIVALENCES
@@ -27,6 +35,80 @@ def row(set_id, number, name, printing_id=None, descriptor=None, state='unverifi
 
 def group(group_id, name):
     return {'groupId': group_id, 'name': name, 'abbreviation': 'X', 'isSupplemental': False}
+
+
+class MatchingRulesParityTests(unittest.TestCase):
+    """Pin the deliberately copied V4 helpers, including their existing differences."""
+
+    def test_number_key_parity(self):
+        for number in (None, '', '   ', '001', '000', 'DP05', 'SWSH001', 'XY01', '12/108',
+                       ' dp05 / 108 ', 'swsh001', 'XY01-002', 'É001', 'E\u0301001', 0, 12):
+            with self.subTest(number=number):
+                self.assertEqual(propose.number_key(number), MatchingRulesV4.number_key(number))
+
+    def test_match_name_parity(self):
+        # strip_number_qualifier is the script's copy of V4.match_name. The
+        # separately proposed name equivalences are deliberately not applied here.
+        for name in ('', '   ', 'Audino', ' AUDINO  ', 'Poké Ball', 'Poke\u0301 Ball',
+                     'Flabébé δ', 'Ampharos (Delta Species)', 'Leafeon-GX', 'Leafeon GX',
+                     'Palkia LV.X', 'Mew EX (Full Art)', 'Koga’s Trap', "Koga's Trap"):
+            for number in (None, '', '001', 'DP05', 'SWSH001', 'XY01', '12/108'):
+                for product_name in (name, f'{name} - {number}', f'{name} ({number})',
+                                     f'{name} (999)', f'{name} - [{number}]',
+                                     f'{name} ({number}) ({number})'):
+                    with self.subTest(name=product_name, number=number):
+                        self.assertEqual(propose.strip_number_qualifier(product_name, number),
+                                         MatchingRulesV4.match_name(product_name, number))
+        # Both name helpers require strings, unlike number_key's nullable input.
+        for helper in (propose.strip_number_qualifier, MatchingRulesV4.match_name):
+            with self.subTest(helper=helper.__qualname__), self.assertRaises(TypeError):
+                helper(None, '001')
+
+    def test_special_parity(self):
+        for descriptor in ({}, {'type': 'holo'}, {'finish': 'normal'}, {'size': 'standard'},
+                           {'size': 'jumbo'}, {'subtype': 'unlimited'}, {'subtype': 'shadowless'},
+                           {'subtype': 'ex'}, {'foil': 'cosmos'}, {'stamp': None}, {'stamp': ''},
+                           {'stamp': []}, {'stamp': ['1st-edition']}, {'stamp': ['set-logo']},
+                           {'stamp': ['1st-edition', 'set-logo']}, {'stamp': '1st-edition'},
+                           {'thirdParty': {'tcgplayer': 5}}, {'unknown': None}):
+            with self.subTest(descriptor=descriptor):
+                self.assertEqual(propose.is_special(descriptor), MatchingRulesV4.special(descriptor))
+
+    def test_missing_descriptor_difference(self):
+        # The script defaults an absent descriptor to {}; V4.special requires
+        # a mapping and calls .get on the unchanged None from V3.plain.
+        self.assertFalse(propose.is_special(None))
+        with self.assertRaises(AttributeError):
+            MatchingRulesV4.special(None)
+
+    def test_id_helpers_parity(self):
+        lookups = [None, '', ' ', [], {}, {'thirdParty': None}, {'thirdParty': []},
+                   {'thirdParty': {'cardmarket': 5}}, {'pricing': None}, {'pricing': []},
+                   {'pricing': {'tcgplayer': None}}, {'pricing': {'tcgplayer': []}},
+                   {'pricing': {'tcgplayer': {'holofoil': 5}}}]
+        for product_id in (None, '', 0, -1, False, '001', 5):
+            lookups.extend(({'thirdParty': {'tcgplayer': product_id}},
+                            {'pricing': {'tcgplayer': {'holofoil': {'productId': product_id}}}}))
+        for lookup in lookups:
+            with self.subTest(lookup=lookup):
+                self.assertEqual(propose.has_tcgdex_id(lookup), MatchingRulesV4.has_tcgdex_id(lookup))
+            for record in (lookup, {'variants_detailed': [None, {}, lookup]},
+                           {'variants_detailed': lookup}):
+                with self.subTest(record=record):
+                    self.assertEqual(propose.record_has_tcgdex_id(record),
+                                     MatchingRulesV4.record_has_tcgdex_id(record))
+
+    def test_pricing_metadata_id_difference(self):
+        # V4.products excludes metadata keys; the script conservatively treats
+        # any nested productId as an ID, even inside unit/updated metadata.
+        for key in ('unit', 'updated'):
+            lookup = {'pricing': {'tcgplayer': {key: {'productId': 5}}}}
+            with self.subTest(key=key):
+                self.assertTrue(propose.has_tcgdex_id(lookup))
+                self.assertFalse(MatchingRulesV4.has_tcgdex_id(lookup))
+                for record in (lookup, {'variants_detailed': [lookup]}):
+                    self.assertTrue(propose.record_has_tcgdex_id(record))
+                    self.assertFalse(MatchingRulesV4.record_has_tcgdex_id(record))
 
 
 class NameMatchTests(unittest.TestCase):
