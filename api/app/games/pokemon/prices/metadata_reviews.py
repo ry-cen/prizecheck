@@ -35,7 +35,15 @@ log = logging.getLogger(__name__)
 LOCK_TIMEOUT = "5s"
 OPEN_REPORT_LIMIT = 25
 QUEUE_PAGE = 100
-OPEN = ("pending", "needs_info")
+# Report status CHECK in migrations/023_metadata_review.sql.
+PENDING = "pending"
+NEEDS_INFO = "needs_info"
+REJECTED = "rejected"
+APPROVED = "approved"
+SUPERSEDED = "superseded"
+OPEN = (PENDING, NEEDS_INFO)
+CLOSED = (REJECTED, APPROVED, SUPERSEDED)
+STATUSES = OPEN + CLOSED
 LIVE_PROPOSAL_KEYS = ("category", "name", "set_code", "collector_number")
 
 
@@ -156,6 +164,7 @@ def my_report(report_id: UUID, user_id: str = Depends(verified_user)):
 @router.patch("/api/catalog/metadata-reports/{report_id}", response_model=MetadataReportView)
 def answer_report(report_id: UUID, payload: MetadataReportUpdate, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
+        # NEEDS_INFO -> PENDING; SQL literals mirror the status constants.
         row = conn.execute("""UPDATE catalog_metadata_report SET note=%s,evidence_url=COALESCE(%s,evidence_url),status='pending',updated_at=now()
           WHERE id=%s AND reporter_id=%s AND status='needs_info' RETURNING *""",
                            (payload.note.strip(), str(payload.evidence_url) if payload.evidence_url else None, report_id, user_id)).fetchone()
@@ -177,6 +186,7 @@ def decide_report(report_id: UUID, payload: MetadataReportDecision, user_id: str
         reason = " ".join(payload.reason.split())
         if not reason:
             fail(422, "REASON_REQUIRED")
+        # The SQL writes REJECTED or NEEDS_INFO; only REJECTED records the reviewer.
         if payload.decision == "reject":
             row = conn.execute("""UPDATE catalog_metadata_report SET status='rejected',review_reason=%s,reviewer_id=%s,reviewed_at=now(),
               updated_at=now() WHERE id=%s RETURNING *""", (reason, user_id, report_id)).fetchone()
@@ -601,7 +611,7 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
             if closing:
                 conn.execute("""UPDATE catalog_metadata_report SET status=%s,review_reason=%s,reviewer_id=%s,reviewed_at=now(),
                   decision_id=%s,updated_at=now() WHERE id=ANY(%s)""",
-                             ("approved" if command.decision in ("verify_source", "correct") else "rejected", reason, user_id,
+                             (APPROVED if command.decision in ("verify_source", "correct") else REJECTED, reason, user_id,
                               decision_id, closing))
             final = load_target(conn, kind, target_id)
     except psycopg.errors.LockNotAvailable:

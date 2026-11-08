@@ -16,6 +16,15 @@ from app.games.pokemon.catalog.public_catalog import publish_catalog_best_effort
 
 router = APIRouter()
 
+# Report status CHECK in migrations/007_missing_card_reports.sql.
+PENDING = "pending"
+NEEDS_INFO = "needs_info"
+REJECTED = "rejected"
+APPROVED = "approved"
+OPEN = (PENDING, NEEDS_INFO)
+CLOSED = (REJECTED, APPROVED)
+STATUSES = OPEN + CLOSED
+
 
 class ReportInput(BaseModel):
     kind: Literal["printing", "edition"]
@@ -134,6 +143,7 @@ def my_report(report_id: UUID, user_id: str = Depends(verified_user)):
 @router.patch("/api/missing-card-reports/{report_id}", response_model=ReportView)
 def respond_to_review(report_id: UUID, payload: ReportUpdate, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
+        # NEEDS_INFO -> PENDING; SQL literals mirror the status constants.
         row = conn.execute("""UPDATE missing_card_report SET note=%s,evidence_url=COALESCE(%s,evidence_url),
           status='pending',updated_at=now() WHERE id=%s AND reporter_id=%s AND status='needs_info'
           RETURNING *""", (payload.note.strip(), _url(payload.evidence_url), report_id, user_id)).fetchone()
@@ -146,6 +156,7 @@ def respond_to_review(report_id: UUID, payload: ReportUpdate, user_id: str = Dep
 def review_queue(user_id: str = Depends(verified_user)):
     with connect() as conn:
         require_owner(conn, user_id)
+        # The SQL orders OPEN reports first.
         return [_view(row) for row in conn.execute("""SELECT * FROM missing_card_report
           ORDER BY CASE WHEN status IN ('pending','needs_info') THEN 0 ELSE 1 END,created_at DESC,id DESC LIMIT 200""").fetchall()]
 
@@ -175,13 +186,13 @@ def decide_report(report_id: UUID, payload: DecisionInput, user_id: str = Depend
         report = _report(conn, report_id, True, user_id)
         if not report:
             raise HTTPException(404, "Report not found")
-        if report["status"] in ("approved", "rejected"):
+        if report["status"] in CLOSED:
             raise HTTPException(409, {"code": "ALREADY_REVIEWED", "message": "Report is already closed."})
         reason = _clean(payload.reason)
         if not reason:
             raise HTTPException(422, {"code": "REASON_REQUIRED", "message": "Give a review reason."})
         if payload.decision != "approve":
-            status = "rejected" if payload.decision == "reject" else "needs_info"
+            status = REJECTED if payload.decision == "reject" else NEEDS_INFO
             row = conn.execute("""UPDATE missing_card_report SET status=%s,review_reason=%s,reviewer_id=%s,
               reviewed_at=now(),updated_at=now() WHERE id=%s RETURNING *""", (status, reason, user_id, report_id)).fetchone()
             return _view(row)
@@ -248,6 +259,7 @@ def decide_report(report_id: UUID, payload: DecisionInput, user_id: str = Depend
           (report_id,printing_id,edition_id,revision,reviewer_id,evidence_url,reason,action)
           VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
           (report_id, printing_id, edition_id, revision, user_id, evidence, reason, action))
+        # APPROVED closes the report after all catalog writes succeed.
         row = conn.execute("""UPDATE missing_card_report SET status='approved',review_reason=%s,reviewer_id=%s,
           reviewed_at=now(),updated_at=now(),approved_printing_id=%s,approved_edition_id=%s,
           evidence_url=%s WHERE id=%s RETURNING *""",
