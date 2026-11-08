@@ -1030,6 +1030,22 @@ same way as WP-B3, before `social/` and `trade_list` move.
 
 ## 10. Notes as built (dated)
 
+**2026-11-22 — Social/Trade List caller scans in tooling (#528, R4)**
+
+- The six caller scans from `api/tests/test_social_contract.py` now also run through
+  `npm run guardrails` as `reserving-picks-callers`, `discovery-callers`, `reach-callers`,
+  `message-callers`, `listable-callers` and `for-trade-callers` in
+  `scripts/python_architecture_rules.py`. Allowed callers use dotted module identities;
+  a later relocation updates the rule data without changing the engine's scan paths.
+- Patterns, string-constant/f-string matching with docstrings excluded, exact versus
+  subset semantics, every mandatory caller and counts' single-owner `ARRAY[%s]` check
+  are preserved. Planted-violation tests in `tests/tooling` cover all six rules.
+- The API test copies remain unchanged until a later reviewed change removes them.
+  No module relocation or privacy-policy change is part of this guard-harness port.
+- Against dev `792e363b5cf8b590518786d45b5eb595f1bdca74`, each scan's pattern, flags, exact or subset semantics and
+  caller set equals `test_social_contract.py`'s after path-to-module normalization. A per-caller constraint must name an
+  allowed module that still has a matching string, so a stale key fails instead of passing quietly.
+
 **2026-11-08 — Matching characterization and `card_accepts` audit (#529)**
 
 Scope: #529's pre-extraction characterization criterion and the `card_accepts` audit only,
