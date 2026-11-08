@@ -399,6 +399,19 @@ def rule_several_owners(tree, data, rules):
     return sorted(found), compare(found, data['readers'], exact=False)
 
 
+def rule_string_callers(tree, data, rules):
+    matches = {name: [text for text in string_constants(source) if data['pattern'].search(text)]
+               for name, source in tree.text.items()}
+    found = {name for name, texts in matches.items() if texts}
+    failures = compare(found, data['callers'], exact=data['exact'])
+    if not data['exact'] and data['required'] - found:
+        failures.append('missing ' + ', '.join(sorted(data['required'] - found)))
+    for name, pattern in data.get('caller_patterns', {}).items():
+        if any(not pattern.search(text) for text in matches.get(name, [])):
+            failures.append(f'{name} must match {pattern.pattern} in every matching string constant')
+    return sorted(found), failures
+
+
 def rule_no_name(tree, data, rules):
     failures = missing_module(tree, data['module'])
     if failures:
@@ -424,6 +437,12 @@ ARCHITECTURE_RULES = {
     'social-allowed-imports': rule_social_imports,
     'friends-of-readers': rule_pattern_readers,
     'several-owners-readers': rule_several_owners,
+    'reserving-picks-callers': rule_string_callers,
+    'discovery-callers': rule_string_callers,
+    'reach-callers': rule_string_callers,
+    'message-callers': rule_string_callers,
+    'listable-callers': rule_string_callers,
+    'for-trade-callers': rule_string_callers,
     'trade-steps-no-friend-ids': rule_no_name,
     'social-area-complete': rule_social_complete,
 }

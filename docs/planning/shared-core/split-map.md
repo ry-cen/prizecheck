@@ -1018,6 +1018,19 @@ same way as WP-B3, before `social/` and `trade_list` move.
 
 ## 10. Notes as built (dated)
 
+**2026-11-08 — Social/Trade List caller scans in tooling (#528, R4)**
+
+- The six caller scans from `api/tests/test_social_contract.py` now also run through
+  `npm run guardrails` as `reserving-picks-callers`, `discovery-callers`, `reach-callers`,
+  `message-callers`, `listable-callers` and `for-trade-callers` in
+  `scripts/python_architecture_rules.py`. Allowed callers use dotted module identities;
+  a later relocation updates the rule data without changing the engine's scan paths.
+- Patterns, string-constant/f-string matching with docstrings excluded, exact versus
+  subset semantics, every mandatory caller and counts' single-owner `ARRAY[%s]` check
+  are preserved. Planted-violation tests in `tests/tooling` cover all six rules.
+- The API test copies remain unchanged until a later reviewed change removes them.
+  No module relocation or privacy-policy change is part of this guard-harness port.
+
 **2026-11-07 — Allocation needs fold extraction (#528)**
 
 Moved the unchanged `allocation_needs` fold into `core/decks/needs.py`. Loan inventory

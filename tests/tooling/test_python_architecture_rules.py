@@ -294,6 +294,167 @@ class SeveralOwnersTest(unittest.TestCase):
         self.assertEqual(run('several-owners-readers', files, **self.DATA), [])
 
 
+class StringCallersTest(unittest.TestCase):
+    # Expectations independent of the rule data: four exact sets and two subsets with one mandatory caller each.
+    CASES = {
+        'reserving-picks-callers': ('SELECT 1 FROM reserving_picks (ARRAY[%s]::text[], %s::uuid[])',
+                                    {'app.social.counts', 'app.social.friend_copies'}, {'app.social.counts'}),
+        'discovery-callers': ('SELECT 1 FROM discovery_setting', {'app.social.discovery'}, {'app.social.discovery'}),
+        'reach-callers': ('SELECT 1 FROM trade_reach(%s)',
+                          {'app.social.discovery', 'app.social.friend_copies'},
+                          {'app.social.discovery', 'app.social.friend_copies'}),
+        'message-callers': ('SELECT 1 FROM message',
+                            {'app.social.conversations', 'app.social.reports'}, {'app.social.conversations'}),
+        'listable-callers': ('SELECT 1 FROM trade_listable(%s)',
+                             {'app.trade_list', 'app.social.friend_copies'}, {'app.trade_list', 'app.social.friend_copies'}),
+        'for-trade-callers': ('SELECT 1 FROM for_trade_locations(ARRAY[%s]::text[])',
+                              {'app.trade_list'}, {'app.trade_list'}),
+    }
+
+    @staticmethod
+    def path(name):
+        return 'api/' + name.replace('.', '/') + '.py'
+
+    def files(self, rule):
+        sql, callers, _ = self.CASES[rule]
+        return {self.path(name): f'SQL = {sql!r}\n' for name in callers}
+
+    def test_every_rules_current_callers_pass(self):
+        for rule in self.CASES:
+            with self.subTest(rule=rule):
+                self.assertEqual(run(rule, self.files(rule), **REAL.RULES[rule]), [])
+
+    def test_an_unlisted_caller_fails_including_nested_modules_and_package_initializers(self):
+        for rule, (sql, _, _) in self.CASES.items():
+            for path, name in (('api/app/other.py', 'app.other'), ('api/app/core/nested/other.py', 'app.core.nested.other'),
+                               ('api/app/other/__init__.py', 'app.other')):
+                with self.subTest(rule=rule, path=path):
+                    files = {**self.files(rule), path: f'SQL = {sql!r}\n'}
+                    self.assertEqual(run(rule, files, **REAL.RULES[rule]), [f'{rule}: unexpected {name}'])
+
+    def test_each_mandatory_caller_must_exist_and_must_still_match(self):
+        for rule, (_, _, required) in self.CASES.items():
+            for name in required:
+                for source in (None, '', 'NOTE = "no call here"'):
+                    with self.subTest(rule=rule, name=name, source=source):
+                        files = {**self.files(rule), self.path(name): source}
+                        self.assertEqual(run(rule, files, **REAL.RULES[rule]), [f'{rule}: missing {name}'])
+
+    def test_optional_callers_may_stop_matching_or_disappear(self):
+        for rule, (_, callers, required) in self.CASES.items():
+            for name in callers - required:
+                for source in (None, ''):
+                    with self.subTest(rule=rule, name=name, source=source):
+                        files = {**self.files(rule), self.path(name): source}
+                        self.assertEqual(run(rule, files, **REAL.RULES[rule]), [])
+
+    def test_docstrings_comments_and_python_calls_are_not_string_constant_calls(self):
+        for rule, (sql, _, _) in self.CASES.items():
+            source = (f'"""{sql}"""\n# {sql}\n'
+                      f'class C:\n    """{sql}"""\n'
+                      f'def f():\n    """{sql}"""\n    return 1\n'
+                      f'async def g():\n    """{sql}"""\n    return 1\n'
+                      'reserving_picks(owners)\ntrade_listable(owners)\nfor_trade_locations(owners)\n'
+                      'trade_reach(owners)\nnearby_collectors(owners)\n')
+            with self.subTest(rule=rule):
+                self.assertEqual(run(rule, {**self.files(rule), 'api/app/other.py': source}, **REAL.RULES[rule]), [])
+
+    def test_plain_mentions_in_messages_pass(self):
+        source = ('NOTE = "reserving_picks trade_listable for_trade_locations trade_reach nearby_collectors " '
+                  '"discovery_setting zip_centroid open_discovery message conversation_member"\n'
+                  'BODY = {"code": "X", "message": "y"}\n'
+                  'FORMAT = "%(asctime)s %(name)s %(message)s"\n')
+        for rule in self.CASES:
+            with self.subTest(rule=rule):
+                self.assertEqual(run(rule, {**self.files(rule), 'api/app/other.py': source}, **REAL.RULES[rule]), [])
+
+    def test_matching_sql_in_a_message_still_fails(self):
+        for rule, (sql, _, _) in self.CASES.items():
+            with self.subTest(rule=rule):
+                files = {**self.files(rule), 'api/app/other.py': f'raise ValueError({sql!r})\n'}
+                self.assertEqual(run(rule, files, **REAL.RULES[rule]), [f'{rule}: unexpected app.other'])
+
+    def test_f_string_pieces_adjacent_literals_and_nested_constants_count(self):
+        for rule, (sql, _, _) in self.CASES.items():
+            for source in (f'SQL = f{(sql + " {value}")!r}', f'SQL = {sql[:7]!r} {sql[7:]!r}',
+                           f'def f():\n    return {sql!r}\n', f'class C:\n    SQL = {sql!r}\n'):
+                with self.subTest(rule=rule, source=source):
+                    files = {**self.files(rule), 'api/app/other.py': source}
+                    self.assertEqual(run(rule, files, **REAL.RULES[rule]), [f'{rule}: unexpected app.other'])
+
+    def test_table_sql_forms_cannot_evade_either_table_rule(self):
+        for rule, tables in (('discovery-callers', ('discovery_setting', 'zip_centroid', 'open_discovery')),
+                             ('message-callers', ('message', 'conversation_member'))):
+            for table in tables:
+                for sql in (f'SELECT 1 FROM {table} t', f'JOIN public.{table} t ON true',
+                            f'UPDATE "{table}" SET enabled = false', f'INSERT INTO {table} (id)',
+                            f'DELETE FROM public.{table}', f'SELECT 1 FROM holding h, {table} t',
+                            f'DELETE FROM holding h USING {table} t', f'TRUNCATE {table}',
+                            f'TRUNCATE TABLE {table}', f'SELECT 1 FROM ({table})', f'LATERAL {table}',
+                            f'SELECT 1 FROM ONLY "public" . "{table}"', f'select 1 from {table.upper()}'):
+                    with self.subTest(rule=rule, sql=sql):
+                        files = {**self.files(rule), 'api/app/other.py': f'SQL = {sql!r}\n'}
+                        self.assertEqual(run(rule, files, **REAL.RULES[rule]), [f'{rule}: unexpected app.other'])
+
+    def test_call_forms_with_whitespace_and_both_reach_functions_count(self):
+        for rule, calls in (('reserving-picks-callers', ('reserving_picks',)),
+                            ('listable-callers', ('trade_listable',)), ('for-trade-callers', ('for_trade_locations',)),
+                            ('reach-callers', ('trade_reach', 'nearby_collectors'))):
+            for call in calls:
+                for sql in (f'{call}(%s)', f'{call} \n (%s)', f'public.{call}(%s)'):
+                    with self.subTest(rule=rule, sql=sql):
+                        files = {**self.files(rule), 'api/app/other.py': f'SQL = {sql!r}\n'}
+                        self.assertEqual(run(rule, files, **REAL.RULES[rule]), [f'{rule}: unexpected app.other'])
+                # The existing function-call patterns are case sensitive and require a whole name and open paren.
+                source = f'NOTE = "{call} {call.upper()}(%s) {call}_log(%s) x{call}(%s)"'
+                self.assertEqual(run(rule, {**self.files(rule), 'api/app/other.py': source}, **REAL.RULES[rule]), [])
+
+    def test_longer_table_names_and_logging_placeholders_do_not_count(self):
+        source = ('SQL = "SELECT 1 FROM message_log JOIN conversation_members ON true " '
+                  '"JOIN discovery_settings ON true JOIN zip_centroids ON true JOIN open_discovery_log ON true"\n'
+                  'FORMAT = "%(message)s %(conversation_member)s"\n')
+        for rule in ('discovery-callers', 'message-callers'):
+            with self.subTest(rule=rule):
+                self.assertEqual(run(rule, {**self.files(rule), 'api/app/other.py': source}, **REAL.RULES[rule]), [])
+
+    def test_counts_requires_the_original_single_owner_form_in_each_matching_string(self):
+        rule = 'reserving-picks-callers'
+        for sql in ('FROM reserving_picks(%s)', 'FROM reserving_picks(ARRAY[%s, %s]::text[], NULL)',
+                    'FROM reserving_picks(array[%s]::text[], NULL)', 'FROM reserving_picks(ARRAY[ %s]::text[], NULL)'):
+            # A second matching string cannot hide behind the first, valid one in counts.
+            files = {**self.files(rule)}
+            files['api/app/social/counts.py'] += f'OTHER = {sql!r}\n'
+            with self.subTest(sql=sql):
+                self.assertEqual(run(rule, files, **REAL.RULES[rule]),
+                                 [f'{rule}: app.social.counts must match '
+                                  r'\breserving_picks\s*\(\s*ARRAY\[%s\] in every matching string constant'])
+            # The optional choke point has no single-owner restriction.
+            files = {**self.files(rule), 'api/app/social/friend_copies.py': f'SQL = {sql!r}\n'}
+            self.assertEqual(run(rule, files, **REAL.RULES[rule]), [])
+
+    def test_counts_keeps_the_old_per_string_search_semantics(self):
+        rule = 'reserving-picks-callers'
+        sql = 'FROM reserving_picks ( ARRAY[%s]::text[], NULL) JOIN reserving_picks(%s) ON true'
+        files = {**self.files(rule), 'api/app/social/counts.py': f'SQL = {sql!r}\n'}
+        self.assertEqual(run(rule, files, **REAL.RULES[rule]), [])
+
+    def test_a_later_move_updates_only_module_identities_in_rule_data(self):
+        def moved(name):
+            return name.replace('app.social.', 'app.core.social.').replace('app.trade_list', 'app.core.trading.trade_list')
+
+        for rule, (sql, callers, _) in self.CASES.items():
+            data = {**REAL.RULES[rule], 'callers': {moved(name) for name in callers}}
+            if 'required' in data:
+                data['required'] = {moved(name) for name in data['required']}
+            if 'caller_patterns' in data:
+                data['caller_patterns'] = {moved(name): pattern for name, pattern in data['caller_patterns'].items()}
+            files = {self.path(moved(name)): f'SQL = {sql!r}\n' for name in callers}
+            with self.subTest(rule=rule):
+                self.assertEqual(run(rule, files, **data), [])
+                files['api/app/unlisted.py'] = f'SQL = {sql!r}\n'
+                self.assertEqual(run(rule, files, **data), [f'{rule}: unexpected app.unlisted'])
+
+
 class NoFriendIdsTest(unittest.TestCase):
     DATA = {'module': 'app.trade_inventory', 'name': 'friend_ids'}
 
@@ -388,7 +549,7 @@ class GuardHelpersTest(unittest.TestCase):
 class EngineTest(unittest.TestCase):
     def test_every_rule_in_the_checker_is_configured_in_the_data_and_the_reverse(self):
         self.assertEqual(set(REAL.RULES), set(boundaries.ARCHITECTURE_RULES))
-        self.assertEqual(len(REAL.RULES), 12)
+        self.assertEqual(len(REAL.RULES), 18)
 
     def test_the_real_tree_passes_every_rule(self):
         self.assertEqual(boundaries.architecture(boundaries.ROOT, REAL)[1], [])

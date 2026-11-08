@@ -98,6 +98,14 @@ A `FAILED:` line names the module, the chunk and the route it reached. Fix it by
 
 A `FAILED: <rule>: <detail>` line names the rule. `--show-pins` prints what each rule found on the tree.
 
+As of 2026-11-08, the six social/Trade List caller scans also run as named tooling rules:
+`reserving-picks-callers`, `discovery-callers`, `reach-callers`, `message-callers`,
+`listable-callers` and `for-trade-callers`. They scan string constants and f-string pieces,
+exclude docstrings, and retain the API scans' patterns, exact/subset semantics, mandatory
+callers and counts' single-owner check. Caller identities are dotted module names in the
+rule data, so later moves update those entries. Planted-violation tests live in `tests/tooling`.
+The copies in `api/tests/test_social_contract.py` stay unchanged until a later reviewed change removes them.
+
 ## Web boundaries
 
 `scripts/check_web_boundaries.py` guards the same split in `web/src` ([frontend composition](../planning/shared-core/frontend-composition.md)). `npm run guardrails` runs it, after the Python check. `scripts/web_imports.mjs` reads each `.ts` and `.tsx` file with the installed TypeScript parser and lists its module references: `import`, `export … from`, `import x = require()`, `import()`, `typeof import()`, `require()` and `new URL("…", import.meta.url)`. Code inside a template's `${…}` counts; text in strings, comments and regular expressions does not. It fails when:
