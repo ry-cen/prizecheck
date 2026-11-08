@@ -146,6 +146,7 @@ def test_editions_changed_lists_every_inactive_or_tombstoned_edition_and_destina
 
 
 def test_a_malformed_request_a_duplicate_edition_and_an_overflow_write_nothing():
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
     owner, _, unsorted, _, edition, generation = fixture()
     first, second = editions(edition, generation, 2)
     ok(add(owner, unsorted, second, str(2**63 - 2)))

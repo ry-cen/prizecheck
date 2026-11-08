@@ -169,12 +169,14 @@ def test_a_deck_named_unsorted_gives_the_name_up_and_another_one_refuses_until_t
 
 
 def test_a_spill_that_would_overflow_unsorted_changes_nothing():
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
     owner, _, unsorted, _, edition, _ = fixture()
     deck = create(owner).json()['location']['id']
     assert add(owner, unsorted, edition, str(MAX - 1)).status_code == 200
     assert add(owner, deck, edition, '2').status_code == 200
     before = revision(owner)
-    assert code(delete(owner, deck)) == 'QUANTITY_OVERFLOW'
+    response = delete(owner, deck)
+    assert (response.status_code, code(response)) == (409, 'QUANTITY_OVERFLOW'), response.text
     assert held(owner, unsorted) == {edition: str(MAX - 1)} and held(owner, deck) == {edition: '2'}
     assert revision(owner) == before
 

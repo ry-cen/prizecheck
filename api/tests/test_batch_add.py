@@ -87,6 +87,7 @@ def test_a_batch_adds_every_edition_to_one_location_in_one_revision_and_replays_
 
 
 def test_a_batch_is_all_or_nothing_and_names_the_card_edition_it_refuses():
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
     owner, other, unsorted, other_leaf, edition, generation = fixture()
     first, second = editions(edition, generation, 2)
     ok(add(owner, unsorted, second, str(2**63 - 2)))

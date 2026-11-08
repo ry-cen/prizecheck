@@ -509,3 +509,24 @@ def test_no_route_reads_prices_or_starts_a_catalog_pull_or_returns_source_data(m
                     for alias in node.names} | {node.module.split(".")[-1] for node in ast.walk(tree)
                                                 if isinstance(node, ast.ImportFrom) and node.module}
         assert not imported & banned, (module, imported & banned)
+
+
+@pytest.mark.parametrize("overflow", ["existing_holding", "combined_rows"])
+def test_save_overflow_changes_neither_holdings_nor_owner_revision(overflow):
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
+    seed_import_catalog()
+    owner, unsorted = collector()
+    starmie = edition("base1-64", "normal")
+    if overflow == "existing_holding":
+        assert add(owner, unsorted, starmie, str(2**63 - 1)).status_code == 200
+        data = HEADER_12 + b"\n" + STARMIE_ROW
+    else:
+        # Each row is valid; their sum for one Edition exceeds bigint.
+        data = HEADER_12 + b"\n" + STARMIE_ROW.replace(b"1,", str(2**63 - 1).encode() + b",", 1) + STARMIE_ROW
+    summary = started(owner, unsorted, data)
+    assert summary["counts"]["needs_you"] == 0
+    before = (held(owner, unsorted), revision(owner), undo_records(owner), all_rows(owner, summary["id"]))
+    response = save(owner, summary["id"])
+    assert (response.status_code, code(response)) == (422, "QUANTITY_OVERFLOW"), response.text
+    assert response.json()["detail"]["edition_id"] == starmie
+    assert (held(owner, unsorted), revision(owner), undo_records(owner), all_rows(owner, summary["id"])) == before

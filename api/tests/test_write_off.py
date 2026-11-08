@@ -198,3 +198,17 @@ def test_a_write_off_racing_the_borrowers_deck_deletion_never_deadlocks(store):
     assert deleted.status_code == 200, deleted.text
     assert borrowed(loan) == {(node(ash, 'Unsorted')['id'], iono): 2}
     assert view(ash, loan)['awaiting_choice'] == '1'
+
+
+def test_keeping_written_off_copies_refuses_overflow_without_changing_inventory_or_loan(store):
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
+    iono, ash, misty, binders, loan, _ = lent_loan({'Binder': 1}, 1)
+    unsorted = node(ash, 'Unsorted')['id']
+    hold(ash, unsorted, iono, 2**63 - 1)
+    ok(write_off(misty, loan, [(iono, 1)]))
+    before = (holding(ash, unsorted, iono), owner_revision(ash), borrowed(loan),
+              undo_records(ash), view(ash, loan), view(misty, loan), owner_revision(misty))
+    response = choose(ash, loan, 'keep')
+    assert code(response) == (409, 'QUANTITY_OVERFLOW'), response.text
+    assert (holding(ash, unsorted, iono), owner_revision(ash), borrowed(loan),
+            undo_records(ash), view(ash, loan), view(misty, loan), owner_revision(misty)) == before
