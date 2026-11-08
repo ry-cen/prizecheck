@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PAGES } from "./routes";
 
 export type Route = {
   /** The address bar's path. */
   path: string;
+  /** Full path and query; query-only navigation also rerenders consumers. */
+  address: string;
+  /** Identity of the current browser history entry. */
+  entry: string;
   /** Pushes (or replaces) an address and shows it, without a page load. An open leave guard that blocks asks first;
    * `force` skips it, for sign-out. */
   navigate: (
     to: string,
-    options?: { replace?: boolean; force?: boolean }
+    options?: { replace?: boolean; force?: boolean; preserveScroll?: boolean }
   ) => void;
-  /** The window scroll position the page at `path` had when it was last left, or 0. */
+  /** The current entry's saved scroll, with a last-visited fallback for tab roots. */
   scrollFor: (path: string) => number;
 };
 
@@ -71,10 +76,33 @@ export function useLeaveGuard(guard: LeaveGuard): void {
  * approved for that popstate; a new pending command must still answer before navigation.
  */
 export function useRoute(): Route {
+  const addressAt = () => window.location.pathname + window.location.search;
+  const entryAt = () => {
+    if (!window.history.state?.prizecheckEntry)
+      window.history.replaceState(
+        { ...window.history.state, prizecheckEntry: crypto.randomUUID() },
+        ""
+      );
+    return window.history.state.prizecheckEntry as string;
+  };
+  const [address, setAddress] = useState(addressAt);
+  const [entry, setEntry] = useState(entryAt);
   const [path, setPath] = useState(() => window.location.pathname);
+  const currentEntry = useRef(entry);
+  const positions = useRef(new Map<string, number>()).current;
+  const update = () => {
+    setPath(window.location.pathname);
+    setAddress(addressAt());
+    const nextEntry = entryAt();
+    setEntry(nextEntry);
+    currentEntry.current = nextEntry;
+  };
   const current = useRef(path);
   current.current = path;
+  const currentAddress = useRef(address);
+  currentAddress.current = address;
   const scrolls = useRef(new Map<string, number>()).current;
+  const addresses = useRef(new Map<string, string>()).current;
   // Approval belongs to these exact registrations, never to an unconditional next popstate.
   const leaving = useRef<Set<RegisteredGuard> | null>(null);
 
@@ -82,8 +110,12 @@ export function useRoute(): Route {
     const onPopState = () => {
       const approved = leaving.current ?? new Set<RegisteredGuard>();
       leaving.current = null;
-      if (blocking(approved) && window.location.pathname !== current.current) {
-        window.history.pushState(null, "", current.current);
+      if (blocking(approved) && addressAt() !== currentAddress.current) {
+        window.history.pushState(
+          { prizecheckEntry: currentEntry.current },
+          "",
+          currentAddress.current
+        );
         askToLeave(() => {
           leaving.current = approved;
           window.history.back();
@@ -91,7 +123,9 @@ export function useRoute(): Route {
         return;
       }
       scrolls.set(current.current, window.scrollY);
-      setPath(window.location.pathname);
+      addresses.set(current.current, currentAddress.current);
+      positions.set(currentEntry.current, window.scrollY);
+      update();
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -103,18 +137,32 @@ export function useRoute(): Route {
       {
         replace = false,
         force = false,
-      }: { replace?: boolean; force?: boolean } = {}
+        preserveScroll = false,
+      }: { replace?: boolean; force?: boolean; preserveScroll?: boolean } = {}
     ) => {
       const go = () => {
         scrolls.set(current.current, window.scrollY);
-        if (replace) window.history.replaceState(null, "", to);
-        else window.history.pushState(null, "", to);
-        setPath(window.location.pathname);
+        addresses.set(current.current, currentAddress.current);
+        positions.set(currentEntry.current, window.scrollY);
+        if (replace)
+          window.history.replaceState(
+            { prizecheckEntry: currentEntry.current },
+            "",
+            to
+          );
+        else {
+          const nextEntry = crypto.randomUUID();
+          if (preserveScroll) positions.set(nextEntry, window.scrollY);
+          window.history.pushState({ prizecheckEntry: nextEntry }, "", to);
+        }
+        update();
       };
       if (
         !force &&
         blocking() &&
-        new URL(to, window.location.href).pathname !== current.current
+        new URL(to, window.location.href).pathname +
+          new URL(to, window.location.href).search !==
+          currentAddress.current
       ) {
         askToLeave(go);
         return;
@@ -124,8 +172,12 @@ export function useRoute(): Route {
     [scrolls]
   );
   const scrollFor = useCallback(
-    (at: string) => scrolls.get(at) ?? 0,
-    [scrolls]
+    (at: string) =>
+      positions.get(entry) ??
+      (PAGES.some((page) => page.path === at) && addresses.get(at) === address
+        ? (scrolls.get(at) ?? 0)
+        : 0),
+    [scrolls, entry, address]
   );
-  return { path, navigate, scrollFor };
+  return { path, address, entry, navigate, scrollFor };
 }

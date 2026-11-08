@@ -102,7 +102,9 @@ function safeDestination(): string {
 
 function App() {
   const lastUserId = useRef<string | null>(null);
-  const { path, navigate, scrollFor } = useRoute();
+  const { path, address, entry, navigate, scrollFor } = useRoute();
+  const collectionAddress = useRef("/collection");
+  if (path === "/collection") collectionAddress.current = address;
   const [session, setSession] = useState<Session | null>(null);
   const [ownerCatalog, setOwnerCatalog] = useState<OwnerCatalogStatus | null>(
     null
@@ -342,6 +344,8 @@ function App() {
           <Workspace
             key={userId}
             userId={userId}
+            address={address}
+            onNavigate={navigate}
             active={active}
             onImport={() => navigate(COLLECTION_IMPORT_PATH)}
             onOpenDeck={(id) =>
@@ -458,7 +462,12 @@ function App() {
           if (tradePath(id) !== path) navigate(tradePath(id));
         }}
         onNavigate={(next) => {
-          if (pageDef(next).path !== path) navigate(pageDef(next).path);
+          if (pageDef(next).path !== path)
+            navigate(
+              next === "collection"
+                ? collectionAddress.current
+                : pageDef(next).path
+            );
         }}
         onOpenFriend={(handle) => {
           if (friendCollectionPath(handle) !== path)
@@ -466,6 +475,7 @@ function App() {
         }}
         onSignOut={signOut}
         scrollFor={scrollFor}
+        entry={entry}
         renderPage={renderPage}
         other={
           publicPage

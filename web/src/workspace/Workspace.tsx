@@ -72,7 +72,7 @@ import { useInventoryActions } from "./useInventoryActions";
 import { useOwnedSets } from "./useOwnedSets";
 import { useSelection } from "./useSelection";
 import { useStaleCollection } from "./useStaleCollection";
-import { clearLinkedLocation, readLinkedLocation } from "./workspaceLink";
+import { collectionAddress, collectionHref } from "./workspaceLink";
 
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
@@ -80,6 +80,11 @@ const FOCUSABLE =
 type Props = {
   /** The signed-in user; their gallery preferences are stored under it in this browser. */
   userId: string;
+  address: string;
+  onNavigate: (
+    to: string,
+    options?: { replace?: boolean; preserveScroll?: boolean }
+  ) => void;
   /** False while the app shell shows another page. The workspace stays mounted, hidden, and keeps its
    * state; document-level keys are ignored meanwhile, and showing it again checks for changes made on
    * other pages (#162). */
@@ -96,6 +101,8 @@ type Props = {
  * (desktop) or drawer (phone), and the gallery area. The shell draws the desktop header and the tabs. */
 export function Workspace({
   userId,
+  address,
+  onNavigate,
   active,
   onOpenDeck,
   onImport,
@@ -114,17 +121,27 @@ export function Workspace({
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
     "loading"
   );
-  const [view, setView] = useState<WorkspaceView>("all");
+  const lastAddress = useRef(address);
+  if (active) lastAddress.current = address;
+  const route = collectionAddress(
+    new URL(lastAddress.current, window.location.origin).search
+  );
+  const view = route.location;
+  const setView = (next: WorkspaceView) => {
+    if (next !== view) onNavigate(collectionHref(next, query));
+  };
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set()
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const query = route.query;
+  const setQuery = (next: string) =>
+    onNavigate(collectionHref(view, next), { replace: true });
   // The create form's preselected parent: undefined while closed, null for Top level.
   const [createFor, setCreateFor] = useState<string | null | undefined>(
     undefined
   );
-  // Sort, filter values and display choices, remembered per user in this browser. Search text isn't.
+  // Sort, filter values and display choices are remembered per user; search lives in the address.
   const [prefs, setPrefs] = useGalleryPrefs(userId);
   const display = prefs.display;
   const setDisplay = (next: DisplayPrefs) =>
@@ -158,6 +175,7 @@ export function Workspace({
     idPrefix: string;
   } | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [locationNotice, setLocationNotice] = useState("");
   // The same line inside the phone drawer: the page behind a modal drawer is inert, so a delete made there is read here.
   const [drawerAnnouncement, setDrawerAnnouncement] = useState("");
   // Add cards (#175): open, and the Location it adds to (null: its picker chooses).
@@ -200,11 +218,6 @@ export function Workspace({
   const current = chosen && !isFolder(chosen) ? chosen : undefined;
   const heading = current?.name ?? "All owned";
   const galleryView: WorkspaceView = current ? view : "all";
-  // A chosen Location that became a folder is left for good: if it later becomes a leaf again (its last child
-  // moved out), the workspace must not jump back to it on its own. created() still ends on the new child.
-  useEffect(() => {
-    if (chosen && isFolder(chosen)) setView("all");
-  }, [chosen]);
   // Typing settles for 250 ms before the gallery reloads. The selection scope ignores `sort`, so
   // sorting keeps the selection and search or filter changes clear it.
   const searchText = useDebouncedValue(query, 250);
@@ -228,6 +241,22 @@ export function Workspace({
     holdings: gallery.holdings,
     byKey: gallery.byKey,
     status: gallery.status,
+    routeDetails: route.card
+      ? {
+          key: route.card,
+          ordinal: Number.isSafeInteger(route.copy) ? route.copy : 0,
+        }
+      : null,
+    onDetails: (card) => {
+      const next = collectionHref(
+        view,
+        query,
+        card?.holding.key,
+        card?.ordinal
+      );
+      if (active && next !== address)
+        onNavigate(next, { replace: card === null, preserveScroll: true });
+    },
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
     active,
@@ -338,31 +367,23 @@ export function Workspace({
     if (active) window.scrollTo(0, 0);
   }, [galleryKey]);
 
-  // A link from the Decks page (/workspace?location=<id>) opens that Storage Leaf or Deck once the tree
-  // has loaded, with its folders expanded. The address is cleaned at once, so a reload opens All owned.
-  // A missing id or a folder id leaves the workspace at All owned.
-  const linked = useRef<string | null>(null);
   const linkReloaded = useRef<string | null>(null);
+  // Expand ancestors after a deep link loads; an unavailable Location stays safe and explains the fallback.
   useEffect(() => {
-    if (!active) return;
-    const id = readLinkedLocation();
-    if (id) linked.current = id;
-    clearLinkedLocation();
-  }, [active]);
-  useEffect(() => {
-    const id = linked.current;
-    if (!active || !id || treeState !== "ready") return;
-    const node = index.byId.get(id);
-    if (!node && linkReloaded.current !== id) {
-      linkReloaded.current = id;
+    if (!active || treeState !== "ready" || view === "all") return;
+    const node = index.byId.get(view);
+    if (!node && linkReloaded.current !== view) {
+      linkReloaded.current = view;
       void loadTree();
       return;
     }
-    linked.current = null;
-    if (!node || node.kind === "organization") return;
-    setExpanded((previous) => new Set([...previous, ...index.ancestors(id)]));
-    setView(id);
-  }, [active, index, treeState, loadTree]);
+    if (!node || isFolder(node)) {
+      setLocationNotice("This Location is unavailable. Showing All owned.");
+      onNavigate(collectionHref("all", query), { replace: true });
+      return;
+    }
+    setExpanded((previous) => new Set([...previous, ...index.ancestors(view)]));
+  }, [active, index, treeState, view]);
 
   function toggleFolder(id: string) {
     setExpanded((previous) => {
@@ -373,6 +394,7 @@ export function Workspace({
     });
   }
   function choose(next: WorkspaceView) {
+    setLocationNotice("");
     setView(next);
     setDrawerOpen(false);
   }
@@ -596,6 +618,11 @@ export function Workspace({
       data-phone-search-header={active ? "" : undefined}
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
+      {locationNotice && (
+        <p role="status" className="px-4 py-2">
+          {locationNotice}
+        </p>
+      )}
       <p className="sr-only" role="status" data-testid="location-announcement">
         {announcement}
       </p>

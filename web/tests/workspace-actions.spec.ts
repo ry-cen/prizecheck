@@ -1356,3 +1356,63 @@ test.describe("mobile", () => {
     await expectActionsOverToast(page);
   });
 });
+
+test("Collection Location addresses survive reload, deep links and Back", async ({
+  page,
+}) => {
+  await signIn(page);
+  const first = await createLocation(page, "Continuity first", null);
+  const second = await createLocation(page, "Continuity second", null);
+  await page.reload();
+  await expectCounts(page, "Continuity first", "This Location has no cards.");
+  await expect(page).toHaveURL(new RegExp(`location=${first}`));
+  await expectCounts(page, "Continuity second", "This Location has no cards.");
+  await page.goBack();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Continuity first"
+  );
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Continuity first"
+  );
+  await expect(page).toHaveTitle("Continuity first · PrizeCheck");
+  await page.goto(new URL(`/collection?location=${second}`, page.url()).href);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Continuity second"
+  );
+  await page.goto(new URL("/collection?location=missing", page.url()).href);
+  await expect(
+    page.getByText("This Location is unavailable. Showing All owned.")
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
+  await expect(page).toHaveTitle("Collection · PrizeCheck");
+  await page.goto(new URL("/catalog", page.url()).href);
+  await expect(page).toHaveTitle("Catalog · PrizeCheck");
+});
+
+test("Back closes the phone card sheet before leaving Collection", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  promoteCatalog({ "card-1": "Continuity Abra" });
+  await signIn(page);
+  const leaf = await createLocation(page, "Continuity binder", null);
+  await addCopies(page, leaf, await editionOf("card-1"), 1);
+  await page.reload();
+  await expect(tiles(page)).toHaveCount(1);
+  await tiles(page).first().click();
+  await expect(page).toHaveURL(/card=/);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/collection$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await tiles(page).first().click();
+  await page
+    .getByRole("button", { name: "Close details", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/collection$/);
+  await page.goBack();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});

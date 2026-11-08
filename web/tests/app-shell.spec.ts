@@ -273,13 +273,13 @@ test.describe("desktop", () => {
     const leaf = await createLocation(page, `Linked ${s}`);
     await page.goto(`${ORIGIN}/workspace?location=${leaf}`);
     await expect(heading(page)).toHaveText(`Linked ${s}`);
-    await expect(page).toHaveURL(/\/collection$/);
+    await expect(page).toHaveURL(`${ORIGIN}/collection?location=${leaf}`);
     // So does the bare origin, which signed out is the landing page.
     await page.goto(`${ORIGIN}/`);
     await expect(heading(page)).toHaveText("All owned");
     await page.goto(`${ORIGIN}/?location=${leaf}`);
     await expect(heading(page)).toHaveText(`Linked ${s}`);
-    await expect(page).toHaveURL(/\/collection$/);
+    await expect(page).toHaveURL(`${ORIGIN}/collection?location=${leaf}`);
     // An address that is no page lands on Collection.
     await page.goto(`${ORIGIN}/nowhere`);
     await expect(page).toHaveURL(/\/collection$/);
@@ -400,7 +400,7 @@ test.describe("desktop", () => {
     }
   });
 
-  test("Collection keeps its Location, selection, scroll, search, filters and display across a tab switch, and a reload starts fresh", async ({
+  test("Collection keeps its Location, selection, scroll, search, filters and display across a tab switch, and a reload restores its address", async ({
     page,
   }) => {
     promoteCatalog({ "card-1": "Keep Abra", "card-2": "Keep Zubat" });
@@ -478,12 +478,12 @@ test.describe("desktop", () => {
         .getByRole("button", { name: `Keep ${s}`, exact: true })
     ).toHaveAttribute("aria-current", "page");
 
-    // A reload starts fresh (display choices are remembered per user, as before).
+    // Reload restores the Location and search; selection stays local to this visit.
     await page.reload();
-    await expect(heading(page)).toHaveText("All owned");
+    await expect(heading(page)).toHaveText(`Keep ${s}`);
     await expect(
       page.getByRole("searchbox", { name: "Search cards" })
-    ).toHaveValue("");
+    ).toHaveValue("Keep");
     await expect(selectionBar(page)).toHaveCount(0);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
   });

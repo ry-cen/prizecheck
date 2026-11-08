@@ -66,6 +66,7 @@ type Props = {
   /** The page to show. App has already sent addresses that are no page to Collection. */
   page: PageId;
   path: string;
+  entry: string;
   /** The signed-in email, when the session gave one. */
   email: string | null;
   /** The name from the latest provider sign-in, shown above the email in the avatar menu. */
@@ -134,6 +135,7 @@ export function Shell(props: Props) {
 function ShellFrame({
   page,
   path,
+  entry,
   email,
   name = null,
   image = null,
@@ -188,7 +190,6 @@ function ShellFrame({
       }),
     [owner]
   );
-  const shown = useRef(new Set<PageId>());
   const containers = useRef(new Map<PageId, HTMLDivElement>());
   const otherContainer = useRef<HTMLDivElement>(null);
   const current = pageDef(page);
@@ -240,14 +241,63 @@ function ShellFrame({
           .querySelectorAll<HTMLDialogElement>("dialog[open]")
           .forEach((dialog) => dialog.close());
     });
-    if (otherKey !== null) {
-      window.scrollTo(0, 0);
-      return;
-    }
-    const returning = path === current.path && shown.current.has(page);
-    if (path === current.path) shown.current.add(page);
-    else shown.current.delete(page);
-    window.scrollTo(0, returning ? scrollFor(current.path) : 0);
+    const target = scrollFor(path);
+    let stopped = false;
+    let frame = 0;
+    const restore = () => {
+      if (stopped) return;
+      window.scrollTo(0, target);
+    };
+    restore();
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(restore);
+    });
+    const container =
+      otherKey !== null ? otherContainer.current : containers.current.get(page);
+    if (container) observer.observe(container);
+    const stop = () => {
+      stopped = true;
+      observer.disconnect();
+    };
+    window.addEventListener("pointerdown", stop, { once: true });
+    window.addEventListener("keydown", stop, { once: true });
+    window.addEventListener("wheel", stop, { once: true });
+    window.addEventListener("touchstart", stop, { once: true });
+    return () => {
+      stop();
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointerdown", stop);
+      window.removeEventListener("keydown", stop);
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("touchstart", stop);
+    };
+  }, [page, path, otherKey, entry]);
+
+  useEffect(() => {
+    const container = other
+      ? otherContainer.current
+      : containers.current.get(page);
+    const update = () => {
+      const heading = container?.querySelector("h1")?.textContent?.trim();
+      const label =
+        page === "collection" && heading === "All owned"
+          ? current.label
+          : heading;
+      document.title = `${label || other?.label || current.label} · PrizeCheck`;
+    };
+    update();
+    const observer = new MutationObserver(update);
+    if (container)
+      observer.observe(container, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    return () => {
+      observer.disconnect();
+      document.title = "PrizeCheck";
+    };
   }, [page, path, otherKey]);
 
   function go(next: PageId) {
