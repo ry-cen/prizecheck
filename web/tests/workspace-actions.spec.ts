@@ -1471,3 +1471,68 @@ test("unavailable Collection card links explain the fallback and remove card and
   await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+for (const remaining of [1, 0]) {
+  test(`a reloaded pushed phone sheet with ${remaining ? "an unavailable copy normalizes inside the modal" : "an unavailable Holding closes"} and keeps Back to Catalog`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    promoteCatalog({ "card-1": "Continuity Abra" });
+    await signIn(page);
+    const leaf = await createLocation(page, "Continuity binder", null);
+    const edition = await editionOf("card-1");
+    await addCopies(page, leaf, edition, 2);
+    await page.goto(new URL("/catalog", page.url()).href);
+    await page
+      .getByRole("navigation", { name: "Main views" })
+      .getByRole("button", { name: "Collection", exact: true })
+      .click();
+    await expect(tiles(page)).toHaveCount(2);
+    await tiles(page).nth(1).click();
+    await expect(page).toHaveURL(/card=.*&copy=1$/);
+    await expect(page.getByRole("dialog")).toBeVisible();
+
+    // Another tab removes copy 2, or the entire Holding, while this history entry remains open.
+    await sql(
+      `WITH changed AS (
+         UPDATE inventory_owner SET revision=revision+1
+         WHERE user_id=(SELECT owner_id FROM location WHERE id=$1) RETURNING revision
+       ) ${remaining ? "UPDATE holding SET quantity=1,version=(SELECT revision FROM changed)" : "DELETE FROM holding"}
+       WHERE location_id=$1 AND edition_id=$2`,
+      [leaf, edition]
+    );
+    const normalized = new URL(page.url());
+    normalized.searchParams.delete("copy");
+    await page.reload();
+    if (remaining) {
+      await expect(page).toHaveURL(normalized.href);
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      const feedback = dialog.getByRole("status");
+      await expect(feedback).toHaveText(
+        "This copy is unavailable. Showing the first copy."
+      );
+      // The native modal makes content outside it inert: check the feedback's accessible subtree.
+      await expect(feedback).toMatchAriaSnapshot(
+        "- status: This copy is unavailable. Showing the first copy."
+      );
+      await dialog
+        .getByRole("button", { name: "Close details", exact: true })
+        .click();
+    } else {
+      await expect(
+        page.getByRole("status").filter({
+          hasText: "This card is unavailable here. Showing your cards.",
+        })
+      ).toBeVisible();
+    }
+    await expect(page).toHaveURL(/\/collection$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => document.body.style.overflow))
+      .not.toBe("hidden");
+    // Real browser traversal must leave Collection, without a duplicate entry from validation/Close.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/catalog$/);
+  });
+}

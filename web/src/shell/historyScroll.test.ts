@@ -66,6 +66,18 @@ it("closes pushed sheets through Back and replaces directly opened sheets", asyn
         preserveScroll: true,
       })
     );
+    const sheetEntry = route.entry;
+    await act(async () =>
+      route.navigate("/collection?location=binder&q=Abra&card=one&copy=1", {
+        replace: true,
+        overlay: true,
+        preserveScroll: true,
+      })
+    );
+    expect(route.entry).toBe(sheetEntry);
+    expect(window.history.state.prizecheckOverlayParent).toBe(
+      "/collection?q=Abra&location=binder"
+    );
     await act(async () =>
       route.closeOverlay("/collection?location=binder&q=Abra")
     );
@@ -78,6 +90,13 @@ it("closes pushed sheets through Back and replaces directly opened sheets", asyn
     await act(async () => route.closeOverlay("/collection"));
     expect(back).toHaveBeenCalledTimes(1);
     expect(route.address).toBe("/collection");
+    await act(async () =>
+      route.navigate("/collection?card=direct", {
+        replace: true,
+        overlay: true,
+      })
+    );
+    expect(window.history.state.prizecheckOverlayParent).toBeUndefined();
   } finally {
     await act(async () => root.unmount());
     vi.restoreAllMocks();

@@ -281,10 +281,7 @@ export function Workspace({
     const holding = route.card ? gallery.byKey.get(route.card) : undefined;
     if (params.has("card") && !holding) {
       setCardNotice("This card is unavailable here. Showing your cards.");
-      onNavigate(collectionHref(view, query), {
-        replace: true,
-        preserveScroll: true,
-      });
+      onCloseCard(collectionHref(view, query));
     } else if (
       hasCopy &&
       (!holding ||
@@ -297,10 +294,13 @@ export function Workspace({
           ? "This copy is unavailable. Showing the first copy."
           : "This card link is incomplete. Showing your cards."
       );
-      onNavigate(
-        collectionHref(view, query, holding ? route.card! : undefined),
-        { replace: true, preserveScroll: true }
-      );
+      if (holding)
+        onNavigate(collectionHref(view, query, route.card!), {
+          replace: true,
+          preserveScroll: true,
+          overlay: true,
+        });
+      else onCloseCard(collectionHref(view, query));
     }
   }, [
     active,
@@ -670,7 +670,7 @@ export function Workspace({
       data-phone-search-header={active ? "" : undefined}
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
-      {cardNotice && (
+      {cardNotice && !(active && selection.details) && (
         <p role="status" className="px-4 py-2">
           {cardNotice}
         </p>
@@ -1040,6 +1040,7 @@ export function Workspace({
       {active && selection.details && (
         <DetailsSheet
           card={selection.details}
+          notice={cardNotice}
           locationPath={locationPath}
           ownerRevision={gallery.ownerRevision}
           ownedTotals={ownedTotals}

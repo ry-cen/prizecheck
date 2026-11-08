@@ -170,7 +170,16 @@ export function useRoute(): Route {
         save(positions, currentEntry.current, window.scrollY);
         if (replace)
           window.history.replaceState(
-            { prizecheckEntry: currentEntry.current },
+            {
+              prizecheckEntry: currentEntry.current,
+              // Normalizing an overlay address keeps ownership of its pushed entry.
+              ...(overlay && currentState.current?.prizecheckOverlayParent
+                ? {
+                    prizecheckOverlayParent:
+                      currentState.current.prizecheckOverlayParent,
+                  }
+                : {}),
+            },
             "",
             to
           );
