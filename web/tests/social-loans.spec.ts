@@ -328,10 +328,12 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expect(needsYou.getByRole("link")).toHaveCount(1);
   await expect(needsYou.getByRole("link")).toContainText("Ash K");
   await expect(needsYou.getByRole("link")).toContainText("Borrow Request");
-  await expect(needsYou.getByRole("link")).toContainText(
-    "You give 3 · You get 0"
-  );
+  await expect(needsYou.getByRole("link")).toContainText("Lending 3");
   await expect(lender.getByRole("main")).not.toContainText(deckName);
+  await test.info().attach("loan-row-after", {
+    body: await needsYou.innerText(),
+    contentType: "text/plain",
+  });
   await expectPageChecks(lender, "the Loans tab");
   await needsYou.getByRole("link").click();
   await expect(title(lender)).toHaveText("Ash K wants to borrow 3 cards");
@@ -357,6 +359,15 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expect(
     lender.getByRole("region", { name: "Acceptance preview" })
   ).toContainText("2 to lend; 1 not lent.");
+  await expect(
+    lender.getByRole("region", { name: "Acceptance preview" })
+  ).toContainText("Accepting agrees to these quantities and this return date.");
+  await test.info().attach("loan-preview-after", {
+    body: await lender
+      .getByRole("region", { name: "Acceptance preview" })
+      .innerText(),
+    contentType: "text/plain",
+  });
   await expectPageChecks(lender, "answering a Borrow Request");
   await lender.setViewportSize(PHONE);
   await expectPageChecks(lender, "answering a Borrow Request on a phone");
@@ -394,7 +405,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
     .click();
   await expect(
     page.getByRole("region", { name: "Pending" }).getByRole("link")
-  ).toContainText("You give 0 · You get 2");
+  ).toContainText("Borrowing 2");
   await expectPageChecks(page, "the Loans tab on a phone");
   await page.setViewportSize(DESKTOP);
   await page.goto(`${ORIGIN}/decks/want-list`);

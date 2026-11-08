@@ -58,7 +58,7 @@ import {
   WillAcceptRadios,
 } from "./TradeWantsPanel";
 import { useTradeWants, type TradeWantsApi } from "./useTradeWants";
-import { pendingText } from "./pendingLoans";
+import { borrowDefault, borrowRemainder, pendingText } from "./pendingLoans";
 import {
   usePendingLoans,
   wantListPins,
@@ -340,7 +340,19 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
                 copy,
                 copy.edition_id === row.edition_id ? row.image_url : null
               )}
-              cap={copyCap(copy)}
+              cap={borrowRemainder(
+                Number(row.need),
+                copyCap(copy),
+                scoped && friendRequests.state.kind === "ready"
+                  ? friendRequests.state.lines.get(row.edition_id)
+                  : undefined,
+                copy.display_name
+              )}
+              initialQuantity={borrowDefault(
+                Number(row.need),
+                Number(copy.spare),
+                copyCap(copy)
+              )}
               lendable={lendableText(copy)}
               deckId={shownScope}
             />
@@ -459,8 +471,8 @@ function DeckSection({
       ) : (
         <>
           <p className="m-0 px-4 py-2 text-meta text-text-muted">
-            Will accept controls Swap hints and trade matching, not the
-            quantities shown on this page.
+            Choose which versions you would accept in a Swap or Trade. This does
+            not change how many cards your Deck needs.
           </p>
           <NeededLines
             layout="tiles"
@@ -573,19 +585,39 @@ export function NeededLines({
               edition={editionText(line)}
               wanted={line.edition_id}
               copies={byCard.get(line.edition_id)}
-              chip={(copy, text) => (
-                <AskChip
-                  friend={copy}
-                  card={copyCard(
-                    copy,
-                    copy.edition_id === line.edition_id ? line.image_url : null
-                  )}
-                  cap={copyCap(copy)}
-                  lendable={lendableText(copy)}
-                  text={text}
-                  deckId={borrowFor}
-                />
-              )}
+              chip={(copy, text) => {
+                const pendingLine =
+                  waiting?.kind === "ready"
+                    ? waiting.lines.get(line.edition_id)
+                    : undefined;
+                const cap = borrowRemainder(
+                  Number(line.need),
+                  copyCap(copy),
+                  pendingLine,
+                  copy.display_name
+                );
+                return (
+                  <AskChip
+                    friend={copy}
+                    card={copyCard(
+                      copy,
+                      copy.edition_id === line.edition_id
+                        ? line.image_url
+                        : null
+                    )}
+                    cap={cap}
+                    initialQuantity={borrowDefault(
+                      cap,
+                      Number(copy.spare),
+                      cap
+                    )}
+                    more={!!pendingLine}
+                    lendable={lendableText(copy)}
+                    text={text}
+                    deckId={borrowFor}
+                  />
+                );
+              }}
             />
           </NeededLine>
         ))}

@@ -1366,7 +1366,9 @@ export function LoanScreen({
             {(lender ? answerDate : loan.return_by)
               ? `Return by ${dayText((lender ? answerDate : loan.return_by)!)}.`
               : "No return date."}{" "}
-            Accepting agrees to these quantities and this return date.
+            {(lender ? answerDate : loan.return_by)
+              ? "Accepting agrees to these quantities and this return date."
+              : "Accepting agrees to these quantities with no return date."}
           </p>
         </section>
       )}

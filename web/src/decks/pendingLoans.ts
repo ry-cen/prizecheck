@@ -156,3 +156,28 @@ export function pendingText(line: PendingLine | undefined): string {
     )
     .join(" · ");
 }
+
+/** Unanswered requests do not reserve spare copies; agreed Loans already do. */
+export function borrowRemainder(
+  need: number,
+  available: number,
+  pending: PendingLine | undefined,
+  lender: string
+): number {
+  const asked =
+    pending?.lenders
+      .filter((who) => who.lender === lender && who.state === "requested")
+      .reduce((total, who) => total + Number(who.copies), 0) ?? 0;
+  const covered =
+    Number(pending?.requested ?? 0) + Number(pending?.accepted ?? 0);
+  return Math.max(0, Math.min(need - covered, available - asked));
+}
+
+/** Prefer spare copies; a Friend can also choose to lend cards from a Deck. */
+export function borrowDefault(
+  need: number,
+  spare: number,
+  cap: number
+): number {
+  return Math.max(0, Math.min(need, spare > 0 ? spare : cap, cap));
+}

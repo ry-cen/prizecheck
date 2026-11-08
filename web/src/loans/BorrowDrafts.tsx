@@ -873,7 +873,11 @@ export function AskControl({
   lendable,
   text = "Ask",
   deckId = null,
+  initialQuantity = 1,
+  more = false,
 }: {
+  initialQuantity?: number;
+  more?: boolean;
   friend: DraftFriend;
   card: DraftCard;
   cap: number;
@@ -913,10 +917,17 @@ export function AskControl({
         aria-label={name}
         onClick={() => {
           pressed.current = true;
-          drafts.set(friend, card, 1, cap, lendable, deckId);
+          drafts.set(
+            friend,
+            card,
+            Math.min(initialQuantity, cap),
+            cap,
+            lendable,
+            deckId
+          );
         }}
       >
-        {text}
+        {more ? `Ask for ${initialQuantity} more` : text}
       </Button>
     );
   return (
@@ -946,7 +957,11 @@ export function AskChip({
   lendable,
   text,
   deckId = null,
+  initialQuantity = 1,
+  more = false,
 }: {
+  initialQuantity?: number;
+  more?: boolean;
   friend: DraftFriend;
   card: DraftCard;
   cap: number;
@@ -956,7 +971,8 @@ export function AskChip({
   deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
-  if (!drafts || cap < 1)
+  if (cap < 1) return null;
+  if (!drafts)
     return (
       <span className="inline-flex min-h-chip items-center rounded-round border border-border-strong px-2.5 text-meta text-text-muted wrap-anywhere">
         {text}
@@ -973,13 +989,21 @@ export function AskChip({
           : `Ask ${friend.display_name} to lend one`
       }
       onClick={() =>
-        drafts.set(friend, card, asked ? 0 : 1, cap, lendable, deckId)
+        drafts.set(
+          friend,
+          card,
+          asked ? 0 : Math.min(initialQuantity, cap),
+          cap,
+          lendable,
+          deckId
+        )
       }
       className="group m-0 box-border inline-flex min-h-chip max-w-full cursor-pointer items-center border-0 bg-transparent p-0 text-left font-sans phone:min-h-tap"
     >
       <span className="box-border inline-flex min-h-chip max-w-full items-center gap-1 rounded-round border border-border-strong px-2.5 text-meta text-text-muted wrap-anywhere group-hover:border-control-outline group-aria-pressed:border-accent-border group-aria-pressed:bg-accent-wash group-aria-pressed:text-accent-strong phone:min-h-control">
         {asked && <span aria-hidden="true">✓</span>}
-        Borrow from {text}
+        {more ? `Ask for ${initialQuantity} more from ` : "Borrow from "}
+        {text}
       </span>
     </button>
   );

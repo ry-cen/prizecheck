@@ -126,9 +126,19 @@ test("a Borrow Request sent from the Want List shows under its line without a re
   const reread = page.waitForResponse((response) => isPending(response.url()));
   await composer.getByRole("button", { name: "Send Borrow Request" }).click();
   await reread;
-  await expect(lines).toContainText("Asked Misty W for 1");
+  await expect(lines).toContainText("Asked Misty W for 2");
+  await expect(
+    lines.getByRole("button", { name: /^Borrow from Misty W/ })
+  ).toHaveCount(0);
   // Information only: the line still needs both copies.
   await expect(lines).toContainText("2 of 2");
+  const toast = page.getByRole("region", { name: "Notifications" });
+  await expect(toast).toContainText("Borrow Request sent to Misty W.");
+  await toast.getByRole("button", { name: "View", exact: true }).click();
+  await expect(page).toHaveURL(/\/loans\/[0-9a-f-]+$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "You asked Misty W for 2 cards"
+  );
 });
 
 test("a Friend's answer from their own device shows once the inbox pulse moves", async ({
@@ -332,4 +342,46 @@ test("editing the same Deck to a card a request already waits on shows the reque
   await reread;
   await expect(lines).toContainText("Asked Misty W for 1");
   await expect(lines).toContainText("1 of 1");
+});
+
+test("the missing-cards panel offers only the remainder after asking and no duplicate when covered", async ({
+  page,
+  collectors,
+}) => {
+  const { iono, misty, deck, deckName } = await lending(page, collectors, 2, 2);
+  await request(page, misty, iono, 1, deck);
+  await page.goto(`${ORIGIN}/decks/${deck}`);
+  await page.getByRole("button", { name: "Ways to get missing cards" }).click();
+  const panel = page.getByRole("region", { name: "Ways to get missing cards" });
+  await expect(panel).toContainText("Asked Misty W for 1");
+  await panel
+    .getByRole("button", { name: /^Ask for 1 more from Misty W/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Review Borrow Request to Misty W" })
+    .click();
+  const composer = page.getByRole("dialog", {
+    name: "Borrow Request to Misty W",
+  });
+  await expect(composer.getByLabel("For Deck")).toHaveValue(deck);
+  await composer.getByRole("button", { name: "Send Borrow Request" }).click();
+  await expect(panel).toContainText(
+    "Asked Misty W for 1 · Asked Misty W for 1"
+  );
+  await expect(
+    panel.getByRole("button", {
+      name: /^(Borrow from|Ask for .* more from) Misty W/,
+    })
+  ).toHaveCount(0);
+  const toast = page.getByRole("region", { name: "Notifications" });
+  await expect(toast).toContainText("Borrow Request sent to Misty W.");
+  await test.info().attach("missing-cards-panel-after", {
+    body: await panel.innerText(),
+    contentType: "text/plain",
+  });
+  await toast.getByRole("button", { name: "View", exact: true }).click();
+  await expect(page).toHaveURL(/\/loans\/[0-9a-f-]+$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "You asked Misty W for 1 card"
+  );
 });

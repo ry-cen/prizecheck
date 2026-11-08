@@ -1,5 +1,5 @@
 import { TradingAvailability } from "./TradingAvailability";
-import { itemState, timelineText } from "./threadText";
+import { agreementText, itemState, timelineText } from "./threadText";
 import { waitingAction } from "./threadPresentation";
 import { useEffect, useRef, useState } from "react";
 import { getLoans, getTrades, type ThreadItem } from "../social_generated";
@@ -168,29 +168,19 @@ export function ThreadList({
               <span className="text-meta text-text-muted">
                 {itemState(row)}
               </span>
-              <span>
-                You give {row.summary.you_give} · You get {row.summary.you_get}
-                {row.summary.cash
-                  ? ` · ${row.summary.cash.payer === "you" ? "You pay" : "They pay"} $${(Number(row.summary.cash.cents) / 100).toFixed(2)}`
-                  : ""}
-              </span>
+              <span>{agreementText(row)}</span>
               <span>
                 {row.summary.cards
                   .map((card) => `${card.copies} ${card.name}`)
                   .join(" · ")}
               </span>
-              {row.latest && (
+              {row.latest?.message && (
                 <span className="line-clamp-2 text-meta text-text-muted whitespace-pre-wrap wrap-anywhere">
                   {timelineText(
                     row.latest,
                     row.you_are,
                     row.other.display_name,
-                    Object.fromEntries(
-                      row.summary.cards.map((card) => [
-                        card.edition_id,
-                        card.name,
-                      ])
-                    )
+                    {}
                   )}
                 </span>
               )}

@@ -231,9 +231,9 @@ it("S2-03: removed Editions and same-name variants keep public identities across
       "earlier"
     );
     const labels = host.querySelector("ol")?.textContent;
-    expect(labels).toContain("They give Iono (PAL 185): 1 → 0");
-    expect(labels).toContain("They give Arven (SVI 166): 0 → 1");
-    expect(labels).toContain("They give Iono (PAL 254, Reverse Holo): 0 → 1");
+    expect(labels).toContain("Removed 1 Iono (PAL 185)");
+    expect(labels).toContain("Added 1 Arven (SVI 166)");
+    expect(labels).toContain("Added 1 Iono (PAL 254, Reverse Holo)");
     await act(async () =>
       root.render(
         h(ThreadTimeline, { kind: "trade", id: "item", editionNames: {} })

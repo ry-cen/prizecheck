@@ -92,7 +92,7 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   ).toContainText("Lend offer");
   await expect(
     page.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText("You give 0 · You get 1");
+  ).toContainText("Borrowing 1");
   // The kept /loans page may warm Decks while this navigation starts. Keep the failure active until
   // the Loan screen shows its own error, so an earlier warm read cannot consume the injection.
   const decksRead = /\/api\/decks(\?.*)?$/;

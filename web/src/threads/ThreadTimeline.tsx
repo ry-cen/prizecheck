@@ -317,7 +317,7 @@ function ThreadTimelineContent({
       >
         {[...(log?.items ?? [])].reverse().map((item) => (
           <li key={item.cursor} className="whitespace-pre-wrap wrap-anywhere">
-            {timelineText(item, log!.you_are, name, editionNames)}
+            {timelineText(item, log!.you_are, name, editionNames, kind)}
           </li>
         ))}
       </ol>

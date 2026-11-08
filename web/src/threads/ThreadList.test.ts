@@ -237,9 +237,10 @@ it("S2-16: an item's latest log summary projects only public terms and its parti
       )
     );
     const link = host.querySelector('a[data-thread="item"]')!;
-    expect(link.textContent).toContain(
-      "Misty: Changed the Loan terms · They give Iono: 1 → 2"
-    );
+    expect(link.textContent).toContain("Borrowing 2");
+    expect(link.textContent).toContain("2 Iono");
+    expect(link.textContent).not.toContain("Changed the Loan terms");
+    expect(link.textContent).not.toContain("→");
     for (const secret of [
       "private-edition",
       "private-location",
