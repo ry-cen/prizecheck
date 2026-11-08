@@ -1,3 +1,4 @@
+import { restorePageScroll } from "./restorePageScroll";
 import { usePageTitle } from "./usePageTitle";
 import { LoanRecoveryProvider } from "../loans/LoanRecovery";
 import { itemTabName } from "../threads/threadPresentation";
@@ -242,37 +243,10 @@ function ShellFrame({
           .querySelectorAll<HTMLDialogElement>("dialog[open]")
           .forEach((dialog) => dialog.close());
     });
-    const target = scrollFor(path);
-    let stopped = false;
-    let frame = 0;
-    const restore = () => {
-      if (stopped) return;
-      window.scrollTo(0, target);
-    };
-    restore();
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(restore);
-    });
-    const container =
-      otherKey !== null ? otherContainer.current : containers.current.get(page);
-    if (container) observer.observe(container);
-    const stop = () => {
-      stopped = true;
-      observer.disconnect();
-    };
-    window.addEventListener("pointerdown", stop, { once: true });
-    window.addEventListener("keydown", stop, { once: true });
-    window.addEventListener("wheel", stop, { once: true });
-    window.addEventListener("touchstart", stop, { once: true });
-    return () => {
-      stop();
-      cancelAnimationFrame(frame);
-      window.removeEventListener("pointerdown", stop);
-      window.removeEventListener("keydown", stop);
-      window.removeEventListener("wheel", stop);
-      window.removeEventListener("touchstart", stop);
-    };
+    return restorePageScroll(
+      otherKey !== null ? otherContainer.current : containers.current.get(page),
+      scrollFor(path)
+    );
   }, [page, path, otherKey, entry]);
 
   usePageTitle(

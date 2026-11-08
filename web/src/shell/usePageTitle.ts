@@ -9,10 +9,18 @@ export function usePageTitle(
 ): void {
   useEffect(() => {
     const root = container();
-    const update = () => {
-      const heading = root?.querySelector("h1")?.textContent?.trim() ?? "";
-      const label = normalize(heading) || fallback;
-      document.title = label === "PrizeCheck" ? label : `${label} · PrizeCheck`;
+    let heading: HTMLHeadingElement | null = null;
+    const update = (records?: MutationRecord[]) => {
+      if (!heading || !root?.contains(heading))
+        heading = root?.querySelector("h1") ?? null;
+      else if (
+        records &&
+        !records.some((record) => heading!.contains(record.target))
+      )
+        return;
+      const label = normalize(heading?.textContent?.trim() ?? "") || fallback;
+      const title = label === "PrizeCheck" ? label : `${label} · PrizeCheck`;
+      if (document.title !== title) document.title = title;
     };
     update();
     const observer = new MutationObserver(update);
