@@ -1130,15 +1130,21 @@ below says where each group ended up; the module map in section 1 stays the plan
 
 **2026-11-03 — API error helper (#527)**
 
-- The existing error raiser moved unchanged from `app.api_errors` to `core/ops/api_errors.py`.
+- The existing error raiser moved unchanged from the former root error helper to `core/ops/api_errors.py`.
   Its status codes, detail keys, string conversions and omission of `None` values are unchanged.
 - Nine existing import sites now use `app.core.ops.api_errors`, including the Collection and publication
   core modules. Core's helper imports only FastAPI; it imports no root or game module.
-- The root-level `app.api_errors` remains a thin compatibility re-export for `app.location_tree`, whose import
-  stays unchanged because #478 reserves that file alongside Trade/social and the architecture rules. The shim
-  retains its original core ownership: it is game-free library compatibility, not a composition root.
-  Once #478 releases `location_tree.py`, a follow-up can migrate that remaining consumer and remove the shim.
+- A root compatibility re-export originally served Location Tree while #478 reserved that file.
+  The 2026-11-08 follow-up below removes it after migrating that final caller.
   Trade/social files, architecture rules and pins, and API snapshots are unchanged.
+
+**2026-11-08 — Remove the final error compatibility shim (#528)**
+
+- Location Tree now imports the error raiser directly from `app.core.ops.api_errors`.
+  The unused root shim and its exact ownership row are removed; the core helper is unchanged.
+- Removed only the compatibility import and its test: function identity through the shim, and a
+  shim call's status/detail assertions. All core-helper status and detail-conversion assertions remain.
+- No route, SQL, lock, receipt, social rule, allow-list, generated client or API snapshot changed.
 
 **2026-11-03 — Bounded work relocation (#528)**
 

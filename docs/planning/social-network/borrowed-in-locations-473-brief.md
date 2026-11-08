@@ -196,7 +196,7 @@ Steps, in a fixed order:
    b.borrower_id=%s ORDER BY b.loan_id, b.location_id, b.edition_id FOR UPDATE OF b`. Then take the first item, in
    input order, that is missing or short, and answer 409 `NOT_ENOUGH_BORROWED` with
    `loan_id/edition_id/from_location_id`. A foreign Loan or a foreign source matches no row, so it lands here too.
-   Use `api_errors.api_error` with keyword details if `location_tree.error` can't carry them.
+   Use `app.core.ops.api_errors.api_error` with keyword details if `location_tree.error` can't carry them.
 5. For each item, in that sorted order, decrement or delete the source and upsert the destination with
    `loan_inventory.py:592-600`'s SQL. Then call `advance_revision` once and `record_response` with the
    `BorrowedMoveResult`.

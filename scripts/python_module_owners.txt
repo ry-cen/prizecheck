@@ -6,7 +6,6 @@
 #   root     the composition root and the entry shims (app.main is root without a line)
 # A package that moves a module, or adds one, updates this file in the same change.
 app core
-app.api_errors core
 app.borrowed_copies core
 app.card_accepts core
 app.copy_allocation core
