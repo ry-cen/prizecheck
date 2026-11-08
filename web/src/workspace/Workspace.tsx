@@ -83,8 +83,9 @@ type Props = {
   address: string;
   onNavigate: (
     to: string,
-    options?: { replace?: boolean; preserveScroll?: boolean }
+    options?: { replace?: boolean; preserveScroll?: boolean; overlay?: boolean }
   ) => void;
+  onCloseCard: (to: string) => void;
   /** False while the app shell shows another page. The workspace stays mounted, hidden, and keeps its
    * state; document-level keys are ignored meanwhile, and showing it again checks for changes made on
    * other pages (#162). */
@@ -103,6 +104,7 @@ export function Workspace({
   userId,
   address,
   onNavigate,
+  onCloseCard,
   active,
   onOpenDeck,
   onImport,
@@ -176,6 +178,7 @@ export function Workspace({
   } | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [locationNotice, setLocationNotice] = useState("");
+  const [cardNotice, setCardNotice] = useState("");
   // The same line inside the phone drawer: the page behind a modal drawer is inert, so a delete made there is read here.
   const [drawerAnnouncement, setDrawerAnnouncement] = useState("");
   // Add cards (#175): open, and the Location it adds to (null: its picker chooses).
@@ -254,13 +257,62 @@ export function Workspace({
         card?.holding.key,
         card?.ordinal
       );
-      if (active && next !== address)
-        onNavigate(next, { replace: card === null, preserveScroll: true });
+      if (!active || next === address) return;
+      setCardNotice("");
+      if (card === null) onCloseCard(next);
+      else onNavigate(next, { preserveScroll: true, overlay: true });
     },
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
     active,
   });
+  useEffect(() => {
+    // Validate only the complete listing for the addressed Location and settled search.
+    if (
+      !active ||
+      treeState !== "ready" ||
+      gallery.status !== "ready" ||
+      view !== galleryView ||
+      query !== searchText
+    )
+      return;
+    const params = new URL(address, window.location.origin).searchParams;
+    const hasCopy = params.has("copy");
+    const holding = route.card ? gallery.byKey.get(route.card) : undefined;
+    if (params.has("card") && !holding) {
+      setCardNotice("This card is unavailable here. Showing your cards.");
+      onNavigate(collectionHref(view, query), {
+        replace: true,
+        preserveScroll: true,
+      });
+    } else if (
+      hasCopy &&
+      (!holding ||
+        !Number.isSafeInteger(route.copy) ||
+        route.copy < 0 ||
+        route.copy >= holding.copies)
+    ) {
+      setCardNotice(
+        holding
+          ? "This copy is unavailable. Showing the first copy."
+          : "This card link is incomplete. Showing your cards."
+      );
+      onNavigate(
+        collectionHref(view, query, holding ? route.card! : undefined),
+        { replace: true, preserveScroll: true }
+      );
+    }
+  }, [
+    active,
+    treeState,
+    gallery.status,
+    gallery.byKey,
+    galleryView,
+    view,
+    query,
+    searchText,
+    address,
+  ]);
   // Browser Back or Forward can hide Collection while an overlay is open (it stays mounted, hidden), which
   // would leave a modal or a scroll lock over the page now shown. Leaving closes them all.
   const { closeDetails } = selection;
@@ -618,6 +670,11 @@ export function Workspace({
       data-phone-search-header={active ? "" : undefined}
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
+      {cardNotice && (
+        <p role="status" className="px-4 py-2">
+          {cardNotice}
+        </p>
+      )}
       {locationNotice && (
         <p role="status" className="px-4 py-2">
           {locationNotice}
@@ -980,7 +1037,7 @@ export function Workspace({
         onMoved={() => void loadTree()}
         returnFocus={mobile ? drawerOpener : undefined}
       />
-      {selection.details && (
+      {active && selection.details && (
         <DetailsSheet
           card={selection.details}
           locationPath={locationPath}

@@ -102,7 +102,8 @@ function safeDestination(): string {
 
 function App() {
   const lastUserId = useRef<string | null>(null);
-  const { path, address, entry, navigate, scrollFor } = useRoute();
+  const { path, address, entry, navigate, closeOverlay, scrollFor } =
+    useRoute();
   const collectionAddress = useRef("/collection");
   if (path === "/collection") collectionAddress.current = address;
   const [session, setSession] = useState<Session | null>(null);
@@ -329,11 +330,11 @@ function App() {
     );
   }
   function pageContent(id: PageId, active: boolean) {
-    const address = pageAddress(id, active, path);
+    const pagePath = pageAddress(id, active, path);
     switch (id) {
       case "collection":
         // Collection Import (#226) shows in Collection's place; saving lands on its Storage Leaf in a new Workspace.
-        if (address === COLLECTION_IMPORT_PATH)
+        if (pagePath === COLLECTION_IMPORT_PATH)
           return (
             <CollectionImportPage
               onCancel={() => navigate(pageDef("collection").path)}
@@ -346,6 +347,7 @@ function App() {
             userId={userId}
             address={address}
             onNavigate={navigate}
+            onCloseCard={closeOverlay}
             active={active}
             onImport={() => navigate(COLLECTION_IMPORT_PATH)}
             onOpenDeck={(id) =>
@@ -358,7 +360,7 @@ function App() {
         // /decks is the index (My Decks) and /decks/want-list the Want List (#209), one page with a switch between
         // them; /decks/import imports a list (#212); /decks/<id> opens that Deck in the deck builder (#176), and
         // /decks/<id>/replace its Replace list… (#215).
-        const deckId = sectionAt(address);
+        const deckId = sectionAt(pagePath);
         if (deckId === "import")
           return (
             <ImportPage
@@ -407,7 +409,7 @@ function App() {
         return (
           <LoansPage
             active={active}
-            loanId={sectionAt(address)}
+            loanId={sectionAt(pagePath)}
             onOpenLoan={(id, options) => navigate(loanPath(id), options)}
             onAllLoans={() => navigate(pageDef("loans").path)}
             onOpenDeck={(id) =>
@@ -421,7 +423,7 @@ function App() {
         return (
           <TradesPage
             active={active}
-            section={sectionAt(address)}
+            section={sectionAt(pagePath)}
             onNavigate={navigate}
           />
         );
@@ -432,7 +434,7 @@ function App() {
           <OwnerControlsPage
             active={active}
             status={ownerCatalog}
-            section={ownerSection(sectionAt(address))}
+            section={ownerSection(sectionAt(pagePath))}
             onSection={(next) => navigate(ownerSectionPath(next))}
             onStatus={setOwnerCatalog}
             message={message}

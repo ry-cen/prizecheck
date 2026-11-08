@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PAGES } from "./routes";
 
+/** Session-only history positions: keep recent entries without growing with every navigation. */
+const SCROLL_CACHE_LIMIT = 128;
+function save<K, V>(cache: Map<K, V>, key: K, value: V): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > SCROLL_CACHE_LIMIT)
+    cache.delete(cache.keys().next().value!);
+}
+
 export type Route = {
   /** The address bar's path. */
   path: string;
@@ -12,8 +21,15 @@ export type Route = {
    * `force` skips it, for sign-out. */
   navigate: (
     to: string,
-    options?: { replace?: boolean; force?: boolean; preserveScroll?: boolean }
+    options?: {
+      replace?: boolean;
+      force?: boolean;
+      preserveScroll?: boolean;
+      overlay?: boolean;
+    }
   ) => void;
+  /** Closes a pushed overlay, or replaces a directly opened overlay address. */
+  closeOverlay: (to: string) => void;
   /** The current entry's saved scroll, with a last-visited fallback for tab roots. */
   scrollFor: (path: string) => number;
 };
@@ -89,6 +105,7 @@ export function useRoute(): Route {
   const [entry, setEntry] = useState(entryAt);
   const [path, setPath] = useState(() => window.location.pathname);
   const currentEntry = useRef(entry);
+  const currentState = useRef(window.history.state);
   const positions = useRef(new Map<string, number>()).current;
   const update = () => {
     setPath(window.location.pathname);
@@ -96,6 +113,7 @@ export function useRoute(): Route {
     const nextEntry = entryAt();
     setEntry(nextEntry);
     currentEntry.current = nextEntry;
+    currentState.current = window.history.state;
   };
   const current = useRef(path);
   current.current = path;
@@ -112,7 +130,7 @@ export function useRoute(): Route {
       leaving.current = null;
       if (blocking(approved) && addressAt() !== currentAddress.current) {
         window.history.pushState(
-          { prizecheckEntry: currentEntry.current },
+          currentState.current,
           "",
           currentAddress.current
         );
@@ -122,9 +140,9 @@ export function useRoute(): Route {
         }, approved);
         return;
       }
-      scrolls.set(current.current, window.scrollY);
-      addresses.set(current.current, currentAddress.current);
-      positions.set(currentEntry.current, window.scrollY);
+      save(scrolls, current.current, window.scrollY);
+      save(addresses, current.current, currentAddress.current);
+      save(positions, currentEntry.current, window.scrollY);
       update();
     };
     window.addEventListener("popstate", onPopState);
@@ -138,12 +156,18 @@ export function useRoute(): Route {
         replace = false,
         force = false,
         preserveScroll = false,
-      }: { replace?: boolean; force?: boolean; preserveScroll?: boolean } = {}
+        overlay = false,
+      }: {
+        replace?: boolean;
+        force?: boolean;
+        preserveScroll?: boolean;
+        overlay?: boolean;
+      } = {}
     ) => {
       const go = () => {
-        scrolls.set(current.current, window.scrollY);
-        addresses.set(current.current, currentAddress.current);
-        positions.set(currentEntry.current, window.scrollY);
+        save(scrolls, current.current, window.scrollY);
+        save(addresses, current.current, currentAddress.current);
+        save(positions, currentEntry.current, window.scrollY);
         if (replace)
           window.history.replaceState(
             { prizecheckEntry: currentEntry.current },
@@ -152,8 +176,17 @@ export function useRoute(): Route {
           );
         else {
           const nextEntry = crypto.randomUUID();
-          if (preserveScroll) positions.set(nextEntry, window.scrollY);
-          window.history.pushState({ prizecheckEntry: nextEntry }, "", to);
+          if (preserveScroll) save(positions, nextEntry, window.scrollY);
+          window.history.pushState(
+            {
+              prizecheckEntry: nextEntry,
+              ...(overlay
+                ? { prizecheckOverlayParent: currentAddress.current }
+                : {}),
+            },
+            "",
+            to
+          );
         }
         update();
       };
@@ -179,5 +212,13 @@ export function useRoute(): Route {
         : 0),
     [scrolls, entry, address]
   );
-  return { path, address, entry, navigate, scrollFor };
+  const closeOverlay = useCallback(
+    (to: string) => {
+      if (typeof window.history.state?.prizecheckOverlayParent === "string")
+        window.history.back();
+      else navigate(to, { replace: true, preserveScroll: true });
+    },
+    [navigate]
+  );
+  return { path, address, entry, navigate, closeOverlay, scrollFor };
 }

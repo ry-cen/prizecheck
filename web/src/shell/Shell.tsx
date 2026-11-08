@@ -1,3 +1,4 @@
+import { usePageTitle } from "./usePageTitle";
 import { LoanRecoveryProvider } from "../loans/LoanRecovery";
 import { itemTabName } from "../threads/threadPresentation";
 import { PageVisibility } from "../ui/PageVisibility";
@@ -274,31 +275,13 @@ function ShellFrame({
     };
   }, [page, path, otherKey, entry]);
 
-  useEffect(() => {
-    const container = other
-      ? otherContainer.current
-      : containers.current.get(page);
-    const update = () => {
-      const heading = container?.querySelector("h1")?.textContent?.trim();
-      const label =
-        page === "collection" && heading === "All owned"
-          ? current.label
-          : heading;
-      document.title = `${label || other?.label || current.label} · PrizeCheck`;
-    };
-    update();
-    const observer = new MutationObserver(update);
-    if (container)
-      observer.observe(container, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-    return () => {
-      observer.disconnect();
-      document.title = "PrizeCheck";
-    };
-  }, [page, path, otherKey]);
+  usePageTitle(
+    () => (other ? otherContainer.current : containers.current.get(page)),
+    other?.label || current.label,
+    `${page}:${path}:${otherKey ?? ""}`,
+    (heading) =>
+      page === "collection" && heading === "All owned" ? current.label : heading
+  );
 
   function go(next: PageId) {
     if (next !== "settings") settingsNavigation.cancel();

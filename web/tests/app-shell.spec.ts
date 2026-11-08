@@ -1443,3 +1443,25 @@ test("a header tab preserves desktop root scroll before navigating away from foc
     });
   }
 });
+
+test("App forwards Collection Location and search addresses through the Shell on reload", async ({
+  page,
+}) => {
+  await signIn(page);
+  const name = `App binder ${randomUUID().slice(0, 6)}`;
+  const id = await createLocation(page, name);
+  await page.reload();
+  await page
+    .getByRole("navigation", { name: "Locations" })
+    .getByRole("button", { name, exact: true })
+    .click();
+  await expect(heading(page)).toHaveText(name);
+  await expect(page).toHaveURL(`${ORIGIN}/collection?location=${id}`);
+  await page.getByRole("searchbox", { name: "Search cards" }).fill("Abra");
+  await expect(page).toHaveURL(`${ORIGIN}/collection?location=${id}&q=Abra`);
+  await page.reload();
+  await expect(heading(page)).toHaveText(name);
+  await expect(
+    page.getByRole("searchbox", { name: "Search cards" })
+  ).toHaveValue("Abra");
+});

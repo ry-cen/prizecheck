@@ -1390,7 +1390,7 @@ test("Collection Location addresses survive reload, deep links and Back", async 
   await expect(page).toHaveTitle("Catalog · PrizeCheck");
 });
 
-test("Back closes the phone card sheet before leaving Collection", async ({
+test("Back closes the phone card sheet then leaves Collection, and jumps release its scroll lock", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 375, height: 812 });
@@ -1398,21 +1398,76 @@ test("Back closes the phone card sheet before leaving Collection", async ({
   await signIn(page);
   const leaf = await createLocation(page, "Continuity binder", null);
   await addCopies(page, leaf, await editionOf("card-1"), 1);
-  await page.reload();
+  await page.goto(new URL("/catalog", page.url()).href);
+  await page
+    .getByRole("navigation", { name: "Main views" })
+    .getByRole("button", { name: "Collection", exact: true })
+    .click();
   await expect(tiles(page)).toHaveCount(1);
+  const overflow = await page.evaluate(() => document.body.style.overflow);
   await tiles(page).first().click();
   await expect(page).toHaveURL(/card=/);
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.reload();
   await expect(page.getByRole("dialog")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe("hidden");
   await page.goBack();
   await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/catalog$/);
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe(overflow);
+  await page.goForward();
   await tiles(page).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  // Jump over the sheet and its underlying Collection entry in one history traversal.
+  await page.evaluate(() => window.history.go(-2));
+  await expect(page).toHaveURL(/\/catalog$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe(overflow);
+  await page.goForward();
+  await page.goForward();
+  await expect(page).toHaveURL(/card=/);
+  await expect(page.getByRole("dialog")).toBeVisible();
   await page
     .getByRole("button", { name: "Close details", exact: true })
     .click();
   await expect(page).toHaveURL(/\/collection$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.goBack();
+  await expect(page).toHaveURL(/\/catalog$/);
+  // A direct sheet link closes safely even without a pushed parent entry.
+  await page.goForward();
+  await tiles(page).first().click();
+  const direct = page.url();
+  await page.goto(new URL("/catalog", page.url()).href);
+  await page.goto(direct);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Close details", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/collection$/);
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe(overflow);
+});
+
+test("unavailable Collection card links explain the fallback and remove card and copy", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto(
+    new URL("/collection?card=foreign-holding&copy=4", page.url()).href
+  );
+  await expect(
+    page.getByText("This card is unavailable here. Showing your cards.")
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
