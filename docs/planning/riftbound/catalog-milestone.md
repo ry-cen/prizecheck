@@ -2,14 +2,24 @@
 
 Status: draft for Ryan. Refs #534. Riftbound-specific work lives on `integration/riftbound-backend`, not `dev`.
 
-## Decided (2026-11-09)
+## Decided on 2026-11-08: the Riftbound branch
 
 Ryan's words, as said:
 
 > "yes lets just make sure all work goes on a new riftbound branch that we will keep until we are ready to deploy riftbound on dev"
->
+
+## Decided (2026-11-09)
+
+Ryan's words, as said. Asked whether the retained Riftbound branch should hold only Riftbound-specific work or the shared core modularization work too, he said:
+
 > "only riftbound specific"
->
+
+and:
+
+> "core modularization can go to dev"
+
+On the first milestone's scope he said:
+
 > "yes i agree with this scope however we should work with the idea that we can ingest real riftbound data because we will not be awaiting data rights we are just going to work with what is given on tcgcsv"
 
 The scope he agreed to: start with the catalog; leave owner-specific routes and moving user identity out of Pokémon's database for later. "Owner routes" here means administrative routes such as catalog-import review, not ordinary collection features. The frontend separation work would block only client-facing work.
@@ -20,18 +30,18 @@ What follows:
 - Administrative owner routes (for example catalog-import review) are deferred, and so is moving user identity out of Pokémon's database.
 - Frontend separation (#532) blocks only client-facing work.
 - Real Riftbound data will be ingested from what TCGCSV provides, without waiting for separate rights clearance.
-- This supersedes the "synthetic only until a data gate passes" framing: #563 D3, #575 H10 and Q-G1, and the R13 "data gate" prerequisite, all on `integration/riftbound-backend`. Those PRs are not edited here.
-- Riftbound-specific work stays on `integration/riftbound-backend`.
-- #563 D4, catalog shape: Riftbound's own database reuses the shared catalog table structure and relationships, with Riftbound-specific write constraints. This is not a separate schema or translation layer, and no Pokémon data is copied. Ryan's words, answering the question of whether to reuse the structure with game-specific constraints:
+- This supersedes the "synthetic only until a data gate passes" framing: #563 D3, #575 H10 and Q-G1, and #563 R13, the "data gate" prerequisite. #563, #564 and #575 are open pull requests into `dev`; they are not edited here.
+- Riftbound-specific work stays on `integration/riftbound-backend`, and core modularization can go to `dev` (the 2026-11-09 clarification of the 2026-11-08 branch decision).
+- #563 D4, catalog shape: Riftbound's own database reuses the shared catalog table structure and relationships, with Riftbound-specific write constraints. This is not a separate schema or translation layer. Ryan's words, answering the question of whether to reuse the structure with game-specific constraints:
 
   > "what does this entail exactly"
 
-  After the explanation that Riftbound would use the same kinds of catalog tables and relationships as Pokémon, in its own database, with adjusted write rules, and that this does not copy Pokémon cards into Riftbound's database or decide how alternate-art cards are grouped:
+  After the assistant's explanation, which Ryan accepted, that Riftbound would use the same kinds of catalog tables and relationships as Pokémon, in its own database, with adjusted write rules, and that no Pokémon data is copied (it "doesn't mean copying Pokémon cards into Riftbound's database") and the choice does not decide how alternate-art cards are grouped:
 
   > "yes that sounds good it will lower the amount of new work that needs to be done and make maintenance easier is that not why we split the core from the game specific?"
 
 - D4 does not decide how the per-game write constraints get installed; that is IM-11.
-- Card Identity grouping (terms as in `CONTEXT.md`). The question put to Ryan was whether one Card Identity should cover the same underlying card, with each artwork or promo kept as a separate printing, for example Ahri, Alluring's regular and alternate-art versions grouped while Ahri, Inquisitive stays a different card, with uncertain matches flagged for review and TCGCSV's pair of Kai'Sa versions with conflicting text given as a case. His answer was:
+- Card Identity grouping. The question put to Ryan was whether one Card Identity should cover the same underlying card, with each artwork or promo kept as a separate printing, for example Ahri, Alluring's regular and alternate-art versions grouped while Ahri, Inquisitive stays a different card, with uncertain matches flagged for review and TCGCSV's pair of Kai'Sa versions with conflicting text given as a case. His answer was:
 
   > "yes"
 
@@ -42,6 +52,7 @@ What follows:
   - A different card with a similar name (Ahri, Inquisitive versus Ahri, Alluring) stays a separate Card Identity.
   - Uncertain or conflicting matches go to review, never a blind name-only merge.
   - The Kai'Sa pair with conflicting text stays a review case and is not silently reconciled.
+  - Note on terms: `CONTEXT.md` defines Card Identity by English card name, and treats differing text within a name as a Reprint Group question. Riftbound's approved grouping instead sends same-name pairs with conflicting text, such as Kai'Sa, to review rather than merging them automatically. Whether `CONTEXT.md` gains a Riftbound entry is not decided (see below).
 - Catalog writer approach. The question put to Ryan was whether to build a small Riftbound-specific writer first, using the shared catalog structure, rather than refactoring Pokémon's existing importer into shared code before we know what both games need, extracting the genuinely common parts once there are two working examples. His answer was:
 
   > "yes"
@@ -60,8 +71,7 @@ What follows:
   - A shared core app builder holds the common setup.
   - Each game has its own application entry point in code, with that game's routes and configuration listed explicitly.
   - The shape allows more games to be added later.
-  - No runtime game setting or registry, per ADR 0023.
-  - The ADR 0023 wording change is drafted in a separate PR to `dev`.
+  - No runtime game setting or registry, per ADR 0023. The ADR 0023 wording change is being drafted as a `dev` docs PR.
 - Migration tracks (#564 IM-11, the principle of option B). The question put to Ryan was whether to keep Pokémon's existing migration history intact and add separate core and game-specific tracks for new databases, rather than running every game's migrations everywhere or moving old files and rewriting existing migration records. His answer was:
 
   > "yes i agree"
@@ -99,11 +109,12 @@ What follows:
 
   > "in the future we may want to separate them so keep note"
 
-  Keep a practical path to moving Riftbound onto its own PostgreSQL server later. In practice:
+  That is the whole decision: keep a practical path to separate servers later. Separate hosting is not being built now.
+
+  What keeping that path open implies (coordinator's note, not a separate decision):
   - No cross-database queries, foreign keys or `dblink`/FDW between the game databases.
   - Each backend reaches its database only through its own connection setting.
-  - Nothing may assume both databases share one server.
-  - Separate hosting is not being built now.
+  - Nothing assumes both databases share one server.
 - Request-signing keys (#564 IM-6), design only. After the explanation that the same key also signs pagination cursors, that the gateway uses it to sign the user identity and request details sent to the backend, that it is separate from the login-session secret, that keeping Pokémon's key avoids invalidating its existing cursors, and that giving Riftbound its own key would limit cross-game impact if a backend key were compromised, the question put to Ryan was whether the team should use separate keys in the design. His answer was:
 
   > "yes"
@@ -111,27 +122,28 @@ What follows:
   What that settles:
   - Pokémon keeps its current gateway-to-backend key, so existing Pokémon pagination cursors stay valid.
   - Each game backend gets its own separate gateway-to-game key, Riftbound included.
-  - The design has to account for the key's existing uses, which are request signing, pagination cursors and budget uses.
+  - The design has to account for the key's existing uses, which are request signing, cursors and tokens (#564 IM-6).
   - This key is distinct from the login-session secret, and the two must not be conflated.
   - No key is created, generated, transmitted, configured or rotated, and no live security or access setting changes. Each of those needs Ryan's separate approval.
-- This is a design choice only. Creating a live database or role, generating or configuring credentials, deploying, and changing live access settings each need Ryan's separate approval.
+- IM-14 (hosting) and IM-6 (keys) are design choices only. Creating a live database or role, generating or configuring credentials, deploying, and changing live access settings each need Ryan's separate approval.
 - Nothing from these decisions is applied to a live database.
-- How the review queue is surfaced is open. Administrative owner routes are deferred, so it may be a job report until those routes exist. That is unresolved and this document does not choose it.
 
 ## Not decided
 
 Nothing below is settled. No recommendation is implied.
 
 - Generation promotion: how the Riftbound writer promotes generations, tombstones and refuses bulk drops.
-- #564 IM-16: identity propagation.
-- H12: deploy topology.
-- Public URL prefixes and gateway routing, for example whether paths look like /api/pokemon and /api/riftbound. Ryan said "it doesnt need to be that exact setup but something like that", so the approach is open and no exact scheme is chosen. Ties to H12.
+- #564 IM-16: what a backend must prove to change shared identity, and how auth gets the stored value.
+- Deploy topology: gateway routing, on/off switch, compose service, backups (not yet tracked in #575).
+- Public URL prefixes (related to #575 H8 / Q-D1), for example whether paths look like /api/pokemon and /api/riftbound. Ryan said "it doesnt need to be that exact setup but something like that", so the approach is open and no exact scheme is chosen.
+- #564 IM-14 test topology: co-located test harness by default, or split.
+- Whether `CONTEXT.md` gains a Riftbound entry for how Card Identity and Reprint Group map to Riftbound's grouping.
 - How the review queue is surfaced.
 - Image display.
 
 ## Source facts
 
-From the researcher report of 2026-11-09 (task artifact `riftbound-backend-20261108/source-research/tcgcsv-findings.md`). Labels: VERIFIED was seen directly; INFERRED is a deduction; UNKNOWN was not found. Most quotes came through summarizing fetch tools and are not byte-exact, so re-check any quote before formal use.
+From the researcher report of 2026-11-09 (research notes kept outside the repo). Labels: VERIFIED was seen directly; INFERRED is a deduction; UNKNOWN was not found. Most quotes came through summarizing fetch tools and are not byte-exact, so re-check any quote before formal use.
 
 ### Endpoints and cadence (VERIFIED, https://tcgcsv.com/docs)
 
