@@ -388,8 +388,37 @@ def set_code_migration_violations(migrations, tsv_text):
     return [('migrations', 'FAILED: no migration carries a set_codes.tsv digest; run scripts/set_code_migration.py <next number>')]
 
 
+# Migration numbers #564 (IM-11) left duplicated: nothing is renumbered, and no new duplicate may appear.
+ALLOWED_DUPLICATE_MIGRATIONS = {
+    '161': ('161_likely_reprint_dismissals.sql', '161_tcgplayer_large_art.sql'),
+}
+
+
+def migration_number_violations(directory, allowed=ALLOWED_DUPLICATE_MIGRATIONS):
+    """Top-level ``*.sql`` files of ``directory`` (what the runner globs) may not share a numeric prefix, except the
+    exact filename groups in ``allowed``. A group with a file missing or renamed also fails, so the exception cannot drift."""
+    names = sorted(path.name for path in Path(directory).glob('*.sql'))
+    by_number = {}
+    for name in names:
+        found = re.match(r'(\d+)_', name)
+        if found:
+            by_number.setdefault(found.group(1), []).append(name)
+    problems = []
+    for number, files in sorted(by_number.items()):
+        if len(files) > 1 and tuple(files) != allowed.get(number):
+            problems.append((number, f'FAILED: migrations share number {number}: {", ".join(files)}; use the next free number'))
+    for number, expected in sorted(allowed.items()):
+        for name in expected:
+            if name not in names:
+                problems.append((number, f'FAILED: allow-listed duplicate migration {name} is missing or renamed'))
+    return problems
+
+
 def main():
     failed = False
+    for name, reason in migration_number_violations(ROOT/'migrations'):
+        print(f'migrations/{name}: {reason}')
+        failed = True
     migrations = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
     for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/games/pokemon/catalog/set_codes.tsv').read_text(encoding='utf-8')):
         print(f'{name}: {reason}')
