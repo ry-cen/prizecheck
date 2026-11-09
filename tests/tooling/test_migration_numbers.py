@@ -69,19 +69,29 @@ class MigrationNumberTest(unittest.TestCase):
         with tree(PAIR) as directory:
             self.assertTrue(guardrails.migration_number_violations(directory))
 
-    def test_main_runs_the_check_on_the_migrations_directory(self):
+    def run_main(self, names):
+        """Runs the real main() on a planted root: the real release scripts and .dockerignore, an empty tree otherwise,
+        and the set-code check stubbed, so the migration check alone decides the outcome."""
         with tree([]) as root:
-            migrations = Path(root)/'migrations'
-            migrations.mkdir()
-            for name in ('001_a.sql', '001_b.sql'):
-                (migrations/name).write_text('select 1;\n')
+            root = Path(root)
+            (root/'migrations').mkdir()
+            for name in names:
+                (root/'migrations'/name).write_text('select 1;\n')
+            for relative in ('scripts/release.py', 'scripts/release_runtime.py', '.dockerignore', 'api/app/games/pokemon/catalog/set_codes.tsv'):
+                (root/relative).parent.mkdir(parents=True, exist_ok=True)
+                (root/relative).write_text((ROOT/relative).read_text(encoding='utf-8'), encoding='utf-8')
             output = io.StringIO()
-            with mock.patch.object(guardrails, 'ROOT', Path(root)), contextlib.redirect_stdout(output):
-                try:
-                    guardrails.main()
-                except OSError:
-                    pass  # later checks need files the planted tree lacks; the migration check runs first
-            self.assertIn('migrations share number 001', output.getvalue())
+            with (mock.patch.object(guardrails, 'ROOT', root), mock.patch.object(guardrails, 'set_code_migration_violations', lambda *_: []),
+                  contextlib.redirect_stdout(output)):
+                return guardrails.main(), output.getvalue()
+
+    def test_main_passes_on_unique_numbers(self):
+        self.assertEqual(self.run_main(['001_a.sql', '002_b.sql', *PAIR]), (0, ''))
+
+    def test_main_runs_the_check_and_fails_on_a_duplicate(self):
+        status, output = self.run_main(['001_a.sql', '001_b.sql', *PAIR])
+        self.assertEqual(status, 1)
+        self.assertIn('migrations share number 001', output)
 
 
 if __name__ == '__main__':
