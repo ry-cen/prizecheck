@@ -57,6 +57,8 @@ class Runtime:
             raise ValueError('Installed runtime differs from gate')
         with psycopg.connect(os.environ['DATABASE_URL'],connect_timeout=5) as conn:
             applied = {row[0] for row in conn.execute('SELECT name FROM schema_migration')}
+        # TODO(#533, S4): this reads every track of the release, not the tracks this database's entry applies. Once an auth or
+        # second-game track exists the Pokémon ledger lacks its files and this refuses the release (it fails closed). Use the entry's tracks then.
         required = set(migration_tracks.files(release/'migrations'))
         if not required <= applied:
             raise ValueError('Runtime database does not have candidate schema')

@@ -9,8 +9,9 @@ There is no registry and no run-time game setting. A per-database entry script (
 its tracks, in the order they apply, and hands them to ``apply`` with its own connection. Core migrations never reference a
 game's tables and game migrations may depend on core, so an entry lists ``core`` before its game's track.
 
-TODO(#533): a guardrail against duplicate migration numbers within a track is its own change
-(branch test/533-migration-duplicate-number-guardrail); the runner only refuses a repeated ledger name.
+TODO(#533): the duplicate-migration-number guardrail is its own change (#604, branch
+test/533-migration-duplicate-number-guardrail), and it checks only the root directory. It must run for each track, one
+number space per track, before any track directory lands (S10). The runner only refuses a repeated ledger name.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,7 +49,8 @@ def planned(migrations, tracks):
 
 def every_track(migrations):
     """The root track and each subdirectory of ``migrations`` that holds ``*.sql`` files, for tools that look at a release's
-    whole migration tree (immutability, guardrails). A database's own entry, not this, says what that database applies."""
+    whole migration tree (release immutability, the guardrails). It is not what one database applies: that database's entry
+    names its tracks. ``release_runtime`` reads the whole tree for the Pokémon ledger today, a gap for S4 (see there)."""
     migrations = Path(migrations)
     directories = sorted(path.name for path in migrations.iterdir() if path.is_dir() and any(path.glob("*.sql")))
     return (Track(), *(Track(directory) for directory in directories))

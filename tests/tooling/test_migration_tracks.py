@@ -131,25 +131,40 @@ class Result:
 class Conn:
     def __enter__(self): return self
     def __exit__(self, *args): return False
-    def execute(self, query):
+    def execute(self, query, params=()):
+        with open(os.environ['FAKE_SQL_LOG'], 'a') as log:
+            log.write(query.splitlines()[0] + '\\n')
         if 'to_regclass' in query: return Result([(True,)])
         return Result([(name,) for name in os.environ['FAKE_LEDGER'].split(',') if name])
 def connect(url, **options): return Conn()
 '''
 
+# What a release before migration tracks did on import: its migrate.py ran its migrations at module level.
+OLD_IMAGE_MIGRATE = '''
+import os
+import psycopg
+with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_migration (name text PRIMARY KEY)")
+'''
+BEFORE_TRACKS = 'c42d6fb142811ede4db9e393b68d6b6543585571'  # dev before migration tracks: no migration_tracks.py
+
 
 class DeployTest(unittest.TestCase):
-    def run_in_app(self, body, files, ledger):
-        """Runs deploy-script Python with /app replaced by a scratch tree holding the real scripts and fixture migrations."""
+    def run_in_app(self, body, files, ledger, scripts=None):
+        """Runs deploy-script Python with /app replaced by a scratch tree holding fixture migrations and `scripts` (this
+        checkout's by default), against a fake psycopg. The result's `.sql` lists the first line of each statement run."""
         with tempfile.TemporaryDirectory() as folder:
             app = Path(folder) / 'app'
-            shutil.copytree(ROOT / 'scripts', app / 'scripts', ignore=shutil.ignore_patterns('__pycache__'))
+            shutil.copytree(scripts or ROOT / 'scripts', app / 'scripts', ignore=shutil.ignore_patterns('__pycache__'))
             tree(app, files)
             (Path(folder) / 'fake').mkdir()
             (Path(folder) / 'fake/psycopg.py').write_text(FAKE_PSYCOPG)
+            log = Path(folder) / 'sql.log'
             env = {**os.environ, 'PYTHONPATH': str(Path(folder) / 'fake'), 'DATABASE_URL': 'x', 'FAKE_LEDGER': ','.join(ledger),
-                   'PYTHONDONTWRITEBYTECODE': '1'}
-            return subprocess.run([sys.executable, '-c', body.replace('/app', str(app))], env=env, capture_output=True, text=True)
+                   'FAKE_SQL_LOG': str(log), 'PYTHONDONTWRITEBYTECODE': '1'}
+            run = subprocess.run([sys.executable, '-c', body.replace('/app', str(app))], env=env, capture_output=True, text=True)
+            run.sql = log.read_text().splitlines() if log.exists() else []
+            return run
 
     def test_a_core_only_pending_file_is_listed_for_the_deploy(self):
         run = self.run_in_app(heredoc("print('schema' if exists"),
@@ -167,6 +182,34 @@ class DeployTest(unittest.TestCase):
         files = {'001_a.sql': '', 'core/001_x.sql': ''}
         self.assertEqual(self.run_in_app(body, files, ['001_a.sql']).returncode, 1)
         self.assertEqual(self.run_in_app(body, files, ['001_a.sql', 'core/001_x.sql']).returncode, 0)
+
+    def assert_smoke_passes_without_importing_the_entry(self, scripts):
+        """The smoke check also runs in the previous release on a rollback or a restore. That release has the flat root
+        files only, no migration_tracks.py, and a migrate.py that migrates when imported."""
+        body = heredoc('sys.exit(0 if files <= applied else 1)')
+        run = self.run_in_app(body, {'001_a.sql': '', '002_b.sql': ''}, ['001_a.sql', '002_b.sql'], scripts)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.sql, ['SELECT name FROM schema_migration'])
+        self.assertEqual(self.run_in_app(body, {'001_a.sql': '', '002_b.sql': ''}, ['001_a.sql'], scripts).returncode, 1)
+
+    def test_the_smoke_check_passes_in_an_image_from_before_migration_tracks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / 'migrate.py').write_text(OLD_IMAGE_MIGRATE)
+            self.assert_smoke_passes_without_importing_the_entry(Path(folder))
+
+    def test_the_smoke_check_passes_against_the_scripts_of_the_commit_before_migration_tracks(self):
+        if subprocess.run(['git', 'cat-file', '-e', BEFORE_TRACKS + '^{commit}'], cwd=ROOT, capture_output=True).returncode:
+            self.skipTest('a shallow clone does not hold ' + BEFORE_TRACKS)
+        with tempfile.TemporaryDirectory() as folder:
+            archive = subprocess.run(['git', 'archive', BEFORE_TRACKS, 'scripts'], cwd=ROOT, capture_output=True, check=True).stdout
+            subprocess.run(['tar', '-x', '-C', folder], input=archive, check=True)
+            self.assertFalse((Path(folder) / 'scripts/migration_tracks.py').exists())
+            self.assert_smoke_passes_without_importing_the_entry(Path(folder) / 'scripts')
+
+    def test_the_smoke_check_passes_against_this_checkouts_scripts(self):
+        body = heredoc('sys.exit(0 if files <= applied else 1)')
+        run = self.run_in_app(body, {'001_a.sql': '', 'core/001_x.sql': ''}, ['001_a.sql', 'core/001_x.sql'])
+        self.assertEqual(run.returncode, 0, run.stderr)
 
 
 class ToolGlobTest(unittest.TestCase):
@@ -189,8 +232,9 @@ class ToolGlobTest(unittest.TestCase):
         guardrails = load('guardrails', 'scripts/check_guardrails.py')
         tsv = 'sv01\tSVI\tName\tA\n'
         digest = f'-- set_codes.tsv digest: {hashlib.sha256(tsv.encode()).hexdigest()[:16]}\n'
-        # 'core/…' sorts after every number, so by name alone it would have been the "newest" file.
-        self.assertEqual(guardrails.set_code_migration_violations({'161_codes.sql': digest, 'core/001_x.sql': 'SELECT 1'}, tsv), [])
+        # 'core/…' sorts after every number, so by name alone it would have been the "newest" digest file, and a stale one.
+        STALE = '-- set_codes.tsv digest: 0000000000000000\n'
+        self.assertEqual(guardrails.set_code_migration_violations({'161_codes.sql': digest, 'core/001_x.sql': STALE + 'SELECT 1'}, tsv), [])
         self.assertTrue(guardrails.set_code_migration_violations({'core/001_codes.sql': digest}, tsv))
 
 

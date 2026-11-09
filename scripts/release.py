@@ -17,9 +17,10 @@ import urllib.request
 
 import psycopg
 from psycopg import sql
-import migration_tracks
 from psycopg.conninfo import conninfo_to_dict
 from urllib.parse import urlsplit, urlunsplit
+
+import migration_tracks
 
 ROOT = Path(__file__).resolve().parents[1]
 
