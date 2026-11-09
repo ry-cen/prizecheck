@@ -211,12 +211,17 @@ export function Workspace({
   // Reloads can overlap (Reload, an action, Manage locations); only the newest one's answer lands,
   // so an older tree never replaces a newer one.
   const treeGeneration = useRef(0);
-  const loadTree = useCallback(async () => {
+  // `mayLand`, for the return refresh: asked once the answer is in, and when it says no the tree on screen stays.
+  const readTree = useCallback(async (mayLand?: () => boolean) => {
     const generation = ++treeGeneration.current;
     setTreeState("loading");
     try {
       const result = await getLocationTree();
       if (generation !== treeGeneration.current) return;
+      if (mayLand && !mayLand()) {
+        setTreeState("ready");
+        return;
+      }
       setNodes(result.locations);
       setLentCopies(result.lent_copies ?? "0");
       setBorrowedCopies(result.borrowed_copies ?? "0");
@@ -224,9 +229,11 @@ export function Workspace({
       setTreeState("ready");
     } catch {
       if (generation !== treeGeneration.current) return;
-      setTreeState("error");
+      // A background refresh that fails leaves the tree on screen, and the banner, rather than an error page.
+      setTreeState(mayLand ? "ready" : "error");
     }
   }, []);
+  const loadTree = useCallback(() => readTree(), [readTree]);
   useEffect(() => {
     void loadTree();
   }, [loadTree]);
@@ -414,6 +421,7 @@ export function Workspace({
     active,
     idle,
     refreshGallery: gallery.refresh,
+    refreshTree: readTree,
   });
   // Inspector totals are cached per owner revision ("<revision>:<edition>"). Older revisions' entries can't be
   // asked for again, so drop them whenever the gallery reads a new revision.

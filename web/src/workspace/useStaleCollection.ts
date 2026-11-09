@@ -48,8 +48,11 @@ type Options = {
   active?: boolean;
   /** isCollectionIdle: nothing selected, running, open or pending. Only an idle Collection refreshes by itself. */
   idle?: boolean;
-  /** A quiet re-read of the tiles: they stay on screen until the complete answer replaces them. */
-  refreshGallery?: () => void;
+  /** A quiet re-read of the tiles: they stay on screen until the complete answer replaces them, and not even
+   * then when `mayLand` says no. False when it could not start. */
+  refreshGallery?: (mayLand: () => boolean) => boolean;
+  /** The same for the Location tree. */
+  refreshTree?: (mayLand: () => boolean) => void | Promise<void>;
 };
 
 type PendingNote = { snapshot: Selection; key: string; revision: number };
@@ -79,6 +82,7 @@ export function useStaleCollection({
   active = true,
   idle = false,
   refreshGallery,
+  refreshTree,
 }: Options) {
   const [latest, setLatest] = useState<number | null>(null);
   const [note, setNote] = useState("");
@@ -108,6 +112,7 @@ export function useStaleCollection({
     treeReady,
     idle,
     refreshGallery,
+    refreshTree,
   });
   live.current = {
     selected,
@@ -123,6 +128,7 @@ export function useStaleCollection({
     treeReady,
     idle,
     refreshGallery,
+    refreshTree,
   };
 
   /** Records a revision. `share` posts it to the other tabs; revisions they sent are not echoed. */
@@ -209,6 +215,10 @@ export function useStaleCollection({
         now.galleryRevision !== null && now.treeRevision !== null
           ? Math.min(now.galleryRevision, now.treeRevision)
           : null;
+      // Idle was true when the read started; it is asked again when each answer lands. Anything the collector
+      // started meanwhile (a selection, Move, drag or dialog) keeps the tiles and the tree as they are, and the
+      // banner offers Reload.
+      const mayLand = () => live.current.idle;
       if (
         now.refreshGallery &&
         returnRefreshDue({
@@ -221,8 +231,7 @@ export function useStaleCollection({
               : Math.max(now.latest ?? 0, revision ?? 0),
         })
       ) {
-        now.refreshGallery();
-        void now.reloadTree();
+        if (now.refreshGallery(mayLand)) void now.refreshTree?.(mayLand);
       }
       if (revision !== null) observe(revision, true);
       setChecking(false);

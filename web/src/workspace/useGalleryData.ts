@@ -42,8 +42,10 @@ export function useGalleryData(
   knownRevision: number | null
 ): GalleryData & {
   reload: () => void;
-  /** Reads the listing again without emptying it: the tiles on screen stay until the complete answer replaces them. */
-  refresh: () => void;
+  /** Reads the listing again without emptying it: the tiles on screen stay until the complete answer replaces them.
+   * `mayLand` is asked once that answer is complete: when it says no, the tiles on screen stay as they are. Returns
+   * false, and reads nothing, when there is no complete listing on screen to keep. */
+  refresh: (mayLand: () => boolean) => boolean;
   /** A refresh's re-read is in flight. */
   refreshing: boolean;
 } {
@@ -54,8 +56,10 @@ export function useGalleryData(
   });
   const [attempt, setAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  // Set by refresh for the next walk: it starts from the listing on screen, kept or not.
-  const refreshNext = useRef(false);
+  // Set by refresh for the next walk of that view: it starts from the listing on screen, kept or not.
+  const refreshNext = useRef<{ key: string; mayLand: () => boolean } | null>(
+    null
+  );
   const generation = useRef(0);
   const cache = useRef(new Map<string, GalleryData>()).current;
   // The revisions every kept listing was read at.
@@ -87,8 +91,10 @@ export function useGalleryData(
       cache.set(key, data);
       while (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
     };
-    const refreshed = refreshNext.current ? cache.get(key) : undefined;
-    refreshNext.current = false;
+    const request = refreshNext.current;
+    refreshNext.current = null;
+    const refreshed = request?.key === key ? cache.get(key) : undefined;
+    const mayLand = refreshed ? request?.mayLand : undefined;
     const shown = refreshed ?? kept(key);
     setRefreshing(refreshed !== undefined);
     // A kept listing is shown at once and read again quietly: no page is published until the walk is complete.
@@ -163,6 +169,14 @@ export function useGalleryData(
                 keep(shown);
                 return;
               }
+              if (mayLand && shown && !mayLand()) {
+                // The collector is busy now: a listing landing under a selection or an open dialog would
+                // change it unseen. Keep what is shown, as it was before the read; the banner offers Reload.
+                cache.clear();
+                cache.set(key, shown);
+                cachedAt.current = shown.snapshot;
+                return;
+              }
               keep(complete);
               setLoaded({ key, data: complete });
               return;
@@ -231,19 +245,19 @@ export function useGalleryData(
     cache.clear();
     setAttempt((n) => n + 1);
   }, [cache]);
-  // A quiet re-read of the listing on screen (ticket 113's return refresh). Without a complete listing to keep
-  // showing it falls back to reload, which empties the view.
-  const refresh = useCallback(() => {
-    if (cache.get(key)?.status !== "ready") {
-      reload();
-      return;
-    }
-    generation.current++;
-    refreshNext.current = true;
-    // Now, with the caller's other updates, so no render between them sees the old listing as settled.
-    setRefreshing(true);
-    setAttempt((n) => n + 1);
-  }, [cache, key, reload]);
+  // A quiet re-read of the listing on screen (the return refresh, ticket 113).
+  const refresh = useCallback(
+    (mayLand: () => boolean) => {
+      if (cache.get(key)?.status !== "ready") return false;
+      generation.current++;
+      refreshNext.current = { key, mayLand };
+      // Now, with the caller's other updates, so no render between them sees the old listing as settled.
+      setRefreshing(true);
+      setAttempt((n) => n + 1);
+      return true;
+    },
+    [cache, key]
+  );
   return {
     ...(loaded.key === key ? loaded.data : (kept(key) ?? EMPTY_GALLERY)),
     reload,

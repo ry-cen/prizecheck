@@ -18,8 +18,17 @@ export type CollectionActivity = {
 };
 
 /** Ticket 113, scope of the return refresh: Collection is idle when nothing in it would be lost or changed under
- * the collector by reading the tiles and the tree again. Every condition counts on its own. An offered Undo does not:
- * Undo is checked by the API, and Move, Removal and Add read the gallery again themselves while it is offered. */
+ * the collector by reading the tiles and the tree again. Every condition counts on its own.
+ *
+ * Not counted, on purpose:
+ * - An offered Undo. Undo is checked by the API, and Move, Removal and Add read the gallery again themselves while
+ *   it is offered, so a refresh leaves it working.
+ * - The amounts typed into an Edition correction (CorrectionsNotice). It keeps them across any re-read of the
+ *   gallery, as Reload already relies on, and a quiet refresh replaces nothing until its complete answer lands.
+ *
+ * A Move or drag in progress, and an open dialog, sheet or drawer, cannot survive a page change (the shell closes
+ * them as Collection is hidden), so on a return they are false unless the collector acted again. They are still
+ * asked here because this is asked again when the refresh's answers land, and a collector can act in between. */
 export function isCollectionIdle(activity: CollectionActivity): boolean {
   return (
     activity.selectedCopies === 0 &&

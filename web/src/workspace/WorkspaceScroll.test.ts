@@ -35,7 +35,7 @@ vi.mock("./useGalleryData", async () => {
     status: "ready",
     ownerRevision: 1,
     reload: () => {},
-    refresh: () => {},
+    refresh: () => false,
     refreshing: false,
   };
   return { useGalleryData: () => ready };

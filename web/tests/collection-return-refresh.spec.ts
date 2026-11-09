@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
-import { test, artUpstream } from "./support/art-upstream";
+import { test as artTest, artUpstream } from "./support/art-upstream";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -123,52 +123,80 @@ const STALE = "Your collection has changed since this view loaded.";
 const banner = (page: Page) =>
   page.getByRole("status").filter({ hasText: STALE });
 
-/** Seeds 120 Abra and 3 Pikachu in one Storage Leaf, so the gallery scrolls, and returns what a change needs. */
-async function seed(page: Page, label: string) {
-  promoteCatalog({ "card-1": `${label} Abra`, "card-2": `${label} Pikachu` });
-  await signIn(page);
-  const s = randomUUID().slice(0, 8);
-  const leaf = await createLocation(page, `Return ${s}`, null);
-  const pikachu = await editionOf("card-2");
-  await addCopies(page, leaf, await editionOf("card-1"), 120);
-  await addCopies(page, leaf, pikachu, 3);
-  await page.reload();
-  await expect(page.getByRole("main")).toContainText("123 copies · 2 editions");
-  return { leaf, pikachu };
-}
+type Prepared = { leaf: string; pikachu: string };
 
-/** Records whether the banner's text ever appeared, even for a frame. */
-async function watchBanner(page: Page) {
+/** The seeding, the sign-in and the first Collection load happen here, so each test body starts with Collection
+ * loaded at 123 copies. Seeds 120 Abra and 3 Pikachu in one Storage Leaf, so the gallery scrolls. */
+const test = artTest.extend<{ prepared: Prepared }>({
+  prepared: async ({ page }, use) => {
+    promoteCatalog({ "card-1": "Return Abra", "card-2": "Return Pikachu" });
+    await signIn(page);
+    const s = randomUUID().slice(0, 8);
+    const leaf = await createLocation(page, `Return ${s}`, null);
+    const pikachu = await editionOf("card-2");
+    await addCopies(page, leaf, await editionOf("card-1"), 120);
+    await addCopies(page, leaf, pikachu, 3);
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "All owned"
+    );
+    await expect(page.getByRole("main")).toContainText(
+      "123 copies · 2 editions"
+    );
+    await use({ leaf, pikachu });
+  },
+});
+
+/** Watches the page from here on: whether the banner's text ever appeared, and whether the Cards region, while it
+ * was shown, ever held no tile (the gallery empties while it reads again). Checked after every DOM change, which
+ * runs before the browser paints it. */
+async function watchPage(page: Page) {
   await page.evaluate((text) => {
-    const w = window as unknown as { bannerSeen: boolean };
+    const w = window as unknown as {
+      bannerSeen: boolean;
+      cardsEmptied: boolean;
+    };
     w.bannerSeen = false;
+    w.cardsEmptied = false;
     const look = () => {
       if (document.body.innerText.includes(text)) w.bannerSeen = true;
+      const cards = document.querySelector('section[aria-label="Cards"]');
+      if (
+        cards &&
+        cards.getClientRects().length > 0 &&
+        cards.querySelector("button") === null
+      )
+        w.cardsEmptied = true;
     };
     new MutationObserver(look).observe(document.body, {
       subtree: true,
       childList: true,
       characterData: true,
+      attributes: true,
     });
   }, STALE);
 }
-const bannerSeen = (page: Page) =>
-  page.evaluate(
-    () => (window as unknown as { bannerSeen: boolean }).bannerSeen
-  );
+const watched = (page: Page) =>
+  page.evaluate(() => {
+    const w = window as unknown as {
+      bannerSeen: boolean;
+      cardsEmptied: boolean;
+    };
+    return { bannerSeen: w.bannerSeen, cardsEmptied: w.cardsEmptied };
+  });
 
 test.describe("returning to Collection from another page (slice 5)", () => {
   test.use({ viewport: { width: 1280, height: 860 } });
 
   test("an idle Collection refreshes quietly when the collector returns: new data, no banner, same scroll, Location and history", async ({
     page,
+    prepared: { leaf, pikachu },
   }) => {
-    const { leaf, pikachu } = await seed(page, "Idle");
     await page.evaluate(() => window.scrollTo(0, 700));
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(700);
     await tab(page, "Decks").click();
     await expect(page).toHaveURL(/\/decks$/);
-    await watchBanner(page);
+    await watchPage(page);
 
     // A holding change elsewhere (here the API), while Collection is out of sight.
     await addCopies(page, leaf, pikachu, 1);
@@ -180,15 +208,18 @@ test.describe("returning to Collection from another page (slice 5)", () => {
       "124 copies · 2 editions"
     );
     await expect(banner(page)).toHaveCount(0);
-    expect(await bannerSeen(page), "the banner never flashed").toBe(false);
+    expect(await watched(page), "no banner frame, no empty gallery").toEqual({
+      bannerSeen: false,
+      cardsEmptied: false,
+    });
     expect(await page.evaluate(() => window.scrollY)).toBe(700);
     expect(await page.evaluate(() => window.history.length)).toBe(entries);
   });
 
   test("a Collection with a selection does not refresh on return and keeps the banner and the selection", async ({
     page,
+    prepared: { leaf, pikachu },
   }) => {
-    const { leaf, pikachu } = await seed(page, "Busy");
     await tiles(page).nth(0).click();
     await expect(bar(page)).toContainText("1 copy selected");
     await tab(page, "Decks").click();
@@ -203,13 +234,63 @@ test.describe("returning to Collection from another page (slice 5)", () => {
     await expect(bar(page)).toContainText("1 copy selected");
     // Nothing refreshed by itself: it takes Reload.
     await page.getByRole("button", { name: "Reload", exact: true }).click();
+    await expect(page.getByRole("main")).toContainText(
+      "124 copies · 2 editions"
+    );
     await expect(banner(page)).toHaveCount(0);
+  });
+
+  // A pending Move keeps Collection busy. Only a Move that involves Borrowed copies is held for recovery in its own
+  // tab, which needs a Loan; a Move in progress in another tab of the same account is held the same way (the
+  // workspace's Pending Move notice), and is the pending command a browser can make here. A Move or drag in
+  // progress, and an open dialog, sheet or drawer, cannot survive a page change (the shell closes them as Collection
+  // is hidden), so they are covered by the idle predicate's unit tests and the refresh-landing component tests.
+  test("a Move in progress in another tab keeps Collection busy: no refresh on return, and the banner", async ({
+    page,
+    prepared: { leaf, pikachu },
+  }) => {
+    const session = await page.request.get(
+      new URL("/auth/session", page.url()).href
+    );
+    const { userId } = (await session.json()) as { userId: string };
+    // The other tab holds the account's Move lock, as a Move in progress does, and announces it.
+    const other = await page.context().newPage();
+    await other.goto(new URL("/auth/session", page.url()).href);
+    await other.evaluate(
+      (owner) =>
+        new Promise<void>((held) => {
+          const name = `prizecheck:mixed-move:${encodeURIComponent(owner)}`;
+          void navigator.locks.request(name, () => {
+            localStorage.setItem(`${name}:activity`, crypto.randomUUID());
+            held();
+            return new Promise<void>(() => {});
+          });
+        }),
+      userId
+    );
+    await expect(
+      page.getByRole("region", { name: "Pending Move" })
+    ).toContainText("A Move is in progress in another tab.");
+    await expect(bar(page)).toHaveCount(0);
+
+    await tab(page, "Decks").click();
+    await expect(page).toHaveURL(/\/decks$/);
+    await addCopies(page, leaf, pikachu, 1);
+    await tab(page, "Collection").click();
+    await expect(banner(page)).toHaveText(STALE);
+    await expect(page.getByRole("main")).toContainText(
+      "123 copies · 2 editions"
+    );
+    await expect(
+      page.getByRole("region", { name: "Pending Move" })
+    ).toBeVisible();
+    await other.close();
   });
 
   test("a change seen while the tab is in front still shows the banner, even when Collection is idle", async ({
     page,
+    prepared: { leaf, pikachu },
   }) => {
-    const { leaf, pikachu } = await seed(page, "Focus");
     await addCopies(page, leaf, pikachu, 1);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(banner(page)).toHaveText(STALE);
