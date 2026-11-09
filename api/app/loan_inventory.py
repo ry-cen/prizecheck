@@ -438,8 +438,7 @@ def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verif
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
             return legacy_loan_view(conn, user_id, stored)
-        if command.return_by is not None and command.return_by < conn.execute(
-                'SELECT current_date AS today').fetchone()['today']:
+        if command.return_by is not None and command.return_by < today(conn):
             error(422, 'INVALID_RETURN_BY')
         # Both owners serialize incoming creation with Block and Suspension.
         lock_owners(conn, user_id, command.lender_id)
