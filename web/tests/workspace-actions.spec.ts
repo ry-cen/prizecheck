@@ -1536,3 +1536,47 @@ for (const remaining of [1, 0]) {
     await expect(page).toHaveURL(/\/catalog$/);
   });
 }
+
+test("Collection restores each Location's scroll on Back and Forward", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 840 });
+  promoteCatalog({ "card-1": "Scroll Abra" });
+  await signIn(page);
+  const first = await createLocation(page, "0 0 Scroll A", null);
+  const second = await createLocation(page, "0 0 Scroll B", null);
+  const edition = await editionOf("card-1");
+  await addCopies(page, first, edition, 40);
+  await addCopies(page, second, edition, 40);
+  await page.reload();
+  await expectCounts(page, "0 0 Scroll A", "40 copies · 1 edition");
+  await expect(tiles(page)).toHaveCount(40);
+  await page.evaluate(() => window.scrollTo(0, 500));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(500);
+  const savedA = await page.evaluate(() => window.scrollY);
+  await expectCounts(page, "0 0 Scroll B", "40 copies · 1 edition");
+  await expect(tiles(page)).toHaveCount(40);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await page.evaluate(() => window.scrollTo(0, 350));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(350);
+  const savedB = await page.evaluate(() => window.scrollY);
+  await page.goBack();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "0 0 Scroll A"
+  );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(500);
+  const restoredA = await page.evaluate(() => window.scrollY);
+  await page.goForward();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "0 0 Scroll B"
+  );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(350);
+  const restoredB = await page.evaluate(() => window.scrollY);
+  await test.info().attach("Location history scroll", {
+    body: JSON.stringify({
+      A: { saved: savedA, restored: restoredA },
+      B: { saved: savedB, restored: restoredB },
+    }),
+    contentType: "application/json",
+  });
+});

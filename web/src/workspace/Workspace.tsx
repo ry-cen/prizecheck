@@ -43,7 +43,7 @@ import {
   type GalleryFilters,
   type GalleryQuery,
 } from "./galleryModel";
-import { useGalleryPrefs } from "./galleryPrefs";
+import { useGalleryPrefs, type GalleryPrefs } from "./galleryPrefs";
 import { DetailsSheet, Inspector } from "./Inspector";
 import type { LendRow } from "./inventoryActionsModel";
 import { MoveDialog, RemovalDialog } from "./InventoryDialogs";
@@ -137,19 +137,35 @@ export function Workspace({
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const query = route.query;
-  const setQuery = (next: string) =>
+  // The Shell owns route/history scroll. Only a collector's local listing controls reset it here;
+  // a later gallery read must never overwrite a position the Shell has already restored.
+  const resetListingScroll = () => {
+    if (active) window.scrollTo(0, 0);
+  };
+  const setQuery = (next: string) => {
+    if (next === query) return;
+    if (next.trim() !== query.trim()) resetListingScroll();
     onNavigate(collectionHref(view, next), { replace: true });
+  };
   // The create form's preselected parent: undefined while closed, null for Top level.
   const [createFor, setCreateFor] = useState<string | null | undefined>(
     undefined
   );
   // Sort, filter values and display choices are remembered per user; search lives in the address.
   const [prefs, setPrefs] = useGalleryPrefs(userId);
+  const changePrefs = (next: GalleryPrefs) => {
+    if (
+      next.sort !== prefs.sort ||
+      JSON.stringify(next.filters) !== JSON.stringify(prefs.filters)
+    )
+      resetListingScroll();
+    setPrefs(next);
+  };
   const display = prefs.display;
   const setDisplay = (next: DisplayPrefs) =>
     setPrefs((previous) => ({ ...previous, display: next }));
   const setFilters = (next: GalleryFilters) =>
-    setPrefs((previous) => ({ ...previous, filters: next }));
+    changePrefs({ ...prefs, filters: next });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false);
   const marqueeArea = useRef<HTMLElement>(null);
@@ -414,11 +430,6 @@ export function Workspace({
     }
     void actions.added(added);
   };
-  // A new view, search, filter or sort starts at the top of its gallery.
-  useEffect(() => {
-    if (active) window.scrollTo(0, 0);
-  }, [galleryKey]);
-
   const linkReloaded = useRef<string | null>(null);
   // Expand ancestors after a deep link loads; an unavailable Location stays safe and explains the fallback.
   useEffect(() => {
@@ -802,9 +813,7 @@ export function Workspace({
             <div className="ml-auto flex items-center gap-2">
               <SortControl
                 sort={prefs.sort}
-                onChange={(sort) =>
-                  setPrefs((previous) => ({ ...previous, sort }))
-                }
+                onChange={(sort) => changePrefs({ ...prefs, sort })}
               />
               <DisplayControls display={display} onChange={setDisplay} />
             </div>
@@ -975,7 +984,7 @@ export function Workspace({
           opener={filtersOpener}
           prefs={prefs}
           sets={sets}
-          onChange={setPrefs}
+          onChange={(update) => changePrefs(update(prefs))}
           onClose={closeFiltersDrawer}
         />
       )}
