@@ -63,8 +63,8 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from .. import copy_allocation
-from ..copy_allocation import AllocationRows, allocate_rows
+from ..core.inventory import allocation as copy_allocation
+from ..core.inventory.allocation import AllocationRows, allocate_rows
 from . import counts
 
 # Whom a Trade List or wants read asks about: ``'friends'`` keeps only the reach rule's friend branch, ``'reach'`` keeps

@@ -1279,3 +1279,16 @@ below says where each group ended up; the module map in section 1 stays the plan
   rows are unchanged. SQL, routes, models, transactions and idempotency stay in their existing modules.
 - The three root modules remain in place with their existing ownership rows. No compatibility shim,
   boundary allow-list, architecture rule or social caller scan changes are needed.
+
+**2026-11-08 — Pure allocation and inventory reader split (#528)**
+
+- The row-only allocation definitions (`EditionCopies`, `_place`, `held_for_line`,
+  `spare_rule`, `LineCount`, `Allocation`, `AllocationRows`, `oldest_first`, `_hand_out`
+  and `allocate_rows`) moved unchanged into `core/inventory/allocation.py`.
+  `WantListCounting` has one definition there; settings re-imports the same alias.
+- `app.copy_allocation` retains its SQL readers and facade, re-exporting every moved
+  name with object identity preserved. Its `core` ownership row remains; ownership
+  of the new module is inferred from its `app.core` destination.
+- Friend copies imports the pure module directly. Its three allowed imports are
+  renamed one-for-one; SQL, authorization, visibility, reservation reads and locks
+  are unchanged. No live moved-symbol patch paths needed retargeting.
