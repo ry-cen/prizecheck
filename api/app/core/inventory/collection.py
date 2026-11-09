@@ -12,7 +12,7 @@ from app.core.ops.api_errors import api_error as fail
 from app.core.art.urls import route_address
 from app.db import connect
 from app.core.inventory.holdings import HoldingView
-from app.location_tree import LOCATION_PATHS
+from app.core.inventory.location_paths import LOCATION_PATHS
 from app.social import counts
 from .cursors import anchor_columns, anchor_json, anchor_value, cursor_key, decode_cursor, encode_cursor
 
@@ -115,7 +115,7 @@ def distribution(edition_id, user_id):
 # Holding-level listing for the collector workspace gallery (tickets #103 and #104).
 # One row per Holding (Storage Leaf + Card Edition), never per copy: the client expands quantities into tiles.
 HOLDING_PAGE_SIZE = 500
-# Full Location paths such as "Shelf / Binder 2" (``location_tree.LOCATION_PATHS``).
+# Full Location paths such as "Shelf / Binder 2" (``location_paths.LOCATION_PATHS``).
 HOLDING_PATHS = LOCATION_PATHS
 # Every sort key is NOT NULL: a NULL would drop rows from the keyset comparison.
 # edition_total is the Card Edition's copies within the listed rows (the view after search and filters).

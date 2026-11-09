@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field
 from app.deck_deletion import unsorted_leaf
 from app.core.decks.store import write_deck_list
 from app.games.pokemon.decks.commands import advance_deck_list
-from app.location_tree import error, location_paths, refuse
+from app.core.inventory.location_paths import location_paths
+from app.location_tree import error, refuse
 from app.db import connect
 from app.identity import verified_user
 from app.inventory_core import add_in, is_deck, leaf, quantity, take_out
