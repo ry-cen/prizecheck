@@ -67,6 +67,10 @@ def with_line_display(conn, response: dict) -> dict:
     display = read_line_display(conn, [UUID(line['edition_id']) for line in lines])
     # Image selection is mutable display state even for a complete historical
     # reply. Preserve its command identity, quantities and logical outcome.
-    return {**response, 'deck_list': {**deck_list, 'lines': [
-        {**display[UUID(line['edition_id'])], **line,
-         'image_url': display[UUID(line['edition_id'])]['image_url']} for line in lines]}}
+    def current(line):
+        row = display.get(UUID(line['edition_id']))
+        if row is None:
+            # No catalog row to select from: a complete stored line replays exactly as stored, as before edition art.
+            return line
+        return {**row, **line, 'image_url': row['image_url']}
+    return {**response, 'deck_list': {**deck_list, 'lines': [current(line) for line in lines]}}
