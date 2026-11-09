@@ -40,13 +40,22 @@ export function useGalleryData(
   /** The newest owner revision read outside the gallery (the Location tree's). A kept listing older than
    * it isn't shown: this tab's own change (a new Location) would otherwise raise the stale-collection banner. */
   knownRevision: number | null
-): GalleryData & { reload: () => void } {
+): GalleryData & {
+  reload: () => void;
+  /** Reads the listing again without emptying it: the tiles on screen stay until the complete answer replaces them. */
+  refresh: () => void;
+  /** A refresh's re-read is in flight. */
+  refreshing: boolean;
+} {
   // Data is tagged with the query key it was loaded for, so a view change never shows the old frame.
   const [loaded, setLoaded] = useState<{ key: string; data: GalleryData }>({
     key: "",
     data: EMPTY_GALLERY,
   });
   const [attempt, setAttempt] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  // Set by refresh for the next walk: it starts from the listing on screen, kept or not.
+  const refreshNext = useRef(false);
   const generation = useRef(0);
   const cache = useRef(new Map<string, GalleryData>()).current;
   // The revisions every kept listing was read at.
@@ -78,7 +87,10 @@ export function useGalleryData(
       cache.set(key, data);
       while (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
     };
-    const shown = kept(key);
+    const refreshed = refreshNext.current ? cache.get(key) : undefined;
+    refreshNext.current = false;
+    const shown = refreshed ?? kept(key);
+    setRefreshing(refreshed !== undefined);
     // A kept listing is shown at once and read again quietly: no page is published until the walk is complete.
     const quiet = shown !== undefined;
     if (shown) keep(shown);
@@ -201,7 +213,10 @@ export function useGalleryData(
           return;
         }
       }
-    })();
+    })().finally(() => {
+      // Whichever way the walk ended, a re-read that was not superseded is over.
+      if (live()) setRefreshing(false);
+    });
     return () => {
       generation.current++;
     };
@@ -216,8 +231,23 @@ export function useGalleryData(
     cache.clear();
     setAttempt((n) => n + 1);
   }, [cache]);
+  // A quiet re-read of the listing on screen (ticket 113's return refresh). Without a complete listing to keep
+  // showing it falls back to reload, which empties the view.
+  const refresh = useCallback(() => {
+    if (cache.get(key)?.status !== "ready") {
+      reload();
+      return;
+    }
+    generation.current++;
+    refreshNext.current = true;
+    // Now, with the caller's other updates, so no render between them sees the old listing as settled.
+    setRefreshing(true);
+    setAttempt((n) => n + 1);
+  }, [cache, key, reload]);
   return {
     ...(loaded.key === key ? loaded.data : (kept(key) ?? EMPTY_GALLERY)),
     reload,
+    refresh,
+    refreshing,
   };
 }

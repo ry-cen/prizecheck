@@ -62,6 +62,7 @@ import {
   selectedGroups,
   selectionScope,
 } from "./selectionModel";
+import { isCollectionIdle } from "./collectionIdle";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
 import { useUndoToast } from "./UndoToast";
@@ -376,12 +377,31 @@ export function Workspace({
     selection,
     onDrop: actions.dropMove,
   });
-  // Ticket 113: the stale-collection banner. Changes made elsewhere show a banner with Reload;
-  // nothing refreshes by itself.
+  // Ticket 113: the stale-collection banner. Changes made elsewhere show a banner with Reload. The one refresh
+  // by itself: Collection shown again from another page of the app, idle, reads the tiles and the tree quietly.
+  const idle = isCollectionIdle({
+    selectedCopies: selection.selected.size,
+    working: actions.busy,
+    dragging: drag.badge !== null,
+    actionDialogOpen: actions.dialog !== null,
+    pendingCommand: actions.pending !== null,
+    detailsOpen: selection.details !== null,
+    overlayOpen:
+      drawerOpen ||
+      filtersDrawerOpen ||
+      createFor !== undefined ||
+      manageOpen ||
+      settingsFor !== null ||
+      adding !== null ||
+      lentOpen ||
+      borrowedOpen ||
+      lending !== null,
+  });
   const staleness = useStaleCollection({
     userId,
     galleryRevision: gallery.ownerRevision,
-    galleryStatus: gallery.status,
+    // A quiet re-read keeps the old tiles "ready"; their revision is not settled until the answer lands.
+    galleryStatus: gallery.refreshing ? "loading" : gallery.status,
     byKey: gallery.byKey,
     galleryKey,
     reloadGallery: gallery.reload,
@@ -392,6 +412,8 @@ export function Workspace({
     clearSelection: actions.clearSelection,
     busy: actions.busy,
     active,
+    idle,
+    refreshGallery: gallery.refresh,
   });
   // Inspector totals are cached per owner revision ("<revision>:<edition>"). Older revisions' entries can't be
   // asked for again, so drop them whenever the gallery reads a new revision.
