@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
+from psycopg import sql
 
 from app.games.pokemon.catalog import catalog, catalog_dispatch, catalog_refresh, catalog_status
 from app.games.pokemon.catalog import catalog_run_states as states
@@ -148,10 +149,12 @@ class FixedClockConnection:
 
 @pytest.mark.parametrize('fallback', [False, True], ids=['lease', 'startup-grace'])
 @pytest.mark.parametrize('offset', [-1, 0, 1], ids=['expired', 'equal', 'healthy'])
-def test_each_lease_site_keeps_its_boundary_and_dispatch_recovery(offset, fallback):
+@pytest.mark.parametrize('session_zone', ['UTC', 'Pacific/Kiritimati'])
+def test_each_lease_site_keeps_its_boundary_and_dispatch_recovery(offset, fallback, session_zone):
     owner = owner_fixture()
     end = datetime(2040, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=offset)
     with connect() as conn:
+        conn.execute(sql.SQL('SET TIME ZONE {}').format(sql.Literal(session_zone)))
         run_id = conn.execute('INSERT INTO catalog_run(started_at,lease_until) VALUES (%s,%s) RETURNING id',
                               (end - timedelta(minutes=2), None if fallback else end)).fetchone()['id']
         conn.execute('INSERT INTO catalog_check(catalog_run_id) VALUES (%s)', (run_id,))
@@ -186,10 +189,12 @@ def test_each_lease_site_keeps_its_boundary_and_dispatch_recovery(offset, fallba
 
 
 @pytest.mark.parametrize('offset', [-1, 0, 1])
-def test_live_runner_lock_overrides_expired_equal_and_healthy_leases(offset):
+@pytest.mark.parametrize('session_zone', ['UTC', 'Pacific/Kiritimati'])
+def test_live_runner_lock_overrides_expired_equal_and_healthy_leases(offset, session_zone):
     owner = owner_fixture()
     end = datetime(2040, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=offset)
     with connect() as holder, connect() as conn:
+        conn.execute(sql.SQL('SET TIME ZONE {}').format(sql.Literal(session_zone)))
         run_id = conn.execute('INSERT INTO catalog_run(lease_until) VALUES (%s) RETURNING id', (end,)).fetchone()['id']
         conn.execute('INSERT INTO catalog_check(catalog_run_id) VALUES (%s)', (run_id,))
         conn.commit()
@@ -207,15 +212,17 @@ def test_live_runner_lock_overrides_expired_equal_and_healthy_leases(offset):
         assert row(conn, run_id)['outcome'] is None
 
 
-@pytest.mark.parametrize('lease', [None, '1999-01-01', '2040-01-01', '2041-01-01'])
-def test_child_exit_interrupts_unfinished_runs_regardless_of_lease_and_is_repeatable(lease, caplog):
+@pytest.mark.parametrize('lease', [None, '1999-01-01 00:00:00+00', '2040-01-01 00:00:00+00', '2041-01-01 00:00:00+00'])
+@pytest.mark.parametrize('session_zone', ['UTC', 'Pacific/Kiritimati'])
+def test_child_exit_interrupts_unfinished_runs_regardless_of_lease_and_is_repeatable(lease, caplog, session_zone):
     reset_catalog()
     with connect() as conn:
+        conn.execute(sql.SQL('SET TIME ZONE {}').format(sql.Literal(session_zone)))
         run_id = conn.execute('INSERT INTO catalog_run(lease_until) VALUES (%s) RETURNING id', (lease,)).fetchone()['id']
         conn.commit()
         clock = FixedClockConnection(conn)
         assert catalog_refresh._wait_for_pull(clock, run_id, None) == ('interrupted', catalog_refresh.PULL_INTERRUPTED)
-        assert any('its lease had expired' in record.message for record in caplog.records) is (lease == '1999-01-01')
+        assert any('its lease had expired' in record.message for record in caplog.records) is (lease == '1999-01-01 00:00:00+00')
         interrupted = row(conn, run_id)
         assert (interrupted['phase'], interrupted['outcome']) == (states.PHASE_FAILED, states.OUTCOME_FAILED)
         conn.commit()
