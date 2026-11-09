@@ -7,7 +7,7 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .api_errors import api_error
+from app.core.ops.api_errors import api_error
 from .db import connect
 from .identity import verified_user
 from .social import counts
