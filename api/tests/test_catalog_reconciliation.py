@@ -145,6 +145,7 @@ def test_owner_confirmation_takes_effect_on_one_request_and_never_repoints_holdi
 
 
 def test_deprecation_is_explicit_and_collector_reassignment_is_version_checked():
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
     reset_catalog();run(Source())
     owner,collector,other=str(uuid4()),str(uuid4()),str(uuid4())
     with connect() as conn:
@@ -161,6 +162,16 @@ def test_deprecation_is_explicit_and_collector_reassignment_is_version_checked()
     assert rows[0]['edition_id']==str(source['id']) and rows[0]['quantity']=='4'
     body={'location_id':str(leaf),'edition_id':str(source['id']),'replacement_edition_id':str(target),'quantity':'2','expected_version':1,'idempotency_key':str(uuid4())}
     assert call('POST','/api/holdings/reassign',other,body).status_code==404
+    with connect() as conn:
+        conn.execute('INSERT INTO holding VALUES (%s,%s,%s,%s,1)',(collector,leaf,target,2**63-1))
+        before_revision=conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s',(collector,)).fetchone()['revision']
+    before=call('GET',f'/api/holdings/{leaf}',collector).json()
+    overflow=call('POST','/api/holdings/reassign',collector,body)
+    assert (overflow.status_code,overflow.json()['detail']['code'])==(409,'QUANTITY_OVERFLOW'),overflow.text
+    assert call('GET',f'/api/holdings/{leaf}',collector).json()==before
+    with connect() as conn:
+        assert conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s',(collector,)).fetchone()['revision']==before_revision
+        conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s',(collector,leaf,target))
     first=call('POST','/api/holdings/reassign',collector,body)
     assert first.status_code==200,first.text
     assert call('POST','/api/holdings/reassign',collector,body).json()==first.json()

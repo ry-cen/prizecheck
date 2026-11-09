@@ -369,3 +369,44 @@ def test_no_undo_move_rolls_back_and_retries_with_the_same_key():
     assert response.status_code == 200 and response.json()['undo_id'] is None, response.text
     assert commit_without_undo(owner, manifest_id, destination, key).json() == response.json()
     assert call('GET', '/api/moves/undo', owner).json() == previous
+
+
+@pytest.mark.parametrize('operation', [commit, commit_without_undo], ids=['commit', 'commit-without-undo'])
+def test_overflow_refuses_both_commit_routes_without_changing_inventory(operation):
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
+    owner, _, source, _, edition, _ = fixture()
+    destination = leaf(owner)
+    current = add(owner, source, edition, '2')
+    assert current.status_code == 200, current.text
+    full = add(owner, destination, edition, str(2**63 - 1))
+    assert full.status_code == 200, full.text
+    manifest = stage_quantity(owner, source, edition, 1)
+    before = quantities(owner, source, destination)
+    records = call('GET', '/api/moves/undo', owner).json()
+    response = operation(owner, manifest, destination, uuid4())
+    assert (response.status_code, response.json()['detail']['code']) == (409, 'QUANTITY_OVERFLOW'), response.text
+    assert quantities(owner, source, destination) == before
+    assert call('GET', '/api/moves/undo', owner).json() == records
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        assert conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s', (owner,)).fetchone()[0] == full.json()['owner_revision']
+
+
+def test_undo_overflow_is_an_incompatible_state_and_changes_nothing():
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
+    # Undo names an overflowing return UNDO_INCOMPATIBLE, preserving its own contract.
+    owner, _, source, _, edition, _ = fixture()
+    destination = leaf(owner)
+    assert add(owner, source, edition, '2').status_code == 200
+    moved = commit(owner, stage_quantity(owner, source, edition, 1), destination)
+    assert moved.status_code == 200, moved.text
+    full = add(owner, source, edition, str(2**63 - 2))
+    assert full.status_code == 200, full.text
+    before = quantities(owner, source, destination)
+    records = call('GET', '/api/moves/undo', owner).json()
+    response = call('POST', f"/api/moves/undo/{moved.json()['undo_id']}", owner,
+                    {'idempotency_key': str(uuid4())})
+    assert (response.status_code, response.json()['detail']['code']) == (409, 'UNDO_INCOMPATIBLE'), response.text
+    assert quantities(owner, source, destination) == before
+    assert call('GET', '/api/moves/undo', owner).json() == records
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        assert conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s', (owner,)).fetchone()[0] == full.json()['owner_revision']
