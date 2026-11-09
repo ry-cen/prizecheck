@@ -119,7 +119,7 @@ class DeployPipelineTest(unittest.TestCase):
         on = VERIFY[:VERIFY.index('\njobs:')]
         self.assertRegex(on, r'(?m)^  workflow_dispatch:$')
         self.assertRegex(on, r'(?m)^      integration:$')
-        self.assertRegex(on, r'(?m)^        options:\n          - none\n          - sharded\n          - full\n        default: none$')
+        self.assertRegex(on, r'(?m)^        options:\n          - none\n          - sharded\n          - full\n          - operations\n        default: none$')
         self.assertNotIn('inputs.full', VERIFY)
         # Sharded is also due on every pull request to main (a release); the unsharded full gate only on request.
         self.assertIn(f"    if: ${{{{ inputs.integration == 'sharded' || ({RELEASE_PR}) }}}}", job_body('integration-legs'))
@@ -139,9 +139,38 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertEqual(len(re.findall(r'(?m)^          - leg: ', legs)), 14)
         self.assertIn('run: npm run verify\n', job_body('integration-full'))
 
+    def test_the_operations_choice_runs_only_the_operations_suite_on_its_own_job(self):
+        job = job_body('integration-operations')
+        self.assertIn("    if: ${{ inputs.integration == 'operations' }}", job)
+        self.assertNotIn('pull_request', job)
+        self.assertIn('run: npm run verify -- --suite operations\n', job)
+        # The same database service and client the full job uses, and the history the runtime fixtures need.
+        for required in ('image: postgres:16', 'postgresql-client-16', 'fetch-depth: 0', 'TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres'):
+            self.assertIn(required, job)
+            self.assertIn(required, job_body('integration-full'))
+        self.assertNotIn('playwright', job.lower())
+        # Its own cap, below the full gate's 75 minutes.
+        minutes = int(one(r'(?m)^    timeout-minutes: (\d+)$', job))
+        self.assertLessEqual(minutes, 25)
+        self.assertLess(minutes, int(one(r'(?m)^    timeout-minutes: (\d+)$', job_body('integration-full'))))
+        # No other deep job runs for it; the default checks and the scanner index image still do.
+        for name in ('integration-legs', 'integration-full', 'integration-scanner-model'):
+            self.assertNotIn("inputs.integration == 'operations'", job_body(name), name)
+        self.assertIn("inputs.integration == 'full'", job_body('integration-scanner-model'))
+
+    def test_a_verify_run_requires_the_operations_job_only_for_the_operations_choice(self):
+        script = job_body('verify')
+        cases = dict(re.findall(r'(?m)^\s+(none|sharded|full|operations)\) (.*) ;;$', script))
+        self.assertEqual(set(cases), {'none', 'sharded', 'full', 'operations'})
+        for choice, assignments in cases.items():
+            self.assertIn('operations=success' if choice == 'operations' else 'operations=skipped', assignments, choice)
+        # With the operations choice nothing else deep is required: legs, full and the scanner model must be skipped.
+        self.assertEqual(cases['operations'], 'legs=skipped; full=skipped; operations=success; model=skipped')
+
     def test_the_verify_aggregator_requires_the_default_checks_and_every_requested_job(self):
         verify = job_body('verify')
-        jobs = ['checks', 'scanner-index-image', 'integration-legs', 'integration-full', 'integration-scanner-model']
+        jobs = ['checks', 'scanner-index-image', 'integration-legs', 'integration-full', 'integration-operations',
+                'integration-scanner-model']
         needs = re.search(r'needs:\s*\[([^\]]*)\]', verify).group(1)
         self.assertEqual([n.strip() for n in needs.split(',') if n.strip()], jobs)
         # always() keeps it from being skipped with a failed or cancelled job; a skipped check counts as passing.
@@ -150,10 +179,12 @@ class DeployPipelineTest(unittest.TestCase):
             self.assertIn(f'needs.{name}.result', verify)
         script = verify[verify.index('run: |'):]
         for required in ('test "$CHECKS_RESULT" = success', 'test "$SCANNER_INDEX_RESULT" = success',
-                         'none) legs=skipped; full=skipped; model=skipped ;;',
-                         'sharded) legs=success; full=skipped; model=success ;;',
-                         'full) legs=skipped; full=success; model=success ;;',
-                         'test "$LEGS_RESULT" = "$legs"', 'test "$FULL_RESULT" = "$full"', 'test "$SCANNER_MODEL_RESULT" = "$model"'):
+                         'none) legs=skipped; full=skipped; operations=skipped; model=skipped ;;',
+                         'sharded) legs=success; full=skipped; operations=skipped; model=success ;;',
+                         'full) legs=skipped; full=success; operations=skipped; model=success ;;',
+                         'operations) legs=skipped; full=skipped; operations=success; model=skipped ;;',
+                         'test "$LEGS_RESULT" = "$legs"', 'test "$FULL_RESULT" = "$full"',
+                         'test "$OPERATIONS_RESULT" = "$operations"', 'test "$SCANNER_MODEL_RESULT" = "$model"'):
             self.assertIn(required, script)
         # A pull request to main is due the sharded jobs even with no input, so skipped legs cannot pass there.
         self.assertIn("RELEASE_PR: ${{ " + RELEASE_PR + " && 'true' || 'false' }}", verify)
