@@ -87,6 +87,12 @@ router = APIRouter(prefix='/api/loans', tags=['social'])
 HISTORY = 50
 # Days an unanswered Borrow Request or an accepted Loan waits before both sides are nudged once (#256).
 NUDGE_DAYS = 14
+# A Loan nobody has confirmed a handover for: still a Borrow Request, Lend Offer or accepted Loan, with neither side's
+# handover stamped. The one definition for the closures that cancel such Loans (``end_loans_between``) and the
+# cancellable-partner read (``social.reports.unconfirmed_partners``). Not the reservation rule (``counts.RESERVING``,
+# which ignores the borrower's stamp) and not the Trade rule, which reads swap stamps.
+UNCONFIRMED_HANDOVER = ("state IN ('requested','offered','accepted') "
+                        "AND lender_handover_at IS NULL AND borrower_handover_at IS NULL")
 
 Action = Literal['accept', 'decline', 'confirm_handover', 'start_return', 'confirm_return', 'choose_written_off',
                  'withdraw', 'take_back', 'cancel', 'write_off', 'change_return_by', 'ask_for_more_time',
@@ -700,10 +706,9 @@ def end_loans_between(conn, user_id: str, other_id: str | list[str], kind: str) 
         raise ValueError('closure kind required')
     # A suspension supplies all partners at once, preserving global round-id lock order.
     others = [other_id] if isinstance(other_id, str) else other_id
-    rows = conn.execute("""SELECT l.*, t.user_low AS thread_user_low FROM loan l JOIN thread t ON t.id=l.thread_id
+    rows = conn.execute(f"""SELECT l.*, t.user_low AS thread_user_low FROM loan l JOIN thread t ON t.id=l.thread_id
       WHERE ((lender_id = %(a)s AND borrower_id = ANY(%(b)s)) OR (lender_id = ANY(%(b)s) AND borrower_id = %(a)s))
-        AND state IN ('requested', 'offered', 'accepted')
-        AND lender_handover_at IS NULL AND borrower_handover_at IS NULL
+        AND {UNCONFIRMED_HANDOVER}
       ORDER BY l.id FOR NO KEY UPDATE OF l""", {'a': user_id, 'b': others}).fetchall()
     lenders = set()
     for row in rows:
