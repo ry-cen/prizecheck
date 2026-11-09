@@ -25,19 +25,16 @@ const test = base.extend<
     async ({}, use) => {
       await use(seedCatalog());
     },
-    { scope: "worker", timeout: 60_000 },
+    { scope: "worker" },
   ],
-  pair: [
-    async ({ page, collectors }, use) => {
-      const lender = (await collectors.signIn({ next: "/loans" })).page;
-      await nameCollector(lender, "Misty W");
-      await signInAsOwner(page, "/loans");
-      await nameCollector(page, "Ash K");
-      await befriend(page, lender);
-      await use({ lender });
-    },
-    { timeout: 60_000 },
-  ],
+  pair: async ({ page, collectors }, use) => {
+    const lender = (await collectors.signIn({ next: "/loans" })).page;
+    await nameCollector(lender, "Misty W");
+    await signInAsOwner(page, "/loans");
+    await nameCollector(page, "Ash K");
+    await befriend(page, lender);
+    await use({ lender });
+  },
 });
 
 test("current Trade cards retain their direction after a counter", async ({

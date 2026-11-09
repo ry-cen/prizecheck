@@ -21,7 +21,7 @@ import {
 } from "./support/loans";
 import { signInAsOwner } from "./support/sign-in";
 
-// Expensive catalog import and multi-account sign-in have setup budgets, separate from behavior assertions.
+// Seed once per worker and prepare the collectors before the behavior assertions.
 const test = base.extend<
   {
     loanQuantities: [number, number];
@@ -33,15 +33,12 @@ const test = base.extend<
     async ({}, use) => {
       await use(seedCatalog());
     },
-    { scope: "worker", timeout: 60_000 },
+    { scope: "worker" },
   ],
   loanQuantities: [[2, 2], { option: true }],
-  prepared: [
-    async ({ page, collectors, loanQuantities }, use) => {
-      await use(await lending(page, collectors, ...loanQuantities));
-    },
-    { timeout: 60_000 },
-  ],
+  prepared: async ({ page, collectors, loanQuantities }, use) => {
+    await use(await lending(page, collectors, ...loanQuantities));
+  },
 });
 let catalog: ReturnType<typeof seedCatalog>;
 test.beforeAll(async ({ catalog: seeded }) => {
@@ -96,7 +93,7 @@ async function lending(
   const deck = await createDeck(page, deckName);
   await setLine(page, deck, iono, listed);
   await befriend(page, misty.page);
-  // Complete the cold Want List load in prepared's existing setup budget.
+  // Complete the first Want List load before the prepared fixture yields.
   await openScoped(page, deck);
   return { ids, iono, misty: misty.page, deck, deckName };
 }
