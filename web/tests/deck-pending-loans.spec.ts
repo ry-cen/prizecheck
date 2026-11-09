@@ -205,10 +205,11 @@ test.describe("answer after a partial acceptance", () => {
     await expect(lines).toContainText("Misty W agreed to lend 1");
     await expect(lines).not.toContainText("Asked Misty W");
     await expect(lines).toContainText("3 of 3");
-    const remainder = lines.getByRole("button", {
-      name: /^Ask for 2 more from Misty W/,
+    const selected = lines.getByRole("button", {
+      name: /^Ask for 1 more from Misty W/,
     });
-    await expect(remainder).toBeVisible();
+    await expect(selected).toBeVisible();
+    await expect(selected).toHaveAttribute("aria-pressed", "true");
     // A previously capped draft keeps its quantity, but can now increase to the fresh cap.
     await page
       .getByRole("button", { name: "Review Borrow Request to Misty W" })
@@ -228,6 +229,10 @@ test.describe("answer after a partial acceptance", () => {
     await existing
       .getByRole("button", { name: "Discard", exact: true })
       .click();
+    const remainder = lines.getByRole("button", {
+      name: /^Ask for 2 more from Misty W/,
+    });
+    await expect(remainder).toHaveAttribute("aria-pressed", "false");
     await remainder.click();
     await page
       .getByRole("button", { name: "Review Borrow Request to Misty W" })

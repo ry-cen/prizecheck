@@ -76,6 +76,11 @@ export type Draft = {
 
 type DraftsApi = {
   drafts: Draft[];
+  checkReadiness: (
+    source: symbol,
+    deckId: string | null,
+    current: boolean | null
+  ) => void;
   /** Copies of one Edition in the draft to one Friend. */
   quantity: (friendId: string, editionId: string) => number;
   /** Sets a line: 0 takes it out, and a draft with no lines goes. `deckId` is the Deck the asking page is about: it
@@ -97,6 +102,19 @@ const DraftsContext = createContext<DraftsApi | null>(null);
 /** The drafts, or null outside the signed-in shell (the slots then draw nothing). */
 export function useBorrowDrafts(): DraftsApi | null {
   return useContext(DraftsContext);
+}
+
+/** A mounted Want List read blocks sending its scoped drafts until quantities are current. */
+export function useBorrowReadiness(
+  deckId: string | null,
+  current: boolean | null
+) {
+  const register = useBorrowDrafts()?.checkReadiness;
+  const source = useRef(Symbol());
+  useLayoutEffect(() => {
+    register?.(source.current, deckId, current);
+    return () => register?.(source.current, deckId, null);
+  }, [register, deckId, current]);
 }
 
 const STORAGE_PREFIX = "prizecheck.borrowDrafts.";
@@ -209,6 +227,21 @@ export function BorrowDraftsProvider({
 }) {
   const [drafts, setDrafts] = useState<Draft[]>(() => readDrafts(userId));
   const [composing, setComposing] = useState<string | null>(null);
+  const [checks, setChecks] = useState(
+    new Map<symbol, { deckId: string | null; current: boolean }>()
+  );
+  const checkReadiness = useCallback(
+    (source: symbol, deckId: string | null, current: boolean | null) => {
+      setChecks((previous) => {
+        const next = new Map(previous);
+        if (current === null) next.delete(source);
+        else next.set(source, { deckId, current });
+        return next;
+      });
+    },
+    []
+  );
+
   const opener = useRef<HTMLElement | null>(null);
   const { store } = useLoanRecovery();
   const guard = useFlowGuard();
@@ -252,6 +285,7 @@ export function BorrowDraftsProvider({
   const api = useMemo<DraftsApi>(
     () => ({
       drafts,
+      checkReadiness,
       quantity: (friendId, editionId) =>
         drafts
           .find((draft) => draft.friend.collector_id === friendId)
@@ -311,7 +345,7 @@ export function BorrowDraftsProvider({
         setComposing(friendId);
       },
     }),
-    [drafts, change]
+    [drafts, change, checkReadiness]
   );
 
   const draft = drafts.find((item) => item.friend.collector_id === composing);
@@ -336,6 +370,16 @@ export function BorrowDraftsProvider({
         <BorrowComposer
           key={draft.friend.collector_id}
           draft={draft}
+          current={
+            draft.lines.every(
+              (line) => line.cap === null || line.quantity <= line.cap
+            ) &&
+            Array.from(checks.values()).every(
+              (check) =>
+                (check.deckId !== null && check.deckId !== draft.deckId) ||
+                check.current
+            )
+          }
           onChange={(update) => change(draft.friend.collector_id, update)}
           onClose={() => setComposing(null)}
           onOpenLoan={onOpenLoan}
@@ -543,12 +587,14 @@ export async function readDecks(): Promise<DeckIndexEntry[]> {
 /** The composer: the draft's lines with steppers, For Deck, Return by, and Send Borrow Request. */
 function BorrowComposer({
   draft,
+  current,
   onChange,
   onClose,
   onOpenLoan,
   returnFocus,
 }: {
   draft: Draft;
+  current: boolean;
   onChange: (update: (draft: Draft | undefined) => Draft | null) => void;
   onClose: () => void;
   onOpenLoan: (id: string) => void;
@@ -660,7 +706,7 @@ function BorrowComposer({
       );
   }
   async function send() {
-    if (draft.replaces || frozen || fence.command.current) return;
+    if (!current || draft.replaces || frozen || fence.command.current) return;
     const tok = guard.capture();
     const fields = {
       lender_id: draft.friend.collector_id,
@@ -851,7 +897,7 @@ function BorrowComposer({
           )}
           <Button
             variant="primary"
-            disabled={frozen || !!draft.replaces}
+            disabled={!current || frozen || !!draft.replaces}
             onClick={() => void send()}
           >
             Send Borrow Request
@@ -868,11 +914,12 @@ function useDraftCap(
   card: DraftCard,
   cap: number,
   lendable: string,
-  deckId: string | null
+  deckId: string | null,
+  current: boolean
 ) {
   const drafts = useBorrowDrafts();
   useEffect(() => {
-    if (!drafts || cap < 0) return;
+    if (!drafts || !current || cap < 0) return;
     const draft = drafts.drafts.find(
       (item) =>
         item.friend.collector_id === friend.collector_id &&
@@ -884,17 +931,20 @@ function useDraftCap(
     );
     if (
       line &&
-      (line.cap !== cap || line.quantity > cap || line.lendable !== lendable)
+      (line.cap !== cap ||
+        (cap > 0 && line.quantity > cap) ||
+        line.lendable !== lendable)
     )
       drafts.set(
         friend,
         card,
-        Math.min(line.quantity, cap),
+        // A zero cap blocks sending but keeps the collector's draft for explicit removal.
+        cap > 0 ? Math.min(line.quantity, cap) : line.quantity,
         cap,
         lendable,
         deckId
       );
-  }, [drafts, friend, card, cap, lendable, deckId]);
+  }, [drafts, friend, card, cap, lendable, deckId, current]);
 }
 
 /**
@@ -910,9 +960,11 @@ export function AskControl({
   deckId = null,
   initialQuantity = 1,
   more = false,
+  current = true,
 }: {
   initialQuantity?: number;
   more?: boolean;
+  current?: boolean;
   friend: DraftFriend;
   card: DraftCard;
   cap: number;
@@ -922,7 +974,7 @@ export function AskControl({
   deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
-  useDraftCap(friend, card, cap, lendable, deckId);
+  useDraftCap(friend, card, cap, lendable, deckId, current);
   const ask = useRef<HTMLButtonElement>(null);
   const group = useRef<HTMLSpanElement>(null);
   const quantity = drafts?.quantity(friend.collector_id, card.edition_id) ?? 0;
@@ -941,7 +993,7 @@ export function AskControl({
     pressed.current = false;
     previous.current = quantity;
   }, [quantity]);
-  if (!drafts || cap < 1) return null;
+  if (!drafts || (cap < 1 && quantity === 0)) return null;
   const name =
     text === "Ask"
       ? `Ask ${friend.display_name} for ${card.name}`
@@ -951,7 +1003,10 @@ export function AskControl({
       <Button
         ref={ask}
         aria-label={name}
+        aria-disabled={!current}
+        className="aria-disabled:opacity-45"
         onClick={() => {
+          if (!current) return;
           pressed.current = true;
           drafts.set(
             friend,
@@ -972,7 +1027,7 @@ export function AskControl({
         label={`Copies of ${card.name} to ask ${friend.display_name} for`}
         value={quantity}
         min={0}
-        max={cap}
+        max={current ? cap : quantity}
         onChange={(next) => {
           pressed.current = true;
           drafts.set(friend, card, next, cap, lendable, deckId);
@@ -995,9 +1050,11 @@ export function AskChip({
   deckId = null,
   initialQuantity = 1,
   more = false,
+  current = true,
 }: {
   initialQuantity?: number;
   more?: boolean;
+  current?: boolean;
   friend: DraftFriend;
   card: DraftCard;
   cap: number;
@@ -1007,25 +1064,28 @@ export function AskChip({
   deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
-  useDraftCap(friend, card, cap, lendable, deckId);
-  if (cap < 1) return null;
+  useDraftCap(friend, card, cap, lendable, deckId, current);
+  const quantity = drafts?.quantity(friend.collector_id, card.edition_id) ?? 0;
+  const asked = quantity > 0;
+  if (cap < 1 && !asked) return null;
   if (!drafts)
     return (
       <span className="inline-flex min-h-chip items-center rounded-round border border-border-strong px-2.5 text-meta text-text-muted wrap-anywhere">
         {text}
       </span>
     );
-  const asked = drafts.quantity(friend.collector_id, card.edition_id) > 0;
   return (
     <button
       type="button"
       aria-pressed={asked}
+      aria-disabled={!current && !asked}
       title={
         asked
-          ? `In your Borrow Request to ${friend.display_name}`
-          : `Ask ${friend.display_name} to lend one`
+          ? `${cardCount(quantity)} in your Borrow Request to ${friend.display_name}`
+          : `Ask ${friend.display_name} to lend ${cardCount(initialQuantity)}`
       }
-      onClick={() =>
+      onClick={() => {
+        if (!current && !asked) return;
         drafts.set(
           friend,
           card,
@@ -1033,14 +1093,17 @@ export function AskChip({
           cap,
           lendable,
           deckId
-        )
-      }
-      className="group m-0 box-border inline-flex min-h-chip max-w-full cursor-pointer items-center border-0 bg-transparent p-0 text-left font-sans phone:min-h-tap"
+        );
+      }}
+      className="group aria-disabled:cursor-default aria-disabled:opacity-45 m-0 box-border inline-flex min-h-chip max-w-full cursor-pointer items-center border-0 bg-transparent p-0 text-left font-sans phone:min-h-tap"
     >
       <span className="box-border inline-flex min-h-chip max-w-full items-center gap-1 rounded-round border border-border-strong px-2.5 text-meta text-text-muted wrap-anywhere group-hover:border-control-outline group-aria-pressed:border-accent-border group-aria-pressed:bg-accent-wash group-aria-pressed:text-accent-strong phone:min-h-control">
         {asked && <span aria-hidden="true">✓</span>}
-        {more ? `Ask for ${initialQuantity} more from ` : "Borrow from "}
+        {more
+          ? `Ask for ${asked ? quantity : initialQuantity} more from `
+          : "Borrow from "}
         {text}
+        {asked && !more && ` · ${cardCount(quantity)} in draft`}
       </span>
     </button>
   );

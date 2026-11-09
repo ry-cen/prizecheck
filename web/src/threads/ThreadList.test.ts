@@ -539,6 +539,7 @@ for (const reason of ["returned", "written_off"] as const) {
         },
         section: "done",
         state: "closed",
+        closed_reason: reason,
         last_activity_at: "2026-11-08",
         latest: {
           kind: "message",
@@ -553,10 +554,6 @@ for (const reason of ["returned", "written_off"] as const) {
         },
       };
       vi.mocked(getLoans).mockResolvedValue([row]);
-      // Only the fields ThreadList reads; getThreadDetail's union is otherwise unrelated to this assertion.
-      vi.mocked(getThreadDetail).mockResolvedValue({
-        live_terms: { closed_reason: reason },
-      } as Awaited<ReturnType<typeof getThreadDetail>>);
       const host = document.createElement("div");
       const root = createRoot(host);
       try {
@@ -571,6 +568,7 @@ for (const reason of ["returned", "written_off"] as const) {
         expect(host.textContent).toContain("Misty: Thanks!");
         expect(host.textContent).toContain("2 cards");
         expect(host.textContent).not.toContain("written_off");
+        expect(getThreadDetail).not.toHaveBeenCalled();
       } finally {
         await act(async () => root.unmount());
         vi.clearAllMocks();

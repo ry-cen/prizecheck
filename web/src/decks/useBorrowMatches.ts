@@ -3,13 +3,28 @@ import { useLoansChanged, usePulseChanged } from "../inbox/Inbox";
 import {
   getPendingLoans,
   getWantListMatches,
+  type FriendCopy,
   type PendingLoans,
   type WantListMatches,
 } from "../social_generated";
 import type { WantList } from "../want_list_generated";
-import type { FriendMatches } from "../social/useFriendMatches";
-import type { PendingApi } from "./usePendingLoans";
-import { wantListPins } from "./usePendingLoans";
+import { useBorrowReadiness } from "../loans/BorrowDrafts";
+import type { PendingState } from "./pendingLoans";
+
+export type FriendMatches =
+  | { kind: "none" }
+  | {
+      kind: "ready";
+      hasFriends: boolean;
+      pending: boolean;
+      byCard: Map<string, FriendCopy[]>;
+    };
+export type PendingApi = { state: PendingState; retry: () => void };
+
+/** Holdings, counting settings and Deck List revisions already read by the Want List. */
+function wantListPins(list: WantList): string {
+  return `${list.owner_revision}:${list.settings_revision}:${list.deck_lists_digest}`;
+}
 
 /** Availability is bracketed by pending reads: a partial accept cannot mix old availability with new coverage. */
 export async function readBorrowMatches(
@@ -107,30 +122,22 @@ export function useBorrowMatches(
           visible.matches.cards.map((card) => [card.edition_id, card.copies])
         ),
       };
+  useBorrowReadiness(deck, list ? current : null);
   const pending: PendingApi = {
     retry,
     state: !deck
       ? { kind: "idle" }
-      : complete?.pending
+      : visible?.pending
         ? {
             kind: "ready",
             deckId: deck,
             lines: new Map(
-              complete.pending.lines.map((line) => [line.edition_id, line])
+              visible.pending.lines.map((line) => [line.edition_id, line])
             ),
-            stale: false,
+            stale: failed === key,
           }
         : failed === key
-          ? visible?.pending
-            ? {
-                kind: "ready",
-                deckId: deck,
-                lines: new Map(
-                  visible.pending.lines.map((line) => [line.edition_id, line])
-                ),
-                stale: true,
-              }
-            : { kind: "failed", deckId: deck }
+          ? { kind: "failed", deckId: deck }
           : { kind: "loading", deckId: deck },
   };
   return { friends, pending };

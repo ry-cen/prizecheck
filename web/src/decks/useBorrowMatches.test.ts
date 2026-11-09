@@ -9,14 +9,51 @@ import {
   type WantListMatches,
 } from "../social_generated";
 import type { WantList } from "../want_list_generated";
-import { borrowDefault, borrowRemainder } from "./pendingLoans";
+import {
+  borrowDefault,
+  borrowRemainder,
+  borrowOffer,
+  pendingText,
+} from "./pendingLoans";
 import { readBorrowMatches, useBorrowMatches } from "./useBorrowMatches";
+import { AskChip, BorrowDraftsProvider } from "../loans/BorrowDrafts";
+import { getDecks } from "../decks_generated";
+const { send, noteChanged, toast } = vi.hoisted(() => ({
+  send: vi.fn(),
+  noteChanged: vi.fn(),
+  toast: { show: vi.fn(), setLift: vi.fn() },
+}));
+vi.mock("../loans/LoanRecovery", () => ({
+  useLoanRecovery: () => ({
+    store: { blockerFor: () => null },
+    blockerFor: () => null,
+    intents: [],
+    accountName: "Ash",
+  }),
+  useFlowGuard: () => ({ capture: () => 1, live: () => true }),
+  useDurableSend: () => ({
+    send,
+    fence: {
+      command: { current: null },
+      pending: false,
+      boundary: { current: null },
+    },
+  }),
+}));
+vi.mock("../ui/Toast", () => ({ useToast: () => toast, useLift: () => 0 }));
+vi.mock("../workspace/media", () => ({
+  MOBILE_QUERY: "phone",
+  useMediaQuery: () => false,
+}));
+vi.mock("../decks_generated", () => ({ getDecks: vi.fn() }));
 let pulse = 0;
 vi.mock("../inbox/Inbox", () => ({
   usePulseChanged: () => pulse,
   useLoansChanged: () => 0,
+  useNoteLoansChanged: () => noteChanged,
 }));
-vi.mock("../social_generated", () => ({
+vi.mock("../social_generated", async (original) => ({
+  ...(await original<typeof import("../social_generated")>()),
   getPendingLoans: vi.fn(),
   getWantListMatches: vi.fn(),
 }));
@@ -173,3 +210,173 @@ it("refuses continually changing reads instead of guessing quantities", async ()
     readBorrowMatches("deck", new AbortController().signal)
   ).rejects.toThrow("changed during");
 });
+
+it.each(["pulse", "focus", "pins"])(
+  "keeps notes, chip identity, focus and draft quantity during a %s refresh, blocking new asks and sends",
+  async (trigger) => {
+    let revision = 0;
+    const answer = matches("3");
+    answer.cards[0].copies.push({
+      ...answer.cards[0].copies[0],
+      collector_id: "two",
+      display_name: "Brock",
+    });
+    vi.mocked(getPendingLoans).mockResolvedValue(pending("1"));
+    vi.mocked(getWantListMatches).mockResolvedValue(answer);
+    vi.mocked(getDecks).mockResolvedValue({
+      decks: [],
+      owner_revision: 1,
+      next_cursor: null,
+    });
+    window.sessionStorage.clear();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      }
+    );
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const dialog = HTMLDialogElement.prototype;
+    const originalShow = Object.getOwnPropertyDescriptor(dialog, "showModal");
+    const originalClose = Object.getOwnPropertyDescriptor(dialog, "close");
+    if (!originalShow)
+      Object.defineProperty(dialog, "showModal", {
+        configurable: true,
+        writable: true,
+        value() {},
+      });
+    if (!originalClose)
+      Object.defineProperty(dialog, "close", {
+        configurable: true,
+        writable: true,
+        value() {},
+      });
+    const show = vi.spyOn(dialog, "showModal").mockImplementation(function (
+      this: HTMLDialogElement
+    ) {
+      this.setAttribute("open", "");
+    });
+    const close = vi.spyOn(dialog, "close").mockImplementation(function (
+      this: HTMLDialogElement
+    ) {
+      this.removeAttribute("open");
+    });
+    function Probe() {
+      const { friends, pending: read } = useBorrowMatches(
+        list,
+        0,
+        String(revision)
+      );
+      const note =
+        read.state.kind === "ready" ? read.state.lines.get("A") : undefined;
+      const copies =
+        friends.kind === "ready" ? (friends.byCard.get("A") ?? []) : [];
+      const current =
+        friends.kind === "ready" &&
+        !friends.pending &&
+        read.state.kind === "ready" &&
+        !read.state.stale;
+      return h(
+        "div",
+        null,
+        h("p", null, pendingText(note)),
+        ...copies.map((copy) => {
+          const offer = borrowOffer(3, copy, note, note);
+          return h(AskChip, {
+            key: copy.collector_id,
+            friend: copy,
+            card: { ...copy, image_url: null },
+            cap: offer.cap,
+            initialQuantity: offer.quantity,
+            current,
+            more: true,
+            lendable: "3 spare",
+            text: copy.display_name,
+            deckId: "deck",
+          });
+        })
+      );
+    }
+    const render = () =>
+      root.render(
+        h(BorrowDraftsProvider, {
+          userId: "refresh-test",
+          onOpenLoan: vi.fn(),
+          children: h(Probe),
+        })
+      );
+    const button = (name: string) =>
+      Array.from(host.querySelectorAll("button")).find(
+        (node) => node.textContent === name
+      )!;
+    try {
+      await act(async () => render());
+      const [chip, other] = Array.from(
+        host.querySelectorAll<HTMLButtonElement>("[aria-pressed]")
+      );
+      await act(async () => chip.click());
+      expect(chip.textContent).toContain("Ask for 2 more from Misty");
+      await act(async () => button("Review").click());
+      const decrease = host.querySelector<HTMLButtonElement>(
+        '[aria-label^="Decrease Copies of Iono,"]'
+      )!;
+      await act(async () => decrease.click());
+      await act(async () => button("Keep draft").click());
+      expect(chip.textContent).toContain("Ask for 1 more from Misty");
+      chip.focus();
+      let release!: (answer: PendingLoans) => void;
+      vi.mocked(getPendingLoans).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      );
+      await act(async () => {
+        if (trigger === "pulse") pulse++;
+        else if (trigger === "pins") revision++;
+        else {
+          window.dispatchEvent(new Event("blur"));
+          window.dispatchEvent(new Event("focus"));
+        }
+        render();
+      });
+      expect(host.textContent).toContain("Asked Misty for 1");
+      expect(host.querySelectorAll("[aria-pressed]")).toHaveLength(2);
+      expect(host.querySelector("[aria-pressed]")).toBe(chip);
+      expect(document.activeElement).toBe(chip);
+      expect(chip.getAttribute("aria-pressed")).toBe("true");
+      expect(other.getAttribute("aria-disabled")).toBe("true");
+      await act(async () => other.click());
+      expect(other.getAttribute("aria-pressed")).toBe("false");
+      await act(async () => button("Review").click());
+      expect(button("Send Borrow Request").disabled).toBe(true);
+      await act(async () => button("Send Borrow Request").click());
+      expect(send).not.toHaveBeenCalled();
+      await act(async () => release(pending("1")));
+      expect(button("Send Borrow Request").disabled).toBe(false);
+      expect(chip.getAttribute("aria-pressed")).toBe("true");
+      expect(chip.textContent).toContain("Ask for 1 more from Misty");
+      await act(async () => button("Send Borrow Request").click());
+      expect(send).toHaveBeenCalledTimes(1);
+      // A newly covered line keeps the chosen draft for review/removal, rather than deleting it on refresh.
+      vi.mocked(getPendingLoans).mockResolvedValue(pending("3"));
+      pulse++;
+      await act(async () => render());
+      expect(chip.isConnected).toBe(true);
+      expect(chip.getAttribute("aria-pressed")).toBe("true");
+      expect(chip.textContent).toContain("Ask for 1 more from Misty");
+      expect(button("Send Borrow Request").disabled).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      show.mockRestore();
+      close.mockRestore();
+      if (!originalShow) Reflect.deleteProperty(dialog, "showModal");
+      if (!originalClose) Reflect.deleteProperty(dialog, "close");
+      window.sessionStorage.clear();
+    }
+  }
+);

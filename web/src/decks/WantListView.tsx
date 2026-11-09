@@ -58,7 +58,7 @@ import {
 } from "./TradeWantsPanel";
 import { useTradeWants, type TradeWantsApi } from "./useTradeWants";
 import { borrowOffer, pendingText } from "./pendingLoans";
-import type { PendingApi } from "./usePendingLoans";
+import type { PendingApi } from "./useBorrowMatches";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
@@ -107,7 +107,7 @@ function follow(event: MouseEvent, go: () => void) {
  *   again after it, and the new answer's `deck_lists_digest` makes the cost re-pair.
  * - **Friends' cards (#251):** a line a Friend can lend shows Friend chips, and the summary's **Buy / Get from Friends**
  *   switch shows one panel per card instead of the sections (`WantListFriends`). Both read Friends' cards apart from
- *   the Want List (`useFriendMatches`), so nothing above waits on them; without Friends there is no switch.
+ *   the Want List (`useBorrowMatches`), so nothing above waits on them; without Friends there is no switch.
  * - **Trading (#275):** each line has a Will accept select (this exact card, any finish, or any card with the same
  *   name), which reads the Want List again because the Swap hints follow it; and All Decks ends with the Trade Wants
  *   panel (`useTradeWants`), shown even without Decks. Neither changes a figure on the page.
@@ -345,7 +345,8 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
                   copy,
                   copy.edition_id === row.edition_id ? row.image_url : null
                 )}
-                cap={known ? offer.cap : -1}
+                cap={offer.cap}
+                current={known}
                 initialQuantity={offer.quantity}
                 lendable={lendableText(copy)}
                 deckId={shownScope}
@@ -611,7 +612,8 @@ export function NeededLines({
                         ? line.image_url
                         : null
                     )}
-                    cap={known ? offer.cap : -1}
+                    cap={offer.cap}
+                    current={known}
                     initialQuantity={offer.quantity}
                     more={!!pendingLine}
                     lendable={lendableText(copy)}

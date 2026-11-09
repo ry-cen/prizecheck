@@ -17373,6 +17373,24 @@
    },
    "ThreadItem": {
     "properties": {
+     "closed_reason": {
+      "anyOf": [
+       {
+        "enum": [
+         "declined",
+         "withdrawn",
+         "cancelled",
+         "returned",
+         "written_off"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Closed Reason"
+     },
      "id": {
       "format": "uuid",
       "title": "Id",
