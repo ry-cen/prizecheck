@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +12,7 @@ guardrails = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guardrails)
 
 PAIR = ('161_likely_reprint_dismissals.sql', '161_tcgplayer_large_art.sql')
+ALLOWED = {'161': PAIR}
 
 
 def tree(names):
@@ -22,7 +25,7 @@ def tree(names):
 class MigrationNumberTest(unittest.TestCase):
     def check(self, names, with_pair=True):
         with tree([*names, *(PAIR if with_pair else ())]) as directory:
-            return guardrails.migration_number_violations(directory)
+            return guardrails.migration_number_violations(directory, ALLOWED)
 
     def test_a_new_duplicate_fails(self):
         self.assertTrue(self.check(['001_a.sql', '002_b.sql', '002_c.sql']))
@@ -43,15 +46,42 @@ class MigrationNumberTest(unittest.TestCase):
         with tree(['001_a.sql', *PAIR]) as directory:
             (Path(directory)/'core').mkdir()
             (Path(directory)/'core'/'001_a.sql').write_text('select 1;\n')
-            self.assertEqual(guardrails.migration_number_violations(directory), [])
+            self.assertEqual(guardrails.migration_number_violations(directory, ALLOWED), [])
 
     def test_the_real_tree_passes(self):
-        self.assertEqual(guardrails.migration_number_violations(ROOT/'migrations'), [])
+        self.assertEqual(guardrails.migration_number_violations(ROOT/'migrations', guardrails.ALLOWED_DUPLICATE_MIGRATIONS), [])
 
-    def test_disabling_the_check_makes_the_duplicate_test_fail(self):
-        with mock.patch.object(guardrails, 'migration_number_violations', lambda directory, allowed=None: []):
-            with self.assertRaises(AssertionError):
-                self.test_a_new_duplicate_fails()
+    def test_a_zero_padded_name_fails(self):
+        self.assertTrue(self.check(['162_a.sql', '0162_b.sql']))
+
+    def test_names_the_runner_applies_without_a_number_and_underscore_fail(self):
+        for name in ('162.sql', '162-x.sql', '162a_x.sql', 'readme.sql'):
+            self.assertTrue(self.check(['162_a.sql', name]), name)
+
+    def test_the_allow_list_matches_in_any_order(self):
+        allowed = {'161': tuple(reversed(PAIR))}
+        with tree(PAIR) as directory:
+            self.assertEqual(guardrails.migration_number_violations(directory, allowed), [])
+
+    def test_nothing_is_allowed_by_default(self):
+        with tree(['001_a.sql']) as directory:
+            self.assertEqual(guardrails.migration_number_violations(directory), [])
+        with tree(PAIR) as directory:
+            self.assertTrue(guardrails.migration_number_violations(directory))
+
+    def test_main_runs_the_check_on_the_migrations_directory(self):
+        with tree([]) as root:
+            migrations = Path(root)/'migrations'
+            migrations.mkdir()
+            for name in ('001_a.sql', '001_b.sql'):
+                (migrations/name).write_text('select 1;\n')
+            output = io.StringIO()
+            with mock.patch.object(guardrails, 'ROOT', Path(root)), contextlib.redirect_stdout(output):
+                try:
+                    guardrails.main()
+                except OSError:
+                    pass  # later checks need files the planted tree lacks; the migration check runs first
+            self.assertIn('migrations share number 001', output.getvalue())
 
 
 if __name__ == '__main__':

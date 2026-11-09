@@ -394,19 +394,23 @@ ALLOWED_DUPLICATE_MIGRATIONS = {
 }
 
 
-def migration_number_violations(directory, allowed=ALLOWED_DUPLICATE_MIGRATIONS):
-    """Top-level ``*.sql`` files of ``directory`` (what the runner globs) may not share a numeric prefix, except the
-    exact filename groups in ``allowed``. A group with a file missing or renamed also fails, so the exception cannot drift."""
+def migration_number_violations(directory, allowed=None):
+    """Every top-level ``*.sql`` file of ``directory`` (the runner applies all of them) must be named ``NNN_<name>.sql`` and
+    may not share its number with another, except the exact filename groups in ``allowed`` (number to filenames, any
+    order; none by default). A group with a file missing or renamed also fails, so the exception cannot drift."""
+    allowed = allowed or {}
     names = sorted(path.name for path in Path(directory).glob('*.sql'))
     by_number = {}
-    for name in names:
-        found = re.match(r'(\d+)_', name)
-        if found:
-            by_number.setdefault(found.group(1), []).append(name)
     problems = []
+    for name in names:
+        found = re.match(r'([0-9]{3})_', name)
+        if found:
+            by_number.setdefault(int(found.group(1)), []).append(name)
+        else:
+            problems.append((name, 'FAILED: migration names must start with a three-digit number and an underscore, like 162_name.sql'))
     for number, files in sorted(by_number.items()):
-        if len(files) > 1 and tuple(files) != allowed.get(number):
-            problems.append((number, f'FAILED: migrations share number {number}: {", ".join(files)}; use the next free number'))
+        if len(files) > 1 and set(files) != set(allowed.get(f'{number:03d}', ())):
+            problems.append((f'{number:03d}', f'FAILED: migrations share number {number:03d}: {", ".join(files)}; use the next free number'))
     for number, expected in sorted(allowed.items()):
         for name in expected:
             if name not in names:
@@ -416,7 +420,7 @@ def migration_number_violations(directory, allowed=ALLOWED_DUPLICATE_MIGRATIONS)
 
 def main():
     failed = False
-    for name, reason in migration_number_violations(ROOT/'migrations'):
+    for name, reason in migration_number_violations(ROOT/'migrations', ALLOWED_DUPLICATE_MIGRATIONS):
         print(f'migrations/{name}: {reason}')
         failed = True
     migrations = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
