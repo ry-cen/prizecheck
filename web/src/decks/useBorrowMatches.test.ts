@@ -353,10 +353,14 @@ it.each(["pulse", "focus", "pins"])(
       expect(other.getAttribute("aria-pressed")).toBe("false");
       await act(async () => button("Review").click());
       expect(button("Send Borrow Request").disabled).toBe(true);
+      expect(
+        host.querySelector('dialog [role="status"]')?.textContent
+      ).toContain("Checking what's available…");
       await act(async () => button("Send Borrow Request").click());
       expect(send).not.toHaveBeenCalled();
       await act(async () => release(pending("1")));
       expect(button("Send Borrow Request").disabled).toBe(false);
+      expect(host.textContent).not.toContain("Checking what's available…");
       expect(chip.getAttribute("aria-pressed")).toBe("true");
       expect(chip.textContent).toContain("Ask for 1 more from Misty");
       await act(async () => button("Send Borrow Request").click());
@@ -369,6 +373,7 @@ it.each(["pulse", "focus", "pins"])(
       expect(chip.getAttribute("aria-pressed")).toBe("true");
       expect(chip.textContent).toContain("Ask for 1 more from Misty");
       expect(button("Send Borrow Request").disabled).toBe(true);
+      expect(host.textContent).not.toContain("Checking what's available…");
     } finally {
       await act(async () => root.unmount());
       host.remove();

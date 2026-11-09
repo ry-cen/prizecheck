@@ -96,6 +96,8 @@ async function lending(
   const deck = await createDeck(page, deckName);
   await setLine(page, deck, iono, listed);
   await befriend(page, misty.page);
+  // Complete the cold Want List load in prepared's existing setup budget.
+  await openScoped(page, deck);
   return { ids, iono, misty: misty.page, deck, deckName };
 }
 
@@ -120,12 +122,15 @@ const accept = (lender: Page, loan: string, edition: string, copies: number) =>
     lines: [{ edition_id: edition, promised: String(copies) }],
   });
 
-/** Opens the Want List on one Deck and waits for its first pending read and pulse. */
+/** Opens the Want List on one Deck and waits for that Deck's pending read. */
 async function openScoped(page: Page, deck: string) {
-  const pending = page.waitForResponse((response) => isPending(response.url()));
-  const pulse = page.waitForResponse((response) => isPulse(response.url()));
+  const pending = page.waitForResponse(
+    (response) =>
+      isPending(response.url()) &&
+      new URL(response.url()).searchParams.get("deck") === deck
+  );
   await page.goto(`${ORIGIN}/decks/want-list?deck=${deck}`);
-  await Promise.all([pending, pulse]);
+  await pending;
 }
 
 test("a Borrow Request sent from the Want List shows under its line without a reload", async ({
@@ -133,7 +138,6 @@ test("a Borrow Request sent from the Want List shows under its line without a re
   prepared,
 }) => {
   const { deck, deckName } = prepared;
-  await openScoped(page, deck);
   const lines = needs(page, deckName);
   await expect(lines).toContainText("2 of 2");
   await expect(lines).not.toContainText("Asked Misty W");

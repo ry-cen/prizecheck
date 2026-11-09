@@ -370,16 +370,11 @@ export function BorrowDraftsProvider({
         <BorrowComposer
           key={draft.friend.collector_id}
           draft={draft}
-          current={
-            draft.lines.every(
-              (line) => line.cap === null || line.quantity <= line.cap
-            ) &&
-            Array.from(checks.values()).every(
-              (check) =>
-                (check.deckId !== null && check.deckId !== draft.deckId) ||
-                check.current
-            )
-          }
+          current={Array.from(checks.values()).every(
+            (check) =>
+              (check.deckId !== null && check.deckId !== draft.deckId) ||
+              check.current
+          )}
           onChange={(update) => change(draft.friend.collector_id, update)}
           onClose={() => setComposing(null)}
           onOpenLoan={onOpenLoan}
@@ -615,6 +610,9 @@ function BorrowComposer({
   const scope = "borrow_request:" + draft.friend.collector_id;
   const blocker = blockerFor(scope);
   const frozen = busy || fence.pending || !!blocker;
+  const quantitiesValid = draft.lines.every(
+    (line) => line.cap === null || line.quantity <= line.cap
+  );
   const form = useRef<HTMLDivElement>(null);
   const close = () =>
     closeLoanRequest(form.current, fence.command.current !== null, onClose);
@@ -706,7 +704,14 @@ function BorrowComposer({
       );
   }
   async function send() {
-    if (!current || draft.replaces || frozen || fence.command.current) return;
+    if (
+      !current ||
+      !quantitiesValid ||
+      draft.replaces ||
+      frozen ||
+      fence.command.current
+    )
+      return;
     const tok = guard.capture();
     const fields = {
       lender_id: draft.friend.collector_id,
@@ -860,6 +865,11 @@ function BorrowComposer({
         <p role="alert" className="m-0 text-meta text-danger empty:hidden">
           {message}
         </p>
+        {!current && (
+          <p role="status" className="m-0 text-meta text-text-muted">
+            Checking what's available…
+          </p>
+        )}
         <div className="flex flex-wrap justify-end gap-2">
           <Button
             variant="quiet"
@@ -897,7 +907,9 @@ function BorrowComposer({
           )}
           <Button
             variant="primary"
-            disabled={!current || frozen || !!draft.replaces}
+            disabled={
+              !current || !quantitiesValid || frozen || !!draft.replaces
+            }
             onClick={() => void send()}
           >
             Send Borrow Request
