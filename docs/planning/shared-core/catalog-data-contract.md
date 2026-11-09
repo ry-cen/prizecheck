@@ -22,7 +22,7 @@ The direct shared catalog readers are:
 | Source under `api/app/` | SQL seam and purpose |
 | --- | --- |
 | `core/catalog/card_facts.py` | `CARD_FACTS`, `card_facts`: retained card display, search keys and `Card.order`. Used by social reads, Loans, Trades and Trade Lists. |
-| `holdings.py` | `add_holding`, `add_holdings`: active-generation availability; `leaf_holdings`: retained display, name/set/number filters and ordering. #521 moves its shared cursor dependency to `core/inventory/cursors.py`. |
+| `core/inventory/holdings.py` | `add_holding`, `add_holdings`: active-generation availability; `leaf_holdings`: retained display, name/set/number filters and ordering. #521 moves its shared cursor dependency to `core/inventory/cursors.py`. |
 | `core/inventory/collection.py` (#521) | Aggregate Collection, Edition distribution, Holding paging/totals, set choices and revision reads. Uses the retained display/art/set-code joins and catalog generation/revision reads below. Reads the effective attribute revision; facet columns, joins, predicates, values and cursor context are supplied by Pokémon. `/sets` inner joins retained display, so bare Printings supply no set choice. |
 | `card_accepts.py` | `ACCEPTED`, `accepts`: widen an Edition to its Printing's Editions or its current Card Identity's Editions. |
 | `core/trading/trade_wants.py` | `AVAILABLE`: whether an Edition may start a new Trade Wants line. |

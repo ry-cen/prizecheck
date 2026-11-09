@@ -77,6 +77,7 @@ def test_required_shared_relation_columns_keep_their_postgresql_types(conn):
     # predicate/join columns and operational/cache reads, not just serialized fields.
     required = {
         'catalog_state': {'singleton': 'boolean', 'active_generation': 'uuid', 'revision': 'bigint'},
+        'catalog_attribute_state': {'singleton': 'boolean', 'revision': 'bigint'},
         'catalog_edition': {'id': 'uuid', 'printing_id': 'uuid', 'descriptor': 'jsonb'},
         'catalog_printing': {'id': 'uuid', 'identity_id': 'uuid', 'public_ref': 'text'},
         'catalog_identity': {'id': 'uuid', 'display_name': 'text'},
