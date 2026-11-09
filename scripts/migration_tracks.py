@@ -9,9 +9,8 @@ There is no registry and no run-time game setting. A per-database entry script (
 its tracks, in the order they apply, and hands them to ``apply`` with its own connection. Core migrations never reference a
 game's tables and game migrations may depend on core, so an entry lists ``core`` before its game's track.
 
-TODO(#533): the duplicate-migration-number guardrail is its own change (#604, branch
-test/533-migration-duplicate-number-guardrail), and it checks only the root directory. It must run for each track, one
-number space per track, before any track directory lands (S10). The runner only refuses a repeated ledger name.
+The duplicate-number guardrail (scripts/check_guardrails.py) runs for the root and for each track, one number space per
+track. The runner itself only refuses a repeated ledger name.
 """
 from dataclasses import dataclass
 from pathlib import Path
