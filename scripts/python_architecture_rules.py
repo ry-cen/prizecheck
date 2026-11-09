@@ -3,7 +3,8 @@ assert by file name). Names, patterns and exact lists only; the engine is in the
 (app.social.friends); the one repository-path rule is import-aliases-tsv-readers.
 
 A rule's list is exact where it says importers, readers or modules: a module missing from it fails, and so does one that
-is not there. Two rules are subsets (tcgcsv-host, several-owners-readers). No rule has an allow-list escape: a package that
+is not there. tcgcsv-host and several-owners-readers are subsets. Caller rules declare exact or subset matching explicitly,
+with required callers for the subsets. No rule has an allow-list escape: a package that
 moves a module renames its entry here and lists the change in its PR. Adding a module or a name to a list is a change of
 expectation and needs the owner.
 """
@@ -25,6 +26,18 @@ INVENTORY_TABLE = re.compile(
 # For trade Locations (140) and the listable rule (142, trading #269). Matched against the whole source text, docstrings
 # and comments too, so a social module's prose must never write one of these names followed by an open parenthesis.
 HIDDEN_CALL = re.compile(r'\b(?:hidden_location(?:s|_ids)|for_trade_locations|trade_listable)\s*\(')
+# The six remaining caller scans, copied unchanged from test_social_contract.py. Match string constants and f-string
+# pieces, never docstrings; a bare name in a message is fine, but a matching SQL/call form in any message still counts.
+RESERVING_PICKS_CALL = re.compile(r'\breserving_picks\s*\(')
+DISCOVERY_TABLE = re.compile(
+    r'(?:\bFROM|\bJOIN|\bUPDATE|\bINTO|\bUSING|\bTRUNCATE(?:\s+TABLE)?|\bLATERAL|,|\()\s*(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
+    r'(?:discovery_setting|zip_centroid|open_discovery)"?\b', re.IGNORECASE)
+REACH_CALL = re.compile(r'\b(?:trade_reach|nearby_collectors)\s*\(')
+MESSAGE_TABLE = re.compile(
+    r'(?:\bFROM|\bJOIN|\bUPDATE|\bINTO|\bUSING|\bTRUNCATE(?:\s+TABLE)?|\bLATERAL|,|(?<!%)\()\s*(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
+    r'(?:message|conversation_member)"?\b', re.IGNORECASE)
+LISTABLE_CALL = re.compile(r'\btrade_listable\s*\(')
+FOR_TRADE_CALL = re.compile(r'\bfor_trade_locations\s*\(')
 # A read of several collectors' inventory in one statement (ADR 0015): a string constant that reads an inventory table
 # and filters on a list of owners or borrowers. Only the choke point may write one. Owner and admin aggregate reads in
 # another form are exempt by the ADR, and review catches the forms this misses (IN lists, joins, split constants).
@@ -254,6 +267,26 @@ RULES = {
         'readers': {'app.social.friends', 'app.social.friend_copies', 'app.social.friend_reads'}},
     # Only the choke point may write a read of several collectors' inventory in one statement (ADR 0015). A subset.
     'several-owners-readers': {'readers': {'app.social.friend_copies'}},
+    # Subset with counts mandatory; every matching counts string must retain the single-owner ARRAY[%s] form.
+    # The original API tests stay in place until a later reviewed change removes them. A relocation updates these
+    # dotted module identities, including required callers and per-caller patterns, rather than engine file paths.
+    'reserving-picks-callers': {
+        'pattern': RESERVING_PICKS_CALL,
+        'callers': {'app.social.counts', 'app.social.friend_copies'}, 'exact': False,
+        'required': {'app.social.counts'},
+        'caller_patterns': {'app.social.counts': re.compile(r'\breserving_picks\s*\(\s*ARRAY\[%s\]')}},
+    'discovery-callers': {
+        'pattern': DISCOVERY_TABLE, 'callers': {'app.social.discovery'}, 'exact': True},
+    'reach-callers': {
+        'pattern': REACH_CALL, 'callers': {'app.social.friend_copies', 'app.social.discovery'}, 'exact': True},
+    # Reports is permitted, not mandatory; conversations must still name a message/member table.
+    'message-callers': {
+        'pattern': MESSAGE_TABLE, 'callers': {'app.social.conversations', 'app.social.reports'}, 'exact': False,
+        'required': {'app.social.conversations'}},
+    'listable-callers': {
+        'pattern': LISTABLE_CALL, 'callers': {'app.trade_list', 'app.social.friend_copies'}, 'exact': True},
+    'for-trade-callers': {
+        'pattern': FOR_TRADE_CALL, 'callers': {'app.trade_list'}, 'exact': True},
     # The trade steps no longer ask the Friends set: they take the ids they are given.
     'trade-steps-no-friend-ids': {'module': 'app.games.pokemon.trading.trade_inventory', 'name': 'friend_ids'},
     'social-area-complete': {'directory': 'social'},
