@@ -31,8 +31,10 @@ test("Decks read failure offers one Retry and recovers the list", async ({
   await page.reload();
   const decks = page.getByRole("region", { name: "Your Decks", exact: true });
   const message = "Decks are temporarily unavailable.";
-  await expect(decks.getByRole("status")).toContainText(message);
-  await expect(decks.getByText(message, { exact: false })).toHaveCount(1);
+  const notice = decks.getByRole("status").locator("span");
+  const retry = decks.getByRole("button", { name: "Retry", exact: true });
+  await expect(notice).toHaveText(message);
+  await expect(decks.getByText(message, { exact: true })).toHaveCount(1);
   await expect(
     decks.getByRole("button", { name: "Retry", exact: true })
   ).toHaveCount(1);
@@ -41,16 +43,32 @@ test("Decks read failure offers one Retry and recovers the list", async ({
     contentType: "text/plain",
   });
 
+  // A second failed read keeps both the exact message and keyboard focus on Retry.
+  await retry.focus();
+  const failedRetry = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/decks" &&
+      response.status() === 503
+  );
+  await retry.press("Enter");
+  await failedRetry;
+  await expect(notice).toHaveText(message);
+  await expect(retry).toHaveCount(1);
+  await expect(retry).toBeFocused();
+
   const failedReads = reads;
   fail = false;
-  await decks.getByRole("button", { name: "Retry", exact: true }).click();
+  await retry.press("Enter");
   await expect(decks.getByRole("link", { name, exact: true })).toBeVisible();
   expect(reads).toBeGreaterThan(failedReads);
+  await expect(
+    decks.getByRole("heading", { name: "Your Decks", exact: true })
+  ).toBeFocused();
   await expect(decks.getByRole("status")).toHaveCount(0);
   await expect(
     decks.getByRole("button", { name: "Retry", exact: true })
   ).toHaveCount(0);
-  await expect(decks.getByText(message, { exact: false })).toHaveCount(0);
+  await expect(decks.getByText(message, { exact: true })).toHaveCount(0);
   await test.info().attach("recovered-decks-dom", {
     body: await decks.innerText(),
     contentType: "text/plain",
