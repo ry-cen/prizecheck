@@ -57,6 +57,12 @@ class PythonBoundariesTest(unittest.TestCase):
                  'util.py': '', 'prices.py': '', 'mixed_thing.py': ''}
         self.assertEqual(run(files), ['forbidden import app.games.pokemon.a -> app.games.riftbound.b (game pokemon to game riftbound)'])
 
+    def test_riftbound_to_pokemon_fails(self):
+        files = {'games/__init__.py': '', 'games/pokemon/__init__.py': '', 'games/riftbound/__init__.py': '',
+                 'games/riftbound/a.py': 'from ..pokemon import b', 'games/pokemon/b.py': '',
+                 'util.py': '', 'prices.py': '', 'mixed_thing.py': ''}
+        self.assertEqual(run(files), ['forbidden import app.games.riftbound.a -> app.games.pokemon.b (game riftbound to game pokemon)'])
+
     def test_a_game_may_import_core_and_root_may_import_anything(self):
         files = {'games/__init__.py': '', 'games/pokemon/__init__.py': '', 'games/pokemon/a.py': 'from app import util',
                  'util.py': '', 'main.py': 'from app.games.pokemon import a\nimport app.prices', 'prices.py': '',
