@@ -388,8 +388,41 @@ def set_code_migration_violations(migrations, tsv_text):
     return [('migrations', 'FAILED: no migration carries a set_codes.tsv digest; run scripts/set_code_migration.py <next number>')]
 
 
+# Migration numbers #564 (IM-11) left duplicated: nothing is renumbered, and no new duplicate may appear.
+ALLOWED_DUPLICATE_MIGRATIONS = {
+    '161': ('161_likely_reprint_dismissals.sql', '161_tcgplayer_large_art.sql'),
+}
+
+
+def migration_number_violations(directory, allowed=None):
+    """Every top-level ``*.sql`` file of ``directory`` (the runner applies all of them) must be named ``NNN_<name>.sql`` and
+    may not share its number with another, except the exact filename groups in ``allowed`` (number to filenames, any
+    order; none by default). A group with a file missing or renamed also fails, so the exception cannot drift."""
+    allowed = allowed or {}
+    names = sorted(path.name for path in Path(directory).glob('*.sql'))
+    by_number = {}
+    problems = []
+    for name in names:
+        found = re.match(r'([0-9]{3})_', name)
+        if found:
+            by_number.setdefault(int(found.group(1)), []).append(name)
+        else:
+            problems.append((name, 'FAILED: migration names must start with a three-digit number and an underscore, like 162_name.sql'))
+    for number, files in sorted(by_number.items()):
+        if len(files) > 1 and set(files) != set(allowed.get(f'{number:03d}', ())):
+            problems.append((f'{number:03d}', f'FAILED: migrations share number {number:03d}: {", ".join(files)}; use the next free number'))
+    for number, expected in sorted(allowed.items()):
+        for name in expected:
+            if name not in names:
+                problems.append((number, f'FAILED: allow-listed duplicate migration {name} is missing or renamed'))
+    return problems
+
+
 def main():
     failed = False
+    for name, reason in migration_number_violations(ROOT/'migrations', ALLOWED_DUPLICATE_MIGRATIONS):
+        print(f'migrations/{name}: {reason}')
+        failed = True
     migrations = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
     for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/games/pokemon/catalog/set_codes.tsv').read_text(encoding='utf-8')):
         print(f'{name}: {reason}')
