@@ -45,7 +45,7 @@ from ..identity import require_owner, verified_user
 from ..core.catalog.card_facts import card_facts
 from .conversations import account_changed, pair_row
 from .threads import ThreadTouch, touch_threads, decode_cursor, encode_cursor, normalize_text
-from .loans import end_loans_between
+from .loans import UNCONFIRMED_HANDOVER, end_loans_between
 from .discovery import (account_state, lock_discovery, reach_one, remove_from_discovery, restore_discovery, switch_off,
                         trader_user)
 from .friends import _command, command_payload, place_block
@@ -436,9 +436,9 @@ def _decide_row(conn, report, owner_id: str, action: str, note: str | None) -> R
 
 def unconfirmed_partners(conn, user_id: str) -> tuple[list[str], list[UUID]]:
     """All cancellable Loan and Trade partners, read twice around the owner locks."""
-    rows = conn.execute("""SELECT borrower_id AS a,lender_id AS b,thread_id FROM loan
+    rows = conn.execute(f"""SELECT borrower_id AS a,lender_id AS b,thread_id FROM loan
       WHERE (borrower_id=%(me)s OR lender_id=%(me)s) AND borrower_id IS NOT NULL AND lender_id IS NOT NULL
-        AND state IN ('requested','offered','accepted') AND lender_handover_at IS NULL AND borrower_handover_at IS NULL
+        AND {UNCONFIRMED_HANDOVER}
       UNION ALL SELECT proposer_id,recipient_id,thread_id FROM trade
       WHERE (proposer_id=%(me)s OR recipient_id=%(me)s) AND proposer_id IS NOT NULL AND recipient_id IS NOT NULL
         AND state IN ('proposed','accepted') AND proposer_swap_at IS NULL AND recipient_swap_at IS NULL""", {'me': user_id}).fetchall()

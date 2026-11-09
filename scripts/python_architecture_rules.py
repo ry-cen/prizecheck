@@ -111,6 +111,7 @@ ALLOWED_IMPORTS = {
         ('app.social.conversations', 'encode_cursor'), ('app.social.conversations', 'decode_cursor'),
         ('app.social.trades', 'end_trades_between'), ('app.social.trades', 'unconfirmed_partners'),
         ('app.social.loans', 'end_loans_between'),
+        ('app.social.loans', 'UNCONFIRMED_HANDOVER'),
         ('app.core.catalog.card_facts', 'card_facts')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
