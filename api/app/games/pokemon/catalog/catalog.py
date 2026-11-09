@@ -19,6 +19,9 @@ from psycopg.rows import dict_row
 
 from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
+from .catalog_run_states import (LEASE_INTERVAL_SQL, OUTCOME_FAILED, OUTCOME_SUCCEEDED, PHASE_COMPLETE,
+                                 PHASE_ENUMERATING, PHASE_FAILED, PHASE_FETCHING, PHASE_PROMOTING,
+                                 PHASE_QUEUED, PHASE_VALIDATING)
 from ..formats.format_standing import rebuild_stale_best_effort
 from .evolution_roots import refresh_evolution_roots
 from ..prices.catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, card_tcgplayer_candidate, fingerprint, normalized_name, refresh_editions, rule_projection,
@@ -460,7 +463,7 @@ def get_or_insert(conn, select, select_args, insert, insert_args):
 
 
 def _progress(conn, run_id: UUID, phase: str, **counts):
-    fields = ["phase = %s", "lease_until = now() + interval '2 minutes'"]
+    fields = ["phase = %s", f"lease_until = now() + {LEASE_INTERVAL_SQL}"]
     values = [phase]
     for key, value in counts.items():
         fields.append(f"{key} = %s")
@@ -480,12 +483,12 @@ def claim_run(conn, run_id: UUID) -> UUID | None:
         raise RunnerBusy("Catalog importer already running")
     conn.commit()
     with conn.transaction():
-        row = conn.execute("""SELECT id FROM catalog_run WHERE id=%s AND outcome IS NULL
-          AND phase='queued' FOR UPDATE""", (run_id,)).fetchone()
+        row = conn.execute(f"""SELECT id FROM catalog_run WHERE id=%s AND outcome IS NULL
+          AND phase='{PHASE_QUEUED}' FOR UPDATE""", (run_id,)).fetchone()
         if not row:
             conn.execute("SELECT pg_advisory_unlock(914703)")
             return None
-        conn.execute("UPDATE catalog_run SET phase='enumerating', lease_until=now()+interval '2 minutes' WHERE id=%s", (run_id,))
+        conn.execute(f"UPDATE catalog_run SET phase='{PHASE_ENUMERATING}', lease_until=now()+{LEASE_INTERVAL_SQL} WHERE id=%s", (run_id,))
     return run_id
 
 
@@ -541,7 +544,7 @@ def _fetch_records(conn, run_id: UUID, source, first) -> dict:
                 if not isinstance(records[source_id], dict) or records[source_id].get("id") != source_id:
                     raise CatalogError("Full record source ID mismatch")
                 if len(records) % 50 == 0:
-                    _progress(conn, run_id, "fetching", fetched_count=len(records))
+                    _progress(conn, run_id, PHASE_FETCHING, fetched_count=len(records))
                 next_id = next(remaining, None)
                 if next_id is not None:
                     pending[pool.submit(source.fetch, next_id)] = next_id
@@ -550,7 +553,7 @@ def _fetch_records(conn, run_id: UUID, source, first) -> dict:
 
 def _validate_records(conn, run_id: UUID, source, first, records) -> list:
     """Normalize the fetched records and refuse excluded, duplicate or suddenly missing source IDs."""
-    _progress(conn, run_id, "validating", fetched_count=len(records))
+    _progress(conn, run_id, PHASE_VALIDATING, fetched_count=len(records))
     second = source.enumerate()
     if first != second:
         raise CatalogError("English enumeration changed during the run")
@@ -773,7 +776,7 @@ def _promote(conn, run_id: UUID, first, records, normalized, set_details, raw, b
         # Contained: the roots are derived data, so a failure must not abort the import that stored its generation.
         refresh_evolution_roots(conn, contain=True)
         conn.execute("UPDATE catalog_state SET active_generation=%s, revision=revision+1, last_success=now() WHERE singleton", (run_id,))
-        conn.execute("UPDATE catalog_run SET phase='complete', outcome='succeeded', finished_at=now(), lease_until=NULL WHERE id=%s", (run_id,))
+        conn.execute(f"UPDATE catalog_run SET phase='{PHASE_COMPLETE}', outcome='{OUTCOME_SUCCEEDED}', finished_at=now(), lease_until=NULL WHERE id=%s", (run_id,))
         # Keep current and previous successful compressed raw generations.
         conn.execute("""DELETE FROM catalog_generation WHERE id NOT IN (
           SELECT id FROM catalog_generation ORDER BY imported_at DESC LIMIT 2)""")
@@ -800,18 +803,18 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
     try:
         source = source or TCGdexSource()
         first = source.enumerate()
-        _progress(conn, run_id, "fetching", enumerated_count=len(first))
+        _progress(conn, run_id, PHASE_FETCHING, enumerated_count=len(first))
         records = _fetch_records(conn, run_id, source, first)
         normalized = _validate_records(conn, run_id, source, first, records)
         set_details = _set_details(source, normalized)
         raw = _build_raw(records, first)
-        _progress(conn, run_id, "promoting", validated_count=len(normalized))
+        _progress(conn, run_id, PHASE_PROMOTING, validated_count=len(normalized))
         _promote(conn, run_id, first, records, normalized, set_details, raw, before_promotion)
         _publish_after_commit(conn, run_id, source)
     except BaseException as exc:
         conn.rollback()
         safe = str(exc) if isinstance(exc, CatalogError) else "Catalog import failed; start a new pull"
-        conn.execute("UPDATE catalog_run SET phase='failed', outcome='failed', error=%s, finished_at=now(), lease_until=NULL WHERE id=%s AND outcome IS NULL", (safe[:180], run_id))
+        conn.execute(f"UPDATE catalog_run SET phase='{PHASE_FAILED}', outcome='{OUTCOME_FAILED}', error=%s, finished_at=now(), lease_until=NULL WHERE id=%s AND outcome IS NULL", (safe[:180], run_id))
         conn.commit()
         raise
     finally:

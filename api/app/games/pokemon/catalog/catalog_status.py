@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from . import catalog_dispatch
+from .catalog_run_states import LEASE_END_SQL, OUTCOME_SUCCEEDED
 from app.db import connect
 from ..prices.metadata_reviews import matched_by_number_editions
 from app.identity import require_owner, verified_user
@@ -103,8 +104,8 @@ def catalog_status(user_id: str = Depends(verified_user)):
 def owner_catalog_status(user_id: str = Depends(verified_user)):
     with connect() as conn:
         require_owner(conn, user_id)
-        run = conn.execute("""SELECT id,phase,outcome,enumerated_count,fetched_count,validated_count,error,started_at,finished_at,
-          (outcome IS NULL AND coalesce(lease_until,started_at+interval '2 minutes')<=clock_timestamp()
+        run = conn.execute(f"""SELECT id,phase,outcome,enumerated_count,fetched_count,validated_count,error,started_at,finished_at,
+          (outcome IS NULL AND {LEASE_END_SQL}<=clock_timestamp()
            AND NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND granted AND database=(
                SELECT oid FROM pg_database WHERE datname=current_database())
              AND classid=0 AND objid=%s AND objsubid=1)) AS heartbeat_stale
@@ -119,10 +120,10 @@ def owner_catalog_status(user_id: str = Depends(verified_user)):
           coalesce(s.source_max < now()-interval '48 hours', true) AS source_stale
           FROM (SELECT max(finished_at) AS good FROM price_import WHERE outcome IN ('imported','unchanged')) g,
                (SELECT max(source_updated_at) AS source_max FROM tcgplayer_price) s""").fetchone()
-        check = conn.execute("""SELECT c.outcome,c.started_at,c.finished_at,c.new_count,c.removed_count,c.catalog_run_id,
+        check = conn.execute(f"""SELECT c.outcome,c.started_at,c.finished_at,c.new_count,c.removed_count,c.catalog_run_id,
           r.outcome AS run_outcome,c.error_code,c.index_exit_code,
           (c.outcome IS NULL AND c.started_at < clock_timestamp() - interval '30 minutes') AS unfinished_stale,
-          EXISTS (SELECT 1 FROM catalog_run s WHERE s.outcome = 'succeeded' AND s.finished_at > c.started_at) AS pull_succeeded_after
+          EXISTS (SELECT 1 FROM catalog_run s WHERE s.outcome = '{OUTCOME_SUCCEEDED}' AND s.finished_at > c.started_at) AS pull_succeeded_after
           FROM catalog_check c LEFT JOIN catalog_run r ON r.id = c.catalog_run_id
           ORDER BY c.started_at DESC, c.id LIMIT 1""").fetchone()
         return OwnerCatalogStatus(catalog=catalog_status_row(conn), run=CatalogRun(**run) if run else None,
