@@ -46,7 +46,7 @@ type Facts = {
 // time per Deck. Each request has its own deadline from when it is sent (timedRead).
 const AT_ONCE = 2;
 
-const UNAVAILABLE = "Decks are temporarily unavailable. Please retry.";
+const UNAVAILABLE = "Decks are temporarily unavailable.";
 const LINK =
   "inline-flex h-control items-center gap-1 rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:h-control-phone";
 
@@ -435,9 +435,12 @@ export function DecksIndexPage({ active, onOpenDeck, onNavigate }: Props) {
           </Button>
         )}
         {notice && (
-          <p role="status" className="m-0 text-body text-warning">
-            {notice}
-          </p>
+          <div role="status" className="m-0 text-body text-warning">
+            {notice}{" "}
+            {notice === UNAVAILABLE && (
+              <Button onClick={() => void loadIndex()}>Retry</Button>
+            )}
+          </div>
         )}
       </section>
       <PublishedDecks
