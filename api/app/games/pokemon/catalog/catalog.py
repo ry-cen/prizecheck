@@ -7,7 +7,6 @@ import os
 import random
 import re
 import time
-import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import date
 from typing import NamedTuple
@@ -22,7 +21,7 @@ from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
 from ..formats.format_standing import rebuild_stale_best_effort
 from .evolution_roots import refresh_evolution_roots
-from ..prices.catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, card_tcgplayer_candidate, refresh_editions, rule_projection,
+from ..prices.catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, card_tcgplayer_candidate, fingerprint, normalized_name, refresh_editions, rule_projection,
                               refresh_printing)
 from ..prices.price_binding import rebind_best_effort
 from .public_catalog import publish_catalog_best_effort
@@ -40,14 +39,6 @@ MAX_CARDS = 100_000
 
 class CatalogError(Exception):
     pass
-
-
-def normalized_name(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFC", value).split())
-
-
-def fingerprint(value: dict) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 # Review identity deliberately excludes mutable lookup and quote information.
