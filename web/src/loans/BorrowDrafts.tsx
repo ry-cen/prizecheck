@@ -279,7 +279,7 @@ export function BorrowDraftsProvider({
                 : existing
                   ? base.lines.map((line) =>
                       line === existing
-                        ? { ...line, quantity, cap: cap ?? line.cap }
+                        ? { ...line, quantity, cap: cap ?? line.cap, lendable }
                         : line
                     )
                   : [
@@ -862,6 +862,41 @@ function BorrowComposer({
   );
 }
 
+/** Only a known, current cap may reconcile a draft; another Deck's draft keeps its own scope. */
+function useDraftCap(
+  friend: DraftFriend,
+  card: DraftCard,
+  cap: number,
+  lendable: string,
+  deckId: string | null
+) {
+  const drafts = useBorrowDrafts();
+  useEffect(() => {
+    if (!drafts || cap < 0) return;
+    const draft = drafts.drafts.find(
+      (item) =>
+        item.friend.collector_id === friend.collector_id &&
+        item.deckId === deckId
+    );
+    if (!draft || draft.replaces) return;
+    const line = draft.lines.find(
+      (item) => item.edition_id === card.edition_id
+    );
+    if (
+      line &&
+      (line.cap !== cap || line.quantity > cap || line.lendable !== lendable)
+    )
+      drafts.set(
+        friend,
+        card,
+        Math.min(line.quantity, cap),
+        cap,
+        lendable,
+        deckId
+      );
+  }, [drafts, friend, card, cap, lendable, deckId]);
+}
+
 /**
  * **Ask** (Get from Friends) or **Ask to borrow** (the card popup, a Friend's Collection): adds one copy to the
  * Friend's draft, then turns into a stepper up to what the Friend could lend; stepping to 0 takes the line out.
@@ -887,6 +922,7 @@ export function AskControl({
   deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
+  useDraftCap(friend, card, cap, lendable, deckId);
   const ask = useRef<HTMLButtonElement>(null);
   const group = useRef<HTMLSpanElement>(null);
   const quantity = drafts?.quantity(friend.collector_id, card.edition_id) ?? 0;
@@ -971,6 +1007,7 @@ export function AskChip({
   deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
+  useDraftCap(friend, card, cap, lendable, deckId);
   if (cap < 1) return null;
   if (!drafts)
     return (

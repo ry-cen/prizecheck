@@ -1,8 +1,19 @@
 import { TradingAvailability } from "./TradingAvailability";
-import { agreementText, itemState, timelineText } from "./threadText";
+import {
+  agreementText,
+  currentCardsText,
+  itemState,
+  loanOutcome,
+  timelineText,
+} from "./threadText";
 import { waitingAction } from "./threadPresentation";
 import { useEffect, useRef, useState } from "react";
-import { getLoans, getTrades, type ThreadItem } from "../social_generated";
+import {
+  getLoans,
+  getTrades,
+  getThreadDetail,
+  type ThreadItem,
+} from "../social_generated";
 import { useLoansChanged, usePulseChanged } from "../inbox/Inbox";
 import { useFirstReadSettled, useReadOnShow } from "../shell/keptRead";
 import { Button } from "../ui/Button";
@@ -28,6 +39,7 @@ export function ThreadList({
   revision?: number;
 }) {
   const [rows, setRows] = useState<ThreadItem[] | null>(null);
+  const [outcomes, setOutcomes] = useState<Record<string, string>>({});
   const lastRows = useRef(rows);
   lastRows.current = rows;
   const [failed, setFailed] = useState(false);
@@ -50,8 +62,34 @@ export function ThreadList({
     reading.current = controller;
     (kind === "trade" ? getTrades : getLoans)(controller.signal)
       .then(
-        (next) => {
+        async (next) => {
           if (!controller.signal.aborted) {
+            const closed =
+              kind === "loan"
+                ? await Promise.all(
+                    next
+                      .filter((row) => row.state === "closed")
+                      .map(async (row) => {
+                        try {
+                          const detail = await getThreadDetail(
+                            "loan",
+                            row.id,
+                            controller.signal
+                          );
+                          return [
+                            row.id,
+                            "live_terms" in detail
+                              ? loanOutcome(detail.live_terms.closed_reason)
+                              : "Closed",
+                          ] as const;
+                        } catch {
+                          return [row.id, "Closed"] as const;
+                        }
+                      })
+                  )
+                : [];
+            if (controller.signal.aborted) return;
+            setOutcomes(Object.fromEntries(closed));
             setRows(next);
             setFailed(false);
           }
@@ -166,14 +204,10 @@ export function ThreadList({
             >
               <strong>{row.other.display_name}</strong>
               <span className="text-meta text-text-muted">
-                {itemState(row)}
+                {outcomes[row.id] ?? itemState(row)}
               </span>
               <span>{agreementText(row)}</span>
-              <span>
-                {row.summary.cards
-                  .map((card) => `${card.copies} ${card.name}`)
-                  .join(" · ")}
-              </span>
+              <span>{currentCardsText(row)}</span>
               {row.latest?.message && (
                 <span className="line-clamp-2 text-meta text-text-muted whitespace-pre-wrap wrap-anywhere">
                   {timelineText(

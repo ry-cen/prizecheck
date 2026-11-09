@@ -1,6 +1,12 @@
 import { expect, it } from "vitest";
 import type { EventView, TimelineItem } from "../social_generated";
-import { agreementText, itemState, timelineText } from "./threadText";
+import {
+  agreementText,
+  currentCardsText,
+  itemState,
+  loanOutcome,
+  timelineText,
+} from "./threadText";
 const event = (kind: string, data?: EventView["data"]): TimelineItem => ({
   kind: "event",
   at: "2026-11-04T10:00:00Z",
@@ -173,4 +179,63 @@ it("describes removing cash and a return date without a raw diff", () => {
   ).toBe(
     "Misty: Changed the Loan terms · Cash now: No cash · Removed the return date"
   );
+});
+
+it("keeps distinct card directions through a counter", () => {
+  const iono = {
+    edition_id: "iono",
+    name: "Iono",
+    copies: "1",
+    image_url: null,
+  };
+  const arven = {
+    edition_id: "arven",
+    name: "Arven",
+    copies: "1",
+    image_url: null,
+  };
+  expect(
+    currentCardsText({
+      kind: "trade",
+      summary: {
+        you_give: "1",
+        you_get: "1",
+        cards: [
+          { ...iono, side: "you_give" },
+          { ...arven, side: "you_get" },
+        ],
+      },
+    })
+  ).toBe("You give 1 Iono · You get 1 Arven");
+  expect(
+    currentCardsText({
+      kind: "trade",
+      summary: {
+        you_give: "1",
+        you_get: "1",
+        cards: [
+          { ...iono, side: "you_get" },
+          { ...arven, side: "you_give" },
+        ],
+      },
+    })
+  ).toBe("You give 1 Arven · You get 1 Iono");
+});
+it.each([
+  ["returned", "Returned"],
+  ["written_off", "Written off"],
+  ["declined", "Declined"],
+  ["withdrawn", "Withdrawn"],
+] as const)("shows a plain %s outcome", (reason, text) =>
+  expect(loanOutcome(reason)).toBe(text)
+);
+
+it("describes closed Loan quantities without claiming a declined proposal was lent", () => {
+  expect(
+    agreementText({
+      kind: "loan",
+      state: "closed",
+      summary: { you_give: "3", you_get: "0", cards: [] },
+    })
+  ).toBe("3 cards");
 });

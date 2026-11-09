@@ -12312,6 +12312,17 @@
       "title": "Lender",
       "type": "string"
      },
+     "lender_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lender Id"
+     },
      "state": {
       "enum": [
        "requested",
@@ -12323,6 +12334,7 @@
     },
     "required": [
      "lender",
+     "lender_id",
      "state",
      "copies"
     ],

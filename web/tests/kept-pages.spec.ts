@@ -461,7 +461,7 @@ test("Loans retains its rows while a held show-time read fetches an API change",
   await expect(old).toHaveCount(0);
   await main(page).locator("summary").filter({ hasText: /^Done/ }).click();
   const closed = main(page).locator(`a[data-thread="${loan.thread_id}"]`);
-  await expect(closed).toContainText("Closed");
+  await expect(closed).toContainText("Withdrawn");
   await closed.click();
   await expect(main(page).getByRole("heading", { level: 1 })).toHaveText(
     "You withdrew your request to Kept lender"

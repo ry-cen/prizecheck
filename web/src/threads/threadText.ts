@@ -1,5 +1,10 @@
 import { tradeCardName } from "../trades/tradeText";
-import type { ThreadItem, Timeline, TimelineItem } from "../social_generated";
+import type {
+  LoanView,
+  ThreadItem,
+  Timeline,
+  TimelineItem,
+} from "../social_generated";
 
 const EVENTS: Record<string, string> = {
   offered: "Sent an offer",
@@ -113,16 +118,54 @@ export function timelineText(
 
 /** Current terms only: the timeline owns the history of edits. */
 export function agreementText(
-  row: Pick<ThreadItem, "kind" | "summary">
+  row: Pick<ThreadItem, "kind" | "summary"> & { state?: string }
 ): string {
   const { summary } = row;
-  if (row.kind === "loan")
+  if (row.kind === "loan") {
+    if (row.state === "closed") {
+      const total = Number(summary.you_give) + Number(summary.you_get);
+      return `${total} ${total === 1 ? "card" : "cards"}`;
+    }
     return Number(summary.you_give) > 0
       ? `Lending ${summary.you_give}`
       : `Borrowing ${summary.you_get}`;
+  }
   return `You give ${summary.you_give} · You get ${summary.you_get}${
     summary.cash
       ? ` · ${summary.cash.payer === "you" ? "You pay" : "They pay"} $${(Number(summary.cash.cents) / 100).toFixed(2)}`
       : ""
   }`;
+}
+
+export function currentCardsText(
+  row: Pick<ThreadItem, "kind" | "summary">
+): string {
+  const cards = (side: "you_give" | "you_get") =>
+    row.summary.cards
+      .filter((card) => card.side === side)
+      .map((card) => `${card.copies} ${card.name}`)
+      .join(", ");
+  return row.kind === "trade"
+    ? [
+        cards("you_give") && `You give ${cards("you_give")}`,
+        cards("you_get") && `You get ${cards("you_get")}`,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : row.summary.cards
+        .map((card) => `${card.copies} ${card.name}`)
+        .join(" · ");
+}
+
+export function loanOutcome(reason: LoanView["closed_reason"]): string {
+  if (!reason) return "Closed";
+  return (
+    {
+      returned: "Returned",
+      written_off: "Written off",
+      declined: "Declined",
+      withdrawn: "Withdrawn",
+      cancelled: "Cancelled",
+    } as const
+  )[reason];
 }

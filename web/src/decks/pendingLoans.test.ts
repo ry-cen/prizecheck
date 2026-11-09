@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PendingLoans } from "../social_generated";
 import {
   borrowDefault,
+  borrowOffer,
   borrowRemainder,
   createPendingReader,
   pendingText,
@@ -44,7 +45,14 @@ const answer = (deckId: string, accepted = "1"): PendingLoans => ({
       edition_id: "iono",
       requested: "0",
       accepted,
-      lenders: [{ lender: "Misty W.", state: "accepted", copies: accepted }],
+      lenders: [
+        {
+          lender: "Misty W.",
+          lender_id: "Misty W.",
+          state: "accepted",
+          copies: accepted,
+        },
+      ],
     },
   ],
 });
@@ -210,8 +218,18 @@ describe("the pending note", () => {
         requested: "2",
         accepted: "1",
         lenders: [
-          { lender: "Misty W.", state: "accepted", copies: "1" },
-          { lender: "Brock S.", state: "requested", copies: "2" },
+          {
+            lender: "Misty W.",
+            lender_id: "Misty W.",
+            state: "accepted",
+            copies: "1",
+          },
+          {
+            lender: "Brock S.",
+            lender_id: "Brock S.",
+            state: "requested",
+            copies: "2",
+          },
         ],
       })
     ).toBe("Misty W. agreed to lend 1 · Asked Brock S. for 2");
@@ -236,12 +254,19 @@ describe("borrowing only the missing remainder", () => {
       edition_id: "iono",
       requested: "1",
       accepted: "0",
-      lenders: [{ lender: "Misty", state: "requested" as const, copies: "1" }],
+      lenders: [
+        {
+          lender: "Misty",
+          lender_id: "Misty",
+          state: "requested" as const,
+          copies: "1",
+        },
+      ],
     };
-    expect(borrowRemainder(3, 2, pending, "Misty")).toBe(1);
-    expect(borrowRemainder(1, 2, pending, "Misty")).toBe(0);
-    expect(borrowRemainder(3, 1, pending, "Misty")).toBe(0);
-    expect(borrowRemainder(3, 2, pending, "Brock")).toBe(2);
+    expect(borrowRemainder(3, 2, pending, pending, "Misty")).toBe(1);
+    expect(borrowRemainder(1, 2, pending, pending, "Misty")).toBe(0);
+    expect(borrowRemainder(3, 1, pending, pending, "Misty")).toBe(0);
+    expect(borrowRemainder(3, 2, pending, pending, "Brock")).toBe(2);
   });
   it("does not subtract accepted copies from already-reserved availability twice", () => {
     expect(
@@ -252,10 +277,77 @@ describe("borrowing only the missing remainder", () => {
           edition_id: "iono",
           requested: "0",
           accepted: "1",
-          lenders: [{ lender: "Misty", state: "accepted", copies: "1" }],
+          lenders: [
+            {
+              lender: "Misty",
+              lender_id: "Misty",
+              state: "accepted",
+              copies: "1",
+            },
+          ],
         },
+        undefined,
         "Misty"
       )
     ).toBe(2);
   });
+});
+
+it("keeps another acceptable Edition's requests separate from Deck coverage", () => {
+  const a = {
+    edition_id: "A",
+    requested: "2",
+    accepted: "0",
+    lenders: [
+      {
+        lender: "Misty",
+        lender_id: "one",
+        state: "requested" as const,
+        copies: "2",
+      },
+    ],
+  };
+  expect(borrowRemainder(4, 2, a, undefined, "one")).toBe(2);
+  expect(borrowRemainder(4, 2, a, a, "one")).toBe(0);
+});
+it("two Friends named Misty retain separate availability", () => {
+  const pending = {
+    edition_id: "A",
+    requested: "1",
+    accepted: "0",
+    lenders: [
+      {
+        lender: "Misty",
+        lender_id: "one",
+        state: "requested" as const,
+        copies: "1",
+      },
+    ],
+  };
+  expect(borrowRemainder(4, 2, pending, pending, "one")).toBe(1);
+  expect(borrowRemainder(4, 2, pending, pending, "two")).toBe(2);
+});
+
+it("defaults to the remaining spare copies, without borrowing from a Deck unnecessarily", () => {
+  const pending = {
+    edition_id: "A",
+    requested: "1",
+    accepted: "0",
+    lenders: [
+      {
+        lender: "Misty",
+        lender_id: "one",
+        state: "requested" as const,
+        copies: "1",
+      },
+    ],
+  };
+  expect(
+    borrowOffer(
+      5,
+      { collector_id: "one", spare: "3", in_deck: "3" },
+      pending,
+      pending
+    )
+  ).toEqual({ cap: 4, quantity: 2 });
 });

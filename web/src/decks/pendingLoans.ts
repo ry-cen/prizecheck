@@ -1,4 +1,8 @@
-import type { PendingLine, PendingLoans } from "../social_generated";
+import type {
+  FriendCopy,
+  PendingLine,
+  PendingLoans,
+} from "../social_generated";
 
 /**
  * What one Deck is waiting on from Friends (`GET /api/loans/pending`): copies asked for and copies promised but not yet
@@ -157,19 +161,17 @@ export function pendingText(line: PendingLine | undefined): string {
     .join(" · ");
 }
 
-/** Unanswered requests do not reserve spare copies; agreed Loans already do. */
+/** Deck coverage and the offered Edition's unreserved requests are different quantities. */
 export function borrowRemainder(
   need: number,
   available: number,
-  pending: PendingLine | undefined,
-  lender: string
+  coverage: PendingLine | undefined,
+  offered: PendingLine | undefined,
+  lenderId: string
 ): number {
-  const asked =
-    pending?.lenders
-      .filter((who) => who.lender === lender && who.state === "requested")
-      .reduce((total, who) => total + Number(who.copies), 0) ?? 0;
+  const asked = requestedFrom(offered, lenderId);
   const covered =
-    Number(pending?.requested ?? 0) + Number(pending?.accepted ?? 0);
+    Number(coverage?.requested ?? 0) + Number(coverage?.accepted ?? 0);
   return Math.max(0, Math.min(need - covered, available - asked));
 }
 
@@ -180,4 +182,36 @@ export function borrowDefault(
   cap: number
 ): number {
   return Math.max(0, Math.min(need, spare > 0 ? spare : cap, cap));
+}
+
+function requestedFrom(
+  line: PendingLine | undefined,
+  lenderId: string
+): number {
+  return (
+    line?.lenders
+      .filter((who) => who.lender_id === lenderId && who.state === "requested")
+      .reduce((total, who) => total + Number(who.copies), 0) ?? 0
+  );
+}
+
+/** One source for both the offer's cap and its initial quantity. */
+export function borrowOffer(
+  need: number,
+  copy: Pick<FriendCopy, "collector_id" | "spare" | "in_deck">,
+  coverage: PendingLine | undefined,
+  offered: PendingLine | undefined
+) {
+  const cap = borrowRemainder(
+    need,
+    Number(copy.spare) + Number(copy.in_deck),
+    coverage,
+    offered,
+    copy.collector_id
+  );
+  const spare = Math.max(
+    0,
+    Number(copy.spare) - requestedFrom(offered, copy.collector_id)
+  );
+  return { cap, quantity: borrowDefault(cap, spare, cap) };
 }

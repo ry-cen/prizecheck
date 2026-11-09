@@ -8,12 +8,11 @@ import {
 import { ChevronRight } from "lucide-react";
 import { COUNTING_OPTIONS } from "../settings/wantListCounting";
 import type { FriendCopy } from "../social_generated";
-import { useFriendMatches } from "../social/useFriendMatches";
+import { useBorrowMatches } from "./useBorrowMatches";
 import { FriendChips, GetFromFriends } from "../social/WantListFriends";
 import {
   AskChip,
   AskControl,
-  copyCap,
   copyCard,
   useBorrowDrafts,
 } from "../loans/BorrowDrafts";
@@ -58,12 +57,8 @@ import {
   WillAcceptRadios,
 } from "./TradeWantsPanel";
 import { useTradeWants, type TradeWantsApi } from "./useTradeWants";
-import { borrowDefault, borrowRemainder, pendingText } from "./pendingLoans";
-import {
-  usePendingLoans,
-  wantListPins,
-  type PendingApi,
-} from "./usePendingLoans";
+import { borrowOffer, pendingText } from "./pendingLoans";
+import type { PendingApi } from "./usePendingLoans";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
@@ -136,18 +131,12 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     reload,
     notify: setNotice,
   });
-  const friends = useFriendMatches(
+  const { friends, pending: friendRequests } = useBorrowMatches(
     load.kind === "ready" ? load.list : null,
     attempt
   );
   const drafts = useBorrowDrafts();
   const trade = useTradeWants(reload);
-  // What a scoped Deck is waiting on from Friends, read apart from the Want List; All Decks reads none. The answer's
-  // own pins read it again when a Swap or a reload brings a new Want List, never the other way round.
-  const friendRequests = usePendingLoans(
-    load.kind === "ready" ? load.list.deck_id : null,
-    load.kind === "ready" ? wantListPins(load.list) : ""
-  );
   const [view, setView] = useState<View>("buy");
 
   function choose(deckId: string | null) {
@@ -332,31 +321,37 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           deckName={deckName}
           scoped={scoped}
           pending={pending}
-          action={(row, copy) => (
-            <AskControl
-              text="Ask to borrow"
-              friend={copy}
-              card={copyCard(
-                copy,
-                copy.edition_id === row.edition_id ? row.image_url : null
-              )}
-              cap={borrowRemainder(
-                Number(row.need),
-                copyCap(copy),
-                scoped && friendRequests.state.kind === "ready"
-                  ? friendRequests.state.lines.get(row.edition_id)
-                  : undefined,
-                copy.display_name
-              )}
-              initialQuantity={borrowDefault(
-                Number(row.need),
-                Number(copy.spare),
-                copyCap(copy)
-              )}
-              lendable={lendableText(copy)}
-              deckId={shownScope}
-            />
-          )}
+          action={(row, copy) => {
+            const lines =
+              friendRequests.state.kind === "ready"
+                ? friendRequests.state.lines
+                : undefined;
+            const offer = borrowOffer(
+              Number(row.need),
+              copy,
+              lines?.get(row.edition_id),
+              lines?.get(copy.edition_id)
+            );
+            const known =
+              !pending &&
+              (!shownScope ||
+                (friendRequests.state.kind === "ready" &&
+                  !friendRequests.state.stale));
+            return (
+              <AskControl
+                text="Ask to borrow"
+                friend={copy}
+                card={copyCard(
+                  copy,
+                  copy.edition_id === row.edition_id ? row.image_url : null
+                )}
+                cap={known ? offer.cap : -1}
+                initialQuantity={offer.quantity}
+                lendable={lendableText(copy)}
+                deckId={shownScope}
+              />
+            );
+          }}
           asked={
             drafts
               ? (_row, copies) =>
@@ -397,6 +392,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
                 trade={trade}
                 borrowFor={shownScope}
                 pending={friendRequests}
+                borrowReady={friends.kind === "ready" && !friends.pending}
               />
             ))}
             {!shownScope && <TradeWantsPanel api={trade} />}
@@ -421,6 +417,7 @@ function DeckSection({
   trade,
   borrowFor,
   pending,
+  borrowReady,
 }: {
   section: WantListSection;
   deckName: (id: string) => string;
@@ -434,6 +431,7 @@ function DeckSection({
   borrowFor: string | null;
   /** What the scoped Deck is waiting on from Friends. */
   pending: PendingApi;
+  borrowReady: boolean;
 }) {
   const idBase = useId();
   return (
@@ -483,6 +481,7 @@ function DeckSection({
             trade={trade}
             borrowFor={borrowFor}
             pending={pending}
+            borrowReady={borrowReady}
           />
         </>
       )}
@@ -505,6 +504,7 @@ export function NeededLines({
   trade,
   borrowFor,
   pending,
+  borrowReady = true,
 }: {
   layout?: "rows" | "tiles";
   section: WantListSection;
@@ -519,6 +519,7 @@ export function NeededLines({
   /** What this Deck is waiting on from Friends, when it is the Deck in scope: shown beside each line's counts and
    * never taken off them. */
   pending?: PendingApi;
+  borrowReady?: boolean;
 }) {
   const waiting =
     pending &&
@@ -590,12 +591,17 @@ export function NeededLines({
                   waiting?.kind === "ready"
                     ? waiting.lines.get(line.edition_id)
                     : undefined;
-                const cap = borrowRemainder(
+                const offer = borrowOffer(
                   Number(line.need),
-                  copyCap(copy),
+                  copy,
                   pendingLine,
-                  copy.display_name
+                  waiting?.kind === "ready"
+                    ? waiting.lines.get(copy.edition_id)
+                    : undefined
                 );
+                const known =
+                  borrowReady &&
+                  (!borrowFor || (waiting?.kind === "ready" && !waiting.stale));
                 return (
                   <AskChip
                     friend={copy}
@@ -605,12 +611,8 @@ export function NeededLines({
                         ? line.image_url
                         : null
                     )}
-                    cap={cap}
-                    initialQuantity={borrowDefault(
-                      cap,
-                      Number(copy.spare),
-                      cap
-                    )}
+                    cap={known ? offer.cap : -1}
+                    initialQuantity={offer.quantity}
                     more={!!pendingLine}
                     lendable={lendableText(copy)}
                     text={text}

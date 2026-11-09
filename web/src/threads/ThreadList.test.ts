@@ -2,11 +2,17 @@
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { getLoans, readThread, type ThreadItem } from "../social_generated";
+import {
+  getLoans,
+  getThreadDetail,
+  readThread,
+  type ThreadItem,
+} from "../social_generated";
 import { ThreadList } from "./ThreadList";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
   getLoans: vi.fn(),
+  getThreadDetail: vi.fn(),
   readThread: vi.fn(),
 }));
 it("keeps a successful empty list quiet after a failed return read", async () => {
@@ -237,7 +243,7 @@ it("S2-16: an item's latest log summary projects only public terms and its parti
       )
     );
     const link = host.querySelector('a[data-thread="item"]')!;
-    expect(link.textContent).toContain("Borrowing 2");
+    expect(link.textContent).toContain("2 cards");
     expect(link.textContent).toContain("2 Iono");
     expect(link.textContent).not.toContain("Changed the Loan terms");
     expect(link.textContent).not.toContain("→");
@@ -516,3 +522,60 @@ for (const leave of [
       await f.cleanup();
     }
   });
+
+for (const reason of ["returned", "written_off"] as const) {
+  for (const side of ["you_give", "you_get"] as const) {
+    it(`shows ${reason} from ${side} even after a later chat message`, async () => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      const row: ThreadItem = {
+        id: "closed",
+        kind: "loan",
+        other: { trader_id: "friend", display_name: "Misty" },
+        you_are: "low",
+        summary: {
+          you_give: side === "you_give" ? "2" : "0",
+          you_get: side === "you_get" ? "2" : "0",
+          cards: [],
+        },
+        section: "done",
+        state: "closed",
+        last_activity_at: "2026-11-08",
+        latest: {
+          kind: "message",
+          at: "2026-11-08",
+          cursor: "cursor",
+          message: {
+            id: "message",
+            from: "them",
+            body: "Thanks!",
+            at: "2026-11-08",
+          },
+        },
+      };
+      vi.mocked(getLoans).mockResolvedValue([row]);
+      // Only the fields ThreadList reads; getThreadDetail's union is otherwise unrelated to this assertion.
+      vi.mocked(getThreadDetail).mockResolvedValue({
+        live_terms: { closed_reason: reason },
+      } as Awaited<ReturnType<typeof getThreadDetail>>);
+      const host = document.createElement("div");
+      const root = createRoot(host);
+      try {
+        await act(async () =>
+          root.render(
+            h(ThreadList, { kind: "loan", active: true, onOpen: vi.fn() })
+          )
+        );
+        expect(host.textContent).toContain(
+          reason === "returned" ? "Returned" : "Written off"
+        );
+        expect(host.textContent).toContain("Misty: Thanks!");
+        expect(host.textContent).toContain("2 cards");
+        expect(host.textContent).not.toContain("written_off");
+      } finally {
+        await act(async () => root.unmount());
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+      }
+    });
+  }
+}

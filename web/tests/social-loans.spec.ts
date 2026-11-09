@@ -616,7 +616,7 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
     .getByRole("list", { name: "Done Loans" })
     .getByRole("link");
   await expect(declinedRow).toContainText("Misty W");
-  await expect(declinedRow).toContainText("Closed");
+  await expect(declinedRow).toContainText("Declined");
   await declinedRow.click();
   await expect(title(page)).toHaveText(
     "Misty W declined your request for 2 cards"
