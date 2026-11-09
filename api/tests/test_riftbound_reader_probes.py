@@ -33,10 +33,10 @@ def conn():
             connection.rollback()
 
 
-def card(conn, *, name='Synthetic Unit 01', identity=None, display=True, number='001/100', image=None):
+def card(conn, *, name='Synthetic Unit 01', identity=None, display=True, number='001/100', image=None, identity_name=None):
     identity = identity or conn.execute(
         'INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s) RETURNING id',
-        (str(uuid4()), name)).fetchone()['id']
+        (str(uuid4()), name if identity_name is None else identity_name)).fetchone()['id']
     printing = conn.execute("INSERT INTO catalog_printing(source,identity_id) VALUES ('manual',%s) RETURNING id",
                             (identity,)).fetchone()['id']
     edition = conn.execute('''INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
@@ -101,15 +101,18 @@ def test_rb_id_02_identity_is_not_name_equality(conn):
 
 @pytest.mark.parametrize('display,name', [(False, 'Synthetic Unit 02'), (True, '')], ids=['RB-ID-03', 'RB-ID-04'])
 def test_name_fallback(conn, display, name):
-    seed = card(conn, name=name, display=display)
+    seed = card(conn, name=name, display=display, identity_name='Synthetic Unit 04' if display else name)
     fact = card_facts(conn, [seed[1]])[seed[1]]
     assert fact.name == name
+    if display:
+        assert fact.name == fact.search_key == ''
     if not display:
         assert (fact.set_code, fact.set_name, fact.collector_number) == ('', '', '')
 
 
 @pytest.mark.parametrize('name,words', [("Synthetic Unit: Ünit's Two // Three", 'synthetic unit units two three'),
-                                     ('Synthetic-Unit Four', 'synthetic unit four')], ids=['RB-ID-05-a', 'RB-ID-05-b'])
+                                     ('Synthetic-Unit Four', 'synthetic unit four'), ('', '')],
+                         ids=['RB-ID-05-a', 'RB-ID-05-b', 'RB-ID-05-empty'])
 def test_search_words(conn, name, words):
     seed = card(conn, name=name)
     assert conn.execute('SELECT catalog_search_words(%s) AS words', (name,)).fetchone()['words'] == words
@@ -193,6 +196,7 @@ def test_retained_inventory(conn, monkeypatch, mode):
 
 @pytest.mark.parametrize('domains', [('DomainA', 'DomainB'), ()], ids=['RB-DOM-02', 'RB-DOM-03'])
 def test_domain_reader_half(conn, monkeypatch, domains):
+    # DOM-02/03 use stand-in facet SQL until Ryan decides the catalog shape in D4.
     seed = card(conn)
     owner, _ = holding(conn, seed[1])
     page = listing(conn, monkeypatch, owner, domains=domains)
@@ -220,7 +224,12 @@ def test_rb_ref_03_and_04_set_code_fallback(conn):
     conn.execute('DELETE FROM catalog_set_code')
     seeds = [card(conn), card(conn, display=False)]
     rows = conn.execute('SELECT * FROM catalog_printing_set_code WHERE printing_id=ANY(%s)', ([s[0] for s in seeds],)).fetchall()
+    assert len(rows) == 2
     assert {r['printing_id']: r['set_code'] for r in rows} == {seeds[0][0]: 'syn01', seeds[1][0]: ''}
+    facts = conn.execute(CARD_FACTS, ([s[1] for s in seeds],)).fetchall()
+    assert len(facts) == 2
+    for seed in seeds:
+        assert sum(row['edition_id'] == seed[1] for row in facts) == 1
     assert len(card_facts(conn, [s[1] for s in seeds])) == 2
     with pytest.raises(psycopg.errors.CheckViolation) as error:
         with conn.transaction():
