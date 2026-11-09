@@ -17,6 +17,7 @@ import urllib.request
 
 import psycopg
 from psycopg import sql
+import migration_tracks
 from psycopg.conninfo import conninfo_to_dict
 from urllib.parse import urlsplit, urlunsplit
 
@@ -103,8 +104,8 @@ def local_url(url):
 
 
 def compatible(previous,candidate):
-    old = {p.name:digest(p) for p in (previous/'migrations').glob('*.sql')}
-    new = {p.name:digest(p) for p in (candidate/'migrations').glob('*.sql')}
+    old = {name:digest(p) for name,p in migration_tracks.files(previous/'migrations').items()}
+    new = {name:digest(p) for name,p in migration_tracks.files(candidate/'migrations').items()}
     if any(new.get(name) != sha for name,sha in old.items()):
         raise ReleaseError('Existing migrations removed or changed')
 

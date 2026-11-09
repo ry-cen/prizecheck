@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.error
 import urllib.request
 
+import migration_tracks
 from release import dependencies, runtime_fingerprint, verify, direct_http_open, valid_control_key
 import socket
 
@@ -56,7 +57,7 @@ class Runtime:
             raise ValueError('Installed runtime differs from gate')
         with psycopg.connect(os.environ['DATABASE_URL'],connect_timeout=5) as conn:
             applied = {row[0] for row in conn.execute('SELECT name FROM schema_migration')}
-        required = {path.name for path in (release/'migrations').glob('*.sql')}
+        required = set(migration_tracks.files(release/'migrations'))
         if not required <= applied:
             raise ValueError('Runtime database does not have candidate schema')
         temp = tempfile.TemporaryDirectory(prefix='tcg-release-runtime-')
