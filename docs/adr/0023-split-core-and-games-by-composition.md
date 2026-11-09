@@ -25,24 +25,44 @@
 - Migrations are not split. The Pokémon track stays the existing files; migration tracks for core wait for the second game.
 - Docs that name a module by path follow it to its new location. The allow-list holds what is left of the old imports (no edges remain; the identity-table SQL lines wait for the identity work) and only shrinks.
 
-**Amendment (2026-11-09, #534): one entry per game, and migration tracks.** Ryan approved two changes to this ADR. Everything else here still holds.
+**Amendment (2026-11-09, #534): one entry per game, migration tracks, databases and keys.** The owner approved the following on 2026-11-09. Option numbers and IM-, A- and R-IDs refer to the open draft pull requests [#563](https://github.com/ry-cen/prizecheck/pull/563) (`backend-readiness.md`) and [#564](https://github.com/ry-cen/prizecheck/pull/564) (`identity-migration-decisions.md`), which are not yet on `dev`.
 
-_Entry points._ Ryan: "yes separate entry meaning like /api/pokemon vs /api/riftbound correct?" The assistant answered that this meant separate application entry points in the code, with public URL prefixes a separate routing choice. Ryan: "ok yes to the separate entry approach, it doesnt need to be that exact setup but something like that in the case that we want to expand to even more games in the future". Where the decision above says "`main.py` chooses which game's app to mount", the approved composition is now a shared core app builder plus a separate application entry point per game, in code. Each entry lists its own game's routes and configuration explicitly, and the shape allows more games later.
+_Entry points._
 
-_Migrations._ Ryan agreed to keep Pokémon's existing migration history intact and add separate core and game-specific tracks for new databases ("yes i agree"). This replaces the consequence "Migrations are not split. The Pokémon track stays the existing files; migration tracks for core wait for the second game." (the option B of IM-11 in #564).
+- The backend is composed from a shared core app builder plus a separate application entry point per game, in code. Each entry lists its game's routes and configuration explicitly, and the shape allows more games later.
 
-- Pokémon's existing migration files and history stay as they are. They are not moved, renumbered or rewritten.
-- A new database uses a core track and its own game's track. No database runs every game's migrations.
-- Tooling and tests must prove the schema each track combination produces.
-- **How a database selects its tracks (IM-12).** Ryan agreed to an explicit migration command for each database over a shared runner, not one command that picks a game from a runtime setting ("yes"). This is consistent with the no-`GAME`-setting rule below.
-- **Hosting (IM-14).** Ryan agreed that Riftbound gets its own database and its own role on the same PostgreSQL server ("yes"), and that the separation is tested explicitly. Ryan added: "in the future we may want to separate them so keep note". So keep a practical path to separate PostgreSQL servers later: no cross-database queries, foreign keys or dblink/FDW between game databases; each backend connects only through its own connection setting; nothing assumes a shared server. Separate hosting is not built now. This is a design choice only: no provisioning, credentials or live access change.
-- **Keys (IM-6).** Ryan agreed to separate keys in the design ("yes"). Pokémon keeps its current gateway-to-backend key, which also signs its pagination cursors; each other game backend gets its own key; this is separate from the login-session secret. Design only: no key is created or configured.
-- **The core baseline (IM-13).** Ryan agreed to create a clean core baseline now from the existing schema, with automated checks that it matches the intended shared schema and seed data ("yes"). A new game's database does not replay Pokémon history.
+_Migration tracks._
 
-_Still holds:_ no runtime game setting, no registry, no protocols.
+- Pokémon's existing migration files and history are kept as they are. New databases get separate core and game-specific tracks, and no database runs every game's migrations. Tooling and tests must prove each resulting schema (IM-11).
+- Each database gets its own explicit migration command over a shared runner. No runtime setting picks a game (IM-12).
+- A clean core baseline is cut now from the existing schema, with automated checks that it matches the intended shared schema and seed data. A new game's database does not replay Pokémon history (IM-13).
 
-_Unchanged today:_ the single Pokémon entry, its behaviour and every existing database stay as they are until an implementation slice lands. This amendment changes no code and applies nothing to any live database.
+_Databases._
 
-_Not decided here:_ public URL prefixes and gateway routing (no `/api/pokemon` or `/api/riftbound` scheme is chosen); deployment topology beyond that database choice; identity propagation (IM-16).
+- Riftbound gets its own database and its own database role on the same PostgreSQL server as Pokémon. Separation must be tested; how is not decided (IM-14).
+- The owner asked to keep a note that the games may later move to separate PostgreSQL servers.
 
-_Supersedes_ the wording in #563 (rows A6 and R13 of `backend-readiness.md`) that `main.py` chooses the game. #563 is not edited.
+_Keys._
+
+- Pokémon keeps its current gateway-to-backend key, which also signs its pagination cursors. Riftbound gets its own key. Both are separate from the login-session secret (IM-6). No key is created or configured.
+
+_Unchanged today._ The single Pokémon entry, its behaviour and every existing database stay as they are until an implementation slice lands. This amendment changes no code and applies nothing to any live database.
+
+_Supersedes_ these lines of this ADR:
+
+- `:12`, "`main.py` chooses which game's app to mount", and "invent nothing for a second game" as far as the core baseline is concerned, which is cut now;
+- `:14`, the migration tracks listed under "Later, with Riftbound";
+- `:24`, "a mount in `main.py`";
+- `:25`, "Migrations are not split".
+
+It also supersedes the wording in #563 that `main.py` picks the game (`backend-readiness.md` A6 and R13; #563 is not edited), and `docs/planning/shared-core/catalog-data-contract.md:6-7`, "Migrations remain one track" (not edited). The rest of the ADR holds, including no runtime game setting, no registry and no protocols (`:12`).
+
+_Not decided here._
+
+- Public URL prefixes and gateway routing; no `/api/pokemon` or `/api/riftbound` scheme is chosen.
+- Deployment topology beyond the database choice above.
+- Identity propagation (IM-16), and any auth track or auth install steps.
+- The track layout, numbering and guardrail details of #564 IM-11.
+- The test harness layout for the databases (the other half of IM-14).
+- Generation promotion (#563 C8).
+- Provisioning, credentials and live database access each need the owner's separate approval.
