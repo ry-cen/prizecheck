@@ -212,6 +212,52 @@ class DeployTest(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
 
 
+class LoneReleaseCopyTest(unittest.TestCase):
+    """tests/operations/test_release.py copies only release.py into a scratch repository and runs its gate there. The
+    commit checks must still run, and the migration comparison must refuse rather than pass without the track tool."""
+    def lone_copy(self, folder):
+        (Path(folder) / 'scripts').mkdir(parents=True)
+        shutil.copy2(ROOT / 'scripts/release.py', Path(folder) / 'scripts/release.py')
+        return Path(folder) / 'scripts/release.py'
+
+    def test_the_gate_reaches_its_commit_check_from_a_lone_copy(self):
+        with tempfile.TemporaryDirectory() as folder:
+            repo = Path(folder) / 'repo'
+            script = self.lone_copy(repo)
+            # A commit hook exports GIT_DIR and GIT_INDEX_FILE; git would then init, configure and stage into the real
+            # repository instead of the scratch one.
+            env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=repo, text=True, env=env).strip()
+            git('init', '-q', '-b', 'main')
+            git('config', 'user.email', 'fixture@example.test')
+            git('config', 'user.name', 'Release fixture')
+            (repo / 'fixture').write_text('first')
+            git('add', '.'); git('commit', '-q', '-m', 'first')
+            previous = git('rev-parse', 'HEAD')
+            (repo / 'fixture').write_text('second')
+            git('add', '.'); git('commit', '-q', '-m', 'second')
+            run = subprocess.run([sys.executable, str(script), 'gate', '--commit', previous, '--main-ref', 'refs/heads/main',
+                                  '--store', str(Path(folder) / 'releases'), '--admin-url', 'postgresql://localhost/postgres'],
+                                 capture_output=True, text=True, env=env)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertNotIn('ModuleNotFoundError', run.stderr)
+            self.assertIn('Exact main commit required', run.stderr)
+            self.assertFalse((Path(folder) / 'releases').exists())
+
+    def test_the_migration_comparison_refuses_without_the_track_tool_instead_of_passing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            script = self.lone_copy(Path(folder) / 'lone')
+            old = tree(Path(folder) / 'old', {'001_a.sql': 'a', 'core/001_x.sql': 'x'}).parent
+            new = tree(Path(folder) / 'new', {'001_a.sql': 'a', 'core/001_x.sql': 'changed'}).parent
+            code = ('import importlib.util, sys; from pathlib import Path\n'
+                    f'spec = importlib.util.spec_from_file_location("lone_release", {str(script)!r}); m = importlib.util.module_from_spec(spec)\n'
+                    'spec.loader.exec_module(m)\n'
+                    'try:\n    m.compatible(Path(sys.argv[1]), Path(sys.argv[2]))\nexcept m.ReleaseError as error:\n    print(error); sys.exit(7)\n')
+            run = subprocess.run([sys.executable, '-I', '-c', code, str(old), str(new)], capture_output=True, text=True, cwd=folder)
+            self.assertEqual((run.returncode, run.stdout.strip()), (7, 'migration_tracks.py is missing beside release.py; migrations cannot be compared'), run.stderr)
+
+
 class ToolGlobTest(unittest.TestCase):
     def test_release_compatibility_covers_every_track(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -226,7 +272,7 @@ class ToolGlobTest(unittest.TestCase):
 
     def test_the_local_runtime_requires_every_track_of_a_release_in_the_ledger(self):
         source = (ROOT / 'scripts/release_runtime.py').read_text()
-        self.assertIn("required = set(migration_tracks.files(release/'migrations'))", source)
+        self.assertIn("required = set(migration_files(release/'migrations'))", source)
 
     def test_the_set_code_guardrail_reads_the_pokemon_track_and_a_core_file_cannot_mask_it(self):
         guardrails = load('guardrails', 'scripts/check_guardrails.py')

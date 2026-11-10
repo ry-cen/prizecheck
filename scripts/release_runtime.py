@@ -17,8 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.error
 import urllib.request
 
-import migration_tracks
-from release import dependencies, runtime_fingerprint, verify, direct_http_open, valid_control_key
+from release import dependencies, runtime_fingerprint, verify, direct_http_open, valid_control_key, migration_files
 import socket
 
 
@@ -59,7 +58,7 @@ class Runtime:
             applied = {row[0] for row in conn.execute('SELECT name FROM schema_migration')}
         # TODO(#533, S4): this reads every track of the release, not the tracks this database's entry applies. Once an auth or
         # second-game track exists the Pokémon ledger lacks its files and this refuses the release (it fails closed). Use the entry's tracks then.
-        required = set(migration_tracks.files(release/'migrations'))
+        required = set(migration_files(release/'migrations'))
         if not required <= applied:
             raise ValueError('Runtime database does not have candidate schema')
         temp = tempfile.TemporaryDirectory(prefix='tcg-release-runtime-')
