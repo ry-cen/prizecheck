@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { restorePageScroll } from "./restorePageScroll";
+import {
+  RESTORE_POLL_MS,
+  RESTORE_WINDOW_MS,
+  restorePageScroll,
+} from "./restorePageScroll";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -39,6 +43,9 @@ function layout(initial: number, available: number) {
     scroll,
     observe,
     disconnect,
+    setHeight: (next: number) => {
+      height = next;
+    },
     grow: (next: number) => {
       height = next;
       resize([], {} as ResizeObserver);
@@ -75,4 +82,26 @@ it("lets keyboard focus take over while content is still loading", () => {
   view.grow(900);
   expect(view.scroll).toHaveBeenCalledTimes(calls);
   stop();
+});
+
+it("keeps retrying a clamped position when no resize is reported, then gives up after a bounded wait", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 100);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  expect(window.scrollY).toBe(100);
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS);
+  expect(window.scrollY).toBe(500);
+  stop();
+
+  const late = layout(0, 100);
+  const stopLate = restorePageScroll(document.createElement("main"), 500);
+  vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
+  const calls = late.scroll.mock.calls.length;
+  late.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 5);
+  expect(late.scroll).toHaveBeenCalledTimes(calls);
+  expect(window.scrollY).toBe(100);
+  stopLate();
+  vi.useRealTimers();
 });
