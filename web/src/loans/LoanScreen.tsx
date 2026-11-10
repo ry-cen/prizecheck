@@ -1268,6 +1268,13 @@ export function LoanScreen({
             )}{" "}
             not lent.
           </p>
+          {loan.lines.length > 0 && (
+            <p className="m-0 text-meta text-text-muted">
+              {lender
+                ? "Choose how many of each card to lend below."
+                : "Choose how many of each card to take below."}
+            </p>
+          )}
           <p className="m-0 text-body">
             {(lender ? answerDate : loan.return_by)
               ? `Return by ${dayText((lender ? answerDate : loan.return_by)!)}.`
@@ -1309,6 +1316,9 @@ export function LoanScreen({
           primary
         )}
       </div>
+      <p role="alert" className="m-0 text-meta text-danger empty:hidden">
+        {message}
+      </p>
     </>
   );
 
@@ -1411,9 +1421,6 @@ export function LoanScreen({
         ))}
       </ul>
       {!answering && responseBlock}
-      <p role="alert" className="m-0 text-meta text-danger empty:hidden">
-        {message}
-      </p>
     </>,
     menu.length > 0 && (
       <div ref={menuAnchor}>
