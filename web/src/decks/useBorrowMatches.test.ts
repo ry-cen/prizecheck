@@ -359,6 +359,24 @@ it.each(["pulse", "focus", "pins"])(
       await act(async () => button("Send Borrow Request").click());
       expect(send).not.toHaveBeenCalled();
       await act(async () => release(pending("1")));
+      // A failed read must stop claiming work is in progress while the modal blocks the page Retry.
+      vi.mocked(getPendingLoans).mockRejectedValueOnce(new Error("offline"));
+      pulse++;
+      await act(async () => render());
+      const failedCopy =
+        "Couldn't check what's available. Close this and try again.";
+      expect(
+        host.querySelector('dialog [role="status"]')?.textContent
+      ).toContain(failedCopy);
+      expect(host.textContent).not.toContain("Checking what's available…");
+      expect(button("Send Borrow Request").disabled).toBe(true);
+      await act(async () => button("Send Borrow Request").click());
+      expect(send).not.toHaveBeenCalled();
+      // A subsequent successful read clears the failure and enables sending again.
+      pulse++;
+      await act(async () => render());
+      expect(host.textContent).not.toContain(failedCopy);
+
       expect(button("Send Borrow Request").disabled).toBe(false);
       expect(host.textContent).not.toContain("Checking what's available…");
       expect(chip.getAttribute("aria-pressed")).toBe("true");

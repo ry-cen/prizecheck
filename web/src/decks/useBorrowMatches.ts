@@ -122,7 +122,7 @@ export function useBorrowMatches(
           visible.matches.cards.map((card) => [card.edition_id, card.copies])
         ),
       };
-  useBorrowReadiness(deck, list ? current : null);
+  useBorrowReadiness(deck, list ? (failed === key ? "failed" : current) : null);
   const pending: PendingApi = {
     retry,
     state: !deck

@@ -74,12 +74,14 @@ export type Draft = {
   replaces: string | null;
 };
 
+type BorrowReadiness = boolean | "failed";
+
 type DraftsApi = {
   drafts: Draft[];
   checkReadiness: (
     source: symbol,
     deckId: string | null,
-    current: boolean | null
+    current: BorrowReadiness | null
   ) => void;
   /** Copies of one Edition in the draft to one Friend. */
   quantity: (friendId: string, editionId: string) => number;
@@ -107,7 +109,7 @@ export function useBorrowDrafts(): DraftsApi | null {
 /** A mounted Want List read blocks sending its scoped drafts until quantities are current. */
 export function useBorrowReadiness(
   deckId: string | null,
-  current: boolean | null
+  current: BorrowReadiness | null
 ) {
   const register = useBorrowDrafts()?.checkReadiness;
   const source = useRef(Symbol());
@@ -228,10 +230,14 @@ export function BorrowDraftsProvider({
   const [drafts, setDrafts] = useState<Draft[]>(() => readDrafts(userId));
   const [composing, setComposing] = useState<string | null>(null);
   const [checks, setChecks] = useState(
-    new Map<symbol, { deckId: string | null; current: boolean }>()
+    new Map<symbol, { deckId: string | null; current: BorrowReadiness }>()
   );
   const checkReadiness = useCallback(
-    (source: symbol, deckId: string | null, current: boolean | null) => {
+    (
+      source: symbol,
+      deckId: string | null,
+      current: BorrowReadiness | null
+    ) => {
       setChecks((previous) => {
         const next = new Map(previous);
         if (current === null) next.delete(source);
@@ -373,7 +379,12 @@ export function BorrowDraftsProvider({
           current={Array.from(checks.values()).every(
             (check) =>
               (check.deckId !== null && check.deckId !== draft.deckId) ||
-              check.current
+              check.current === true
+          )}
+          failed={Array.from(checks.values()).some(
+            (check) =>
+              (check.deckId === null || check.deckId === draft.deckId) &&
+              check.current === "failed"
           )}
           onChange={(update) => change(draft.friend.collector_id, update)}
           onClose={() => setComposing(null)}
@@ -583,6 +594,7 @@ export async function readDecks(): Promise<DeckIndexEntry[]> {
 function BorrowComposer({
   draft,
   current,
+  failed,
   onChange,
   onClose,
   onOpenLoan,
@@ -590,6 +602,7 @@ function BorrowComposer({
 }: {
   draft: Draft;
   current: boolean;
+  failed: boolean;
   onChange: (update: (draft: Draft | undefined) => Draft | null) => void;
   onClose: () => void;
   onOpenLoan: (id: string) => void;
@@ -867,7 +880,9 @@ function BorrowComposer({
         </p>
         {!current && (
           <p role="status" className="m-0 text-meta text-text-muted">
-            Checking what's available…
+            {failed
+              ? "Couldn't check what's available. Close this and try again."
+              : "Checking what's available…"}
           </p>
         )}
         <div className="flex flex-wrap justify-end gap-2">
