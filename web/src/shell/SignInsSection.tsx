@@ -145,7 +145,9 @@ export function SignInsSection({
         aria-label="Your sign-ins"
         className="flex flex-col gap-4 text-body"
       >
-        {email && <p className="m-0">Your account email: {email}</p>}
+        {email && (
+          <p className="m-0 wrap-anywhere">Your account email: {email}</p>
+        )}
         {failure && (
           <SignInAlert
             message={failure}
