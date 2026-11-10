@@ -37,8 +37,9 @@ OTHER_DELIMITERS = (',', '/', '|', '&', '+', '\n', '\t')
 NO_VALUE = 'None'
 
 # Card details compared across the printings of one identity. Names are the source's extended field names. The list is
-# a working choice for what "uncertain" covers: Rarity is included although it differs on most alternate art.
-DETAIL_FIELDS = ('Domain', 'Tag', 'Card Type', 'Energy Cost', 'Power Cost', 'Might', 'Rarity')
+# a working choice for what "uncertain" covers. Rarity is left out: it belongs to each printing, and artwork versions
+# are expected to differ in it.
+DETAIL_FIELDS = ('Domain', 'Tag', 'Card Type', 'Energy Cost', 'Power Cost', 'Might')
 # These hold several values; their order is not compared.
 MULTI_VALUE_DETAILS = ('Domain', 'Tag', 'Card Type')
 

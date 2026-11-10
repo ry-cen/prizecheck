@@ -24,7 +24,7 @@ FLAG_PRICE_WITHOUT_PRODUCT = 'price_without_product'
 # An extended field name that appears more than once on a product: every value is kept, none is chosen.
 FLAG_EXTENDED_FIELD_REPEATED = 'extended_field_repeated'
 # Printings grouped into one identity by name and rules text that disagree on other card details (Domain, Tag, Card
-# Type, costs, Might, Rarity). The identity is kept and not split; the flag names the fields and sends it to review.
+# Type, costs, Might; not Rarity, which belongs to each printing). The identity is kept and not split; the flag names the fields and sends it to review.
 FLAG_PRINTING_DETAILS_DIFFER = 'printing_details_differ'
 
 FLAGS = (FLAG_IDENTITY_TEXT_CONFLICT, FLAG_CARD_SCOPE_PENDING, FLAG_FINISH_POLICY_PENDING,

@@ -362,13 +362,22 @@ def test_grouped_printings_that_differ_on_card_details_stay_grouped_and_are_flag
 
 @pytest.mark.parametrize('field, override', [
     ('Domain', {'domain': 'DomainB'}), ('Tag', {'tag': 'TagC'}), ('Card Type', {'card_type': 'Spell'}),
-    ('Energy Cost', {'Energy Cost': '4'}), ('Power Cost', {'Power Cost': '1'}), ('Might', {'Might': '3'}),
-    ('Rarity', {'rarity': 'Rare'})])
+    ('Energy Cost', {'Energy Cost': '4'}), ('Power Cost', {'Power Cost': '1'}), ('Might', {'Might': '3'})])
 def test_each_compared_detail_is_named_when_it_differs(field, override):
     base, alt = alternate_pair(**override)
     result = normalise_group([base, alt], [price(base, 'Normal'), price(alt, 'Normal')])
     [item] = [i for i in result.review if i.code == FLAG_PRINTING_DETAILS_DIFFER]
     assert item.detail.endswith('differ on ' + field)
+
+
+def test_a_difference_in_rarity_alone_is_not_a_details_difference():
+    """Rarity belongs to each printing; artwork versions are expected to differ in it."""
+    base, alt = alternate_pair(rarity='Showcase')
+    result = normalise_group([base, alt], [price(base, 'Normal'), price(alt, 'Normal')])
+    assert [len(i.printings) for i in result.identities] == [2]
+    assert FLAG_PRINTING_DETAILS_DIFFER not in codes(result)
+    assert all(p.flags == () for p in result.printings)
+    assert {p.rarity for p in result.printings} == {'Common', 'Showcase'}
 
 
 def test_matching_details_and_a_different_order_of_values_are_not_flagged():
