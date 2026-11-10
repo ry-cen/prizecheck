@@ -14,10 +14,12 @@ The deep suites (the PostgreSQL-backed `api/tests`, the `auth/tests` vitest suit
 ```sh
 gh workflow run verify.yml --ref <branch> -f integration=sharded
 gh workflow run verify.yml --ref <branch> -f integration=full
+gh workflow run verify.yml --ref <branch> -f integration=operations
 ```
 
 - `sharded` adds the `integration-legs` jobs, 14 legs that run at once, each on its own runner with its own database server: `--suite api --fast --shard K/3` for K from 1 to 3, `--suite auth --fast` (guardrails, the build and vitest, run once for every leg) and `--suite browser --fast --shard K/10` for K from 1 to 10; each leg uploads its own artifact, `verification-<leg>` (such as `verification-api-2` or `verification-browser-7`). On one runner the fast tier took about 32 minutes; a leg takes about 5. It also adds `integration-scanner-model` on both architectures, which builds the Dockerfile's `test` stage and runs the real-model test, the only test that needs ONNX Runtime.
 - `full` adds `integration-full`, one unsharded `npm run verify` (slow tests and the operations suite included) whose artifact is `verification`, plus `integration-scanner-model`. A timing budget warns and never fails; read `timing_warnings` in `result.json`. Functional failures still fail the run.
+- `operations` adds only `integration-operations`: `npm run verify -- --suite operations` (the release and recovery suite, 11 tests) with the full job's database service and `psql` 16, no browser download, artifact `verification-operations`. No sharded, full, scanner-model or browser job runs, and `verify` requires exactly this job. Its cap is 25 minutes, set from local timings (no hosted run of the suite alone has been timed): about 3 minutes of setup, 3 of installs and 9 to 14 for the tests. Read `phases.tsv` in its artifact after the first run and tighten the cap. Use it for a release, recovery or `tests/operations` change when the local operations suite cannot run.
 - `none`, the default, adds nothing (a pull request to `main` runs `sharded` regardless). The default checks run in every dispatched run too.
 
 The local gate (`npm run verify`) and the burn-in (below) are optional tools, not a step before a pull request.

@@ -5,6 +5,8 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'scripts'))
+import migration_tracks  # noqa: E402
 
 
 def violations(source, filename):
@@ -376,10 +378,11 @@ def colour_scope_files():
 
 
 def set_code_migration_violations(migrations, tsv_text):
-    """``migrations`` maps file name to text. The newest migration that opens with a set_codes.tsv digest line must carry
-    the digest of the TSV as it is now, or the TSV changed without its migration."""
+    """``migrations`` maps ledger name to text across every track. Set Code is Pokémon's own track, whose names carry no
+    track prefix, so a core or other game file is ignored here. The newest migration that opens with a set_codes.tsv digest
+    line must carry the digest of the TSV as it is now, or the TSV changed without its migration."""
     import hashlib
-    for name in sorted(migrations, reverse=True):
+    for name in sorted((name for name in migrations if '/' not in name), reverse=True):
         found = re.match(r'-- set_codes\.tsv digest: ([0-9a-f]{16})(?:\n|$)', migrations[name])
         if found:
             if found.group(1) == hashlib.sha256(tsv_text.encode()).hexdigest()[:16]:
@@ -418,12 +421,24 @@ def migration_number_violations(directory, allowed=None):
     return problems
 
 
+def track_number_violations(migrations, allowed=None):
+    """``migration_number_violations`` for the root track and for each track directory, one number space per track: a number
+    may repeat across tracks, never within one. ``allowed`` (the explicit 161 pair) applies to the root track only.
+    Returns ``(label, reason)``, the label naming the file or number under ``migrations/``."""
+    problems = []
+    for track in migration_tracks.every_track(migrations):
+        prefix = f'{track.directory}/' if track.directory else ''
+        for name, reason in migration_number_violations(Path(migrations)/track.directory, None if track.directory else allowed):
+            problems.append((f'migrations/{prefix}{name}', reason))
+    return problems
+
+
 def main():
     failed = False
-    for name, reason in migration_number_violations(ROOT/'migrations', ALLOWED_DUPLICATE_MIGRATIONS):
-        print(f'migrations/{name}: {reason}')
+    for label, reason in track_number_violations(ROOT/'migrations', ALLOWED_DUPLICATE_MIGRATIONS):
+        print(f'{label}: {reason}')
         failed = True
-    migrations = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
+    migrations = {name: path.read_text() for name, path in migration_tracks.files(ROOT/'migrations').items()}
     for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/games/pokemon/catalog/set_codes.tsv').read_text(encoding='utf-8')):
         print(f'{name}: {reason}')
         failed = True

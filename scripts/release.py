@@ -102,9 +102,22 @@ def local_url(url):
         raise ReleaseError('Explicit loopback database required')
 
 
+def migration_files(migrations):
+    """{ledger name: path} across every track of a migration tree. migration_tracks.py ships beside this file, but it is
+    imported here and not at the top so the gate's commit checks still run from a lone copy of release.py. If it is missing
+    this refuses: a flat glob would not see track directories and could pass a release that changed one of their files."""
+    try:
+        import migration_tracks
+    except ModuleNotFoundError as error:
+        if error.name != 'migration_tracks':
+            raise
+        raise ReleaseError('migration_tracks.py is missing beside release.py; migrations cannot be compared') from error
+    return migration_tracks.files(migrations)
+
+
 def compatible(previous,candidate):
-    old = {p.name:digest(p) for p in (previous/'migrations').glob('*.sql')}
-    new = {p.name:digest(p) for p in (candidate/'migrations').glob('*.sql')}
+    old = {name:digest(p) for name,p in migration_files(previous/'migrations').items()}
+    new = {name:digest(p) for name,p in migration_files(candidate/'migrations').items()}
     if any(new.get(name) != sha for name,sha in old.items()):
         raise ReleaseError('Existing migrations removed or changed')
 

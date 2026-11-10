@@ -5,22 +5,21 @@ from pathlib import Path
 import psycopg
 
 # A release runs this file from inside its verified store directory (scripts/release.py), and the runtime then checks every
-# file there against the release receipt, so importing the helper must not leave a __pycache__ beside it.
+# file there against the release receipt, so importing the helpers must not leave a __pycache__ beside it.
 sys.dont_write_bytecode = True
+import migration_tracks  # noqa: E402
 import set_code_migration  # noqa: E402
+from migration_tracks import Track  # noqa: E402
 
 root = Path(__file__).resolve().parents[1]
-with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
-    conn.execute("CREATE TABLE IF NOT EXISTS schema_migration (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")
-    for path in sorted((root / "migrations").glob("*.sql")):
-        if conn.execute("SELECT 1 FROM schema_migration WHERE name = %s", (path.name,)).fetchone():
-            continue
-        with conn.transaction():
-            conn.execute(path.read_text())
-            conn.execute("INSERT INTO schema_migration (name) VALUES (%s)", (path.name,))
-        print(f"Applied {path.name}")
 
-    # The printed set codes (WP-C1): the table must equal set_codes.tsv and the view must give each Printing its code.
+# The Pokémon database's entry (IM-12): its tracks in apply order, and no run-time setting that picks them. Core before the
+# game's own track; the root directory is Pokémon's track, with its names unqualified. A directory with no files is no track yet.
+TRACKS = (Track("core"), Track())
+
+
+def check_set_codes(conn):
+    """The printed set codes (WP-C1): the table must equal set_codes.tsv and the view must give each Printing its code."""
     if conn.execute("SELECT to_regclass('catalog_set_code') IS NOT NULL AS present").fetchone()[0]:
         codes = set_code_migration.parse((root / "api/app/games/pokemon/catalog/set_codes.tsv").read_text(encoding="utf-8"))
         problems = []
@@ -41,3 +40,13 @@ with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
             print(f"set code table disagrees with set_codes.tsv: {'; '.join(problems[:5])}; nothing from this run was committed")
             sys.exit(1)
         print(f"Set codes match set_codes.tsv: {len(stored)} rows, {printings} Printings")
+
+
+def main():
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        migration_tracks.apply(conn, root / "migrations", TRACKS)
+        check_set_codes(conn)
+
+
+if __name__ == "__main__":
+    main()
