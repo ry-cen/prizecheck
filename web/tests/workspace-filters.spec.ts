@@ -468,7 +468,11 @@ test.describe("desktop", () => {
     );
     await expectEditions(page, ["Squirtle"]);
     await expect(cards(page).getByText("Squirtle").first()).toBeVisible();
-    await expect(cards(page).getByText("Charmander")).toHaveCount(0);
+
+    // Clearing the search drops q from the address and shows the filtered, sorted listing.
+    await search.fill("");
+    await expect(page).toHaveURL(/\/collection$/);
+    await expectEditions(page, ["Charmander", "Squirtle"]);
   });
 
   test("sorting keeps the selection; search or a filter change clears it; the inspector shows category and type", async ({
