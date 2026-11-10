@@ -7,6 +7,7 @@ import {
 } from "./restorePageScroll";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -103,5 +104,49 @@ it("keeps retrying a clamped position when no resize is reported, then gives up 
   expect(late.scroll).toHaveBeenCalledTimes(calls);
   expect(window.scrollY).toBe(100);
   stopLate();
-  vi.useRealTimers();
+});
+
+it("stops its timer on input and on release, so no later retry moves the page", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 100);
+  restorePageScroll(document.createElement("main"), 500);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+  const calls = view.scroll.mock.calls.length;
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+  expect(view.scroll).toHaveBeenCalledTimes(calls);
+
+  const other = layout(0, 100);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  stop();
+  const before = other.scroll.mock.calls.length;
+  other.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+  expect(other.scroll).toHaveBeenCalledTimes(before);
+});
+
+it("lets a scroll it did not cause (scrollbar drag, find in page) take over", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 100);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  expect(window.scrollY).toBe(100);
+  vi.stubGlobal("scrollY", 40);
+  window.dispatchEvent(new Event("scroll"));
+  const calls = view.scroll.mock.calls.length;
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+  expect(view.scroll).toHaveBeenCalledTimes(calls);
+  expect(window.scrollY).toBe(40);
+  stop();
+});
+
+it("ignores the scroll event its own restore causes", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 100);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  window.dispatchEvent(new Event("scroll"));
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS);
+  expect(window.scrollY).toBe(500);
+  stop();
 });

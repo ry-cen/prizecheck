@@ -11,6 +11,8 @@ export function restorePageScroll(
   let frame = 0;
   let observer: ResizeObserver | undefined;
   let poll: ReturnType<typeof setInterval> | undefined;
+  // Where the last restore left the page; a scroll that lands elsewhere was not ours.
+  let left = window.scrollY;
   const stop = () => {
     stopped = true;
     observer?.disconnect();
@@ -20,12 +22,19 @@ export function restorePageScroll(
     window.removeEventListener("keydown", stop);
     window.removeEventListener("wheel", stop);
     window.removeEventListener("touchstart", stop);
+    window.removeEventListener("scroll", foreign);
   };
+  // Scrollbar drags, find-in-page and assistive scrolling fire no input event. Any scroll we did not cause
+  // (including a clamp or scroll anchoring) releases the restoration, the cautious choice.
+  function foreign() {
+    if (window.scrollY !== left) stop();
+  }
   const restore = () => {
     frame = 0;
     if (stopped) return;
     if (window.scrollY !== target) window.scrollTo(0, target);
-    if (window.scrollY === target) stop();
+    left = window.scrollY;
+    if (left === target) stop();
   };
   restore();
   // First loads and already laid-out pages need no observer or input listeners.
@@ -35,7 +44,8 @@ export function restorePageScroll(
     frame = requestAnimationFrame(restore);
   });
   if (container) observer.observe(container);
-  // Layout that grows without resizing the observed page (late rows, a sibling above) still gets its retry.
+  // In run 42882196433 the observer was seen to miss content growth after Back; why is unknown. A bounded retry
+  // covers it.
   const until = Date.now() + RESTORE_WINDOW_MS;
   poll = setInterval(() => {
     if (Date.now() > until) stop();
@@ -45,5 +55,6 @@ export function restorePageScroll(
   window.addEventListener("keydown", stop, { once: true });
   window.addEventListener("wheel", stop, { once: true });
   window.addEventListener("touchstart", stop, { once: true });
+  window.addEventListener("scroll", foreign, { passive: true });
   return stop;
 }
