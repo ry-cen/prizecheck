@@ -8,8 +8,11 @@ Rules and where they come from:
 
 * Owner-approved (2026-11-09): one Card Identity per underlying card; `(Alternate Art)` does not change the
   identity; a different name is a different identity; a same-name pair with conflicting text goes to review.
-  Text comparison is conservative: differences other than case, whitespace and HTML tags go to review (so a
-  difference inside the reminder text is a conflict). Unrelated products must never be merged silently.
+  The text comparison is a conservative comparison applying the owner's approved rule that conflicting or
+  uncertain matches go to review: differences other than case, whitespace and HTML tags go to review, so a
+  difference inside the reminder text is a conflict. `(Alternate Art)` groups only as a name's sole bracketed
+  part, by the same rule. Printings grouped by name and text that differ on other card details keep their
+  identity and carry `printing_details_differ` for review.
 * Read off real TCGCSV data (the delimiter, the literal `None`): parsing facts only.
 * Everything else the acceptance spec proposes (PC-2 card scope, PC-5 finishes, PC-9 other delimiters, other
   name markers, duplicate numbers) is flagged as pending, not decided.
@@ -19,9 +22,10 @@ import re
 import unicodedata
 
 from .model import (FLAG_CARD_SCOPE_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_EXTENDED_FIELD_REPEATED,
-                    FLAG_FINISH_POLICY_PENDING, FLAG_IDENTITY_TEXT_CONFLICT, FLAG_MARKER_GROUPING_PENDING, FLAG_MULTI_VALUE_UNPARSED,
-                    FLAG_PRICE_WITHOUT_PRODUCT, CardScope, EditionCandidate, IdentityCandidate, GroupResult,
-                    PriceObservation, PrintingCandidate, PrintingKey, ReviewItem)
+                    FLAG_FINISH_POLICY_PENDING, FLAG_IDENTITY_TEXT_CONFLICT, FLAG_MARKER_GROUPING_PENDING,
+                    FLAG_MULTI_VALUE_UNPARSED, FLAG_PRICE_WITHOUT_PRODUCT, FLAG_PRINTING_DETAILS_DIFFER, CardScope,
+                    EditionCandidate, GroupResult, IdentityCandidate, PriceObservation, PrintingCandidate,
+                    PrintingKey, ReviewItem)
 
 # Verified on categories/89 groups 24343, 24344, 24519 and 24528 (2026-11-10): Domain, Tag and Card Type all
 # join several values with `;`, e.g. `Fury;Mind`, `Noxus;Dragon`, `Unit;Token`.
@@ -31,6 +35,12 @@ MULTI_VALUE_DELIMITER = ';'
 OTHER_DELIMITERS = (',', '/', '|', '&', '+', '\n', '\t')
 # The source writes the literal `None` for "no value" in Domain and Card Type.
 NO_VALUE = 'None'
+
+# Card details compared across the printings of one identity. Names are the source's extended field names. The list is
+# a working choice for what "uncertain" covers: Rarity is included although it differs on most alternate art.
+DETAIL_FIELDS = ('Domain', 'Tag', 'Card Type', 'Energy Cost', 'Power Cost', 'Might', 'Rarity')
+# These hold several values; their order is not compared.
+MULTI_VALUE_DETAILS = ('Domain', 'Tag', 'Card Type')
 
 # The one marker the owner approved for automatic grouping.
 GROUPED_MARKER = 'alternate art'
@@ -73,8 +83,9 @@ def plain_text(text):
 
 
 def rules_text(description):
-    """The Description as compared for conflicts. Conservative: differences other than case, whitespace and HTML
-    tags go to review, so reminder text counts. A pending owner question, not a settled rule."""
+    """The Description as compared for conflicts: a conservative comparison applying the owner's approved rule that
+    conflicting or uncertain matches go to review. Differences other than case, whitespace and HTML tags go to
+    review, so reminder text counts."""
     return fold(plain_text(description or ''))
 
 
@@ -217,6 +228,10 @@ def normalise_group(products, prices=()):
             flag(product_ids, FLAG_IDENTITY_TEXT_CONFLICT,
                  f'{members[0]["base_name"]!r}: the products disagree on rules text')
             continue
+        differing = differing_details(members)
+        if differing:
+            flag([d['key'].product_id for d in members], FLAG_PRINTING_DETAILS_DIFFER,
+                 f'{members[0]["base_name"]!r}: the printings differ on ' + ', '.join(differing))
         unmarked = [d for d in members if d['marker'] is None]
         identities.append(IdentityCandidate(identity_key, (unmarked or members)[0]['base_name'],
                                             tuple(d['key'] for d in members)))
@@ -231,6 +246,24 @@ def normalise_group(products, prices=()):
 
     return GroupResult(group_id=group_id, identities=tuple(sorted(identities, key=lambda i: i.identity_key)),
                        printings=printings, review=tuple(review), counts=counts_of(printings, identities, review))
+
+
+def differing_details(members):
+    """The DETAIL_FIELDS on which the products of one identity disagree. A missing value differs from a present one."""
+    differing = []
+    for field in DETAIL_FIELDS:
+        values = set()
+        for d in members:
+            raw = d['extended'].get(field)
+            if raw is None or raw.strip() in ('', NO_VALUE):
+                values.add(None)
+            elif field in MULTI_VALUE_DETAILS:
+                values.add(tuple(sorted(split_values(raw)[0])))
+            else:
+                values.add(raw.strip())
+        if len(values) > 1:
+            differing.append(field)
+    return differing
 
 
 def draft(product, group_id, rows):

@@ -13,7 +13,9 @@ import pytest
 from app.games.riftbound.catalog.model import (
     FLAG_CARD_SCOPE_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_EXTENDED_FIELD_REPEATED, FLAG_FINISH_POLICY_PENDING,
     FLAG_IDENTITY_TEXT_CONFLICT,
-    FLAG_MARKER_GROUPING_PENDING, FLAG_MULTI_VALUE_UNPARSED, FLAG_PRICE_WITHOUT_PRODUCT)
+    FLAG_MARKER_GROUPING_PENDING, FLAG_MULTI_VALUE_UNPARSED, FLAG_PRICE_WITHOUT_PRODUCT, FLAG_PRINTING_DETAILS_DIFFER,
+    FLAGS)
+from app.games.riftbound.catalog import model
 from app.games.riftbound.catalog.normalize import SourceResponseError, normalise_group
 
 NEXT_ID = iter(range(9000001, 9100000))
@@ -99,7 +101,7 @@ def test_alternate_art_with_conflicting_text_is_also_not_merged():
 
 
 def test_case_whitespace_and_html_tags_alone_are_not_conflicts():
-    """The comparison is conservative: differences other than case, whitespace and HTML tags go to review."""
+    """The comparison is conservative comparison: differences other than case, whitespace and HTML tags go to review."""
     base = product('Synthetic Unit 06', text='[KEYWORD]\r\n<br>\r\nDraw  a card.')
     alt = product('Synthetic Unit 06 (Alternate Art)', number='001a/100', text='[keyword] <b>draw a card.</b>')
     result = normalise_group([base, alt])
@@ -334,6 +336,66 @@ def test_a_synthetic_group_file_round_trips():
     assert all(p.image_url.startswith('https://example.invalid/') for p in result.printings)
     assert {FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING, FLAG_MULTI_VALUE_UNPARSED,
             FLAG_FINISH_POLICY_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_IDENTITY_TEXT_CONFLICT} == set(codes(result))
+
+
+def alternate_pair(**overrides):
+    """A base card and its Alternate Art with the same details, except for the given product() arguments."""
+    details = {'domain': 'DomainA', 'tag': 'TagA;TagB', 'card_type': 'Unit', 'rarity': 'Common',
+               'Energy Cost': '3', 'Power Cost': '0', 'Might': '2'}
+    base = product('Synthetic Unit 20', **details)
+    alt = product('Synthetic Unit 20 (Alternate Art)', number='001a/100', **{**details, **overrides})
+    return base, alt
+
+
+def test_grouped_printings_that_differ_on_card_details_stay_grouped_and_are_flagged_for_review():
+    """Pending policy: whether such a difference should block the grouping is for the owner. Not a text conflict."""
+    base, alt = alternate_pair(domain=None, tag='TagC')
+    result = normalise_group([base, alt], [price(base, 'Normal'), price(alt, 'Normal')])
+    assert [(i.display_name, len(i.printings)) for i in result.identities] == [('Synthetic Unit 20', 2)]
+    assert all(p.identity_key is not None and FLAG_PRINTING_DETAILS_DIFFER in p.flags for p in result.printings)
+    assert FLAG_IDENTITY_TEXT_CONFLICT not in codes(result)
+    [item] = [i for i in result.review if i.code == FLAG_PRINTING_DETAILS_DIFFER]
+    assert item.product_ids == (base['productId'], alt['productId'])
+    assert 'Domain' in item.detail and 'Tag' in item.detail and 'Might' not in item.detail
+    assert [p.domains for p in result.printings] == [('DomainA',), ()]  # every value is still on its printing
+
+
+@pytest.mark.parametrize('field, override', [
+    ('Domain', {'domain': 'DomainB'}), ('Tag', {'tag': 'TagC'}), ('Card Type', {'card_type': 'Spell'}),
+    ('Energy Cost', {'Energy Cost': '4'}), ('Power Cost', {'Power Cost': '1'}), ('Might', {'Might': '3'}),
+    ('Rarity', {'rarity': 'Rare'})])
+def test_each_compared_detail_is_named_when_it_differs(field, override):
+    base, alt = alternate_pair(**override)
+    result = normalise_group([base, alt], [price(base, 'Normal'), price(alt, 'Normal')])
+    [item] = [i for i in result.review if i.code == FLAG_PRINTING_DETAILS_DIFFER]
+    assert item.detail.endswith('differ on ' + field)
+
+
+def test_matching_details_and_a_different_order_of_values_are_not_flagged():
+    base = product('Synthetic Unit 21', domain='DomainA;DomainB', tag='TagA;TagB')
+    alt = product('Synthetic Unit 21 (Alternate Art)', number='001a/100', domain='DomainB;DomainA', tag='TagB;TagA')
+    result = normalise_group([base, alt], [price(base, 'Normal'), price(alt, 'Normal')])
+    assert FLAG_PRINTING_DETAILS_DIFFER not in codes(result)
+    assert all(FLAG_PRINTING_DETAILS_DIFFER not in p.flags for p in result.printings)
+
+
+def test_every_flag_the_normaliser_emits_is_in_flags():
+    assert {value for name, value in vars(model).items() if name.startswith('FLAG_')} == set(FLAGS)
+    directory = Path(__file__).parent / 'fixtures' / 'riftbound_synthetic'
+    grouped = normalise_group(json.loads((directory / 'group-900-products.json').read_text()),
+                              json.loads((directory / 'group-900-prices.json').read_text()))
+    repeated = product('Synthetic Unit 30')
+    repeated['extendedData'].append({'name': 'Number', 'displayName': 'Number', 'value': '002/100'})
+    stray = {'productId': 9099999, 'market': 1.0, 'subTypeName': 'Normal'}
+    detail = normalise_group(list(alternate_pair(domain='DomainB')), [stray])
+    emitted = set()
+    for result in (grouped, normalise_group([repeated], [stray]), detail):
+        emitted |= {item.code for item in result.review}
+        emitted |= {flag for p in result.printings for flag in p.flags}
+        emitted |= {flag for p in result.printings for e in p.editions for flag in e.flags}
+    assert FLAG_EXTENDED_FIELD_REPEATED in emitted and FLAG_PRINTING_DETAILS_DIFFER in emitted
+    assert FLAG_PRICE_WITHOUT_PRODUCT in emitted
+    assert emitted <= set(FLAGS)
 
 
 @pytest.mark.parametrize('payload', [
