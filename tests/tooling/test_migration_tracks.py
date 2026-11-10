@@ -161,22 +161,124 @@ class NestedMigrationTest(unittest.TestCase):
 
 
 class PokemonEntryTest(unittest.TestCase):
-    def test_the_entry_names_core_then_the_root_track_and_a_fresh_tree_plans_exactly_the_old_glob(self):
+    def test_the_entry_names_root_to_the_cutoff_then_core_then_the_rest_of_root(self):
         migrate_source = (ROOT / 'scripts/migrate.py').read_text()
-        self.assertIn('TRACKS = (Track("core"), Track())', migrate_source)
         self.assertIn('os.environ["DATABASE_URL"]', migrate_source)
         self.assertNotIn('GAME', migrate_source)
+        migrate = load('migrate_entry', 'scripts/migrate.py')
+        self.assertEqual(migrate.TRACKS, (
+            Track(through='162_trade_loan_threads.sql'),
+            Track('core', recorded=('000_baseline.sql', '001_zip_centroids.sql')),
+            Track(after='162_trade_loan_threads.sql')))
+
+    def test_on_todays_tree_the_plan_is_every_root_file_in_the_old_order_then_the_two_recorded_core_names(self):
+        migrate = load('migrate_plan', 'scripts/migrate.py')
         old_glob = [p.name for p in sorted((ROOT / 'migrations').glob('*.sql'))]
-        plan = migration_tracks.planned(ROOT / 'migrations', (Track('core'), Track()))
-        self.assertEqual([name for name, _ in plan], old_glob)
-        self.assertEqual([path.name for _, path in plan], old_glob)
+        plan = migration_tracks.planned(ROOT / 'migrations', migrate.TRACKS)
+        self.assertEqual([name for name, _ in plan], [*old_glob, 'core/000_baseline.sql', 'core/001_zip_centroids.sql'])
+        self.assertEqual(old_glob[-1], migrate.CUTOFF)
+        self.assertEqual(migration_tracks.recorded_names(migrate.TRACKS), {'core/000_baseline.sql', 'core/001_zip_centroids.sql'})
         self.assertGreater(len(old_glob), 80)
 
     def test_importing_the_entry_applies_nothing_and_leaves_no_bytecode(self):
         run = subprocess.run([sys.executable, '-c', 'import sys; sys.path.insert(0, "scripts"); import migrate; print(migrate.TRACKS)'],
                              cwd=ROOT, env={**os.environ, 'PYTHONDONTWRITEBYTECODE': ''}, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(run.stdout.strip(), "(Track(directory='core'), Track(directory=''))")
+        self.assertIn("Track(directory='', through='162_trade_loan_threads.sql', after='', recorded=())", run.stdout)
+        self.assertIn("recorded=('000_baseline.sql', '001_zip_centroids.sql')", run.stdout)
+
+
+class SliceAndRecordTest(unittest.TestCase):
+    """The runner support for S10: slices of the root track, files recorded instead of run, and the precondition."""
+    ENTRY = (Track(through='002_b.sql'), Track('core', recorded=('000_baseline.sql', '001_seed.sql')), Track(after='002_b.sql'))
+    FILES = {'001_a.sql': 'SELECT 1', '002_b.sql': 'SELECT 2', '003_c.sql': 'SELECT 3', 'core/000_baseline.sql': 'CREATE TABLE seen (n int);',
+             'core/001_seed.sql': 'INSERT INTO seen VALUES (1);', 'core/002_tail.sql': 'SELECT 4'}
+
+    def test_slices_cut_the_root_by_name_and_the_plan_runs_core_between_the_halves(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), self.FILES)
+            self.assertEqual([n for n, _ in migration_tracks.planned(migrations, self.ENTRY)],
+                             ['001_a.sql', '002_b.sql', 'core/000_baseline.sql', 'core/001_seed.sql', 'core/002_tail.sql', '003_c.sql'])
+            self.assertEqual([p.name for p in Track(through='002_b.sql').files(migrations)], ['001_a.sql', '002_b.sql'])
+            self.assertEqual([p.name for p in Track(after='002_b.sql').files(migrations)], ['003_c.sql'])
+            self.assertEqual([p.name for p in Track(after='001_a.sql', through='002_b.sql').files(migrations)], ['002_b.sql'])
+
+    def test_a_slice_that_overlaps_another_is_refused_by_the_ledger_name_check(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), self.FILES)
+            with self.assertRaises(ValueError):
+                migration_tracks.planned(migrations, (Track(through='002_b.sql'), Track(after='001_a.sql')))
+
+    def test_a_recorded_file_the_track_does_not_have_is_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), {'core/000_baseline.sql': ''})
+            with self.assertRaises(ValueError) as raised:
+                migration_tracks.planned(migrations, (Track('core', recorded=('000_baseline.sql', '009_gone.sql')),))
+            self.assertIn('009_gone.sql', str(raised.exception))
+
+    class ObjectConn(FakeConn):
+        """FakeConn that also answers the precondition's existence queries from a set of object names and a set of non-empty tables."""
+        def __init__(self, objects=(), filled=(), applied=()):
+            super().__init__(applied)
+            self.objects, self.filled = set(objects), set(filled)
+
+        def execute(self, query, params=()):
+            if 'to_regclass' in query or 'pg_proc' in query:
+                self.log.append((query, params))
+                return type('Result', (), {'fetchone': lambda me: (params[0] in self.objects,)})()
+            if query.startswith('SELECT EXISTS (SELECT 1 FROM '):
+                self.log.append((query, params))
+                return type('Result', (), {'fetchone': lambda me: (query.split()[-1].rstrip(')') in self.filled,)})()
+            return super().execute(query, params)
+
+    def ran(self, conn):
+        return [query for query, _ in conn.log if 'schema_migration' not in query and query.startswith(('SELECT 1', 'SELECT 2', 'SELECT 3', 'SELECT 4', 'CREATE', 'INSERT INTO seen'))]
+
+    def test_a_recorded_file_is_recorded_not_run_once_its_objects_exist_and_the_rest_runs_in_plan_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), self.FILES)
+            conn, said = self.ObjectConn(objects={'seen'}, filled={'seen'}), []
+            added = migration_tracks.apply(conn, migrations, self.ENTRY, said.append)
+            self.assertEqual(added, ['001_a.sql', '002_b.sql', 'core/000_baseline.sql', 'core/001_seed.sql', 'core/002_tail.sql', '003_c.sql'])
+            self.assertEqual(said, ['Applied 001_a.sql', 'Applied 002_b.sql', 'Recorded core/000_baseline.sql without running it',
+                                    'Recorded core/001_seed.sql without running it', 'Applied core/002_tail.sql', 'Applied 003_c.sql'])
+            self.assertEqual(self.ran(conn), ['SELECT 1', 'SELECT 2', 'SELECT 4', 'SELECT 3'])
+            self.assertEqual(conn.ledger, set(added))
+            self.assertEqual(migration_tracks.apply(conn, migrations, self.ENTRY, said.append), [])
+
+    def test_a_recorded_file_is_refused_when_its_objects_are_absent_and_nothing_after_it_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), self.FILES)
+            for objects, wanted, refused, ledger in (((), 'table seen', 'core/000_baseline.sql', {'001_a.sql', '002_b.sql'}),
+                                                     (('seen',), 'rows in seen', 'core/001_seed.sql', {'001_a.sql', '002_b.sql', 'core/000_baseline.sql'})):
+                conn = self.ObjectConn(objects=objects)
+                with self.assertRaises(migration_tracks.MissingObjects) as raised:
+                    migration_tracks.apply(conn, migrations, self.ENTRY, lambda line: None)
+                self.assertIn(refused, str(raised.exception))
+                self.assertIn(wanted, str(raised.exception))
+                self.assertEqual(conn.ledger, ledger)
+                self.assertEqual(self.ran(conn), ['SELECT 1', 'SELECT 2'])
+
+    def test_a_new_games_entry_lists_core_whole_and_the_baseline_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), {k: v for k, v in self.FILES.items() if k.startswith('core/')})
+            conn = self.ObjectConn()
+            added = migration_tracks.apply(conn, migrations, (Track('core'),), lambda line: None)
+            self.assertEqual(added, ['core/000_baseline.sql', 'core/001_seed.sql', 'core/002_tail.sql'])
+            self.assertEqual(self.ran(conn), ['CREATE TABLE seen (n int);', 'INSERT INTO seen VALUES (1);', 'SELECT 4'])
+
+    def test_the_precondition_reads_what_a_file_creates_and_inserts(self):
+        text = ('-- CREATE TABLE in_a_comment (n int);\nCREATE TABLE a (n int);\nCREATE TABLE IF NOT EXISTS b (n int);\n'
+                'CREATE VIEW v AS SELECT 1;\nCREATE OR REPLACE FUNCTION f(x int) RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql;\n'
+                '  CREATE TABLE indented (n int);\nCREATE INDEX i ON a(n);\nINSERT INTO a(n) VALUES (1);\nINSERT INTO a(n) VALUES (2);\n')
+        self.assertEqual(migration_tracks.CREATES.findall(text), [('TABLE', 'a'), ('TABLE', 'b'), ('VIEW', 'v'), ('FUNCTION', 'f')])
+        self.assertEqual(migration_tracks.INSERTS.findall(text), ['a', 'a'])
+
+    def test_the_real_baseline_and_seed_are_readable_by_the_precondition(self):
+        baseline = (ROOT / 'migrations/core/000_baseline.sql').read_text()
+        self.assertGreater(len(migration_tracks.CREATES.findall(baseline)), 100)
+        self.assertEqual(migration_tracks.INSERTS.findall(baseline), ['operations_state'])
+        self.assertEqual(set(migration_tracks.INSERTS.findall((ROOT / 'migrations/core/001_zip_centroids.sql').read_text())), {'zip_centroid'})
 
 
 def heredoc(function_or_marker):
@@ -211,6 +313,28 @@ with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_migration (name text PRIMARY KEY)")
 '''
 BEFORE_TRACKS = 'c42d6fb142811ede4db9e393b68d6b6543585571'  # dev before migration tracks: no migration_tracks.py
+BEFORE_BASELINE = '97fb02cf1e39d0f1fcf6b202f418fd3ecc70452f'  # dev with migration tracks and no core directory: the release before S10
+
+
+def git_env():
+    """No GIT_* variables (a commit hook exports GIT_DIR and GIT_INDEX_FILE) and no user or system git config, so a test that
+    reads this repository's history can neither be redirected nor change any configuration."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    return {**env, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_SYSTEM': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+
+
+def have_commit(commit):
+    return subprocess.run(['git', 'cat-file', '-e', commit + '^{commit}'], cwd=ROOT, env=git_env(), capture_output=True).returncode == 0
+
+
+def extract(commit, folder, *paths):
+    archive = subprocess.run(['git', 'archive', commit, *paths], cwd=ROOT, env=git_env(), capture_output=True, check=True).stdout
+    subprocess.run(['tar', '-x', '-C', str(folder)], input=archive, check=True)
+
+
+# What the Pokémon entry needs of a tree: its recorded core files, and a root file at or before the cutoff.
+ENTRY_FILES = {'001_a.sql': '', 'core/000_baseline.sql': '', 'core/001_zip_centroids.sql': ''}
+ENTRY_LEDGER = ['001_a.sql', 'core/000_baseline.sql', 'core/001_zip_centroids.sql']
 
 
 class DeployTest(unittest.TestCase):
@@ -231,15 +355,18 @@ class DeployTest(unittest.TestCase):
             return run
 
     def test_a_core_only_pending_file_is_listed_for_the_deploy(self):
-        run = self.run_in_app(heredoc("print('schema' if exists"),
-                              {'001_a.sql': '', 'core/001_x.sql': ''}, ['001_a.sql'])
+        run = self.run_in_app(heredoc("print('schema' if exists"), {**ENTRY_FILES, 'core/002_x.sql': ''}, ENTRY_LEDGER)
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(run.stdout.split(), ['schema', 'core/001_x.sql'])
+        self.assertEqual(run.stdout.split(), ['schema', 'core/002_x.sql'])
 
-    def test_pending_files_list_core_before_the_root_track_and_skip_applied_ones(self):
-        files = {'001_a.sql': '', '002_b.sql': '', 'core/001_x.sql': '', 'core/002_y.sql': ''}
-        run = self.run_in_app(heredoc("print('schema' if exists"), files, ['core/001_x.sql', '001_a.sql'])
-        self.assertEqual(run.stdout.split(), ['schema', 'core/002_y.sql', '002_b.sql'])
+    def test_a_database_without_the_recorded_core_names_lists_them_so_the_deploy_migrates(self):
+        run = self.run_in_app(heredoc("print('schema' if exists"), ENTRY_FILES, ['001_a.sql'])
+        self.assertEqual(run.stdout.split(), ['schema', 'core/000_baseline.sql', 'core/001_zip_centroids.sql'])
+
+    def test_pending_files_follow_the_entrys_order_and_skip_applied_ones(self):
+        files = {**ENTRY_FILES, '163_b.sql': '', 'core/002_x.sql': '', 'core/003_y.sql': ''}
+        run = self.run_in_app(heredoc("print('schema' if exists"), files, [*ENTRY_LEDGER, 'core/002_x.sql'])
+        self.assertEqual(run.stdout.split(), ['schema', 'core/003_y.sql', '163_b.sql'])
 
     def test_the_deploy_list_and_smoke_check_refuse_a_nested_file_but_the_old_image_fallback_is_unchanged(self):
         files = {'001_a.sql': '', NESTED: ''}
@@ -255,9 +382,10 @@ class DeployTest(unittest.TestCase):
 
     def test_the_smoke_check_requires_every_track_of_the_entry_in_the_ledger(self):
         body = heredoc('sys.exit(0 if files <= applied else 1)')
-        files = {'001_a.sql': '', 'core/001_x.sql': ''}
+        files = {**ENTRY_FILES, 'core/002_x.sql': ''}
         self.assertEqual(self.run_in_app(body, files, ['001_a.sql']).returncode, 1)
-        self.assertEqual(self.run_in_app(body, files, ['001_a.sql', 'core/001_x.sql']).returncode, 0)
+        self.assertEqual(self.run_in_app(body, files, ENTRY_LEDGER).returncode, 1)
+        self.assertEqual(self.run_in_app(body, files, [*ENTRY_LEDGER, 'core/002_x.sql']).returncode, 0)
 
     def assert_smoke_passes_without_importing_the_entry(self, scripts):
         """The smoke check also runs in the previous release on a rollback or a restore. That release has the flat root
@@ -274,18 +402,62 @@ class DeployTest(unittest.TestCase):
             self.assert_smoke_passes_without_importing_the_entry(Path(folder))
 
     def test_the_smoke_check_passes_against_the_scripts_of_the_commit_before_migration_tracks(self):
-        if subprocess.run(['git', 'cat-file', '-e', BEFORE_TRACKS + '^{commit}'], cwd=ROOT, capture_output=True).returncode:
+        if not have_commit(BEFORE_TRACKS):
             self.skipTest('a shallow clone does not hold ' + BEFORE_TRACKS)
         with tempfile.TemporaryDirectory() as folder:
-            archive = subprocess.run(['git', 'archive', BEFORE_TRACKS, 'scripts'], cwd=ROOT, capture_output=True, check=True).stdout
-            subprocess.run(['tar', '-x', '-C', folder], input=archive, check=True)
+            extract(BEFORE_TRACKS, folder, 'scripts')
             self.assertFalse((Path(folder) / 'scripts/migration_tracks.py').exists())
             self.assert_smoke_passes_without_importing_the_entry(Path(folder) / 'scripts')
 
     def test_the_smoke_check_passes_against_this_checkouts_scripts(self):
         body = heredoc('sys.exit(0 if files <= applied else 1)')
-        run = self.run_in_app(body, {'001_a.sql': '', 'core/001_x.sql': ''}, ['001_a.sql', 'core/001_x.sql'])
+        run = self.run_in_app(body, {**ENTRY_FILES, 'core/002_x.sql': ''}, [*ENTRY_LEDGER, 'core/002_x.sql'])
         self.assertEqual(run.returncode, 0, run.stderr)
+
+
+class RollbackAcrossTheBaselineTest(unittest.TestCase):
+    """S10 adds migrations/core/ and two ledger names. The release before it ignores both: its smoke check and the release gate
+    still pass, on a rollback to it and on promoting this one."""
+    def test_the_release_before_the_baseline_passes_its_smoke_check_on_the_ledger_this_release_leaves(self):
+        if not have_commit(BEFORE_BASELINE):
+            self.skipTest('a shallow clone does not hold ' + BEFORE_BASELINE)
+        old_files = {path.name: '' for path in (ROOT / 'migrations').glob('*.sql')}
+        ledger = [*old_files, 'core/000_baseline.sql', 'core/001_zip_centroids.sql']
+        body = heredoc('sys.exit(0 if files <= applied else 1)')
+        with tempfile.TemporaryDirectory() as folder:
+            extract(BEFORE_BASELINE, folder, 'scripts')
+            self.assertTrue((Path(folder) / 'scripts/migration_tracks.py').exists())
+            run = DeployTest('run_in_app').run_in_app(body, old_files, ledger, Path(folder) / 'scripts')
+            self.assertEqual(run.returncode, 0, run.stderr)
+            # It still fails closed on a database missing one of its own files.
+            missing = DeployTest('run_in_app').run_in_app(body, old_files, ledger[1:], Path(folder) / 'scripts')
+            self.assertEqual(missing.returncode, 1)
+
+    def test_this_releases_smoke_check_requires_the_recorded_core_names_in_the_ledger(self):
+        files = {path.name: '' for path in (ROOT / 'migrations').glob('*.sql')}
+        files.update({'core/000_baseline.sql': '', 'core/001_zip_centroids.sql': ''})
+        body = heredoc('sys.exit(0 if files <= applied else 1)')
+        deploy = DeployTest('run_in_app')
+        root_only = [name for name in files if '/' not in name]
+        self.assertEqual(deploy.run_in_app(body, files, root_only).returncode, 1)
+        self.assertEqual(deploy.run_in_app(body, files, [*root_only, 'core/000_baseline.sql', 'core/001_zip_centroids.sql']).returncode, 0)
+
+    def test_the_gate_accepts_this_tree_over_the_release_before_the_baseline_and_refuses_changing_either_core_file(self):
+        if not have_commit(BEFORE_BASELINE):
+            self.skipTest('a shallow clone does not hold ' + BEFORE_BASELINE)
+        with tempfile.TemporaryDirectory() as folder:
+            previous = Path(folder) / 'previous'
+            previous.mkdir()
+            extract(BEFORE_BASELINE, previous, 'migrations')
+            self.assertFalse((previous / 'migrations/core').exists())
+            release.compatible(previous, ROOT)
+            # Once shipped, the core files are as immutable as the root ones.
+            candidate = Path(folder) / 'candidate'
+            shutil.copytree(ROOT / 'migrations', candidate / 'migrations')
+            release.compatible(ROOT, candidate)
+            (candidate / 'migrations/core/000_baseline.sql').write_text('-- edited\n')
+            with self.assertRaises(release.ReleaseError):
+                release.compatible(ROOT, candidate)
 
 
 class LoneReleaseCopyTest(unittest.TestCase):

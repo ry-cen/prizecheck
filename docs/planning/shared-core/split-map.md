@@ -662,8 +662,8 @@ ADR 0022 says.
 ## 4. Migrations
 
 The tracks follow design-brief D10:
-- the 82 existing files stay at `migrations/` as the **pokemon** track, under their recorded names, and none re-runs;
-- the **core** track starts at `core/000_baseline.sql` (Later);
+- the 86 existing files stay at `migrations/` as the **pokemon** track, under their recorded names, and none re-runs;
+- the **core** track starts at `core/000_baseline.sql` and `core/001_zip_centroids.sql` (S10, built; a Pokémon database records them without running them);
 - the **auth** track starts at `auth/001_baseline.sql` (Later).
 
 "Track(s) by content" says which target database each file's objects belong to. It decides what the Later baselines
@@ -759,6 +759,18 @@ Phase: **Now**, nothing changes in `migrations/`. **Later (Riftbound)**, the thr
 | 157_rule_rollout.sql | pokemon |  | game-pokemon: `catalog_rule_rollout`, `catalog_rule_activation` |
 | 158_art_route_urls.sql | pokemon |  | game-pokemon: `catalog_printing_art` |
 | 159_confirm_reprint_group_decision.sql | pokemon |  | game-pokemon: `catalog_card_identity_decision` |
+| 160_catalog_set_code.sql | pokemon |  | game-pokemon: `catalog_set_code` (create + 136 rows), `catalog_printing_set_code` |
+| 161_likely_reprint_dismissals.sql | pokemon |  | game-pokemon: `catalog_likely_reprint_decision` (reviewer FK → `inventory_owner`, a pokemon→core FK) |
+| 161_tcgplayer_large_art.sql | core+pokemon | **MIXED** FK crosses: `art_large_upgrade.printing_id`→`catalog_printing` | game-core: `art_large_upgrade` (read and written by `api/app/core/art/store.py`); game-pokemon: `catalog_printing_art_product`, `catalog_printing_art`, `catalog_art_version`, `catalog_art_route_v` |
+| 162_trade_loan_threads.sql | core |  | game-core: `thread`, `thread_round_source`, `thread_member`, `thread_message`, `thread_event`, `legacy_contact`, `conversation`, `conversation_member`, `message`, `trade`, `loan`, `collector_profile`, and the functions `round_in_thread_pair`, `thread_immutable`, `trade_reach` |
+
+Rows above 160 that read differently in the S10 classification (`FILE_OWNERS` in `api/tests/core_baseline_ownership.py`, recomputed by
+`api/tests/test_core_baseline.py` for every root file through 162): `008` and `107` leave a fresh schema unchanged and act on core tables
+only, so they are core; `019_operations.sql` is core only (`operations_counter`'s gateway names move with the auth copy later);
+`020_signup.sql` is auth only (the `"user"` trigger and `onboard_auth_account`); `100_collector_profile.sql` is core, because the S10
+baseline keeps `released_handle` (read by the core function `create_collector_profile`, written by `api/app/social/profile.py`)
+until the identity split decides otherwise; `002_auth.sql` is auth only. Files that mix owners in S10's classification: `001`,
+`007`, `013`, `040` and `161_tcgplayer_large_art`.
 
 ## 5. Identity
 
@@ -1410,3 +1422,15 @@ below says where each group ended up; the module map in section 1 stays the plan
 - Friend copies imports the pure module directly. Its three allowed imports are
   renamed one-for-one; SQL, authorization, visibility, reservation reads and locks
   are unchanged. No live moved-symbol patch paths needed retargeting.
+
+**2026-11-10 — Core baseline and second-game install proof (S10, #533)**
+
+`migrations/core/000_baseline.sql` and `migrations/core/001_zip_centroids.sql` are cut from the schema that root migrations 001 to 162 leave:
+66 core relations (65 tables, 1 view), their sequences, indexes, constraints, 38 functions and 29 triggers, and the `operations_state` row;
+the zip seed is migration 146's `INSERT` statements byte for byte. The baseline leaves out every `catalog_*` and other Pokémon relation, the
+auth tables and `onboard_auth_account`, and the sixteen foreign keys from core into `catalog_edition` and `catalog_printing` (listed in
+`api/tests/core_baseline_ownership.py`). It keeps `released_handle` and `legacy_contact`, which core functions and code read.
+Pokémon's entry (`scripts/migrate.py`) runs root files through 162, records the two core files after a precondition check, then runs any
+pending core file, then root files after 162. `api/tests/test_core_baseline.py` is the proof: pg_catalog definitions of every core object
+equal the Pokémon history's, rows match by digest, and a stub game track (`api/tests/fixtures/stub_game_track`) installs core baseline, core
+tail and its own track in that order.
