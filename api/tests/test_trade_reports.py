@@ -1006,7 +1006,7 @@ def test_thread_snapshot_spans_two_threads_and_archive_without_duplicate_message
     by M1 appear once even though the archive retains the same source message.
     """
     from app.social.reports import ReportCollector, _file_report
-    from test_thread_migration import apply, message as archived_message, pair as archived_pair, trade as old_trade
+    from test_thread_migration import MIGRATION, apply, message as archived_message, pair as archived_pair, trade as old_trade
     migrate(scratch, before='162_trade_loan_threads.sql')
     with psycopg.connect(scratch, row_factory=dict_row) as conn:
         archived = archived_pair(conn)
@@ -1014,6 +1014,10 @@ def test_thread_snapshot_spans_two_threads_and_archive_without_duplicate_message
         duplicate = archived_message(conn, archived, '2020-01-02')
         archive_only = archived_message(conn, archived, '2020-01-01')
         apply(conn)
+        # _file_report reads current card facts (catalog_edition_art), so the migrations after 162 go on too.
+        conn.execute('INSERT INTO schema_migration(name) VALUES (%s)', (MIGRATION,))
+        conn.commit()
+        migrate(scratch)
         conn.execute("UPDATE collector_profile SET handle='ashsnapshot',handle_key='ashsnapshot' WHERE user_id='A'")
         conn.execute("UPDATE collector_profile SET handle='mistysnapshot',handle_key='mistysnapshot' WHERE user_id='z'")
         # Keep one archived source without its migrated copy to independently

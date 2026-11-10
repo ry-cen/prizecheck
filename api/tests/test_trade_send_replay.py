@@ -109,8 +109,8 @@ def legacy(old, scratch, monkeypatch, store, writer):
     # Loan and Trade can share a round UUID; kind is part of mapping identity.
     old.execute("INSERT INTO loan(id,kind,state,lender_id,borrower_id,lender_name,borrower_name) VALUES (%s,'borrow_request','requested',%s,%s,'Ash','Misty')", (ROUND, OWNER, OTHER))
     apply(old)
-    # apply() runs only the thread migration. The send path under test is current code, so the rest of the schema
-    # (every migration after it) goes on as a release applies it, with the thread migration recorded as applied.
+    # apply() runs only the thread migration. The send path under test is current code, so record that migration and
+    # apply every later root migration too (migrate() applies the remaining files in filename order).
     old.execute('INSERT INTO schema_migration(name) VALUES (%s)', (MIGRATION,))
     old.commit()
     migrate(scratch)
