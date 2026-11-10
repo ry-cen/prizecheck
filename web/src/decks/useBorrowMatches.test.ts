@@ -363,19 +363,26 @@ it.each(["pulse", "focus", "pins"])(
       vi.mocked(getPendingLoans).mockRejectedValueOnce(new Error("offline"));
       pulse++;
       await act(async () => render());
-      const failedCopy =
-        "Couldn't check what's available. Close this and try again.";
+      const failedCopy = "Couldn't check what's available.";
       expect(
         host.querySelector('dialog [role="status"]')?.textContent
       ).toContain(failedCopy);
+      expect(host.textContent).not.toContain("Close this");
       expect(host.textContent).not.toContain("Checking what's available…");
       expect(button("Send Borrow Request").disabled).toBe(true);
       await act(async () => button("Send Borrow Request").click());
       expect(send).not.toHaveBeenCalled();
-      // A subsequent successful read clears the failure and enables sending again.
-      pulse++;
-      await act(async () => render());
+      // Retry re-runs the read in place; the open composer and its draft stay as they were.
+      const retried = host.querySelector("dialog");
+      await act(async () => button("Retry").click());
+      expect(host.querySelector("dialog")).toBe(retried);
       expect(host.textContent).not.toContain(failedCopy);
+      expect(host.querySelector('dialog [role="status"]')).toBeNull();
+      expect(
+        host.querySelector(
+          '[role="group"][aria-label^="Copies of Iono,"] output'
+        )?.textContent
+      ).toBe("1");
 
       expect(button("Send Borrow Request").disabled).toBe(false);
       expect(host.textContent).not.toContain("Checking what's available…");
@@ -403,3 +410,137 @@ it.each(["pulse", "focus", "pins"])(
     }
   }
 );
+
+it("offers Retry in the composer when the All Decks availability read fails", async () => {
+  const everyDeck: WantList = { ...list, deck_id: null };
+  vi.mocked(getWantListMatches).mockResolvedValue(matches("3"));
+  vi.mocked(getDecks).mockResolvedValue({
+    decks: [],
+    owner_revision: 1,
+    next_cursor: null,
+  });
+  window.sessionStorage.clear();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    }
+  );
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const dialog = HTMLDialogElement.prototype;
+  const originalShow = Object.getOwnPropertyDescriptor(dialog, "showModal");
+  const originalClose = Object.getOwnPropertyDescriptor(dialog, "close");
+  if (!originalShow)
+    Object.defineProperty(dialog, "showModal", {
+      configurable: true,
+      writable: true,
+      value() {},
+    });
+  if (!originalClose)
+    Object.defineProperty(dialog, "close", {
+      configurable: true,
+      writable: true,
+      value() {},
+    });
+  const show = vi.spyOn(dialog, "showModal").mockImplementation(function (
+    this: HTMLDialogElement
+  ) {
+    this.setAttribute("open", "");
+  });
+  const close = vi.spyOn(dialog, "close").mockImplementation(function (
+    this: HTMLDialogElement
+  ) {
+    this.removeAttribute("open");
+  });
+  function Probe() {
+    const { friends, pending: read } = useBorrowMatches(everyDeck, 0);
+    // The All Decks Want List has no pending read, so the page shows no Retry of its own.
+    expect(read.state.kind).toBe("idle");
+    const copies =
+      friends.kind === "ready" ? (friends.byCard.get("A") ?? []) : [];
+    return h(
+      "div",
+      null,
+      ...copies.map((copy) =>
+        h(AskChip, {
+          key: copy.collector_id,
+          friend: copy,
+          card: { ...copy, image_url: null },
+          cap: 3,
+          initialQuantity: 2,
+          current: friends.kind === "ready" && !friends.pending,
+          more: true,
+          lendable: "3 spare",
+          text: copy.display_name,
+          deckId: null,
+        })
+      )
+    );
+  }
+  const render = () =>
+    root.render(
+      h(BorrowDraftsProvider, {
+        userId: "all-decks-test",
+        onOpenLoan: vi.fn(),
+        children: h(Probe),
+      })
+    );
+  const button = (name: string) =>
+    Array.from(host.querySelectorAll("button")).find(
+      (node) => node.textContent === name
+    )!;
+  try {
+    await act(async () => render());
+    const chip = host.querySelector<HTMLButtonElement>("[aria-pressed]")!;
+    await act(async () => chip.click());
+    await act(async () => button("Review").click());
+    const date = host.querySelector<HTMLInputElement>('input[type="date"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )!.set!.call(date, "2030-01-02");
+      date.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const decrease = host.querySelector<HTMLButtonElement>(
+      '[aria-label^="Decrease Copies of Iono,"]'
+    )!;
+    await act(async () => decrease.click());
+    const quantity = () =>
+      host.querySelector('[role="group"][aria-label^="Copies of Iono,"] output')
+        ?.textContent;
+    expect(quantity()).toBe("1");
+
+    // The read behind the open composer fails; the page has no Retry for this scope.
+    vi.mocked(getWantListMatches).mockRejectedValueOnce(new Error("offline"));
+    pulse++;
+    await act(async () => render());
+    expect(host.querySelector('dialog [role="status"]')?.textContent).toContain(
+      "Couldn't check what's available."
+    );
+    expect(host.textContent).not.toContain("Close this");
+    expect(button("Send Borrow Request").disabled).toBe(true);
+    await act(async () => button("Send Borrow Request").click());
+    expect(send).not.toHaveBeenCalled();
+
+    await act(async () => button("Retry").click());
+    expect(host.querySelector('dialog [role="status"]')).toBeNull();
+    expect(button("Send Borrow Request").disabled).toBe(false);
+    expect(quantity()).toBe("1");
+    expect(
+      host.querySelector<HTMLInputElement>('input[type="date"]')!.value
+    ).toBe("2030-01-02");
+    expect(getWantListMatches).toHaveBeenCalledTimes(3);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    show.mockRestore();
+    close.mockRestore();
+    if (!originalShow) Reflect.deleteProperty(dialog, "showModal");
+    if (!originalClose) Reflect.deleteProperty(dialog, "close");
+    window.sessionStorage.clear();
+  }
+});

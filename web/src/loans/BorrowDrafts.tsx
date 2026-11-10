@@ -81,7 +81,8 @@ type DraftsApi = {
   checkReadiness: (
     source: symbol,
     deckId: string | null,
-    current: BorrowReadiness | null
+    current: BorrowReadiness | null,
+    retry?: () => void
   ) => void;
   /** Copies of one Edition in the draft to one Friend. */
   quantity: (friendId: string, editionId: string) => number;
@@ -106,17 +107,22 @@ export function useBorrowDrafts(): DraftsApi | null {
   return useContext(DraftsContext);
 }
 
-/** A mounted Want List read blocks sending its scoped drafts until quantities are current. */
+/** A mounted Want List read blocks sending its scoped drafts until quantities are current. `retry` runs the read
+ * again, so the composer can offer Retry while the page's own Retry is hidden behind it. */
 export function useBorrowReadiness(
   deckId: string | null,
-  current: BorrowReadiness | null
+  current: BorrowReadiness | null,
+  retry?: () => void
 ) {
   const register = useBorrowDrafts()?.checkReadiness;
   const source = useRef(Symbol());
+  const latest = useRef(retry);
+  latest.current = retry;
+  const again = useCallback(() => latest.current?.(), []);
   useLayoutEffect(() => {
-    register?.(source.current, deckId, current);
+    register?.(source.current, deckId, current, again);
     return () => register?.(source.current, deckId, null);
-  }, [register, deckId, current]);
+  }, [register, deckId, current, again]);
 }
 
 const STORAGE_PREFIX = "prizecheck.borrowDrafts.";
@@ -230,18 +236,22 @@ export function BorrowDraftsProvider({
   const [drafts, setDrafts] = useState<Draft[]>(() => readDrafts(userId));
   const [composing, setComposing] = useState<string | null>(null);
   const [checks, setChecks] = useState(
-    new Map<symbol, { deckId: string | null; current: BorrowReadiness }>()
+    new Map<
+      symbol,
+      { deckId: string | null; current: BorrowReadiness; retry?: () => void }
+    >()
   );
   const checkReadiness = useCallback(
     (
       source: symbol,
       deckId: string | null,
-      current: BorrowReadiness | null
+      current: BorrowReadiness | null,
+      retry?: () => void
     ) => {
       setChecks((previous) => {
         const next = new Map(previous);
         if (current === null) next.delete(source);
-        else next.set(source, { deckId, current });
+        else next.set(source, { deckId, current, retry });
         return next;
       });
     },
@@ -381,6 +391,14 @@ export function BorrowDraftsProvider({
               (check.deckId !== null && check.deckId !== draft.deckId) ||
               check.current === true
           )}
+          onRetry={() => {
+            for (const check of checks.values())
+              if (
+                (check.deckId === null || check.deckId === draft.deckId) &&
+                check.current === "failed"
+              )
+                check.retry?.();
+          }}
           failed={Array.from(checks.values()).some(
             (check) =>
               (check.deckId === null || check.deckId === draft.deckId) &&
@@ -595,6 +613,7 @@ function BorrowComposer({
   draft,
   current,
   failed,
+  onRetry,
   onChange,
   onClose,
   onOpenLoan,
@@ -603,6 +622,7 @@ function BorrowComposer({
   draft: Draft;
   current: boolean;
   failed: boolean;
+  onRetry: () => void;
   onChange: (update: (draft: Draft | undefined) => Draft | null) => void;
   onClose: () => void;
   onOpenLoan: (id: string) => void;
@@ -880,9 +900,20 @@ function BorrowComposer({
         </p>
         {!current && (
           <p role="status" className="m-0 text-meta text-text-muted">
-            {failed
-              ? "Couldn't check what's available. Close this and try again."
-              : "Checking what's available…"}
+            {failed ? (
+              <>
+                Couldn't check what's available.{" "}
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="cursor-pointer border-0 bg-transparent p-0 font-sans text-meta text-accent-strong underline"
+                >
+                  Retry
+                </button>
+              </>
+            ) : (
+              "Checking what's available…"
+            )}
           </p>
         )}
         <div className="flex flex-wrap justify-end gap-2">
