@@ -297,6 +297,7 @@ def test_trade_list_summary_counts_all_lines_caps_thumbnails_and_orients_cash(st
     for reader, give, get, payer in ((a, '3', '7', 'them'), (b, '7', '3', 'you')):
         item = ok(call('GET', '/api/trades?group=done', reader))[0]
         assert item['you_are'] == ('low' if reader == min(a, b) else 'high')
+        assert item['closed_reason'] is None
         summary = item['summary']
         assert summary['you_give'] == give and summary['you_get'] == get
         assert summary['cash'] == {'cents': '1250', 'payer': payer}
@@ -311,6 +312,8 @@ def test_trade_list_summary_counts_all_lines_caps_thumbnails_and_orients_cash(st
     (True, 'withdrawn', False, 0, '5'),
     (True, 'cancelled', False, 0, '5'),
     (True, 'cancelled', True, 3, '3'),
+    (True, 'returned', True, 3, '3'),
+    (True, 'written_off', True, 3, '3'),
 ])
 def test_loan_list_summary_orients_requested_and_promised_quantities(store, closed, reason, accepted, promised, quantity):
     from want_list_swap_fixtures import seed_swap_catalog
@@ -327,10 +330,17 @@ def test_loan_list_summary_orients_requested_and_promised_quantities(store, clos
     for reader, side in ((a, 'you_give'), (b, 'you_get')):
         groups = ('needs_you', 'done') if closed else ('needs_you', 'open')
         rows = [item for group in groups for item in ok(call('GET', '/api/loans?group=' + group, reader))]
-        summary = next(item['summary'] for item in rows if item['id'] == str(tid))
+        item = next(item for item in rows if item['id'] == str(tid))
+        detail = ok(call('GET', f'/api/loans/{tid}', reader))
+        assert item['closed_reason'] == detail['live_terms']['closed_reason'] == reason
+        summary = item['summary']
         assert summary[side] == quantity
         assert summary['you_get' if side == 'you_give' else 'you_give'] == '0'
         assert summary['cash'] is None and summary['cards'][0]['side'] == side
+    outsider, _ = collector()
+    for group in ('needs_you', 'open', 'out_now', 'pending', 'done'):
+        assert ok(call('GET', '/api/loans?group=' + group, outsider)) == []
+    assert call('GET', f'/api/loans/{tid}', outsider).status_code == 404
 
 
 @pytest.mark.parametrize('viewer_role', ['lender', 'borrower'])

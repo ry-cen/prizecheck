@@ -1,5 +1,10 @@
 import { tradeCardName } from "../trades/tradeText";
-import type { ThreadItem, Timeline, TimelineItem } from "../social_generated";
+import type {
+  LoanView,
+  ThreadItem,
+  Timeline,
+  TimelineItem,
+} from "../social_generated";
 
 const EVENTS: Record<string, string> = {
   offered: "Sent an offer",
@@ -60,7 +65,8 @@ export function timelineText(
   item: TimelineItem,
   youAre: Timeline["you_are"],
   name: string,
-  editionNames: Record<string, string>
+  editionNames: Record<string, string>,
+  kind: "trade" | "loan" = "trade"
 ): string {
   if (item.message)
     return `${item.message.from === "you" ? "You" : name}: ${item.message.body}`;
@@ -70,10 +76,18 @@ export function timelineText(
   for (const edition of event.editions ?? [])
     labels[edition.edition_id] = tradeCardName(edition);
   const actor = event.actor ? `${event.actor === youAre ? "You" : name}: ` : "";
-  const changes = (event.data?.lines ?? []).map(
-    (line) =>
-      `${line.giver === youAre ? "You give" : "They give"} ${labels[line.edition_id] ?? "copies"}: ${line.from_qty} → ${line.to_qty}`
-  );
+  const changes = (event.data?.lines ?? []).map((line) => {
+    const card = labels[line.edition_id] ?? "copies";
+    const side = line.giver === youAre ? "you" : name;
+    const action = kind === "loan" ? "lend" : "give";
+    const detail =
+      line.from_qty === 0
+        ? `Added ${line.to_qty} ${card}`
+        : line.to_qty === 0
+          ? `Removed ${line.from_qty} ${card}`
+          : `Changed ${card} to ${line.to_qty}`;
+    return `${detail} for ${side} to ${action}`;
+  });
   const cash = (value: {
     cents?: number | null;
     payer?: "low" | "high" | null;
@@ -81,13 +95,12 @@ export function timelineText(
     value.cents
       ? `${value.payer === youAre ? "You pay" : "They pay"} $${(value.cents / 100).toFixed(2)}`
       : "No cash";
-  if (event.data?.cash)
-    changes.push(
-      `Cash: ${cash(event.data.cash.from)} → ${cash(event.data.cash.to)}`
-    );
+  if (event.data?.cash) changes.push(`Cash now: ${cash(event.data.cash.to)}`);
   if (event.data?.return_by)
     changes.push(
-      `Return by: ${returnDate(event.data.return_by.from)} → ${returnDate(event.data.return_by.to)}`
+      event.data.return_by.to
+        ? `Return by ${returnDate(event.data.return_by.to)}`
+        : "Removed the return date"
     );
   for (const [field, label] of [
     ["not_lent", "Not lent"],
@@ -101,4 +114,58 @@ export function timelineText(
         `${label}: ${line.quantity} ${labels[line.edition_id] ?? "copies"}`
       );
   return `${actor}${EVENTS[event.kind] ?? "Agreement updated"}${changes.map((change) => ` · ${change}`).join("")}`;
+}
+
+/** Current terms only: the timeline owns the history of edits. */
+export function agreementText(
+  row: Pick<ThreadItem, "kind" | "summary"> & { state?: string }
+): string {
+  const { summary } = row;
+  if (row.kind === "loan") {
+    if (row.state === "closed") {
+      const total = Number(summary.you_give) + Number(summary.you_get);
+      return `${total} ${total === 1 ? "card" : "cards"}`;
+    }
+    return Number(summary.you_give) > 0
+      ? `Lending ${summary.you_give}`
+      : `Borrowing ${summary.you_get}`;
+  }
+  return `You give ${summary.you_give} · You get ${summary.you_get}${
+    summary.cash
+      ? ` · ${summary.cash.payer === "you" ? "You pay" : "They pay"} $${(Number(summary.cash.cents) / 100).toFixed(2)}`
+      : ""
+  }`;
+}
+
+export function currentCardsText(
+  row: Pick<ThreadItem, "kind" | "summary">
+): string {
+  const cards = (side: "you_give" | "you_get") =>
+    row.summary.cards
+      .filter((card) => card.side === side)
+      .map((card) => `${card.copies} ${card.name}`)
+      .join(", ");
+  return row.kind === "trade"
+    ? [
+        cards("you_give") && `You give ${cards("you_give")}`,
+        cards("you_get") && `You get ${cards("you_get")}`,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : row.summary.cards
+        .map((card) => `${card.copies} ${card.name}`)
+        .join(" · ");
+}
+
+export function loanOutcome(reason: LoanView["closed_reason"]): string {
+  if (!reason) return "Closed";
+  return (
+    {
+      returned: "Returned",
+      written_off: "Written off",
+      declined: "Declined",
+      withdrawn: "Withdrawn",
+      cancelled: "Cancelled",
+    } as const
+  )[reason];
 }

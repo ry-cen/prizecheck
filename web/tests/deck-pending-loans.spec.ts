@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import {
   expect,
-  test,
+  test as base,
   type OtherCollector,
   type OtherCollectorOptions,
 } from "./support/collectors";
@@ -20,6 +20,30 @@ import {
   unsorted,
 } from "./support/loans";
 import { signInAsOwner } from "./support/sign-in";
+
+// Seed once per worker and prepare the collectors before the behavior assertions.
+const test = base.extend<
+  {
+    loanQuantities: [number, number];
+    prepared: Awaited<ReturnType<typeof lending>>;
+  },
+  { catalog: ReturnType<typeof seedCatalog> }
+>({
+  catalog: [
+    async ({}, use) => {
+      await use(seedCatalog());
+    },
+    { scope: "worker" },
+  ],
+  loanQuantities: [[2, 2], { option: true }],
+  prepared: async ({ page, collectors, loanQuantities }, use) => {
+    await use(await lending(page, collectors, ...loanQuantities));
+  },
+});
+let catalog: ReturnType<typeof seedCatalog>;
+test.beforeAll(async ({ catalog: seeded }) => {
+  catalog = seeded;
+});
 
 // What a Deck is waiting on from Friends (GET /api/loans/pending, design docs/planning/social-network/
 // want-list-pending-loans.md): under each needed line, the copies asked for and the copies a Friend agreed to lend,
@@ -55,7 +79,7 @@ async function lending(
   copies: number,
   listed: number
 ) {
-  const ids = seedCatalog();
+  const ids = catalog;
   const iono = ids["PAL 185"];
   const misty = await collectors.signIn({ next: "/decks" });
   await nameCollector(misty.page, "Misty W");
@@ -69,6 +93,8 @@ async function lending(
   const deck = await createDeck(page, deckName);
   await setLine(page, deck, iono, listed);
   await befriend(page, misty.page);
+  // Complete the first Want List load before the prepared fixture yields.
+  await openScoped(page, deck);
   return { ids, iono, misty: misty.page, deck, deckName };
 }
 
@@ -93,20 +119,22 @@ const accept = (lender: Page, loan: string, edition: string, copies: number) =>
     lines: [{ edition_id: edition, promised: String(copies) }],
   });
 
-/** Opens the Want List on one Deck and waits for its first pending read and pulse. */
+/** Opens the Want List on one Deck and waits for that Deck's pending read. */
 async function openScoped(page: Page, deck: string) {
-  const pending = page.waitForResponse((response) => isPending(response.url()));
-  const pulse = page.waitForResponse((response) => isPulse(response.url()));
+  const pending = page.waitForResponse(
+    (response) =>
+      isPending(response.url()) &&
+      new URL(response.url()).searchParams.get("deck") === deck
+  );
   await page.goto(`${ORIGIN}/decks/want-list?deck=${deck}`);
-  await Promise.all([pending, pulse]);
+  await pending;
 }
 
 test("a Borrow Request sent from the Want List shows under its line without a reload", async ({
   page,
-  collectors,
+  prepared,
 }) => {
-  const { deck, deckName } = await lending(page, collectors, 2, 2);
-  await openScoped(page, deck);
+  const { deck, deckName } = prepared;
   const lines = needs(page, deckName);
   await expect(lines).toContainText("2 of 2");
   await expect(lines).not.toContainText("Asked Misty W");
@@ -126,30 +154,100 @@ test("a Borrow Request sent from the Want List shows under its line without a re
   const reread = page.waitForResponse((response) => isPending(response.url()));
   await composer.getByRole("button", { name: "Send Borrow Request" }).click();
   await reread;
-  await expect(lines).toContainText("Asked Misty W for 1");
+  await expect(lines).toContainText("Asked Misty W for 2");
+  await expect(
+    lines.getByRole("button", { name: /^Borrow from Misty W/ })
+  ).toHaveCount(0);
   // Information only: the line still needs both copies.
   await expect(lines).toContainText("2 of 2");
+  const toast = page.getByRole("region", { name: "Notifications" });
+  await expect(toast).toContainText("Borrow Request sent to Misty W.");
+  await toast.getByRole("button", { name: "View", exact: true }).click();
+  await expect(page).toHaveURL(/\/loans\/[0-9a-f-]+$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "You asked Misty W for 2 cards"
+  );
 });
 
-test("a Friend's answer from their own device shows once the inbox pulse moves", async ({
-  page,
-  collectors,
-}) => {
-  const { iono, misty, deck, deckName } = await lending(page, collectors, 3, 3);
-  const loan = await request(page, misty, iono, 2, deck);
-  await page.clock.install();
-  await openScoped(page, deck);
-  const lines = needs(page, deckName);
-  await expect(lines).toContainText("Asked Misty W for 2");
+test.describe("answer after a partial acceptance", () => {
+  test.use({ loanQuantities: [3, 3] });
+  test("a Friend's answer from their own device shows once the inbox pulse moves", async ({
+    page,
+    prepared,
+  }) => {
+    const { iono, misty, deck, deckName } = prepared;
+    const loan = await request(page, misty, iono, 2, deck);
+    await page.clock.install();
+    await openScoped(page, deck);
+    const lines = needs(page, deckName);
+    await expect(lines).toContainText("Asked Misty W for 2");
 
-  // A partial accept stores an inbox update for Ash, which moves the pulse; no focus is needed.
-  await accept(misty, loan, iono, 1);
-  const reread = page.waitForResponse((response) => isPending(response.url()));
-  await page.clock.runFor(61_000);
-  await reread;
-  await expect(lines).toContainText("Misty W agreed to lend 1");
-  await expect(lines).not.toContainText("Asked Misty W");
-  await expect(lines).toContainText("3 of 3");
+    await lines
+      .getByRole("button", { name: /^Ask for 1 more from Misty W/ })
+      .click();
+    await page
+      .getByRole("button", { name: "Review Borrow Request to Misty W" })
+      .click();
+    const before = page.getByRole("dialog", {
+      name: "Borrow Request to Misty W",
+    });
+    await expect(
+      before.getByRole("button", { name: /^Increase Copies of Iono,/ })
+    ).toBeDisabled();
+    await before.getByRole("button", { name: "Keep draft" }).click();
+
+    // A partial accept stores an inbox update for Ash, which moves the pulse; no focus is needed.
+    await accept(misty, loan, iono, 1);
+    const reread = page.waitForResponse((response) =>
+      isPending(response.url())
+    );
+    await page.clock.runFor(61_000);
+    await reread;
+    await expect(lines).toContainText("Misty W agreed to lend 1");
+    await expect(lines).not.toContainText("Asked Misty W");
+    await expect(lines).toContainText("3 of 3");
+    const selected = lines.getByRole("button", {
+      name: /^Ask for 1 more from Misty W/,
+    });
+    await expect(selected).toBeVisible();
+    await expect(selected).toHaveAttribute("aria-pressed", "true");
+    // A previously capped draft keeps its quantity, but can now increase to the fresh cap.
+    await page
+      .getByRole("button", { name: "Review Borrow Request to Misty W" })
+      .click();
+    const existing = page.getByRole("dialog", {
+      name: "Borrow Request to Misty W",
+    });
+    await expect(
+      existing.getByRole("button", { name: /^Increase Copies of Iono,/ })
+    ).toBeEnabled();
+    await existing
+      .getByRole("button", { name: /^Increase Copies of Iono,/ })
+      .click();
+    await expect(
+      existing.getByRole("button", { name: /^Increase Copies of Iono,/ })
+    ).toBeDisabled();
+    await existing
+      .getByRole("button", { name: "Discard", exact: true })
+      .click();
+    const remainder = lines.getByRole("button", {
+      name: /^Ask for 2 more from Misty W/,
+    });
+    await expect(remainder).toHaveAttribute("aria-pressed", "false");
+    await remainder.click();
+    await page
+      .getByRole("button", { name: "Review Borrow Request to Misty W" })
+      .click();
+    const draft = page.getByRole("dialog", {
+      name: "Borrow Request to Misty W",
+    });
+    await expect(
+      draft.getByRole("button", { name: /^Increase Copies of Iono,/ })
+    ).toBeDisabled();
+    await expect(
+      draft.getByRole("list", { name: "Cards to borrow" })
+    ).toContainText("2");
+  });
 });
 
 test("a write-off moves the thread pulse and refreshes pending quantities without focus", async ({
@@ -332,4 +430,83 @@ test("editing the same Deck to a card a request already waits on shows the reque
   await reread;
   await expect(lines).toContainText("Asked Misty W for 1");
   await expect(lines).toContainText("1 of 1");
+});
+
+test("the missing-cards panel offers only the remainder after asking and no duplicate when covered", async ({
+  page,
+  collectors,
+}) => {
+  const { iono, misty, deck, deckName } = await lending(page, collectors, 2, 2);
+  await request(page, misty, iono, 1, deck);
+  await page.goto(`${ORIGIN}/decks/${deck}`);
+  await page.getByRole("button", { name: "Ways to get missing cards" }).click();
+  const panel = page.getByRole("region", { name: "Ways to get missing cards" });
+  await expect(panel).toContainText("Asked Misty W for 1");
+  await panel
+    .getByRole("button", { name: /^Ask for 1 more from Misty W/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Review Borrow Request to Misty W" })
+    .click();
+  const composer = page.getByRole("dialog", {
+    name: "Borrow Request to Misty W",
+  });
+  await expect(composer.getByLabel("For Deck")).toHaveValue(deck);
+  await composer.getByRole("button", { name: "Send Borrow Request" }).click();
+  await expect(panel).toContainText(
+    "Asked Misty W for 1 · Asked Misty W for 1"
+  );
+  await expect(
+    panel.getByRole("button", {
+      name: /^(Borrow from|Ask for .* more from) Misty W/,
+    })
+  ).toHaveCount(0);
+  const toast = page.getByRole("region", { name: "Notifications" });
+  await expect(toast).toContainText("Borrow Request sent to Misty W.");
+  await test.info().attach("missing-cards-panel-after", {
+    body: await panel.innerText(),
+    contentType: "text/plain",
+  });
+  await toast.getByRole("button", { name: "View", exact: true }).click();
+  await expect(page).toHaveURL(/\/loans\/[0-9a-f-]+$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "You asked Misty W for 1 card"
+  );
+});
+
+test.describe("different acceptable Editions", () => {
+  test.use({ loanQuantities: [2, 4] });
+  test("requests for Edition A do not consume Edition B from the same Friend", async ({
+    page,
+    prepared,
+  }) => {
+    const { ids, iono, misty, deck, deckName } = prepared;
+    await hold(misty, await unsorted(misty), ids["PAL 254"], 2);
+    await request(page, misty, iono, 2, deck);
+    await openScoped(page, deck);
+    const line = needs(page, deckName);
+    await line
+      .getByRole("radiogroup", { name: /^Will accept for Iono/ })
+      .getByRole("radio", { name: "Any card with the same name" })
+      .check();
+    const offers = line
+      .getByRole("list", { name: "Friends who can lend Iono" })
+      .getByRole("button");
+    await expect(offers).toHaveCount(1);
+    await expect(offers).toContainText("Ask for 2 more from Misty W");
+    await expect(offers).toContainText("PAL 254");
+    await offers.click();
+    await page
+      .getByRole("button", { name: "Review Borrow Request to Misty W" })
+      .click();
+    const draft = page.getByRole("dialog", {
+      name: "Borrow Request to Misty W",
+    });
+    await expect(
+      draft.getByRole("list", { name: "Cards to borrow" })
+    ).toContainText("PAL 254");
+    await expect(
+      draft.getByRole("button", { name: /^Increase Copies of Iono,/ })
+    ).toBeDisabled();
+  });
 });

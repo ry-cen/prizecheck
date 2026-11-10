@@ -318,12 +318,12 @@ for (const width of [320, 375, 390, 960, 1024, 1280, 1440, 1920]) {
     });
     if (width <= 760) await expectTouchTarget(ask);
     await ask.click();
-    await expect(panel).toContainText("1 of 2 asked");
+    await expect(panel).toContainText("2 of 2 asked");
     const copies = friends.getByRole("group", {
       name: "Copies of Iono to ask Misty W for",
       exact: true,
     });
-    await expect(copies.locator("output")).toHaveText("1");
+    await expect(copies.locator("output")).toHaveText("2");
     await expect(
       copies.getByRole("button", {
         name: "Increase Copies of Iono to ask Misty W for",
@@ -345,7 +345,7 @@ for (const width of [320, 375, 390, 960, 1024, 1280, 1440, 1920]) {
     await expect
       .poll(() => copies.evaluate((node, old) => node === old, original))
       .toBe(true);
-    await expect(copies.locator("output")).toHaveText("1");
+    await expect(copies.locator("output")).toHaveText("2");
     await page.setViewportSize({ width, height: 900 });
     await expectIdentityFits();
     await fits(panel);

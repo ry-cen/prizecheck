@@ -87,7 +87,7 @@ export function GetFromFriends({
   deckName: (id: string) => string;
   /** The Deck the Want List is scoped to, or null for all Decks. */
   scoped: string | null;
-  /** The Friends' cards for this scope aren't in yet (or couldn't be read): no line about what they lack. */
+  /** The Friends' cards are not current: omit the missing-card verdict until they are. */
   pending: boolean;
   action?: (row: CombinedRow, copy: FriendCopy) => ReactNode;
   /** Copies of the row's card the Borrow Request drafts ask Friends for. */
@@ -108,7 +108,7 @@ export function GetFromFriends({
   const missing = rows.length - lendable.length;
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {!pending && lendable.length > 0 && (
+      {lendable.length > 0 && (
         <p className="m-0 text-body text-text-muted">
           Cards you need that Friends can lend.
         </p>

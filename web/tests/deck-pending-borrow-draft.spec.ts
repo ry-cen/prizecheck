@@ -94,7 +94,7 @@ test("Ask, Review and Send from a Deck's Want List shows the request under that 
   // The page's Deck, not a choice made here.
   await expect(draft.getByLabel("For Deck")).toHaveValue(deck);
   await send(page);
-  await expect(needs(page, deckName)).toContainText("Asked Misty W for 1");
+  await expect(needs(page, deckName)).toContainText("Asked Misty W for 2");
   await expect(needs(page, deckName)).toContainText("2 of 2");
 });
 

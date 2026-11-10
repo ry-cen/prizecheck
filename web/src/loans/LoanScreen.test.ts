@@ -373,8 +373,23 @@ it("previews a partial acceptance without presenting draft quantities as agreed 
     const preview = host.querySelector('[aria-label="Acceptance preview"]')!;
     expect(preview.textContent).toContain("2 to lend; 1 not lent.");
     expect(preview.textContent).toContain(
-      "No return date. Accepting agrees to these quantities and this return date."
+      "No return date. Accepting agrees to these quantities with no return date."
     );
+    const dateInput =
+      host.querySelector<HTMLInputElement>('input[type="date"]');
+    if (!dateInput) throw new Error("Missing optional return date");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )!.set!.call(dateInput, "2099-01-31");
+      dateInput.dispatchEvent(new Event("input", { bubbles: true }));
+      dateInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(preview.textContent).toContain(
+      "Accepting agrees to these quantities and this return date."
+    );
+    expect(preview.textContent).not.toContain("No return date.");
     expect(acceptBorrowRequest).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());

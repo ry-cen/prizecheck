@@ -176,7 +176,8 @@ def test_only_the_borrower_reads_it_for_their_own_deck(store):
     lender = body['lines'][0]['lenders'][0]
     assert set(body) == {'deck_id', 'lines'} and set(body['lines'][0]) == {'edition_id', 'requested', 'accepted',
                                                                         'lenders'}
-    assert set(lender) == {'lender', 'state', 'copies'}
+    assert set(lender) == {'lender', 'lender_id', 'state', 'copies'}
+    assert lender['lender_id'] == misty
 
 
 def test_two_lenders_and_two_decks_are_each_counted_where_they_belong(store):
@@ -264,3 +265,25 @@ def test_a_failed_request_to_send_shows_nothing_pending(store):
     refused = send(ash, misty, [(iono, 2)], deck_id=charizard)
     assert refused.json()['detail']['code'] == 'NOT_LENDABLE'
     assert waiting(ash, charizard) == {}
+
+
+def test_same_named_lenders_keep_their_distinct_collector_ids(store):
+    _, iono, ash, misty, charizard = lending()
+    brock, _ = collector()
+    for user in (misty, brock):
+        named(user, 'Misty')
+    befriend(ash, brock)
+    hold(brock, place(brock, 'Box'), iono, 2)
+    sent(ash, misty, [(iono, 1)], deck_id=charizard)
+    sent(ash, brock, [(iono, 2)], deck_id=charizard)
+    lenders = ok(pending(ash, charizard))['lines'][0]['lenders']
+    matches = ok(call('GET', f'/api/social/want-list-matches?deck={charizard}', ash))
+    assert {copy['collector_id'] for card in matches['cards'] for copy in card['copies']} == {misty, brock}
+    assert {(who['lender_id'], who['lender'], who['copies']) for who in lenders} == {
+        (misty, 'Misty', '1'), (brock, 'Misty', '2')}
+
+
+def test_lender_id_is_required_even_when_the_account_was_deleted():
+    from app.loan_inventory import PendingLender
+    assert 'lender_id' in PendingLender.model_json_schema()['required']
+    assert PendingLender(lender='Former Friend', lender_id=None, state='accepted', copies='1').lender_id is None
