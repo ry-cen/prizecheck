@@ -19,6 +19,13 @@ function layout(initial: number, available: number) {
   const disconnect = vi.fn();
   const observe = vi.fn();
   vi.stubGlobal("scrollY", initial);
+  vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+    800
+  );
+  Object.defineProperty(document.documentElement, "scrollHeight", {
+    configurable: true,
+    get: () => height + 800,
+  });
   const scroll = vi
     .spyOn(window, "scrollTo")
     .mockImplementation((_x, requested) => {
@@ -130,6 +137,7 @@ it("lets a scroll it did not cause (scrollbar drag, find in page) take over", ()
   const view = layout(0, 100);
   const stop = restorePageScroll(document.createElement("main"), 500);
   expect(window.scrollY).toBe(100);
+  view.setHeight(900);
   vi.stubGlobal("scrollY", 40);
   window.dispatchEvent(new Event("scroll"));
   const calls = view.scroll.mock.calls.length;
@@ -149,4 +157,59 @@ it("ignores the scroll event its own restore causes", () => {
   vi.advanceTimersByTime(RESTORE_POLL_MS);
   expect(window.scrollY).toBe(500);
   stop();
+});
+
+it("keeps restoring when scroll anchoring carries the view toward the saved position before the next retry", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 683);
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  expect(window.scrollY).toBe(683);
+  view.setHeight(1500); // grows with no resize callback
+  vi.stubGlobal("scrollY", 700); // anchoring: below the saved position, on a page that now ends at 1500
+  window.dispatchEvent(new Event("scroll"));
+  vi.advanceTimersByTime(RESTORE_POLL_MS);
+  expect(window.scrollY).toBe(721);
+  stop();
+});
+
+it("keeps restoring when the browser clamps the view to a page that shrank", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 683);
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  expect(window.scrollY).toBe(683);
+  view.setHeight(600);
+  vi.stubGlobal("scrollY", 600); // clamped to the new end
+  window.dispatchEvent(new Event("scroll"));
+  view.setHeight(1500);
+  vi.advanceTimersByTime(RESTORE_POLL_MS);
+  expect(window.scrollY).toBe(721);
+  stop();
+});
+
+it("leaves a scroll past the saved position alone", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 683);
+  restorePageScroll(document.createElement("main"), 721);
+  view.setHeight(1500);
+  vi.stubGlobal("scrollY", 740);
+  window.dispatchEvent(new Event("scroll"));
+  const calls = view.scroll.mock.calls.length;
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+  expect(view.scroll).toHaveBeenCalledTimes(calls);
+  expect(window.scrollY).toBe(740);
+});
+
+it("still lets an upward scroll away from the saved position take over once the page is tall", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 100);
+  restorePageScroll(document.createElement("main"), 500);
+  view.setHeight(450);
+  vi.advanceTimersByTime(RESTORE_POLL_MS);
+  expect(window.scrollY).toBe(450);
+  vi.stubGlobal("scrollY", 200);
+  window.dispatchEvent(new Event("scroll"));
+  const calls = view.scroll.mock.calls.length;
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+  expect(view.scroll).toHaveBeenCalledTimes(calls);
 });
