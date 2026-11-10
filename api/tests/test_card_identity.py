@@ -300,7 +300,7 @@ def test_migration_merges_subtitled_identities_and_keeps_every_reference(project
             # And the fallback-art view of migration 154 (no art before it), which public delivery reads for image_url.
             conn.execute("""CREATE TEMP VIEW catalog_printing_art AS SELECT NULL::uuid AS printing_id,NULL::text AS tcgdex_url,
               NULL::text AS low_image_url,NULL::text AS high_image_url WHERE false""")
-            # And the Edition-keyed art view of migration 162, which the Edition public records read for their art sidecar.
+            # And the Edition-keyed art view of migration 163, which the Edition public records read for their art sidecar.
             conn.execute("""CREATE TEMP VIEW catalog_edition_art AS SELECT NULL::uuid AS edition_id,NULL::jsonb AS linked_art,
               NULL::boolean AS reference_only,NULL::boolean AS art_scoped,NULL::boolean AS art_withheld,NULL::text AS art_set_id,
               NULL::text AS art_number,NULL::text AS low_image_url,NULL::text AS high_image_url WHERE false""")
