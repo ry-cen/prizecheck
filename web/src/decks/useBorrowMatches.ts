@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLoansChanged, usePulseChanged } from "../inbox/Inbox";
 import {
   getPendingLoans,
@@ -67,7 +67,7 @@ export function useBorrowMatches(
   const key = list
     ? `${deck}:${wantListPins(list)}:${refresh}:${pins}:${pulse}:${loans}:${attempt}`
     : "";
-  const retry = () => setAttempt((n) => n + 1);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
   useEffect(() => {
     const leave = () => {
       away.current = true;
@@ -112,44 +112,52 @@ export function useBorrowMatches(
   const complete = answer && answer.key === key ? answer : null;
   const current = complete !== null;
   const visible = answer && answer.scope === deck ? answer : null;
+  // Downstream reads key on these maps' identity (Trade for it re-reads when `byCard` changes), so each is rebuilt
+  // only when its answer changes, never on a re-render that brings the same one.
+  const byCard = useMemo(
+    () =>
+      new Map(
+        visible
+          ? visible.matches.cards.map((card) => [card.edition_id, card.copies])
+          : []
+      ),
+    [visible]
+  );
+  const lines = useMemo(
+    () =>
+      visible?.pending
+        ? new Map(visible.pending.lines.map((line) => [line.edition_id, line]))
+        : null,
+    [visible]
+  );
   // The last answer stays up while another scope's loads, so the Friends view and its switch don't flicker; another
   // scope's cards are never shown against this one, and borrowing waits (`pending`) until this scope's answer is in.
-  const friends: FriendMatches = !answer
-    ? { kind: "none" }
-    : {
-        kind: "ready",
-        hasFriends: answer.matches.has_friends,
-        pending: !current,
-        byCard: new Map(
-          visible
-            ? visible.matches.cards.map((card) => [
-                card.edition_id,
-                card.copies,
-              ])
-            : []
-        ),
-      };
+  const hasFriends = answer?.matches.has_friends;
+  const friends: FriendMatches = useMemo(
+    () =>
+      hasFriends === undefined
+        ? { kind: "none" }
+        : { kind: "ready", hasFriends, pending: !current, byCard },
+    [hasFriends, current, byCard]
+  );
   useBorrowReadiness(
     deck,
     list ? (failed === key ? "failed" : current) : null,
     retry
   );
-  const pending: PendingApi = {
-    retry,
-    state: !deck
-      ? { kind: "idle" }
-      : visible?.pending
-        ? {
-            kind: "ready",
-            deckId: deck,
-            lines: new Map(
-              visible.pending.lines.map((line) => [line.edition_id, line])
-            ),
-            stale: failed === key,
-          }
-        : failed === key
-          ? { kind: "failed", deckId: deck }
-          : { kind: "loading", deckId: deck },
-  };
+  const failedNow = failed === key;
+  const pending: PendingApi = useMemo(
+    () => ({
+      retry,
+      state: !deck
+        ? { kind: "idle" }
+        : lines
+          ? { kind: "ready", deckId: deck, lines, stale: failedNow }
+          : failedNow
+            ? { kind: "failed", deckId: deck }
+            : { kind: "loading", deckId: deck },
+    }),
+    [retry, deck, lines, failedNow]
+  );
   return { friends, pending };
 }
