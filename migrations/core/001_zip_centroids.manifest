@@ -1,0 +1,4 @@
+# The rows core/001_zip_centroids.sql leaves in zip_centroid: the exact count, which the runner checks before it records
+# the seed without running it (scripts/migration_tracks.py). GENERATED, never edited by hand;
+# api/tests/test_core_baseline.py compares it with the rows the seed inserts.
+rows zip_centroid 41471

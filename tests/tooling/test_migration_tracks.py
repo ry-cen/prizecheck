@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -171,14 +172,28 @@ class PokemonEntryTest(unittest.TestCase):
             Track('core', recorded=('000_baseline.sql', '001_zip_centroids.sql')),
             Track(after='162_trade_loan_threads.sql')))
 
-    def test_on_todays_tree_the_plan_is_every_root_file_in_the_old_order_then_the_two_recorded_core_names(self):
+    def test_on_todays_tree_the_plan_is_root_through_the_cutoff_then_the_recorded_core_names_then_root_after_it(self):
         migrate = load('migrate_plan', 'scripts/migrate.py')
-        old_glob = [p.name for p in sorted((ROOT / 'migrations').glob('*.sql'))]
+        root_files = sorted(p.name for p in (ROOT / 'migrations').glob('*.sql'))
+        before = [name for name in root_files if name <= migrate.CUTOFF]
+        after = [name for name in root_files if name > migrate.CUTOFF]
         plan = migration_tracks.planned(ROOT / 'migrations', migrate.TRACKS)
-        self.assertEqual([name for name, _ in plan], [*old_glob, 'core/000_baseline.sql', 'core/001_zip_centroids.sql'])
-        self.assertEqual(old_glob[-1], migrate.CUTOFF)
+        self.assertEqual([name for name, _ in plan], [*before, 'core/000_baseline.sql', 'core/001_zip_centroids.sql', *after])
+        self.assertEqual(before[-1], migrate.CUTOFF)
+        self.assertEqual(len(before), 86)
         self.assertEqual(migration_tracks.recorded_names(migrate.TRACKS), {'core/000_baseline.sql', 'core/001_zip_centroids.sql'})
-        self.assertGreater(len(old_glob), 80)
+
+    def test_a_163_file_lands_after_the_recorded_names_and_a_pending_core_tail_lands_before_it(self):
+        """The next ordinary root migration must neither break this plan nor move: a temporary 163 stands in for it (S10R-02)."""
+        migrate = load('migrate_next', 'scripts/migrate.py')
+        names = sorted(p.name for p in (ROOT / 'migrations').glob('*.sql') if p.name <= migrate.CUTOFF)
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), {name: '' for name in names})
+            tree(Path(folder), {'core/000_baseline.sql': '', 'core/001_zip_centroids.sql': '', 'core/002_tail.sql': '',
+                                '163_next_ordinary_change.sql': '', '164_and_another.sql': ''})
+            plan = [name for name, _ in migration_tracks.planned(migrations, migrate.TRACKS)]
+        self.assertEqual(plan, [*names, 'core/000_baseline.sql', 'core/001_zip_centroids.sql', 'core/002_tail.sql',
+                                '163_next_ordinary_change.sql', '164_and_another.sql'])
 
     def test_importing_the_entry_applies_nothing_and_leaves_no_bytecode(self):
         run = subprocess.run([sys.executable, '-c', 'import sys; sys.path.insert(0, "scripts"); import migrate; print(migrate.TRACKS)'],
@@ -216,29 +231,69 @@ class SliceAndRecordTest(unittest.TestCase):
                 migration_tracks.planned(migrations, (Track('core', recorded=('000_baseline.sql', '009_gone.sql')),))
             self.assertIn('009_gone.sql', str(raised.exception))
 
-    class ObjectConn(FakeConn):
-        """FakeConn that also answers the precondition's existence queries from a set of object names and a set of non-empty tables."""
-        def __init__(self, objects=(), filled=(), applied=()):
-            super().__init__(applied)
-            self.objects, self.filled = set(objects), set(filled)
+    MANIFEST = ('# a comment\ntable seen n name\nview seen_view n\nfunction f(x integer)\nindex seen_name_idx\n'
+                'constraint seen seen_pkey\nconstraint seen seen_name_check\ntrigger seen seen_guard\nrows seen 1\n')
+    FULL = {'table': {'seen'}, 'view': {'seen_view'}, 'column': {'seen.n', 'seen.name', 'seen_view.n'}, 'function': {'f(x integer)'},
+            'index': {'seen_name_idx'}, 'constraint': {'seen.seen_pkey', 'seen.seen_name_check'}, 'trigger': {'seen.seen_guard'}}
 
-        def execute(self, query, params=()):
-            if 'to_regclass' in query or 'pg_proc' in query:
-                self.log.append((query, params))
-                return type('Result', (), {'fetchone': lambda me: (params[0] in self.objects,)})()
-            if query.startswith('SELECT EXISTS (SELECT 1 FROM '):
-                self.log.append((query, params))
-                return type('Result', (), {'fetchone': lambda me: (query.split()[-1].rstrip(')') in self.filled,)})()
-            return super().execute(query, params)
+    def present(self, **without):
+        """FULL, minus the named facts, as present_objects would report them."""
+        return {kind: found - set(without.get(kind, ())) | {'extra'} for kind, found in self.FULL.items()}
 
-    def ran(self, conn):
-        return [query for query, _ in conn.log if 'schema_migration' not in query and query.startswith(('SELECT 1', 'SELECT 2', 'SELECT 3', 'SELECT 4', 'CREATE', 'INSERT INTO seen'))]
+    def check(self, found, counts=None):
+        with mock.patch.object(migration_tracks, 'present_objects', lambda conn: found), \
+                mock.patch.object(migration_tracks, 'row_counts', lambda conn, tables: {'seen': 1} if counts is None else counts):
+            return migration_tracks.missing_objects(None, self.MANIFEST)
 
-    def test_a_recorded_file_is_recorded_not_run_once_its_objects_exist_and_the_rest_runs_in_plan_order(self):
+    def test_a_manifest_parses_into_facts_and_rejects_an_unknown_line(self):
+        wanted = migration_tracks.parse_manifest(self.MANIFEST)
+        self.assertEqual({kind: wanted[kind] for kind in self.FULL}, self.FULL)
+        self.assertEqual(wanted['rows'], {'seen': 1})
+        with self.assertRaises(ValueError):
+            migration_tracks.parse_manifest('sequence x\n')
+
+    def test_a_database_holding_everything_the_manifest_names_passes_and_extras_are_ignored(self):
+        self.assertEqual(self.check(self.present()), [])
+
+    def test_each_missing_kind_of_object_is_refused_by_name(self):
+        for kind, name, wanted in (('table', 'seen', 'table seen'), ('view', 'seen_view', 'view seen_view'),
+                                   ('column', 'seen.name', 'column seen.name'), ('function', 'f(x integer)', 'function f(x integer)'),
+                                   ('index', 'seen_name_idx', 'index seen_name_idx'), ('constraint', 'seen.seen_name_check', 'constraint seen.seen_name_check'),
+                                   ('constraint', 'seen.seen_pkey', 'constraint seen.seen_pkey'), ('trigger', 'seen.seen_guard', 'trigger seen.seen_guard')):
+            self.assertEqual(self.check(self.present(**{kind: {name}})), [wanted], kind)
+
+    def test_the_seed_must_have_exactly_the_rows_the_manifest_names(self):
+        for counts, shown in (({'seen': 0}, '1 rows in seen (has 0)'), ({'seen': 2}, '1 rows in seen (has 2)'), ({}, '1 rows in seen (has no such table)')):
+            self.assertEqual(self.check(self.present(), counts), [shown])
+
+    def test_the_real_manifests_parse_and_name_the_baseline_and_the_seed(self):
+        baseline = migration_tracks.parse_manifest((ROOT / 'migrations/core/000_baseline.manifest').read_text())
+        seed = migration_tracks.parse_manifest((ROOT / 'migrations/core/001_zip_centroids.manifest').read_text())
+        self.assertEqual({kind: len(baseline[kind]) for kind in ('table', 'view', 'function', 'trigger')},
+                         {'table': 65, 'view': 1, 'function': 38, 'trigger': 29})
+        self.assertGreater(len(baseline['column']), 400)
+        self.assertGreater(len(baseline['constraint']), 300)
+        self.assertGreater(len(baseline['index']), 100)
+        self.assertEqual((baseline['rows'], seed['rows']), ({'operations_state': 1}, {'zip_centroid': 41471}))
+        self.assertEqual({kind: seed[kind] for kind in self.FULL}, {kind: set() for kind in self.FULL})
+
+    def test_rendering_a_manifest_and_parsing_it_back_gives_the_same_facts(self):
+        text = migration_tracks.render_manifest(self.FULL, {'seen': 1}, 'two\nlines')
+        self.assertTrue(text.startswith('# two\n# lines\n'))
+        wanted = migration_tracks.parse_manifest(text)
+        self.assertEqual({kind: wanted[kind] for kind in self.FULL}, self.FULL)
+
+    def manifests(self, folder, files):
+        return tree(Path(folder), {**files, 'core/000_baseline.manifest': self.MANIFEST.replace('rows seen 1\n', ''),
+                                   'core/001_seed.manifest': 'rows seen 1\n'})
+
+    def test_a_recorded_file_is_recorded_not_run_once_its_manifest_is_met_and_the_rest_runs_in_plan_order(self):
         with tempfile.TemporaryDirectory() as folder:
-            migrations = tree(Path(folder), self.FILES)
-            conn, said = self.ObjectConn(objects={'seen'}, filled={'seen'}), []
-            added = migration_tracks.apply(conn, migrations, self.ENTRY, said.append)
+            migrations = self.manifests(folder, self.FILES)
+            conn, said = FakeConn(), []
+            with mock.patch.object(migration_tracks, 'present_objects', lambda conn: self.present()), \
+                    mock.patch.object(migration_tracks, 'row_counts', lambda conn, tables: {'seen': 1}):
+                added = migration_tracks.apply(conn, migrations, self.ENTRY, said.append)
             self.assertEqual(added, ['001_a.sql', '002_b.sql', 'core/000_baseline.sql', 'core/001_seed.sql', 'core/002_tail.sql', '003_c.sql'])
             self.assertEqual(said, ['Applied 001_a.sql', 'Applied 002_b.sql', 'Recorded core/000_baseline.sql without running it',
                                     'Recorded core/001_seed.sql without running it', 'Applied core/002_tail.sql', 'Applied 003_c.sql'])
@@ -246,39 +301,38 @@ class SliceAndRecordTest(unittest.TestCase):
             self.assertEqual(conn.ledger, set(added))
             self.assertEqual(migration_tracks.apply(conn, migrations, self.ENTRY, said.append), [])
 
-    def test_a_recorded_file_is_refused_when_its_objects_are_absent_and_nothing_after_it_runs(self):
+    def ran(self, conn):
+        return [query for query, _ in conn.log if 'schema_migration' not in query and query.startswith(('SELECT 1', 'SELECT 2', 'SELECT 3', 'SELECT 4', 'CREATE', 'INSERT INTO seen'))]
+
+    def test_a_recorded_file_is_refused_when_the_database_lacks_something_and_nothing_after_it_runs(self):
         with tempfile.TemporaryDirectory() as folder:
-            migrations = tree(Path(folder), self.FILES)
-            for objects, wanted, refused, ledger in (((), 'table seen', 'core/000_baseline.sql', {'001_a.sql', '002_b.sql'}),
-                                                     (('seen',), 'rows in seen', 'core/001_seed.sql', {'001_a.sql', '002_b.sql', 'core/000_baseline.sql'})):
-                conn = self.ObjectConn(objects=objects)
-                with self.assertRaises(migration_tracks.MissingObjects) as raised:
-                    migration_tracks.apply(conn, migrations, self.ENTRY, lambda line: None)
+            migrations = self.manifests(folder, self.FILES)
+            for found, counts, refused, ledger in (
+                    (self.present(trigger={'seen.seen_guard'}), {'seen': 1}, 'core/000_baseline.sql', {'001_a.sql', '002_b.sql'}),
+                    (self.present(), {'seen': 0}, 'core/001_seed.sql', {'001_a.sql', '002_b.sql', 'core/000_baseline.sql'})):
+                conn = FakeConn()
+                with mock.patch.object(migration_tracks, 'present_objects', lambda conn, found=found: found), \
+                        mock.patch.object(migration_tracks, 'row_counts', lambda conn, tables, counts=counts: counts):
+                    with self.assertRaises(migration_tracks.MissingObjects) as raised:
+                        migration_tracks.apply(conn, migrations, self.ENTRY, lambda line: None)
                 self.assertIn(refused, str(raised.exception))
-                self.assertIn(wanted, str(raised.exception))
                 self.assertEqual(conn.ledger, ledger)
                 self.assertEqual(self.ran(conn), ['SELECT 1', 'SELECT 2'])
 
-    def test_a_new_games_entry_lists_core_whole_and_the_baseline_runs(self):
+    def test_a_recorded_file_without_a_manifest_is_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), self.FILES)
+            with self.assertRaises(migration_tracks.MissingObjects) as raised:
+                migration_tracks.apply(FakeConn(), migrations, self.ENTRY, lambda line: None)
+            self.assertIn('000_baseline.manifest is missing', str(raised.exception))
+
+    def test_a_new_games_entry_lists_core_whole_and_the_baseline_runs_without_a_manifest(self):
         with tempfile.TemporaryDirectory() as folder:
             migrations = tree(Path(folder), {k: v for k, v in self.FILES.items() if k.startswith('core/')})
-            conn = self.ObjectConn()
+            conn = FakeConn()
             added = migration_tracks.apply(conn, migrations, (Track('core'),), lambda line: None)
             self.assertEqual(added, ['core/000_baseline.sql', 'core/001_seed.sql', 'core/002_tail.sql'])
             self.assertEqual(self.ran(conn), ['CREATE TABLE seen (n int);', 'INSERT INTO seen VALUES (1);', 'SELECT 4'])
-
-    def test_the_precondition_reads_what_a_file_creates_and_inserts(self):
-        text = ('-- CREATE TABLE in_a_comment (n int);\nCREATE TABLE a (n int);\nCREATE TABLE IF NOT EXISTS b (n int);\n'
-                'CREATE VIEW v AS SELECT 1;\nCREATE OR REPLACE FUNCTION f(x int) RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql;\n'
-                '  CREATE TABLE indented (n int);\nCREATE INDEX i ON a(n);\nINSERT INTO a(n) VALUES (1);\nINSERT INTO a(n) VALUES (2);\n')
-        self.assertEqual(migration_tracks.CREATES.findall(text), [('TABLE', 'a'), ('TABLE', 'b'), ('VIEW', 'v'), ('FUNCTION', 'f')])
-        self.assertEqual(migration_tracks.INSERTS.findall(text), ['a', 'a'])
-
-    def test_the_real_baseline_and_seed_are_readable_by_the_precondition(self):
-        baseline = (ROOT / 'migrations/core/000_baseline.sql').read_text()
-        self.assertGreater(len(migration_tracks.CREATES.findall(baseline)), 100)
-        self.assertEqual(migration_tracks.INSERTS.findall(baseline), ['operations_state'])
-        self.assertEqual(set(migration_tracks.INSERTS.findall((ROOT / 'migrations/core/001_zip_centroids.sql').read_text())), {'zip_centroid'})
 
 
 def heredoc(function_or_marker):

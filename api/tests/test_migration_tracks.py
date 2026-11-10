@@ -62,7 +62,9 @@ def ledger(url):
 # the baseline "creates", so the precondition holds, and running the baseline would fail: it is recorded, not run.
 STUBS = {
     "core/000_baseline.sql": "CREATE TABLE seen (n serial, name text);",
+    "core/000_baseline.manifest": "table seen n name\n",
     "core/001_zip_centroids.sql": "INSERT INTO seen (name) VALUES ('seed');",
+    "core/001_zip_centroids.manifest": "rows seen 1\n",
 }
 FIRST = {"001_a.sql": "CREATE TABLE seen (n serial, name text); INSERT INTO seen (name) VALUES ('001_a');"}
 
@@ -114,7 +116,7 @@ def test_a_recorded_core_file_is_refused_when_the_database_lacks_its_objects(scr
     run = subprocess.run([sys.executable, str(root / "scripts/migrate.py")], cwd=root, env={**os.environ, "DATABASE_URL": url},
                          capture_output=True, text=True)
     assert run.returncode != 0
-    assert "Refusing to record core/000_baseline.sql without running it; the database lacks table seen" in run.stderr
+    assert "Refusing to record core/000_baseline.sql without running it; the database lacks table seen, column seen.n" in run.stderr
     with psycopg.connect(url) as conn:
         assert conn.execute("SELECT to_regclass('schema_migration'), to_regclass('other')").fetchone() == (None, None)
 
@@ -193,18 +195,44 @@ def run_migrate(root, url):
                           capture_output=True, text=True)
 
 
-def test_a_fresh_pokemon_database_runs_every_root_file_then_records_the_core_baseline_and_seed(fresh):
+def expected_log(root, extra_after=()):
+    """The Applied and Recorded lines of a fresh run, built from the files on each side of the cutoff: root files through 162,
+    the two recorded core files, then root files after it (so a new 163 changes the tree and not this rule)."""
+    names = sorted(path.name for path in (root / "migrations").glob("*.sql"))
+    before = [name for name in names if name <= ENTRY_CUTOFF]
+    after = [name for name in names if name > ENTRY_CUTOFF]
+    return [*(f"Applied {name}" for name in before), "Recorded core/000_baseline.sql without running it",
+            "Recorded core/001_zip_centroids.sql without running it", *(f"Applied {name}" for name in after)]
+
+
+ENTRY_CUTOFF = "162_trade_loan_threads.sql"
+
+
+def test_a_fresh_pokemon_database_runs_every_root_file_then_records_the_core_baseline_and_seed(fresh, real_root):
     url, _, output = fresh
-    root_files = sorted(path.name for path in (ROOT / "migrations").glob("*.sql"))
     lines = [line for line in output.splitlines() if line.startswith(("Applied ", "Recorded "))]
-    assert lines == [*(f"Applied {name}" for name in root_files),
-                     "Recorded core/000_baseline.sql without running it", "Recorded core/001_zip_centroids.sql without running it"]
+    assert lines == expected_log(real_root)
+    root_files = {path.name for path in (real_root / "migrations").glob("*.sql")}
     assert ledger(url) == {*root_files, "core/000_baseline.sql", "core/001_zip_centroids.sql"}
     with psycopg.connect(url) as conn:
-        # The baseline would have failed on the existing tables; the seed would have changed no row (an upsert), so the row
-        # counts tell nothing here: the ledger and the log above do.
+        # The baseline would have failed on the existing tables; the seed is an upsert-free insert that would have failed
+        # on the existing rows. The log above and the ledger are the evidence it was recorded and not run.
         assert conn.execute("SELECT count(*) FROM zip_centroid").fetchone()[0] == 41471
         assert conn.execute("SELECT count(*) FROM operations_state").fetchone()[0] == 1
+
+
+def test_a_163_file_runs_after_the_recorded_baseline_on_a_fresh_database_without_changing_the_rule(databases, real_root, tmp_path):
+    """A temporary 163 stands in for the next ordinary root migration: the fresh run's order must not move."""
+    root = tmp_path / "tree"
+    shutil.copytree(real_root, root)
+    write(root, {"163_temporary_probe.sql": "CREATE TABLE temporary_probe (n int);"})
+    url, _ = databases()
+    run = run_migrate(root, url)
+    assert run.returncode == 0, run.stdout + run.stderr
+    lines = [line for line in run.stdout.splitlines() if line.startswith(("Applied ", "Recorded "))]
+    assert lines == expected_log(root)
+    assert lines[-3:] == ["Recorded core/000_baseline.sql without running it", "Recorded core/001_zip_centroids.sql without running it",
+                          "Applied 163_temporary_probe.sql"]
 
 
 def test_a_populated_pokemon_database_that_predates_the_baseline_gains_only_the_two_recorded_names(fresh, databases, real_root):
@@ -224,20 +252,47 @@ def test_a_populated_pokemon_database_that_predates_the_baseline_gains_only_the_
     assert run_migrate(real_root, url).stdout.count("Applied ") == 0
 
 
-def test_a_populated_database_missing_a_core_object_is_refused_and_records_nothing(fresh, databases, real_root):
+DRIFT = (
+    ("DROP VIEW open_discovery", "view open_discovery"),
+    ("DROP FUNCTION trade_reach(text, text[])", "function trade_reach(viewer text, others text[])"),
+    ("DROP TABLE zip_centroid CASCADE", "table zip_centroid"),
+    ("DELETE FROM operations_state", "1 rows in operations_state (has 0)"),
+    ("DROP TRIGGER holding_deck_list_insert ON holding", "trigger holding.holding_deck_list_insert"),
+    ("ALTER TABLE holding DROP COLUMN quantity CASCADE", "column holding.quantity"),
+    ("DROP INDEX holding_owner_edition_location", "index holding_owner_edition_location"),
+    ("ALTER TABLE holding DROP CONSTRAINT holding_quantity_check", "constraint holding.holding_quantity_check"),
+    ("ALTER TABLE holding DROP CONSTRAINT holding_owner_id_fkey", "constraint holding.holding_owner_id_fkey"),
+    ("DELETE FROM zip_centroid WHERE zip > '90000'", "41471 rows in zip_centroid (has "),
+    ("INSERT INTO zip_centroid (zip, lat, lon, source) VALUES ('00000', 0, 0, 'census')", "41471 rows in zip_centroid (has 41472)"),
+)
+
+
+@pytest.mark.parametrize("broken, wanted", DRIFT)
+def test_a_populated_database_that_drifted_from_the_baseline_is_refused_and_records_nothing(fresh, databases, real_root, broken, wanted):
+    """The ledger says 001 to 162 ran, but an object the baseline holds is gone or its seed is short (S10R-01)."""
     _, name, _ = fresh
-    for broken, wanted in (("DROP VIEW open_discovery", "view open_discovery"),
-                           ("DROP FUNCTION trade_reach(text, text[])", "function trade_reach"),
-                           ("DROP TABLE zip_centroid CASCADE", "table zip_centroid"),
-                           ("DELETE FROM operations_state", "rows in operations_state")):
-        url, _ = databases(template=name)
-        with psycopg.connect(url) as conn:
-            conn.execute("DELETE FROM schema_migration WHERE name LIKE 'core/%'")
-            conn.execute(broken)
-        run = run_migrate(real_root, url)
-        assert run.returncode != 0, broken
-        assert wanted in run.stderr, run.stderr
-        assert not [name for name in ledger(url) if name.startswith("core/")]
+    url, _ = databases(template=name)
+    with psycopg.connect(url) as conn:
+        conn.execute("DELETE FROM schema_migration WHERE name LIKE 'core/%'")
+        conn.execute(broken)
+    run = run_migrate(real_root, url)
+    assert run.returncode != 0, broken
+    assert wanted in run.stderr, run.stderr
+    assert not [name for name in ledger(url) if name.startswith("core/")]
+
+
+def test_extra_objects_on_a_populated_database_never_block_recording(fresh, databases, real_root):
+    _, name, _ = fresh
+    url, _ = databases(template=name)
+    with psycopg.connect(url) as conn:
+        conn.execute("DELETE FROM schema_migration WHERE name LIKE 'core/%'")
+        conn.execute("CREATE TABLE production_only (n int); ALTER TABLE holding ADD COLUMN production_note text;"
+                     " CREATE INDEX production_only_idx ON production_only (n); ALTER TABLE holding ADD CONSTRAINT production_only_check CHECK (true);"
+                     " CREATE FUNCTION production_only_fn() RETURNS int LANGUAGE sql AS 'SELECT 1';"
+                     " CREATE TRIGGER production_only_trigger BEFORE INSERT ON production_only FOR EACH ROW EXECUTE FUNCTION cleanup_inventory_undo()")
+    run = run_migrate(real_root, url)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert {"core/000_baseline.sql", "core/001_zip_centroids.sql"} <= ledger(url)
 
 
 def test_a_pending_core_tail_and_a_later_root_file_apply_after_the_recorded_baseline_in_that_order(fresh, databases, real_root, tmp_path):

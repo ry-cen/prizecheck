@@ -12,8 +12,10 @@ The core baseline holds core-owned objects only. Ownership is by relation and fu
   drop it. ``art_large_upgrade`` is core because ``api/app/core/art/store.py`` reads and writes it, although its foreign
   key points at ``catalog_printing`` (omitted below).
 
-An object that fits none of these is a failure in the proof, so a new migration cannot add an unowned object quietly. Indexes,
-constraints, sequences and triggers belong to the relation they sit on.
+There is no "unowned" answer: a relation or function in none of the Pokémon or auth lists counts as core. An object a later root
+migration added to the Pokémon side and forgot to list here would therefore be expected in the baseline and reported as a core
+object the baseline lacks, which fails the proof. Names listed here that the history does not create fail it too. A kind with no rule
+at all (a user type, say) raises. Indexes, constraints, sequences and triggers belong to the relation they sit on.
 """
 import ast
 import re

@@ -192,16 +192,38 @@ def test_the_baseline_never_uses_a_catalog_relation_or_an_auth_one():
     assert re.findall(rf'(?i)\b(?:FROM|JOIN|INTO|UPDATE|TABLE|REFERENCES)\s+"?(?:{auth})"?(?![\w"])', code) == []
 
 
-def test_the_recorded_precondition_reads_every_table_view_and_function_the_baseline_creates(baseline):
-    text = (MIGRATIONS / "core/000_baseline.sql").read_text()
-    created = migration_tracks.CREATES.findall(text)
+def test_each_manifest_equals_what_its_file_builds(baseline):
+    """The runner records core/000 and core/001 on a Pokémon database after checking the objects and rows their manifests name
+    (scripts/migration_tracks.py). The manifests are the only list of those names, so they must be exactly what the files build:
+    the same present_objects the runner reads, on a database built from the baseline, and the same row counts."""
     with psycopg.connect(baseline) as conn:
-        relations = set(schema_snapshot.relation_names(conn))
-        functions = {row[0] for row in conn.execute("SELECT proname FROM pg_proc WHERE pronamespace = 'public'::regnamespace")}
-        assert migration_tracks.missing_objects(conn, text) == []
-        assert migration_tracks.missing_objects(conn, (MIGRATIONS / "core/001_zip_centroids.sql").read_text()) == []
-    assert {name for kind, name in created if kind != "FUNCTION"} == relations - {"schema_migration"}
-    assert {name for kind, name in created if kind == "FUNCTION"} == functions
+        found = migration_tracks.present_objects(conn)
+        counts = migration_tracks.row_counts(conn, ["operations_state", "zip_centroid"])
+    for kind in ("table", "view", "column", "function", "index", "constraint", "trigger"):
+        found[kind] = {name for name in found[kind] if not name.startswith("schema_migration")}
+    baseline_manifest = migration_tracks.parse_manifest((MIGRATIONS / "core/000_baseline.manifest").read_text())
+    seed_manifest = migration_tracks.parse_manifest((MIGRATIONS / "core/001_zip_centroids.manifest").read_text())
+    for kind in ("table", "view", "column", "function", "index", "constraint", "trigger"):
+        assert baseline_manifest[kind] == found[kind], kind
+        assert seed_manifest[kind] == set(), kind
+    assert baseline_manifest["rows"] == {"operations_state": counts["operations_state"]} == {"operations_state": 1}
+    assert seed_manifest["rows"] == {"zip_centroid": counts["zip_centroid"]} == {"zip_centroid": 41471}
+    # The manifest covers what the proof compares: every table, view, function, trigger and constraint of the baseline.
+    snap, _ = snapshot(baseline)
+    assert len(baseline_manifest["table"]) == sum(key.startswith("table:") for key in snap)
+    assert len(baseline_manifest["view"]) == sum(key.startswith("view:") for key in snap)
+    assert len(baseline_manifest["column"]) == sum(key.startswith("column:") for key in snap)
+    assert len(baseline_manifest["function"]) == sum(key.startswith("function:") for key in snap)
+    assert len(baseline_manifest["trigger"]) == sum(key.startswith("trigger:") for key in snap)
+    assert len(baseline_manifest["constraint"]) == sum(key.startswith("constraint:") for key in snap)
+    assert len(baseline_manifest["index"]) == sum(key.startswith("index:") for key in snap)
+    with psycopg.connect(baseline) as conn:
+        assert migration_tracks.missing_objects(conn, (MIGRATIONS / "core/000_baseline.manifest").read_text()) == []
+        assert migration_tracks.missing_objects(conn, (MIGRATIONS / "core/001_zip_centroids.manifest").read_text()) == []
+    # And the committed text is the one render_manifest writes, so it was generated and not edited.
+    header = "".join(line[2:] if line.startswith("# ") else line[1:] for line in
+                     (MIGRATIONS / "core/000_baseline.manifest").read_text().splitlines(True) if line.startswith("#"))
+    assert migration_tracks.render_manifest(found, {"operations_state": 1}, header.rstrip("\n")) == (MIGRATIONS / "core/000_baseline.manifest").read_text()
 
 
 def test_a_new_game_installs_core_baseline_then_core_tail_then_its_own_track(databases, history, tmp_path):

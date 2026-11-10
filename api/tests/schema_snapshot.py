@@ -1,12 +1,22 @@
 """Normalized definitions of a database's schema objects, read from pg_catalog, for the core baseline proof (S10, IM-13).
 
-``snapshot`` returns ``{"<kind>:<name>": "<normalized definition>"}`` for the public schema's tables (with their columns),
-constraints, indexes, sequences, views, functions and triggers. It reads pg_catalog and uses the server's own
-``pg_get_*def`` printers, not pg_dump, so it runs against whatever server the tests use. The same schema built by
-different migration histories gives the same snapshot; ``public.`` is dropped so a name never depends on search_path.
-Constraint names, column order, defaults and function bodies are all part of a definition.
+``snapshot`` returns ``{"<kind>:<name>": "<normalized definition>"}`` for the public schema's:
 
-Nothing but ``rows_digest`` reads rows: it is the data half, one digest per table.
+* tables: kind, reloptions, row security, persistence; and each column with its position among the live columns, type, NOT
+  NULL, default expression, identity, generated expression, collation, storage and compression;
+* constraints: name, type, ``pg_get_constraintdef`` text, deferrability, validated;
+* indexes: ``pg_get_indexdef`` text; sequences: type, start, increment, bounds, cache, cycle and owning column;
+* views: ``pg_get_viewdef`` text and reloptions, with their columns; functions: ``pg_get_functiondef`` text (body, language,
+  volatility, security, strictness, cost, SET options); triggers: ``pg_get_triggerdef`` text;
+* extension names, user type names and kinds, and row-level security policies.
+
+It does not compare: comments, owners and privileges (no migration issues a COMMENT or GRANT), sequence current values,
+trigger enable state, statistics targets, or enum labels and domain definitions (no migration creates a user type, and one that
+appeared would have no owner rule in core_baseline_ownership.py, so the proof would fail rather than skip it).
+
+It uses the server's own ``pg_get_*def`` printers, not pg_dump, so it runs against whatever server the tests use. The same
+schema built by different migration histories gives the same snapshot; ``public.`` is dropped so a name never depends on
+search_path. Nothing but ``rows_digest`` reads rows: it is the data half, one digest per table.
 """
 import hashlib
 import re
@@ -75,16 +85,16 @@ def snapshot(conn):
     for oid, name, kind, options, rls, force_rls, persistence in conn.execute(RELATIONS).fetchall():
         if kind in ("r", "p"):
             out[f"table:{name}"] = normalize(f"kind={kind} options={options} rls={rls}/{force_rls} persistence={persistence}")
-            for column in conn.execute(COLUMNS, (oid,)).fetchall():
-                out[f"column:{name}.{column[0]}"] = normalize(repr(column[1:]))
+            for position, column in enumerate(conn.execute(COLUMNS, (oid,)).fetchall()):
+                out[f"column:{name}.{column[0]}"] = normalize(repr((position, *column[1:])))
             for conname, contype, definition, deferrable, deferred, validated, target in conn.execute(CONSTRAINTS, (oid,)).fetchall():
                 out[f"constraint:{name}.{conname}"] = normalize(f"{contype} {definition} deferrable={deferrable}/{deferred} validated={validated}")
             for index_name, definition in conn.execute(INDEXES, (oid,)).fetchall():
                 out[f"index:{index_name}"] = normalize(definition)
         elif kind in ("v", "m"):
             out[f"view:{name}"] = normalize(f"kind={kind} options={options} " + conn.execute("SELECT pg_get_viewdef(%s, true)", (oid,)).fetchone()[0])
-            for column in conn.execute(COLUMNS, (oid,)).fetchall():
-                out[f"column:{name}.{column[0]}"] = normalize(repr(column[1:3]))
+            for position, column in enumerate(conn.execute(COLUMNS, (oid,)).fetchall()):
+                out[f"column:{name}.{column[0]}"] = normalize(repr((position, *column[1:3])))
             for index_name, definition in conn.execute(INDEXES, (oid,)).fetchall():
                 out[f"index:{index_name}"] = normalize(definition)
         elif kind == "S":

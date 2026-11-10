@@ -1430,7 +1430,7 @@ below says where each group ended up; the module map in section 1 stays the plan
 the zip seed is migration 146's `INSERT` statements byte for byte. The baseline leaves out every `catalog_*` and other Pokémon relation, the
 auth tables and `onboard_auth_account`, and the sixteen foreign keys from core into `catalog_edition` and `catalog_printing` (listed in
 `api/tests/core_baseline_ownership.py`). It keeps `released_handle` and `legacy_contact`, which core functions and code read.
-Pokémon's entry (`scripts/migrate.py`) runs root files through 162, records the two core files after a precondition check, then runs any
+Pokémon's entry (`scripts/migrate.py`) runs root files through 162, records the two core files after checking their manifests (`core/*.manifest`, generated from the baseline and verified by the proof), then runs any
 pending core file, then root files after 162. `api/tests/test_core_baseline.py` is the proof: pg_catalog definitions of every core object
 equal the Pokémon history's, rows match by digest, and a stub game track (`api/tests/fixtures/stub_game_track`) installs core baseline, core
 tail and its own track in that order.

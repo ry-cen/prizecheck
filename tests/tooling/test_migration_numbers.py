@@ -2,6 +2,7 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -101,7 +102,7 @@ class MigrationNumberTest(unittest.TestCase):
 
     def run_main(self, names):
         """Runs the real main() on a planted root: the real release scripts and .dockerignore, an empty tree otherwise,
-        and the set-code check stubbed, so the migration check alone decides the outcome."""
+        and the set-code and frozen-root checks stubbed, so the number and nested checks alone decide the outcome."""
         with tree([]) as root:
             root = Path(root)
             (root/'migrations').mkdir()
@@ -113,6 +114,8 @@ class MigrationNumberTest(unittest.TestCase):
                 (root/relative).write_text((ROOT/relative).read_text(encoding='utf-8'), encoding='utf-8')
             output = io.StringIO()
             with (mock.patch.object(guardrails, 'ROOT', root), mock.patch.object(guardrails, 'set_code_migration_violations', lambda *_: []),
+                  mock.patch.object(guardrails, 'frozen_root_migrations', lambda: ('162_x.sql', frozenset())),
+                  mock.patch.object(guardrails, 'frozen_root_violations', lambda *_: []),
                   contextlib.redirect_stdout(output)):
                 return guardrails.main(), output.getvalue()
 
@@ -156,6 +159,53 @@ class MigrationNumberTest(unittest.TestCase):
                              ['migrations/core/x/001_a.sql', 'migrations/core/x/y/002_b.sql'])
             self.assertEqual([label for label, _ in guardrails.track_number_violations(root, ALLOWED)],
                              ['migrations/core/x/001_a.sql', 'migrations/core/x/y/002_b.sql'])
+
+
+class FrozenRootTest(unittest.TestCase):
+    """S10R-03: Pokémon's entry runs root files through 162_trade_loan_threads.sql before the core track, by file name, so a new
+    root file numbered at or below it would run in the wrong slice. Only the frozen set may sit there."""
+    CUTOFF = '162_trade_loan_threads.sql'
+    FROZEN = frozenset({'001_a.sql', '100_b.sql', '161_x.sql', CUTOFF})
+
+    def check(self, names):
+        with tree(names) as directory:
+            return guardrails.frozen_root_violations(directory, self.CUTOFF, self.FROZEN)
+
+    def test_the_frozen_set_alone_passes_and_so_do_files_after_the_cutoff(self):
+        self.assertEqual(self.check(sorted(self.FROZEN)), [])
+        self.assertEqual(self.check([*sorted(self.FROZEN), '163_next.sql', '170_later.sql']), [])
+
+    def test_a_new_file_at_or_below_the_cutoff_fails_and_is_named(self):
+        for name in ('060_new.sql', '161_other.sql', '010_gap.sql'):
+            problems = self.check([*sorted(self.FROZEN), name])
+            self.assertEqual([label for label, _ in problems], [f'migrations/{name}'], name)
+            self.assertIn('163', problems[0][1])
+
+    def test_a_missing_or_renamed_frozen_file_fails(self):
+        problems = self.check(['001_a.sql', '100_b.sql', '161_x.sql', '101_renamed.sql'])
+        self.assertEqual(sorted(label for label, _ in problems), ['migrations/101_renamed.sql', 'migrations/162_trade_loan_threads.sql'])
+
+    def test_the_real_tree_and_the_real_frozen_set_agree(self):
+        cutoff, frozen = guardrails.frozen_root_migrations()
+        self.assertEqual(cutoff, self.CUTOFF)
+        self.assertEqual(len(frozen), 86)
+        self.assertEqual(guardrails.frozen_root_violations(ROOT/'migrations', cutoff, frozen), [])
+
+    def test_main_fails_on_a_planted_low_numbered_file_in_a_copy_of_the_real_tree(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            shutil.copytree(ROOT/'migrations', root/'migrations')
+            (root/'migrations/060_planted.sql').write_text('select 1;\n')
+            cutoff, frozen = guardrails.frozen_root_migrations()
+            problems = guardrails.frozen_root_violations(root/'migrations', cutoff, frozen)
+            self.assertEqual([label for label, _ in problems], ['migrations/060_planted.sql'])
+            # main() reads the real checkout's ROOT; the planted copy reaches it through the check's own function.
+            output = io.StringIO()
+            original = guardrails.frozen_root_violations
+            with (mock.patch.object(guardrails, 'frozen_root_violations', lambda *_: original(root/'migrations', cutoff, frozen)),
+                  contextlib.redirect_stdout(output)):
+                self.assertEqual(guardrails.main(), 1)
+            self.assertIn('migrations/060_planted.sql: FAILED: a new root migration must be numbered after the Pokémon cutoff', output.getvalue())
 
 
 if __name__ == '__main__':
