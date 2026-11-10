@@ -46,7 +46,7 @@ type Facts = {
 // time per Deck. Each request has its own deadline from when it is sent (timedRead).
 const AT_ONCE = 2;
 
-const UNAVAILABLE = "Decks are temporarily unavailable. Please retry.";
+const UNAVAILABLE = "Decks are temporarily unavailable.";
 const LINK =
   "inline-flex h-control items-center gap-1 rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:h-control-phone";
 
@@ -61,6 +61,7 @@ const LINK =
  */
 export function DecksIndexPage({ active, onOpenDeck, onNavigate }: Props) {
   const idBase = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const [decks, setDecks] = useState<DeckIndexEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -98,7 +99,7 @@ export function DecksIndexPage({ active, onOpenDeck, onNavigate }: Props) {
 
   const generation = useRef(0);
   const paged = useRef(false);
-  async function loadIndex(quiet = false) {
+  async function loadIndex(quiet = false, retryButton?: HTMLButtonElement) {
     refresh.current?.abort();
     const controller = new AbortController();
     refresh.current = controller;
@@ -170,6 +171,9 @@ export function DecksIndexPage({ active, onOpenDeck, onNavigate }: Props) {
       setCursor(index.next_cursor);
       setLoaded(true);
       setNotice("");
+      // Keep the collector's place when success removes the Retry they still hold focus on.
+      if (retryButton && document.activeElement === retryButton)
+        heading.current?.focus();
     } catch {
       if (!quiet && mine === generation.current) setNotice(UNAVAILABLE);
     }
@@ -371,7 +375,12 @@ export function DecksIndexPage({ active, onOpenDeck, onNavigate }: Props) {
         className="flex flex-col gap-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id={`${idBase}-decks`} className="m-0 text-heading font-semibold">
+          <h2
+            ref={heading}
+            id={`${idBase}-decks`}
+            tabIndex={-1}
+            className="m-0 text-heading font-semibold"
+          >
             Your Decks
           </h2>
           <form
@@ -435,9 +444,16 @@ export function DecksIndexPage({ active, onOpenDeck, onNavigate }: Props) {
           </Button>
         )}
         {notice && (
-          <p role="status" className="m-0 text-body text-warning">
-            {notice}
-          </p>
+          <div role="status" className="m-0 text-body text-warning">
+            <span>{notice}</span>{" "}
+            {notice === UNAVAILABLE && (
+              <Button
+                onClick={(event) => void loadIndex(false, event.currentTarget)}
+              >
+                Retry
+              </Button>
+            )}
+          </div>
         )}
       </section>
       <PublishedDecks
