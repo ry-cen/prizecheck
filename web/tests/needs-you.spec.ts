@@ -120,7 +120,22 @@ for (const viewport of [
         .getByRole("button", { name: "Accept", exact: true });
       await expect(loanAction).toBeVisible();
       evidence.loanAction = await loanAction.boundingBox();
-      // Record geometry without making an unverified below-fold position a desired contract.
+      // The waiting Borrow Request's answer is on the first screen, unscrolled.
+      for (const name of ["Accept", "Decline"]) {
+        const button = page
+          .getByRole("main")
+          .getByRole("button", { name, exact: true });
+        await expect(button).toBeInViewport();
+        const box = await button.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.y).toBeGreaterThanOrEqual(0);
+        expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+      }
+      evidence.loanDecline = await page
+        .getByRole("main")
+        .getByRole("button", { name: "Decline", exact: true })
+        .boundingBox();
+      // Keep the recorded geometry as evidence alongside the assertions above.
       console.log("NEEDS_YOU_EVIDENCE " + JSON.stringify(evidence));
       await testInfo.attach("needs-you-evidence", {
         body: JSON.stringify(evidence, null, 2),

@@ -1248,103 +1248,9 @@ export function LoanScreen({
       )
     );
 
-  return frame(
-    loanHeadline(loan),
+  // A waiting request puts its answer above the long card list so Accept and Decline start on the first screen.
+  const responseBlock = (
     <>
-      <p className="m-0 border-b border-border pb-4 text-meta text-text-muted tabular-nums">
-        {facts.map((fact, index) => (
-          <Fragment key={index}>
-            {index > 0 && " · "}
-            {fact}
-          </Fragment>
-        ))}
-      </p>
-      {(showing.includes("nudge_answer") ||
-        showing.includes("nudge_handover")) && (
-        <p role="status" className="m-0 text-body">
-          {loan.state === "requested"
-            ? loan.role === "lender"
-              ? "Still deciding? Accept or decline this request."
-              : "No answer yet. Withdraw the request if you no longer need these."
-            : loan.state === "offered"
-              ? loan.role === "lender"
-                ? "No answer yet. Withdraw the offer to release these cards."
-                : "Still want these? Accept or decline the offer."
-              : "Still handing these over? Cancel to release them."}
-        </p>
-      )}
-      {loan.actions.includes("approve_extension") && loan.extension_to && (
-        <div
-          role="group"
-          aria-label="More time"
-          className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
-        >
-          <p className="m-0 min-w-0 flex-1 text-body">
-            {other} asked for more time, until {dayText(loan.extension_to)}.
-          </p>
-          <Button
-            variant="primary"
-            aria-disabled={busy || undefined}
-            onClick={() =>
-              void step("approve_extension", (key) =>
-                approveExtension(loan.thread_id, body(key))
-              )
-            }
-          >
-            Approve
-          </Button>
-          <Button
-            aria-disabled={busy || undefined}
-            onClick={() =>
-              void step("decline_extension", (key) =>
-                declineExtension(loan.thread_id, body(key))
-              )
-            }
-          >
-            Decline
-          </Button>
-        </div>
-      )}
-      <ul
-        aria-label="Cards"
-        className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-5 p-0"
-      >
-        {loan.lines.map((line) => (
-          <LoanLine
-            key={line.edition_id}
-            loan={loan}
-            line={line}
-            side={side}
-            answering={answering}
-            value={promised.get(line.edition_id) ?? 0}
-            onValue={(value) =>
-              setPromised(new Map(promised).set(line.edition_id, value))
-            }
-            counting={
-              writing
-                ? {
-                    value: writing.get(line.edition_id) ?? 0,
-                    max: writable(line),
-                    verb: "write off",
-                  }
-                : returning
-                  ? {
-                      value: returning.get(line.edition_id) ?? 0,
-                      max: lineOut(line),
-                      verb: "return",
-                    }
-                  : null
-            }
-            onCounting={(value) => {
-              if (writing) {
-                setWriting(new Map(writing).set(line.edition_id, value));
-              } else {
-                setReturning(new Map(returning).set(line.edition_id, value));
-              }
-            }}
-          />
-        ))}
-      </ul>
       {answering && (
         <section
           aria-label="Acceptance preview"
@@ -1403,6 +1309,108 @@ export function LoanScreen({
           primary
         )}
       </div>
+    </>
+  );
+
+  return frame(
+    loanHeadline(loan),
+    <>
+      <p className="m-0 border-b border-border pb-4 text-meta text-text-muted tabular-nums">
+        {facts.map((fact, index) => (
+          <Fragment key={index}>
+            {index > 0 && " · "}
+            {fact}
+          </Fragment>
+        ))}
+      </p>
+      {(showing.includes("nudge_answer") ||
+        showing.includes("nudge_handover")) && (
+        <p role="status" className="m-0 text-body">
+          {loan.state === "requested"
+            ? loan.role === "lender"
+              ? "Still deciding? Accept or decline this request."
+              : "No answer yet. Withdraw the request if you no longer need these."
+            : loan.state === "offered"
+              ? loan.role === "lender"
+                ? "No answer yet. Withdraw the offer to release these cards."
+                : "Still want these? Accept or decline the offer."
+              : "Still handing these over? Cancel to release them."}
+        </p>
+      )}
+      {loan.actions.includes("approve_extension") && loan.extension_to && (
+        <div
+          role="group"
+          aria-label="More time"
+          className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
+        >
+          <p className="m-0 min-w-0 flex-1 text-body">
+            {other} asked for more time, until {dayText(loan.extension_to)}.
+          </p>
+          <Button
+            variant="primary"
+            aria-disabled={busy || undefined}
+            onClick={() =>
+              void step("approve_extension", (key) =>
+                approveExtension(loan.thread_id, body(key))
+              )
+            }
+          >
+            Approve
+          </Button>
+          <Button
+            aria-disabled={busy || undefined}
+            onClick={() =>
+              void step("decline_extension", (key) =>
+                declineExtension(loan.thread_id, body(key))
+              )
+            }
+          >
+            Decline
+          </Button>
+        </div>
+      )}
+      {answering && responseBlock}
+      <ul
+        aria-label="Cards"
+        className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-5 p-0"
+      >
+        {loan.lines.map((line) => (
+          <LoanLine
+            key={line.edition_id}
+            loan={loan}
+            line={line}
+            side={side}
+            answering={answering}
+            value={promised.get(line.edition_id) ?? 0}
+            onValue={(value) =>
+              setPromised(new Map(promised).set(line.edition_id, value))
+            }
+            counting={
+              writing
+                ? {
+                    value: writing.get(line.edition_id) ?? 0,
+                    max: writable(line),
+                    verb: "write off",
+                  }
+                : returning
+                  ? {
+                      value: returning.get(line.edition_id) ?? 0,
+                      max: lineOut(line),
+                      verb: "return",
+                    }
+                  : null
+            }
+            onCounting={(value) => {
+              if (writing) {
+                setWriting(new Map(writing).set(line.edition_id, value));
+              } else {
+                setReturning(new Map(returning).set(line.edition_id, value));
+              }
+            }}
+          />
+        ))}
+      </ul>
+      {!answering && responseBlock}
       <p role="alert" className="m-0 text-meta text-danger empty:hidden">
         {message}
       </p>
