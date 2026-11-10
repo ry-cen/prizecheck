@@ -200,6 +200,41 @@ it("never enables an offer while pending or availability is delayed, and disable
     await act(async () => root.unmount());
   }
 });
+it("keeps the Friends view up, without the old scope's cards, while another scope's answer loads", async () => {
+  vi.mocked(getPendingLoans).mockResolvedValue(pending("0"));
+  vi.mocked(getWantListMatches).mockResolvedValueOnce(matches("3"));
+  let releaseOther!: (answer: WantListMatches) => void;
+  vi.mocked(getWantListMatches).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        releaseOther = resolve;
+      })
+  );
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  function Probe({ scope }: { scope: WantList }) {
+    const { friends } = useBorrowMatches(scope, 0);
+    return h(
+      "span",
+      null,
+      friends.kind === "none"
+        ? "none"
+        : `ready friends=${friends.hasFriends} pending=${friends.pending} cards=${friends.byCard.size}`
+    );
+  }
+  try {
+    await act(async () => root.render(h(Probe, { scope: list })));
+    expect(host.textContent).toBe("ready friends=true pending=false cards=1");
+    await act(async () =>
+      root.render(h(Probe, { scope: { ...list, deck_id: "other" } }))
+    );
+    expect(host.textContent).toBe("ready friends=true pending=true cards=0");
+    await act(async () => releaseOther(matches("2")));
+    expect(host.textContent).toBe("ready friends=true pending=false cards=1");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
 it("refuses continually changing reads instead of guessing quantities", async () => {
   let count = 0;
   vi.mocked(getPendingLoans).mockImplementation(async () =>

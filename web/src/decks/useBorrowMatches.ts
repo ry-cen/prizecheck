@@ -112,14 +112,21 @@ export function useBorrowMatches(
   const complete = answer && answer.key === key ? answer : null;
   const current = complete !== null;
   const visible = answer && answer.scope === deck ? answer : null;
-  const friends: FriendMatches = !visible
+  // The last answer stays up while another scope's loads, so the Friends view and its switch don't flicker; another
+  // scope's cards are never shown against this one, and borrowing waits (`pending`) until this scope's answer is in.
+  const friends: FriendMatches = !answer
     ? { kind: "none" }
     : {
         kind: "ready",
-        hasFriends: visible.matches.has_friends,
+        hasFriends: answer.matches.has_friends,
         pending: !current,
         byCard: new Map(
-          visible.matches.cards.map((card) => [card.edition_id, card.copies])
+          visible
+            ? visible.matches.cards.map((card) => [
+                card.edition_id,
+                card.copies,
+              ])
+            : []
         ),
       };
   useBorrowReadiness(
