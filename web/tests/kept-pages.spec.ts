@@ -322,7 +322,7 @@ test("root state survives tab switches; details unmount, Back remounts them, and
     dispatchEvent(new PopStateEvent("popstate"));
   }, id);
   await expect(main(page).getByRole("heading", { level: 1 })).toHaveText(name);
-  await expect(page).toHaveURL(/\/collection$/);
+  await expect(page).toHaveURL(new RegExp(`/collection\\?location=${id}$`));
 });
 
 test("Save-Data skips hidden warm mounts", async ({ page }) => {

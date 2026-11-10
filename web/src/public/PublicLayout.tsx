@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { usePageTitle } from "../shell/usePageTitle";
 import { Wordmark } from "../shell/Shell";
 import { PRIMARY, QUIET } from "./controls";
 import { DISCOVER_PATH, followLink, SIGN_IN_PATH } from "./publicRoutes";
@@ -18,6 +19,17 @@ type Props = {
  * unavailable and not found share it.
  */
 export function PublicLayout({ current, onNavigate, children }: Props) {
+  const frame = useRef<HTMLDivElement>(null);
+  usePageTitle(
+    () => frame.current,
+    current === "sign-in"
+      ? "Sign in"
+      : current === "discover"
+        ? "Discover"
+        : "PrizeCheck",
+    window.location.pathname,
+    (heading) => (heading === "Sign in to PrizeCheck" ? "Sign in" : heading)
+  );
   const follow = followLink(onNavigate);
   const header = useRef<HTMLElement>(null);
   // The page's overlay scroll bar (DocumentScrollbar) starts below this sticky header, and a control scrolled into
@@ -43,7 +55,10 @@ export function PublicLayout({ current, onNavigate, children }: Props) {
     };
   }, []);
   return (
-    <div className="flex min-h-dvh flex-col bg-bg font-sans text-text scheme-dark">
+    <div
+      ref={frame}
+      className="flex min-h-dvh flex-col bg-bg font-sans text-text scheme-dark"
+    >
       <header
         ref={header}
         className="sticky top-0 z-(--layer-sticky) box-border flex min-h-header shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-bg px-7 py-2 compact:px-5 phone:gap-x-2 phone:px-3"

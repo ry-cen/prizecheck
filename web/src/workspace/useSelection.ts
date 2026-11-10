@@ -40,6 +40,8 @@ type Options = {
   mobile: boolean;
   /** False while the app shell shows another page: Escape there leaves this selection alone. */
   active?: boolean;
+  routeDetails?: { key: string; ordinal: number } | null;
+  onDetails?: (card: Inspected | null) => void;
 };
 
 export type SelectionState = {
@@ -69,6 +71,8 @@ export function useSelection({
   scope,
   mobile,
   active = true,
+  routeDetails,
+  onDetails,
 }: Options): SelectionState {
   const [selected, setSelected] = useState<Selection>(EMPTY_SELECTION);
   // The last clicked Holding that is still selected.
@@ -76,6 +80,12 @@ export function useSelection({
   const [details, setDetails] = useState<Inspected | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   // Shift-click ranges start here. A Holding key and ordinal, never a display index, so a sort keeps it valid.
+  const detailsCallback = useRef(onDetails);
+  detailsCallback.current = onDetails;
+  const showDetails = useCallback((card: Inspected | null) => {
+    setDetails(card);
+    detailsCallback.current?.(card);
+  }, []);
   const anchor = useRef<{ key: string; ordinal: number } | null>(null);
   const marqueeBase = useRef<Selection>(EMPTY_SELECTION);
   const shown = useRef(active);
@@ -125,7 +135,7 @@ export function useSelection({
       const clicked = { holding: tile.holding, ordinal: tile.ordinal };
       const key = tile.holding.key;
       if (onMobile && !selecting) {
-        setDetails(clicked);
+        showDetails(clicked);
         return;
       }
       if (gesture.kind === "space" || onMobile) {
@@ -215,16 +225,33 @@ export function useSelection({
   const summary = useMemo(() => summarizeSelection(selected), [selected]);
   const openDetails = useCallback(() => {
     const card = latest.current.focus;
-    if (card) setDetails(card);
+    if (card) showDetails(card);
   }, []);
-  const closeDetails = useCallback(() => setDetails(null), []);
+  const closeDetails = useCallback(() => showDetails(null), [showDetails]);
 
+  const routedHolding = routeDetails ? byKey.get(routeDetails.key) : undefined;
+  const routedCard =
+    routedHolding && routeDetails
+      ? {
+          holding: routedHolding,
+          ordinal: Math.max(
+            0,
+            Math.min(routeDetails.ordinal, routedHolding.copies - 1)
+          ),
+        }
+      : null;
   return {
     selected,
     dropBorrowed: () => commit(dropBorrowedSelection(latest.current.selected)),
     summary,
-    inspected: fresh(selected.size ? focus : null),
-    details: fresh(details),
+    inspected:
+      fresh(selected.size ? focus : null) ?? (!mobile ? routedCard : null),
+    details:
+      routeDetails !== undefined
+        ? mobile
+          ? routedCard
+          : null
+        : fresh(details),
     selectMode,
     setSelectMode,
     clear,

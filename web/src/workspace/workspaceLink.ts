@@ -1,27 +1,28 @@
-/** The workspace deep link, /collection?location=<id>, opens one Storage Leaf or Deck.
- * The Decks page links here; an old /workspace?location=<id> link is redirected here with its query.
- * The workspace reads each link when shown and then removes it from the address. */
-const PARAM = "location";
-
+/** Collection addresses retain the existing Location query used by Decks and Loans. */
+export function collectionAddress(search: string) {
+  const params = new URLSearchParams(search);
+  return {
+    location: params.get("location") || "all",
+    query: params.get("q") || "",
+    card: params.get("card"),
+    copy: Number(params.get("copy") || 0),
+  };
+}
+export function collectionHref(
+  location: string,
+  query = "",
+  card?: string,
+  copy = 0
+): string {
+  const params = new URLSearchParams();
+  if (location !== "all") params.set("location", location);
+  if (query) params.set("q", query);
+  if (card) {
+    params.set("card", card);
+    if (copy) params.set("copy", String(copy));
+  }
+  return `/collection${params.size ? `?${params}` : ""}`;
+}
 export function workspaceHref(locationId: string): string {
-  return `/collection?${new URLSearchParams({ [PARAM]: locationId })}`;
-}
-
-/** The linked Location id in the current address, or null. */
-export function readLinkedLocation(): string | null {
-  return new URLSearchParams(window.location.search).get(PARAM) || null;
-}
-
-/** Removes the link from the address, keeping the path, other parameters and hash,
- * so a later reload opens the workspace at All owned. */
-export function clearLinkedLocation(): void {
-  const params = new URLSearchParams(window.location.search);
-  if (!params.has(PARAM)) return;
-  params.delete(PARAM);
-  const search = params.toString();
-  window.history.replaceState(
-    window.history.state,
-    "",
-    `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`
-  );
+  return collectionHref(locationId);
 }
