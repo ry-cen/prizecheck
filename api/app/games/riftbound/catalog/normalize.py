@@ -8,6 +8,8 @@ Rules and where they come from:
 
 * Owner-approved (2026-11-09): one Card Identity per underlying card; `(Alternate Art)` does not change the
   identity; a different name is a different identity; a same-name pair with conflicting text goes to review.
+  Text comparison is conservative: differences other than case, whitespace and HTML tags go to review (so a
+  difference inside the reminder text is a conflict). Unrelated products must never be merged silently.
 * Read off real TCGCSV data (the delimiter, the literal `None`): parsing facts only.
 * Everything else the acceptance spec proposes (PC-2 card scope, PC-5 finishes, PC-9 other delimiters, other
   name markers, duplicate numbers) is flagged as pending, not decided.
@@ -16,8 +18,8 @@ import html
 import re
 import unicodedata
 
-from .model import (FLAG_CARD_SCOPE_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_FINISH_POLICY_PENDING,
-                    FLAG_IDENTITY_TEXT_CONFLICT, FLAG_MARKER_GROUPING_PENDING, FLAG_MULTI_VALUE_UNPARSED,
+from .model import (FLAG_CARD_SCOPE_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_EXTENDED_FIELD_REPEATED,
+                    FLAG_FINISH_POLICY_PENDING, FLAG_IDENTITY_TEXT_CONFLICT, FLAG_MARKER_GROUPING_PENDING, FLAG_MULTI_VALUE_UNPARSED,
                     FLAG_PRICE_WITHOUT_PRODUCT, CardScope, EditionCandidate, IdentityCandidate, GroupResult,
                     PriceObservation, PrintingCandidate, PrintingKey, ReviewItem)
 
@@ -33,21 +35,30 @@ NO_VALUE = 'None'
 # The one marker the owner approved for automatic grouping.
 GROUPED_MARKER = 'alternate art'
 _MARKER = re.compile(r'\s*\(([^()]*)\)\s*$')
+_BRACKETED = re.compile(r'\(([^()]*)\)')
 
 # Working mapping of price subtypes to finishes. Mapping these two is allowed; deciding what an unpriced product
 # or another subtype becomes is not.
 FINISH_BY_SUBTYPE = {'Normal': 'normal', 'Foil': 'foil'}
 
 _TAGS = re.compile(r'<[^>]*>')
-_REMINDER = re.compile(r'<em>.*?</em>', re.IGNORECASE | re.DOTALL)
 _SPACE = re.compile(r'\s+')
+
+
+class SourceResponseError(ValueError):
+    """A TCGCSV response that reports failure or has no `results`: not an empty group."""
 
 
 def results(payload, what):
     """The list of a TCGCSV response (`{success, errors, results}`) or a bare list."""
-    rows = payload.get('results') if isinstance(payload, dict) else payload
-    if rows is None:
-        rows = []
+    if isinstance(payload, dict):
+        if payload.get('success') is False or payload.get('errors'):
+            raise SourceResponseError(f'{what} response reports failure: {payload.get("errors")!r}')
+        if payload.get('results') is None:
+            raise SourceResponseError(f'{what} response has no results')
+        rows = payload['results']
+    else:
+        rows = payload
     if not isinstance(rows, (list, tuple)) or not all(isinstance(row, dict) for row in rows):
         raise ValueError(f'{what} is not a list of objects')
     return rows
@@ -62,16 +73,19 @@ def plain_text(text):
 
 
 def rules_text(description):
-    """The Description reduced to what can conflict: no reminder text, tags, case or spacing."""
-    return fold(plain_text(_REMINDER.sub(' ', description or '')))
+    """The Description as compared for conflicts. Conservative: differences other than case, whitespace and HTML
+    tags go to review, so reminder text counts. A pending owner question, not a settled rule."""
+    return fold(plain_text(description or ''))
 
 
 def split_name(name):
-    """(base name, marker or None): a trailing parenthetical is a marker."""
+    """(base name, marker or None, bracketed parts): a trailing parenthetical is the marker. Every bracketed part
+    of the name is returned, whether or not it trails."""
+    parts = tuple(part.strip() for part in _BRACKETED.findall(name))
     found = _MARKER.search(name)
     if not found:
-        return name.strip(), None
-    return name[:found.start()].strip(), found.group(1).strip()
+        return name.strip(), None, parts
+    return name[:found.start()].strip(), found.group(1).strip(), parts
 
 
 def split_values(raw):
@@ -84,8 +98,26 @@ def split_values(raw):
     return tuple(part.strip() for part in raw.split(MULTI_VALUE_DELIMITER) if part.strip()), False
 
 
-def extended_fields(product):
-    return {field['name']: field.get('value') for field in product.get('extendedData') or []}
+def extended_entries(product):
+    """Every extendedData entry as (name, value), in source order."""
+    entries = product.get('extendedData')
+    if entries is None:
+        return ()
+    if not isinstance(entries, (list, tuple)):
+        raise ValueError(f'product {product["productId"]} has extendedData that is not a list')
+    for entry in entries:
+        if not (isinstance(entry, dict) and isinstance(entry.get('name'), str)
+                and isinstance(entry.get('value'), (str, type(None)))):
+            raise ValueError(f'product {product["productId"]} has a malformed extendedData entry')
+    return tuple((entry['name'], entry.get('value')) for entry in entries)
+
+
+def extended_fields(entries):
+    """name -> value, the first value when a name repeats."""
+    fields = {}
+    for name, value in entries:
+        fields.setdefault(name, value)
+    return fields
 
 
 def number_of(extended):
@@ -93,8 +125,9 @@ def number_of(extended):
     return value if value and value.strip() else None
 
 
-def scope_of(number, card_types):
+def scope_of(number, card_types, card_type_unparsed=False):
     return CardScope(has_number=number is not None, has_card_type=bool(card_types), card_types=card_types,
+                     card_type_unparsed=card_type_unparsed,
                      looks_sealed=number is None and not card_types,
                      looks_token=any(fold(value) == 'token' for value in card_types))
 
@@ -123,8 +156,13 @@ def normalise_group(products, prices=()):
     """
     products = results(products, 'products')
     price_rows = results(prices, 'prices')
+    for row in price_rows:
+        if type(row.get('productId')) is not int:
+            raise ValueError('a price row has no integer productId')
     ids, groups = set(), set()
     for product in products:
+        if not isinstance(product.get('name', ''), str):
+            raise ValueError(f'product {product.get("productId")} has a name that is not text')
         for name in ('productId', 'groupId'):
             if type(product.get(name)) is not int:
                 raise ValueError(f'a product has no integer {name}')
@@ -169,7 +207,8 @@ def normalise_group(products, prices=()):
     candidates = {}
     for d in drafts:
         pid = d['key'].product_id
-        if not (set(flags[pid]) & {FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING}):
+        if not (set(flags[pid]) & {FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING,
+                                   FLAG_EXTENDED_FIELD_REPEATED}):
             candidates.setdefault(fold(d['base_name']), []).append(d)
     identities, identity_of = [], {}
     for identity_key, members in candidates.items():
@@ -196,22 +235,31 @@ def normalise_group(products, prices=()):
 
 def draft(product, group_id, rows):
     """Everything about one product that needs no other product, plus the pending questions it raises."""
-    extended = extended_fields(product)
+    entries = extended_entries(product)
+    extended = extended_fields(entries)
     name = product.get('name') or ''
-    base_name, marker = split_name(name)
+    base_name, marker, brackets = split_name(name)
     number = number_of(extended)
     card_types, card_types_unparsed = split_values(extended.get('Card Type'))
     domains, domains_unparsed = split_values(extended.get('Domain'))
     tags, tags_unparsed = split_values(extended.get('Tag'))
-    scope = scope_of(number, card_types)
+    scope = scope_of(number, card_types, card_types_unparsed)
     pending = []
-    if not (scope.has_number and scope.has_card_type) or scope.looks_token:
+    if not (scope.has_number and scope.has_card_type) or scope.looks_token or scope.card_type_unparsed:
         missing = [label for label, present in (('Number', scope.has_number), ('Card Type', scope.has_card_type))
                    if not present]
         pending.append((FLAG_CARD_SCOPE_PENDING,
-                        'no ' + ' or '.join(missing) if missing else 'Card Type includes Token'))
-    if marker is not None and fold(marker) != GROUPED_MARKER:
-        pending.append((FLAG_MARKER_GROUPING_PENDING, f'marker ({marker}) on base name {base_name!r}'))
+                        'no ' + ' or '.join(missing) if missing else 'Card Type includes Token'
+                        if scope.looks_token else 'Card Type has an unrecognised separator'))
+    # `(Alternate Art)` groups only as the name's one bracketed part; any other bracketed part, trailing or not,
+    # is an open question.
+    if brackets and not (len(brackets) == 1 and marker is not None and fold(marker) == GROUPED_MARKER):
+        pending.append((FLAG_MARKER_GROUPING_PENDING, 'bracketed parts ' + ', '.join(
+            f'({part})' for part in brackets) + f' on proposed base name {base_name!r}'))
+    names = [entry_name for entry_name, _ in entries]
+    repeated = sorted({entry_name for entry_name in names if names.count(entry_name) > 1})
+    if repeated:
+        pending.append((FLAG_EXTENDED_FIELD_REPEATED, 'repeated: ' + ', '.join(repeated)))
     subtypes = tuple(dict.fromkeys(row.get('subTypeName') for row in rows))
     if not rows:
         pending.append((FLAG_FINISH_POLICY_PENDING, 'no price rows'))
@@ -222,7 +270,7 @@ def draft(product, group_id, rows):
                                              ('Tag', tags_unparsed)) if flagged]
     if unparsed:
         pending.append((FLAG_MULTI_VALUE_UNPARSED, 'kept raw: ' + ', '.join(unparsed)))
-    return {'key': PrintingKey(group_id, product['productId']), 'product': product, 'extended': extended,
+    return {'key': PrintingKey(group_id, product['productId']), 'product': product, 'extended': extended, 'entries': entries,
             'name': name, 'base_name': base_name, 'marker': marker, 'number': number, 'scope': scope,
             'card_types': card_types, 'domains': domains, 'tags': tags, 'rows': rows, 'subtypes': subtypes,
             'rules_text': rules_text(extended.get('Description')), 'pending': pending, 'flags': ()}
@@ -238,7 +286,7 @@ def printing(d, identity_key, flags):
         energy_cost=extended.get('Energy Cost'), power_cost=extended.get('Power Cost'), might=extended.get('Might'),
         description_html=extended.get('Description'), flavor_text_html=flavor,
         flavor_text_plain=plain_text(flavor) if flavor is not None else None, image_url=product.get('imageUrl'),
-        modified_on=product.get('modifiedOn'), extended=extended, price_subtypes=d['subtypes'],
+        modified_on=product.get('modifiedOn'), extended=extended, extended_entries=d['entries'], price_subtypes=d['subtypes'],
         editions=editions_of(d['rows']), flags=flags)
 
 

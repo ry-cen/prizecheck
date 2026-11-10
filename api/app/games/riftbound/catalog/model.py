@@ -5,7 +5,7 @@ writer has yet to decide on. Behaviour the owner has not decided is never applie
 output and carries a flag from FLAGS naming the open question, with the source data intact.
 """
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Tuple
 
 # Owner-approved grouping (2026-11-09): same name, or the same name plus an `(Alternate Art)` marker, is one Card
 # Identity; same name with conflicting rules text goes to review and is never merged.
@@ -21,6 +21,8 @@ FLAG_DUPLICATE_NUMBER_PENDING = 'duplicate_number_pending'
 FLAG_MULTI_VALUE_UNPARSED = 'multi_value_delimiter_unrecognised'
 # A price row for a product the group's product list does not have.
 FLAG_PRICE_WITHOUT_PRODUCT = 'price_without_product'
+# An extended field name that appears more than once on a product: every value is kept, none is chosen.
+FLAG_EXTENDED_FIELD_REPEATED = 'extended_field_repeated'
 
 FLAGS = (FLAG_IDENTITY_TEXT_CONFLICT, FLAG_CARD_SCOPE_PENDING, FLAG_FINISH_POLICY_PENDING,
          FLAG_MARKER_GROUPING_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_MULTI_VALUE_UNPARSED,
@@ -39,7 +41,8 @@ class CardScope:
     """What the product has, as observed. It does not say whether the product is a card."""
     has_number: bool
     has_card_type: bool
-    card_types: tuple
+    card_types: Tuple[str, ...]
+    card_type_unparsed: bool  # the Card Type had an unrecognised separator and was kept raw
     looks_sealed: bool  # neither a Number nor a Card Type
     looks_token: bool   # `Token` is one of the Card Type values
 
@@ -59,8 +62,8 @@ class EditionCandidate:
     """A price subtype the product has. `finish` is None for a subtype outside FINISH_BY_SUBTYPE."""
     subtype: str
     finish: Optional[str]
-    prices: tuple  # of PriceObservation, one per price row with this subtype
-    flags: tuple = ()
+    prices: Tuple[PriceObservation, ...]  # one per price row with this subtype
+    flags: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -74,9 +77,9 @@ class PrintingCandidate:
     number: Optional[str]     # the source's form, e.g. `001/100`
     rarity: Optional[str]
     scope: CardScope
-    card_types: tuple
-    domains: tuple
-    tags: tuple
+    card_types: Tuple[str, ...]
+    domains: Tuple[str, ...]
+    tags: Tuple[str, ...]
     energy_cost: Optional[str]
     power_cost: Optional[str]
     might: Optional[str]
@@ -85,30 +88,34 @@ class PrintingCandidate:
     flavor_text_plain: Optional[str]
     image_url: Optional[str]
     modified_on: Optional[str]
-    extended: dict                    # every extended field by name, raw
-    price_subtypes: tuple             # observed, in source order, without repeats
-    editions: tuple                   # of EditionCandidate
-    flags: tuple = ()
+    # The first value of each extended field name, raw. Convenience only; extended_entries has every entry.
+    extended: dict = field(hash=False)
+    extended_entries: Tuple[Tuple[str, Optional[str]], ...]  # every (name, value), in source order
+    price_subtypes: Tuple[str, ...]   # observed, in source order, without repeats
+    editions: Tuple[EditionCandidate, ...]
+    flags: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class IdentityCandidate:
+    """Group-local: `identity_key` is unique only within the group it came from. Matching an identity across
+    groups, and conflicts between groups, are the writer's open problem."""
     identity_key: str
     display_name: str
-    printings: tuple  # of PrintingKey
+    printings: Tuple[PrintingKey, ...]
 
 
 @dataclass(frozen=True)
 class ReviewItem:
     code: str          # one of FLAGS
-    product_ids: tuple
+    product_ids: Tuple[int, ...]
     detail: str
 
 
 @dataclass(frozen=True)
 class GroupResult:
     group_id: Optional[int]
-    identities: tuple
-    printings: tuple
-    review: tuple
-    counts: dict = field(default_factory=dict)
+    identities: Tuple[IdentityCandidate, ...]
+    printings: Tuple[PrintingCandidate, ...]
+    review: Tuple[ReviewItem, ...]
+    counts: dict = field(default_factory=dict, hash=False)

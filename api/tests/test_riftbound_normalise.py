@@ -11,9 +11,10 @@ from pathlib import Path
 import pytest
 
 from app.games.riftbound.catalog.model import (
-    FLAG_CARD_SCOPE_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_FINISH_POLICY_PENDING, FLAG_IDENTITY_TEXT_CONFLICT,
+    FLAG_CARD_SCOPE_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_EXTENDED_FIELD_REPEATED, FLAG_FINISH_POLICY_PENDING,
+    FLAG_IDENTITY_TEXT_CONFLICT,
     FLAG_MARKER_GROUPING_PENDING, FLAG_MULTI_VALUE_UNPARSED, FLAG_PRICE_WITHOUT_PRODUCT)
-from app.games.riftbound.catalog.normalize import normalise_group
+from app.games.riftbound.catalog.normalize import SourceResponseError, normalise_group
 
 NEXT_ID = iter(range(9000001, 9100000))
 
@@ -97,12 +98,46 @@ def test_alternate_art_with_conflicting_text_is_also_not_merged():
     assert FLAG_IDENTITY_TEXT_CONFLICT in codes(result)
 
 
-def test_reminder_text_case_and_spacing_are_not_conflicts():
-    base = product('Synthetic Unit 06', text='[KEYWORD] <em>(Reminder.)</em>\r\n<br>\r\nDraw  a card.')
-    alt = product('Synthetic Unit 06 (Alternate Art)', number='001a/100', text='[KEYWORD]\r\n<br>draw a card.')
+def test_case_whitespace_and_html_tags_alone_are_not_conflicts():
+    """The comparison is conservative: differences other than case, whitespace and HTML tags go to review."""
+    base = product('Synthetic Unit 06', text='[KEYWORD]\r\n<br>\r\nDraw  a card.')
+    alt = product('Synthetic Unit 06 (Alternate Art)', number='001a/100', text='[keyword] <b>draw a card.</b>')
     result = normalise_group([base, alt])
     assert [len(i.printings) for i in result.identities] == [2]
     assert FLAG_IDENTITY_TEXT_CONFLICT not in codes(result)
+
+
+@pytest.mark.parametrize('other', [
+    '[KEYWORD] <em>(You may pay 1 Resource as an additional cost.)</em>',   # reminder wording differs
+    '[KEYWORD]',                                                            # reminder text missing
+])
+def test_a_difference_inside_the_reminder_text_goes_to_review_unmerged(other):
+    """Regression, from the real shape of a same-name pair: the base card and its Alternate Art differ only inside
+    the `<em>` reminder text. Conservative comparison: that is a conflict, never silently reconciled."""
+    base = product('Synthetic Unit 06', text='[KEYWORD] <em>(You may pay 1 and 1 Resource as an additional cost.)</em>')
+    alt = product('Synthetic Unit 06 (Alternate Art)', number='001a/100', text=other)
+    result = normalise_group([base, alt])
+    assert result.identities == ()
+    assert [p.identity_key for p in result.printings] == [None, None]
+    [item] = [i for i in result.review if i.code == FLAG_IDENTITY_TEXT_CONFLICT]
+    assert item.product_ids == (base['productId'], alt['productId'])
+
+
+def test_alternate_art_is_grouped_only_as_the_sole_bracketed_part_of_a_name():
+    plain = product('Synthetic Unit 07 (Alternate Art)', number='001a/100')
+    nested = product('Synthetic Unit 08 (Metal) (Alternate Art)', number='002a/100')
+    inner = product('Synthetic Unit 09 (Metal)', number='003/100')
+    leading = product('Synthetic Unit 10 (271) Token Copy', number='004/100')
+    result = normalise_group([plain, nested, inner, leading])
+    printings = by_id(result)
+    assert printings[plain['productId']].identity_key is not None
+    for item in (nested, inner, leading):
+        kept = printings[item['productId']]
+        assert kept.identity_key is None and FLAG_MARKER_GROUPING_PENDING in kept.flags
+    assert printings[nested['productId']].base_name == 'Synthetic Unit 08 (Metal)'
+    assert printings[nested['productId']].marker == 'Alternate Art'
+    assert [i.product_ids for i in result.review if i.code == FLAG_MARKER_GROUPING_PENDING] == [
+        (nested['productId'],), (inner['productId'],), (leading['productId'],)]
 
 
 def test_rb_scope_01_a_product_with_number_and_card_type_has_no_scope_flag():
@@ -301,16 +336,72 @@ def test_a_synthetic_group_file_round_trips():
             FLAG_FINISH_POLICY_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_IDENTITY_TEXT_CONFLICT} == set(codes(result))
 
 
+@pytest.mark.parametrize('payload', [
+    {'success': False, 'errors': ['Rate limited'], 'results': []},
+    {'success': True, 'errors': ['Something'], 'results': []},
+    {'success': True, 'errors': []},
+    {'success': True, 'errors': [], 'results': None},
+])
+def test_a_failed_or_incomplete_response_is_not_an_empty_group(payload):
+    with pytest.raises(SourceResponseError):
+        normalise_group(payload, [])
+    with pytest.raises(SourceResponseError):
+        normalise_group([], payload)
+
+
+def test_a_successful_empty_response_is_an_empty_group():
+    result = normalise_group({'success': True, 'errors': [], 'results': []}, {'success': True, 'errors': [], 'results': []})
+    assert result.printings == ()
+
+
+def test_a_card_type_with_an_unrecognised_separator_is_scope_pending_and_gets_no_identity():
+    item = product('Synthetic Unit 11', card_type='Unit, Token')
+    result = normalise_group([item], [price(item, 'Normal')])
+    [kept] = result.printings
+    assert kept.card_types == ('Unit, Token',) and kept.scope.card_type_unparsed
+    assert {FLAG_CARD_SCOPE_PENDING, FLAG_MULTI_VALUE_UNPARSED} <= set(kept.flags)
+    assert kept.identity_key is None and result.identities == ()
+
+
+def test_a_repeated_extended_field_keeps_every_value_and_is_flagged():
+    item = product('Synthetic Unit 12')
+    item['extendedData'].append({'name': 'Number', 'displayName': 'Number', 'value': '002/100'})
+    result = normalise_group([item], [price(item, 'Normal')])
+    [kept] = result.printings
+    assert [value for name, value in kept.extended_entries if name == 'Number'] == ['001/100', '002/100']
+    assert len(kept.extended_entries) == len(item['extendedData'])
+    assert FLAG_EXTENDED_FIELD_REPEATED in kept.flags
+    assert kept.identity_key is None  # which Number or Description counts is not decided here
+    assert [i.code for i in result.review if i.code == FLAG_EXTENDED_FIELD_REPEATED] == [FLAG_EXTENDED_FIELD_REPEATED]
+
+
+def test_a_printing_candidate_is_hashable():
+    item = product('Synthetic Unit 13')
+    [kept] = normalise_group([item], [price(item, 'Normal')]).printings
+    assert isinstance(hash(kept), int)
+
+
 @pytest.mark.parametrize('products', [
     [{'name': 'x', 'groupId': 900}],
     [{'productId': 9000001}],
     [product('Synthetic Unit 01', product_id=9000001), product('Synthetic Unit 02', product_id=9000001)],
     [product('Synthetic Unit 01', group=900), product('Synthetic Unit 02', group=901)],
     'not a list',
+    [{**product('Synthetic Unit 01'), 'extendedData': [{'value': 'x'}]}],
+    [{**product('Synthetic Unit 01'), 'extendedData': [{'name': 'Number', 'value': 1}]}],
+    [{**product('Synthetic Unit 01'), 'extendedData': 'x'}],
+    [{**product('Synthetic Unit 01'), 'name': 5}],
 ])
 def test_a_structurally_broken_payload_is_refused_loudly(products):
     with pytest.raises(ValueError):
         normalise_group(products)
+
+
+def test_a_price_row_without_an_integer_product_id_is_refused_loudly():
+    item = product('Synthetic Unit 01')
+    for stray in ({'subTypeName': 'Normal'}, {'productId': None, 'subTypeName': 'Normal'}):
+        with pytest.raises(ValueError):
+            normalise_group([item], [price(item, 'Normal'), stray, {**stray, 'productId': 9099999}])
 
 
 def test_an_empty_group_gives_an_empty_result():
