@@ -4,6 +4,8 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   getPendingLoans,
+  getTradeMatch,
+  getTradeMatches,
   getWantListMatches,
   type PendingLoans,
   type WantListMatches,
@@ -18,6 +20,8 @@ import {
 import { readBorrowMatches, useBorrowMatches } from "./useBorrowMatches";
 import { AskChip, BorrowDraftsProvider } from "../loans/BorrowDrafts";
 import { getDecks } from "../decks_generated";
+import { GetFromFriends } from "../social/WantListFriends";
+import { OpenProposalContext } from "../trades/openProposal";
 const { send, noteChanged, toast } = vi.hoisted(() => ({
   send: vi.fn(),
   noteChanged: vi.fn(),
@@ -55,6 +59,8 @@ vi.mock("../inbox/Inbox", () => ({
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
   getPendingLoans: vi.fn(),
+  getTradeMatch: vi.fn(),
+  getTradeMatches: vi.fn(),
   getWantListMatches: vi.fn(),
 }));
 const pending = (requested: string, accepted = "0"): PendingLoans => ({
@@ -235,6 +241,109 @@ it("keeps the Friends view up, without the old scope's cards, while another scop
     await act(async () => root.unmount());
   }
 });
+it("keeps its maps and Trade for it steady when the Want List re-renders with the same answer", async () => {
+  vi.mocked(getPendingLoans).mockResolvedValue(pending("0"));
+  vi.mocked(getWantListMatches).mockResolvedValue(matches("3"));
+  const offer = {
+    edition_id: "A",
+    name: "Iono",
+    set_code: "PAL",
+    set_name: "Paldea Evolved",
+    collector_number: "185",
+    descriptor: {},
+    image_url: null,
+    copies: "1",
+    need: "1",
+    want_list_need: "1",
+    origin: "want_list" as const,
+    accepts_as: "exact" as const,
+    need_groups: [],
+  };
+  vi.mocked(getTradeMatches).mockResolvedValue({
+    has_friends: true,
+    rows: [
+      {
+        collector_id: "one",
+        trader_id: "t1",
+        handle: "misty",
+        display_name: "Misty",
+        completed_trades: 0,
+        open_to_cash_offers: false,
+        match: "has_what_you_want",
+        you_get: [offer],
+        you_give: [],
+        more_you_get: 0,
+        more_you_give: 0,
+        you_get_groups: [],
+        you_give_groups: [],
+      },
+    ],
+  });
+  vi.mocked(getTradeMatch).mockReset();
+  const row = {
+    edition_id: "A",
+    name: "Iono",
+    set_id: "PAL",
+    set_name: "Paldea Evolved",
+    collector_number: "185",
+    descriptor: {},
+    image_url: null,
+    need: "1",
+    decks: [],
+  };
+  const seen: unknown[] = [];
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  function Probe({ tick }: { tick: number }) {
+    const { friends, pending: read } = useBorrowMatches(list, 0);
+    const byCard = friends.kind === "ready" ? friends.byCard : new Map();
+    seen.push([friends, read.state, byCard]);
+    return h(
+      "div",
+      { "data-tick": tick },
+      h(GetFromFriends, {
+        rows: [row],
+        byCard,
+        deckName: () => "Deck",
+        scoped: "deck",
+        pending: false,
+      })
+    );
+  }
+  const render = (tick: number) =>
+    root.render(
+      h(OpenProposalContext.Provider, { value: vi.fn() }, h(Probe, { tick }))
+    );
+  const trade = () =>
+    host.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Trade for it:"]'
+    );
+  try {
+    await act(async () => render(0));
+    const button = trade();
+    expect(button).not.toBeNull();
+    expect(getTradeMatches).toHaveBeenCalledTimes(1);
+    const before = seen.length;
+    for (const tick of [1, 2, 3]) {
+      await act(async () => render(tick));
+      expect(trade()).toBe(button);
+    }
+    // Same answer in, same identities out: Trade for it re-reads on a changed Friends map only.
+    expect(seen.length).toBeGreaterThan(before);
+    const latest = seen.at(-1) as unknown[];
+    for (const state of seen.slice(before - 1)) {
+      expect((state as unknown[])[0]).toBe(latest[0]);
+      expect((state as unknown[])[1]).toBe(latest[1]);
+      expect((state as unknown[])[2]).toBe(latest[2]);
+    }
+    expect(getTradeMatches).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
+
 it("refuses continually changing reads instead of guessing quantities", async () => {
   let count = 0;
   vi.mocked(getPendingLoans).mockImplementation(async () =>
