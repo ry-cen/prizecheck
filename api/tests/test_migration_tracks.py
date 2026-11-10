@@ -98,3 +98,18 @@ def test_on_todays_tree_the_ledger_holds_exactly_the_root_files_under_their_unqu
         names = {row["name"] for row in conn.execute("SELECT name FROM schema_migration")}
     assert names == {path.name for path in (ROOT / "migrations").glob("*.sql")}
     assert not any("/" in name for name in names)
+
+
+def test_a_nested_migration_file_stops_the_run_before_anything_is_applied_or_recorded(scratch):
+    root, url = scratch
+    write(root, {"core/001_x.sql": "CREATE TABLE kept (n int);", "001_a.sql": "CREATE TABLE kept_too (n int);",
+                 "core/x/001_a.sql": "CREATE TABLE never (n int);"})
+    run = subprocess.run([sys.executable, str(root / "scripts/migrate.py")], cwd=root, env={**os.environ, "DATABASE_URL": url},
+                         capture_output=True, text=True)
+    assert run.returncode != 0
+    assert "migrations/core/x/001_a.sql" in run.stderr
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT to_regclass('schema_migration'), to_regclass('kept'), to_regclass('kept_too'), to_regclass('never')").fetchone() == (None, None, None, None)
+    # Moved to its track directory, the same file runs.
+    (root / "migrations/core/x/001_a.sql").rename(root / "migrations/core/002_a.sql")
+    assert migrate(root, url) == ["core/001_x.sql", "core/002_a.sql", "001_a.sql"]

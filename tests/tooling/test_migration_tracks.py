@@ -96,6 +96,70 @@ class TrackTest(unittest.TestCase):
             self.assertEqual(migration_tracks.apply(conn, migrations, (Track('core'), Track()), said.append), [])
 
 
+NESTED = 'core/x/001_a.sql'
+
+
+class NestedMigrationTest(unittest.TestCase):
+    """A .sql file two or more directories below migrations/ is refused by name where it used to be ignored (S3R-11). Root
+    files and files directly in a track directory behave as they always did. The suffix is matched as the runner globs it:
+    lower-case .sql only, at every depth."""
+    def test_nested_files_are_listed_by_path_and_one_level_files_are_not(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), {'001_a.sql': '', 'core/001_x.sql': '', NESTED: '', 'a/b/c/002_b.sql': '',
+                                             'core/x/readme.md': '', 'core/x/002_b.SQL': ''})
+            self.assertEqual(migration_tracks.nested_files(migrations), ['a/b/c/002_b.sql', NESTED])
+            self.assertEqual(migration_tracks.nested_files(tree(Path(folder) / 'ok', {'001_a.sql': '', 'core/001_x.sql': ''})), [])
+
+    def test_every_listing_function_refuses_the_tree_and_names_each_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), {'001_a.sql': '', 'core/001_x.sql': '', NESTED: '', 'a/b/c/002_b.sql': ''})
+            for call in (lambda: migration_tracks.planned(migrations, (Track('core'), Track())),
+                         lambda: migration_tracks.files(migrations), lambda: migration_tracks.every_track(migrations)):
+                with self.assertRaises(migration_tracks.NestedMigrationError) as raised:
+                    call()
+                self.assertIn('migrations/core/x/001_a.sql', str(raised.exception))
+                self.assertIn('migrations/a/b/c/002_b.sql', str(raised.exception))
+
+    def test_apply_refuses_before_it_runs_or_records_anything(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), {'001_a.sql': 'SELECT 1', 'core/001_x.sql': 'SELECT 2', NESTED: 'SELECT 3'})
+            conn, said = FakeConn(), []
+            with self.assertRaises(migration_tracks.NestedMigrationError):
+                migration_tracks.apply(conn, migrations, (Track('core'), Track()), said.append)
+            self.assertEqual((conn.log, conn.ledger, said), ([], set(), []))
+
+    def test_root_and_one_level_files_still_plan_and_apply_and_a_nested_non_sql_or_upper_case_file_is_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), {'001_a.sql': 'SELECT 1', 'core/001_x.sql': 'SELECT 2', 'core/x/notes.txt': '',
+                                             'core/x/002_b.SQL': '', 'core/003_c.SQL': ''})
+            conn = FakeConn()
+            self.assertEqual(migration_tracks.apply(conn, migrations, (Track('core'), Track()), lambda line: None),
+                             ['core/001_x.sql', '001_a.sql'])
+            self.assertEqual(set(migration_tracks.files(migrations)), {'001_a.sql', 'core/001_x.sql'})
+
+    def test_a_symlinked_directory_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            migrations = tree(Path(folder), {'001_a.sql': '', 'core/001_x.sql': ''})
+            outside = Path(folder) / 'outside'
+            (outside / 'deep').mkdir(parents=True)
+            (outside / 'deep' / '009_z.sql').write_text('')
+            (migrations / 'core' / 'link').symlink_to(outside, target_is_directory=True)
+            self.assertEqual(migration_tracks.nested_files(migrations), [])
+
+    def test_the_release_tools_refuse_a_nested_file_in_either_release(self):
+        with tempfile.TemporaryDirectory() as folder:
+            clean = tree(Path(folder) / 'clean', {'001_a.sql': 'a', 'core/001_x.sql': 'x'}).parent
+            nested = tree(Path(folder) / 'nested', {'001_a.sql': 'a', 'core/001_x.sql': 'x', NESTED: 'n'}).parent
+            for previous, candidate in ((clean, nested), (nested, clean)):
+                with self.assertRaises(release.ReleaseError) as raised:
+                    release.compatible(previous, candidate)
+                self.assertEqual(str(raised.exception), 'A migration file sits more than one directory below migrations/; migrations cannot be compared')
+                self.assertIn('migrations/core/x/001_a.sql', str(raised.exception.__cause__))
+            with self.assertRaises(release.ReleaseError):
+                release.migration_files(nested / 'migrations')
+            release.compatible(clean, clean)
+
+
 class PokemonEntryTest(unittest.TestCase):
     def test_the_entry_names_core_then_the_root_track_and_a_fresh_tree_plans_exactly_the_old_glob(self):
         migrate_source = (ROOT / 'scripts/migrate.py').read_text()
@@ -176,6 +240,18 @@ class DeployTest(unittest.TestCase):
         files = {'001_a.sql': '', '002_b.sql': '', 'core/001_x.sql': '', 'core/002_y.sql': ''}
         run = self.run_in_app(heredoc("print('schema' if exists"), files, ['core/001_x.sql', '001_a.sql'])
         self.assertEqual(run.stdout.split(), ['schema', 'core/002_y.sql', '002_b.sql'])
+
+    def test_the_deploy_list_and_smoke_check_refuse_a_nested_file_but_the_old_image_fallback_is_unchanged(self):
+        files = {'001_a.sql': '', NESTED: ''}
+        for body in (heredoc("print('schema' if exists"), heredoc('sys.exit(0 if files <= applied else 1)')):
+            run = self.run_in_app(body, files, ['001_a.sql'])
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn('migrations/core/x/001_a.sql', run.stderr)
+        # An image from before migration tracks has no migration_tracks.py: the flat glob it always had, with nothing new to trip.
+        body = heredoc('sys.exit(0 if files <= applied else 1)')
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / 'migrate.py').write_text(OLD_IMAGE_MIGRATE)
+            self.assertEqual(self.run_in_app(body, files, ['001_a.sql'], Path(folder)).returncode, 0)
 
     def test_the_smoke_check_requires_every_track_of_the_entry_in_the_ledger(self):
         body = heredoc('sys.exit(0 if files <= applied else 1)')

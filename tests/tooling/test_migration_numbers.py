@@ -133,5 +133,30 @@ class MigrationNumberTest(unittest.TestCase):
     def test_main_passes_on_the_same_number_in_two_tracks(self):
         self.assertEqual(self.run_main(['001_a.sql', 'core/001_a.sql', *PAIR]), (0, ''))
 
+    def test_main_fails_on_a_nested_migration_and_names_the_file(self):
+        status, output = self.run_main(['001_a.sql', 'core/001_a.sql', 'core/x/001_a.sql', *PAIR])
+        self.assertEqual(status, 1)
+        self.assertIn('migrations/core/x/001_a.sql: FAILED: a migration sits more than one directory below migrations/', output)
+        self.assertNotIn('Traceback', output)
+
+    def test_main_fails_on_a_nested_migration_even_when_it_is_the_only_problem_in_a_deeper_directory(self):
+        status, output = self.run_main(['001_a.sql', 'a/b/c/002_b.sql', *PAIR])
+        self.assertEqual(status, 1)
+        self.assertIn('migrations/a/b/c/002_b.sql', output)
+
+    def test_main_ignores_a_nested_file_that_is_not_lower_case_sql(self):
+        self.assertEqual(self.run_main(['001_a.sql', 'core/x/notes.txt', 'core/x/002_b.SQL', *PAIR]), (0, ''))
+
+    def test_nested_violations_name_each_file_and_leave_one_level_files_alone(self):
+        with tree(['001_a.sql']) as root:
+            for name in ('core/001_x.sql', 'core/x/001_a.sql', 'core/x/y/002_b.sql'):
+                (Path(root)/name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(root)/name).write_text('select 1;\n')
+            self.assertEqual([label for label, _ in guardrails.nested_migration_violations(root)],
+                             ['migrations/core/x/001_a.sql', 'migrations/core/x/y/002_b.sql'])
+            self.assertEqual([label for label, _ in guardrails.track_number_violations(root, ALLOWED)],
+                             ['migrations/core/x/001_a.sql', 'migrations/core/x/y/002_b.sql'])
+
+
 if __name__ == '__main__':
     unittest.main()
