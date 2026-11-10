@@ -25,17 +25,21 @@ export function restorePageScroll(
     window.removeEventListener("scroll", foreign);
   };
   // Scrollbar drags, find-in-page and assistive scrolling fire no input event, so a scroll we did not cause counts
-  // as the collector's only when it moves away from the saved position and is not the browser clamping to the
-  // page's end. Scroll anchoring and clamps while content is still arriving keep the retry going.
+  // as the collector's unless it is the browser clamping to the page's end while content is still arriving, or
+  // scroll anchoring carrying the view from where we left it up to the saved position. A scroll past the saved
+  // position, or any other move, releases the restoration.
   function foreign() {
     const at = window.scrollY;
     if (at === left) return;
     const end = Math.max(
       0,
-      document.documentElement.scrollHeight - window.innerHeight
+      document.documentElement.scrollHeight -
+        document.documentElement.clientHeight
     );
     const clamped = at >= end - 1 && at < target;
-    const toward = Math.abs(at - target) < Math.abs(left - target);
+    const toward =
+      Math.sign(at - left) === Math.sign(target - left) &&
+      Math.abs(at - left) <= Math.abs(target - left);
     if (clamped || toward) left = at;
     else stop();
   }
