@@ -326,6 +326,56 @@ function collectionClearance(page: Page) {
   });
 }
 
+/** Another tab of the same account holds its Move lock, as a Move in progress does. Collection then counts as busy:
+ * coming back to it shows the out-of-date banner instead of refreshing quietly. Close the returned tab to let go. */
+async function moveInProgressElsewhere(page: Page): Promise<Page> {
+  const session = await page.request.get(
+    new URL("/auth/session", page.url()).href
+  );
+  const { userId } = (await session.json()) as { userId: string };
+  const other = await page.context().newPage();
+  await other.goto(new URL("/auth/session", page.url()).href);
+  await other.evaluate(
+    (owner) =>
+      new Promise<void>((held) => {
+        const name = `prizecheck:mixed-move:${encodeURIComponent(owner)}`;
+        void navigator.locks.request(name, () => {
+          localStorage.setItem(`${name}:activity`, crypto.randomUUID());
+          held();
+          return new Promise<void>(() => {});
+        });
+      }),
+    userId
+  );
+  await expect(
+    page.getByRole("region", { name: "Pending Move" })
+  ).toBeVisible();
+  return other;
+}
+
+/** A new owner with 120 copies in Unsorted, signed in to a loaded Collection at the page's viewport. */
+async function openCollectionWithCards(page: Page) {
+  const ids = seedCatalog();
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    await startAsNewOwner(pool);
+  } finally {
+    await pool.end();
+  }
+  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+    route.abort()
+  );
+  await signInAsOwner(page, "/collection");
+  const location = await unsorted(page);
+  const edition = Object.values(ids)[0];
+  await hold(page, location, edition, 120);
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
+  const tiles = page.locator('section[aria-label="Cards"] button');
+  await expect(tiles.first()).toBeVisible();
+  return { location, edition, tiles };
+}
+
 for (const scenario of [
   { name: "320 px", width: 320, height: 568, big: false },
   { name: "320 px with 200% text", width: 320, height: 568, big: true },
@@ -338,26 +388,7 @@ for (const scenario of [
       width: scenario.width,
       height: scenario.height,
     });
-    const ids = seedCatalog();
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-    try {
-      await startAsNewOwner(pool);
-    } finally {
-      await pool.end();
-    }
-    await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-      route.abort()
-    );
-    await signInAsOwner(page, "/collection");
-    const location = await unsorted(page);
-    const edition = Object.values(ids)[0];
-    await hold(page, location, edition, 120);
-    await page.reload();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      "All owned"
-    );
-    const tiles = page.locator('section[aria-label="Cards"] button');
-    await expect(tiles.first()).toBeVisible();
+    const { location, edition, tiles } = await openCollectionWithCards(page);
     if (scenario.big) await doubleText(page);
     await hold(page, location, edition, 1);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -474,7 +505,10 @@ for (const scenario of [
       await doubleText(page); // ResizeObserver must also account for wrapping after the banner appears.
       await expectPadding(true);
     }
-    // Kept pages must not leave their banner height on the document while another page is shown.
+    // Kept pages must not leave their banner height on the document while another page is shown. A Collection that
+    // is idle when the collector comes back refreshes quietly (see the next test), so it is made busy first and the
+    // banner is still there on return.
+    const moving = await moveInProgressElsewhere(page);
     const tabs = page.locator('nav[aria-label="Main views"]:visible');
     await tabs.getByRole("button", { name: "Catalog", exact: true }).click();
     await expect
@@ -501,5 +535,51 @@ for (const scenario of [
         )
       )
       .toBe("");
+    await moving.close();
   });
 }
+
+test("an idle return to a stale Collection refreshes it, and the banner and its clearance go", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  const { location, edition, tiles } = await openCollectionWithCards(page);
+  await hold(page, location, edition, 1);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  const reload = page.getByRole("button", { name: "Reload", exact: true });
+  await expect(reload).toBeVisible();
+  const clearance = () =>
+    page.evaluate(() =>
+      document.documentElement.style.getPropertyValue(
+        "--collection-stale-height"
+      )
+    );
+  await expect.poll(clearance).not.toBe("");
+  const expectedHeader = await page
+    .locator(PHONE_HEADER)
+    .evaluate((el) => el.getBoundingClientRect().height);
+
+  const tabs = page.locator('nav[aria-label="Main views"]:visible');
+  await tabs.getByRole("button", { name: "Catalog", exact: true }).click();
+  await expect.poll(clearance).toBe("");
+  await tabs.getByRole("button", { name: "Collection", exact: true }).click();
+  // Nothing selected, running or open: the return reads Collection again and the banner never comes back.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
+  await expect(page.getByRole("main")).toContainText("121 copies");
+  await expect(reload).toHaveCount(0);
+  await expect(tiles.first()).toBeVisible();
+  await expect.poll(clearance).toBe("");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (header) =>
+          Math.abs(
+            parseFloat(
+              getComputedStyle(document.documentElement).scrollPaddingTop
+            ) - header
+          ),
+        expectedHeader
+      )
+    )
+    .toBeLessThan(0.5);
+});
