@@ -408,9 +408,15 @@ it.each(["pulse", "focus", "pins"])(
       await act(async () => button("Send Borrow Request").click());
       expect(send).not.toHaveBeenCalled();
       // Retry re-runs the read in place; the open composer and its draft stay as they were.
-      const retried = host.querySelector("dialog");
+      const retried = host
+        .querySelector('dialog [role="status"]')
+        ?.closest("dialog");
+      button("Retry").focus();
       await act(async () => button("Retry").click());
-      expect(host.querySelector("dialog")).toBe(retried);
+      // The Retry that held focus is gone; focus stays inside the composer, not on the page behind it.
+      expect(retried?.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement).not.toBe(document.body);
+      expect(retried?.isConnected).toBe(true);
       expect(host.textContent).not.toContain(failedCopy);
       expect(host.querySelector('dialog [role="status"]')).toBeNull();
       expect(
@@ -561,8 +567,15 @@ it("offers Retry in the composer when the All Decks availability read fails", as
     await act(async () => button("Send Borrow Request").click());
     expect(send).not.toHaveBeenCalled();
 
+    const composer = host
+      .querySelector('dialog [role="status"]')
+      ?.closest("dialog");
+    button("Retry").focus();
     await act(async () => button("Retry").click());
+    expect(composer?.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
     expect(host.querySelector('dialog [role="status"]')).toBeNull();
+    expect(composer?.contains(document.activeElement)).toBe(true);
     expect(button("Send Borrow Request").disabled).toBe(false);
     expect(quantity()).toBe("1");
     expect(

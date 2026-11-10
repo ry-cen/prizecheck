@@ -647,6 +647,7 @@ function BorrowComposer({
     (line) => line.cap === null || line.quantity <= line.cap
   );
   const form = useRef<HTMLDivElement>(null);
+  const intro = useRef<HTMLParagraphElement>(null);
   const close = () =>
     closeLoanRequest(form.current, fence.command.current !== null, onClose);
 
@@ -777,7 +778,11 @@ function BorrowComposer({
       returnFocus={returnFocus}
     >
       <div ref={form} className="flex flex-col gap-4">
-        <p className="m-0 text-meta text-text-muted">
+        <p
+          ref={intro}
+          tabIndex={-1}
+          className="m-0 text-meta text-text-muted outline-none"
+        >
           {name} can accept all of it, part of it, or decline.
         </p>
         <fieldset disabled={frozen} className="contents">
@@ -899,22 +904,26 @@ function BorrowComposer({
           {message}
         </p>
         {!current && (
-          <p role="status" className="m-0 text-meta text-text-muted">
-            {failed ? (
-              <>
-                Couldn't check what's available.{" "}
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  className="cursor-pointer border-0 bg-transparent p-0 font-sans text-meta text-accent-strong underline"
-                >
-                  Retry
-                </button>
-              </>
-            ) : (
-              "Checking what's available…"
+          <div className="flex flex-wrap items-center gap-2">
+            <p role="status" className="m-0 text-meta text-text-muted">
+              {failed
+                ? "Couldn't check what's available."
+                : "Checking what's available…"}
+            </p>
+            {failed && (
+              <Button
+                variant="quiet"
+                onClick={(event) => {
+                  const held = event.currentTarget;
+                  onRetry();
+                  // Keep the collector's place when the check starting again removes the Retry they hold.
+                  if (document.activeElement === held) intro.current?.focus();
+                }}
+              >
+                Retry
+              </Button>
             )}
-          </p>
+          </div>
         )}
         <div className="flex flex-wrap justify-end gap-2">
           <Button
