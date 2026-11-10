@@ -1,0 +1,486 @@
+{
+  "success": true,
+  "errors": [],
+  "results": [
+    {
+      "productId": 9000001,
+      "name": "Synthetic Unit 01",
+      "cleanName": "Synthetic Unit 01",
+      "imageUrl": "https://example.invalid/9000001.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000001",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "001/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Unit"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA"
+        }
+      ]
+    },
+    {
+      "productId": 9000002,
+      "name": "Synthetic Unit 01 (Alternate Art)",
+      "cleanName": "Synthetic Unit 01 (Alternate Art)",
+      "imageUrl": "https://example.invalid/9000002.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000002",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "001a/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Unit"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA"
+        }
+      ]
+    },
+    {
+      "productId": 9000003,
+      "name": "Synthetic Unit 01 (Overnumbered)",
+      "cleanName": "Synthetic Unit 01 (Overnumbered)",
+      "imageUrl": "https://example.invalid/9000003.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000003",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "101/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Unit"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA"
+        }
+      ]
+    },
+    {
+      "productId": 9000004,
+      "name": "Synthetic Unit 02",
+      "cleanName": "Synthetic Unit 02",
+      "imageUrl": "https://example.invalid/9000004.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000004",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "002/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Unit"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA;DomainB"
+        },
+        {
+          "name": "Tag",
+          "displayName": "Tag",
+          "value": "TagA;TagB"
+        }
+      ]
+    },
+    {
+      "productId": 9000005,
+      "name": "Synthetic Unit 03",
+      "cleanName": "Synthetic Unit 03",
+      "imageUrl": "https://example.invalid/9000005.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000005",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "003/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Unit"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA,DomainB"
+        }
+      ]
+    },
+    {
+      "productId": 9000006,
+      "name": "Synthetic Unit 04",
+      "cleanName": "Synthetic Unit 04",
+      "imageUrl": "https://example.invalid/9000006.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000006",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "004/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Draw a card."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Spell"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA"
+        }
+      ]
+    },
+    {
+      "productId": 9000007,
+      "name": "Synthetic Unit 04",
+      "cleanName": "Synthetic Unit 04",
+      "imageUrl": "https://example.invalid/9000007.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000007",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "005/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Discard a card."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Spell"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA"
+        }
+      ]
+    },
+    {
+      "productId": 9000008,
+      "name": "Synthetic Unit 05",
+      "cleanName": "Synthetic Unit 05",
+      "imageUrl": "https://example.invalid/9000008.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000008",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "006/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Gear"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA"
+        }
+      ]
+    },
+    {
+      "productId": 9000009,
+      "name": "Synthetic Unit 06",
+      "cleanName": "Synthetic Unit 06",
+      "imageUrl": "https://example.invalid/9000009.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000009",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "006/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Gear"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA"
+        }
+      ]
+    },
+    {
+      "productId": 9000010,
+      "name": "Synthetic Booster Pack",
+      "cleanName": "Synthetic Booster Pack",
+      "imageUrl": "https://example.invalid/9000010.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000010",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": []
+    },
+    {
+      "productId": 9000011,
+      "name": "Synthetic Token",
+      "cleanName": "Synthetic Token",
+      "imageUrl": "https://example.invalid/9000011.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000011",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Rarity",
+          "displayName": "Rarity",
+          "value": "Common"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Token"
+        }
+      ]
+    },
+    {
+      "productId": 9000012,
+      "name": "Synthetic Unit 07",
+      "cleanName": "Synthetic Unit 07",
+      "imageUrl": "https://example.invalid/9000012.jpg",
+      "categoryId": 0,
+      "groupId": 900,
+      "url": "https://example.invalid/product/9000012",
+      "modifiedOn": "2026-01-01T00:00:00",
+      "imageCount": 1,
+      "presaleInfo": {
+        "isPresale": false,
+        "releasedOn": null,
+        "note": null
+      },
+      "extendedData": [
+        {
+          "name": "Number",
+          "displayName": "Number",
+          "value": "007/100"
+        },
+        {
+          "name": "Description",
+          "displayName": "Description",
+          "value": "Synthetic text."
+        },
+        {
+          "name": "Card Type",
+          "displayName": "Card Type",
+          "value": "Unit"
+        },
+        {
+          "name": "Domain",
+          "displayName": "Domain",
+          "value": "DomainA"
+        }
+      ]
+    }
+  ]
+}

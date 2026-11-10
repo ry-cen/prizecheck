@@ -1,0 +1,123 @@
+{
+  "success": true,
+  "errors": [],
+  "results": [
+    {
+      "productId": 9000001,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000001,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Foil"
+    },
+    {
+      "productId": 9000002,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000002,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Foil"
+    },
+    {
+      "productId": 9000003,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000004,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000005,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000006,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000007,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000008,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000009,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000011,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Normal"
+    },
+    {
+      "productId": 9000012,
+      "low": 1.0,
+      "mid": 1.25,
+      "high": 2.0,
+      "market": 1.5,
+      "directLow": null,
+      "subTypeName": "Synthetic Finish"
+    }
+  ]
+}
