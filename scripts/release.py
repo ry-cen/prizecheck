@@ -112,7 +112,12 @@ def migration_files(migrations):
         if error.name != 'migration_tracks':
             raise
         raise ReleaseError('migration_tracks.py is missing beside release.py; migrations cannot be compared') from error
-    return migration_tracks.files(migrations)
+    try:
+        return migration_tracks.files(migrations)
+    except migration_tracks.NestedMigrationError as error:
+        # ReleaseError texts are fixed strings (scripts/check_guardrails.py); the cause, chained, names the files, and so does
+        # `npm run guardrails`.
+        raise ReleaseError('A migration file sits more than one directory below migrations/; migrations cannot be compared') from error
 
 
 def compatible(previous,candidate):

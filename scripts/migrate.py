@@ -13,9 +13,18 @@ from migration_tracks import Track  # noqa: E402
 
 root = Path(__file__).resolve().parents[1]
 
-# The Pokémon database's entry (IM-12): its tracks in apply order, and no run-time setting that picks them. Core before the
-# game's own track; the root directory is Pokémon's track, with its names unqualified. A directory with no files is no track yet.
-TRACKS = (Track("core"), Track())
+# The Pokémon database's entry (IM-12, IM-13): its tracks in apply order, and no run-time setting that picks them. The root
+# directory is Pokémon's track, with its names unqualified, and it is split at the cutoff, the last file before the core
+# baseline. Pending root files up to the cutoff run first. Then the core track: its baseline and zip seed are RECORDED
+# without running, after the runner checks that the objects exist, because root files 001 to 162 already built them (fresh
+# and populated databases take this same path; there is no Pokémon squash). Then any pending core tail, then the root files
+# after the cutoff. A new game's entry lists Track("core") whole, so the baseline runs there.
+CUTOFF = "162_trade_loan_threads.sql"
+TRACKS = (
+    Track(through=CUTOFF),
+    Track("core", recorded=("000_baseline.sql", "001_zip_centroids.sql")),
+    Track(after=CUTOFF),
+)
 
 
 def check_set_codes(conn):
