@@ -280,7 +280,7 @@ test.describe("desktop", () => {
     await save.getByRole("button", { name: "Add 9 cards to Unsorted" }).click();
 
     // It lands on Unsorted, with a toast and no Undo.
-    await expect(page).toHaveURL(/\/collection$/);
+    await expect(page).toHaveURL(`${ORIGIN}/collection?location=${unsorted}`);
     await expect(heading(page)).toHaveText("Unsorted");
     await expect(notifications(page)).toContainText(
       "Added 9 cards to Unsorted."

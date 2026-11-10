@@ -406,7 +406,7 @@ test.describe("desktop", () => {
     await expectEditions(page, ["Vaporeon", "Squirtle", "Charmander"]);
   });
 
-  test("search finds cards by name; sort, filters, card size and Names are remembered and search is not", async ({
+  test("search finds cards by name; sort, filters, card size and Names are remembered and search is kept in the address", async ({
     page,
   }) => {
     promoteCatalog();
@@ -446,7 +446,8 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       "All owned"
     );
-    await expect(search).toHaveValue("");
+    await expect(page).toHaveURL(/\/collection\?q=squirt$/);
+    await expect(search).toHaveValue("squirt");
     await expect(page.getByLabel("Sort", { exact: true })).toHaveValue(
       "quantity-desc"
     );
@@ -465,8 +466,9 @@ test.describe("desktop", () => {
     await expect(panel(page).getByLabel("Set", { exact: true })).toHaveValue(
       "set-a"
     );
-    await expectEditions(page, ["Charmander", "Squirtle"]);
-    await expect(cards(page).getByText("Charmander").first()).toBeVisible();
+    await expectEditions(page, ["Squirtle"]);
+    await expect(cards(page).getByText("Squirtle").first()).toBeVisible();
+    await expect(cards(page).getByText("Charmander")).toHaveCount(0);
   });
 
   test("sorting keeps the selection; search or a filter change clears it; the inspector shows category and type", async ({
