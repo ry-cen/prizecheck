@@ -382,7 +382,7 @@ test.describe("desktop", () => {
     await page.goto(`${ORIGIN}/catalog?printing=${printing}&edition=${normal}`);
     await expect(popup(page)).toBeVisible();
     await expect(popup(page)).toContainText("Mega Evolution (me01) · #001");
-    await expect(popup(page)).toContainText("Regulation mark unavailable");
+    await expect(popup(page)).not.toContainText("Regulation mark");
     await expect(popup(page)).toContainText("Legality unavailable");
     await expect(popup(page)).not.toContainText("Card details are unavailable");
     await expect(editions(page).first()).toContainText("Copies owned unknown");
