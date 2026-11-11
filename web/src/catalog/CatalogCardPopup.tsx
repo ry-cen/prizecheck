@@ -1,4 +1,11 @@
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type RefObject,
+  type ReactNode,
+} from "react";
 import type {
   BrowseEdition,
   EditionStandings,
@@ -57,6 +64,12 @@ export type CardRequest = {
   report: CardReport | null;
 };
 
+/** Collection keeps this feedback across popup close and card steps. */
+export type AddFeedbackRenderer = (
+  onUndone: () => void,
+  focusAfterUndo: () => void
+) => ReactNode;
+
 type Props = {
   request: CardRequest | null;
   onClose: () => void;
@@ -80,6 +93,7 @@ type Props = {
    * moved by itself, and shows the Undo toast. It resolves to that toast's Undo, which the Add row offers beside its
    * own line while the popup covers the toast (null: none). */
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
+  renderAddFeedback?: AddFeedbackRenderer;
   /** A metadata report was sent: My metadata reports reads again. */
   onReported: () => void;
   returnFocus?: RefObject<HTMLElement | null>;
@@ -132,6 +146,7 @@ export function CatalogCardPopup({
   alsoOffer,
   onAdded,
   onReported,
+  renderAddFeedback,
   returnFocus,
 }: Props) {
   const open = request !== null;
@@ -405,6 +420,7 @@ export function CatalogCardPopup({
                 setWhereVersion((value) => value + 1);
                 return undo;
               }}
+              renderAddFeedback={renderAddFeedback}
               onUndone={() => {
                 reload();
                 setWhereVersion((value) => value + 1);
@@ -634,6 +650,7 @@ function AddRows({
   onLocation,
   onAdded,
   onUndone,
+  renderAddFeedback,
 }: {
   cardName: string;
   pendingFor: (editionId: string) => { current: AddCommand | null };
@@ -645,6 +662,7 @@ function AddRows({
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
   /** The Add row's Undo took the copies out again. */
   onUndone: () => void;
+  renderAddFeedback?: AddFeedbackRenderer;
 }) {
   const headingId = useId();
   const addButton = useRef<HTMLButtonElement>(null);
@@ -821,19 +839,23 @@ function AddRows({
           This Edition is unavailable, so it can't be added.
         </p>
       )}
-      <div className={ROW}>
-        <p role="status" className="m-0 min-w-0 flex-1 text-meta text-text">
-          {done}
-        </p>
-        {undo && undo.isAvailable() && done && (
-          <Button
-            aria-disabled={undoing || undefined}
-            onClick={() => void undoAdd()}
-          >
-            Undo
-          </Button>
-        )}
-      </div>
+      {renderAddFeedback ? (
+        renderAddFeedback(onUndone, () => addButton.current?.focus())
+      ) : (
+        <div className={ROW}>
+          <p role="status" className="m-0 min-w-0 flex-1 text-meta text-text">
+            {done}
+          </p>
+          {undo && undo.isAvailable() && done && (
+            <Button
+              aria-disabled={undoing || undefined}
+              onClick={() => void undoAdd()}
+            >
+              Undo
+            </Button>
+          )}
+        </div>
+      )}
       <p role="alert" className="m-0 text-meta text-danger">
         {failure}
       </p>
