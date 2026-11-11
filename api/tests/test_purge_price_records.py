@@ -5,6 +5,9 @@ wrote them: with the seven families registered again for the seeding only (``leg
 import importlib.util
 from pathlib import Path
 import re
+import os
+import subprocess
+import sys
 import time
 
 import pytest
@@ -73,7 +76,11 @@ def test_the_store_no_longer_registers_the_retired_families():
         for key in keys:
             with pytest.raises(ValueError):
                 records.key_family(key)
-    assert all(not evictable for _, _, evictable in records._FAMILIES)
+    # Conformance fixtures register evictable test families during collection. Check the actual production registry
+    # in a fresh interpreter so this still fails if any production family becomes evictable, in either file order.
+    subprocess.run([sys.executable, '-c',
+        'from app import public_records; assert all(not evictable for _, _, evictable in public_records._FAMILIES)'],
+        env={**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[1])}, check=True)
 
 
 def test_a_store_holding_retired_keys_opens_and_serves_the_live_families(tmp_path, seeded):
@@ -194,3 +201,30 @@ def test_a_corrupt_store_fails_closed(tmp_path, seeded, capsys):
     (tmp_path / 'records' / 'current.json').write_text('{"format": 2, "generation": "zz"}')
     assert run(FilePublicRecords(tmp_path), '--delete') == 1
     assert 'record store is unavailable' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('name', ['quote', 'result', 'fence', 'work'])
+def test_revision_limits_match_the_retired_store_and_invalid_keys_survive(tmp_path, monkeypatch, capsys, name):
+    valid = f'{name}:{REF}:9223372036854775807'
+    invalid = [f'{name}:{REF}:9223372036854775808', f'{name}:{REF}:01', f'{name}:{REF}:0']
+    assert purge.family(valid) == name
+    for key in invalid:
+        assert purge.family(key) is None
+    store = FilePublicRecords(tmp_path)
+    store.initialize(deadline=deadline())
+    # Seed arbitrary synthetic keys independently of the purge's patterns and classification.
+    with monkeypatch.context() as patch:
+        patch.setattr(records, '_FAMILIES', records._FAMILIES + (('synthetic', re.compile(r'.+'), False),))
+        write(store, {key: {'keep': key != valid} for key in [valid, *invalid]})
+    assert run(store, '--dry-run') == 0
+    assert f'{name} 1' in capsys.readouterr().out
+    assert run(store, '--delete') == 0
+    assert set(store.unregistered_records(deadline=deadline())) == set(invalid)
+
+
+@pytest.mark.parametrize('name', ['lease', 'admission', 'backoff'])
+def test_scope_classification_matches_the_retired_store(name):
+    assert purge.family(f'{name}:A_0.-:z') == name
+    assert purge.family(f'{name}:' + 'a' * 200) == name
+    for scope in ('', 'a' * 201, 'with/slash', 'with space', 'é', 'line\n'):
+        assert purge.family(f'{name}:{scope}') is None

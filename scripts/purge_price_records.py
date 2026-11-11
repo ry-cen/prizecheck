@@ -40,8 +40,11 @@ STEP_SECONDS = 30.0  # deadline for each store call
 
 
 def family(key):
+    if not isinstance(key, str):
+        return None
     for name, pattern in FAMILIES:
-        if pattern.fullmatch(key):
+        match = pattern.fullmatch(key)
+        if match and (name not in ('quote', 'result', 'fence', 'work') or int(match.group(2)) <= 2 ** 63 - 1):
             return name
     return None
 

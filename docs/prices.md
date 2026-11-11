@@ -47,7 +47,7 @@ never read PostgreSQL. A `quarantine:edition` record delivered through the catal
 
 ## Failure and PRICE_READS
 
-- A failed or partial import leaves stored prices as they were. Owner controls show each import's outcome and warn when
+- A partial import commits successful groups and keeps the previous rows for failed groups. A wholly failed import leaves stored prices unchanged. Owner controls show each import's outcome and warn when
   the newest good import, or TCGCSV's own update time, is over 48 hours old.
 - A publish failure is recorded on the import run (`public_error`) and shown to the owner; the previous `price:` records
   stay.
@@ -223,7 +223,7 @@ Withheld answers. If the entry deadline, the final-check deadline or the final m
 
 The digest is `sha256(json.dumps(record['snapshot'], sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))` over the stored snapshot. It is computed per request, never stored (no migration), never a request input, and checked server-side only: the server refuses a digest change within one request (409). The client guards by version: it discards an answer for another version, and a 409 or 404 makes the page read its snapshot again and price the new version.
 
-Reference proof. A row is price-eligible only if its `edition_ref` and `printing_ref` are both present, the store's `catalog:edition:<edition_ref>` record names the same `printing_ref`, and the Edition is verified, has a `quote_lookup` and passes the public catalog checks. Otherwise it is unpriced and still counts in `total_copies`. Legacy rows (no `edition_ref`) are unproven: readable, unpriced and counted in the total; no lookup by set, number or name is attempted, and a republish is the only way to capture references. A row whose reference resolves to another Printing, or is unknown to the public catalog, is treated the same way. Rows repeating one reference have their quantities summed; if they disagree on `printing_ref`, the Edition is unproven. A malformed frozen quantity makes the whole snapshot invalid (503 at entry, `validation_unavailable` at the final check); a row is never dropped silently.
+Reference proof. A row is price-eligible only if its `edition_ref` and `printing_ref` are both present, the store's `catalog:edition:<edition_ref>` record names the same `printing_ref`, and the Edition has a verified product and a `price:` record matching its product and mapping revision, and passes the public catalog checks. Otherwise it is unpriced and still counts in `total_copies`. Legacy rows (no `edition_ref`) are unproven: readable, unpriced and counted in the total; no lookup by set, number or name is attempted, and a republish is the only way to capture references. A row whose reference resolves to another Printing, or is unknown to the public catalog, is treated the same way. Rows repeating one reference have their quantities summed; if they disagree on `printing_ref`, the Edition is unproven. A malformed frozen quantity makes the whole snapshot invalid (503 at entry, `validation_unavailable` at the final check); a row is never dropped silently.
 
 Eligibility comes from the store's `catalog:edition` and `quarantine:edition` records, never from PostgreSQL. A quarantine committed in PostgreSQL hides private prices at once but reaches Published Deck pages only after outbox delivery (`catalog_outbox_pending` shows the lag).
 

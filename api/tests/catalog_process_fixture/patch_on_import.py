@@ -25,4 +25,3 @@ class _PatchOnImport(importlib.abc.MetaPathFinder):
             patch(module)
         loader.exec_module = exec_module
         return spec
-

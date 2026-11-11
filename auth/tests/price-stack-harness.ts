@@ -2,7 +2,13 @@
 // transactional HTTP relay, and two uvicorn APIs behind two gateways. Prices come from PostgreSQL (ADR 0019).
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { createServer as netServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,8 +59,6 @@ const freePort = () =>
     });
   });
 
-// ---------------------------------------------------------------- the fake TCGdex
-
 // ---------------------------------------------------------------- the stack
 export type Edition = {
   id: string;
@@ -72,6 +76,8 @@ export type Price = {
   checked_at: string | null;
   provider_updated_at: string | null;
 };
+
+type Row = { version: string; value: any };
 
 export class Stack {
   admin = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -305,11 +311,7 @@ serve_relay({'adapter': 'http', 'directory': sys.argv[1]}, Out())`,
    * One Printing per card with one verified Edition per finish (`normal`, then `reverse-holofoil`), delivered to the
    * record store through the public catalog outbox.
    */
-  async cards(
-    count: number,
-    finishes = 1,
-    price = "1.25"
-  ): Promise<Edition[][]> {
+  async cards(count: number, finishes = 1): Promise<Edition[][]> {
     const made: Edition[][] = [];
     const variants = ["normal", "reverse-holofoil"];
     for (let n = 0; n < count; n++) {
