@@ -2,7 +2,7 @@
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { changeDeckList } from "../decks_generated";
+import { changeDeckList, DeckError } from "../decks_generated";
 import type {
   WantList,
   WantListLine,
@@ -71,20 +71,28 @@ const reload = vi.fn();
 function Harness({
   list,
   failed = false,
+  scope = list.deck_id,
 }: {
   list: WantList;
   failed?: boolean;
+  scope?: string | null;
 }) {
-  const swap = useWantListSwap({ list, failed, reload, notify: vi.fn() });
+  const swap = useWantListSwap({
+    list,
+    failed,
+    reload,
+    notify: vi.fn(),
+    scope,
+  });
   return h(
     "button",
     { onClick: () => swap.swap(section, line), disabled: swap.busy },
     "Swap"
   );
 }
-async function render(list = initial, failed = false) {
+async function render(list = initial, failed = false, scope = list.deck_id) {
   await act(async () =>
-    root.render(h(ToastProvider, null, h(Harness, { list, failed })))
+    root.render(h(ToastProvider, null, h(Harness, { list, failed, scope })))
   );
 }
 async function click(text: string) {
@@ -146,4 +154,74 @@ it("leaving the page discards a waiting Undo", async () => {
   await act(async () => root.render(h(ToastProvider, null)));
   await render(refreshed);
   expect(changeDeckList).toHaveBeenCalledTimes(1);
+});
+
+function deferredCommand() {
+  let resolve!: (value: Awaited<ReturnType<typeof changeDeckList>>) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<Awaited<ReturnType<typeof changeDeckList>>>(
+    (yes, no) => {
+      resolve = yes;
+      reject = no;
+    }
+  );
+  vi.mocked(changeDeckList).mockImplementationOnce(() => promise);
+  return { resolve, reject };
+}
+
+it("S6-R1: queues the old Undo through a deferred Swap success and reports revision refusal", async () => {
+  await render();
+  await click("Swap");
+  await render(refreshed);
+  const command = deferredCommand();
+  await click("Swap");
+  await click("Undo");
+  const accepted = host.querySelector('[aria-disabled="true"]') !== null;
+  await act(async () =>
+    command.resolve({ deck_list: { revision: 3 } } as Awaited<
+      ReturnType<typeof changeDeckList>
+    >)
+  );
+  vi.mocked(changeDeckList).mockRejectedValueOnce(
+    new DeckError(409, "STALE_DECK_LIST")
+  );
+  await render({ ...refreshed, deck_lists_digest: "3" });
+  expect(changeDeckList).toHaveBeenCalledTimes(3);
+  expect(vi.mocked(changeDeckList).mock.calls[2][1].revision).toBe(2);
+  expect(host.textContent).toContain("Can't undo: this deck changed.");
+  expect(accepted).toBe(true);
+});
+
+it("S6-R1: queues the old Undo through a deferred Swap failure and applies the inverse", async () => {
+  await render();
+  await click("Swap");
+  await render(refreshed);
+  const command = deferredCommand();
+  await click("Swap");
+  await click("Undo");
+  const accepted = host.querySelector('[aria-disabled="true"]') !== null;
+  await act(async () =>
+    command.reject(new DeckError(400, "EDITION_UNAVAILABLE"))
+  );
+  await render({ ...refreshed });
+  expect(changeDeckList).toHaveBeenCalledTimes(3);
+  expect(vi.mocked(changeDeckList).mock.calls[2][1]).toMatchObject({
+    revision: 2,
+    changes: [
+      { edition_id: "A", quantity: "1" },
+      { edition_id: "B", quantity: "0" },
+    ],
+  });
+  expect(host.textContent).toContain("Undone:");
+  expect(accepted).toBe(true);
+});
+
+it("S6-R2: changing Deck scope cancels a queued Undo before the new Deck answers", async () => {
+  await render();
+  await click("Swap");
+  await click("Undo");
+  await render(initial, false, "other-deck");
+  await render({ ...initial, deck_id: "other-deck" });
+  expect(changeDeckList).toHaveBeenCalledTimes(1);
+  expect(host.textContent).not.toContain("Undo");
 });
