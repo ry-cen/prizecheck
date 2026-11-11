@@ -18,6 +18,13 @@ export type AddedCards = {
   from: "bar" | "popup";
 };
 
+/** The toast's Undo, pressed from inside the popup: it resolves to the toast's new message ("" when nothing was
+ * done), and the Undo to offer next (a failure that can be retried) or null. */
+export type InlineUndo = () => Promise<{
+  message: string;
+  next: InlineUndo | null;
+}>;
+
 type Options = {
   /** False while another page is shown: the toast leaves with Catalog. */
   shown: boolean;
@@ -31,10 +38,12 @@ type Options = {
  * record while that record is the owner's newest (Undo applies only the newest, as in Collection). Undo goes through
  * POST /api/moves/undo/{id}; a request with no answer keeps its idempotency key, so pressing Undo again applies it
  * once. After Add N cards the toast takes focus, since the bar's button it came from is disabled (hidden on a phone)
- * once the queue empties; after the popup's Add N it waits behind the popup, which shows its own line, and is there
- * when the popup closes. Collection's Add cards gallery doesn't use this: Collection shows its own toast.
+ * once the queue empties; after the popup's Add N it waits behind the popup, which is modal, so the popup offers the
+ * same Undo beside its own line (an InlineUndo) and the toast is there when the popup closes. Collection's Add cards
+ * gallery doesn't use this: Collection shows its own toast.
  *
- * Returns `added(result)`, which the gallery calls once a batch add succeeds.
+ * Returns `added(result)`, which the gallery calls once a batch add succeeds. It resolves to the toast's Undo for the
+ * popup to offer (null when the toast offers none).
  */
 export function useAddToast({ shown, onUndone }: Options) {
   const kit = useToast();
@@ -58,8 +67,15 @@ export function useAddToast({ shown, onUndone }: Options) {
     [kit]
   );
 
+  // The newest toast's message and Undo, for the popup's InlineUndo.
+  const offered = useRef<{ message: string; added: AddedCards | null }>({
+    message: "",
+    added: null,
+  });
+
   const show = useCallback(
     (message: string, added: AddedCards | null, focus: boolean) => {
+      offered.current = { message, added };
       const id = kit.show({
         message,
         action: added
@@ -107,15 +123,42 @@ export function useAddToast({ shown, onUndone }: Options) {
     }
   }
 
+  /** The popup's Undo for the toast with this id: it acts only while that toast is up and still offers Undo, and
+   * follows the toast the Undo leaves (a retry stays offered). */
+  function inline(toastId: number): InlineUndo {
+    return async () => {
+      const { added, message } = offered.current;
+      if (!kit.isShown(toastId) || !added) return { message: "", next: null };
+      await undo(added, toastId, message);
+      // Undo replaces the toast with its outcome (current then names the new one, not drawn yet).
+      const now = current.current;
+      if (now === null) return { message: "", next: null };
+      // Still the same toast: it was taken down, or an Undo pressed on the toast itself was already under way.
+      if (now === toastId)
+        return {
+          message: "",
+          next: kit.isShown(toastId) ? inline(toastId) : null,
+        };
+      return {
+        message: offered.current.message,
+        next: offered.current.added ? inline(now) : null,
+      };
+    };
+  }
+
   return useCallback(
-    async (added: AddedCards) => {
+    async (added: AddedCards): Promise<InlineUndo | null> => {
       const entries = await listUndo().catch(() => [] as UndoEntry[]);
+      const undoable = entries[0]?.id === added.undoId;
       show(
         batchAddedText(added.copies, added.path),
-        entries[0]?.id === added.undoId ? added : null,
+        undoable ? added : null,
         added.from === "bar"
       );
+      const id = current.current;
+      return undoable && id !== null ? inline(id) : null;
     },
+    // inline reads only refs and calls undo; both live as long as the toast host.
     [show]
   );
 }

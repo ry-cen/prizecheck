@@ -147,6 +147,17 @@ export function CatalogGallery({
     null;
   const target = fixedTarget ?? picked;
   const [queue, setQueue] = useState<AddQueue>(EMPTY_QUEUE);
+  // The queue lives only on this page: the browser's own warning on reload or close while cards wait in it.
+  const queued = queue.size > 0;
+  useEffect(() => {
+    if (!queued) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [queued]);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [failure, setFailure] = useState("");
@@ -196,8 +207,11 @@ export function CatalogGallery({
         })),
         result.ownerRevision
       );
-      if (live.current.undoToast) void live.current.addToast(result);
+      const undo = live.current.undoToast
+        ? live.current.addToast(result)
+        : Promise.resolve(null);
       live.current.onAdded?.(result);
+      return undo;
     },
     [noteAdded]
   );
