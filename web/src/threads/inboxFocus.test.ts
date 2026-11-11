@@ -19,6 +19,8 @@ function LoanScreen(props: Parameters<typeof Screen>[0]) {
     children: h(Screen, props),
   });
 }
+import { TradesPage } from "../trades/TradesPage";
+import { getTrades } from "../social_generated";
 import { TradeScreen } from "../trades/TradeScreen";
 import { ToastProvider } from "../ui/Toast";
 import {
@@ -33,6 +35,7 @@ import {
 import { getTradeSide } from "../trades_generated";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
+  getTrades: vi.fn(),
   getInbox: vi.fn(),
   getThreadPulse: vi.fn(),
   getLoan: vi.fn(),
@@ -335,3 +338,87 @@ it("a Trade opened in-app focuses its heading once; a pulse reload later neither
     vi.clearAllMocks();
   }
 });
+
+// Exercise canonicalization through the routing wrapper as well as the screen.
+for (const explicitOpen of [false, true]) {
+  it(`TradesPage canonicalization preserves ${explicitOpen ? "an in-app open" : "a direct load"}'s focus intent`, async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    const oldId = "10000000-0000-4000-8000-000000000001";
+    const canonicalId = "10000000-0000-4000-8000-000000000002";
+    const view = {
+      ...trade,
+      id: oldId,
+      offer_id: oldId,
+      thread_id: canonicalId,
+    };
+    vi.mocked(getTrade).mockResolvedValue(view);
+    vi.mocked(getTradeSide).mockResolvedValue({
+      trade_id: canonicalId,
+      picks: [],
+      suggested: [],
+      deck_switches: [],
+    });
+    vi.mocked(getTrades).mockResolvedValue([
+      {
+        id: oldId,
+        kind: "trade",
+        other: { trader_id: null, display_name: "Misty", friend: false },
+        you_are: "low",
+        summary: { you_give: "0", you_get: "1", cards: [], cash: null },
+        section: "needs_you",
+        state: "proposed",
+        waiting: "answer",
+        unread: 0,
+        needs_you: true,
+        last_activity_at: "2026-11-04T00:00:00Z",
+      },
+    ]);
+    const navigate = vi.fn();
+    function View() {
+      const [section, setSection] = useState<string | null>(
+        explicitOpen ? null : oldId
+      );
+      return h(ToastProvider, {
+        children: h(TradesPage, {
+          active: true,
+          section,
+          onNavigate: (to, options) => {
+            navigate(to, options);
+            setSection(to.slice(8));
+          },
+        }),
+      });
+    }
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(h(View)));
+      if (explicitOpen) {
+        const row = host.querySelector<HTMLAnchorElement>(
+          `a[data-thread="${oldId}"]`
+        )!;
+        expect(row).not.toBeNull();
+        await act(async () => row.click());
+      }
+      expect(navigate).toHaveBeenCalledWith(`/trades/${canonicalId}`, {
+        replace: true,
+      });
+      const heading = host.querySelector("h1");
+      expect(heading).not.toBeNull();
+      if (explicitOpen) expect(document.activeElement).toBe(heading);
+      else expect(document.activeElement).not.toBe(heading);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      vi.clearAllMocks();
+    }
+  });
+}

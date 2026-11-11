@@ -41,11 +41,15 @@ export function TradesPage({ active, section, onNavigate }: Props) {
   useLayoutEffect(() => {
     opening.current = null;
   }, [section]);
+  const route = tradesRoute(section);
+  // Capture this render's intent before the layout effect clears the pending press.
+  // A canonical replacement carries that intent to the new ID without inventing a press.
+  const focusOnOpen =
+    route.kind === "trade" && opening.current === tradePath(route.id);
   const go = (to: string, options?: { replace?: boolean }) => {
-    opening.current = to;
+    opening.current = options?.replace ? (focusOnOpen ? to : null) : to;
     onNavigate(to, options);
   };
-  const route = tradesRoute(section);
   if (route.kind === "new")
     return (
       <ProposalBuilderPage
@@ -121,10 +125,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
               onTradeChanged={() => setRevision((n) => n + 1)}
               key={route.kind === "trade" ? route.id : "missing"}
               tradeId={route.kind === "trade" ? route.id : null}
-              focusOnOpen={
-                route.kind === "trade" &&
-                opening.current === tradePath(route.id)
-              }
+              focusOnOpen={focusOnOpen}
               onAllTrades={() => go(TRADES_PATH)}
               onNavigate={go}
             />
