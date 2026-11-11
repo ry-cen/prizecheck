@@ -147,15 +147,17 @@ export function currentCardsText(
   };
   const cards = (side: "you_give" | "you_get") => {
     const own = row.summary.cards.filter((card) => card.side === side);
+    const total = Number(row.summary[side]);
+    // A side whose cards all fell past the previews has no names to add to, so it says how many.
+    if (own.length === 0)
+      return total > 0 ? `${total} ${total === 1 ? "card" : "cards"}` : "";
     return (
       own.map((card) => `${card.copies} ${card.name}`).join(", ") +
-      (own.length > 0 || Number(row.summary[side]) > 0
-        ? more(
-            own.reduce((sum, card) => sum + Number(card.copies), 0),
-            row.summary[side]
-          )
-        : "")
-    ).replace(/^, /, "");
+      more(
+        own.reduce((sum, card) => sum + Number(card.copies), 0),
+        row.summary[side]
+      )
+    );
   };
   if (row.kind === "trade")
     return [

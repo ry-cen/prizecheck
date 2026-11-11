@@ -247,6 +247,16 @@ it("counts the copies a three-card preview leaves out", () => {
   );
   expect(
     currentCardsText({
+      kind: "trade",
+      summary: {
+        you_give: "3",
+        you_get: "4",
+        cards: [card("Iono", "you_give", "3")],
+      },
+    })
+  ).toBe("You give 3 Iono · You get 4 cards");
+  expect(
+    currentCardsText({
       kind: "loan",
       summary: {
         you_give: "5",

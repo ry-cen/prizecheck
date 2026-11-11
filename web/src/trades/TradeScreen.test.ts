@@ -3,7 +3,7 @@ import { act, createElement as h, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { TradeView } from "../social_generated";
-import { getTrade, declineTrade } from "../social_generated";
+import { getTrade, declineTrade, SocialError } from "../social_generated";
 import { acceptTrade, confirmSwap, getTradeSide } from "../trades_generated";
 import { ListDetailLayout } from "../ui/ListDetailLayout";
 import { ToastProvider } from "../ui/Toast";
@@ -182,6 +182,44 @@ it("asks before declining a proposal, and Keep it leaves it open", async () => {
     expect.objectContaining({ offer_id: "old-round", revision: 1 })
   );
   expect(host.querySelector('[role="group"][aria-label="Decline"]')).toBeNull();
+});
+it("closes the Decline question and focuses the heading when the Trade has moved on", async () => {
+  vi.mocked(getTrade)
+    .mockResolvedValueOnce({ ...trade, actions: ["decline"] })
+    .mockResolvedValue({
+      ...trade,
+      state: "closed",
+      actions: [],
+      closed_reason: "withdrawn",
+    });
+  vi.mocked(declineTrade).mockRejectedValue(
+    new SocialError(409, "TRADE_CHANGED")
+  );
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  const press = async (label: string, within: ParentNode = host) =>
+    act(async () =>
+      [...within.querySelectorAll("button")]
+        .find((button) => button.textContent === label)!
+        .click()
+    );
+  await press("Decline");
+  await press(
+    "Decline",
+    host.querySelector('[role="group"][aria-label="Decline"]')!
+  );
+  expect(declineTrade).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[role="group"][aria-label="Decline"]')).toBeNull();
+  expect(document.activeElement).toBe(host.querySelector("h1, h2"));
 });
 it("shows the physical swap disclosure before its single confirmation control", async () => {
   const agreed: TradeView = {

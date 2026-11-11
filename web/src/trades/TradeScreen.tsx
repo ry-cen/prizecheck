@@ -101,7 +101,7 @@ type SwapPlace = { id: string; path: string; label: string };
 type Asking = "cancel" | "decline";
 
 /** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
- * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Trade), and the heading after a step or a
+ * it asks, its opener after Keep it (Decline, or ⋯ for Cancel Trade), and the heading after a step or a
  * refusal that reads the Trade again. */
 type FocusNext = "ask" | "menu" | "decline" | "heading";
 

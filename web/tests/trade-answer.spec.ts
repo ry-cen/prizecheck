@@ -328,7 +328,7 @@ async function story(
     await expect(heading(page)).toHaveText("Ash K declined");
     await expectOnlyReport(page);
 
-    // C: Withdraw acts once inline, while Ash has the gift open. Cancel alone keeps an ask.
+    // C: Withdraw acts once inline, while Ash has the gift open. Cancel and Decline ask first.
     await ash.page.goto(`${ORIGIN}/trades/${withdrawn}`);
     await expect(heading(ash.page)).toHaveText(
       "Misty W wants to give you 1 card"
