@@ -21,8 +21,8 @@ export function ListDetailLayout({
       }
     };
     restore();
-    window.addEventListener("resize", restore);
-    return () => window.removeEventListener("resize", restore);
+    // A resize can arrive after scrollTop changes but before its scroll event.
+    // Leave resizing to the browser; replay saved positions only on selection changes.
   }, [selected]);
   return (
     <main className="list-detail" data-selected={selected}>

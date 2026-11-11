@@ -537,3 +537,114 @@ test("phone Want List restores its history entry scroll after opening a Deck", a
     contentType: "application/json",
   });
 });
+
+for (const width of [375, 1280]) {
+  test(`history restoration survives late prices and Back/Forward at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 812 });
+    await signIn(page);
+    // Two missing-card sections provide scroll room; the worked example's Holdings and Shelf are unnecessary here.
+    const { iono } = editions();
+    const suffix = randomUUID().slice(0, 6);
+    const names = {
+      charizard: `Charizard ex ${suffix}`,
+      gardevoir: `Gardevoir ex ${suffix}`,
+    };
+    const first = await createDeck(page, names.charizard, 3);
+    const second = await createDeck(page, names.gardevoir, 2);
+    await setLine(page, first, iono, 4);
+    await setLine(page, second, iono, 3);
+    let returning = false;
+    let releaseData!: () => void;
+    let releaseCost!: () => void;
+    let sawData!: () => void;
+    let sawCost!: () => void;
+    const dataGate = new Promise<void>((resolve) => {
+      releaseData = resolve;
+    });
+    const costGate = new Promise<void>((resolve) => {
+      releaseCost = resolve;
+    });
+    const dataSeen = new Promise<void>((resolve) => {
+      sawData = resolve;
+    });
+    const costSeen = new Promise<void>((resolve) => {
+      sawCost = resolve;
+    });
+    const isCost = (response: { url(): string }) =>
+      new URL(response.url()).pathname === "/api/want-list/cost";
+    await page.route("**/api/want-list", async (route) => {
+      if (returning) {
+        sawData();
+        await dataGate;
+      }
+      await route.continue();
+    });
+    await page.route("**/api/want-list/cost**", async (route) => {
+      if (returning) {
+        sawCost();
+        await costGate;
+      }
+      await route.continue();
+    });
+    try {
+      const firstCost = page.waitForResponse(isCost);
+      await page.goto(`${ORIGIN}/decks/want-list`);
+      await firstCost;
+      await expect(
+        page.getByText("Checking prices…", { exact: true })
+      ).toHaveCount(0);
+      const open = deckSection(page, names.gardevoir).getByRole("link", {
+        name: `Open Deck ${names.gardevoir}`,
+      });
+      await open.scrollIntoViewIfNeeded();
+      const saved = await page.evaluate(() => window.scrollY);
+      const linkTop = await open.evaluate(
+        (element) => element.getBoundingClientRect().top
+      );
+      expect(saved).toBeGreaterThan(0);
+      await open.click();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        names.gardevoir
+      );
+      const deckScroll = await page.evaluate(() => window.scrollY);
+      returning = true;
+      await page.goBack();
+      await dataSeen;
+      releaseData();
+      await costSeen;
+      // Reach the history position before prices add their later layout change.
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(saved);
+      const costReturned = page.waitForResponse(isCost);
+      releaseCost();
+      await costReturned;
+      await expect(
+        page.getByText("Checking prices…", { exact: true })
+      ).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(saved);
+      await expect
+        .poll(() =>
+          open.evaluate((element) => element.getBoundingClientRect().top)
+        )
+        .toBe(linkTop);
+      await page.goForward();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        names.gardevoir
+      );
+      await expect
+        .poll(() => page.evaluate(() => window.scrollY))
+        .toBe(deckScroll);
+      const nextCost = page.waitForResponse(isCost);
+      await page.goBack();
+      await nextCost;
+      await expect(
+        page.getByText("Checking prices…", { exact: true })
+      ).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(saved);
+    } finally {
+      releaseData();
+      releaseCost();
+    }
+  });
+}

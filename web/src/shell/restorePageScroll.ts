@@ -2,11 +2,16 @@
 export const RESTORE_WINDOW_MS = 5000;
 export const RESTORE_POLL_MS = 100;
 
-/** Retry a clamped history position as content arrives; release it on success, interaction or after a bounded wait. */
+/** Guard a history position while content arrives; release it on interaction or after a bounded wait. */
 export function restorePageScroll(
   container: HTMLElement | null | undefined,
   target: number
 ): () => void {
+  // Anchoring late content can move the page again after scrollTo first reaches the target.
+  // Keep the saved position authoritative only within the existing restore window.
+  const root = document.documentElement;
+  const previousAnchor = root.style.overflowAnchor;
+  if (target !== 0) root.style.overflowAnchor = "none";
   let stopped = false;
   let frame = 0;
   let observer: ResizeObserver | undefined;
@@ -14,7 +19,9 @@ export function restorePageScroll(
   // Where the last restore left the page; a scroll that lands elsewhere was not ours.
   let left = window.scrollY;
   const stop = () => {
+    if (stopped) return;
     stopped = true;
+    root.style.overflowAnchor = previousAnchor;
     observer?.disconnect();
     cancelAnimationFrame(frame);
     clearInterval(poll);
@@ -48,10 +55,10 @@ export function restorePageScroll(
     if (stopped) return;
     if (window.scrollY !== target) window.scrollTo(0, target);
     left = window.scrollY;
-    if (left === target) stop();
+    if (target === 0 && left === target) stop();
   };
   restore();
-  // First loads and already laid-out pages need no observer or input listeners.
+  // Fresh top-of-page visits need no guard; nonzero history positions can still shift as content arrives.
   if (stopped) return stop;
   observer = new ResizeObserver(() => {
     cancelAnimationFrame(frame);

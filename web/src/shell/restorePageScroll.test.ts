@@ -69,17 +69,17 @@ it("does not watch page layout for an already reached top position", () => {
   stop();
 });
 
-it("retries while content is too short, then releases restoration at the saved position", () => {
+it("retries while content is too short and guards the saved position until release", () => {
   const view = layout(0, 100);
   const stop = restorePageScroll(document.createElement("main"), 500);
   expect(window.scrollY).toBe(100);
   view.grow(900);
   expect(window.scrollY).toBe(500);
-  expect(view.disconnect).toHaveBeenCalled();
   const calls = view.scroll.mock.calls.length;
   view.grow(1200);
   expect(view.scroll).toHaveBeenCalledTimes(calls);
   stop();
+  expect(view.disconnect).toHaveBeenCalled();
 });
 
 it("lets keyboard focus take over while content is still loading", () => {
@@ -212,4 +212,80 @@ it("still lets an upward scroll away from the saved position take over once the 
   view.setHeight(900);
   vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
   expect(view.scroll).toHaveBeenCalledTimes(calls);
+});
+
+it.each(["pointerdown", "keydown", "wheel"])(
+  "leaves the collector's position alone after %s interrupts a pending restore",
+  (input) => {
+    vi.useFakeTimers();
+    const view = layout(0, 683);
+    const stop = restorePageScroll(document.createElement("main"), 721);
+    window.dispatchEvent(new Event(input));
+    vi.stubGlobal("scrollY", 120);
+    view.grow(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+    expect(window.scrollY).toBe(120);
+    stop();
+  }
+);
+
+it("retries a later clamp even after first reaching the history position", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1204);
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    expect(window.scrollY).toBe(721);
+    view.setHeight(683);
+    vi.stubGlobal("scrollY", 683);
+    window.dispatchEvent(new Event("scroll"));
+    view.setHeight(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+  } finally {
+    stop();
+  }
+});
+
+it.each(["pointerdown", "keydown", "wheel"])(
+  "releases a reached history position and its anchoring guard on %s",
+  (input) => {
+    vi.useFakeTimers();
+    const root = document.documentElement;
+    const previous = root.style.overflowAnchor;
+    root.style.overflowAnchor = "auto";
+    const view = layout(0, 900);
+    const stop = restorePageScroll(document.createElement("main"), 500);
+    try {
+      expect(root.style.overflowAnchor).toBe("none");
+      window.dispatchEvent(new Event(input));
+      expect(root.style.overflowAnchor).toBe("auto");
+      vi.stubGlobal("scrollY", 120);
+      view.grow(1500);
+      vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+      expect(window.scrollY).toBe(120);
+    } finally {
+      stop();
+      root.style.overflowAnchor = previous;
+    }
+  }
+);
+
+it("bounds the anchoring guard and restores its previous style exactly once", () => {
+  vi.useFakeTimers();
+  const root = document.documentElement;
+  const previous = root.style.overflowAnchor;
+  root.style.overflowAnchor = "auto";
+  layout(0, 900);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  try {
+    expect(root.style.overflowAnchor).toBe("none");
+    vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
+    expect(root.style.overflowAnchor).toBe("auto");
+    root.style.overflowAnchor = "none";
+    stop();
+    expect(root.style.overflowAnchor).toBe("none");
+  } finally {
+    stop();
+    root.style.overflowAnchor = previous;
+  }
 });
