@@ -18,6 +18,9 @@ import {
 import { signInAsOwner } from "./support/sign-in";
 import { expectPageChecks } from "./support/page-check";
 
+// Ctrl+click opens a background tab, which chrome-headless-shell can leave uncommitted (no `page` event).
+test.use({ channel: "chromium" });
+
 test("Loans keep a stable queue, canonical selection and open forms across widths", async ({
   page,
   collectors,
