@@ -813,5 +813,5 @@ def test_art_sidecar_is_protected_and_commits_atomically_with_parent(adapter):
         {parent: {'revision': 1}, art: {'revision': 1, 'mode': 'linked'}}, deadline=deadline())
     assert values(store, [parent, art])[art] == {'revision': 2, 'mode': 'withheld'}
     for revision in range(1, 5):
-        write(store, {records.quote_key(OTHER, revision): {'amount': '5.00'}})
+        write(store, {quote_key(OTHER, revision): {'amount': '5.00'}})
     assert values(store, [art])[art]['mode'] == 'withheld'

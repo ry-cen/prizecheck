@@ -23,12 +23,13 @@ STORE_OPTIONS = ('max_entries', 'max_bytes', 'operation_ttl', 'generation_retent
 # Test-only key families for the store conformance tests. No live family is evictable (ADR 0019 retired the quote
 # payloads), but the store still evicts payloads it holds as evictable, so the tests register their own families
 # here, in every process that imports this fixture (the relay and fault-writer children too). The prefixes are
-# test-only, so the retired families stay unregistered.
+# test-only (each as long as the retired prefix it stands for: quote, result, fence, lease), so the retired
+# families stay unregistered and stored sizes match the earlier tests.
 TEST_FAMILIES = (
-    ('test_payload', re.compile(r'test-payload:([0-9a-f]{48}):([1-9][0-9]{0,18})'), True),
-    ('test_marker', re.compile(r'test-marker:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
-    ('test_fence', re.compile(r'test-fence:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
-    ('test_scope', re.compile(r'test-scope:([A-Za-z0-9_.:-]{1,200})'), False),
+    ('test_payload', re.compile(r'qtest:([0-9a-f]{48}):([1-9][0-9]{0,18})'), True),
+    ('test_marker', re.compile(r'rstest:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
+    ('test_fence', re.compile(r'ftest:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
+    ('test_scope', re.compile(r'stest:([A-Za-z0-9_.:-]{1,200})'), False),
 )
 if not any(family[0] == 'test_payload' for family in _records._FAMILIES):
     _records._FAMILIES = _records._FAMILIES + TEST_FAMILIES
@@ -36,19 +37,19 @@ if not any(family[0] == 'test_payload' for family in _records._FAMILIES):
 
 def payload_key(ref, revision):
     """An evictable test payload."""
-    return f'test-payload:{ref}:{revision}'
+    return f'qtest:{ref}:{revision}'
 
 
 def marker_key(ref, revision):
-    return f'test-marker:{ref}:{revision}'
+    return f'rstest:{ref}:{revision}'
 
 
 def fence_key(ref, revision):
-    return f'test-fence:{ref}:{revision}'
+    return f'ftest:{ref}:{revision}'
 
 
 def scope_key(scope):
-    return f'test-scope:{scope}'
+    return f'stest:{scope}'
 
 
 def backend_from_config(config):
