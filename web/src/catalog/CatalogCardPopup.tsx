@@ -11,7 +11,13 @@ import { CardArt, CardPopup } from "../ui/CardPopup";
 import { FormatStandings } from "./FormatStandings";
 import { Pill } from "../ui/Pill";
 import { Select } from "../ui/Select";
-import { AskControl, copyCap, copyCard } from "../loans/BorrowDrafts";
+import {
+  AskControl,
+  copyCap,
+  copyCard,
+  useBorrowDrafts,
+  type DraftFriend,
+} from "../loans/BorrowDrafts";
 import { lendableText } from "../social/friendCards";
 import { FriendsWhoHaveThis } from "../social/FriendsWhoHaveThis";
 import { AskToTrade } from "../trades/AskToTrade";
@@ -33,7 +39,7 @@ import {
   useCopiesWhere,
   type PopupEdition,
 } from "./useCardDetails";
-import type { AddedCards } from "./useAddToast";
+import type { AddedCards, InlineUndo } from "./useAddToast";
 import { usePlaces, type Place, type Places } from "./usePlaces";
 
 /** A report flow opened from the footer: a metadata report preset to an Edition (null: the Printing's metadata), or
@@ -70,8 +76,9 @@ type Props = {
    * cards on an open Deck). */
   alsoOffer: Place | null;
   /** A batch add from the Add row succeeded: the gallery shows the new count on the tile, knows the owner revision
-   * moved by itself, and shows the Undo toast. */
-  onAdded: (added: AddedCards) => void;
+   * moved by itself, and shows the Undo toast. It resolves to that toast's Undo, which the Add row offers beside its
+   * own line while the popup covers the toast (null: none). */
+  onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
   /** A metadata report was sent: My metadata reports reads again. */
   onReported: () => void;
   returnFocus?: RefObject<HTMLElement | null>;
@@ -359,13 +366,25 @@ export function CatalogCardPopup({
             printingId={ready.printing.id}
             editionId={selected?.id ?? null}
             action={(copy) => (
-              <AskControl
-                friend={copy}
-                card={copyCard(copy, null)}
-                cap={copyCap(copy)}
-                lendable={lendableText(copy)}
-                text="Ask to borrow"
-              />
+              <>
+                <AskControl
+                  friend={copy}
+                  card={copyCard(copy, null)}
+                  cap={copyCap(copy)}
+                  lendable={lendableText(copy)}
+                  text="Ask to borrow"
+                />
+                <ReviewDraft
+                  friend={copy}
+                  onReview={(review) => {
+                    // The popup is modal and the drafts tray sits behind it: it closes, giving focus back to the
+                    // tile, and the composer opens over the page with that tile as its opener.
+                    const opener = returnFocus?.current ?? null;
+                    onClose();
+                    review(opener);
+                  }}
+                />
+              </>
             )}
           />
           <AskToTrade printingId={ready.printing.id} />
@@ -380,7 +399,12 @@ export function CatalogCardPopup({
               location={location}
               onLocation={onLocation}
               onAdded={(added) => {
-                onAdded(added);
+                const undo = onAdded(added);
+                reload();
+                setWhereVersion((value) => value + 1);
+                return undo;
+              }}
+              onUndone={() => {
                 reload();
                 setWhereVersion((value) => value + 1);
               }}
@@ -389,6 +413,36 @@ export function CatalogCardPopup({
         </>
       )}
     </CardPopup>
+  );
+}
+
+/** Review beside Ask to borrow once a draft to this Friend exists: the drafts tray's Review, which the modal popup
+ * covers. */
+function ReviewDraft({
+  friend,
+  onReview,
+}: {
+  friend: DraftFriend;
+  onReview: (review: (opener: HTMLElement | null) => void) => void;
+}) {
+  const drafts = useBorrowDrafts();
+  if (
+    !drafts ||
+    !drafts.drafts.some(
+      (draft) => draft.friend.collector_id === friend.collector_id
+    )
+  )
+    return null;
+  return (
+    <Button
+      variant="primary"
+      aria-label={`Review Borrow Request to ${friend.display_name}`}
+      onClick={() =>
+        onReview((opener) => drafts.review(friend.collector_id, opener))
+      }
+    >
+      Review
+    </Button>
   );
 }
 
@@ -578,6 +632,7 @@ function AddRows({
   location: locationId,
   onLocation,
   onAdded,
+  onUndone,
 }: {
   cardName: string;
   pendingFor: (editionId: string) => { current: AddCommand | null };
@@ -586,9 +641,15 @@ function AddRows({
   alsoOffer: Place | null;
   location: string | null;
   onLocation: (id: string) => void;
-  onAdded: (added: AddedCards) => void;
+  onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
+  /** The Add row's Undo took the copies out again. */
+  onUndone: () => void;
 }) {
   const headingId = useId();
+  const addButton = useRef<HTMLButtonElement>(null);
+  // The toast's Undo for the last add, offered here while the popup covers the toast.
+  const [undo, setUndo] = useState<InlineUndo | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const leaves =
     alsoOffer && !places.leaves.some((leaf) => leaf.id === alsoOffer.id)
       ? [alsoOffer, ...places.leaves]
@@ -624,6 +685,7 @@ function AddRows({
   if (shownFor !== edition.id) {
     setShownFor(edition.id);
     setDone("");
+    setUndo(null);
     setNote(
       heldNote(edition) ??
         (note?.retry && note.editionId !== edition.id ? note : null)
@@ -639,6 +701,7 @@ function AddRows({
     if (!location || busy) return;
     setBusy(true);
     setDone("");
+    setUndo(null);
     setNote(null);
     const sent = edition;
     const outcome = await addToCollection(
@@ -670,7 +733,7 @@ function AddRows({
           : addedText(copiesAdded, outcome.path)
       );
       setCount(Math.max(1, remaining));
-      onAdded({
+      const offered = await onAdded({
         locationId: outcome.locationId,
         path: outcome.path,
         items: outcome.items,
@@ -679,6 +742,7 @@ function AddRows({
         undoId: outcome.undoId,
         from: "popup",
       });
+      if (shown.current === sent.id) setUndo(() => offered);
     } else {
       setNote({
         editionId: sent.id,
@@ -688,6 +752,18 @@ function AddRows({
       });
       if (outcome.code === "LOCATION_NOT_FOUND") places.reload();
     }
+  }
+
+  async function undoAdd() {
+    if (!undo || undoing) return;
+    setUndoing(true);
+    const result = await undo();
+    setUndoing(false);
+    setUndo(() => result.next);
+    if (result.message) setDone(result.message);
+    if (result.message && !result.next) onUndone();
+    // Undo goes once it is used: focus moves on to Add, beside it.
+    if (!result.next) addButton.current?.focus();
   }
 
   return (
@@ -729,6 +805,7 @@ function AddRows({
           disabled={!usable}
         />
         <Button
+          ref={addButton}
           variant="primary"
           disabled={!usable || !location}
           aria-disabled={busy || undefined}
@@ -742,9 +819,19 @@ function AddRows({
           This Edition is unavailable, so it can't be added.
         </p>
       )}
-      <p role="status" className="m-0 text-meta text-text">
-        {done}
-      </p>
+      <div className={ROW}>
+        <p role="status" className="m-0 min-w-0 flex-1 text-meta text-text">
+          {done}
+        </p>
+        {undo && done && (
+          <Button
+            aria-disabled={undoing || undefined}
+            onClick={() => void undoAdd()}
+          >
+            Undo
+          </Button>
+        )}
+      </div>
       <p role="alert" className="m-0 text-meta text-danger">
         {failure}
       </p>

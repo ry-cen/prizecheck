@@ -185,6 +185,14 @@ async function unsortedId(page: Page): Promise<string> {
 const MAY_HAVE_COMPLETED =
   "Adding may have completed. Press Add again to check safely.";
 
+/** Whether the page asks before a reload or close (the beforeunload event is cancelled). */
+const warns = (page: Page) =>
+  page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -215,7 +223,10 @@ test.describe("desktop", () => {
     await picker.selectOption({ label: "Trade box" });
 
     // + queues a copy and becomes − N +; the tile is outlined and says how many it will add.
+    expect(await warns(page)).toBe(false);
     await more(page, BULBASAUR).click();
+    // The queue lives only on this page: reload or close asks first while cards wait in it.
+    expect(await warns(page)).toBe(true);
     await more(page, BULBASAUR).click();
     await expect(
       results(page).getByRole("group", { name: `${BULBASAUR}: 2 to add` })
@@ -265,6 +276,7 @@ test.describe("desktop", () => {
     await expect(toast(page)).toHaveText("Added 4 cards to Trade box.");
     await expect(undo(page)).toBeVisible();
     await expect(bar).toContainText("Tap + on cards, then add them together.");
+    expect(await warns(page)).toBe(false);
     await expect(
       tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal")
     ).toHaveAccessibleName(
