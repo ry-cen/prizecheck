@@ -18,7 +18,7 @@ from app import copy_allocation
 from app.copy_allocation import held_for_line, spare_rule
 from app.social import counts
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, detail, hold, iono_world, line, need, new_owner
 from test_friend_copies import befriend, collector, ok
 from test_holdings import call

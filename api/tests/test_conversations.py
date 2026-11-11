@@ -21,7 +21,7 @@ from app.social.conversations import normalize_text
 from app.social.owners import lock_owners
 from test_catalog_references import migrate
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from stranger_fixtures import far_zip, propose_to, strangers
 from test_ending_friendship import remove
 from test_friend_copies import block, collector, ok

@@ -7,7 +7,6 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -34,7 +33,6 @@ const database = "tcg_published_cost_" + randomUUID().replaceAll("-", "");
 const directory = mkdtempSync(join(tmpdir(), "tcg-published-cost-"));
 const gateExempt = join(directory, "gate");
 const projection = join(directory, "projection");
-const launchLog = join(directory, "launches.log");
 const currentJson = join(projection, "current.json");
 const children: ChildProcess[] = [];
 const listeners: NetServer[] = [];
@@ -331,11 +329,6 @@ const percentile = (values: number[], p: number) => {
   return sorted[Math.ceil(sorted.length * p) - 1];
 };
 
-const launches = () =>
-  existsSync(launchLog)
-    ? readFileSync(launchLog, "utf8").split("\n").filter(Boolean).length
-    : 0;
-
 function spawnProcess(command: string, args: string[], at: NodeJS.ProcessEnv) {
   const child = spawn(command, args, { env: at, stdio: "ignore" });
   children.push(child);
@@ -374,9 +367,7 @@ beforeAll(async () => {
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) =>
-        !key.startsWith("PRICE_FIXTURE_") &&
         !key.startsWith("PUBLIC_PROJECTION_") &&
-        key !== "PRICE_RUNNER_LOCK_DIR" &&
         key !== "CATALOG_PROCESS_FIXTURE_DIR"
     )
   );
@@ -392,13 +383,9 @@ beforeAll(async () => {
     PUBLIC_ORIGIN: origin,
     PUBLIC_PROJECTION_ADAPTER: "filesystem",
     PUBLIC_PROJECTION_DIR: projection,
-    PRICE_RUNNER_LOCK_DIR: join(directory, "locks"),
-    PRICE_FIXTURE_LAUNCHER: "record",
-    PRICE_FIXTURE_LAUNCH_LOG: launchLog,
     PUBLISH_GATE_EXEMPT_DIR: gateExempt,
   };
   mkdirSync(projection, { recursive: true });
-  mkdirSync(join(directory, "locks"), { recursive: true, mode: 0o700 });
   await run(".venv/bin/python", ["scripts/migrate.py"], { env });
   await run(".venv/bin/python", ["scripts/init_public_projection.py"], {
     env,
@@ -718,7 +705,6 @@ describe("the Published Deck cost through the real gateway", () => {
       const deck = await deckWith([[edition, 2]]);
       const { token } = await publication("POST", deck);
       const baseline = { ...wakeups };
-      const lines = launches();
 
       // A row with no price record is unpriced.
       expect((await anonymous(costPath(token, 1))).json).toMatchObject({
@@ -765,8 +751,7 @@ with connect() as conn:
         status: "no_quotes",
         priced_copies: "0",
       });
-      // Nothing in the cost path launched a runner or wrote a coordination record.
-      expect(launches()).toBe(lines);
+      // Nothing in the cost path woke a listener.
       expect(wakeups).toEqual(baseline);
     }
   );
@@ -1066,13 +1051,10 @@ with connect() as conn:
           expect(answer.elapsed).toBeLessThanOrEqual(3_500);
         }
       };
-      const launchesBefore = launches();
-
-      // 100 callers: no work, no launch, nothing waits.
+      // 100 callers: no work, nothing waits.
       const answers = await burst("198.51.100");
       check(answers);
       const times = answers.map((a) => a.elapsed);
-      expect(launches()).toBe(launchesBefore);
       metric(
         `100 simultaneous callers: p50 ${percentile(times, 0.5).toFixed(0)} ms, p95 ${percentile(times, 0.95).toFixed(0)} ms, max ${Math.max(...times).toFixed(0)} ms (bound 3500)`
       );

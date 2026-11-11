@@ -23,7 +23,7 @@ from app.location_tree import VOID_DIGEST
 from app.social import loans
 from app.social.owners import COMMANDS_PER_HOUR
 from test_catalog_targets import isolated_rules  # noqa: F401
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_deck_counting import hold
 from test_friend_copies import node, ok, place
 from test_holdings import call

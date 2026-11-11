@@ -33,7 +33,7 @@ class GuardrailTest(unittest.TestCase):
         self.assertTrue(guardrails.violations('try: run()\nexcept Exception as error: print(f"Failed: {error}")', 'release_runtime.py'))
 
     def test_host_wide_process_search_is_rejected(self):
-        for source in ('subprocess.run(["pkill", "-f", "app.price_runner"])', 'run("pgrep", ["-f", "uvicorn"])', 'killall node'):
+        for source in ('subprocess.run(["pkill", "-f", "app.catalog_import"])', 'run("pgrep", ["-f", "uvicorn"])', 'killall node'):
             self.assertTrue(guardrails.process_search_violations(source), source)
 
     def test_scoped_process_cleanup_is_allowed(self):
@@ -203,7 +203,7 @@ class FlakeGuardrailTest(unittest.TestCase):
                        'for (let attempt = 0; attempt < 100 && !ready; attempt += 1) {\n  try { ready = await probe(); }\n'
                        '  catch { await new Promise((resolve) => setTimeout(resolve, 100)); }\n}'):
             self.assertEqual(self.flagged(source, self.AUTH), [1], source)
-        self.assertEqual(self.flagged(self.PROBE, 'auth/tests/price-runners-harness.ts'), [1])
+        self.assertEqual(self.flagged(self.PROBE, 'auth/tests/price-stack-harness.ts'), [1])
         self.assertEqual(self.flagged(self.PROBE, self.SPEC), [])
 
     def test_deadline_waits_and_counted_retries_without_sleeps_are_allowed(self):

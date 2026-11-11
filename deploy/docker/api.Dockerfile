@@ -19,7 +19,7 @@ ENV PATH=/opt/venv/bin:$PATH \
     PYTHONPATH=/app/api
 RUN groupadd --system --gid 10001 prizecheck \
  && useradd --system --uid 10001 --gid prizecheck --home-dir /app --shell /usr/sbin/nologin prizecheck \
- && mkdir -p /var/lib/prizecheck/public /var/lib/prizecheck/price-runners \
+ && mkdir -p /var/lib/prizecheck/public \
  && chown -R prizecheck:prizecheck /var/lib/prizecheck
 COPY --from=deps /opt/venv /opt/venv
 COPY api/app /app/api/app

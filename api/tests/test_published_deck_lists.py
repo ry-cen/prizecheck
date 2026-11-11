@@ -26,7 +26,7 @@ from test_discovery import visibility
 from test_holdings import add, call, client, fixture
 from test_moves import edition_like, leaf
 from test_publications import command, list_cards, stored_decks
-from test_published_cost import USER, body_of, launches, public_cost, publish, seed, store  # noqa: F401  (store, launches: autouse)
+from test_published_cost import USER, body_of, public_cost, publish, seed, store  # noqa: F401  (store: autouse)
 from test_published_live_export import live_world
 
 JUNIPER_NAME = "Professor's Research (Professor Juniper)"

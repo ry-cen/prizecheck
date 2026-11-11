@@ -20,12 +20,8 @@ app.loan_inventory core
 app.loan_picks core
 app.location_tree core
 app.operations core
-app.price_launcher core
-app.price_refresh core
-app.price_runner root
 app.public_projection core
 app.public_records core
-app.quote_contract root
 app.settings core
 app.social core
 app.social.conversations core

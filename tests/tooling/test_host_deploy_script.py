@@ -229,7 +229,7 @@ class HostDeployScriptTest(unittest.TestCase):
         (home / 'bin/prizecheck-deploy.sh').write_bytes(SCRIPT.read_bytes())
         for unit in UNITS:
             (home / 'bin' / unit).write_bytes((ROOT / 'deploy/host' / unit).read_bytes())
-        for sub in ('postgres', 'public', 'price-runners', 'mail', 'art'):
+        for sub in ('postgres', 'public', 'mail', 'art'):
             (home / 'data' / sub).mkdir(parents=True)
         env = home / 'prizecheck.env'
         env.write_text('\n'.join([*lines, f'PRIZECHECK_DATA_DIR={home / "data"}']) + '\n')

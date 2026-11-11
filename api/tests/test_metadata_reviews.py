@@ -538,7 +538,7 @@ def test_decisions_touch_no_quote_result_or_work_data_and_call_no_source(quarant
         kinds = {row["target_kind"] for row in conn.execute("SELECT target_kind FROM catalog_public_outbox")}
     assert kinds <= {"printing", "edition"}
     assert snapshot()["state"] == before["state"] and len(published) == 1
-    assert not any(hasattr(metadata_reviews, name) for name in ("public_records", "quote_states", "read_all"))
+    assert not any(hasattr(metadata_reviews, name) for name in ("public_records", "read_all"))
 
 
 # ------------------------------------------------------------------ Live decisions (API side of AC4)

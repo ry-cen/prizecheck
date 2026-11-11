@@ -23,7 +23,7 @@ from test_catalog_references import migrate
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_conversations import detail
 from test_threads import thread as make_thread, message as thread_message, timeline as thread_timeline
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import deck, detail as deck_detail, hold, line
 from test_for_trade_locations import mark
 from test_friend_copies import befriend, block, collector, node, ok, place

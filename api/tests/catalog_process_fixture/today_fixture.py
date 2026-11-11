@@ -42,7 +42,7 @@ def install(environ=None):
     if not directory:
         return
     import sys
-    from price_fixture import _PatchOnImport
+    from patch_on_import import _PatchOnImport
     patch = patch_module(directory)
     targets = {'app.games.pokemon.formats.deck_format_checks': patch, 'app.games.pokemon.formats.format_standing': patch}
     for name in [name for name in targets if name in sys.modules]:

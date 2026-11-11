@@ -24,18 +24,17 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP = ('scripts/migrate.py', 'scripts/init_public_projection.py', 'scripts/backfill_public_catalog.py')
-WORKER_KEYS = ('DATABASE_URL', 'PUBLIC_PROJECTION_DIR', 'PRICE_RUNNER_LOCK_DIR', 'CATALOG_PROCESS_FIXTURE_DIR', 'MAIL_FILE')
+WORKER_KEYS = ('DATABASE_URL', 'PUBLIC_PROJECTION_DIR', 'CATALOG_PROCESS_FIXTURE_DIR', 'MAIL_FILE')
 STACK_KEYS = ('DATABASE_URL', 'API_PORT', 'AUTH_PORT', 'WEB_PORT', 'API_ORIGIN', 'PUBLIC_ORIGIN', 'TEST_ORIGIN', 'TEST_BASE_URL',
-              'REVIEW_BROWSER_ORIGIN', 'MAIL_FILE', 'PUBLIC_PROJECTION_DIR', 'CATALOG_PROCESS_FIXTURE_DIR', 'PRICE_RUNNER_LOCK_DIR',
-              'VITE_CACHE_DIR')
+              'REVIEW_BROWSER_ORIGIN', 'MAIL_FILE', 'PUBLIC_PROJECTION_DIR', 'CATALOG_PROCESS_FIXTURE_DIR', 'VITE_CACHE_DIR')
 
 
 def private_directories(base):
-    """Fresh projection, runner-lock, catalog-fixture and vite-cache directories and an empty mail file under base."""
-    for name in ('projection', 'locks', 'catalog-fixture', 'vite-cache'):
+    """Fresh projection, catalog-fixture and vite-cache directories and an empty mail file under base."""
+    for name in ('projection', 'catalog-fixture', 'vite-cache'):
         (base / name).mkdir(parents=True)
     (base / 'mail').touch()
-    return {'PUBLIC_PROJECTION_DIR': str(base / 'projection'), 'PRICE_RUNNER_LOCK_DIR': str(base / 'locks'),
+    return {'PUBLIC_PROJECTION_DIR': str(base / 'projection'),
             'CATALOG_PROCESS_FIXTURE_DIR': str(base / 'catalog-fixture'), 'MAIL_FILE': str(base / 'mail'),
             'VITE_CACHE_DIR': str(base / 'vite-cache')}
 
@@ -51,7 +50,7 @@ def stack_environment(database_url, api_port, auth_port, web_port, directories):
             'REVIEW_BROWSER_ORIGIN': origin, 'MAIL_FILE': directories['MAIL_FILE'],
             'PUBLIC_PROJECTION_DIR': directories['PUBLIC_PROJECTION_DIR'],
             'CATALOG_PROCESS_FIXTURE_DIR': directories['CATALOG_PROCESS_FIXTURE_DIR'],
-            'PRICE_RUNNER_LOCK_DIR': directories['PRICE_RUNNER_LOCK_DIR'], 'VITE_CACHE_DIR': directories['VITE_CACHE_DIR']}
+            'VITE_CACHE_DIR': directories['VITE_CACHE_DIR']}
 
 
 def gate_stack(environ, vite_cache):
@@ -63,7 +62,7 @@ def gate_stack(environ, vite_cache):
             'TEST_BASE_URL': environ['TEST_BASE_URL'], 'REVIEW_BROWSER_ORIGIN': environ['REVIEW_BROWSER_ORIGIN'],
             'MAIL_FILE': environ['MAIL_FILE'], 'PUBLIC_PROJECTION_DIR': environ['PUBLIC_PROJECTION_DIR'],
             'CATALOG_PROCESS_FIXTURE_DIR': environ['CATALOG_PROCESS_FIXTURE_DIR'],
-            'PRICE_RUNNER_LOCK_DIR': environ['PRICE_RUNNER_LOCK_DIR'], 'VITE_CACHE_DIR': vite_cache}
+            'VITE_CACHE_DIR': vite_cache}
 
 
 def shell_exports(values):

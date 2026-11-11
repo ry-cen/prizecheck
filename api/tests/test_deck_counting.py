@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 
 from app.main import connect  # noqa: F401
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import body_of, cost, launches, store  # noqa: F401  (store and launches are autouse fixtures)
+from test_deck_cost import body_of, cost, store  # noqa: F401  (store is autouse fixtures)
 from test_decks import create
 from test_holdings import add, call
 from test_prices import seed, world

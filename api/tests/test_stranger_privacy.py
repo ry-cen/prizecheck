@@ -16,7 +16,7 @@ from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_blocks import unblock
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_conversations import detail, start, swapped, view
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_friend_copies import block, collector, ok
 from test_holdings import call
 from test_open_discovery import discoverable, put

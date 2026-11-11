@@ -21,7 +21,7 @@ from app.games.pokemon.trading import trade_inventory
 from app.social import owners, trades
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import hold
 from test_for_trade_locations import deck_in, hide, mark
 from test_friend_copies import befriend, block, collector, copies, node, ok, place

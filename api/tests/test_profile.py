@@ -25,7 +25,7 @@ from app.public_records import FilePublicRecords, invite_key
 from app.social import profile as profile_module
 from test_catalog_references import migrate
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_holdings import call, client
 
 ROOT = Path(__file__).resolve().parents[2]

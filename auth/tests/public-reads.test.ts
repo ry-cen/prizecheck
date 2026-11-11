@@ -210,13 +210,10 @@ print(json.dumps([rows[k].value for k in keys]))`,
               "--no-access-log",
             ],
             {
-              // Only the publish gate fixture: none of the price or catalog fixtures the same directory carries.
+              // Only the publish gate fixture: not the catalog fixture the same directory carries.
               ...Object.fromEntries(
                 Object.entries(isolated).filter(
-                  ([key]) =>
-                    !key.startsWith("PRICE_FIXTURE_") &&
-                    key !== "PRICE_RUNNER_LOCK_DIR" &&
-                    key !== "CATALOG_PROCESS_FIXTURE_DIR"
+                  ([key]) => key !== "CATALOG_PROCESS_FIXTURE_DIR"
                 )
               ),
               PYTHONPATH:

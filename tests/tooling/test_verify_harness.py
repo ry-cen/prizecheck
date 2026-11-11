@@ -563,7 +563,6 @@ class VerifyResourcesTest(unittest.TestCase):
                 'TEST_ORIGIN': 'http://localhost:9002', 'TEST_BASE_URL': 'http://localhost:9002',
                 'REVIEW_BROWSER_ORIGIN': 'http://localhost:9002', 'MAIL_FILE': f'{directory}/mail',
                 'PUBLIC_PROJECTION_DIR': f'{directory}/projection', 'CATALOG_PROCESS_FIXTURE_DIR': f'{directory}/fixture',
-                'PRICE_RUNNER_LOCK_DIR': f'{directory}/locks',
                 'VERIFY_PYTEST_DATABASE_URLS': json.dumps(['postgresql://tcg@127.0.0.1:5432/run_gw0', 'postgresql://tcg@127.0.0.1:5432/run_gw1']),
                 'VERIFY_EXTRA_STACKS': json.dumps([{'database_url': 'postgresql://tcg@127.0.0.1:5432/run_s1', 'api_port': 9100,
                                                     'auth_port': 9101, 'web_port': 9102}])}

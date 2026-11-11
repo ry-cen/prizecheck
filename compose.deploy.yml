@@ -26,7 +26,6 @@ x-api-environment: &api-environment
   PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
   PUBLIC_PROJECTION_ADAPTER: filesystem
   PUBLIC_PROJECTION_DIR: /var/lib/prizecheck/public
-  PRICE_RUNNER_LOCK_DIR: /var/lib/prizecheck/price-runners
   # Collector price kill switch (api/app/core/prices/price_reads.py): `off` answers every price row unavailable without a query.
   # off disables storing and serving TCGplayer copies.
   ART_TCGPLAYER_SOURCE: ${ART_TCGPLAYER_SOURCE:-on}
@@ -65,12 +64,11 @@ services:
   api:
     <<: *app-hardening
     image: ${PRIZECHECK_REGISTRY:-ghcr.io/ry-cen}/prizecheck-api:${PRIZECHECK_IMAGE_TAG:?PRIZECHECK_IMAGE_TAG is required}
-    # Catalog imports and price runners are detached children; an init process reaps them.
+    # Catalog imports are detached children; an init process reaps them.
     init: true
     environment: *api-environment
     volumes:
       - ${PRIZECHECK_DATA_DIR}/public:/var/lib/prizecheck/public
-      - ${PRIZECHECK_DATA_DIR}/price-runners:/var/lib/prizecheck/price-runners
       - ${PRIZECHECK_DATA_DIR}/art:/var/lib/prizecheck/art
     networks: [backend, egress]
     depends_on:
@@ -185,7 +183,6 @@ services:
     volumes:
       - ${PRIZECHECK_DATA_DIR}/art:/var/lib/prizecheck/art
       - ${PRIZECHECK_DATA_DIR}/public:/var/lib/prizecheck/public
-      - ${PRIZECHECK_DATA_DIR}/price-runners:/var/lib/prizecheck/price-runners
     networks: [backend, egress]
     depends_on:
       db:

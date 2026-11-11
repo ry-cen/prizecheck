@@ -17,7 +17,7 @@ import pytest
 
 from app.main import app, connect  # noqa: F401
 from test_batch_add import batch as add_batch, undo, undo_records
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, detail as deck_detail, hold, line
 from test_for_trade_locations import deck_in, hide
 from test_friend_copies import ok, place

@@ -26,7 +26,6 @@ export DISCORD_CLIENT_SECRET=fake-discord-secret
 export MAIL_FILE="$(mktemp "${TMPDIR:-/tmp}/prizecheck.XXXXXXXXXX")"
 export PUBLIC_PROJECTION_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prizecheck.XXXXXXXXXX")"
 export CATALOG_PROCESS_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prizecheck.XXXXXXXXXX")"
-export PRICE_RUNNER_LOCK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prizecheck.XXXXXXXXXX")"
 export VERIFY_SUITE="${VERIFY_SUITE:-all}"
 export VERIFY_FAST="${VERIFY_FAST:-}"
 # K/N from scripts/verify.py --shard: run the K-th of N parts of the api or browser suite's test files.
@@ -79,11 +78,11 @@ cleanup() {
   local status=$? path problem="" survivors=""
   set +e
   if [ "${#pids[@]}" -gt 0 ] && ! stop_servers; then
-    problem="servers still running ${STOP_GRACE_S}s after SIGKILL:$survivors; kept $MAIL_FILE $PUBLIC_PROJECTION_DIR $CATALOG_PROCESS_FIXTURE_DIR $PRICE_RUNNER_LOCK_DIR $VERIFY_WORK"
+    problem="servers still running ${STOP_GRACE_S}s after SIGKILL:$survivors; kept $MAIL_FILE $PUBLIC_PROJECTION_DIR $CATALOG_PROCESS_FIXTURE_DIR $VERIFY_WORK"
     echo "== cleanup failed: $problem"
     printf '%s\n' "$problem" >> "$TEST_LOG_DIR/cleanup-failures.txt"
   else
-    for path in "$MAIL_FILE" "$PUBLIC_PROJECTION_DIR" "$CATALOG_PROCESS_FIXTURE_DIR" "$PRICE_RUNNER_LOCK_DIR" "$VERIFY_WORK"; do
+    for path in "$MAIL_FILE" "$PUBLIC_PROJECTION_DIR" "$CATALOG_PROCESS_FIXTURE_DIR" "$VERIFY_WORK"; do
       if ! rm -rf "$path"; then
         problem=1
         echo "== cleanup failed: could not remove $path"

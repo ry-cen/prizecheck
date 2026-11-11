@@ -718,19 +718,16 @@ def test_drain_refuses_a_connection_with_an_open_transaction_and_loses_nothing()
 
 
 def plant_foreign_timeline(edition_ref, mapping_revision, *, revision_gap=1000):
-    """Make the store hold Edition state from a lost timeline: a higher mapping revision with its quote already written."""
-    from app.public_records import quote_key, result_key
+    """Make the store hold Edition state from a lost timeline: a higher mapping revision."""
     key, held = catalog_edition_key(edition_ref), quarantine_key(edition_ref)
     records = read(key, held)
     value = records[key].value
     high = value['revision'] + revision_gap
     foreign = {**value, 'revision': high, 'marketplace': {**value['marketplace'], 'mapping_revision': mapping_revision}}
     foreign_hold = {**records[held].value, 'revision': high, 'mapping_revision': mapping_revision}
-    quote, result = quote_key(edition_ref, mapping_revision), result_key(edition_ref, mapping_revision)
     store = public_record_store()
-    versions = {name: record.version for name, record in read(key, held, quote, result).items()}
-    assert store.compare_and_swap(versions, {key: foreign, held: foreign_hold, quote: {'attempt': 1, 'amount': '9.99'},
-                                             result: {'state': 'quote', 'attempt': 1}}, deadline=time.monotonic() + 5)
+    versions = {name: record.version for name, record in read(key, held).items()}
+    assert store.compare_and_swap(versions, {key: foreign, held: foreign_hold}, deadline=time.monotonic() + 5)
     return mapping_revision
 
 

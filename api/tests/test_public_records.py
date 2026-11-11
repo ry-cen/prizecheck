@@ -17,11 +17,10 @@ import pytest
 
 from app import public_records as records
 from app.public_projection import FilePublicProjection, ProjectionUnavailable
-from app.public_records import (
-    FilePublicRecords, OperationConflict, admission_key, backoff_key, catalog_edition_key, fence_key,
-    lease_key, quote_key, quote_states, result_key,
-)
-from public_records_fixture import (
+from app.public_records import FilePublicRecords, OperationConflict, catalog_edition_key
+from public_records_fixture import (  # test-only families: payload (evictable), marker, fence and scope keys
+    fence_key, marker_key as result_key, payload_key as quote_key, scope_key as admission_key,
+    scope_key as backoff_key, scope_key as lease_key,
     backend_from_config, corrupt_generation, corrupt_pointer, fault, fault_writer, race_writer,
     read_only_storage, scramble_mtimes, serve_relay, stale_writer, store_from_config, store_size,
     write_legacy_store,
@@ -142,40 +141,15 @@ def test_price_records_survive_capacity_eviction_and_replace_and_delete_by_versi
     assert values(store, [key]) == {key: None}
 
 
-def test_quote_keys_are_exact_to_edition_and_mapping_revision_and_only_quotes_are_evictable():
-    assert records.quote_key(REF, 1) != records.quote_key(REF, 2)
-    assert records.quote_key(REF, 1) != records.quote_key(OTHER, 1)
-    assert records.key_family(records.quote_key(REF, 1)).evictable
-    for key in (records.result_key(REF, 1), records.fence_key(REF, 1), records.admission_key('global'),
-                records.lease_key('runner-1'), records.backoff_key(REF + '.1'), records.work_key(REF, 1)):
-        assert not records.key_family(key).evictable
-    assert records.key_family(records.work_key(REF, 1)).name == 'work'
-    assert records.work_key(REF, 1) != records.work_key(REF, 2)
-
-
 @pytest.mark.parametrize('bad', ['A' * 48, 'a' * 47, 'a' * 49, 'g' * 48, '', None, 12])
 def test_invalid_public_references_are_rejected(bad):
     with pytest.raises(ValueError):
         records.catalog_edition_key(bad)
     with pytest.raises(ValueError):
-        records.quote_key(bad, 1)
+        records.price_key(bad)
 
 
-@pytest.mark.parametrize('revision', [0, -1, True, '1', 1.0, None, 2 ** 63])
-def test_invalid_mapping_revisions_are_rejected(revision):
-    with pytest.raises(ValueError):
-        records.quote_key(REF, revision)
-    with pytest.raises(ValueError):
-        records.result_key(REF, revision)
-
-
-@pytest.mark.parametrize('scope', ['', 'has space', 'x' * 201, 'slash/inside', None])
-def test_invalid_coordination_scopes_are_rejected(scope):
-    with pytest.raises(ValueError):
-        records.lease_key(scope)
-
-
-@pytest.mark.parametrize('key', ['catalog:one', 'payload:x', 'quote:' + REF, 'quote:' + REF + ':0',
+@pytest.mark.parametrize('key', ['catalog:one', 'payload:x', 'quote:' + REF, 'quote:' + REF + ':1', 'lease:runner-1',
                                  'result:' + REF + ':01', 'unknown:' + REF, 'catalog:edition:' + REF + ':1',
                                  'catalog:format:' + REF + ':1', 'catalog:format:' + REF.upper()])
 def test_untyped_or_malformed_keys_are_rejected_by_the_store_boundary(key, tmp_path):
@@ -454,14 +428,14 @@ def test_absence_during_full_storage_fails_closed_never_old_quote(adapter):
         with pytest.raises(ProjectionUnavailable):
             store.compare_and_swap(expected, {result: {'state': 'absent'}, quote: None},
                 deadline=deadline(), operation_id='absence-full')
-        state = quote_states(store, [(REF, 1)], deadline=deadline())[(REF, 1)]
-        assert (state.status, state.quote) == ('pending', None)
+        assert values(store, [result, quote]) == {result: {'state': 'pending', 'fence': 2},
+                                                  quote: {'attempt': 1, 'amount': '5.00'}}
     assert store.operation_status('absence-full', deadline=deadline()) is None
-    assert quote_states(store, [(REF, 1)], deadline=deadline())[(REF, 1)].status == 'pending'
+    assert values(store, [result])[result]['state'] == 'pending'
     # Storage recovers: the retried absence commits and supersedes the quote.
     assert store.compare_and_swap(expected, {result: {'state': 'absent'}, quote: None},
         deadline=deadline(), operation_id='absence-full')
-    assert quote_states(store, [(REF, 1)], deadline=deadline())[(REF, 1)].status == 'absent'
+    assert values(store, [result, quote]) == {result: {'state': 'absent'}, quote: None}
 
 
 # --- Snapshots, pinning and reads ------------------------------------------------
@@ -707,80 +681,6 @@ def test_http_malformed_records_shape_is_unavailable(adapter):
 
 
 # --- Quote-state read helper -------------------------------------------------------
-def test_quote_state_pending_marker_suppresses_payload(adapter):
-    store, _ = adapter
-    write(store, {result_key(REF, 1): {'state': 'quote', 'attempt': 1}, quote_key(REF, 1): {'attempt': 1, 'amount': '5.00'}})
-    assert quote_states(store, [(REF, 1)], deadline=deadline())[(REF, 1)].quote == {'attempt': 1, 'amount': '5.00'}
-    write(store, {result_key(REF, 1): {'state': 'pending', 'fence': 2}})
-    state = quote_states(store, [(REF, 1)], deadline=deadline())[(REF, 1)]
-    assert (state.status, state.quote) == ('pending', None)
-
-
-def test_quote_state_absence_supersedes_a_remaining_payload(adapter):
-    store, _ = adapter
-    write(store, {result_key(REF, 1): {'state': 'absent', 'checked_at': '2026-10-08T00:00:00Z'},
-                  quote_key(REF, 1): {'attempt': 1, 'amount': '5.00'}})
-    state = quote_states(store, [(REF, 1)], deadline=deadline())[(REF, 1)]
-    assert (state.status, state.quote) == ('absent', None)
-    assert state.result == {'state': 'absent', 'checked_at': '2026-10-08T00:00:00Z'}
-
-
-def test_quote_state_evicted_payload_is_unknown(adapter):
-    store, _ = adapter
-    write(store, {result_key(REF, 1): {'state': 'quote', 'attempt': 1}, quote_key(REF, 1): {'attempt': 1, 'amount': '5.00'}})
-    write(store, {quote_key(OTHER, 1): {'amount': '1.00'}, quote_key(OTHER, 2): {'amount': '2.00'}})
-    state = quote_states(store, [(REF, 1)], deadline=deadline())[(REF, 1)]
-    assert (state.status, state.quote) == ('unknown', None)
-
-
-def test_quote_state_never_falls_back_to_an_older_mapping_revision_or_attempt(adapter):
-    store, _ = adapter
-    write(store, {result_key(REF, 1): {'state': 'quote', 'attempt': 1}, quote_key(REF, 1): {'attempt': 1, 'amount': '5.00'}})
-    write(store, {result_key(OTHER, 1): {'state': 'quote', 'attempt': 2}, quote_key(OTHER, 1): {'attempt': 1, 'amount': '9.00'}})
-    states = quote_states(store, [(REF, 2), (OTHER, 1)], deadline=deadline())
-    assert (states[(REF, 2)].status, states[(REF, 2)].quote) == ('unknown', None)
-    assert (states[(OTHER, 1)].status, states[(OTHER, 1)].quote) == ('unknown', None)
-
-
-@pytest.mark.parametrize('result', [{'state': 'bogus'}, ['quote'], {'state': 'quote'}, 'absent',
-                                    {'state': 'quote', 'attempt': True}, {'state': 'quote', 'attempt': 1.5}])
-def test_quote_state_malformed_result_is_invalid_for_that_row_only(adapter, result):
-    store, _ = adapter
-    write(store, {result_key(REF, 1): result})
-    write(store, {result_key(OTHER, 1): {'state': 'quote', 'attempt': 1}, quote_key(OTHER, 1): {'attempt': 1, 'amount': '5.00'}})
-    states = quote_states(store, [(REF, 1), (OTHER, 1)], deadline=deadline())
-    assert (states[(REF, 1)].status, states[(REF, 1)].quote) == ('invalid', None)
-    assert (states[(OTHER, 1)].status, states[(OTHER, 1)].quote) == ('quote', {'attempt': 1, 'amount': '5.00'})
-    assert states[(REF, 1)].generation == states[(OTHER, 1)].generation
-
-
-def test_quote_state_non_dict_payload_is_invalid_for_that_row_only(adapter):
-    store, _ = adapter
-    write(store, {result_key(REF, 1): {'state': 'quote', 'attempt': 1}, quote_key(REF, 1): ['nope']})
-    write(store, {result_key(OTHER, 1): {'state': 'absent'}})
-    states = quote_states(store, [(REF, 1), (OTHER, 1)], deadline=deadline())
-    assert (states[(REF, 1)].status, states[(REF, 1)].quote) == ('invalid', None)
-    assert states[(OTHER, 1)].status == 'absent'
-
-
-def test_quote_state_store_unavailability_still_raises(adapter):
-    store, _ = adapter
-    with pytest.raises(ProjectionUnavailable):
-        quote_states(store, [(REF, 1)], deadline=time.monotonic() - 1)
-
-
-def test_quote_states_cover_more_than_one_batch_at_one_generation(adapter):
-    store, _ = adapter
-    pairs = [(ref(index), 1) for index in range(100)]
-    for offset in range(0, 100, 50):
-        write(store, {result_key(edition, revision): {'state': 'absent'} for edition, revision in pairs[offset:offset + 50]})
-    states = quote_states(store, pairs + [(REF, 7)], deadline=deadline())
-    assert len(states) == 101
-    assert all(states[pair].status == 'absent' for pair in pairs)
-    assert states[(REF, 7)].status == 'unknown'
-    assert len({state.generation for state in states.values()}) == 1
-
-
 # --- Performance against the 500 ms cached-read p95 budget -----------------------
 PERF_RECORDS = 10_000
 

@@ -8,7 +8,7 @@ from app.main import app, connect  # noqa: F401
 from test_card_attributes import edition_of
 from test_deck_format_checks import format_checks, standard
 from test_holdings import call
-from test_published_cost import launches, store  # noqa: F401  (autouse: a records store, no price launches)
+from test_published_cost import store  # noqa: F401  (autouse: a records store)
 from test_reprint_group_reviews import ADMIN, CANDIES, OWNER, correct_attributes, deck_of, decide, error, \
     groups, identity_of, ok, revision, seed, seed_manual_printing
 

@@ -16,7 +16,7 @@ import pytest
 from app.main import connect  # noqa: F401
 from app.games.pokemon.prices import prices
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import buy_missing, counting, deck, hold, iono_world, line, new_owner
 from test_holdings import call
 from test_prices import client, seed, world
@@ -163,7 +163,7 @@ def test_the_export_and_the_cost_count_the_same_copies(store):
             assert {key: view[key] for key in PAIRED} == {key: priced[key] for key in PAIRED}
 
 
-def test_the_export_is_private_scoped_like_the_want_list_and_not_a_price_access(store, launches, monkeypatch):
+def test_the_export_is_private_scoped_like_the_want_list_and_not_a_price_access(store, monkeypatch):
     monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("the export read a price"))
     owner, older, _ = mixed_world(store)
     stranger, _ = new_owner()
@@ -179,4 +179,3 @@ def test_the_export_is_private_scoped_like_the_want_list_and_not_a_price_access(
     assert client.get("/api/want-list/exports/tcgplayer").status_code == 401
     export(owner)
     export(owner, older)
-    assert launches == []

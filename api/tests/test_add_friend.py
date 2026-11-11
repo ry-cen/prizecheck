@@ -14,7 +14,7 @@ from app.social import trades
 from stranger_fixtures import propose_to, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_conversations import detail, swapped
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_friend_copies import befriend, block, collector, ok
 from test_friends import age_decline, commands_counted, rows
 from test_holdings import call

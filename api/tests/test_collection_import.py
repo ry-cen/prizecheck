@@ -18,7 +18,7 @@ from uuid import uuid4
 import pytest
 
 from app.main import connect  # first: app.main imports the routers, and they import it
-from app import price_launcher, price_refresh, public_records  # noqa: E402
+from app import public_records  # noqa: E402
 from app.games.pokemon.catalog import catalog_dispatch  # noqa: E402
 from app.games.pokemon.prices import prices  # noqa: E402
 from test_batch_add import batch, held, revision, undo_records
@@ -484,8 +484,7 @@ def test_no_route_reads_prices_or_starts_a_catalog_pull_or_returns_source_data(m
     def forbidden(*args, **kwargs):
         pytest.fail("a Collection Import route reached prices or the catalog importer")
 
-    for module, name in ((price_launcher, "spawn"), (public_records, "quote_states"),
-                         (prices, "private_edition_quotes"), (price_refresh, "evaluate_and_admit"),
+    for module, name in ((public_records, "public_record_store"), (prices, "private_edition_quotes"),
                          (catalog_dispatch, "dispatch_import"), (catalog_dispatch, "launch_import")):
         monkeypatch.setattr(module, name, forbidden)
     texts = []
@@ -501,7 +500,7 @@ def test_no_route_reads_prices_or_starts_a_catalog_pull_or_returns_source_data(m
     with connect() as conn:
         assert conn.execute("SELECT count(*) AS n FROM catalog_run").fetchone()["n"] == runs
     # And the modules don't import them.
-    banned = {"prices", "price_refresh", "price_launcher", "public_records", "catalog_dispatch", "catalog"}
+    banned = {"prices", "public_records", "catalog_dispatch", "catalog"}
     for module in ("collection_import", "collection_import_reader", "collection_import_matcher",
                    "collection_import_finish", "collection_import_aliases"):
         tree = ast.parse(next((Path(__file__).parents[1] / "app").rglob(f"{module}.py")).read_text())

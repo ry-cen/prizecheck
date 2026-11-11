@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 
 from test_catalog_targets import isolated_rules  # noqa: F401
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_deck_counting import counting, deck, hold, line
 from test_friend_copies import befriend, collector, ok
 from test_holdings import call, client

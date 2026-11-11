@@ -31,8 +31,8 @@ from test_deck_format_checks import CARDS
 from test_holdings import call
 from test_prices import client, headers_for
 from test_publications import command, edition_refs, legacy_snapshot, stored_decks
-from test_published_cost import (USER, body_of, generation, launches, publish, rewrite_snapshot,  # noqa: F401
-                                 store)  # store and launches are autouse
+from test_published_cost import (USER, body_of, generation, publish, rewrite_snapshot,  # noqa: F401
+                                 store)  # store is autouse
 
 LEGAL = (("me01-001", 1), ("me01-125", 4), ("me01-130", 4), ("sv02-278", 51))
 OVER = (("me01-001", 1), ("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv05-157", 1), ("sv05-162", 1),

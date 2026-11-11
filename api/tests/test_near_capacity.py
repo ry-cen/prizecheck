@@ -130,7 +130,7 @@ def leave_no_collectors_behind():
     stack the gate runs afterwards, and 1,500 leftover collectors in open discovery at zip 00010 fill the 500 Near you
     and 1,000 card search candidates, so a Near you spec's two or three collectors fall outside the cut
     (``trade-near-you.spec.ts``). Switching discovery off is one cheap update; deleting the owners cascaded through
-    every Holding and kept the database busy into the next serial test's timing window (``test_price_runner``)."""
+    every Holding and kept the database busy into the next serial test's timing window."""
     yield
     with connect() as conn:
         conn.execute("UPDATE discovery_setting SET enabled = false WHERE user_id LIKE 'nearcap-%' AND enabled")

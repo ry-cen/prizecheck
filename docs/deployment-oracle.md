@@ -491,7 +491,7 @@ Everything lives under `/opt/prizecheck-prod`:
 | `bin/prizecheck-backup.*`                | The nightly backup's service and timer units; `setup` installs them too                                           |
 | `compose.deploy.yml`, `compose.prod.yml` | The stack and the production overlay                                                                              |
 | `prizecheck.env`                         | The env file (mode 600; step 6)                                                                                   |
-| `data/`                                  | PostgreSQL, the public projection store, price runners, mail, card art                                            |
+| `data/`                                  | PostgreSQL, the public projection store, mail, card art                                                           |
 | `state/`, `backups/`                     | Release state and logs; database dumps and archives                                                               |
 | `signup/`, `signup-active/`              | The signup readiness proof you edit, and the validated copy the gateway reads ([Opening signup](#opening-signup)) |
 
@@ -525,7 +525,7 @@ sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup
 
 `setup` stops with an error if the env file (step 6) or a unit file is missing. Otherwise it:
 
-- creates `data/` (PostgreSQL, the public projection store, price runners, mail, card art), `state/`, `backups/`, `signup/` and `signup-active/`, with the owners the containers need. `data/art/` holds the card pictures the API fetched from TCGdex on first request (ADR 0020); it is regenerable, so `backup` leaves it out on purpose, and deploys refuse to run without it;
+- creates `data/` (PostgreSQL, the public projection store, mail, card art), `state/`, `backups/`, `signup/` and `signup-active/`, with the owners the containers need. `data/art/` holds the card pictures the API fetched from TCGdex on first request (ADR 0020); it is regenerable, so `backup` leaves it out on purpose, and deploys refuse to run without it;
 - installs the two timers' units into `/etc/systemd/system/` (rewriting each service's `ExecStart` to the installed script's own path), reloads systemd and enables the catalog refresh timer and the nightly backup timer. A unit is written only when its content differs. [The daily jobs](#the-daily-jobs) describe what they run;
 - removes `/etc/cron.d/prizecheck-backup` if an earlier version of this guide made it, and logs that, so the backup never runs twice;
 - ends with the readiness report, which `setup` also runs for you. Run it alone with `sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh readiness`.

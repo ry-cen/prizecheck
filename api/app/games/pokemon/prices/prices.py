@@ -31,10 +31,8 @@ STALE_AFTER = timedelta(hours=48)
 MAX_EDITIONS = 64
 
 Status = Literal['quote', 'unavailable', 'failed', 'pending']
-Reason = Literal['not_found', 'no_price', 'unverified', 'quarantined', 'unspecified_variant', 'no_quote_variant', 'not_cached',
-                 'confirmed_absent', 'lookup_mismatch', 'invalid_quote', 'store_unavailable', 'deadline',
+Reason = Literal['not_found', 'no_price', 'unverified', 'quarantined', 'unspecified_variant', 'deadline', 'store_unavailable',
                  'validation_unavailable']
-Refresh = Literal['background', 'refreshed', 'timeout', 'busy', 'backoff', 'failed']
 
 _CENT = Decimal('0.01')
 
@@ -54,8 +52,6 @@ class QuoteView(BaseModel):
     checked_at: str | None = None
     age: Literal['known', 'unknown'] = 'unknown'
     stale: bool | None = None            # True only when the quote is strictly more than 48 h old.
-    refresh: Refresh | None = None       # What the access did about refresh; never changes status/reason/amount.
-    refresh_failed_at: str | None = None # When the last refresh attempt failed (refresh == 'failed'), if known.
 
 
 def format_usd(amount: Decimal) -> str:

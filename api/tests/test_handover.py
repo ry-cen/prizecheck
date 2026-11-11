@@ -27,7 +27,7 @@ from app.social import counts
 from app.social.loans import LoanStep, run_step
 from test_batch_add import undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, detail, hold, line
 from test_friend_copies import collector, node, ok, place
 from test_holdings import call

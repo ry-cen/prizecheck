@@ -7,18 +7,13 @@ import types
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+ALLOWED = {'app.social': set(), 'app.social.a': {('app.social', 'b'), ('app.util', 'helper')}, 'app.social.b': set()}
+
+
 spec = importlib.util.spec_from_file_location('check_python_boundaries', ROOT / 'scripts/check_python_boundaries.py')
 boundaries = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boundaries)
 REAL = boundaries.load_rules()
-
-CLEAN_PRICE_SOURCE = (
-    'import httpx\nimport json\nORIGIN = "https://api.tcgdex.net"\n'
-    'def fetch(card, may_retry):\n'
-    '    client = httpx.Client(follow_redirects=False, trust_env=False, timeout=1)\n'
-    '    return json.loads(client.get(ORIGIN).text, parse_float=str)\n')
-ALLOWED = {'app.social': set(), 'app.social.a': {('app.social', 'b'), ('app.util', 'helper')}, 'app.social.b': set()}
-
 
 def rules(**data):
     """A rules object holding only the configured rules, with the real patterns and social packages."""
@@ -126,47 +121,6 @@ class TsvReadersTest(unittest.TestCase):
         self.assertEqual(run('import-aliases-tsv-readers', files, **self.DATA),
                          ['import-aliases-tsv-readers: unexpected api/app/games/import_aliases.py; '
                           'missing api/app/import_aliases.py'])
-
-
-class PriceSourceTest(unittest.TestCase):
-    DATA = REAL.RULES['price-source-client']
-
-    def fails(self, source, *details):
-        found = run('price-source-client', {'api/app/games/pokemon/prices/price_source.py': source}, **self.DATA)
-        self.assertEqual(found, [f'price-source-client: {detail}' for detail in details])
-
-    def test_the_clean_client_passes(self):
-        self.fails(CLEAN_PRICE_SOURCE)
-
-    def test_a_second_origin_fails(self):
-        self.fails(CLEAN_PRICE_SOURCE + 'OTHER = "http://example.test"\n',
-                   "origin literals are ['https://api.tcgdex.net', 'http://example.test'], not ['https://api.tcgdex.net']")
-
-    def test_a_different_origin_fails(self):
-        self.fails(CLEAN_PRICE_SOURCE.replace('api.tcgdex.net', 'api.example.test'),
-                   "origin literals are ['https://api.example.test'], not ['https://api.tcgdex.net']")
-
-    def test_a_second_client_or_none_fails(self):
-        self.fails(CLEAN_PRICE_SOURCE + 'other = httpx.Client(follow_redirects=False, trust_env=False)\n',
-                   '2 httpx.Client(...) calls, not exactly one')
-        self.fails(CLEAN_PRICE_SOURCE.replace('httpx.Client(', 'make('), '0 httpx.Client(...) calls, not exactly one')
-
-    def test_unsafe_client_settings_fail(self):
-        self.fails(CLEAN_PRICE_SOURCE.replace('follow_redirects=False', 'follow_redirects=True'),
-                   'httpx.Client keyword follow_redirects is True, not False')
-        self.fails(CLEAN_PRICE_SOURCE.replace(' trust_env=False,', ''), 'httpx.Client keyword trust_env is None, not False')
-
-    def test_json_loads_without_parse_float_or_no_json_loads_fails(self):
-        self.fails(CLEAN_PRICE_SOURCE + 'x = json.loads("1")\n', 'json.loads on line 7 passes no parse_float')
-        self.fails(CLEAN_PRICE_SOURCE.replace('json.loads(', 'str('), 'no json.loads call')
-
-    def test_a_changed_fetch_signature_fails(self):
-        self.fails(CLEAN_PRICE_SOURCE.replace('(card, may_retry)', '(card, may_retry, extra=None)'),
-                   "fetch takes ['card', 'may_retry', 'extra'], not ['card', 'may_retry']")
-        self.fails(CLEAN_PRICE_SOURCE.replace('def fetch', 'def get'), "fetch takes None, not ['card', 'may_retry']")
-
-    def test_a_missing_module_fails(self):
-        self.assertEqual(run('price-source-client', {}, **self.DATA), ['price-source-client: no module app.games.pokemon.prices.price_source'])
 
 
 class HostTest(unittest.TestCase):
@@ -388,7 +342,7 @@ class GuardHelpersTest(unittest.TestCase):
 class EngineTest(unittest.TestCase):
     def test_every_rule_in_the_checker_is_configured_in_the_data_and_the_reverse(self):
         self.assertEqual(set(REAL.RULES), set(boundaries.ARCHITECTURE_RULES))
-        self.assertEqual(len(REAL.RULES), 12)
+        self.assertEqual(len(REAL.RULES), 11)
 
     def test_the_real_tree_passes_every_rule(self):
         self.assertEqual(boundaries.architecture(boundaries.ROOT, REAL)[1], [])

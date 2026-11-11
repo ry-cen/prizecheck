@@ -15,7 +15,7 @@ from psycopg.rows import dict_row
 
 from app.main import connect  # noqa: F401
 from app.social import loans, trades
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import hold
 from test_friend_copies import node, ok
 from test_loans import accept, pair, sent, step, view

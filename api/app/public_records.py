@@ -1,10 +1,15 @@
 """Independent public-safe shared records; never mutates publication/discovery.
 
 Keys are typed (see ``key_family``): catalog Printing/Edition metadata, Printing
-format facts, quarantine, and -- keyed by public Edition reference plus mapping revision --
-quote payloads, current-result/supersession markers, fences and coalesced
-in-flight work; plus admission, lease and backoff scopes. Only ``quote`` payloads are evictable; every other family is protected
-and never counted against or removed by payload capacity.
+format facts, quarantine, public Edition prices and invite records. Every registered family is protected and never
+counted against or removed by payload capacity. The store keeps its capacity accounting and eviction queue for
+payloads it already holds as evictable (the retired price refresh's ``quote:`` payloads, ADR 0019).
+
+Keys of a family that is no longer registered (the retired price refresh's ``quote``, ``result``, ``fence``,
+``work``, ``admission``, ``lease`` and ``backoff`` records) may still sit in a store until the owner runs
+``scripts/purge_price_records.py``. They are inert: no call accepts them as arguments, nothing reads or validates
+stored entries by family, and eviction, tombstone expiry and garbage collection handle entries without classifying
+them. Only the filesystem adapter's maintenance pair, ``unregistered_records`` and ``delete_unregistered``, sees them.
 
 Store API (both adapters; every call takes the caller's absolute monotonic
 ``deadline`` and never extends it):
@@ -28,10 +33,6 @@ Store API (both adapters; every call takes the caller's absolute monotonic
 * ``operation_status(operation_id, deadline=)`` -> True if that explicit
   operation ID committed within ``operation_ttl`` seconds, else None (unknown:
   re-read the records). Failed CAS attempts are not logged.
-* ``quote_states(store, [(edition_ref, mapping_revision)], deadline=)`` reads
-  result marker plus quote payload at one generation: a pending marker
-  suppresses the payload, absence supersedes it, an evicted/mismatched payload
-  is unknown, and no other mapping revision is ever consulted.
 
 Filesystem layout (private): ``records/current.json`` is the atomic pointer to
 an immutable content-addressed generation manifest. The index is sharded into
@@ -94,18 +95,8 @@ class RecordSnapshot:
     records: dict[str, Record]
 
 
-@dataclass(frozen=True)
-class QuoteState:
-    status: str          # 'quote' | 'absent' | 'pending' | 'unknown' | 'invalid' (this row's records are malformed)
-    result: object       # Current-result marker value, or None.
-    quote: object        # Usable quote payload only when status == 'quote'.
-    generation: str
-
-
 # --- Typed key families ---------------------------------------------------------
-_SCOPE = re.compile(r'[A-Za-z0-9_.:-]{1,200}')
 _REF = re.compile(r'[0-9a-f]{48}')
-MAX_REVISION = 2 ** 63 - 1
 
 
 @dataclass(frozen=True)
@@ -114,8 +105,7 @@ class KeyFamily:
     evictable: bool
 
 
-# Protected vs evictable is decided by family, never by caller. Only quote
-# payloads are evictable; every marker/metadata/coordination family is protected.
+# Protected vs evictable is decided by family, never by caller. No registered family is evictable now.
 _FAMILIES = (
     ('catalog_printing', re.compile(r'catalog:printing:([0-9a-f]{48})'), False),
     ('catalog_edition', re.compile(r'catalog:edition:([0-9a-f]{48})'), False),
@@ -123,16 +113,8 @@ _FAMILIES = (
     ('catalog_format', re.compile(r'catalog:format:([0-9a-f]{48})'), False),
     ('quarantine', re.compile(r'quarantine:edition:([0-9a-f]{48})'), False),
     ('price', re.compile(r'price:([0-9a-f]{48})'), False),
-    ('quote', re.compile(r'quote:([0-9a-f]{48}):([1-9][0-9]{0,18})'), True),
-    ('result', re.compile(r'result:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
-    ('fence', re.compile(r'fence:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
-    ('work', re.compile(r'work:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
-    ('admission', re.compile(r'admission:([A-Za-z0-9_.:-]{1,200})'), False),
-    ('lease', re.compile(r'lease:([A-Za-z0-9_.:-]{1,200})'), False),
-    ('backoff', re.compile(r'backoff:([A-Za-z0-9_.:-]{1,200})'), False),
     ('invite', re.compile(r'invite:([0-9a-f]{64})'), False),
 )
-_REVISIONED = ('quote', 'result', 'fence', 'work')
 
 
 def key_family(key):
@@ -140,7 +122,7 @@ def key_family(key):
     if isinstance(key, str):
         for name, pattern, evictable in _FAMILIES:
             match = pattern.fullmatch(key)
-            if match and (name not in _REVISIONED or int(match.group(2)) <= MAX_REVISION):
+            if match:
                 return KeyFamily(name, evictable)
     raise ValueError('untyped or malformed public record key')
 
@@ -149,18 +131,6 @@ def _ref(ref):
     if not isinstance(ref, str) or not _REF.fullmatch(ref):
         raise ValueError('invalid public reference')
     return ref
-
-
-def _revision(revision):
-    if type(revision) is not int or not 0 < revision <= MAX_REVISION:
-        raise ValueError('invalid mapping revision')
-    return str(revision)
-
-
-def _scope(scope):
-    if not isinstance(scope, str) or not _SCOPE.fullmatch(scope):
-        raise ValueError('invalid coordination scope')
-    return scope
 
 
 def catalog_printing_key(printing_ref):
@@ -184,26 +154,9 @@ def quarantine_key(edition_ref):
     return 'quarantine:edition:' + _ref(edition_ref)
 
 
-def quote_key(edition_ref, mapping_revision):
-    return 'quote:' + _ref(edition_ref) + ':' + _revision(mapping_revision)
-
-
 def price_key(edition_ref):
     """An Edition's public price record (ADR 0019): {mapping_revision, product_id, amount}. Protected, never evicted."""
     return 'price:' + _ref(edition_ref)
-
-
-def result_key(edition_ref, mapping_revision):
-    return 'result:' + _ref(edition_ref) + ':' + _revision(mapping_revision)
-
-
-def fence_key(edition_ref, mapping_revision):
-    return 'fence:' + _ref(edition_ref) + ':' + _revision(mapping_revision)
-
-
-def work_key(edition_ref, mapping_revision):
-    """In-flight source work for one Edition/mapping revision (coalescing)."""
-    return 'work:' + _ref(edition_ref) + ':' + _revision(mapping_revision)
 
 
 def invite_key(token_hash):
@@ -212,18 +165,6 @@ def invite_key(token_hash):
     if not isinstance(token_hash, str) or not _HEX64.fullmatch(token_hash):
         raise ValueError('invalid invite token hash')
     return 'invite:' + token_hash
-
-
-def admission_key(scope):
-    return 'admission:' + _scope(scope)
-
-
-def lease_key(scope):
-    return 'lease:' + _scope(scope)
-
-
-def backoff_key(scope):
-    return 'backoff:' + _scope(scope)
 
 
 # --- Validation helpers -----------------------------------------------------------
@@ -420,6 +361,30 @@ class _Transaction:
             self.bytes += entry['s']
             self._append([key, version])
         self._set(key, entry)
+
+    def drop(self, key):
+        """Delete a stored entry without classifying its key (maintenance of unregistered families). A payload the
+        store holds as evictable (it carries its size) leaves the capacity accounting, as ``put`` would do."""
+        old = self.entry(key)
+        if old is not None and 'd' in old and 's' in old:
+            self.count -= 1
+            self.bytes -= old['s']
+        self._set(key, {'v': uuid4().hex, 't': self.now})
+
+    def stored(self):
+        """Every key with a live value in this generation, with its version. Walks the whole index."""
+        found = {}
+        for page in range(PAGES):
+            if self.pages[page] is None:
+                continue
+            for slot, digest in enumerate(self._slots(page)):
+                if digest is None:
+                    continue
+                _remaining(self.deadline)
+                for key, entry in self._segment((page, slot))['entries'].items():
+                    if 'd' in entry:
+                        found[key] = entry['v']
+        return found
 
     def _live(self, item):
         entry = self.entry(item[0])
@@ -759,9 +724,55 @@ class FilePublicRecords(_Records):
     # Writes -----------------------------------------------------------------------------
     def compare_and_swap(self, expected, changes, *, deadline, operation_id=None):
         fingerprint = _transaction(expected, changes)
-        explicit = operation_id is not None
-        if explicit:
+        if operation_id is not None:
             _operation_id(operation_id)
+
+        def apply(transaction):
+            for key, value in changes.items():
+                transaction.put(key, value)
+        return self._commit(expected, apply, fingerprint, deadline, operation_id)
+
+    # Maintenance of unregistered families (scripts/purge_price_records.py) ------------------------
+    def unregistered_records(self, *, deadline):
+        """``{key: version}`` for every stored live value whose key no registered family accepts, at the current
+        generation. Walks the whole index; it never writes storage."""
+        try:
+            view = _Transaction(self, self._manifest(self._current(deadline), deadline), 0, deadline)
+            found = {}
+            for key, version in view.stored().items():
+                try:
+                    key_family(key)
+                except ValueError:
+                    found[key] = version
+            _remaining(deadline)
+            return found
+        except ProjectionUnavailable:
+            raise
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
+            raise ProjectionUnavailable() from exc
+
+    def delete_unregistered(self, expected, *, deadline):
+        """Delete up to 128 unregistered-family keys in one conditional transaction: True when committed, False on a
+        version conflict (nothing published). A key that a registered family accepts is refused (ValueError), so this
+        can never touch a live record."""
+        if not isinstance(expected, dict) or not 0 < len(expected) <= MAX_BATCH:
+            raise ValueError('maintenance batches require 1 to 128 keys')
+        for key, version in expected.items():
+            if not isinstance(key, str) or not isinstance(version, str) or not 0 < len(version) <= 128:
+                raise ValueError('invalid maintenance key or version')
+            try:
+                key_family(key)
+            except ValueError:
+                continue
+            raise ValueError('maintenance never deletes a registered record family')
+
+        def apply(transaction):
+            for key in expected:
+                transaction.drop(key)
+        return self._commit(expected, apply, None, deadline, None)
+
+    def _commit(self, expected, apply, fingerprint, deadline, operation_id):
+        explicit = operation_id is not None
         with self._lock(deadline):
             try:
                 now = time.time()
@@ -776,8 +787,7 @@ class FilePublicRecords(_Records):
                 if any(transaction.version(key) != version for key, version in expected.items()):
                     return False  # Publishes nothing.
                 gc_at = self._collect(manifest, previous, now, deadline)
-                for key, value in changes.items():
-                    transaction.put(key, value)
+                apply(transaction)
                 transaction.enforce_capacity()
                 transaction.compact_queue()
                 state = transaction.write(self._put_object)
@@ -1013,48 +1023,3 @@ def public_record_store():
     if adapter == 'http':
         return HttpPublicRecords()
     raise ProjectionUnavailable()
-
-
-# --- Domain read helper ------------------------------------------------------------------
-_RESULT_STATES = ('quote', 'absent', 'pending')
-
-
-def quote_states(store, pairs, *, deadline, generation=None):
-    """Current quote state per (edition_ref, mapping_revision), at one generation.
-
-    Result marker values: {'state': 'pending', ...} suppresses any payload;
-    {'state': 'absent', ...} (confirmed unavailability) supersedes any payload;
-    {'state': 'quote', 'attempt': A, ...} exposes the quote payload only when it
-    is present with the same 'attempt'. A missing marker, or an evicted or
-    mismatched payload, is 'unknown'. Other mapping revisions are never read.
-    A malformed marker or payload makes only that row 'invalid' (never usable); the batch still succeeds, and store
-    unavailability still raises ProjectionUnavailable. ``generation``
-    reads at a snapshot pinned by an earlier read (for example the catalog eligibility read).
-    """
-    pairs = list(dict.fromkeys((_ref(edition), mapping_revision) for edition, mapping_revision in pairs))
-    keys = []
-    for edition, mapping_revision in pairs:
-        keys += [result_key(edition, mapping_revision), quote_key(edition, mapping_revision)]
-    snapshot = store.read_all(keys, deadline=deadline, generation=generation)
-    states = {}
-    for pair in pairs:
-        result = snapshot.records[result_key(*pair)].value
-        payload = snapshot.records[quote_key(*pair)].value
-        if result is None:
-            states[pair] = QuoteState('unknown', None, None, snapshot.generation)
-            continue
-        # A malformed row is that row's problem only (status 'invalid'); store unavailability raised above.
-        if not isinstance(result, dict) or result.get('state') not in _RESULT_STATES \
-                or (payload is not None and not isinstance(payload, dict)):
-            states[pair] = QuoteState('invalid', None, None, snapshot.generation)
-            continue
-        if result['state'] != 'quote':
-            states[pair] = QuoteState(result['state'], result, None, snapshot.generation)
-            continue
-        attempt = result.get('attempt')
-        if isinstance(attempt, bool) or not isinstance(attempt, (int, str)):
-            states[pair] = QuoteState('invalid', None, None, snapshot.generation)
-            continue
-        usable = payload is not None and type(payload.get('attempt')) is type(attempt) and payload['attempt'] == attempt
-        states[pair] = QuoteState('quote' if usable else 'unknown', result, payload if usable else None, snapshot.generation)
-    return states

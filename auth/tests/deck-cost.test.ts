@@ -2,19 +2,13 @@
 // slow (process): the price stack (two gateways, two APIs, the record-store relay) and the real 3 s price budget.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import {
-  metric,
-  SCHEDULER,
-  Stack,
-  type Edition,
-} from "./price-runners-harness";
+import { metric, Stack, type Edition } from "./price-stack-harness";
 
 // Ticket 09 through ADR 0019: complete private Deck costs through the real gateways read the imported TCGCSV prices from
-// PostgreSQL only. Nothing admits a refresh, fetches a source or touches the record store; every elapsed time is measured
+// PostgreSQL only; every elapsed time is measured
 // from outside the gateway with a real clock. (The API suite covers the arithmetic; this proves the routing and the
 // budget end to end.)
 const stack = new Stack();
-const source = stack.source;
 const HOUR = 3_600_000;
 const ago = (ms: number) =>
   new Date(Math.floor((Date.now() - ms) / 1000) * 1000).toISOString();
@@ -123,8 +117,7 @@ const revision = async () =>
   );
 
 describe("a complete private Deck through the gateways", () => {
-  it("prices the six-copy example as $1.61 and 5/6 from PostgreSQL alone: provider age stays stale, a row with no market price stays unpriced, and nothing is fetched or admitted", async () => {
-    await stack.quiesce();
+  it("prices the six-copy example as $1.61 and 5/6 from PostgreSQL alone: provider age stays stale and a row with no market price stays unpriced", async () => {
     const [[fresh], [stale], [gone]] = await stack.cards(3);
     await price(fresh, "0.25", ago(HOUR));
     await price(stale, "0.43", ago(72 * HOUR));
@@ -134,7 +127,6 @@ describe("a complete private Deck through the gateways", () => {
       [stale, 2],
       [gone, 1],
     ]);
-    const before = await stack.read([SCHEDULER]);
     const response = await cost(0, deck);
     expect(response.status).toBe(200);
     expect(response.elapsed).toBeLessThanOrEqual(3_000);
@@ -149,22 +141,17 @@ describe("a complete private Deck through the gateways", () => {
       fallback_copies: "0", // there is no refresh label any more
       owner_revision: await revision(),
     });
-    for (const edition of [fresh, stale, gone])
-      expect(source.requests(edition.card)).toEqual([]);
-    expect(await stack.read([SCHEDULER])).toEqual(before);
     metric(
       `deck six-copy cost: ${response.elapsed.toFixed(0)} ms (bound 3000)`
     );
   }, 60_000);
 
   it("answers a whole Deck of 34 Editions at once, keeps checks and inventory writes responsive, and names the captured revision", async () => {
-    await stack.quiesce();
     const cards = await stack.cards(17, 2);
     const editions = cards.flat();
     for (const edition of editions) await price(edition, "0.50", ago(HOUR));
     const deck = await deckWith(editions.map((edition) => [edition, 2]));
     const captured = await revision();
-    const before = await stack.read([SCHEDULER]);
     const response = await cost(1, deck);
     const checks = await gateway(0, "GET", `/api/decks/${deck}`);
     // An inventory write serialized on the same owner row the capture locked.
@@ -188,15 +175,12 @@ describe("a complete private Deck through the gateways", () => {
       fallback_copies: "0",
     });
     expect(await revision()).toBe(captured + 1); // the write moved it: the browser would ask again
-    expect(await stack.read([SCHEDULER])).toEqual(before);
     metric(
       `deck of 34 Editions: ${response.elapsed.toFixed(0)} ms (bound 1500); checks ${checks.elapsed.toFixed(0)} ms, inventory write ${added.elapsed.toFixed(0)} ms`
     );
   }, 90_000);
 
-  it("answers an empty Deck with $0.00 at once and touches no coordination record", async () => {
-    await stack.quiesce();
-    const before = await stack.read([SCHEDULER]);
+  it("answers an empty Deck with $0.00 at once", async () => {
     const deck = await deckWith([]);
     const response = await cost(0, deck);
     expect(response.cost).toMatchObject({
@@ -206,6 +190,5 @@ describe("a complete private Deck through the gateways", () => {
       total_copies: "0",
     });
     expect(response.elapsed).toBeLessThan(1_000);
-    expect(await stack.read([SCHEDULER])).toEqual(before);
   }, 30_000);
 });

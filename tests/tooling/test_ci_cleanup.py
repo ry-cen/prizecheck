@@ -152,7 +152,7 @@ class CiCleanupTest(unittest.TestCase):
         for pid in self.pids('started'):
             self.assertIn(pid, reported)
         kept = sorted(path.name for path in self.temporary.iterdir())
-        self.assertEqual(len(kept), 5, kept)  # mail file, projection, catalog fixture, runner lock and work directories
+        self.assertEqual(len(kept), 4, kept)  # mail file, projection, catalog fixture and work directories
         for name in kept:
             self.assertIn(name, reported)
 
