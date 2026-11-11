@@ -1,3 +1,5 @@
+import { restorePageScroll } from "./restorePageScroll";
+import { usePageTitle } from "./usePageTitle";
 import { LoanRecoveryProvider } from "../loans/LoanRecovery";
 import { itemTabName } from "../threads/threadPresentation";
 import { PageVisibility } from "../ui/PageVisibility";
@@ -66,6 +68,7 @@ type Props = {
   /** The page to show. App has already sent addresses that are no page to Collection. */
   page: PageId;
   path: string;
+  entry: string;
   /** The signed-in email, when the session gave one. */
   email: string | null;
   /** The name from the latest provider sign-in, shown above the email in the avatar menu. */
@@ -134,6 +137,7 @@ export function Shell(props: Props) {
 function ShellFrame({
   page,
   path,
+  entry,
   email,
   name = null,
   image = null,
@@ -188,7 +192,6 @@ function ShellFrame({
       }),
     [owner]
   );
-  const shown = useRef(new Set<PageId>());
   const containers = useRef(new Map<PageId, HTMLDivElement>());
   const otherContainer = useRef<HTMLDivElement>(null);
   const current = pageDef(page);
@@ -240,15 +243,19 @@ function ShellFrame({
           .querySelectorAll<HTMLDialogElement>("dialog[open]")
           .forEach((dialog) => dialog.close());
     });
-    if (otherKey !== null) {
-      window.scrollTo(0, 0);
-      return;
-    }
-    const returning = path === current.path && shown.current.has(page);
-    if (path === current.path) shown.current.add(page);
-    else shown.current.delete(page);
-    window.scrollTo(0, returning ? scrollFor(current.path) : 0);
-  }, [page, path, otherKey]);
+    return restorePageScroll(
+      otherKey !== null ? otherContainer.current : containers.current.get(page),
+      scrollFor(path)
+    );
+  }, [page, path, otherKey, entry]);
+
+  usePageTitle(
+    () => (other ? otherContainer.current : containers.current.get(page)),
+    other?.label || current.label,
+    `${page}:${path}:${otherKey ?? ""}`,
+    (heading) =>
+      page === "collection" && heading === "All owned" ? current.label : heading
+  );
 
   function go(next: PageId) {
     if (next !== "settings") settingsNavigation.cancel();

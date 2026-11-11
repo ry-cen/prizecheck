@@ -38,7 +38,8 @@ const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 const apiOrigin = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 const internalSecret = process.env.INTERNAL_AUTH_SECRET || "";
 const publicReadLimiter = new PublicReadLimiter();
-const PUBLIC_ART_PATH = /^\/api\/public\/art\/[^/]+\/[^/]+$/;
+const PUBLIC_ART_PATH = /^\/api\/public\/(?:art|edition-art)\/[^/]+\/[^/]+$/;
+const EDITION_ART_PATH = /^\/api\/public\/edition-art\/[^/]+\/[^/]+$/;
 const publicArtLimiter = new PublicReadLimiter(600);
 if (
   !ownerEmail ||
@@ -655,7 +656,7 @@ const server = createServer(async (request, response) => {
         });
         const link = upstream.headers.get("location");
         if (
-          ART_PATH.test(path) &&
+          (ART_PATH.test(path) || EDITION_ART_PATH.test(path)) &&
           upstream.status === 302 &&
           link &&
           ART_LINK.test(link)

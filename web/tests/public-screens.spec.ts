@@ -570,3 +570,15 @@ test.describe("phone", () => {
     await expectPageChecks(page, "unavailable inside the shell on a phone");
   });
 });
+
+test("signed-out Discover and sign-in have page titles", async ({ page }) => {
+  await page.goto(`${ORIGIN}/discover`);
+  await expect(heading(page)).toHaveText("Discover decks");
+  await expect(page).toHaveTitle("Discover decks · PrizeCheck");
+  await page
+    .getByRole("banner")
+    .getByRole("link", { name: "Sign in", exact: true })
+    .click();
+  await expect(heading(page)).toHaveText("Sign in to PrizeCheck");
+  await expect(page).toHaveTitle("Sign in · PrizeCheck");
+});

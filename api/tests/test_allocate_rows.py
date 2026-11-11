@@ -164,3 +164,28 @@ def test_the_rows_are_never_changed(counting):
     first = allocate_rows(inputs, [E], counting)
     assert inputs == before
     assert allocate_rows(inputs, [E], counting) == first
+
+
+def test_allocation_facade_preserves_symbol_identity():
+    from app import copy_allocation, settings
+    from app.core.inventory import allocation
+
+    for name in ('EditionCopies', '_place', 'held_for_line', 'spare_rule', 'LineCount', 'Allocation',
+                 'AllocationRows', 'oldest_first', '_hand_out', 'allocate_rows', 'WantListCounting'):
+        assert getattr(copy_allocation, name) is getattr(allocation, name), name
+    assert settings.WantListCounting is allocation.WantListCounting
+
+
+def test_row_allocation_imports_only_the_standard_library():
+    import ast
+    from pathlib import Path
+    import sys
+    from app.core.inventory import allocation
+
+    tree = ast.parse(Path(allocation.__file__).read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert node.level == 0
+            assert node.module.split('.')[0] in sys.stdlib_module_names
+        elif isinstance(node, ast.Import):
+            assert all(alias.name.split('.')[0] in sys.stdlib_module_names for alias in node.names)

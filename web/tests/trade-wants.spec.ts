@@ -272,7 +272,7 @@ test.describe("on a desktop", () => {
     await expect(energy(page)).toHaveCount(2);
     await expect(
       page.getByText(
-        "Will accept controls Swap hints and trade matching, not the quantities shown on this page.",
+        "Choose which versions you would accept in a Swap or Trade. This does not change how many cards your Deck needs.",
         { exact: true }
       )
     ).toHaveCount(2);
@@ -682,7 +682,7 @@ for (const width of [320, 375, 390, 1280]) {
     await expect(heading).not.toBeFocused();
     await expect(
       page.getByText(
-        "Will accept controls Swap hints and trade matching, not the quantities shown on this page.",
+        "Choose which versions you would accept in a Swap or Trade. This does not change how many cards your Deck needs.",
         { exact: true }
       )
     ).toHaveCount(1);

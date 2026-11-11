@@ -8,6 +8,7 @@ import { MetadataReport } from "../MetadataReport";
 import { MissingCardReports } from "../MissingCardReports";
 import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
+import { FormatStandings } from "./FormatStandings";
 import { Pill } from "../ui/Pill";
 import { Select } from "../ui/Select";
 import { AskControl, copyCap, copyCard } from "../loans/BorrowDrafts";
@@ -25,10 +26,7 @@ import {
   addMayHaveCompletedFor,
   copies,
   earlierAddFinishedFor,
-  FORMATS,
   MAX_ADD,
-  STANDING_TONES,
-  STANDING_WORDS,
 } from "./catalogText";
 import {
   useCardDetails,
@@ -106,7 +104,7 @@ type CardState = {
 /**
  * Catalog's card popup (#174, spec "Catalog": CardPopup (Browse)). It answers everything about one Card Printing: the
  * art and its note; set name, code and number; regulation mark; the Card Identity when it differs from the name; the
- * owner-reviewed note on a manual record; a legality Pill per Format with the reason for an unknown one; the Editions as a picker, each with its
+ * owner-reviewed note on a manual record; a legality Pill per Format with a summary of unknown standings; the Editions as a picker, each with its
  * Variant, copies owned and price, and Owner reviewed and Unavailable badges; where the picked Edition's copies are;
  * "Friends who have this" (#251, FriendsWhoHaveThis); "Friends with this on their Trade List" with Ask to trade
  * (Trading #276, AskToTrade); the Add row (Collection | Location | − N + | Add N); and a quiet footer that opens today's
@@ -170,7 +168,7 @@ export function CatalogCardPopup({
   const row = ready?.rows[0] ?? request?.row ?? null;
   const name = ready?.printing.name ?? request?.row?.name ?? "Card details";
   const artUrl = ready
-    ? ready.printing.high_image_url
+    ? (selected?.imageUrl ?? null)
     : (request?.row?.image_url ?? null);
 
   // A report flow takes focus once its form is on screen, so it is in view and keyboard-ready.
@@ -306,13 +304,9 @@ export function CatalogCardPopup({
               {row?.set_code ?? ready.printing.set_id}) · #
               {ready.printing.collector_number}
             </p>
-            <p className={META}>
-              {row
-                ? row.regulation_mark
-                  ? `Regulation mark ${row.regulation_mark}`
-                  : "No regulation mark recorded"
-                : "Regulation mark unavailable"}
-            </p>
+            {row?.regulation_mark && (
+              <p className={META}>Regulation mark {row.regulation_mark}</p>
+            )}
             {ready.printing.identity_name !== ready.printing.name && (
               <p className={META}>
                 Card Identity: {ready.printing.identity_name}
@@ -398,7 +392,7 @@ export function CatalogCardPopup({
   );
 }
 
-/** One Pill per Format, and the reasons behind an unknown standing. */
+/** Known Format standings and one collector-facing summary for unknown ones. */
 function Legality({
   standing,
   pending,
@@ -413,32 +407,7 @@ function Legality({
         Legality
       </h3>
       {standing ? (
-        <>
-          <ul
-            aria-labelledby={headingId}
-            className="m-0 flex list-none flex-wrap gap-1.5 p-0"
-          >
-            {FORMATS.map((format) => {
-              const { status } = standing[format.value];
-              return (
-                <li key={format.value}>
-                  <Pill tone={STANDING_TONES[status]}>
-                    {format.label}: {STANDING_WORDS[status]}
-                  </Pill>
-                </li>
-              );
-            })}
-          </ul>
-          {FORMATS.filter(
-            (format) => standing[format.value].status === "unknown"
-          ).map((format) => (
-            <p key={format.value} className={META}>
-              {format.label} legality unknown:{" "}
-              {standing[format.value].reasons.join(" ") ||
-                "no reason was recorded."}
-            </p>
-          ))}
-        </>
+        <FormatStandings standing={standing} labelledBy={headingId} />
       ) : (
         <p className={META}>
           {pending ? "Loading legality…" : "Legality unavailable"}

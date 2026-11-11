@@ -31,7 +31,7 @@ const TEXT = "px-3 phone:px-4";
 const ICON_ONLY = "w-control p-0 phone:w-control-phone";
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "border-accent bg-accent font-semibold text-on-accent enabled:hover:border-accent-strong enabled:hover:bg-accent-strong",
+    "border-accent bg-accent font-semibold text-on-accent enabled:hover:border-accent-strong enabled:hover:bg-accent-strong disabled:border-border-strong disabled:bg-surface-raised disabled:text-text-muted disabled:opacity-100",
   secondary: `border-border-strong bg-surface-raised text-text enabled:hover:border-control-outline ${SELECTED}`,
   quiet: `border-transparent bg-transparent text-text-muted enabled:hover:bg-surface-raised enabled:hover:text-text ${SELECTED}`,
   danger:

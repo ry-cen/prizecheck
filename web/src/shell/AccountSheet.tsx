@@ -121,7 +121,7 @@ export function AccountSheetProvider({
       >
         {/* Drawn only while open: the desktop avatar menu shows the same name and email. */}
         {open && (name || email) && (
-          <div className="mb-2 border-b border-border pb-2 text-meta">
+          <div className="mb-2 min-w-0 border-b border-border pb-2 text-meta wrap-anywhere">
             {name && <p className="m-0 font-semibold text-text">{name}</p>}
             {email && <p className="m-0 text-text-muted">{email}</p>}
           </div>

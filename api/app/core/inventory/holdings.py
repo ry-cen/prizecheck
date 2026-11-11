@@ -6,16 +6,13 @@ owner revision and one Inventory Undo record of the ``add`` kind (migration 046)
 out again, as one action. Like every inventory command's replay row, a batch add's keeps counts only: no Edition or
 Location IDs.
 """
-import base64
 import hashlib
-import hmac
 import json
-import os
 from typing import Literal
 from uuid import UUID
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.core.ops.api_errors import api_error
@@ -233,37 +230,6 @@ def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
         api_error(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
 
 
-def cursor_encode(user_id: str, location_id: UUID, owner_revision: int, catalog_revision: int, row: dict) -> str:
-    data = json.dumps({"v": 1, "u": user_id, "l": str(location_id), "r": owner_revision,
-                       "c": catalog_revision, "k": [row["search_name"], str(row["edition_id"])]},
-                      separators=(",", ":")).encode()
-    signature = hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), data, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(data + signature).decode().rstrip("=")
-
-
-def cursor_decode(token: str, user_id: str, location_id: UUID, owner_revision: int, catalog_revision: int):
-    try:
-        raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
-        data, signature = raw[:-32], raw[-32:]
-        if not hmac.compare_digest(signature, hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), data, hashlib.sha256).digest()):
-            raise ValueError
-        payload = json.loads(data)
-        if payload["v"] != 1 or payload["u"] != user_id or payload["l"] != str(location_id):
-            raise ValueError
-        if payload["r"] != owner_revision:
-            api_error(409, "INVENTORY_CHANGED")
-        if payload["c"] != catalog_revision:
-            api_error(409, "CATALOG_CHANGED")
-        key = payload["k"]
-        if not isinstance(key, list) or len(key) != 2 or not isinstance(key[0], str):
-            raise ValueError
-        return key[0], UUID(key[1])
-    except HTTPException:
-        raise
-    except (ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
-        api_error(400, "INVALID_CURSOR")
-
-
 @router.get("/{location_id}", response_model=LeafHoldings)
 def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, max_length=1024),
                   name: str=Query(default='',max_length=120),set_id: str=Query(default='',max_length=80),
@@ -305,14 +271,14 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
           p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
           coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
           coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
-          coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade
+          coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade,art.reference_only AS art_reference
           FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
           JOIN catalog_edition e ON e.id=h.edition_id
           JOIN catalog_printing p ON p.id=e.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
           JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
           LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
-          LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
+          LEFT JOIN catalog_edition_art art ON art.edition_id=e.id
           LEFT JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=p.id
           WHERE h.owner_id=%s AND h.location_id=%s {filters} {after}
           ORDER BY {order} LIMIT 49""", params).fetchall()
@@ -320,7 +286,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
         views = [HoldingView(edition_id=row["edition_id"], quantity=str(row["quantity"]), version=row["version"],
                              printing_id=row["printing_id"], printing_name=row["printing_name"],
                              set_id=row["set_id"], set_name=row["set_name"], set_code=row["set_code"], collector_number=row["collector_number"],
-                             descriptor=row["descriptor"], image_url=route_address(row["printing_id"], row["art_source"], upgrade=row["art_upgrade"]),
+                             descriptor=row["descriptor"], image_url=route_address(row["printing_id"], row["art_source"], upgrade=row["art_upgrade"], reference_only=row["art_reference"]),
                              location_id=row["location_id"], location_name=row["location_name"]) for row in page]
         return LeafHoldings(holdings=views, owner_revision=revision, catalog_revision=state["revision"],
                             next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>48 else None)

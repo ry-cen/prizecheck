@@ -1356,3 +1356,227 @@ test.describe("mobile", () => {
     await expectActionsOverToast(page);
   });
 });
+
+test("Collection Location addresses survive reload, deep links and Back", async ({
+  page,
+}) => {
+  await signIn(page);
+  const first = await createLocation(page, "Continuity first", null);
+  const second = await createLocation(page, "Continuity second", null);
+  await page.reload();
+  await expectCounts(page, "Continuity first", "This Location has no cards.");
+  await expect(page).toHaveURL(new RegExp(`location=${first}`));
+  await expectCounts(page, "Continuity second", "This Location has no cards.");
+  await page.goBack();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Continuity first"
+  );
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Continuity first"
+  );
+  await expect(page).toHaveTitle("Continuity first · PrizeCheck");
+  await page.goto(new URL(`/collection?location=${second}`, page.url()).href);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Continuity second"
+  );
+  await page.goto(new URL("/collection?location=missing", page.url()).href);
+  await expect(
+    page.getByText("This Location is unavailable. Showing All owned.")
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
+  await expect(page).toHaveTitle("Collection · PrizeCheck");
+  await page.goto(new URL("/catalog", page.url()).href);
+  await expect(page).toHaveTitle("Catalog · PrizeCheck");
+});
+
+test("Back closes the phone card sheet then leaves Collection, and jumps release its scroll lock", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  promoteCatalog({ "card-1": "Continuity Abra" });
+  await signIn(page);
+  const leaf = await createLocation(page, "Continuity binder", null);
+  await addCopies(page, leaf, await editionOf("card-1"), 1);
+  await page.goto(new URL("/catalog", page.url()).href);
+  await page
+    .getByRole("navigation", { name: "Main views" })
+    .getByRole("button", { name: "Collection", exact: true })
+    .click();
+  await expect(tiles(page)).toHaveCount(1);
+  const overflow = await page.evaluate(() => document.body.style.overflow);
+  await tiles(page).first().click();
+  await expect(page).toHaveURL(/card=/);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe("hidden");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/collection$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/catalog$/);
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe(overflow);
+  await page.goForward();
+  await tiles(page).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  // Jump over the sheet and its underlying Collection entry in one history traversal.
+  await page.evaluate(() => window.history.go(-2));
+  await expect(page).toHaveURL(/\/catalog$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe(overflow);
+  await page.goForward();
+  await page.goForward();
+  await expect(page).toHaveURL(/card=/);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Close details", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/collection$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/catalog$/);
+  // A direct sheet link closes safely even without a pushed parent entry.
+  await page.goForward();
+  await tiles(page).first().click();
+  const direct = page.url();
+  await page.goto(new URL("/catalog", page.url()).href);
+  await page.goto(direct);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Close details", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/collection$/);
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.overflow))
+    .toBe(overflow);
+});
+
+test("unavailable Collection card links explain the fallback and remove card and copy", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto(
+    new URL("/collection?card=foreign-holding&copy=4", page.url()).href
+  );
+  await expect(
+    page.getByText("This card is unavailable here. Showing your cards.")
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/collection$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+for (const remaining of [1, 0]) {
+  test(`a reloaded pushed phone sheet with ${remaining ? "an unavailable copy normalizes inside the modal" : "an unavailable Holding closes"} and keeps Back to Catalog`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    promoteCatalog({ "card-1": "Continuity Abra" });
+    await signIn(page);
+    const leaf = await createLocation(page, "Continuity binder", null);
+    const edition = await editionOf("card-1");
+    await addCopies(page, leaf, edition, 2);
+    await page.goto(new URL("/catalog", page.url()).href);
+    await page
+      .getByRole("navigation", { name: "Main views" })
+      .getByRole("button", { name: "Collection", exact: true })
+      .click();
+    await expect(tiles(page)).toHaveCount(2);
+    await tiles(page).nth(1).click();
+    await expect(page).toHaveURL(/card=.*&copy=1$/);
+    await expect(page.getByRole("dialog")).toBeVisible();
+
+    // Another tab removes copy 2, or the entire Holding, while this history entry remains open.
+    await sql(
+      `WITH changed AS (
+         UPDATE inventory_owner SET revision=revision+1
+         WHERE user_id=(SELECT owner_id FROM location WHERE id=$1) RETURNING revision
+       ) ${remaining ? "UPDATE holding SET quantity=1,version=(SELECT revision FROM changed)" : "DELETE FROM holding"}
+       WHERE location_id=$1 AND edition_id=$2`,
+      [leaf, edition]
+    );
+    const normalized = new URL(page.url());
+    normalized.searchParams.delete("copy");
+    await page.reload();
+    if (remaining) {
+      await expect(page).toHaveURL(normalized.href);
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      const feedback = dialog.getByRole("status");
+      await expect(feedback).toHaveText(
+        "This copy is unavailable. Showing the first copy."
+      );
+      // The native modal makes content outside it inert: check the feedback's accessible subtree.
+      await expect(feedback).toMatchAriaSnapshot(
+        "- status: This copy is unavailable. Showing the first copy."
+      );
+      await dialog
+        .getByRole("button", { name: "Close details", exact: true })
+        .click();
+    } else {
+      await expect(
+        page.getByRole("status").filter({
+          hasText: "This card is unavailable here. Showing your cards.",
+        })
+      ).toBeVisible();
+    }
+    await expect(page).toHaveURL(/\/collection$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => document.body.style.overflow))
+      .not.toBe("hidden");
+    // Real browser traversal must leave Collection, without a duplicate entry from validation/Close.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/catalog$/);
+  });
+}
+
+test("Collection restores each Location's scroll on Back and Forward", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 840 });
+  promoteCatalog({ "card-1": "Scroll Abra" });
+  await signIn(page);
+  const first = await createLocation(page, "0 0 Scroll A", null);
+  const second = await createLocation(page, "0 0 Scroll B", null);
+  const edition = await editionOf("card-1");
+  await addCopies(page, first, edition, 40);
+  await addCopies(page, second, edition, 40);
+  await page.reload();
+  await expectCounts(page, "0 0 Scroll A", "40 copies · 1 edition");
+  await expect(tiles(page)).toHaveCount(40);
+  await page.evaluate(() => window.scrollTo(0, 500));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(500);
+  const savedA = await page.evaluate(() => window.scrollY);
+  await expectCounts(page, "0 0 Scroll B", "40 copies · 1 edition");
+  await expect(tiles(page)).toHaveCount(40);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await page.evaluate(() => window.scrollTo(0, 350));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(350);
+  const savedB = await page.evaluate(() => window.scrollY);
+  await page.goBack();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "0 0 Scroll A"
+  );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(500);
+  const restoredA = await page.evaluate(() => window.scrollY);
+  await page.goForward();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "0 0 Scroll B"
+  );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(350);
+  const restoredB = await page.evaluate(() => window.scrollY);
+  await test.info().attach("Location history scroll", {
+    body: JSON.stringify({
+      A: { saved: savedA, restored: restoredA },
+      B: { saved: savedB, restored: restoredB },
+    }),
+    contentType: "application/json",
+  });
+});

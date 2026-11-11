@@ -46,8 +46,8 @@ ALLOWED_IMPORTS = {
     # Pure owner/key receipt presence; no inventory or hidden-Location access.
     'app.social.owners': {('app.location_tree', 'replay'), ('app.location_tree', 'replay_with_presence')},
     # The choke point counts each Friend's wants with the pure allocation over rows it reads itself (trading #276).
-    'app.social.friend_copies': {('app.social', 'counts'), ('app', 'copy_allocation'), ('app.copy_allocation', 'allocate_rows'),
-                                ('app.copy_allocation', 'AllocationRows')},
+    'app.social.friend_copies': {('app.social', 'counts'), ('app.core.inventory', 'allocation'), ('app.core.inventory.allocation', 'allocate_rows'),
+                                ('app.core.inventory.allocation', 'AllocationRows')},
     'app.social.friend_reads': {
         ('app.card_accepts', 'accepts'), ('app.core.trading.trade_wants', 'own_rules'),
         ('app.social', 'name_rules'), ('app', 'set_codes'), ('app.db', 'connect'), ('app.identity', 'verified_user'),
@@ -68,7 +68,7 @@ ALLOWED_IMPORTS = {
         ('app.trade_list', 'own_trade_copies'), ('app.core.trading.trade_wants', 'own_wants'), ('app.core.trading.trade_wants', 'own_rules'),
         ('app.want_list', 'capture_want_list'), ('app.social.friend_copies', 'friend_wants'), ('app.card_accepts', 'accepts'),
         # WP3b, owner-approved: own needs by Edition stays under one viewer lock, using the existing Want List fold.
-        ('app.want_list', 'edition_needs'), ('app.social.owners', 'ensure_owner'), ('app.social.owners', 'lock_owners'),
+        ('app.core.decks.edition_needs', 'edition_needs'), ('app.social.owners', 'ensure_owner'), ('app.social.owners', 'lock_owners'),
         ('app.social.friends', 'friend_ids'),
         # Each Friend's completed-Trade count on their row and Trade List (trading #298), one read for all of them.
         ('app.social.trades', 'completed_trades'),
@@ -111,6 +111,7 @@ ALLOWED_IMPORTS = {
         ('app.social.conversations', 'encode_cursor'), ('app.social.conversations', 'decode_cursor'),
         ('app.social.trades', 'end_trades_between'), ('app.social.trades', 'unconfirmed_partners'),
         ('app.social.loans', 'end_loans_between'),
+        ('app.social.loans', 'UNCONFIRMED_HANDOVER'),
         ('app.core.catalog.card_facts', 'card_facts')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in

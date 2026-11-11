@@ -21,6 +21,8 @@ type Props = Omit<
   owned: number;
   /** The owned badge's text, by default "×N". The deck builder's library shows free of owned instead. */
   badge?: string;
+  /** Keep ownership above controls overlaid on the bottom of the art. */
+  ownedBadgePosition?: "bottom-right" | "top-right";
   /** How the label and title say what is owned, by default "N owned" or "not owned". */
   ownedText?: string;
   /** A small Pill on the artwork, such as "?" for a Format Standing that is unknown, and the words the label
@@ -63,6 +65,7 @@ export function EditionTile({
   imageUrl,
   owned,
   badge,
+  ownedBadgePosition = "bottom-right",
   ownedText,
   flag,
   price,
@@ -94,16 +97,28 @@ export function EditionTile({
     >
       <span aria-hidden="true" className={`${ART} ${QUEUED_ART} relative`}>
         <EditionArt imageUrl={imageUrl} dark={owned <= 0} />
-        {owned > 0 && (
-          <span className="pointer-events-none absolute right-1 bottom-1 box-border flex h-5 min-w-5 items-center justify-center rounded-round border-2 border-solid border-bg bg-accent px-1 text-caption font-semibold leading-none text-on-accent tabular-nums">
-            {badge ?? `×${owned}`}
-          </span>
-        )}
-        {flag && (
-          <span className="pointer-events-none absolute left-1 top-1 box-border flex h-5 min-w-5 max-w-[calc(100%-0.5rem)] items-center justify-start overflow-hidden whitespace-nowrap rounded-round border border-solid border-control-outline bg-surface-raised px-1 text-caption font-semibold leading-none text-text">
-            <span className="min-w-0 truncate">{flag.text}</span>
-          </span>
-        )}
+        <span
+          className={
+            ownedBadgePosition === "top-right"
+              ? "absolute inset-x-1 top-1 flex items-start gap-1"
+              : "contents"
+          }
+        >
+          {owned > 0 && (
+            <span
+              className={`pointer-events-none ${ownedBadgePosition === "top-right" ? "order-2 ml-auto shrink-0" : "absolute right-1 bottom-1"} box-border flex h-5 min-w-5 items-center justify-center rounded-round border-2 border-solid border-bg bg-accent px-1 text-caption font-semibold leading-none text-on-accent tabular-nums`}
+            >
+              {badge ?? `×${owned}`}
+            </span>
+          )}
+          {flag && (
+            <span
+              className={`pointer-events-none ${ownedBadgePosition === "top-right" ? "min-w-0" : "absolute left-1 top-1 min-w-5 max-w-[calc(100%-0.5rem)]"} box-border flex h-5 items-center justify-start overflow-hidden whitespace-nowrap rounded-round border border-solid border-control-outline bg-surface-raised px-1 text-caption font-semibold leading-none text-text`}
+            >
+              <span className="min-w-0 truncate">{flag.text}</span>
+            </span>
+          )}
+        </span>
       </span>
       <span
         aria-hidden="true"

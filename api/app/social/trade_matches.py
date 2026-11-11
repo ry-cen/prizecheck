@@ -86,7 +86,9 @@ from ..db import connect
 from ..identity import verified_user
 from ..trade_list import own_trade_copies
 from app.core.trading.trade_wants import own_rules, own_wants
-from ..want_list import capture_want_list, edition_needs
+from app.core.decks.edition_needs import edition_needs
+
+from ..want_list import capture_want_list
 from .owners import ensure_owner, lock_owners
 from ..core.catalog.card_facts import card_facts
 from . import name_rules

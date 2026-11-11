@@ -4,7 +4,6 @@ from decimal import Decimal
 import pytest
 from fastapi import HTTPException
 
-from app.api_errors import api_error as compatibility_api_error
 from app.core.ops.api_errors import api_error
 
 
@@ -24,11 +23,3 @@ def test_error_converts_detail_values_and_omits_only_none():
         'code': 'conflict', 'source': 'source', 'quantity': '0', 'enabled': 'False',
         'amount': '12.30', 'empty': '',
     }
-
-
-def test_compatibility_import_uses_the_same_error_raiser():
-    assert compatibility_api_error is api_error
-    with pytest.raises(HTTPException) as raised:
-        compatibility_api_error(409, 'conflict', quantity=0, missing=None)
-    assert raised.value.status_code == 409
-    assert raised.value.detail == {'code': 'conflict', 'quantity': '0'}

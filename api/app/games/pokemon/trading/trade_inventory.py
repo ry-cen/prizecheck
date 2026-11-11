@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field
 from app.deck_deletion import unsorted_leaf
 from app.core.decks.store import write_deck_list
 from app.games.pokemon.decks.commands import advance_deck_list
-from app.location_tree import error, location_paths, refuse
+from app.core.inventory.location_paths import location_paths
+from app.location_tree import error, refuse
 from app.db import connect
 from app.identity import verified_user
 from app.inventory_core import add_in, is_deck, leaf, quantity, take_out
@@ -33,7 +34,8 @@ from app.trade_list import own_trade_copies
 from app.trade_picks import (insert_trade_picks, make_trade_picks, replacement_trade_picks, stale_pick_trades,
                           trade_pick_shortfalls)
 from app.core.trading.trade_wants import lower_trade_wants
-from app.want_list import DeckSwitch, deck_switch_candidates, edition_needs
+from app.core.decks.edition_needs import edition_needs
+from app.want_list import DeckSwitch, deck_switch_candidates
 
 router = APIRouter(prefix='/api/trades', tags=['trades'])
 

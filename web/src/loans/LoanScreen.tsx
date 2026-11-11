@@ -1248,6 +1248,80 @@ export function LoanScreen({
       )
     );
 
+  // A waiting request puts its answer above the long card list so Accept and Decline start on the first screen.
+  const responseBlock = (
+    <>
+      {answering && (
+        <section
+          aria-label="Acceptance preview"
+          className="flex flex-col gap-2 rounded-panel border border-border p-3"
+        >
+          <h2 className="m-0 text-heading font-semibold">Acceptance preview</h2>
+          <p className="m-0 text-body">
+            {total} {lender ? "to lend" : "to borrow"};{" "}
+            {Math.max(
+              0,
+              loan.lines.reduce(
+                (sum, line) => sum + Number(line.requested),
+                0
+              ) - total
+            )}{" "}
+            not lent.
+          </p>
+          {loan.lines.length > 0 && (
+            <p className="m-0 text-meta text-text-muted">
+              {lender
+                ? "Choose how many of each card to lend below."
+                : "Choose how many of each card to take below."}
+            </p>
+          )}
+          <p className="m-0 text-body">
+            {(lender ? answerDate : loan.return_by)
+              ? `Return by ${dayText((lender ? answerDate : loan.return_by)!)}.`
+              : "No return date."}{" "}
+            {(lender ? answerDate : loan.return_by)
+              ? "Accepting agrees to these quantities and this return date."
+              : "Accepting agrees to these quantities with no return date."}
+          </p>
+        </section>
+      )}
+      <div className="flex flex-col gap-3 border-t border-border pt-4">
+        {asking ? (
+          <div
+            role="group"
+            aria-label={asks[asking].yes}
+            className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
+          >
+            <p className="m-0 min-w-0 flex-1 text-body">
+              {asks[asking].question(other)}
+            </p>
+            <Button
+              ref={askButton}
+              variant="danger"
+              aria-disabled={busy || undefined}
+              onClick={run[asking]}
+            >
+              {asks[asking].yes}
+            </Button>
+            <Button
+              onClick={() => {
+                focusNext.current = asking === "decline" ? "decline" : "menu";
+                setAsking(null);
+              }}
+            >
+              Keep it
+            </Button>
+          </div>
+        ) : (
+          primary
+        )}
+      </div>
+      <p role="alert" className="m-0 text-meta text-danger empty:hidden">
+        {message}
+      </p>
+    </>
+  );
+
   return frame(
     loanHeadline(loan),
     <>
@@ -1305,6 +1379,7 @@ export function LoanScreen({
           </Button>
         </div>
       )}
+      {answering && responseBlock}
       <ul
         aria-label="Cards"
         className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-5 p-0"
@@ -1345,65 +1420,7 @@ export function LoanScreen({
           />
         ))}
       </ul>
-      {answering && (
-        <section
-          aria-label="Acceptance preview"
-          className="flex flex-col gap-2 rounded-panel border border-border p-3"
-        >
-          <h2 className="m-0 text-heading font-semibold">Acceptance preview</h2>
-          <p className="m-0 text-body">
-            {total} {lender ? "to lend" : "to borrow"};{" "}
-            {Math.max(
-              0,
-              loan.lines.reduce(
-                (sum, line) => sum + Number(line.requested),
-                0
-              ) - total
-            )}{" "}
-            not lent.
-          </p>
-          <p className="m-0 text-body">
-            {(lender ? answerDate : loan.return_by)
-              ? `Return by ${dayText((lender ? answerDate : loan.return_by)!)}.`
-              : "No return date."}{" "}
-            Accepting agrees to these quantities and this return date.
-          </p>
-        </section>
-      )}
-      <div className="flex flex-col gap-3 border-t border-border pt-4">
-        {asking ? (
-          <div
-            role="group"
-            aria-label={asks[asking].yes}
-            className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
-          >
-            <p className="m-0 min-w-0 flex-1 text-body">
-              {asks[asking].question(other)}
-            </p>
-            <Button
-              ref={askButton}
-              variant="danger"
-              aria-disabled={busy || undefined}
-              onClick={run[asking]}
-            >
-              {asks[asking].yes}
-            </Button>
-            <Button
-              onClick={() => {
-                focusNext.current = asking === "decline" ? "decline" : "menu";
-                setAsking(null);
-              }}
-            >
-              Keep it
-            </Button>
-          </div>
-        ) : (
-          primary
-        )}
-      </div>
-      <p role="alert" className="m-0 text-meta text-danger empty:hidden">
-        {message}
-      </p>
+      {!answering && responseBlock}
     </>,
     menu.length > 0 && (
       <div ref={menuAnchor}>

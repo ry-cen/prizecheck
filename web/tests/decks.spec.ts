@@ -117,7 +117,7 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     ).toBe(200);
     // In Collection the Deck holds 59 under its banner, whose link opens the deck builder again.
     await page.goto(`${ORIGIN}/collection?location=${deckId}`);
-    await expect(page).toHaveURL(/\/collection$/);
+    await expect(page).toHaveURL(`${ORIGIN}/collection?location=${deckId}`);
     await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
     await expect(page.getByRole("main")).toContainText("59 copies · 1 edition");
     await page

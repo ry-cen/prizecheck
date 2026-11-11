@@ -81,7 +81,7 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   await page.goto(`${ORIGIN}/loans`);
   await expect(
     page.getByRole("region", { name: "Pending" }).getByRole("link")
-  ).toContainText("You give 0 · You get 1");
+  ).toContainText("Borrowing 1");
   await page.getByRole("button", { name: "Friends", exact: true }).click();
   const yours = friends(page).getByRole("region", { name: "Your Friends" });
   await yours.getByRole("button", { name: "More for Misty W" }).click();
@@ -103,7 +103,7 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   await expect(page.getByRole("region", { name: "Pending" })).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Out now" }).getByRole("link")
-  ).toContainText("You give 0 · You get 1");
+  ).toContainText("Borrowing 1");
   await page.locator("summary", { hasText: "Done" }).click();
   await page.locator(`a[data-thread="${pending}"]`).click();
   await expect(page).toHaveURL(`${ORIGIN}/loans/${pending}`);
@@ -128,7 +128,7 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   await lender.goto(`${ORIGIN}/loans`);
   await expect(
     lender.getByRole("region", { name: "Out now" }).getByRole("link")
-  ).toContainText("You give 1 · You get 0");
+  ).toContainText("Lending 1");
   await lender.setViewportSize(PHONE);
   await lender.getByRole("button", { name: /^Inbox/ }).click();
   const earlier = inbox(lender).getByRole("region", { name: "Earlier" });

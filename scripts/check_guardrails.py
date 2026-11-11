@@ -5,6 +5,8 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'scripts'))
+import migration_tracks  # noqa: E402
 
 
 def violations(source, filename):
@@ -376,10 +378,11 @@ def colour_scope_files():
 
 
 def set_code_migration_violations(migrations, tsv_text):
-    """``migrations`` maps file name to text. The newest migration that opens with a set_codes.tsv digest line must carry
-    the digest of the TSV as it is now, or the TSV changed without its migration."""
+    """``migrations`` maps ledger name to text across every track. Set Code is Pokémon's own track, whose names carry no
+    track prefix, so a core or other game file is ignored here. The newest migration that opens with a set_codes.tsv digest
+    line must carry the digest of the TSV as it is now, or the TSV changed without its migration."""
     import hashlib
-    for name in sorted(migrations, reverse=True):
+    for name in sorted((name for name in migrations if '/' not in name), reverse=True):
         found = re.match(r'-- set_codes\.tsv digest: ([0-9a-f]{16})(?:\n|$)', migrations[name])
         if found:
             if found.group(1) == hashlib.sha256(tsv_text.encode()).hexdigest()[:16]:
@@ -388,12 +391,102 @@ def set_code_migration_violations(migrations, tsv_text):
     return [('migrations', 'FAILED: no migration carries a set_codes.tsv digest; run scripts/set_code_migration.py <next number>')]
 
 
+# Migration numbers #564 (IM-11) left duplicated: nothing is renumbered, and no new duplicate may appear.
+ALLOWED_DUPLICATE_MIGRATIONS = {
+    '161': ('161_likely_reprint_dismissals.sql', '161_tcgplayer_large_art.sql'),
+}
+
+
+def migration_number_violations(directory, allowed=None):
+    """Every top-level ``*.sql`` file of ``directory`` (the runner applies all of them) must be named ``NNN_<name>.sql`` and
+    may not share its number with another, except the exact filename groups in ``allowed`` (number to filenames, any
+    order; none by default). A group with a file missing or renamed also fails, so the exception cannot drift."""
+    allowed = allowed or {}
+    names = sorted(path.name for path in Path(directory).glob('*.sql'))
+    by_number = {}
+    problems = []
+    for name in names:
+        found = re.match(r'([0-9]{3})_', name)
+        if found:
+            by_number.setdefault(int(found.group(1)), []).append(name)
+        else:
+            problems.append((name, 'FAILED: migration names must start with a three-digit number and an underscore, like 162_name.sql'))
+    for number, files in sorted(by_number.items()):
+        if len(files) > 1 and set(files) != set(allowed.get(f'{number:03d}', ())):
+            problems.append((f'{number:03d}', f'FAILED: migrations share number {number:03d}: {", ".join(files)}; use the next free number'))
+    for number, expected in sorted(allowed.items()):
+        for name in expected:
+            if name not in names:
+                problems.append((number, f'FAILED: allow-listed duplicate migration {name} is missing or renamed'))
+    return problems
+
+
+def frozen_root_migrations():
+    """``(cutoff, frozen names)``: the root migrations through Pokémon's cutoff, which core/000_baseline.sql was cut from. The
+    names are the keys of api/tests/core_baseline_ownership.py's FILE_OWNERS, which test_core_baseline.py recomputes from the files."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('core_baseline_ownership', ROOT/'api/tests/core_baseline_ownership.py')
+    ownership = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ownership)
+    flag = sys.dont_write_bytecode
+    try:
+        import migrate
+    finally:
+        sys.dont_write_bytecode = flag
+    return migrate.CUTOFF, frozenset(ownership.FILE_OWNERS)
+
+
+def frozen_root_violations(migrations, cutoff, frozen):
+    """``(label, reason)`` for a root migration that sorts at or before ``cutoff`` and is not one of the ``frozen`` names, and for
+    a frozen name that is missing. The cutoff is by file name (scripts/migrate.py runs root files through it before the core
+    track), so a new root file must be numbered after it: 163 onward."""
+    present = {path.name for path in Path(migrations).glob('*.sql')}
+    problems = [(f'migrations/{name}', f'FAILED: a new root migration must be numbered after the Pokémon cutoff {cutoff} (use the next free number from 163), '
+                                       'because root files through the cutoff are frozen and run before the core track')
+                for name in sorted(present) if name <= cutoff and name not in frozen]
+    problems += [(f'migrations/{name}', f'FAILED: {name} is a frozen root migration (through the cutoff {cutoff}) and is missing or renamed')
+                 for name in sorted(frozen - present)]
+    return problems
+
+
+def nested_migration_violations(migrations):
+    """``(label, reason)`` for each ``.sql`` file two or more directories below ``migrations``: no track applies it, so it
+    must fail by name instead of being ignored (the runner and the release tools refuse the same tree)."""
+    return [(f'migrations/{name}', 'FAILED: a migration sits more than one directory below migrations/, where no track runs it; '
+                                   'move it into migrations/ or directly into a track directory')
+            for name in migration_tracks.nested_files(migrations)]
+
+
+def track_number_violations(migrations, allowed=None):
+    """``migration_number_violations`` for the root track and for each track directory, one number space per track: a number
+    may repeat across tracks, never within one. ``allowed`` (the explicit 161 pair) applies to the root track only.
+    A tree with a nested ``.sql`` file gets that error alone: the track tools refuse such a tree, so nothing else is read from
+    it until the file is moved. Returns ``(label, reason)``, the label naming the file or number under ``migrations/``."""
+    problems = nested_migration_violations(migrations)
+    if problems:
+        return problems
+    for track in migration_tracks.every_track(migrations):
+        prefix = f'{track.directory}/' if track.directory else ''
+        for name, reason in migration_number_violations(Path(migrations)/track.directory, None if track.directory else allowed):
+            problems.append((f'migrations/{prefix}{name}', reason))
+    return problems
+
+
 def main():
     failed = False
-    migrations = {path.name: path.read_text() for path in (ROOT/'migrations').glob('*.sql')}
-    for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/games/pokemon/catalog/set_codes.tsv').read_text(encoding='utf-8')):
-        print(f'{name}: {reason}')
+    problems = track_number_violations(ROOT/'migrations', ALLOWED_DUPLICATE_MIGRATIONS)
+    for label, reason in problems:
+        print(f'{label}: {reason}')
         failed = True
+    cutoff, frozen = frozen_root_migrations()
+    for label, reason in frozen_root_violations(ROOT/'migrations', cutoff, frozen):
+        print(f'{label}: {reason}')
+        failed = True
+    if not migration_tracks.nested_files(ROOT/'migrations'):
+        migrations = {name: path.read_text() for name, path in migration_tracks.files(ROOT/'migrations').items()}
+        for name, reason in set_code_migration_violations(migrations, (ROOT/'api/app/games/pokemon/catalog/set_codes.tsv').read_text(encoding='utf-8')):
+            print(f'{name}: {reason}')
+            failed = True
     for relative in ('scripts/release.py', 'scripts/release_runtime.py'):
         for line, reason in violations((ROOT/relative).read_text(), relative):
             print(f'{relative}:{line}: {reason}')

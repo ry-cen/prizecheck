@@ -142,6 +142,7 @@ class ThreadItem(BaseModel):
     summary: OfferSummary
     section: Literal['needs_you', 'open', 'out_now', 'pending', 'done']
     state: str
+    closed_reason: Literal['declined', 'withdrawn', 'cancelled', 'returned', 'written_off'] | None = None
     waiting: str | None = None
     unread: int = 0
     needs_you: bool = False
@@ -596,6 +597,7 @@ def thread_items(conn, user_id: str, kind: Kind, marks: list[dict] | None = None
         if marks_by_id[row['id']]['needs_you']:
             section = 'needs_you'
         result.append(ThreadItem(id=row['id'], kind=kind, other=party, state=state,
+                                 closed_reason=live['closed_reason'] if kind == 'loan' and state == 'closed' else None,
                                  you_are='low' if row['user_low'] == user_id else 'high', section=section,
                                  summary=OfferSummary(cards=previews, you_give=str(counts['you_give']),
                                                       you_get=str(counts['you_get']), cash=cash),

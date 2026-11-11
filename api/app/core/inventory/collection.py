@@ -12,7 +12,7 @@ from app.core.ops.api_errors import api_error as fail
 from app.core.art.urls import route_address
 from app.db import connect
 from app.core.inventory.holdings import HoldingView
-from app.location_tree import LOCATION_PATHS
+from app.core.inventory.location_paths import LOCATION_PATHS
 from app.social import counts
 from .cursors import anchor_columns, anchor_json, anchor_value, cursor_key, decode_cursor, encode_cursor
 
@@ -42,20 +42,20 @@ class Distribution(BaseModel):
 
 COLUMNS = """e.id AS edition_id,e.printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
  coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
- coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade"""
+ coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade,art.reference_only AS art_reference"""
 JOINS = """JOIN catalog_edition e ON e.id=h.edition_id
  JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
  JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
  LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
- LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
+ LEFT JOIN catalog_edition_art art ON art.edition_id=e.id
  LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s"""
 
 
 def views(rows, model=HoldingView):
     """The page's rows as views. Rows carry the art source, not the address: the route address (ADR 0020) is built here,
     for the page only, so a large Collection does not hash a version for every catalog row."""
-    return [model(**{**{key:value for key,value in row.items() if key not in ('art_source','art_upgrade')},'quantity':str(row['quantity']),
-             'image_url':route_address(row['printing_id'],row['art_source'],upgrade=row['art_upgrade'])}) for row in rows]
+    return [model(**{**{key:value for key,value in row.items() if key not in ('art_source','art_upgrade','art_reference')},'quantity':str(row['quantity']),
+             'image_url':route_address(row['printing_id'],row['art_source'],upgrade=row['art_upgrade'],reference_only=row['art_reference'])}) for row in rows]
 
 
 def collection(name, set_id, collector_number, sort, location_id, cursor, user_id):
@@ -95,7 +95,7 @@ def collection(name, set_id, collector_number, sort, location_id, cursor, user_i
         rows=conn.execute(f"""WITH totals AS (SELECT {COLUMNS},sum(h.quantity) AS quantity,
           coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name
           FROM holding h {JOINS} WHERE h.owner_id=%s {scope} {filters}
-          GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id,art.low_image_url,art.stored_upgrade_url,psc.set_code)
+          GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id,art.low_image_url,art.stored_upgrade_url,art.reference_only,psc.set_code)
           SELECT * FROM totals {after} ORDER BY {order} LIMIT 31""",params).fetchall()
         page=rows[:30]
         next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>30 else None
@@ -115,7 +115,7 @@ def distribution(edition_id, user_id):
 # Holding-level listing for the collector workspace gallery (tickets #103 and #104).
 # One row per Holding (Storage Leaf + Card Edition), never per copy: the client expands quantities into tiles.
 HOLDING_PAGE_SIZE = 500
-# Full Location paths such as "Shelf / Binder 2" (``location_tree.LOCATION_PATHS``).
+# Full Location paths such as "Shelf / Binder 2" (``location_paths.LOCATION_PATHS``).
 HOLDING_PATHS = LOCATION_PATHS
 # Every sort key is NOT NULL: a NULL would drop rows from the keyset comparison.
 # edition_total is the Card Edition's copies within the listed rows (the view after search and filters).
@@ -126,7 +126,7 @@ def holding_columns(*, facet_columns):
     return f"""h.edition_id,h.location_id,l.name AS location_name,coalesce(lp.path,l.name) AS location_path,h.quantity,h.version,
       p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
       coalesce(pd.set_id,'') AS set_id,psc.set_code AS set_code,coalesce(pd.set_name,'') AS set_name,
-      coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade,
+      coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS art_source,art.stored_upgrade_url AS art_upgrade,art.reference_only AS art_reference,
       {facet_columns},
       coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
       lower(coalesce(lp.path,l.name)) AS location_key,
@@ -144,7 +144,7 @@ def card_joins(*, facet_joins):
       JOIN catalog_identity ci ON ci.id=p.identity_id
       JOIN catalog_printing_set_code psc ON psc.printing_id=p.id
       LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
-      LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
+      LEFT JOIN catalog_edition_art art ON art.edition_id=e.id
     {facet_joins}"""
 
 

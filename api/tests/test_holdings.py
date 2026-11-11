@@ -53,6 +53,7 @@ def add(owner, leaf, edition, quantity, key=None):
 
 
 def test_add_replay_increment_privacy_and_boundaries():
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
     owner, other, leaf, other_leaf, edition, generation = fixture()
     key = uuid4()
     first = add(owner, leaf, edition, "2", key)
@@ -73,7 +74,11 @@ def test_add_replay_increment_privacy_and_boundaries():
     assert page.json()["holdings"][0]["set_id"] == "base" and page.json()["holdings"][0]["set_code"] == "base"
     for invalid in ("0", "-1", "1.5", "", "9223372036854775808"):
         assert add(owner, leaf, edition, invalid).status_code == 422
-    assert add(owner, leaf, edition, str(2**63 - 3)).json()["detail"]["code"] == "QUANTITY_OVERFLOW"
+    overflow = add(owner, leaf, edition, str(2**63 - 3))
+    assert overflow.status_code == 422 and overflow.json()["detail"]["code"] == "QUANTITY_OVERFLOW"
+    assert call("GET", f"/api/holdings/{leaf}", owner).json() == page.json()
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        assert conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (owner,)).fetchone()[0] == second.json()["owner_revision"]
     assert add(owner, other_leaf, edition, "1").status_code == 404
     assert add(owner, str(uuid4()), edition, "1").status_code == 404
     assert call("GET", f"/api/holdings/{leaf}", other).status_code == 404
@@ -113,10 +118,16 @@ def test_concurrent_adds_and_failure_rollback():
 
 
 def test_maximum_quantity_and_inventory_cursor_refresh():
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
     owner, _, leaf, _, edition, generation = fixture()
     maximum = add(owner, leaf, edition, str(2**63 - 1))
     assert maximum.status_code == 200 and maximum.json()["quantity"] == str(2**63 - 1)
-    assert add(owner, leaf, edition, "1").json()["detail"]["code"] == "QUANTITY_OVERFLOW"
+    before = call("GET", f"/api/holdings/{leaf}", owner).json()
+    overflow = add(owner, leaf, edition, "1")
+    assert overflow.status_code == 422 and overflow.json()["detail"]["code"] == "QUANTITY_OVERFLOW"
+    assert call("GET", f"/api/holdings/{leaf}", owner).json() == before
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        assert conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (owner,)).fetchone()[0] == maximum.json()["owner_revision"]
     assert call("GET", f"/api/holdings/{leaf}", owner).json()["holdings"][0]["quantity"] == str(2**63 - 1)
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         printing = conn.execute("SELECT printing_id FROM catalog_edition WHERE id=%s", (edition,)).fetchone()[0]

@@ -405,7 +405,7 @@ function AddTradeWant({
                     key={edition.edition_id}
                     className="flex flex-wrap items-center gap-x-3 gap-y-1"
                   >
-                    <span className="min-w-0 flex-1 text-body wrap-anywhere">
+                    <span className="min-w-0 flex-1 text-body wrap-anywhere phone:basis-full">
                       {editionText(edition)}
                       {have > 0 && (
                         <span className="text-meta text-text-muted">

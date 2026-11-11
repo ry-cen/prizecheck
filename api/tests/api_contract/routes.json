@@ -985,6 +985,13 @@
  ],
  [
   [
+   "GET"
+  ],
+  "/api/public/edition-art/{edition_ref}/{size}",
+  "edition_art"
+ ],
+ [
+  [
    "POST"
   ],
   "/api/scanner/save",

@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { COUNTING_OPTIONS } from "../settings/wantListCounting";
 import type { FriendCopy } from "../social_generated";
-import { useFriendMatches } from "../social/useFriendMatches";
+import { useBorrowMatches } from "./useBorrowMatches";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { getWantList, type WantList } from "../want_list_generated";
@@ -11,7 +11,6 @@ import { useTradeWants } from "./useTradeWants";
 import { useWantListCost, WantListCostContext } from "./WantListCost";
 import { NeededLines } from "./WantListView";
 import { useWantListSwap } from "./useWantListSwap";
-import { usePendingLoans } from "./usePendingLoans";
 
 const NO_COPIES = new Map<string, FriendCopy[]>();
 
@@ -101,11 +100,10 @@ function PanelBody({ deckId, pins }: { deckId: string; pins: string }) {
     },
     notify: setNotice,
   });
-  const friends = useFriendMatches(list, attempt);
+  const { friends, pending } = useBorrowMatches(list, attempt, pins);
   const trade = useTradeWants(reload);
   // What this Deck is waiting on from Friends, read apart from the Want List, so a refresh reads no cost again. The
   // builder's pins (Deck List, owner and settings revisions) read it again whenever they read the Want List again.
-  const pending = usePendingLoans(deckId, pins);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -176,6 +174,9 @@ function PanelBody({ deckId, pins }: { deckId: string; pins: string }) {
             trade={trade}
             borrowFor={deckId}
             pending={pending}
+            borrowReady={
+              load.fresh && friends.kind === "ready" && !friends.pending
+            }
           />
         )}
       </div>

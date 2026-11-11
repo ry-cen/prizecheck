@@ -42,6 +42,7 @@ from fastapi import HTTPException
 
 from .catalog import CatalogError, TCGdexSource
 from .catalog_dispatch import RUNNER_LOCK, dispatch_import_detailed
+from .catalog_run_states import OUTCOME_FAILED, OUTCOME_SUCCEEDED, PHASE_FAILED, QUALIFIED_LEASE_END_SQL
 from ..prices.catalog_targets import LIVE, MATCHING, load_active
 from app.db import connect
 
@@ -77,13 +78,13 @@ def pause_failures(conn) -> list[dict]:
     """The check-started pulls that failed (or were left unfinished with no live runner) after the latest successful pull,
     newest first. An owner-started run is never listed: only runs a check row names. An unfinished run counts only when no
     session holds the runner lock (an expired lease alone is not a failure)."""
-    rows = conn.execute("""WITH s AS (SELECT coalesce(max(finished_at), '-infinity') AS at FROM catalog_run
-        WHERE outcome = 'succeeded')
+    rows = conn.execute(f"""WITH s AS (SELECT coalesce(max(finished_at), '-infinity') AS at FROM catalog_run
+        WHERE outcome = '{OUTCOME_SUCCEEDED}')
       SELECT r.id, r.error, r.outcome, coalesce(r.finished_at, r.started_at) AS ended
       FROM catalog_check c JOIN catalog_run r ON r.id = c.catalog_run_id, s
       WHERE c.catalog_run_id IS NOT NULL AND coalesce(r.finished_at, r.started_at) > s.at
-        AND (r.outcome = 'failed' OR (r.outcome IS NULL
-             AND coalesce(r.lease_until, r.started_at + interval '2 minutes') < clock_timestamp()
+        AND (r.outcome = '{OUTCOME_FAILED}' OR (r.outcome IS NULL
+             AND {QUALIFIED_LEASE_END_SQL} < clock_timestamp()
              AND NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted AND database = (
                  SELECT oid FROM pg_database WHERE datname = current_database())
                AND classid = 0 AND objid = %s AND objsubid = 1)))
@@ -118,10 +119,10 @@ def _wait_for_pull(conn, run_id, child) -> tuple[str, str | None]:
         return row
 
     def settled(row):
-        if row and row["outcome"] == "succeeded":
-            return "succeeded", None
-        if row and row["outcome"] == "failed":
-            return "failed", pull_error_code(row["error"])
+        if row and row["outcome"] == OUTCOME_SUCCEEDED:
+            return OUTCOME_SUCCEEDED, None
+        if row and row["outcome"] == OUTCOME_FAILED:
+            return OUTCOME_FAILED, pull_error_code(row["error"])
         return None
 
     row = read()
@@ -130,7 +131,7 @@ def _wait_for_pull(conn, run_id, child) -> tuple[str, str | None]:
     # The child is gone and the run is not finished: nothing is running it any more.
     if row and row["lease_expired"]:
         log.warning("pull %s: its lease had expired", run_id)
-    marked = conn.execute("""UPDATE catalog_run SET phase = 'failed', outcome = 'failed', error = %s, finished_at = now(),
+    marked = conn.execute(f"""UPDATE catalog_run SET phase = '{PHASE_FAILED}', outcome = '{OUTCOME_FAILED}', error = %s, finished_at = now(),
       lease_until = NULL WHERE id = %s AND outcome IS NULL RETURNING id""", (INTERRUPTED, run_id)).fetchone()
     conn.commit()
     if marked is None:
@@ -215,7 +216,7 @@ def run_check(conn, source=None, out=None) -> int:
         log.info("check %s: %d new, %d removed; started pull %s", check_id, counts["new"], counts["removed"], dispatched.run_id)
         result, error = _wait_for_pull(conn, dispatched.run_id, dispatched.child)
         _finish(conn, check_id, "pull_started", counts["new"], counts["removed"], error, dispatched.run_id)
-        return EXIT_OK if result == "succeeded" else EXIT_PULL_FAILED
+        return EXIT_OK if result == OUTCOME_SUCCEEDED else EXIT_PULL_FAILED
     except psycopg.OperationalError:
         log.error("check %s: the database connection failed", check_id)
         return EXIT_DATABASE

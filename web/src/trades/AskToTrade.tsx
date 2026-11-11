@@ -61,7 +61,7 @@ export function AskToTrade({ printingId }: { printingId: string }) {
               key={`${offer.collector_id}:${offer.edition_id}`}
               className="flex flex-wrap items-center gap-x-2 gap-y-1"
             >
-              <span className="min-w-0 flex-1 text-meta wrap-anywhere">
+              <span className="min-w-0 flex-1 text-meta wrap-anywhere phone:basis-full">
                 <span className="font-semibold text-text">
                   {offer.display_name}
                 </span>{" "}

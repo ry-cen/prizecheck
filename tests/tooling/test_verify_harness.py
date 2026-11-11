@@ -53,6 +53,22 @@ class VerifyArgumentsTest(unittest.TestCase):
         self.assertTrue(verify.runs_operations('operations', True))
         self.assertFalse(verify.runs_operations('api', False))
 
+    def test_the_operations_suite_runs_alone_in_ci_sh_after_setup(self):
+        """The hosted `integration=operations` job runs `npm run verify -- --suite operations`: scripts/ci.sh must run setup and
+        then the operations phase, and no pytest, vitest or browser phase."""
+        import re
+        script = (ROOT / 'scripts' / 'ci.sh').read_text()
+        phases = {}
+        for patterns, body in re.findall(r'(?ms)^case "\$VERIFY_SUITE" in\n\s+([a-z|-]+)\)(.*?)^esac$', script):
+            for name in re.findall(r'phase (\w[\w-]*) start', body):
+                phases[name] = patterns.split('|')
+        for name in ('pytest', 'vitest', 'browser'):
+            self.assertNotIn('operations', phases[name], name)
+        self.assertEqual(phases['operations'], ['all', 'operations'])
+        # --suite operations selects no shard or selectors and asks for the operations phase even though --fast would not.
+        self.assertTrue(verify.runs_operations('operations', False))
+        self.assertEqual(verify.effective_workers('operations', 2, 2), (1, 1))
+
     def test_selectors_need_the_api_or_browser_suite(self):
         with self.assertRaises(SystemExit):
             verify.parse_arguments(['--admin-url', ADMIN, '--suite', 'all', '--', 'api/tests/test_api.py'])

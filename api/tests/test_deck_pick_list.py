@@ -388,6 +388,7 @@ def test_concurrent_confirmations_of_the_same_copies_move_them_once():
 
 
 def test_confirm_write_path_invariants_overflow_organization_sources_and_versions():
+    # Contract: overflow is 422 on add-style routes and 409 on move/state routes.
     owner, _, unsorted, _, edition, _ = fixture()
     deck = create(owner).json()['location']['id']
     ok(add(owner, unsorted, edition, '5'))
@@ -397,10 +398,12 @@ def test_confirm_write_path_invariants_overflow_organization_sources_and_version
     ok(add(owner, full, edition, str(2**63 - 3)))
     revision = pick_list(owner, full)['deck_list_revision']
     undo = call('GET', '/api/moves/undo', owner).json()
+    before = call('GET', '/api/collection/revision', owner).json()
     response = confirm(owner, full, [item(unsorted, edition, 5, versions(owner, unsorted)[edition])], revision)
     assert (response.status_code, code(response)) == (409, 'QUANTITY_OVERFLOW'), response.text
     assert held(owner, unsorted) == {edition: '5'} and held(owner, full) == {edition: str(2**63 - 3)}
     assert call('GET', '/api/moves/undo', owner).json() == undo
+    assert call('GET', '/api/collection/revision', owner).json() == before
     # (b) An organizational Location is never a source.
     organization = str(uuid4())
     with psycopg.connect(os.environ['DATABASE_URL']) as conn:

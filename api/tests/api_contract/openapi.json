@@ -6720,6 +6720,17 @@
       "title": "Id",
       "type": "string"
      },
+     "image_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Image Url"
+     },
      "source": {
       "title": "Source",
       "type": "string"
@@ -12312,6 +12323,17 @@
       "title": "Lender",
       "type": "string"
      },
+     "lender_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lender Id"
+     },
      "state": {
       "enum": [
        "requested",
@@ -12323,6 +12345,7 @@
     },
     "required": [
      "lender",
+     "lender_id",
      "state",
      "copies"
     ],
@@ -17361,6 +17384,24 @@
    },
    "ThreadItem": {
     "properties": {
+     "closed_reason": {
+      "anyOf": [
+       {
+        "enum": [
+         "declined",
+         "withdrawn",
+         "cancelled",
+         "returned",
+         "written_off"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Closed Reason"
+     },
      "id": {
       "format": "uuid",
       "title": "Id",
@@ -23616,6 +23657,16 @@
         }
        ],
        "title": "V"
+      }
+     },
+     {
+      "in": "query",
+      "name": "reference",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Reference",
+       "type": "boolean"
       }
      },
      {
@@ -36063,6 +36114,69 @@
     "tags": [
      "public discovery"
     ]
+   }
+  },
+  "/api/public/edition-art/{edition_ref}/{size}": {
+   "get": {
+    "operationId": "edition_art_api_public_edition_art__edition_ref___size__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "edition_ref",
+      "required": true,
+      "schema": {
+       "maxLength": 64,
+       "title": "Edition Ref",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "size",
+      "required": true,
+      "schema": {
+       "maxLength": 16,
+       "title": "Size",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "v",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 32,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "V"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response"
+     },
+     "302": {
+      "description": "Reviewed linked image"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Edition Art"
    }
   },
   "/api/public/invites/{token}": {

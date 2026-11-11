@@ -3,14 +3,9 @@ import type {
   BrowseEdition,
   EditionStandings,
 } from "../catalog_browse_generated";
-import {
-  FORMATS,
-  STANDING_TONES,
-  STANDING_WORDS,
-} from "../catalog/catalogText";
+import { FormatStandings } from "../catalog/FormatStandings";
 import { EditionPrice } from "../EditionPrice";
 import { CardArt, CardPopup } from "../ui/CardPopup";
-import { Pill } from "../ui/Pill";
 import { variantLabel } from "../ui/variantLabel";
 import { DeckListStepper, EditFeedbackLine } from "./DeckListStepper";
 import type { EditFeedback } from "./useDeckListEdits";
@@ -50,7 +45,7 @@ export function ownedWords(row: BrowseEdition): string {
  * The deck builder library's card popup (#177, spec "Deck builder": a tap opens CardPopup with −1 / N on Deck List /
  * +1 and ‹ › stepping). It shows the card from its library row (the browse route with deck_id), with no read of its
  * own: the art, set, number and Variant, the regulation mark, copies free of owned, the price and a legality Pill per
- * Format with the reason for an unknown one. The stepper adds to or takes from the Deck List and never moves a card.
+ * Format with a summary of unknown standings. The stepper adds to or takes from the Deck List and never moves a card.
  */
 export function LibraryCardPopup({
   row,
@@ -93,11 +88,9 @@ export function LibraryCardPopup({
               {row.set_name} ({row.set_code}) · #{row.collector_number} ·{" "}
               {variantLabel(row.descriptor)}
             </p>
-            <p className={META}>
-              {row.regulation_mark
-                ? `Regulation mark ${row.regulation_mark}`
-                : "No regulation mark recorded"}
-            </p>
+            {row.regulation_mark && (
+              <p className={META}>Regulation mark {row.regulation_mark}</p>
+            )}
             <p className="m-0 tabular-nums">{ownedWords(row)}</p>
             <p className={META}>
               <EditionPrice key={row.edition_id} editionId={row.edition_id} />
@@ -115,7 +108,7 @@ export function LibraryCardPopup({
   );
 }
 
-/** One Pill per Format, and the reasons behind an unknown standing. */
+/** Known Format standings and one collector-facing summary for unknown ones. */
 function Legality({ standing }: { standing: EditionStandings }) {
   const headingId = useId();
   return (
@@ -123,30 +116,7 @@ function Legality({ standing }: { standing: EditionStandings }) {
       <h3 id={headingId} className={HEADING}>
         Legality
       </h3>
-      <ul
-        aria-labelledby={headingId}
-        className="m-0 flex list-none flex-wrap gap-1.5 p-0"
-      >
-        {FORMATS.map((format) => {
-          const { status } = standing[format.value];
-          return (
-            <li key={format.value}>
-              <Pill tone={STANDING_TONES[status]}>
-                {format.label}: {STANDING_WORDS[status]}
-              </Pill>
-            </li>
-          );
-        })}
-      </ul>
-      {FORMATS.filter(
-        (format) => standing[format.value].status === "unknown"
-      ).map((format) => (
-        <p key={format.value} className={META}>
-          {format.label} legality unknown:{" "}
-          {standing[format.value].reasons.join(" ") ||
-            "no reason was recorded."}
-        </p>
-      ))}
+      <FormatStandings standing={standing} labelledBy={headingId} />
     </div>
   );
 }

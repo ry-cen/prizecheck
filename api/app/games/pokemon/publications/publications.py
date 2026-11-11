@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import ValidationError
 
 from app.db import connect
-from app.core.art.public import public_address
+from app.core.art.editions import read_selections
+from app.games.pokemon.art.selection import public_images
 from app.core.art.store import warm_deck
 from app.games.pokemon.art import route as art_route
 from app.identity import verified_user
@@ -69,7 +70,7 @@ def snapshot(conn, owner, deck_id, title, version, target_format):
       FROM deck_list_line l JOIN catalog_edition e ON e.id=l.edition_id
       JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
       LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
-      LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
+      LEFT JOIN catalog_edition_art art ON art.edition_id=e.id
       LEFT JOIN catalog_card_attribute a ON a.printing_id=p.id
       LEFT JOIN catalog_evolution_root er ON er.identity_key=ci.identity_key AND a.card_kind='pokemon'
       WHERE l.owner_id=%s AND l.deck_id=%s
@@ -178,11 +179,13 @@ def public_snapshot(token: str, response: Response):
         public = PublicSnapshot.model_validate(record['snapshot'])
     except (KeyError, TypeError, ValueError, ValidationError):
         raise HTTPException(503, {'code': 'PUBLIC_PROJECTION_UNAVAILABLE'}, headers=PUBLIC_HEADERS) from None
+    reviewed = read_selections(edition.edition_ref for identity in public.identities for edition in identity.editions)
     for identity in public.identities:
         for edition in identity.editions:
             direct = edition.image_url
-            edition.image_url = public_address(edition.printing_ref, 'small', excluded_prefixes=art_route.excluded_prefixes()) or direct
-            edition.large_image_url = public_address(edition.printing_ref, 'large', excluded_prefixes=art_route.excluded_prefixes()) or large_direct_url(direct)
+            edition.image_url, edition.large_image_url = public_images(
+                edition.edition_ref, edition.printing_ref, edition.variant, direct, large_direct_url(direct), reviewed,
+                excluded_prefixes=art_route.excluded_prefixes(), set_id=edition.set_id, collector_number=edition.collector_number)
     if record['visibility'] == 'listed':
         response.headers['X-Robots-Tag'] = 'index, follow'
     return public

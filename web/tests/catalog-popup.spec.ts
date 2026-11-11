@@ -13,7 +13,7 @@ import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
-import { test, artUpstream } from "./support/art-upstream";
+import { test, artUpstream, PIXEL } from "./support/art-upstream";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 function python(code: string) {
@@ -117,6 +117,35 @@ const addRow = (page: Page) =>
 
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("selected Eevee Edition switches between regular reference and audited PC art", async ({
+    page,
+  }) => {
+    python("from test_edition_art import seed_pair\nseed_pair()");
+    await page.route("https://tcgplayer-cdn.tcgplayer.com/product/*", (route) =>
+      route.fulfill({ contentType: "image/png", body: PIXEL })
+    );
+    await signIn(page);
+    await tile(page, "Eevee,").first().click();
+    const card = page.getByRole("dialog", { name: "Eevee" });
+    const stamp = editions(page).filter({ hasText: /pokemon center/i });
+    const regular = editions(page).filter({ hasNotText: /pokemon center/i });
+    await regular.click();
+    await expect(
+      card.getByRole("img", { name: "Eevee card art" })
+    ).toHaveAttribute("src", /reference=1/);
+    await stamp.click();
+    await expect(
+      card.getByRole("img", { name: "Eevee card art" })
+    ).toHaveAttribute("src", /\/api\/public\/edition-art\/.*\/large\?v=/);
+    await expect(
+      card.getByRole("img", { name: "Eevee card art" })
+    ).toBeVisible();
+    await regular.click();
+    await expect(
+      card.getByRole("img", { name: "Eevee card art" })
+    ).toHaveAttribute("src", /reference=1/);
+  });
 
   test("the card popup answers everything about a card, steps through the results and opens the report flows", async ({
     page,
@@ -382,7 +411,7 @@ test.describe("desktop", () => {
     await page.goto(`${ORIGIN}/catalog?printing=${printing}&edition=${normal}`);
     await expect(popup(page)).toBeVisible();
     await expect(popup(page)).toContainText("Mega Evolution (me01) · #001");
-    await expect(popup(page)).toContainText("Regulation mark unavailable");
+    await expect(popup(page)).not.toContainText("Regulation mark");
     await expect(popup(page)).toContainText("Legality unavailable");
     await expect(popup(page)).not.toContainText("Card details are unavailable");
     await expect(editions(page).first()).toContainText("Copies owned unknown");

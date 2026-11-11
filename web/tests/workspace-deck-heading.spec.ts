@@ -636,7 +636,7 @@ test("a Collection link opens that Deck once, under a banner that links to the d
   const second = await deckWith(page, [], "0 Link");
   await page.goto(`${ORIGIN}/collection?location=${second.id}`);
   await expect(heading(page)).toHaveText(second.name);
-  await expect(page).toHaveURL(/\/collection$/);
+  await expect(page).toHaveURL(`${ORIGIN}/collection?location=${second.id}`);
   await expect(
     page
       .getByRole("navigation", { name: "Locations" })
@@ -648,9 +648,10 @@ test("a Collection link opens that Deck once, under a banner that links to the d
   });
   await expect(link).toHaveAttribute("href", `/decks/${second.id}`);
 
-  // The link is used once: a reload opens All owned, and an unknown id falls back to All owned.
+  // The Location is in the address, so a reload keeps it; an unknown id falls back to All owned.
   await page.reload();
-  await expect(heading(page)).toHaveText("All owned");
+  await expect(page).toHaveURL(`${ORIGIN}/collection?location=${second.id}`);
+  await expect(heading(page)).toHaveText(second.name);
   await page.goto(`${ORIGIN}/collection?location=${randomUUID()}`);
   await expect(page).toHaveURL(/\/collection$/);
   await expect(heading(page)).toHaveText("All owned");

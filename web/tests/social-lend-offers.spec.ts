@@ -4,6 +4,7 @@
 // her Friends again, and closes with Done: the selection went with the offer, so the Collection's heading takes focus.
 // The API tests cover reserving on send, partial acceptance, declining and withdrawing. The catalog is the Swap
 // catalog (api/tests/want_list_swap_fixtures.py).
+import type { Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import {
   DESKTOP,
@@ -18,6 +19,21 @@ import {
 } from "./support/loans";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+
+/** The borrower's Accept and Decline start on the first screen at the current size. */
+async function expectAnswerInView(page: Page) {
+  const size = page.viewportSize()!;
+  for (const name of ["Accept", "Decline"]) {
+    const button = page
+      .getByRole("main")
+      .getByRole("button", { name, exact: true });
+    await expect(button).toBeInViewport();
+    const box = await button.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(size.height);
+  }
+}
 
 test("the lender offers selected copies from the Collection, and the borrower accepts them into a Deck", async ({
   page,
@@ -92,7 +108,7 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   ).toContainText("Lend offer");
   await expect(
     page.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText("You give 0 · You get 1");
+  ).toContainText("Borrowing 1");
   // The kept /loans page may warm Decks while this navigation starts. Keep the failure active until
   // the Loan screen shows its own error, so an earlier warm read cannot consume the injection.
   const decksRead = /\/api\/decks(\?.*)?$/;
@@ -129,8 +145,10 @@ test("the lender offers selected copies from the Collection, and the borrower ac
     page.getByRole("main").locator('a[href^="/decks/"]')
   ).toHaveCount(0);
   await expectPageChecks(page, "answering a Lend Offer");
+  await expectAnswerInView(page);
   await page.setViewportSize(PHONE);
   await expectPageChecks(page, "answering a Lend Offer on a phone");
+  await expectAnswerInView(page);
   await page.setViewportSize(DESKTOP);
   await page.getByRole("button", { name: "Accept" }).click();
   await expect(title(page)).toHaveText("Misty W is lending you 1 card");

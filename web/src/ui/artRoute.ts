@@ -4,7 +4,8 @@
  * so a large view asks for the same address with the route's `large` size. An address that isn't an art-route small
  * address (a public page's image) is used as it is.
  */
-const SMALL_ROUTE = /^(\/api\/art\/[^/?#]+\/)small(\?[^#]*)?$/;
+const SMALL_ROUTE =
+  /^(\/api\/(?:art|public\/edition-art)\/[^/?#]+\/)small(\?[^#]*)?$/;
 
 /** The art route's large address for a small one, or null when the address isn't an art-route small address. */
 export function largeArtUrl(url: string): string | null {

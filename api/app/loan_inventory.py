@@ -79,7 +79,8 @@ from app.core.decks.needs import allocation_needs
 from .deck_deletion import unsorted_leaf
 from .copy_picks import suggest_picks
 from .loan_picks import pick_shortfalls
-from .location_tree import VOID_DIGEST, error, location_paths, refuse, replay
+from app.core.inventory.location_paths import location_paths
+from .location_tree import VOID_DIGEST, error, refuse, replay
 from .db import connect
 from .identity import verified_user
 from .inventory_core import MAX_QUANTITY, first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
@@ -335,6 +336,8 @@ class PendingLender(BaseModel):
     """One open Loan of the borrower's, for one card of the Deck: the lender's Display Name, and the copies asked for
     (``requested``, nobody has answered) or promised and not yet received (``accepted``)."""
     lender: str
+    # Required even after account deletion, which leaves the saved name but nulls the id.
+    lender_id: str | None
     state: Literal['requested', 'accepted']
     copies: str
 
@@ -438,8 +441,7 @@ def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verif
         digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
             return legacy_loan_view(conn, user_id, stored)
-        if command.return_by is not None and command.return_by < conn.execute(
-                'SELECT current_date AS today').fetchone()['today']:
+        if command.return_by is not None and command.return_by < today(conn):
             error(422, 'INVALID_RETURN_BY')
         # Both owners serialize incoming creation with Block and Suspension.
         lock_owners(conn, user_id, command.lender_id)
@@ -661,9 +663,9 @@ def lent_out(user_id: str = Depends(verified_user)):
 # through a LEFT JOIN, so a missing, foreign or non-Deck id gives no row at all and an empty Deck gives one empty row.
 PENDING_FOR_DECK = """WITH d AS (
     SELECT id FROM location WHERE owner_id = %(user)s AND id = %(deck)s AND kind = 'deck')
-  SELECT d.id AS deck_id, p.edition_id, p.state, p.lender_name, p.copies
+  SELECT d.id AS deck_id, p.edition_id, p.state, p.lender_name, p.lender_id, p.copies
   FROM d LEFT JOIN LATERAL (
-    SELECT l.edition_id, o.state, o.lender_name, o.created_at, o.id,
+    SELECT l.edition_id, o.state, o.lender_name, o.lender_id, o.created_at, o.id,
            CASE WHEN o.state = 'requested' THEN l.requested ELSE l.promised - l.written_off END AS copies
     FROM loan o JOIN loan_line l ON l.loan_id = o.id
     WHERE o.borrower_id = %(user)s AND o.deck_id = d.id AND o.borrower_handover_at IS NULL
@@ -676,7 +678,7 @@ PENDING_FOR_DECK = """WITH d AS (
 
 def pending_for_deck(conn, borrower_id: str, deck_id: UUID) -> list[dict] | None:
     """The borrower's open Loans waiting on one of their own Decks (want list pending loans): rows of ``edition_id``,
-    ``state`` ('requested' or 'accepted'), ``lender_name`` and ``copies``, one per Loan and Edition, in Edition order,
+    ``state`` ('requested' or 'accepted'), ``lender_id``, ``lender_name`` and ``copies``, one per Loan and Edition,
     accepted before requested, oldest Loan first. ``requested`` copies are the line's ask while nobody answered;
     ``accepted`` copies are ``promised - written_off`` until the borrower confirms the handover, when they become
     Borrowed Copies (a take-back brings them back). It doesn't look at the friendship: a Loan the lender confirmed a
@@ -709,7 +711,7 @@ def pending_loans(deck: UUID, user_id: str = Depends(verified_user)):
 
     return PendingLoans(deck_id=deck, lines=[PendingLine(
         edition_id=edition, requested=total(found, 'requested'), accepted=total(found, 'accepted'),
-        lenders=[PendingLender(lender=row['lender_name'], state=row['state'], copies=str(row['copies']))
+        lenders=[PendingLender(lender=row['lender_name'], lender_id=row['lender_id'], state=row['state'], copies=str(row['copies']))
                  for row in found]) for edition, found in lines.items()])
 
 

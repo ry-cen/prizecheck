@@ -221,21 +221,6 @@ def combined(capture: WantListCapture, needs: dict[UUID, list[LineCount]]) -> li
     return [(edition, pick(line.need for line in lines), lines) for edition, lines in rows.items()]
 
 
-def edition_needs(conn, user_id: str, edition_ids=None) -> dict[UUID, int]:
-    """Each given Card Edition's combined need over every Deck of the owner, hidden ones included, under the account's
-    counting setting, as combined() counts it. None asks for every Edition the owner's Deck Lists name. An Edition no
-    Deck needs is absent. Plain reads only: the caller holds the shared owner lock (social.owners.lock_owners), and
-    nothing here takes FOR UPDATE."""
-    if edition_ids is None:
-        edition_ids = [row['edition_id'] for row in conn.execute(
-            'SELECT DISTINCT edition_id FROM deck_list_line WHERE owner_id=%s', (user_id,))]
-    wanted = sorted(set(edition_ids))
-    if not wanted:
-        return {}
-    counting = read_settings(conn, user_id).want_list_counting
-    return allocation_needs(allocate(conn, user_id, wanted, counting))
-
-
 # Every Will accept choice of the owner for an Edition some Deck lists (the others offer nothing), and the owner's
 # Trade Wants copies of some Editions (Trading #279). Plain SQL: ``trade_wants`` imports this module.
 ALL_RULES = '''SELECT t.edition_id, t.rule FROM trade_accept t WHERE t.owner_id = %s AND EXISTS (

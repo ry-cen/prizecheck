@@ -684,12 +684,19 @@ pull_images() {
 
 # First line "schema" or "empty" (does the database already hold this app?), then the release's migration files that
 # the database has not applied.
+# Runs only in the release being deployed (compose uses its image tag), which always ships migration_tracks.py; the smoke
+# check below also runs in older releases and cannot assume it.
 migration_state() {
   compose run --rm --no-deps -T tools - <<'PY'
 import os
+import sys
 from pathlib import Path
 import psycopg
-files = sorted(p.name for p in Path('/app/migrations').glob('*.sql'))
+# The Pokémon entry names this database's tracks (IM-12); the ledger holds each file under its track-qualified name.
+sys.dont_write_bytecode = True
+sys.path.insert(0, '/app/scripts')
+import migrate, migration_tracks
+files = [name for name, _ in migration_tracks.planned(Path('/app/migrations'), migrate.TRACKS)]
 with psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=10) as conn:
     exists = conn.execute("SELECT to_regclass('public.schema_migration') IS NOT NULL").fetchone()[0]
     applied = {r[0] for r in conn.execute('SELECT name FROM schema_migration')} if exists else set()
@@ -760,7 +767,17 @@ smoke() {
 import os, sys
 from pathlib import Path
 import psycopg
-files = {p.name for p in Path('/app/migrations').glob('*.sql')}
+sys.dont_write_bytecode = True
+# This runs in whichever release is being started, including the previous one on a rollback or a restore. An image from
+# before migration tracks has no migration_tracks.py, and its migrate.py migrates when imported: never import it, and
+# keep the flat root glob that image always had.
+scripts = Path('/app/scripts')
+if (scripts / 'migration_tracks.py').exists():
+    sys.path.insert(0, str(scripts))
+    import migrate, migration_tracks
+    files = {name for name, _ in migration_tracks.planned(Path('/app/migrations'), migrate.TRACKS)}
+else:
+    files = {p.name for p in Path('/app/migrations').glob('*.sql')}
 with psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=5) as conn:
     applied = {r[0] for r in conn.execute('SELECT name FROM schema_migration')}
 sys.exit(0 if files <= applied else 1)

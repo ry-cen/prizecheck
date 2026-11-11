@@ -138,11 +138,17 @@ async function story(
   await focusPulse(page);
   await expect(timeline(page)).toContainText("You: Revised the offer");
   await expect(timeline(page).getByRole("listitem")).toHaveCount(4);
-  await expect(timeline(page)).toContainText("They give Iono (PAL 185): 1 → 2");
+  await expect(timeline(page)).toContainText(
+    "Changed Iono (PAL 185) to 2 for Misty W to give"
+  );
   await expect(
     page.getByRole("list", { name: "You get", exact: true })
   ).toContainText("×2");
   await expect(page).toHaveURL(address);
+  await test.info().attach(`timeline-after-${width}`, {
+    body: await timeline(page).innerText(),
+    contentType: "text/plain",
+  });
   await expectPageChecks(page, `live revised terms and their diff at ${width}`);
 
   // Done replaces the retired Archive action. Closing removes waiting; a message on
@@ -152,6 +158,10 @@ async function story(
   await expect(tradesTab(misty)).toHaveAccessibleName("Trades");
   await misty.getByText("Done", { exact: true }).click();
   await expect(row).toBeVisible();
+  await test.info().attach(`trade-row-after-${width}`, {
+    body: await row.innerText(),
+    contentType: "text/plain",
+  });
   await page.goto(address);
   await composer(page).fill("Any news?");
   // A click starts the POST; only its successful response makes the next pulse meaningful.

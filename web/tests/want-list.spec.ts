@@ -341,6 +341,7 @@ test.describe("on a desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       names.charizard
     );
+    await expect(page).toHaveTitle(`${names.charizard} · PrizeCheck`);
   });
 
   test("One Deck at a time names the Deck whose copies a line counts and the total takes the largest need", async ({
@@ -505,5 +506,34 @@ test.describe("on a phone", () => {
     ]);
     await expect(page.getByText(/^Combined total/)).toHaveCount(0);
     await expectPageChecks(page, "the Want List on a phone, one Deck");
+  });
+});
+
+test("phone Want List restores its history entry scroll after opening a Deck", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await signIn(page);
+  const { names } = await world(page);
+  await page.goto(`${ORIGIN}/decks/want-list`);
+  const open = deckSection(page, names.gardevoir).getByRole("link", {
+    name: `Open Deck ${names.gardevoir}`,
+  });
+  await open.scrollIntoViewIfNeeded();
+  const saved = await page.evaluate(() => window.scrollY);
+  expect(saved).toBeGreaterThan(0);
+  await open.click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    names.gardevoir
+  );
+  await page.goBack();
+  await expect(page).toHaveURL(/want-list/);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(saved);
+  await test.info().attach("continuity-scroll.json", {
+    body: JSON.stringify({
+      saved,
+      restored: await page.evaluate(() => window.scrollY),
+    }),
+    contentType: "application/json",
   });
 });

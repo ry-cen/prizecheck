@@ -44,7 +44,14 @@ router = APIRouter()
 LOCK_TIMEOUT = "5s"
 OPEN_REPORT_LIMIT = 25
 QUEUE_PAGE = 100
-OPEN = ("pending", "needs_info")
+# Report status CHECK in migrations/033_card_attribute_corrections.sql.
+PENDING = "pending"
+NEEDS_INFO = "needs_info"
+REJECTED = "rejected"
+APPROVED = "approved"
+OPEN = (PENDING, NEEDS_INFO)
+CLOSED = (REJECTED, APPROVED)
+STATUSES = OPEN + CLOSED
 POKEMON_TYPES = ("Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal", "Fairy", "Dragon",
                  "Colorless")
 PokemonType = Literal["Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal", "Fairy",
@@ -210,6 +217,7 @@ def my_report(report_id: UUID, user_id: str = Depends(verified_user)):
 @router.patch("/api/catalog/attribute-reports/{report_id}", response_model=AttributeReportView)
 def answer_report(report_id: UUID, payload: AttributeReportUpdate, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
+        # NEEDS_INFO -> PENDING; SQL literals mirror the status constants.
         row = conn.execute("""UPDATE catalog_attribute_report SET note=%s,evidence_url=COALESCE(%s,evidence_url),status='pending',
           updated_at=now() WHERE id=%s AND reporter_id=%s AND status='needs_info' RETURNING *""",
                            (payload.note.strip(), str(payload.evidence_url) if payload.evidence_url else None, report_id,
@@ -232,6 +240,7 @@ def decide_report(report_id: UUID, payload: AttributeReportDecision, user_id: st
         reason = " ".join(payload.reason.split())
         if not reason:
             fail(422, "REASON_REQUIRED")
+        # The SQL writes REJECTED or NEEDS_INFO; only REJECTED records the reviewer.
         if payload.decision == "reject":
             row = conn.execute("""UPDATE catalog_attribute_report SET status='rejected',review_reason=%s,reviewer_id=%s,
               reviewed_at=now(),updated_at=now() WHERE id=%s RETURNING *""", (reason, user_id, report_id)).fetchone()
@@ -481,6 +490,7 @@ def decide(command: AttributeDecisionInput, background_tasks: BackgroundTasks, u
                   updated_at = now()""",
                              (command.printing_id, *(stated.get(column) for column in ATTRIBUTE_COLUMNS), decision_id))
             if closing:
+                # APPROVED requires the decision and reviewer columns.
                 conn.execute("""UPDATE catalog_attribute_report SET status='approved',review_reason=%s,reviewer_id=%s,
                   reviewed_at=now(),decision_id=%s,updated_at=now() WHERE id=ANY(%s)""",
                              (reason, user_id, decision_id, closing))

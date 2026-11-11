@@ -43,7 +43,7 @@ import {
   type GalleryFilters,
   type GalleryQuery,
 } from "./galleryModel";
-import { useGalleryPrefs } from "./galleryPrefs";
+import { useGalleryPrefs, type GalleryPrefs } from "./galleryPrefs";
 import { DetailsSheet, Inspector } from "./Inspector";
 import type { LendRow } from "./inventoryActionsModel";
 import { MoveDialog, RemovalDialog } from "./InventoryDialogs";
@@ -62,6 +62,7 @@ import {
   selectedGroups,
   selectionScope,
 } from "./selectionModel";
+import { isCollectionIdle } from "./collectionIdle";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
 import { useUndoToast } from "./UndoToast";
@@ -72,7 +73,7 @@ import { useInventoryActions } from "./useInventoryActions";
 import { useOwnedSets } from "./useOwnedSets";
 import { useSelection } from "./useSelection";
 import { useStaleCollection } from "./useStaleCollection";
-import { clearLinkedLocation, readLinkedLocation } from "./workspaceLink";
+import { collectionAddress, collectionHref } from "./workspaceLink";
 
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
@@ -80,6 +81,12 @@ const FOCUSABLE =
 type Props = {
   /** The signed-in user; their gallery preferences are stored under it in this browser. */
   userId: string;
+  address: string;
+  onNavigate: (
+    to: string,
+    options?: { replace?: boolean; preserveScroll?: boolean; overlay?: boolean }
+  ) => void;
+  onCloseCard: (to: string) => void;
   /** False while the app shell shows another page. The workspace stays mounted, hidden, and keeps its
    * state; document-level keys are ignored meanwhile, and showing it again checks for changes made on
    * other pages (#162). */
@@ -96,6 +103,9 @@ type Props = {
  * (desktop) or drawer (phone), and the gallery area. The shell draws the desktop header and the tabs. */
 export function Workspace({
   userId,
+  address,
+  onNavigate,
+  onCloseCard,
   active,
   onOpenDeck,
   onImport,
@@ -114,23 +124,49 @@ export function Workspace({
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
     "loading"
   );
-  const [view, setView] = useState<WorkspaceView>("all");
+  const lastAddress = useRef(address);
+  if (active) lastAddress.current = address;
+  const route = collectionAddress(
+    new URL(lastAddress.current, window.location.origin).search
+  );
+  const view = route.location;
+  const setView = (next: WorkspaceView) => {
+    if (next !== view) onNavigate(collectionHref(next, query));
+  };
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set()
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const query = route.query;
+  // The Shell owns route/history scroll. Only a collector's local listing controls reset it here;
+  // a later gallery read must never overwrite a position the Shell has already restored.
+  const resetListingScroll = () => {
+    if (active) window.scrollTo(0, 0);
+  };
+  const setQuery = (next: string) => {
+    if (next === query) return;
+    if (next.trim() !== query.trim()) resetListingScroll();
+    onNavigate(collectionHref(view, next), { replace: true });
+  };
   // The create form's preselected parent: undefined while closed, null for Top level.
   const [createFor, setCreateFor] = useState<string | null | undefined>(
     undefined
   );
-  // Sort, filter values and display choices, remembered per user in this browser. Search text isn't.
+  // Sort, filter values and display choices are remembered per user; search lives in the address.
   const [prefs, setPrefs] = useGalleryPrefs(userId);
+  const changePrefs = (next: GalleryPrefs) => {
+    if (
+      next.sort !== prefs.sort ||
+      JSON.stringify(next.filters) !== JSON.stringify(prefs.filters)
+    )
+      resetListingScroll();
+    setPrefs(next);
+  };
   const display = prefs.display;
   const setDisplay = (next: DisplayPrefs) =>
     setPrefs((previous) => ({ ...previous, display: next }));
   const setFilters = (next: GalleryFilters) =>
-    setPrefs((previous) => ({ ...previous, filters: next }));
+    changePrefs({ ...prefs, filters: next });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false);
   const marqueeArea = useRef<HTMLElement>(null);
@@ -158,6 +194,8 @@ export function Workspace({
     idPrefix: string;
   } | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [locationNotice, setLocationNotice] = useState("");
+  const [cardNotice, setCardNotice] = useState("");
   // The same line inside the phone drawer: the page behind a modal drawer is inert, so a delete made there is read here.
   const [drawerAnnouncement, setDrawerAnnouncement] = useState("");
   // Add cards (#175): open, and the Location it adds to (null: its picker chooses).
@@ -173,12 +211,17 @@ export function Workspace({
   // Reloads can overlap (Reload, an action, Manage locations); only the newest one's answer lands,
   // so an older tree never replaces a newer one.
   const treeGeneration = useRef(0);
-  const loadTree = useCallback(async () => {
+  // `mayLand`, for the return refresh: asked once the answer is in, and when it says no the tree on screen stays.
+  const readTree = useCallback(async (mayLand?: () => boolean) => {
     const generation = ++treeGeneration.current;
     setTreeState("loading");
     try {
       const result = await getLocationTree();
       if (generation !== treeGeneration.current) return;
+      if (mayLand && !mayLand()) {
+        setTreeState("ready");
+        return;
+      }
       setNodes(result.locations);
       setLentCopies(result.lent_copies ?? "0");
       setBorrowedCopies(result.borrowed_copies ?? "0");
@@ -186,9 +229,11 @@ export function Workspace({
       setTreeState("ready");
     } catch {
       if (generation !== treeGeneration.current) return;
-      setTreeState("error");
+      // A background refresh that fails leaves the tree on screen, and the banner, rather than an error page.
+      setTreeState(mayLand ? "ready" : "error");
     }
   }, []);
+  const loadTree = useCallback(() => readTree(), [readTree]);
   useEffect(() => {
     void loadTree();
   }, [loadTree]);
@@ -200,11 +245,6 @@ export function Workspace({
   const current = chosen && !isFolder(chosen) ? chosen : undefined;
   const heading = current?.name ?? "All owned";
   const galleryView: WorkspaceView = current ? view : "all";
-  // A chosen Location that became a folder is left for good: if it later becomes a leaf again (its last child
-  // moved out), the workspace must not jump back to it on its own. created() still ends on the new child.
-  useEffect(() => {
-    if (chosen && isFolder(chosen)) setView("all");
-  }, [chosen]);
   // Typing settles for 250 ms before the gallery reloads. The selection scope ignores `sort`, so
   // sorting keeps the selection and search or filter changes clear it.
   const searchText = useDebouncedValue(query, 250);
@@ -228,10 +268,75 @@ export function Workspace({
     holdings: gallery.holdings,
     byKey: gallery.byKey,
     status: gallery.status,
+    routeDetails: route.card
+      ? {
+          key: route.card,
+          ordinal: Number.isSafeInteger(route.copy) ? route.copy : 0,
+        }
+      : null,
+    onDetails: (card) => {
+      const next = collectionHref(
+        view,
+        query,
+        card?.holding.key,
+        card?.ordinal
+      );
+      if (!active || next === address) return;
+      setCardNotice("");
+      if (card === null) onCloseCard(next);
+      else onNavigate(next, { preserveScroll: true, overlay: true });
+    },
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
     active,
   });
+  useEffect(() => {
+    // Validate only the complete listing for the addressed Location and settled search.
+    if (
+      !active ||
+      treeState !== "ready" ||
+      gallery.status !== "ready" ||
+      view !== galleryView ||
+      query !== searchText
+    )
+      return;
+    const params = new URL(address, window.location.origin).searchParams;
+    const hasCopy = params.has("copy");
+    const holding = route.card ? gallery.byKey.get(route.card) : undefined;
+    if (params.has("card") && !holding) {
+      setCardNotice("This card is unavailable here. Showing your cards.");
+      onCloseCard(collectionHref(view, query));
+    } else if (
+      hasCopy &&
+      (!holding ||
+        !Number.isSafeInteger(route.copy) ||
+        route.copy < 0 ||
+        route.copy >= holding.copies)
+    ) {
+      setCardNotice(
+        holding
+          ? "This copy is unavailable. Showing the first copy."
+          : "This card link is incomplete. Showing your cards."
+      );
+      if (holding)
+        onNavigate(collectionHref(view, query, route.card!), {
+          replace: true,
+          preserveScroll: true,
+          overlay: true,
+        });
+      else onCloseCard(collectionHref(view, query));
+    }
+  }, [
+    active,
+    treeState,
+    gallery.status,
+    gallery.byKey,
+    galleryView,
+    view,
+    query,
+    searchText,
+    address,
+  ]);
   // Browser Back or Forward can hide Collection while an overlay is open (it stays mounted, hidden), which
   // would leave a modal or a scroll lock over the page now shown. Leaving closes them all.
   const { closeDetails } = selection;
@@ -279,12 +384,31 @@ export function Workspace({
     selection,
     onDrop: actions.dropMove,
   });
-  // Ticket 113: the stale-collection banner. Changes made elsewhere show a banner with Reload;
-  // nothing refreshes by itself.
+  // Ticket 113: the stale-collection banner. Changes made elsewhere show a banner with Reload. The one refresh
+  // by itself: Collection shown again from another page of the app, idle, reads the tiles and the tree quietly.
+  const idle = isCollectionIdle({
+    selectedCopies: selection.selected.size,
+    working: actions.busy,
+    dragging: drag.badge !== null,
+    actionDialogOpen: actions.dialog !== null,
+    pendingCommand: actions.pending !== null,
+    detailsOpen: selection.details !== null,
+    overlayOpen:
+      drawerOpen ||
+      filtersDrawerOpen ||
+      createFor !== undefined ||
+      manageOpen ||
+      settingsFor !== null ||
+      adding !== null ||
+      lentOpen ||
+      borrowedOpen ||
+      lending !== null,
+  });
   const staleness = useStaleCollection({
     userId,
     galleryRevision: gallery.ownerRevision,
-    galleryStatus: gallery.status,
+    // A quiet re-read keeps the old tiles "ready"; their revision is not settled until the answer lands.
+    galleryStatus: gallery.refreshing ? "loading" : gallery.status,
     byKey: gallery.byKey,
     galleryKey,
     reloadGallery: gallery.reload,
@@ -295,6 +419,9 @@ export function Workspace({
     clearSelection: actions.clearSelection,
     busy: actions.busy,
     active,
+    idle,
+    refreshGallery: gallery.refresh,
+    refreshTree: readTree,
   });
   // Inspector totals are cached per owner revision ("<revision>:<edition>"). Older revisions' entries can't be
   // asked for again, so drop them whenever the gallery reads a new revision.
@@ -333,36 +460,23 @@ export function Workspace({
     }
     void actions.added(added);
   };
-  // A new view, search, filter or sort starts at the top of its gallery.
-  useEffect(() => {
-    if (active) window.scrollTo(0, 0);
-  }, [galleryKey]);
-
-  // A link from the Decks page (/workspace?location=<id>) opens that Storage Leaf or Deck once the tree
-  // has loaded, with its folders expanded. The address is cleaned at once, so a reload opens All owned.
-  // A missing id or a folder id leaves the workspace at All owned.
-  const linked = useRef<string | null>(null);
   const linkReloaded = useRef<string | null>(null);
+  // Expand ancestors after a deep link loads; an unavailable Location stays safe and explains the fallback.
   useEffect(() => {
-    if (!active) return;
-    const id = readLinkedLocation();
-    if (id) linked.current = id;
-    clearLinkedLocation();
-  }, [active]);
-  useEffect(() => {
-    const id = linked.current;
-    if (!active || !id || treeState !== "ready") return;
-    const node = index.byId.get(id);
-    if (!node && linkReloaded.current !== id) {
-      linkReloaded.current = id;
+    if (!active || treeState !== "ready" || view === "all") return;
+    const node = index.byId.get(view);
+    if (!node && linkReloaded.current !== view) {
+      linkReloaded.current = view;
       void loadTree();
       return;
     }
-    linked.current = null;
-    if (!node || node.kind === "organization") return;
-    setExpanded((previous) => new Set([...previous, ...index.ancestors(id)]));
-    setView(id);
-  }, [active, index, treeState, loadTree]);
+    if (!node || isFolder(node)) {
+      setLocationNotice("This Location is unavailable. Showing All owned.");
+      onNavigate(collectionHref("all", query), { replace: true });
+      return;
+    }
+    setExpanded((previous) => new Set([...previous, ...index.ancestors(view)]));
+  }, [active, index, treeState, view]);
 
   function toggleFolder(id: string) {
     setExpanded((previous) => {
@@ -373,6 +487,7 @@ export function Workspace({
     });
   }
   function choose(next: WorkspaceView) {
+    setLocationNotice("");
     setView(next);
     setDrawerOpen(false);
   }
@@ -596,6 +711,16 @@ export function Workspace({
       data-phone-search-header={active ? "" : undefined}
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
+      {cardNotice && !(active && selection.details) && (
+        <p role="status" className="px-4 py-2">
+          {cardNotice}
+        </p>
+      )}
+      {locationNotice && (
+        <p role="status" className="px-4 py-2">
+          {locationNotice}
+        </p>
+      )}
       <p className="sr-only" role="status" data-testid="location-announcement">
         {announcement}
       </p>
@@ -718,9 +843,7 @@ export function Workspace({
             <div className="ml-auto flex items-center gap-2">
               <SortControl
                 sort={prefs.sort}
-                onChange={(sort) =>
-                  setPrefs((previous) => ({ ...previous, sort }))
-                }
+                onChange={(sort) => changePrefs({ ...prefs, sort })}
               />
               <DisplayControls display={display} onChange={setDisplay} />
             </div>
@@ -891,7 +1014,7 @@ export function Workspace({
           opener={filtersOpener}
           prefs={prefs}
           sets={sets}
-          onChange={setPrefs}
+          onChange={(update) => changePrefs(update(prefs))}
           onClose={closeFiltersDrawer}
         />
       )}
@@ -953,9 +1076,10 @@ export function Workspace({
         onMoved={() => void loadTree()}
         returnFocus={mobile ? drawerOpener : undefined}
       />
-      {selection.details && (
+      {active && selection.details && (
         <DetailsSheet
           card={selection.details}
+          notice={cardNotice}
           locationPath={locationPath}
           ownerRevision={gallery.ownerRevision}
           ownedTotals={ownedTotals}
