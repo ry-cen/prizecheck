@@ -113,6 +113,7 @@ export function useWantListSwap({
   const working = useRef(false);
   // A command landed and the page is reading the Want List again: the buttons stay off until the new answer draws.
   const pending = useRef(false);
+  const queuedUndo = useRef<UndoJob | null>(null);
   const toastId = useRef<number | null>(null);
   const mounted = useRef(true);
 
@@ -120,6 +121,7 @@ export function useWantListSwap({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      queuedUndo.current = null;
       if (toastId.current !== null) kit.dismiss(toastId.current);
     };
   }, [kit]);
@@ -129,7 +131,10 @@ export function useWantListSwap({
     if (!pending.current) return;
     pending.current = false;
     working.current = false;
-    setBusy(false);
+    const job = queuedUndo.current;
+    queuedUndo.current = null;
+    if (job) void undo(job);
+    else setBusy(false);
   }, [list, failed]);
 
   function start(): boolean {
@@ -200,7 +205,16 @@ export function useWantListSwap({
   }
 
   async function undo(job: UndoJob) {
-    if (!start()) return;
+    if (!mounted.current) return;
+    if (!start()) {
+      // The Swap toast is usable before its Want List refresh finishes. Retain the press until
+      // that read releases the command lock; duplicate presses must not queue another inverse.
+      if (pending.current && queuedUndo.current === null) {
+        queuedUndo.current = job;
+        say(job.message, job, true);
+      }
+      return;
+    }
     say(job.message, job, true);
     try {
       await changeDeckList(job.deckId, {
