@@ -19,3 +19,11 @@ def tcgplayer_beats(base: str, width: int, height: int) -> bool:
     if LINKED_ART.fullmatch(base):
         return width >= 400 and height >= 558
     return width * height > 600 * 825
+
+
+def linked_product_url(product_id: int, size: str) -> str:
+    """Existing linked-art address shape; no arbitrary URL or remote fetch."""
+    if type(product_id) is not int or not 0 < product_id <= 999999999 or size not in ('small', 'large'):
+        raise ValueError('invalid linked art identity')
+    # Both views use the inspected 200w asset; no higher-resolution URL is inferred.
+    return f'https://{TCGPLAYER_HOST}/product/{product_id}_200w.jpg'

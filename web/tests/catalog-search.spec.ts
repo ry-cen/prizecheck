@@ -49,10 +49,13 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
       })
       .click();
     const details = page.getByRole("dialog", { name: "Pikachu 01" });
-    // The stand-in appears once the picture's retries are spent (about 6.5 s).
+    // The large file is missing, so the popup falls back to the Edition's small picture at once.
+    await expect(
+      details.getByRole("img", { name: "Pikachu 01 card art" })
+    ).toBeVisible({ timeout: 15_000 });
     await expect(
       details.getByRole("img", { name: "Artwork unavailable for Pikachu 01" })
-    ).toBeVisible({ timeout: 15_000 });
+    ).toHaveCount(0);
     // Each Card Edition is in the popup's Edition picker by its Variant, the tapped one picked.
     const editions = details
       .getByRole("group", { name: "Editions" })

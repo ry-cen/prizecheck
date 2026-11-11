@@ -91,6 +91,9 @@ def test_required_shared_relation_columns_keep_their_postgresql_types(conn):
         'catalog_printing_art': {column: 'uuid' if column == 'printing_id' else 'text'
                                  for column in ('printing_id', 'small_art_url', 'low_image_url', 'high_image_url',
                                                 'large_upgrade_url', 'stored_upgrade_url')},
+        'catalog_edition_art': {'edition_id': 'uuid', 'printing_id': 'uuid', 'small_art_url': 'text',
+                                'low_image_url': 'text', 'high_image_url': 'text', 'stored_upgrade_url': 'text',
+                                'reference_only': 'boolean'},
         'catalog_run': {'outcome': 'text'},
         'catalog_review': {'status': 'text'},
         'catalog_public_outbox': {'created_at': 'timestamp with time zone', 'delivered_at': 'timestamp with time zone'},

@@ -21,6 +21,7 @@ class EditionView(BaseModel):
     id: UUID
     descriptor: dict
     active: bool
+    image_url: str | None = None
     source: str
     evidence_url: str | None = None
 
@@ -113,14 +114,15 @@ def _views(conn, generation: UUID, rows: list[dict]) -> list[PrintingView]:
     if not rows:
         return []
     ids = [row["id"] for row in rows]
-    edition_rows = conn.execute("""SELECT ge.printing_id, e.id, e.descriptor, ge.active, co.evidence_url,
+    edition_rows = conn.execute("""SELECT ge.printing_id, e.id, e.descriptor, ge.active, co.evidence_url,art.small_art_url AS image_url,
       CASE WHEN co.id IS NULL THEN 'tcgdex' ELSE 'manual' END AS source
       FROM catalog_generation_edition ge JOIN catalog_edition e ON e.id=ge.edition_id
       LEFT JOIN catalog_override co ON co.edition_id=e.id
+      LEFT JOIN catalog_edition_art art ON art.edition_id=e.id
       WHERE ge.generation_id=%s AND ge.printing_id=ANY(%s) ORDER BY e.descriptor_key,e.id""", (generation, ids)).fetchall()
     editions: dict[UUID, list[EditionView]] = {value: [] for value in ids}
     for edition in edition_rows:
-        editions[edition["printing_id"]].append(EditionView(id=edition["id"], descriptor=edition["descriptor"], active=edition["active"], source=edition["source"], evidence_url=edition["evidence_url"]))
+        editions[edition["printing_id"]].append(EditionView(id=edition["id"], descriptor=edition["descriptor"], active=edition["active"], image_url=edition["image_url"], source=edition["source"], evidence_url=edition["evidence_url"]))
     evidence_rows = conn.execute("""SELECT printing_id,evidence_url FROM catalog_override
       WHERE action='approve_printing' AND printing_id=ANY(%s)""", (ids,)).fetchall()
     evidence = {row["printing_id"]: row["evidence_url"] for row in evidence_rows}

@@ -1,0 +1,339 @@
+{
+  "fetched_at": "2026-11-04T01:59:48Z",
+  "source_sha256": "a5c5a62d3a001a15a9a8de6567fcfca97fd9f69e143b93b5a32a516bd7d19d58",
+  "products": [
+    {
+      "productId": 490719,
+      "name": "Miraidon - 013",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/490719_200w.jpg",
+      "imageCount": 1,
+      "number": "013"
+    },
+    {
+      "productId": 490730,
+      "name": "Miraidon - 013 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/490730_200w.jpg",
+      "imageCount": 1,
+      "number": "013"
+    },
+    {
+      "productId": 490721,
+      "name": "Koraidon - 014",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/490721_200w.jpg",
+      "imageCount": 1,
+      "number": "014"
+    },
+    {
+      "productId": 490725,
+      "name": "Koraidon - 014 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/490725_200w.jpg",
+      "imageCount": 1,
+      "number": "014"
+    },
+    {
+      "productId": 500263,
+      "name": "Pikachu - 027",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/500263_200w.jpg",
+      "imageCount": 1,
+      "number": "027"
+    },
+    {
+      "productId": 500264,
+      "name": "Pikachu - 027 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/500264_200w.jpg",
+      "imageCount": 1,
+      "number": "027"
+    },
+    {
+      "productId": 512035,
+      "name": "Charmander - 044",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/512035_200w.jpg",
+      "imageCount": 1,
+      "number": "044"
+    },
+    {
+      "productId": 512036,
+      "name": "Charmander - 044 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/512036_200w.jpg",
+      "imageCount": 1,
+      "number": "044"
+    },
+    {
+      "productId": 517175,
+      "name": "Snorlax - 051",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/517175_200w.jpg",
+      "imageCount": 1,
+      "number": "051"
+    },
+    {
+      "productId": 517270,
+      "name": "Snorlax - 051 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/517270_200w.jpg",
+      "imageCount": 1,
+      "number": "051"
+    },
+    {
+      "productId": 526649,
+      "name": "Scream Tail - 065",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/526649_200w.jpg",
+      "imageCount": 1,
+      "number": "065"
+    },
+    {
+      "productId": 526655,
+      "name": "Scream Tail - 065 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/526655_200w.jpg",
+      "imageCount": 1,
+      "number": "065"
+    },
+    {
+      "productId": 526656,
+      "name": "Iron Bundle - 066",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/526656_200w.jpg",
+      "imageCount": 1,
+      "number": "066"
+    },
+    {
+      "productId": 526657,
+      "name": "Iron Bundle - 066 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/526657_200w.jpg",
+      "imageCount": 1,
+      "number": "066"
+    },
+    {
+      "productId": 535952,
+      "name": "Mimikyu - 075",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/535952_200w.jpg",
+      "imageCount": 1,
+      "number": "075"
+    },
+    {
+      "productId": 535953,
+      "name": "Mimikyu - 075 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/535953_200w.jpg",
+      "imageCount": 1,
+      "number": "075"
+    },
+    {
+      "productId": 543946,
+      "name": "Flutter Mane - 097",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/543946_200w.jpg",
+      "imageCount": 1,
+      "number": "097"
+    },
+    {
+      "productId": 543947,
+      "name": "Flutter Mane - 097 (Pokemon Center)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/543947_200w.jpg",
+      "imageCount": 1,
+      "number": "097"
+    },
+    {
+      "productId": 543948,
+      "name": "Iron Thorns - 098",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/543948_200w.jpg",
+      "imageCount": 1,
+      "number": "098"
+    },
+    {
+      "productId": 543949,
+      "name": "Iron Thorns - 098 (Pokemon Center)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/543949_200w.jpg",
+      "imageCount": 1,
+      "number": "098"
+    },
+    {
+      "productId": 552785,
+      "name": "Teal Mask Ogerpon - 123",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/552785_200w.jpg",
+      "imageCount": 1,
+      "number": "123"
+    },
+    {
+      "productId": 552786,
+      "name": "Teal Mask Ogerpon - 123 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/552786_200w.jpg",
+      "imageCount": 1,
+      "number": "123"
+    },
+    {
+      "productId": 564137,
+      "name": "Pecharunt - 129",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/564137_200w.jpg",
+      "imageCount": 1,
+      "number": "129"
+    },
+    {
+      "productId": 573720,
+      "name": "Pecharunt - 129 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/573720_200w.jpg",
+      "imageCount": 1,
+      "number": "129"
+    },
+    {
+      "productId": 578811,
+      "name": "Noctowl - 141",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/578811_200w.jpg",
+      "imageCount": 1,
+      "number": "141"
+    },
+    {
+      "productId": 578812,
+      "name": "Noctowl - 141 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/578812_200w.jpg",
+      "imageCount": 1,
+      "number": "141"
+    },
+    {
+      "productId": 594386,
+      "name": "Magneton - 159",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/594386_200w.jpg",
+      "imageCount": 1,
+      "number": "159"
+    },
+    {
+      "productId": 594468,
+      "name": "Magneton - 159 (Pokémon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/594468_200w.jpg",
+      "imageCount": 1,
+      "number": "159"
+    },
+    {
+      "productId": 610758,
+      "name": "Eevee - 173",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/610758_200w.jpg",
+      "imageCount": 1,
+      "number": "173"
+    },
+    {
+      "productId": 610757,
+      "name": "Eevee - 173 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/610757_200w.jpg",
+      "imageCount": 1,
+      "number": "173"
+    },
+    {
+      "productId": 625181,
+      "name": "N's Zorua - 189",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/625181_200w.jpg",
+      "imageCount": 1,
+      "number": "189"
+    },
+    {
+      "productId": 625182,
+      "name": "N's Zorua - 189 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/625182_200w.jpg",
+      "imageCount": 1,
+      "number": "189"
+    },
+    {
+      "productId": 635467,
+      "name": "Team Rocket's Wobbuffet",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/635467_200w.jpg",
+      "imageCount": 1,
+      "number": "203"
+    },
+    {
+      "productId": 635468,
+      "name": "Team Rocket's Wobbuffet (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/635468_200w.jpg",
+      "imageCount": 1,
+      "number": "203"
+    },
+    {
+      "productId": 644833,
+      "name": "Thundurus - 209",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/644833_200w.jpg",
+      "imageCount": 1,
+      "number": "209"
+    },
+    {
+      "productId": 644834,
+      "name": "Thundurus - 209 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/644834_200w.jpg",
+      "imageCount": 1,
+      "number": "209"
+    },
+    {
+      "productId": 644835,
+      "name": "Tornadus - 210",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/644835_200w.jpg",
+      "imageCount": 1,
+      "number": "210"
+    },
+    {
+      "productId": 644836,
+      "name": "Tornadus - 210 (Pokemon Center Exclusive)",
+      "groupId": 22872,
+      "imageUrl": "https://tcgplayer-cdn.tcgplayer.com/product/644836_200w.jpg",
+      "imageCount": 1,
+      "number": "210"
+    }
+  ],
+  "visual_qa": {
+    "started_at": "2026-11-04T03:42:00Z",
+    "completed_at": "2026-11-04T03:44:00Z",
+    "source": "Independent read-only pixel inspection relayed by Ryan; approximate interval",
+    "asset_size": "200w",
+    "result": "19 HTTP 200 valid JPEG; correct Pokemon identity and visible Pokemon Center stamp; 0 failed or uncertain",
+    "note": "Magneton stamp is low contrast; no 400w or high-resolution asset assertion; not licensing evidence",
+    "pc_products": {
+      "490730": "visible stamp confirmed",
+      "490725": "visible stamp confirmed",
+      "500264": "visible stamp confirmed",
+      "512036": "visible stamp confirmed",
+      "517270": "visible stamp confirmed",
+      "526655": "visible stamp confirmed",
+      "526657": "visible stamp confirmed",
+      "535953": "visible stamp confirmed",
+      "543947": "visible stamp confirmed",
+      "543949": "visible stamp confirmed",
+      "552786": "visible stamp confirmed",
+      "573720": "visible stamp confirmed",
+      "578812": "visible stamp confirmed",
+      "594468": "visible stamp confirmed; low contrast",
+      "610757": "visible stamp confirmed",
+      "625182": "visible stamp confirmed",
+      "635468": "visible stamp confirmed",
+      "644834": "visible stamp confirmed",
+      "644836": "visible stamp confirmed"
+    }
+  }
+}

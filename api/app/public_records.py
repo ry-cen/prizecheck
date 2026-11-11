@@ -119,6 +119,7 @@ class KeyFamily:
 _FAMILIES = (
     ('catalog_printing', re.compile(r'catalog:printing:([0-9a-f]{48})'), False),
     ('catalog_edition', re.compile(r'catalog:edition:([0-9a-f]{48})'), False),
+    ('edition_art', re.compile(r'art:edition:([0-9a-f]{48})'), False),
     ('catalog_format', re.compile(r'catalog:format:([0-9a-f]{48})'), False),
     ('quarantine', re.compile(r'quarantine:edition:([0-9a-f]{48})'), False),
     ('price', re.compile(r'price:([0-9a-f]{48})'), False),
@@ -168,6 +169,10 @@ def catalog_printing_key(printing_ref):
 
 def catalog_edition_key(edition_ref):
     return 'catalog:edition:' + _ref(edition_ref)
+
+
+def edition_art_key(edition_ref):
+    return 'art:edition:' + _ref(edition_ref)
 
 
 def catalog_format_key(printing_ref):

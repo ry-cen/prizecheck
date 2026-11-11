@@ -197,7 +197,7 @@ def run_migrate(root, url):
 
 def expected_log(root, extra_after=()):
     """The Applied and Recorded lines of a fresh run, built from the files on each side of the cutoff: root files through 162,
-    the two recorded core files, then root files after it (so a new 163 changes the tree and not this rule)."""
+    the two recorded core files, then root files after it (so a new root file changes the tree and not this rule)."""
     names = sorted(path.name for path in (root / "migrations").glob("*.sql"))
     before = [name for name in names if name <= ENTRY_CUTOFF]
     after = [name for name in names if name > ENTRY_CUTOFF]
@@ -221,18 +221,25 @@ def test_a_fresh_pokemon_database_runs_every_root_file_then_records_the_core_bas
         assert conn.execute("SELECT count(*) FROM operations_state").fetchone()[0] == 1
 
 
-def test_a_163_file_runs_after_the_recorded_baseline_on_a_fresh_database_without_changing_the_rule(databases, real_root, tmp_path):
-    """A temporary 163 stands in for the next ordinary root migration: the fresh run's order must not move."""
+def test_a_new_root_file_runs_after_the_recorded_baseline_on_a_fresh_database_without_changing_the_rule(databases, real_root, tmp_path):
+    """A temporary root file numbered one past the highest real one stands in for the next ordinary root migration: the
+    fresh run's order must not move, whichever real files come after the cutoff."""
     root = tmp_path / "tree"
     shutil.copytree(real_root, root)
-    write(root, {"163_temporary_probe.sql": "CREATE TABLE temporary_probe (n int);"})
+    number = max(int(path.name.split("_", 1)[0]) for path in (root / "migrations").glob("*.sql")) + 1
+    probe = f"{number:03d}_temporary_probe.sql"
+    write(root, {probe: "CREATE TABLE temporary_probe (n int);"})
     url, _ = databases()
     run = run_migrate(root, url)
     assert run.returncode == 0, run.stdout + run.stderr
     lines = [line for line in run.stdout.splitlines() if line.startswith(("Applied ", "Recorded "))]
     assert lines == expected_log(root)
-    assert lines[-3:] == ["Recorded core/000_baseline.sql without running it", "Recorded core/001_zip_centroids.sql without running it",
-                          "Applied 163_temporary_probe.sql"]
+    # The two recorded core lines, then every root file after the cutoff in order, the probe last.
+    after = sorted(path.name for path in (root / "migrations").glob("*.sql") if path.name > ENTRY_CUTOFF)
+    assert after[-1] == probe
+    assert lines[-(2 + len(after)):] == ["Recorded core/000_baseline.sql without running it",
+                                         "Recorded core/001_zip_centroids.sql without running it",
+                                         *(f"Applied {name}" for name in after)]
 
 
 def test_a_populated_pokemon_database_that_predates_the_baseline_gains_only_the_two_recorded_names(fresh, databases, real_root):

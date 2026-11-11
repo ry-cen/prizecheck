@@ -168,7 +168,7 @@ export function CatalogCardPopup({
   const row = ready?.rows[0] ?? request?.row ?? null;
   const name = ready?.printing.name ?? request?.row?.name ?? "Card details";
   const artUrl = ready
-    ? ready.printing.high_image_url
+    ? (selected?.imageUrl ?? null)
     : (request?.row?.image_url ?? null);
 
   // A report flow takes focus once its form is on screen, so it is in view and keyboard-ready.

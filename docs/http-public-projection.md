@@ -29,7 +29,7 @@ The relay must provide the same semantics as `FilePublicRecords` (see `api/app/p
 - **Opaque, never-repeating versions.** A missing key has a version too. Delete/recreate, eviction and tombstone compaction must never make an older version, including an older "absent" version, current again.
 - **Immutable snapshots.** Reads never block on writers. A superseded generation remains readable for at least 15 seconds so callers can read many 128-key batches at one generation. After that, reads fail closed. Never fall back to another generation.
 - **Durable operation IDs.** A committed `operation_id` is remembered for at least 120 seconds. During that time, a replay with identical content returns `committed: true` without reapplying. A failed CAS is not recorded. When a response is lost, the caller resolves the outcome with `status` and then re-reads if needed.
-- **Typed keys and capacity.** Reject untyped keys. Only `quote:` payloads are evictable, up to 250,000 entries or 256 MiB, oldest first. Eviction replaces the value with a new tombstone version and never exposes an older value. Catalog (`catalog:printing:`, `catalog:format:`, `catalog:edition:`), quarantine, result/supersession, fence, work (coalescing), admission, lease, backoff and invite (`invite:<64 hex>`, social network #246) records are protected and never evicted. A single value is at most 1 MiB.
+- **Typed keys and capacity.** Reject untyped keys. Only `quote:` payloads are evictable, up to 250,000 entries or 256 MiB, oldest first. Eviction replaces the value with a new tombstone version and never exposes an older value. Catalog (`catalog:printing:`, `catalog:format:`, `catalog:edition:`), Edition-art sidecars (`art:edition:<48 hex>`), quarantine, result/supersession, fence, work (coalescing), admission, lease, backoff and invite (`invite:<64 hex>`, social network #246) records are protected and never evicted. A single value is at most 1 MiB.
 - **Fail closed.** Missing or corrupt authoritative state, full storage and interrupted commits return 503 for affected operations. They never revive superseded data.
 
 The client validates every 200 response and treats a malformed one as unavailable: `read` must return a string `generation` (1-128 characters, equal to the requested one when pinned), exactly the requested keys, and a string `version` (1-128 characters) plus a `value` field for each; `transact` must return a boolean `committed`; `status` must return `true`, `false` or `null` (the client reports only "committed" or "unknown").
@@ -37,3 +37,13 @@ The client validates every 200 response and treats a malformed one as unavailabl
 Run the conformance suite (`api/tests/test_public_records.py`) against any candidate relay before configuring it. With `PUBLIC_PROJECTION_ADAPTER=http`, `scripts/init_public_records.py` and `scripts/init_public_projection.py` call the relay's `initialize` action. The empty-legacy-store upgrade and refusal rules in `docs/public-projections.md` are implemented by the filesystem adapter only; a deployment-owned relay must provide its own equivalent and must never reset established state.
 
 The relay can translate this contract to a selected object provider. A plain vendor object endpoint may not supply linearizable reads, required conditional updates, authentication envelope or initialization behavior; verify or translate those differences before configuring it. No provider was provisioned. Local real-HTTP tests exercise CAS conflict/retry, concurrent writers, revocation/discovery, no-private-database anonymous reads, storage outages, durable failed-write retry, weak ETag rejection and timeouts. Provider latency, capacity and failure recovery still need deployment evidence.
+
+Edition-art rollout preserves the existing catalog Edition/quarantine payloads. The
+new writer atomically publishes a scoped art sidecar plus those unchanged payloads
+in batches of at most 42 Editions (three keys each). Readers pin both at one generation.
+A relay must add the protected art family before `PUBLIC_ART_SIDECARS=on` is configured
+for an HTTP deployment. The default on HTTP is off: legacy catalog/price/export writes
+and reads continue without requesting unknown art keys. Sidecar reads then withhold only
+scoped images or use their proven reference fallback. Do not enable the flag against an
+older relay. Validate this rollout with both adapter conformance and compatibility tests;
+no deployment-owned relay has been upgraded by this branch.

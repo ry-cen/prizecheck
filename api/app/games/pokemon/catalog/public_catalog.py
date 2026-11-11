@@ -12,6 +12,12 @@ verified, priced Edition. Internal UUIDs, owners, Holdings, sessions, reviewer i
 evidence, free-text reasons, reports, rejected fingerprints, source candidates and quote
 amounts never appear here.
 
+Edition imagery is a separate protected art sidecar. Original Edition/quarantine
+payloads and strict eligibility readers stay unchanged; supported sidecars publish
+atomically with those records and are read at one generation. Art-only repair never
+becomes marketplace recovery/quarantine evidence. Older HTTP relays retain the original
+path until support is explicitly enabled (``PUBLIC_ART_SIDECARS``).
+
 Delivery rests on two facts. Every correction takes a commit-ordered ``public_revision``
 from one PostgreSQL clock and enqueues the target in the same transaction (a dirty-target
 outbox). A drain re-reads current committed PostgreSQL state and writes a record only when
@@ -37,12 +43,14 @@ from .card_attributes import FORMAT_FACT_COLUMNS, CardAttributeRules, CardAttrib
 from app.db import connect
 from app.public_projection import ProjectionUnavailable, public_record_store
 from app.core.prices.price_reads import price_reads_enabled
-from app.public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, price_key, quarantine_key)
+from app.public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, price_key, quarantine_key, edition_art_key)
 from app.core.prices.quote_contract import parse_amount
+from app.core.art.editions import ART_PREFIX, sidecars_enabled
+from app.core.art.urls import art_version
 
 log = logging.getLogger(__name__)
 LOCK = 914706               # Session advisory lock: one drainer at a time. Correctness never depends on it.
-EDITION_CAS = 64            # Editions per CAS: catalog + quarantine key each, so 128 keys.
+EDITION_CAS = 42            # At most three keys per Edition; 42 x 3 <= 128.
 PRINTING_CAS = 64           # Printings per CAS: catalog + format key each, so 128 keys.
 CHUNK_TARGETS = 64          # Pending targets taken per snapshot, in (priority, sequence) order.
 ATTEMPTS = 4                # Rebuild-and-retry rounds when a CAS loses or the store looks ahead.
@@ -133,6 +141,20 @@ def edition_value(row):
                             'product_id': row['product_id'] if verified else None, 'quote_lookup': lookup}}
 
 
+def edition_art_value(row):
+    if row['linked_art'] is not None:
+        mode, product, version = 'linked', row['linked_art']['product_id'], row['linked_art']['version']
+    else:
+        mode = 'reference' if row['reference_only'] else 'withheld' if row['art_withheld'] else 'printing'
+        product = None
+        version = art_version(f"edition-art:{mode}:{row['mapping_revision']}:{row['public_revision']}")
+    return {'edition_ref': row['edition_ref'], 'printing_ref': row['printing_ref'], 'descriptor': row['descriptor'],
+            'revision': row['public_revision'], 'mapping_revision': row['mapping_revision'], 'version': version,
+            'mode': mode, 'product_id': product, 'set_id': row['art_set_id'], 'collector_number': row['art_number'],
+            'reference_small': row['reference_small'] if mode == 'reference' else None,
+            'reference_large': row['reference_large'] if mode == 'reference' else None}
+
+
 def quarantine_value(row):
     return {'edition_ref': row['edition_ref'], 'revision': row['public_revision'],
             'mapping_revision': row['mapping_revision'],
@@ -178,13 +200,16 @@ def build_values(conn, targets):
                 catalog_format_key(row['printing_ref']): format_value(row)})
     if ids['edition']:
         for row in conn.execute("""SELECT e.id,e.public_ref AS edition_ref,p.public_ref AS printing_ref,e.descriptor,
-          p.source,p.source_id,m.public_revision,m.mapping_state,m.mapping_reason,m.mapping_revision,m.product_id,m.quote_variant
+          p.source,p.source_id,m.public_revision,m.mapping_state,m.mapping_reason,m.mapping_revision,m.product_id,m.quote_variant,art.linked_art,art.reference_only,art.art_scoped,art.art_withheld,art.art_set_id,art.art_number,art.low_image_url AS reference_small,art.high_image_url AS reference_large
           FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
           JOIN catalog_edition_metadata m ON m.edition_id=e.id
+          LEFT JOIN catalog_edition_art art ON art.edition_id=e.id
           WHERE e.id=ANY(%s::uuid[])""", (ids['edition'],)):
             built[('edition', row['id'])] = Built(row['public_revision'], {
                 catalog_edition_key(row['edition_ref']): edition_value(row),
                 quarantine_key(row['edition_ref']): quarantine_value(row)})
+            if row['art_scoped'] and sidecars_enabled():
+                built[('edition', row['id'])].values[edition_art_key(row['edition_ref'])] = edition_art_value(row)
     return built
 
 
@@ -199,19 +224,20 @@ def stored_revision(value):
 def classify(built, records):
     """Compare one target with the store: 'write', 'current', 'ahead' (store newer) or 'mismatch' (same revision, other value).
 
-    A format record that differs at the same revision is written, not a mismatch: format facts have no fail-closed
+    Format/art sidecars that differ at the same revision are written, not a mismatch: these are derived display/format facts with no marketplace fail-closed
     state, PostgreSQL is their only source, and such a difference can only be a fact that changed without a Printing
     stamp (for example on a runtime rolled back below migration 036's triggers). Live and marketplace records keep the
     mismatch rule.
     """
-    stored = [stored_revision(records[key].value) for key in built.values]
+    legacy = {key: value for key, value in built.values.items() if not key.startswith(ART_PREFIX)}
+    stored = [stored_revision(records[key].value) for key in legacy]
     if any(revision > built.revision for revision in stored):
         return 'ahead'
     if all(revision == built.revision for revision in stored):
         differing = [key for key, value in built.values.items() if records[key].value != value]
         if not differing:
             return 'current'
-        return 'write' if all(key.startswith(FORMAT_PREFIX) for key in differing) else 'mismatch'
+        return 'write' if all(key.startswith((FORMAT_PREFIX, ART_PREFIX)) for key in differing) else 'mismatch'
     return 'write'
 
 
@@ -465,6 +491,8 @@ def _stored_mapping_revision(built, records):
     """The highest mapping revision the store holds for one Edition (its catalog and quarantine records)."""
     found = [0]
     for key in built.values:
+        if key.startswith(ART_PREFIX):
+            continue
         value = records[key].value
         if not isinstance(value, dict):
             continue
@@ -506,7 +534,7 @@ def _scan(conn, store):
             records = store.read_all(keys, deadline=time.monotonic() + CHUNK_SECONDS).records
             suspects = []
             for target, value in built.items():
-                store_max = max([store_max, *(stored_revision(records[key].value) for key in value.values)])
+                store_max = max([store_max, *(stored_revision(records[key].value) for key in value.values if not key.startswith(ART_PREFIX))])
                 verdict = classify(value, records)
                 if verdict == 'mismatch':
                     _note_conflict(conflicts, kind, target, value, records)

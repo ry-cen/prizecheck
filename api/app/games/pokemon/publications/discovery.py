@@ -20,7 +20,8 @@ store generation as the facts with the Published Deck cost route's eligibility p
 
 Contract: docs/public-projections.md ("Discover lists legal decks").
 """
-from app.core.art.public import public_address
+from app.core.art.editions import read_selections
+from app.games.pokemon.art.selection import public_images
 from app.games.pokemon.art.route import excluded_prefixes
 
 import hashlib
@@ -30,7 +31,7 @@ import threading
 import time
 import unicodedata
 from collections import OrderedDict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -140,7 +141,7 @@ def cost(active, states) -> DiscoverCost:
                         priced_copies=figures.get('priced_copies', '0'), total_copies=figures['total_copies'])
 
 
-def featured(active, facts):
+def featured(active, facts, reviewed=None):
     """The featured card ``(image_url, name, printing_ref)``: the rule-box Pokémon (ex, V and the like) with the most copies, else the
     Pokémon with the most copies, else the first card with art; ties go to the snapshot's order. Only rows with art
     count, and a row's kind comes from its Printing's public format facts."""
@@ -148,7 +149,12 @@ def featured(active, facts):
         found = (facts or {}).get(row.printing_ref) if row.printing_ref is not None else None
         return found.attributes if found is not None else None
 
-    pictured = [row for row in active.rows if row.image_url]
+    pictured = []
+    for row in active.rows:
+        image, _ = public_images(row.edition_ref, row.printing_ref, row.variant, row.image_url, None,
+                                 reviewed or {}, excluded_prefixes=excluded_prefixes(), set_id=row.set_id, collector_number=row.collector_number)
+        if image:
+            pictured.append(replace(row, image_url=image))
     pokemon = [row for row in pictured if (attributes(row) or card_attributes.UNKNOWN).card_kind == 'pokemon']
     ruled = [row for row in pokemon if attributes(row).rule_box]
     for rows in (ruled, pokemon):
@@ -158,11 +164,10 @@ def featured(active, facts):
     return (pictured[0].image_url, pictured[0].name, pictured[0].printing_ref) if pictured else (None, None, None)
 
 
-def summary(token, active, facts, states) -> PublicDeckSummary:
+def summary(token, active, facts, states, reviewed=None) -> PublicDeckSummary:
     public = active.snapshot
     checks = public.checks
-    image_url, name, ref = featured(active, facts)
-    image_url = public_address(ref, "small", excluded_prefixes=excluded_prefixes()) or image_url
+    image_url, name, ref = featured(active, facts, reviewed)
     return PublicDeckSummary(url=f'/published/{token}', title=public.title, total=public.total, published_at=public.published_at,
         checks=PublicCheckSummary(size_status=checks.size_status, shortage=checks.shortage, excess=checks.excess,
              over_limit_groups=sum(item.status=='over_limit' for item in checks.identities),
@@ -188,7 +193,8 @@ def confirm(chunk, deadline, on) -> tuple[dict[str, PublicDeckSummary], bool]:
     except (ProjectionUnavailable, ValueError):
         states = facts = None
         readable = False
-    return ({token: summary(token, active, facts, states) for token, active in chunk
+    reviewed = read_selections(editions, deadline=deadline)
+    return ({token: summary(token, active, facts, states, reviewed) for token, active in chunk
              if target_status(token, active, facts, on) == 'legal'}, readable)
 
 

@@ -17,10 +17,11 @@ from app.db import connect
 from app.games.pokemon.trading.trade_inventory import SendTradeProposal, trade_send_payload
 from app.location_tree import VOID_DIGEST
 from app.social.threads import normalize_text
+from test_catalog_references import migrate
 from test_deck_cost import launches, store  # noqa: F401
 from test_holdings import call
 from test_operation_counts import writer  # noqa: F401
-from test_thread_migration import old, apply, mapped  # noqa: F401
+from test_thread_migration import MIGRATION, old, apply, mapped  # noqa: F401
 from test_trade_migrations import collector, scratch  # noqa: F401
 from test_trades import counter, read, trade_step
 
@@ -108,7 +109,11 @@ def legacy(old, scratch, monkeypatch, store, writer):
     # Loan and Trade can share a round UUID; kind is part of mapping identity.
     old.execute("INSERT INTO loan(id,kind,state,lender_id,borrower_id,lender_name,borrower_name) VALUES (%s,'borrow_request','requested',%s,%s,'Ash','Misty')", (ROUND, OWNER, OTHER))
     apply(old)
+    # apply() runs only the thread migration. The send path under test is current code, so record that migration and
+    # apply every later root migration too (migrate() applies the remaining files in filename order).
+    old.execute('INSERT INTO schema_migration(name) VALUES (%s)', (MIGRATION,))
     old.commit()
+    migrate(scratch)
     return {'thread_id': str(mapped(old, 'trade', UUID(ROUND))), 'id': ROUND, 'offer_id': ROUND, 'revision': 1}
 
 
