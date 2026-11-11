@@ -6,6 +6,7 @@ import type {
 import { EditionPrice } from "../EditionPrice";
 import { MetadataReport } from "../MetadataReport";
 import { MissingCardReports } from "../MissingCardReports";
+import { useShownToastId } from "../ui/Toast";
 import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
 import { FormatStandings } from "./FormatStandings";
@@ -650,6 +651,7 @@ function AddRows({
   // The toast's Undo for the last add, offered here while the popup covers the toast.
   const [undo, setUndo] = useState<InlineUndo | null>(null);
   const [undoing, setUndoing] = useState(false);
+  useShownToastId();
   const leaves =
     alsoOffer && !places.leaves.some((leaf) => leaf.id === alsoOffer.id)
       ? [alsoOffer, ...places.leaves]
@@ -761,7 +763,7 @@ function AddRows({
     setUndoing(false);
     setUndo(() => result.next);
     if (result.message) setDone(result.message);
-    if (result.message && !result.next) onUndone();
+    if (result.undone) onUndone();
     // Undo goes once it is used: focus moves on to Add, beside it.
     if (!result.next) addButton.current?.focus();
   }
@@ -823,7 +825,7 @@ function AddRows({
         <p role="status" className="m-0 min-w-0 flex-1 text-meta text-text">
           {done}
         </p>
-        {undo && done && (
+        {undo && undo.isAvailable() && done && (
           <Button
             aria-disabled={undoing || undefined}
             onClick={() => void undoAdd()}

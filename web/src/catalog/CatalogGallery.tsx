@@ -46,7 +46,7 @@ import {
   QUEUE_FULL,
   searchHint,
 } from "./catalogText";
-import { useAddToast, type AddedCards } from "./useAddToast";
+import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
 import { useCatalogBrowse } from "./useCatalogBrowse";
 import { usePlaces, type Place } from "./usePlaces";
 
@@ -66,7 +66,7 @@ type Props = {
    * Collection's toast instead, from onAdded. */
   undoToast: boolean;
   /** Every batch add from here, from the bar or the card popup, once it succeeded. */
-  onAdded?: (added: AddedCards) => void;
+  onAdded?: (added: AddedCards) => void | Promise<InlineUndo | null>;
   /** Add N cards found its Location gone: the owner reads its Locations again. */
   onTargetGone?: () => void;
   /** Where the bar sticks: under the shell's header on the page, or to the top of a dialog's body. */
@@ -207,10 +207,22 @@ export function CatalogGallery({
         })),
         result.ownerRevision
       );
+      const external = live.current.onAdded?.(result);
       const undo = live.current.undoToast
         ? live.current.addToast(result)
-        : Promise.resolve(null);
-      live.current.onAdded?.(result);
+        : Promise.resolve(external ?? null).then((undo) =>
+            undo
+              ? observeUndo(undo, (ownerRevision) =>
+                  noteAdded(
+                    result.items.map((item) => ({
+                      editionId: item.editionId,
+                      added: -item.quantity,
+                    })),
+                    ownerRevision
+                  )
+                )
+              : null
+          );
       return undo;
     },
     [noteAdded]
@@ -653,5 +665,24 @@ function QuickAdd({
         <Icon icon={Plus} />
       </button>
     </div>
+  );
+}
+
+/** Collection owns the toast, but this embedded gallery also accounts for copies its popup Undo removes. */
+function observeUndo(
+  undo: InlineUndo,
+  onUndone: (ownerRevision: number) => void
+): InlineUndo {
+  return Object.assign(
+    async () => {
+      const result = await undo();
+      if (result.undone && result.ownerRevision !== undefined)
+        onUndone(result.ownerRevision);
+      return {
+        ...result,
+        next: result.next ? observeUndo(result.next, onUndone) : null,
+      };
+    },
+    { isAvailable: undo.isAvailable }
   );
 }

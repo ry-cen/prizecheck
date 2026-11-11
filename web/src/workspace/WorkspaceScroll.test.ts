@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { useRoute, type Route } from "../shell/useRoute";
 import { restorePageScroll } from "../shell/restorePageScroll";
+import { ToastProvider } from "../ui/Toast";
 import { Workspace } from "./Workspace";
 
 vi.mock("../location_generated", async (original) => ({
@@ -129,7 +130,7 @@ it("real Collection effects do not undo restored Location positions after cached
     });
   }
   try {
-    await act(async () => root.render(h(Page)));
+    await act(async () => root.render(h(ToastProvider, null, h(Page))));
     expect(host.querySelector("h1")?.textContent).toBe("A");
     window.scrollTo(0, 500);
     await act(async () => route.navigate("/collection?location=B"));
