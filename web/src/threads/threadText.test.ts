@@ -221,6 +221,51 @@ it("keeps distinct card directions through a counter", () => {
     })
   ).toBe("You give 1 Arven · You get 1 Iono");
 });
+it("counts the copies a three-card preview leaves out", () => {
+  const card = (name: string, side: "you_give" | "you_get", copies = "1") => ({
+    edition_id: name,
+    name,
+    copies,
+    side,
+    image_url: null,
+  });
+  expect(
+    currentCardsText({
+      kind: "trade",
+      summary: {
+        you_give: "2",
+        you_get: "2",
+        cards: [
+          card("Boss's Orders", "you_give"),
+          card("Meowth ex", "you_give"),
+          card("Rosa's Encouragement", "you_get"),
+        ],
+      },
+    })
+  ).toBe(
+    "You give 1 Boss's Orders, 1 Meowth ex · You get 1 Rosa's Encouragement, +1 more"
+  );
+  expect(
+    currentCardsText({
+      kind: "trade",
+      summary: {
+        you_give: "3",
+        you_get: "4",
+        cards: [card("Iono", "you_give", "3")],
+      },
+    })
+  ).toBe("You give 3 Iono · You get 4 cards");
+  expect(
+    currentCardsText({
+      kind: "loan",
+      summary: {
+        you_give: "5",
+        you_get: "0",
+        cards: [card("Iono", "you_give", "2")],
+      },
+    })
+  ).toBe("2 Iono · +3 more");
+});
 it.each([
   ["returned", "Returned"],
   ["written_off", "Written off"],

@@ -302,9 +302,16 @@ async function story(
     // Ash declines one of the gifts, and Misty's Iono comes back to her Trade List and to his read of it.
     await ash.page.goto(`${ORIGIN}/trades/${declined}`);
     await ashMain.getByRole("button", { name: "Decline" }).click();
-    await expect(ashMain.getByRole("group", { name: "Decline" })).toHaveCount(
-      0
-    );
+    const sure = ashMain.getByRole("group", { name: "Decline" });
+    await expect(sure).toContainText("You can't undo it");
+    await sure.getByRole("button", { name: "Keep it" }).click();
+    await expect(sure).toHaveCount(0);
+    await expect(
+      ashMain.getByRole("button", { name: "Decline" })
+    ).toBeFocused();
+    await ashMain.getByRole("button", { name: "Decline" }).click();
+    await sure.getByRole("button", { name: "Decline", exact: true }).click();
+    await expect(sure).toHaveCount(0);
     await expect(heading(ash.page)).toHaveText("You declined");
     await expect(toast(ash.page)).toContainText("Declined");
     expect((await tradeState(ash.page, declined)).actions).toEqual([]);
@@ -321,7 +328,7 @@ async function story(
     await expect(heading(page)).toHaveText("Ash K declined");
     await expectOnlyReport(page);
 
-    // C: Withdraw acts once inline, while Ash has the gift open. Cancel alone keeps an ask.
+    // C: Withdraw acts once inline, while Ash has the gift open. Cancel and Decline ask first.
     await ash.page.goto(`${ORIGIN}/trades/${withdrawn}`);
     await expect(heading(ash.page)).toHaveText(
       "Misty W wants to give you 1 card"
