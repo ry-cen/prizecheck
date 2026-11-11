@@ -350,3 +350,94 @@ it.each(["cleanup", "wheel", "expiry"])(
     }
   }
 );
+
+it("S5-R3 remembers an observed shrink before growth and the queued scroll event", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  // The observer runs now; its animation frame and the scroll event are still queued.
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn(() => 1)
+  );
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    expect(window.scrollY).toBe(721);
+    vi.stubGlobal("scrollY", 683);
+    view.grow(683);
+    view.grow(1500);
+    expect(window.scrollY).toBe(683);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+  } finally {
+    stop();
+  }
+});
+
+it("S5-R3 retains every observed short end until the next owned write", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn(() => 1)
+  );
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    vi.stubGlobal("scrollY", 683);
+    view.grow(683);
+    view.grow(700);
+    view.grow(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+    // The old short end cannot explain a new app scroll after our owned write.
+    vi.stubGlobal("scrollY", 683);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(683);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
+
+it("S5-R3 releases a shrink and growth with no observable layout or scroll delivery", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    // No observer, rendering step, poll or scroll handler sees the short page.
+    // This is indistinguishable from an app scroll to 683, so ownership releases.
+    view.setHeight(683);
+    vi.stubGlobal("scrollY", 683);
+    view.setHeight(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(683);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
+
+it("S5-R3 does not treat every position above a historical end as a clamp", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn(() => 1)
+  );
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    vi.stubGlobal("scrollY", 300);
+    view.grow(300);
+    view.grow(1500);
+    vi.stubGlobal("scrollY", 400);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(400);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});

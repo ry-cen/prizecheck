@@ -22,6 +22,12 @@ export function restorePageScroll(
   // Where the last restore left the page; a scroll that lands elsewhere was not ours.
   let left = window.scrollY;
   let attempted = false;
+  // Geometry may grow again before a queued scroll event or retry sees the clamp.
+  const observedEnds = new Set<number>();
+  function observeEnd() {
+    const end = Math.max(0, root.scrollHeight - root.clientHeight);
+    if (end < target) observedEnds.add(end);
+  }
   const stop = () => {
     if (stopped) return;
     stopped = true;
@@ -44,14 +50,14 @@ export function restorePageScroll(
   // scroll anchoring carrying the view from where we left it up to the saved position. A scroll past the saved
   // position, or any other move, releases the restoration.
   function foreign() {
+    observeEnd();
     const at = window.scrollY;
     if (at === left) return;
-    const end = Math.max(
-      0,
-      document.documentElement.scrollHeight -
-        document.documentElement.clientHeight
-    );
-    const clamped = at >= end - 1 && at < target;
+    // A shrink and growth with no rendering/observer delivery or other sample in between
+    // leaves no clamp evidence; release an unexplained move just like an app scroll.
+    const clamped =
+      at < target &&
+      [...observedEnds].some((end) => at >= end - 1 && at <= end);
     const toward =
       Math.sign(at - left) === Math.sign(target - left) &&
       Math.abs(at - left) <= Math.abs(target - left);
@@ -61,11 +67,16 @@ export function restorePageScroll(
   const restore = () => {
     frame = 0;
     if (stopped) return;
+    observeEnd();
     // Scroll events are queued: a poll or resize callback may see a newer position first.
     if (attempted) foreign();
     if (stopped) return;
     attempted = true;
-    if (window.scrollY !== target) window.scrollTo(0, target);
+    if (window.scrollY !== target) {
+      window.scrollTo(0, target);
+      observedEnds.clear();
+      observeEnd();
+    }
     left = window.scrollY;
     if (target === 0 && left === target) stop();
   };
@@ -73,6 +84,8 @@ export function restorePageScroll(
   // Fresh top-of-page visits need no guard; nonzero history positions can still shift as content arrives.
   if (stopped) return stop;
   observer = new ResizeObserver(() => {
+    if (stopped) return;
+    observeEnd();
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(restore);
   });
