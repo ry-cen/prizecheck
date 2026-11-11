@@ -61,6 +61,12 @@ type Lifts = Partial<Record<LiftSource, number>>;
 const ToastContext = createContext<ToastApi | null>(null);
 // Apart from ToastContext, so a lift that changes never changes the toast API that effects depend on.
 const LiftContext = createContext<Lifts>({});
+const ShownToastContext = createContext<number | null>(null);
+
+/** Subscribe inline toast controls to replacement and dismissal without changing the stable toast API. */
+export function useShownToastId(): number | null {
+  return useContext(ShownToastContext);
+}
 
 /** The app's one toast host. Call it from anything inside ToastProvider. */
 export function useToast(): ToastApi {
@@ -153,7 +159,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   return (
     <ToastContext.Provider value={api}>
-      <LiftContext.Provider value={lifts}>{children}</LiftContext.Provider>
+      <LiftContext.Provider value={lifts}>
+        <ShownToastContext.Provider value={visible?.id ?? null}>
+          {children}
+        </ShownToastContext.Provider>
+      </LiftContext.Provider>
       <section
         ref={host}
         aria-label="Notifications"

@@ -366,6 +366,48 @@ test.describe("desktop", () => {
     await expect(cards(page)).toHaveCount(0);
   });
 
+  test("Collection popup Undo is reachable while Add cards stays open", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await createLocation(page, "Trade box");
+    await page.goto(`${ORIGIN}/collection`);
+    await sidebarButton(page, "Trade box").click();
+    await page.getByRole("button", { name: "Add cards", exact: true }).click();
+    const add = page.getByRole("dialog", { name: "Add cards to Trade box" });
+    await tile(add, "Switch, MEG 130").click();
+    const popup = page.getByRole("dialog", { name: "Switch", exact: true });
+    await addRow(page)
+      .getByRole("button", { name: "Add 1", exact: true })
+      .click();
+    const popupUndo = popup.getByRole("button", { name: "Undo", exact: true });
+    await expect(popupUndo).toBeVisible();
+    await expect(add).toBeVisible();
+    await expect(popup).toContainText("1 copy owned");
+    await popupUndo.click();
+    await expect(
+      popup.getByText("Undo removed 1 card from Trade box.")
+    ).toBeVisible();
+    await expect(popupUndo).toHaveCount(0);
+    await expect(
+      addRow(page).getByRole("button", { name: "Add 1", exact: true })
+    ).toBeFocused();
+    await expect(popup).not.toContainText("1 copy owned");
+    await expectPageChecks(
+      page,
+      "Collection, popup Undo while Add cards stays open"
+    );
+    await page.keyboard.press("Escape");
+    await expect(add).toBeVisible();
+    await expect(tile(add, "Switch, MEG 130")).toHaveAccessibleName(
+      "Switch, MEG 130, Mega Evolution, Normal, not owned"
+    );
+    await page.keyboard.press("Escape");
+    await expect(add).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(0);
+  });
+
   test("Add N cards and its Undo restart the walk quietly, and Add cards loads more cards as its dialog scrolls", async ({
     page,
   }) => {

@@ -16,6 +16,7 @@ import type {
   CatalogSet,
 } from "../catalog_browse_generated";
 import { EditionPrice } from "../EditionPrice";
+import { useShownToastId } from "../ui/Toast";
 import { Button } from "../ui/Button";
 import { EditionTile } from "../ui/EditionTile";
 import { Icon } from "../ui/Icon";
@@ -39,6 +40,7 @@ import { CatalogCardPopup, type CardRequest } from "./CatalogCardPopup";
 import { CatalogFilters } from "./CatalogFilters";
 import {
   batchFailed,
+  batchAddedText,
   CATALOG_UNAVAILABLE,
   earlierBatchFinished,
   FORMAT_NAMES,
@@ -46,7 +48,7 @@ import {
   QUEUE_FULL,
   searchHint,
 } from "./catalogText";
-import { useAddToast, type AddedCards } from "./useAddToast";
+import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
 import { useCatalogBrowse } from "./useCatalogBrowse";
 import { usePlaces, type Place } from "./usePlaces";
 
@@ -66,7 +68,7 @@ type Props = {
    * Collection's toast instead, from onAdded. */
   undoToast: boolean;
   /** Every batch add from here, from the bar or the card popup, once it succeeded. */
-  onAdded?: (added: AddedCards) => void;
+  onAdded?: (added: AddedCards) => void | Promise<InlineUndo | null>;
   /** Add N cards found its Location gone: the owner reads its Locations again. */
   onTargetGone?: () => void;
   /** Where the bar sticks: under the shell's header on the page, or to the top of a dialog's body. */
@@ -196,6 +198,66 @@ export function CatalogGallery({
         ownerRevision
       ),
   });
+  // Collection's feedback belongs to the gallery, rather than the AddRows that unmounts on close/step.
+  const [feedback, setFeedback] = useState<{
+    message: string;
+    undo: InlineUndo | null;
+  } | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  const feedbackBusy = useRef(false);
+  const feedbackVersion = useRef(0);
+  const galleryRoot = useRef<HTMLDivElement>(null);
+  const feedbackEffects = useRef({
+    onUndone: () => {},
+    focusAfterUndo: () => {},
+  });
+  useShownToastId();
+
+  function renderAddFeedback(
+    onUndone: () => void,
+    focusAfterUndo: () => void,
+    announce = true
+  ) {
+    feedbackEffects.current = { onUndone, focusAfterUndo };
+    async function pressUndo() {
+      if (!feedback?.undo || feedbackBusy.current) return;
+      const version = feedbackVersion.current;
+      feedbackBusy.current = true;
+      setUndoing(true);
+      try {
+        const result = await feedback.undo();
+        if (version !== feedbackVersion.current) return;
+        setFeedback({
+          message: result.message || feedback.message,
+          undo: result.next,
+        });
+        // Close/step can move the control while this request is in flight: refresh and focus the current view.
+        if (result.undone) feedbackEffects.current.onUndone();
+        if (!result.next) feedbackEffects.current.focusAfterUndo();
+      } finally {
+        feedbackBusy.current = false;
+        setUndoing(false);
+      }
+    }
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <p
+          role={announce ? "status" : undefined}
+          className="m-0 min-w-0 flex-1 text-meta text-text"
+        >
+          {feedback?.message ?? ""}
+        </p>
+        {feedback?.undo?.isAvailable() && (
+          <Button
+            aria-disabled={undoing || undefined}
+            onClick={() => void pressUndo()}
+          >
+            Undo
+          </Button>
+        )}
+      </div>
+    );
+  }
   const live = useRef({ undoToast, onAdded, addToast });
   live.current = { undoToast, onAdded, addToast };
   const added = useCallback(
@@ -207,10 +269,33 @@ export function CatalogGallery({
         })),
         result.ownerRevision
       );
+      const version = ++feedbackVersion.current;
+      const external = live.current.onAdded?.(result);
       const undo = live.current.undoToast
         ? live.current.addToast(result)
-        : Promise.resolve(null);
-      live.current.onAdded?.(result);
+        : Promise.resolve(external ?? null).then((undo) =>
+            undo
+              ? observeUndo(undo, (ownerRevision) =>
+                  noteAdded(
+                    result.items.map((item) => ({
+                      editionId: item.editionId,
+                      added: -item.quantity,
+                    })),
+                    ownerRevision
+                  )
+                )
+              : null
+          );
+      if (!live.current.undoToast) {
+        setFeedback(null);
+        void undo.then((offered) => {
+          if (version === feedbackVersion.current)
+            setFeedback({
+              message: batchAddedText(result.copies, result.path),
+              undo: offered,
+            });
+        });
+      }
       return undo;
     },
     [noteAdded]
@@ -367,7 +452,7 @@ export function CatalogGallery({
   const first = browse.first;
   const unavailable = first !== null && !first.available;
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <div ref={galleryRoot} className="flex min-w-0 flex-col gap-4">
       {adding && (
         <AddBar
           fixed={fixedTarget}
@@ -421,6 +506,16 @@ export function CatalogGallery({
         onOwned={setOwned}
       />
       <div role="status" className="flex flex-col gap-0.5 text-meta">
+        {!undoToast &&
+          !card &&
+          renderAddFeedback(
+            () => {},
+            () =>
+              galleryRoot.current
+                ?.querySelector<HTMLInputElement>('input[type="search"]')
+                ?.focus(),
+            false
+          )}
         {browse.notice && (
           <p className="m-0 font-medium text-text">{browse.notice}</p>
         )}
@@ -547,6 +642,7 @@ export function CatalogGallery({
         onLocation={setPopupLocation}
         alsoOffer={adding ? target : null}
         onAdded={added}
+        renderAddFeedback={undoToast ? undefined : renderAddFeedback}
         onReported={onReported ?? (() => {})}
         returnFocus={opener}
       />
@@ -653,5 +749,24 @@ function QuickAdd({
         <Icon icon={Plus} />
       </button>
     </div>
+  );
+}
+
+/** Collection owns the toast, but this embedded gallery also accounts for copies its popup Undo removes. */
+function observeUndo(
+  undo: InlineUndo,
+  onUndone: (ownerRevision: number) => void
+): InlineUndo {
+  return Object.assign(
+    async () => {
+      const result = await undo();
+      if (result.undone && result.ownerRevision !== undefined)
+        onUndone(result.ownerRevision);
+      return {
+        ...result,
+        next: result.next ? observeUndo(result.next, onUndone) : null,
+      };
+    },
+    { isAvailable: undo.isAvailable }
   );
 }

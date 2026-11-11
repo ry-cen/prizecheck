@@ -1,4 +1,11 @@
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type RefObject,
+  type ReactNode,
+} from "react";
 import type {
   BrowseEdition,
   EditionStandings,
@@ -6,6 +13,7 @@ import type {
 import { EditionPrice } from "../EditionPrice";
 import { MetadataReport } from "../MetadataReport";
 import { MissingCardReports } from "../MissingCardReports";
+import { useShownToastId } from "../ui/Toast";
 import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
 import { FormatStandings } from "./FormatStandings";
@@ -56,6 +64,12 @@ export type CardRequest = {
   report: CardReport | null;
 };
 
+/** Collection keeps this feedback across popup close and card steps. */
+export type AddFeedbackRenderer = (
+  onUndone: () => void,
+  focusAfterUndo: () => void
+) => ReactNode;
+
 type Props = {
   request: CardRequest | null;
   onClose: () => void;
@@ -79,6 +93,7 @@ type Props = {
    * moved by itself, and shows the Undo toast. It resolves to that toast's Undo, which the Add row offers beside its
    * own line while the popup covers the toast (null: none). */
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
+  renderAddFeedback?: AddFeedbackRenderer;
   /** A metadata report was sent: My metadata reports reads again. */
   onReported: () => void;
   returnFocus?: RefObject<HTMLElement | null>;
@@ -131,6 +146,7 @@ export function CatalogCardPopup({
   alsoOffer,
   onAdded,
   onReported,
+  renderAddFeedback,
   returnFocus,
 }: Props) {
   const open = request !== null;
@@ -404,6 +420,7 @@ export function CatalogCardPopup({
                 setWhereVersion((value) => value + 1);
                 return undo;
               }}
+              renderAddFeedback={renderAddFeedback}
               onUndone={() => {
                 reload();
                 setWhereVersion((value) => value + 1);
@@ -633,6 +650,7 @@ function AddRows({
   onLocation,
   onAdded,
   onUndone,
+  renderAddFeedback,
 }: {
   cardName: string;
   pendingFor: (editionId: string) => { current: AddCommand | null };
@@ -644,12 +662,14 @@ function AddRows({
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
   /** The Add row's Undo took the copies out again. */
   onUndone: () => void;
+  renderAddFeedback?: AddFeedbackRenderer;
 }) {
   const headingId = useId();
   const addButton = useRef<HTMLButtonElement>(null);
   // The toast's Undo for the last add, offered here while the popup covers the toast.
   const [undo, setUndo] = useState<InlineUndo | null>(null);
   const [undoing, setUndoing] = useState(false);
+  useShownToastId();
   const leaves =
     alsoOffer && !places.leaves.some((leaf) => leaf.id === alsoOffer.id)
       ? [alsoOffer, ...places.leaves]
@@ -761,7 +781,7 @@ function AddRows({
     setUndoing(false);
     setUndo(() => result.next);
     if (result.message) setDone(result.message);
-    if (result.message && !result.next) onUndone();
+    if (result.undone) onUndone();
     // Undo goes once it is used: focus moves on to Add, beside it.
     if (!result.next) addButton.current?.focus();
   }
@@ -819,19 +839,23 @@ function AddRows({
           This Edition is unavailable, so it can't be added.
         </p>
       )}
-      <div className={ROW}>
-        <p role="status" className="m-0 min-w-0 flex-1 text-meta text-text">
-          {done}
-        </p>
-        {undo && done && (
-          <Button
-            aria-disabled={undoing || undefined}
-            onClick={() => void undoAdd()}
-          >
-            Undo
-          </Button>
-        )}
-      </div>
+      {renderAddFeedback ? (
+        renderAddFeedback(onUndone, () => addButton.current?.focus())
+      ) : (
+        <div className={ROW}>
+          <p role="status" className="m-0 min-w-0 flex-1 text-meta text-text">
+            {done}
+          </p>
+          {undo && undo.isAvailable() && done && (
+            <Button
+              aria-disabled={undoing || undefined}
+              onClick={() => void undoAdd()}
+            >
+              Undo
+            </Button>
+          )}
+        </div>
+      )}
       <p role="alert" className="m-0 text-meta text-danger">
         {failure}
       </p>
