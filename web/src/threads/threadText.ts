@@ -140,21 +140,40 @@ export function agreementText(
 export function currentCardsText(
   row: Pick<ThreadItem, "kind" | "summary">
 ): string {
-  const cards = (side: "you_give" | "you_get") =>
-    row.summary.cards
-      .filter((card) => card.side === side)
-      .map((card) => `${card.copies} ${card.name}`)
-      .join(", ");
-  return row.kind === "trade"
-    ? [
-        cards("you_give") && `You give ${cards("you_give")}`,
-        cards("you_get") && `You get ${cards("you_get")}`,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : row.summary.cards
-        .map((card) => `${card.copies} ${card.name}`)
-        .join(" · ");
+  // The list names at most three cards; the side totals count every copy, so what the names miss is the difference.
+  const more = (shown: number, total: string) => {
+    const left = Number(total) - shown;
+    return left > 0 ? `, +${left} more` : "";
+  };
+  const cards = (side: "you_give" | "you_get") => {
+    const own = row.summary.cards.filter((card) => card.side === side);
+    return (
+      own.map((card) => `${card.copies} ${card.name}`).join(", ") +
+      (own.length > 0 || Number(row.summary[side]) > 0
+        ? more(
+            own.reduce((sum, card) => sum + Number(card.copies), 0),
+            row.summary[side]
+          )
+        : "")
+    ).replace(/^, /, "");
+  };
+  if (row.kind === "trade")
+    return [
+      cards("you_give") && `You give ${cards("you_give")}`,
+      cards("you_get") && `You get ${cards("you_get")}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  const shown = row.summary.cards.reduce(
+    (sum, card) => sum + Number(card.copies),
+    0
+  );
+  const left =
+    Number(row.summary.you_give) + Number(row.summary.you_get) - shown;
+  return (
+    row.summary.cards.map((card) => `${card.copies} ${card.name}`).join(" · ") +
+    (left > 0 ? ` · +${left} more` : "")
+  );
 }
 
 export function loanOutcome(reason: LoanView["closed_reason"]): string {

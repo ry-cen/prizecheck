@@ -91,25 +91,29 @@ const RELOAD = new Set([
 ]);
 
 /** A step the screen runs; its idempotency key is kept under this name until it settles. */
-type StepName =
-  Asking | "decline" | "withdraw" | "accept" | "use_suggested" | "confirm";
+type StepName = Asking | "withdraw" | "accept" | "use_suggested" | "confirm";
 
 /** A place the confirm dialog offers for the cards the reader gets: one of their Storage Leaves or Decks, by full
  * path, a Deck marked " (Deck)". */
 type SwapPlace = { id: string; path: string; label: string };
 
-/** Cancel asks once inline; Decline and Withdraw act directly. */
-type Asking = "cancel";
+/** Cancel and Decline ask once inline; Withdraw acts directly. */
+type Asking = "cancel" | "decline";
 
 /** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
  * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Trade), and the heading after a step or a
  * refusal that reads the Trade again. */
-type FocusNext = "ask" | "menu" | "heading";
+type FocusNext = "ask" | "menu" | "decline" | "heading";
 
 const ASK: Record<
   Asking,
   { question: (other: string) => string; yes: string }
 > = {
+  decline: {
+    question: (other) =>
+      `Decline this Trade Proposal from ${other}? You can't undo it.`,
+    yes: "Decline",
+  },
   cancel: {
     question: (other) =>
       `Cancel this Trade with ${other}? None of these cards stay promised.`,
@@ -118,10 +122,7 @@ const ASK: Record<
 };
 
 /** What each step's toast says once it went through. Confirm swap's names where the cards went (swapDoneMessage). */
-const DONE: Record<
-  Asking | "decline" | "withdraw" | "accept" | "use_suggested",
-  string
-> = {
+const DONE: Record<Asking | "withdraw" | "accept" | "use_suggested", string> = {
   accept: "Accepted. Swap the cards in person, then confirm.",
   use_suggested: "Picks updated",
   decline: "Declined",
@@ -130,7 +131,7 @@ const DONE: Record<
 };
 
 /** The live item offer, its actions and inline physical-swap consent, beside its chat on wide screens.
- * Decline and Withdraw act directly; Cancel asks once inline. Unknown commands retain their exact consent and key.
+ * Withdraw acts directly; Decline and Cancel ask once inline. Unknown commands retain their exact consent and key.
  * Picks, destinations and selected Deck switches come only from the reader's own inventory. */
 export function TradeScreen({
   tradeId,
@@ -207,6 +208,7 @@ export function TradeScreen({
   const heading = useRef<HTMLHeadingElement>(null);
   const menuAnchor = useRef<HTMLDivElement>(null);
   const askButton = useRef<HTMLButtonElement>(null);
+  const declineButton = useRef<HTMLButtonElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const focusNext = useRef<FocusNext | null>(null);
   // A step refused because the Trade moved on reads it again: an open question closes and the heading takes focus
@@ -305,9 +307,11 @@ export function TradeScreen({
     const element =
       target === "ask"
         ? askButton.current
-        : target === "menu"
-          ? menuAnchor.current?.querySelector("button")
-          : heading.current;
+        : target === "decline"
+          ? declineButton.current
+          : target === "menu"
+            ? menuAnchor.current?.querySelector("button")
+            : heading.current;
     element?.focus({ preventScroll: target === "heading" });
   });
 
@@ -656,7 +660,11 @@ export function TradeScreen({
         </Button>
       )}
       {trade.actions.includes("decline") && (
-        <Button onClick={run.decline} aria-disabled={busy || undefined}>
+        <Button
+          ref={declineButton}
+          onClick={() => ask("decline")}
+          aria-disabled={busy || undefined}
+        >
           Decline
         </Button>
       )}
@@ -785,7 +793,7 @@ export function TradeScreen({
           </Button>
           <Button
             onClick={() => {
-              focusNext.current = "menu";
+              focusNext.current = asking === "decline" ? "decline" : "menu";
               setAsking(null);
             }}
           >

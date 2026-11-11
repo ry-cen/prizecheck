@@ -133,7 +133,7 @@ it("canonicalizes an old round URL before acceptance so route-scoped feedback st
   ).toContain("Accepted. Swap the cards in person, then confirm.");
 });
 
-it("declines a proposal in one press without a redundant confirmation", async () => {
+it("asks before declining a proposal, and Keep it leaves it open", async () => {
   vi.mocked(getTrade).mockResolvedValue({ ...trade, actions: ["decline"] });
   vi.mocked(declineTrade).mockResolvedValue({
     ...trade,
@@ -156,6 +156,26 @@ it("declines a proposal in one press without a redundant confirmation", async ()
     (button) => button.textContent === "Decline"
   )!;
   await act(async () => decline.click());
+  expect(declineTrade).not.toHaveBeenCalled();
+  const sure = host.querySelector('[role="group"][aria-label="Decline"]')!;
+  expect(sure.textContent).toContain("You can't undo it");
+  const keep = [...sure.querySelectorAll("button")].find(
+    (button) => button.textContent === "Keep it"
+  )!;
+  await act(async () => keep.click());
+  expect(declineTrade).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="group"][aria-label="Decline"]')).toBeNull();
+  const again = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent === "Decline"
+  )!;
+  expect(document.activeElement).toBe(again);
+  await act(async () => again.click());
+  const yes = [
+    ...host
+      .querySelector('[role="group"][aria-label="Decline"]')!
+      .querySelectorAll("button"),
+  ].find((button) => button.textContent === "Decline")!;
+  await act(async () => yes.click());
   expect(declineTrade).toHaveBeenCalledTimes(1);
   expect(declineTrade).toHaveBeenCalledWith(
     "item",
