@@ -2,7 +2,7 @@
 import { act, createElement as h, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { InboxProvider, InboxButton } from "../inbox/Inbox";
+import { InboxProvider, InboxButton, usePollPulse } from "../inbox/Inbox";
 import { LoanScreen as Screen } from "../loans/LoanScreen";
 import { LoanRecoveryProvider } from "../loans/LoanRecovery";
 import { fixture } from "../loans/testing/loanFakes";
@@ -263,3 +263,75 @@ for (const kind of ["loan", "trade"] as const)
       }
     });
   }
+
+it("a Trade opened in-app focuses its heading once; a pulse reload later neither refocuses nor scrolls it", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/trades/item");
+  vi.mocked(getInbox).mockResolvedValue({
+    waiting: [],
+    updates: [],
+    trade_waiting: [],
+    trade_updates: [],
+  });
+  let watermark = "one";
+  vi.mocked(getThreadPulse).mockImplementation(async () => ({
+    watermark,
+    trades: { needs_you: 1, waiting: 1, unread: 0 },
+    loans: { needs_you: 0, waiting: 0, unread: 0 },
+  }));
+  vi.mocked(getTrade).mockResolvedValue(trade);
+  vi.mocked(getTradeSide).mockResolvedValue({
+    trade_id: "round",
+    picks: [],
+    suggested: [],
+    deck_switches: [],
+  });
+  let poll: () => void = () => {};
+  function Poll() {
+    poll = usePollPulse();
+    return null;
+  }
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        h(ToastProvider, {
+          children: h(InboxProvider, {
+            onOpenLoan: vi.fn(),
+            onOpenTrade: vi.fn(),
+            children: h(
+              "main",
+              null,
+              h(Poll),
+              h(TradeScreen, {
+                tradeId: "item",
+                focusOnOpen: true,
+                onAllTrades: vi.fn(),
+                onNavigate: vi.fn(),
+              })
+            ),
+          }),
+        })
+      )
+    );
+    const heading = host.querySelector("h1")!;
+    expect(document.activeElement).toBe(heading);
+    heading.blur();
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    const calls = vi.mocked(getTrade).mock.calls.length;
+    watermark = "two";
+    await act(async () => poll());
+    await act(async () => {});
+    expect(vi.mocked(getTrade).mock.calls.length).toBeGreaterThan(calls);
+    expect(focus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(document.body);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});

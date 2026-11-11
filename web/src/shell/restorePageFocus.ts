@@ -27,13 +27,13 @@ function find(container: HTMLElement, saved: SavedFocus): HTMLElement | null {
   if (saved.element.isConnected && container.contains(saved.element))
     return saved.element as HTMLElement;
   if (!saved.name) return null;
-  for (const element of container.querySelectorAll<HTMLElement>(saved.tag))
-    if (
+  const twins = [...container.querySelectorAll<HTMLElement>(saved.tag)].filter(
+    (element) =>
       element.getAttribute("href") === saved.href &&
       nameOf(element) === saved.name
-    )
-      return element;
-  return null;
+  );
+  // Two controls alike can't tell which one was left; guessing could focus one off screen.
+  return twins.length === 1 ? twins[0] : null;
 }
 
 /** Back or Forward to an entry gives focus back to the control that left it, once it is drawn again; focus moved by

@@ -136,12 +136,15 @@ const DONE: Record<Asking | "withdraw" | "accept" | "use_suggested", string> = {
 export function TradeScreen({
   tradeId,
   active = true,
+  focusOnOpen = false,
   onAllTrades,
   onTradeChanged,
   onNavigate,
 }: {
   /** The Trade's id, or null for an address that names no Trade: it shows the same not-found as a missing Trade. */
   active?: boolean;
+  /** Opened by an in-app press (a list row, a sent Trade Proposal): the heading takes focus once the Trade is drawn. */
+  focusOnOpen?: boolean;
   tradeId: string | null;
   onAllTrades: () => void;
   onTradeChanged?: () => void;
@@ -152,6 +155,7 @@ export function TradeScreen({
   const refreshInbox = useInboxRefresh();
   // Opened from the inbox's drawer: the heading takes focus once the Trade is drawn, as the bell may be hidden.
   const openedFromInbox = useOpenedFromInbox();
+  const focusInitialHeading = useRef(focusOnOpen);
   const [load, setLoad] = useState<Load>(
     tradeId === null ? { kind: "missing" } : { kind: "loading" }
   );
@@ -237,12 +241,10 @@ export function TradeScreen({
           setAsking(null);
           setConfirming(false);
         }
-        // Opened from the inbox, or after a press that left focus nowhere (a sent Trade Proposal, a list row).
-        if (
-          openedFromInbox(tradeId) ||
-          (active && document.activeElement === document.body)
-        )
+        if (openedFromInbox(tradeId) || focusInitialHeading.current) {
           focusNext.current = "heading";
+          focusInitialHeading.current = false;
+        }
         setLoad({ kind: "ready", trade, side });
       },
       (cause) => {

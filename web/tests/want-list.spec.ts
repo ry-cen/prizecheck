@@ -654,7 +654,9 @@ test("Want List Back returns to where the page was when Open Deck was pressed, a
   page,
 }) => {
   // The review's path: window.scrollTo, then the first Open Deck link. Playwright scrolls that link into view before
-  // it clicks, so the position to come back to is the one at the click, not the one scrolled to.
+  // it clicks, so the position to come back to is the one at the click, not the one scrolled to. At the phone size the
+  // link is centred below the top (the review measured 393); at 1280×800 it lands at 0, which proves nothing.
+  await page.setViewportSize({ width: 375, height: 812 });
   await signIn(page);
   await world(page);
   await page.goto(`${ORIGIN}/decks/want-list`);
@@ -664,6 +666,7 @@ test("Want List Back returns to where the page was when Open Deck was pressed, a
     .first();
   await expect(open).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 9999));
+  const scripted = await page.evaluate(() => window.scrollY);
   await page.evaluate(() => {
     document.addEventListener(
       "click",
@@ -677,6 +680,8 @@ test("Want List Back returns to where the page was when Open Deck was pressed, a
   const atClick = await page.evaluate(
     () => (window as unknown as { atClick: number }).atClick
   );
+  expect(atClick).toBeGreaterThan(0);
+  expect(atClick).not.toBe(scripted);
   await expect(page).not.toHaveURL(/want-list/);
   await page.goBack();
   await expect(page).toHaveURL(/want-list/);

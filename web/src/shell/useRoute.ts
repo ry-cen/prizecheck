@@ -173,7 +173,9 @@ export function useRoute(): Route {
         save(scrolls, current.current, window.scrollY);
         save(addresses, current.current, currentAddress.current);
         save(positions, currentEntry.current, window.scrollY);
-        if (!replace) save(focuses, currentEntry.current, saveFocus());
+        // A replaced entry shows another address: the control that left it is not on it.
+        if (replace) focuses.delete(currentEntry.current);
+        else save(focuses, currentEntry.current, saveFocus());
         if (replace)
           window.history.replaceState(
             {

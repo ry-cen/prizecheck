@@ -1,6 +1,6 @@
 import { ListDetailLayout } from "../ui/ListDetailLayout";
 import { LegacyThreadLink } from "../threads/LegacyThreadLink";
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { TradesViewHeader } from "./TradesViewHeader";
 import { segmentId } from "../ui/Segmented";
 import { ThreadList } from "../threads/ThreadList";
@@ -12,7 +12,7 @@ import { ProposalBuilderPage } from "./ProposalBuilderPage";
 import { ProposalRedirect } from "./ProposalRedirect";
 import { TradeScreen } from "./TradeScreen";
 import { TraderTradeListPage } from "./TraderTradeListPage";
-import { TRADES_PATH, tradesRoute } from "./tradeListModel";
+import { TRADES_PATH, tradePath, tradesRoute } from "./tradeListModel";
 
 type Props = {
   /** The section the address names (``sectionAt``): null for /trades, "find", "list", "new/<trader id>" (or "new/<Handle>", which redirects), "trader/<trader id>", "with/<trader id>", "conversation/<conversation id>", "<id>/counter", or a Trade id. */
@@ -35,13 +35,23 @@ export function TradesPage({ active, section, onNavigate }: Props) {
   const idBase = useId();
   const [revision, setRevision] = useState(0);
   const panelId = `${idBase}-panel`;
+  // The address an in-app press went to: a Trade opened that way (a list row, a sent Trade Proposal) takes focus on
+  // its heading, as a Loan opened from its list does (LoansPage). A direct load or reload leaves focus where it is.
+  const opening = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    opening.current = null;
+  }, [section]);
+  const go = (to: string, options?: { replace?: boolean }) => {
+    opening.current = to;
+    onNavigate(to, options);
+  };
   const route = tradesRoute(section);
   if (route.kind === "new")
     return (
       <ProposalBuilderPage
         key={route.traderId}
         traderId={route.traderId}
-        onNavigate={onNavigate}
+        onNavigate={go}
       />
     );
   if (route.kind === "newHandle")
@@ -49,7 +59,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
       <ProposalRedirect
         key={route.handle.toLowerCase()}
         handle={route.handle}
-        onNavigate={onNavigate}
+        onNavigate={go}
       />
     );
   if (route.kind === "trader")
@@ -57,17 +67,17 @@ export function TradesPage({ active, section, onNavigate }: Props) {
       <TraderTradeListPage
         key={route.traderId}
         traderId={route.traderId}
-        onNavigate={onNavigate}
+        onNavigate={go}
       />
     );
   if (route.kind === "with" || route.kind === "conversation")
-    return <LegacyThreadLink section={section!} onNavigate={onNavigate} />;
+    return <LegacyThreadLink section={section!} onNavigate={go} />;
   if (route.kind === "counter")
     return (
       <CounterPage
         key={`counter-${route.id}`}
         tradeId={route.id}
-        onNavigate={onNavigate}
+        onNavigate={go}
       />
     );
   if (
@@ -85,7 +95,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
               idBase={idBase}
               panelId={panelId}
               view="trades"
-              onNavigate={onNavigate}
+              onNavigate={go}
             />
             <div
               role="tabpanel"
@@ -97,7 +107,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
                 active={active}
                 revision={revision}
                 selected={route.kind === "trade" ? route.id : null}
-                onOpen={(id) => onNavigate(`/trades/${id}`)}
+                onOpen={(id) => go(`/trades/${id}`)}
               />
             </div>
           </div>
@@ -111,8 +121,12 @@ export function TradesPage({ active, section, onNavigate }: Props) {
               onTradeChanged={() => setRevision((n) => n + 1)}
               key={route.kind === "trade" ? route.id : "missing"}
               tradeId={route.kind === "trade" ? route.id : null}
-              onAllTrades={() => onNavigate(TRADES_PATH)}
-              onNavigate={onNavigate}
+              focusOnOpen={
+                route.kind === "trade" &&
+                opening.current === tradePath(route.id)
+              }
+              onAllTrades={() => go(TRADES_PATH)}
+              onNavigate={go}
             />
           )
         }
@@ -127,7 +141,7 @@ export function TradesPage({ active, section, onNavigate }: Props) {
         idBase={idBase}
         panelId={panelId}
         view={view}
-        onNavigate={onNavigate}
+        onNavigate={go}
       />
       <div
         role="tabpanel"
@@ -136,9 +150,9 @@ export function TradesPage({ active, section, onNavigate }: Props) {
         className="flex min-w-0 flex-col gap-5"
       >
         {view === "find" ? (
-          <FindTrades onNavigate={onNavigate} />
+          <FindTrades onNavigate={go} />
         ) : (
-          <MyTradeList onOpenCollection={() => onNavigate("/collection")} />
+          <MyTradeList onOpenCollection={() => go("/collection")} />
         )}
       </div>
     </main>

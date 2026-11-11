@@ -165,3 +165,47 @@ it("retains a pushed sheet's parent when a leave guard blocks Back", async () =>
     vi.unstubAllGlobals();
   }
 });
+
+it("records the control that left each entry and offers it back on Back, not on a new visit", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/decks/want-list");
+  let route!: Route;
+  function View() {
+    route = useRoute();
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  const link = document.createElement("a");
+  link.href = "/decks/d1";
+  link.textContent = "Open Deck Gardevoir";
+  document.body.append(link);
+  try {
+    await act(async () => root.render(createElement(View)));
+    expect(route.focusFor()).toBeNull();
+    const wantList = window.history.state;
+    link.focus();
+    await act(async () => route.navigate("/decks/d1"));
+    expect(route.focusFor()).toBeNull();
+    link.remove();
+    await act(async () => {
+      window.history.replaceState(wantList, "", "/decks/want-list");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(route.focusFor()).toMatchObject({
+      tag: "A",
+      href: "/decks/d1",
+      name: "Open Deck Gardevoir",
+    });
+    // A replace shows another address on the same entry: the saved control goes with the old one.
+    await act(async () =>
+      route.navigate("/decks/want-list?deck=d2", { replace: true })
+    );
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/decks/want-list"));
+    expect(route.focusFor()).toBeNull();
+  } finally {
+    link.remove();
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});

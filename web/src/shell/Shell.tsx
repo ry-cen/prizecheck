@@ -198,6 +198,7 @@ function ShellFrame({
   );
   const containers = useRef(new Map<PageId, HTMLDivElement>());
   const otherContainer = useRef<HTMLDivElement>(null);
+  const restoredFocusEntry = useRef<string | null>(null);
   const current = pageDef(page);
   // The page whose tab is current: none while another page is shown.
   const showing = other ? null : page;
@@ -250,7 +251,12 @@ function ShellFrame({
     const container =
       otherKey !== null ? otherContainer.current : containers.current.get(page);
     const stopScroll = restorePageScroll(container, scrollFor(path));
-    const stopFocus = restorePageFocus(container, focusFor?.());
+    // Once per visit to an entry: a rerun for another reason must not bring back an old focus.
+    const stopFocus =
+      restoredFocusEntry.current === entry
+        ? () => {}
+        : restorePageFocus(container, focusFor?.());
+    restoredFocusEntry.current = entry;
     return () => {
       stopScroll();
       stopFocus();
