@@ -102,7 +102,7 @@ function safeDestination(): string {
 
 function App() {
   const lastUserId = useRef<string | null>(null);
-  const { path, address, entry, navigate, closeOverlay, scrollFor } =
+  const { path, address, entry, navigate, closeOverlay, scrollFor, focusFor } =
     useRoute();
   const collectionAddress = useRef("/collection");
   if (path === "/collection") collectionAddress.current = address;
@@ -477,6 +477,7 @@ function App() {
         }}
         onSignOut={signOut}
         scrollFor={scrollFor}
+        focusFor={focusFor}
         entry={entry}
         renderPage={renderPage}
         other={

@@ -237,7 +237,12 @@ export function TradeScreen({
           setAsking(null);
           setConfirming(false);
         }
-        if (openedFromInbox(tradeId)) focusNext.current = "heading";
+        // Opened from the inbox, or after a press that left focus nowhere (a sent Trade Proposal, a list row).
+        if (
+          openedFromInbox(tradeId) ||
+          (active && document.activeElement === document.body)
+        )
+          focusNext.current = "heading";
         setLoad({ kind: "ready", trade, side });
       },
       (cause) => {
@@ -312,7 +317,8 @@ export function TradeScreen({
           : target === "menu"
             ? menuAnchor.current?.querySelector("button")
             : heading.current;
-    element?.focus({ preventScroll: target === "heading" });
+    // The heading scrolls into view, so a step taken low on a phone never leaves focus above the screen.
+    element?.focus();
   });
 
   // A Trade still waiting for an answer shows each side's estimated total (Trading #277), for both parties.
