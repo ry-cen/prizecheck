@@ -10,18 +10,26 @@ export function restorePageScroll(
   // Anchoring late content can move the page again after scrollTo first reaches the target.
   // Keep the saved position authoritative only within the existing restore window.
   const root = document.documentElement;
-  const previousAnchor = root.style.overflowAnchor;
-  if (target !== 0) root.style.overflowAnchor = "none";
+  const previousAnchor = root.style.getPropertyValue("overflow-anchor");
+  const previousAnchorPriority =
+    root.style.getPropertyPriority("overflow-anchor");
+  if (target !== 0)
+    root.style.setProperty("overflow-anchor", "none", previousAnchorPriority);
   let stopped = false;
   let frame = 0;
   let observer: ResizeObserver | undefined;
   let poll: ReturnType<typeof setInterval> | undefined;
   // Where the last restore left the page; a scroll that lands elsewhere was not ours.
   let left = window.scrollY;
+  let attempted = false;
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    root.style.overflowAnchor = previousAnchor;
+    root.style.setProperty(
+      "overflow-anchor",
+      previousAnchor,
+      previousAnchorPriority
+    );
     observer?.disconnect();
     cancelAnimationFrame(frame);
     clearInterval(poll);
@@ -53,6 +61,10 @@ export function restorePageScroll(
   const restore = () => {
     frame = 0;
     if (stopped) return;
+    // Scroll events are queued: a poll or resize callback may see a newer position first.
+    if (attempted) foreign();
+    if (stopped) return;
+    attempted = true;
     if (window.scrollY !== target) window.scrollTo(0, target);
     left = window.scrollY;
     if (target === 0 && left === target) stop();

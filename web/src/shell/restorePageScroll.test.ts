@@ -289,3 +289,64 @@ it("bounds the anchoring guard and restores its previous style exactly once", ()
     root.style.overflowAnchor = previous;
   }
 });
+
+it.each(["scroll before poll", "poll before scroll", "resize before scroll"])(
+  "S5-R1 keeps a newer programmatic position: %s",
+  (ordering) => {
+    vi.useFakeTimers();
+    const view = layout(0, 1500);
+    const stop = restorePageScroll(document.createElement("main"), 721);
+    try {
+      expect(window.scrollY).toBe(721);
+      vi.stubGlobal("scrollY", 400);
+      if (ordering === "scroll before poll")
+        window.dispatchEvent(new Event("scroll"));
+      if (ordering === "resize before scroll") view.grow(1800);
+      else vi.advanceTimersByTime(RESTORE_POLL_MS);
+      window.dispatchEvent(new Event("scroll"));
+      vi.advanceTimersByTime(RESTORE_POLL_MS * 2);
+      expect(window.scrollY).toBe(400);
+    } finally {
+      stop();
+    }
+  }
+);
+
+it("S5-R1 still retries a native clamp when the poll precedes its scroll event", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    view.setHeight(683);
+    vi.stubGlobal("scrollY", 683);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    window.dispatchEvent(new Event("scroll"));
+    view.setHeight(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+  } finally {
+    stop();
+  }
+});
+
+it.each(["cleanup", "wheel", "expiry"])(
+  "S5-R2 restores the inline anchoring value and priority on %s",
+  (release) => {
+    vi.useFakeTimers();
+    const style = document.documentElement.style;
+    const previous = style.cssText;
+    style.setProperty("overflow-anchor", "auto", "important");
+    layout(0, 1500);
+    const stop = restorePageScroll(document.createElement("main"), 721);
+    try {
+      if (release === "cleanup") stop();
+      else if (release === "wheel") window.dispatchEvent(new Event("wheel"));
+      else vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
+      expect(style.getPropertyValue("overflow-anchor")).toBe("auto");
+      expect(style.getPropertyPriority("overflow-anchor")).toBe("important");
+    } finally {
+      stop();
+      style.cssText = previous;
+    }
+  }
+);
