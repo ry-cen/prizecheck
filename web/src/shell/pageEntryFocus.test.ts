@@ -222,3 +222,52 @@ it("opens a Deck with heading focus even when a Decks tab had focus", async () =
     vi.unstubAllGlobals();
   }
 });
+
+it("a query-only replace cancels loading entry focus and disconnects its observer immediately", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/decks/example");
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect");
+  let route!: Route;
+  let loading = true;
+  function View() {
+    route = useRoute();
+    const container = useRef<HTMLDivElement>(null);
+    // Match the Shell effect: a query-only replace changes neither dependency.
+    useLayoutEffect(
+      () => restorePageFocus(container.current, route.focusFor()),
+      [route.entry, route.path]
+    );
+    return h(
+      "div",
+      { ref: container },
+      h("h1", { "data-page-heading": loading ? "loading" : undefined }, "Decks")
+    );
+  }
+  try {
+    await act(async () => root.render(h(View)));
+    await act(async () => route.navigate("/decks/want-list"));
+    const request = route.focusFor();
+    expect(request).toMatchObject({ kind: "heading", state: "pending" });
+    expect(document.activeElement).toBe(document.body);
+    disconnect.mockClear();
+    await act(async () =>
+      route.navigate("/decks/want-list?deck=example", { replace: true })
+    );
+    expect(request).toMatchObject({ state: "cancelled" });
+    const disconnectedBeforeReady = disconnect.mock.calls.length > 0;
+    loading = false;
+    await act(async () => root.render(h(View)));
+    expect({ focus: document.activeElement, disconnectedBeforeReady }).toEqual({
+      focus: document.body,
+      disconnectedBeforeReady: true,
+    });
+  } finally {
+    await act(async () => root.unmount());
+    disconnect.mockRestore();
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});

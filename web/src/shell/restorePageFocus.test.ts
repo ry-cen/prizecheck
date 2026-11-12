@@ -260,3 +260,41 @@ it("an interaction whose propagation is stopped still cancels", async () => {
     stop();
   }
 });
+
+for (const state of ["cancelled", "completed"] as const)
+  it(`detaches immediately and rejects a queued callback after the request is ${state}`, () => {
+    const NativeObserver = MutationObserver;
+    let notify!: () => void;
+    class QueuedObserver extends NativeObserver {
+      constructor(callback: MutationCallback) {
+        super(callback);
+        notify = () => callback([], this);
+      }
+    }
+    vi.stubGlobal("MutationObserver", QueuedObserver);
+    const disconnect = vi.spyOn(QueuedObserver.prototype, "disconnect");
+    const page = document.createElement("div");
+    page.innerHTML = '<h1 data-page-heading="loading">Loading</h1>';
+    document.body.append(page);
+    const request = createPageEntryFocus();
+    const stop = restorePageFocus(page, request);
+    try {
+      request.state = state;
+      const disconnectedBeforeReady = disconnect.mock.calls.length > 0;
+      page.innerHTML = "<h1>Ready</h1>";
+      // Even a callback already queued before cancellation must reject terminal intent.
+      notify();
+      expect({
+        focus: document.activeElement,
+        disconnectedBeforeReady,
+      }).toEqual({
+        focus: document.body,
+        disconnectedBeforeReady: true,
+      });
+      expect(request.state).toBe(state);
+    } finally {
+      stop();
+      disconnect.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });

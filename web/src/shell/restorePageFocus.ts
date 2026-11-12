@@ -14,9 +14,24 @@ export type PageEntryFocus = {
   opener: Element | null;
 };
 
+const entryFocusCleanup = new WeakMap<PageEntryFocus, () => void>();
+
 /** One request per pushed entry. Replacements share its lifecycle, never a fresh exemption. */
 export function createPageEntryFocus(): PageEntryFocus {
-  return { kind: "heading", state: "pending", opener: document.activeElement };
+  let state: PageEntryFocus["state"] = "pending";
+  const request: PageEntryFocus = {
+    kind: "heading",
+    get state() {
+      return state;
+    },
+    set state(next) {
+      state = next;
+      // Route changes can settle a request without rerunning the Shell effect.
+      if (next !== "pending") entryFocusCleanup.get(request)?.();
+    },
+    opener: document.activeElement,
+  };
+  return request;
 }
 
 export type PageFocus = SavedFocus | PageEntryFocus;
@@ -65,7 +80,12 @@ function focusPageEntry(
 ): () => void {
   if (request.state !== "pending") return () => {};
   let target: HTMLElement | null = null;
+  let detached = false;
   const detach = () => {
+    if (detached) return;
+    detached = true;
+    if (entryFocusCleanup.get(request) === detach)
+      entryFocusCleanup.delete(request);
     observer.disconnect();
     window.removeEventListener("pointerdown", cancel, true);
     window.removeEventListener("keydown", cancel, true);
@@ -80,6 +100,10 @@ function focusPageEntry(
     if (event.target !== target) cancel();
   };
   const attempt = () => {
+    if (detached || request.state !== "pending") {
+      detach();
+      return;
+    }
     const active = document.activeElement;
     if (
       active &&
@@ -95,7 +119,7 @@ function focusPageEntry(
     heading.tabIndex = -1;
     heading.classList.add("outline-none");
     heading.focus({ preventScroll: true });
-    if (document.activeElement === heading) {
+    if (request.state === "pending" && document.activeElement === heading) {
       request.state = "completed";
       detach();
     } else target = null;
@@ -111,6 +135,7 @@ function focusPageEntry(
   window.addEventListener("keydown", cancel, true);
   window.addEventListener("wheel", cancel, { capture: true, passive: true });
   window.addEventListener("focusin", focused, true);
+  entryFocusCleanup.set(request, detach);
   attempt();
   return detach;
 }
