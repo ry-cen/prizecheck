@@ -1,13 +1,15 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, mergeTests, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
-import { artUpstream } from "./support/art-upstream";
-import { test } from "./support/collectors";
+import { test as artTest, artUpstream } from "./support/art-upstream";
+import { test as collectorsTest } from "./support/collectors";
 import { befriend, lendHandedOver, nameCollector } from "./support/loans";
+
+const test = mergeTests(artTest, collectorsTest);
 
 type TreeNode = { id: string; name: string; version: number };
 
