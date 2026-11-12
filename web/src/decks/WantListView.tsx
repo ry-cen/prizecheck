@@ -126,6 +126,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     reload
   );
   const swap = useWantListSwap({
+    scope: scope,
     list: load.kind === "ready" ? load.list : null,
     failed: load.kind === "failed",
     reload,

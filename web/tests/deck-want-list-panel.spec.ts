@@ -315,6 +315,50 @@ test.describe("on a desktop", () => {
     });
   }
 
+  for (const width of [390, 1280]) {
+    test(`Swap Undo waits for the Want List refresh at width ${width}`, async ({
+      page,
+    }) => {
+      const ids = seedCatalog();
+      await signIn(page);
+      const { deck } = await lastGap(page, ids);
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`${ORIGIN}/decks/${deck}`);
+      if (width === 390)
+        await page.getByRole("tab", { name: /^Deck / }).click();
+      await toggle(page).click();
+      await expect(swapButton(page)).toBeVisible();
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started!: () => void;
+      const refreshStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      await page.route(/\/api\/want-list\?deck=/, async (route) => {
+        started();
+        await held;
+        await route.continue();
+      });
+      try {
+        await swapButton(page).click();
+        await refreshStarted;
+        const undo = notifications(page).getByRole("button", { name: "Undo" });
+        await expect(undo).toBeVisible();
+        await undo.click();
+        await expect(undo).toHaveAttribute("aria-disabled", "true");
+        release();
+        await expect(notifications(page)).toContainText("Undone:");
+        await expect(readiness(page)).toContainText("Not owned1");
+        expect(await deckList(page, deck)).toEqual({ [ids["PAL 185"]]: "1" });
+        await expect(swapButton(page)).toBeVisible();
+      } finally {
+        release();
+      }
+    });
+  }
+
   test("a failed read says so in the panel, and Retry reads again", async ({
     page,
   }) => {
