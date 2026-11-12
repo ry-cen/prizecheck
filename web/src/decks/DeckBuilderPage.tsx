@@ -521,7 +521,7 @@ export function DeckBuilderPage({
         </div>
         <div className="col-start-1 row-start-2 flex min-w-0 flex-col gap-1">
           <DeckCostLine settled={cost} />
-          <DeckReadinessSummary lines={model.lines} />
+          <DeckReadinessSummary lines={model.lines} toGet={detail.to_get} />
         </div>
         <div className="col-start-2 row-span-2 row-start-1 flex flex-wrap items-center gap-2 phone:[&>button]:flex-1 phone:[&>button]:px-2">
           <Button
