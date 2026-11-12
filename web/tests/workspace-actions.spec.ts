@@ -253,6 +253,7 @@ for (const viewport of [
     };
     page.on("request", countDelete);
     await page
+      .getByRole("region", { name: "Notifications" })
       .getByRole("button", { name: "Dismiss", exact: true })
       .evaluate((button: HTMLElement) => {
         button.click();
@@ -308,7 +309,10 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
     }
     await page
       .getByRole("region", { name: "Catalog results" })
-      .getByRole("button", { name: /^Dismiss Abra,/ })
+      .getByRole("button", {
+        name: "Dismiss Abra, fixture 1, Fixture Set, Normal, 1 owned",
+        exact: true,
+      })
       .click();
     const popup = page.getByRole("dialog", {
       name: "Dismiss Abra",
@@ -338,7 +342,10 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
       // Catalog takes down its toast on navigation; make another Add to exercise its Dismiss.
       await page
         .getByRole("region", { name: "Catalog results" })
-        .getByRole("button", { name: /^Dismiss Abra,/ })
+        .getByRole("button", {
+          name: "Dismiss Abra, fixture 1, Fixture Set, Normal, 1 owned",
+          exact: true,
+        })
         .click();
       await popup.getByRole("button", { name: "Add 1", exact: true }).click();
       await expect(
@@ -361,6 +368,7 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
     };
     page.on("request", countDelete);
     await page
+      .getByRole("region", { name: "Notifications" })
       .getByRole("button", { name: "Dismiss", exact: true })
       .evaluate((button: HTMLElement) => {
         button.click();
@@ -416,7 +424,10 @@ test("a delayed Dismiss failure never replaces a newer sign-out notice", async (
       arrived();
     } else void route.continue();
   });
-  await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await page
+    .getByRole("region", { name: "Notifications" })
+    .getByRole("button", { name: "Dismiss", exact: true })
+    .click();
   await incoming;
   await tiles(page).first().click();
   const actions = bar(page).getByRole("button", {
@@ -539,6 +550,7 @@ test("a bar Add whose Undo list failed is still dismissed for good", async ({
       r.request().method() === "DELETE" && r.url().includes("/api/moves/undo/")
   );
   await page
+    .getByRole("region", { name: "Notifications" })
     .getByRole("button", { name: "Dismiss", exact: true })
     .evaluate((button: HTMLElement) => {
       button.click();
