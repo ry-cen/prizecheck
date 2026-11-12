@@ -185,7 +185,7 @@ it("records the control that left each entry and offers it back on Back, not on 
     const wantList = window.history.state;
     link.focus();
     await act(async () => route.navigate("/decks/d1"));
-    expect(route.focusFor()).toBeNull();
+    expect(route.focusFor()).toBe("heading");
     link.remove();
     await act(async () => {
       window.history.replaceState(wantList, "", "/decks/want-list");
@@ -205,6 +205,44 @@ it("records the control that left each entry and offers it back on Back, not on 
     expect(route.focusFor()).toBeNull();
   } finally {
     link.remove();
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
+it("only requests heading focus for forward in-app page entry", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/decks");
+  let route!: Route;
+  function View() {
+    route = useRoute();
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  try {
+    await act(async () => root.render(createElement(View)));
+    expect(route.focusFor()).toBeNull();
+    await act(async () =>
+      route.navigate("/decks/canonical", { replace: true })
+    );
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/decks/d1"));
+    expect(route.focusFor()).toBe("heading");
+    await act(async () => route.navigate("/decks/d1?view=list"));
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/loans"));
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/loans/l1"));
+    expect(route.focusFor()).toBe("heading");
+    const detail = window.history.state;
+    await act(async () => route.navigate("/loans/l2", { replace: true }));
+    expect(route.focusFor()).toBe("heading");
+    await act(async () => {
+      window.history.replaceState(detail, "", "/loans/l1");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(route.focusFor()).toBeNull();
+  } finally {
     await act(async () => root.unmount());
     vi.unstubAllGlobals();
   }

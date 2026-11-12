@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PAGES } from "./routes";
-import { saveFocus, type SavedFocus } from "./restorePageFocus";
+import { saveFocus, type SavedFocus, type PageFocus } from "./restorePageFocus";
 
 /** Session-only history positions: keep recent entries without growing with every navigation. */
 const SCROLL_CACHE_LIMIT = 128;
@@ -33,8 +33,8 @@ export type Route = {
   closeOverlay: (to: string) => void;
   /** The current entry's saved scroll, with a last-visited fallback for tab roots. */
   scrollFor: (path: string) => number;
-  /** The control that had focus when the current entry was last left, if any. */
-  focusFor: () => SavedFocus | null;
+  /** Forward page entry requests its heading; history traversal offers the saved opener. */
+  focusFor: () => PageFocus | null;
 };
 
 /** A page that can't be left without asking (the proposal builder, Trading #284). */
@@ -107,6 +107,8 @@ export function useRoute(): Route {
   const [address, setAddress] = useState(addressAt);
   const [entry, setEntry] = useState(entryAt);
   const [path, setPath] = useState(() => window.location.pathname);
+  // Intent is session-only: reloads and history traversal never invent a forward entry.
+  const headingEntry = useRef<string | null>(null);
   const currentEntry = useRef(entry);
   const currentState = useRef(window.history.state);
   const positions = useRef(new Map<string, number>()).current;
@@ -148,6 +150,7 @@ export function useRoute(): Route {
       save(addresses, current.current, currentAddress.current);
       save(positions, currentEntry.current, window.scrollY);
       save(focuses, currentEntry.current, saveFocus());
+      headingEntry.current = null;
       update();
     };
     window.addEventListener("popstate", onPopState);
@@ -205,6 +208,15 @@ export function useRoute(): Route {
             to
           );
         }
+        const target = new URL(to, window.location.href).pathname;
+        // Canonical replacements carry existing intent; they cannot create it on a direct load.
+        if (!replace)
+          headingEntry.current =
+            !overlay &&
+            target !== current.current &&
+            !PAGES.some((page) => page.path === target)
+              ? window.history.state.prizecheckEntry
+              : null;
         update();
       };
       if (
@@ -237,6 +249,10 @@ export function useRoute(): Route {
     },
     [navigate]
   );
-  const focusFor = useCallback(() => focuses.get(entry) ?? null, [entry]);
+  const focusFor = useCallback(
+    () =>
+      headingEntry.current === entry ? "heading" : (focuses.get(entry) ?? null),
+    [entry, address]
+  );
   return { path, address, entry, navigate, closeOverlay, scrollFor, focusFor };
 }

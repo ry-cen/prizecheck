@@ -8,6 +8,8 @@ export type SavedFocus = {
   name: string;
 };
 
+export type PageFocus = SavedFocus | "heading";
+
 const nameOf = (element: Element) =>
   (element.getAttribute("aria-label") ?? element.textContent ?? "").trim();
 
@@ -36,37 +38,60 @@ function find(container: HTMLElement, saved: SavedFocus): HTMLElement | null {
   return twins.length === 1 ? twins[0] : null;
 }
 
-/** Back or Forward to an entry gives focus back to the control that left it, once it is drawn again; focus moved by
+/** A forward page entry focuses its heading; Back or Forward restores the control that left the entry.
+ * Both wait for the target to be drawn; focus moved by
  * the collector or the page first, any input, or a bounded wait releases it. Scroll is the shell's to restore. */
 export function restorePageFocus(
   container: HTMLElement | null | undefined,
-  saved: SavedFocus | null | undefined
+  saved: PageFocus | null | undefined
 ): () => void {
   if (!container || !saved) return () => {};
+  let stopped = false;
   let observer: MutationObserver | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
+    stopped = true;
     observer?.disconnect();
     clearTimeout(timer);
     window.removeEventListener("pointerdown", stop);
     window.removeEventListener("keydown", stop);
+    window.removeEventListener("focusin", stop);
   };
   const attempt = () => {
     const active = document.activeElement;
-    if (active && active !== document.body) return stop();
-    const element = find(container, saved);
+    if (
+      active &&
+      active !== document.body &&
+      !(saved === "heading" && active === initialFocus)
+    )
+      return stop();
+    const element =
+      saved === "heading"
+        ? container.querySelector<HTMLElement>("h1")
+        : find(container, saved);
     if (!element || element.closest("[hidden],[inert]")) return;
+    if (saved === "heading") {
+      element.tabIndex = -1;
+      element.classList.add("outline-none");
+    }
     element.focus({ preventScroll: true });
     if (document.activeElement === element) stop();
   };
+  const initialFocus = document.activeElement;
   attempt();
   // Leaving dropped focus to the body while the page was hidden or remounted; wait for the control to be drawn.
-  if (document.activeElement === document.body) {
+  if (
+    !stopped &&
+    (document.activeElement === document.body ||
+      (saved === "heading" && document.activeElement === initialFocus))
+  ) {
     observer = new MutationObserver(attempt);
     observer.observe(container, { childList: true, subtree: true });
-    timer = setTimeout(stop, RESTORE_WINDOW_MS);
+    if (saved !== "heading") timer = setTimeout(stop, RESTORE_WINDOW_MS);
     window.addEventListener("pointerdown", stop, { once: true });
     window.addEventListener("keydown", stop, { once: true });
+    if (saved === "heading")
+      window.addEventListener("focusin", stop, { once: true });
   }
   return stop;
 }
