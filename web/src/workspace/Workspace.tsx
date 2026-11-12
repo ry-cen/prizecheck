@@ -710,7 +710,7 @@ export function Workspace({
     target?.focus();
   }
   const dockHasControls =
-    actions.toast !== null || selection.summary.copies > 0;
+    active && (actions.toast !== null || selection.summary.copies > 0);
 
   return (
     // Collection's own root (#166 retired the workspace CSS root and the old .legacy wrapper): the kit's body type
@@ -894,7 +894,7 @@ export function Workspace({
             // Ticket 114: hidden above the viewport until focused, like the shell's skip link.
             <a
               className="fixed top-2 left-2 z-(--layer-modal) box-border inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 py-2 text-body font-semibold text-text no-underline focus:translate-y-0"
-              href="#ws-dock"
+              href={selection.summary.copies > 0 ? "#ws-dock" : "#app-toasts"}
               onClick={(event) => {
                 event.preventDefault();
                 focusDock();

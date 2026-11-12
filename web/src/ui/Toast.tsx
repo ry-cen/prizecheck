@@ -166,6 +166,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </LiftContext.Provider>
       <section
         ref={host}
+        id="app-toasts"
         aria-label="Notifications"
         aria-live="polite"
         style={{ "--toast-lift": `${lift}px` } as CSSProperties}

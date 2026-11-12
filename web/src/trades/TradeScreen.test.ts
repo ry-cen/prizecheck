@@ -168,7 +168,11 @@ it("asks before declining a proposal, and Keep it leaves it open", async () => {
   const keep = [...sure.querySelectorAll("button")].find(
     (button) => button.textContent === "Keep it"
   )!;
-  await act(async () => keep.click());
+  await act(async () =>
+    keep.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    )
+  );
   expect(declineTrade).not.toHaveBeenCalled();
   expect(host.querySelector('[role="group"][aria-label="Decline"]')).toBeNull();
   const again = [...host.querySelectorAll("button")].find(
@@ -527,3 +531,33 @@ it("re-reads a refused withdrawal and focuses the heading", async () => {
     "This Trade has changed. Check it and try again."
   );
 });
+it.each(["withdraw", "cancel"] as const)(
+  "Escape dismisses %s and restores the menu opener",
+  async (action) => {
+    vi.mocked(getTrade).mockResolvedValue({
+      ...trade,
+      role: "proposer",
+      state: action === "cancel" ? "accepted" : "proposed",
+      actions: [action],
+    });
+    await openWithdraw();
+    const question = host.querySelector(
+      '[role="group"][aria-label="' +
+        (action === "cancel" ? "Cancel Trade" : "Withdraw") +
+        '"]'
+    )!;
+    expect(question).not.toBeNull();
+    await act(async () =>
+      question
+        .querySelector("button")!
+        .dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+        )
+    );
+    expect(question.isConnected).toBe(false);
+    expect(document.activeElement).toBe(
+      host.querySelector('[aria-label="More for this Trade"]')
+    );
+    expect(withdrawTrade).not.toHaveBeenCalled();
+  }
+);

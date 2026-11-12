@@ -51,6 +51,8 @@ export function PrivacySection({
   const pending = useRef<Pending | null>(null);
   const newLinkButton = useRef<HTMLButtonElement>(null);
   const base = useId();
+  const nameInput = useRef<HTMLInputElement>(null);
+  const [nameInvalid, setNameInvalid] = useState(false);
 
   function show(profile: CollectorProfile) {
     setLoad({ kind: "ready", profile });
@@ -135,6 +137,12 @@ export function PrivacySection({
               className="flex flex-wrap items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (!name.trim() || [...name.trim()].length > 40) {
+                  setNameInvalid(true);
+                  setNameNotice("Enter a name of 1 to 40 characters.");
+                  nameInput.current?.focus();
+                  return;
+                }
                 void change(
                   "display_name",
                   name,
@@ -151,11 +159,20 @@ export function PrivacySection({
               <div className="min-w-0 flex-[1_1_16rem]">
                 <TextField
                   label="Display Name"
+                  ref={nameInput}
+                  aria-invalid={nameInvalid || undefined}
                   value={name}
                   maxLength={40}
                   autoComplete="nickname"
-                  aria-describedby={`${base}-name-help`}
-                  onChange={(event) => setName(event.target.value)}
+                  aria-describedby={`${base}-name-help${nameNotice ? ` ${base}-name-error` : ""}`}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setName(value);
+                    if (value.trim() && [...value.trim()].length <= 40) {
+                      setNameInvalid(false);
+                      setNameNotice("");
+                    }
+                  }}
                 />
               </div>
               <Button
@@ -173,6 +190,7 @@ export function PrivacySection({
               </p>
               {nameNotice && (
                 <p
+                  id={`${base}-name-error`}
                   role="alert"
                   className="m-0 basis-full text-meta text-danger"
                 >

@@ -47,7 +47,7 @@ vi.mock("./useInventoryActions", () => ({
     busy: false,
     dialog: null,
     pending: null,
-    toast: null,
+    toast: { message: "Removed 1 copy.", undo: null },
     actionsButton: { current: null },
   }),
 }));
@@ -132,6 +132,9 @@ it("real Collection effects do not undo restored Location positions after cached
   try {
     await act(async () => root.render(h(ToastProvider, null, h(Page))));
     expect(host.querySelector("h1")?.textContent).toBe("A");
+    expect(host.querySelector('a[href="#ws-dock"]')).toBeNull();
+    expect(host.querySelector('a[href="#app-toasts"]')).not.toBeNull();
+    expect(document.getElementById("app-toasts")).not.toBeNull();
     window.scrollTo(0, 500);
     await act(async () => route.navigate("/collection?location=B"));
     expect(window.scrollY).toBe(0); // Fresh Location entry starts at the top.
