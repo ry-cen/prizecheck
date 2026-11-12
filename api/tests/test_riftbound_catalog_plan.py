@@ -382,3 +382,26 @@ def test_review_order_puts_group_reviews_last():
 def test_group_pull_reasons_default_is_empty_and_quality_still_required():
     assert pull().reasons==()
     with pytest.raises(TypeError): plan.GroupPull(info=pull().info,result=None,raw={})
+
+
+@pytest.mark.parametrize('value_index',range(22))
+def test_storage_violations_is_total(value_index):
+    from test_riftbound_catalog_assess import MUTATIONS
+    result=plan.storage_violations(None,MUTATIONS[value_index],None)
+    assert isinstance(result,tuple) and result==tuple(sorted(set(result)))
+
+
+def test_raw_bytes_is_total_and_escapes_nul_and_surrogates():
+    from test_riftbound_catalog_assess import MUTATIONS
+    for value in MUTATIONS:
+        assert isinstance(plan.raw_bytes(value),bytes)
+    assert plan.raw_bytes({'text':'a\x00\ud800'})==b'{"text":"a\\u0000\\ud800"}'
+    assert plan.raw_bytes({'tuple':(1,)})==b'{"tuple":[1]}'
+
+
+def test_plan_run_downgrades_hand_built_acceptable_pull_with_storage_violation():
+    current=pull([product(name='a\x00b')])
+    result=run(current)
+    assert result.compared==0 and not result.printings
+    assert result.reviews[0].kind==plan.GROUP_PULL_HELD
+    assert 'invalid_text' in result.reviews[0].candidate['reasons']

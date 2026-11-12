@@ -395,8 +395,8 @@ def test_malformed_group_does_not_stop_complete_sibling(conn, subtype):
     assert rows(conn, 'SELECT * FROM riftbound_group_snapshot WHERE group_id=900') == snapshot
     assert {r['source_id'] for r in accepted(conn)} == {'9000001', '9000002'}
     assert one(conn, "SELECT source_id,detail,candidate FROM catalog_review WHERE kind='group_pull_held'") == {
-        'source_id': 'group:900', 'detail': 'malformed_response',
-        'candidate': {'group_id': 900, 'status': 'pull_failed', 'reasons': ['malformed_response']}}
+        'source_id': 'group:900', 'detail': 'invalid_value',
+        'candidate': {'group_id': 900, 'status': 'pull_failed', 'reasons': ['invalid_value']}}
     assert one(conn, 'SELECT outcome FROM catalog_run WHERE id=%s', (report.run_id,))['outcome'] == 'succeeded'
 
 
@@ -421,3 +421,47 @@ def test_invalid_product_id_does_not_block_sibling_promotion(conn, which, identi
     hold = one(conn, "SELECT source_id,candidate FROM catalog_review WHERE kind='group_pull_held'")
     assert hold['source_id'] == 'group:900' and 'invalid_id' in hold['candidate']['reasons']
     assert one(conn, 'SELECT outcome FROM catalog_run WHERE id=%s', (report.run_id,))['outcome'] == 'succeeded'
+
+
+@pytest.mark.parametrize('field,value,reason',[
+    ('name','a\x00b','invalid_text'),('cleanName','a\x00b','invalid_text'),
+    ('Description','a\ud800b','invalid_text'),('productId',-1,'invalid_id'),
+    ('productId',10**19,'invalid_id'),('name','x'*501,'text_too_long')])
+def test_storage_violation_is_held_and_sibling_promotes(conn,field,value,reason):
+    _storage_case(conn,field,value,reason)
+
+
+def _storage_case(conn,field,value,reason,hand_built=False):
+    from app.games.riftbound.catalog.assess import assess_pull
+    from app.games.riftbound.catalog.normalize import normalise_group
+    from test_riftbound_catalog_assess import complete_payload
+    initial=complete_payload(901)
+    writer.apply_run(conn,[assess_pull(plan.GroupInfo(901,'Synthetic Set 901'),**initial)])
+    snapshot=rows(conn,'SELECT * FROM riftbound_group_snapshot WHERE group_id=901')
+    gp=rows(conn,'SELECT * FROM catalog_generation_printing ORDER BY printing_id')
+    editions=rows(conn,'SELECT * FROM catalog_edition ORDER BY id')
+    raw=complete_payload(901)
+    if field=='Description':
+        for entry in raw['products']['results'][0]['extendedData']:
+            if entry['name']==field: entry['value']=value
+    else: raw['products']['results'][0][field]=value
+    info=plan.GroupInfo(901,'Synthetic Set 901')
+    held=(plan.GroupPull(info,normalise_group(**raw),'acceptable',raw) if hand_built
+          else assess_pull(info,**raw))
+    valid=assess_pull(plan.GroupInfo(900,'Synthetic Set 900'),**complete_payload(900))
+    report=writer.apply_run(conn,[valid,held])
+    assert report.promoted and report.plan.compared==1
+    assert rows(conn,'SELECT * FROM riftbound_group_snapshot WHERE group_id=901')==snapshot
+    assert all(e in rows(conn,'SELECT * FROM catalog_edition') for e in editions)
+    current=rows(conn,'''SELECT gp.* FROM catalog_generation_printing gp JOIN catalog_state s
+        ON s.active_generation=gp.generation_id WHERE gp.set_id='901' ORDER BY printing_id''')
+    assert [{k:v for k,v in r.items() if k!='generation_id'} for r in current]==[
+        {k:v for k,v in r.items() if k!='generation_id'} for r in gp]
+    review=one(conn,"SELECT * FROM catalog_review WHERE kind='group_pull_held'")
+    assert review['source_id']=='group:901' and review['status']=='pending'
+    assert reason in review['candidate']['reasons']
+    assert one(conn,'SELECT outcome FROM catalog_run WHERE id=%s',(report.run_id,))['outcome']=='succeeded'
+
+
+def test_hand_built_acceptable_pull_with_nul_is_downgraded_by_plan_run(conn):
+    _storage_case(conn,'name','a\x00b','invalid_text',hand_built=True)

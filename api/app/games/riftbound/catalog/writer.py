@@ -120,8 +120,7 @@ def apply_run(conn, pulls: Sequence[plan.GroupPull], *, run_id: Optional[UUID] =
                         WHERE printing_id=%s AND descriptor_key=%s''', (printing, edition.descriptor_key)).fetchone()['id']
             promoted = state['active_generation'] is None or plan.content_digest(previous.printings.values()) != result.content_sha256
             if promoted:
-                raw = gzip.compress(json.dumps({str(p.info.group_id): p.raw for p in pulls}, sort_keys=True,
-                                               separators=(',', ':')).encode('utf-8'))
+                raw = gzip.compress(plan.raw_bytes({str(p.info.group_id): p.raw for p in pulls}))
                 cur.execute('INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256) VALUES (%s,%s,%s,%s)',
                             (run_id, len(result.printings), raw, hashlib.sha256(raw).hexdigest()))
                 for row in result.printings:
