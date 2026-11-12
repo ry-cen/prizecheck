@@ -18,8 +18,6 @@ import unicodedata
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 
-from psycopg.errors import LockNotAvailable
-
 from ..catalog.settlement_audit import record_settlement
 
 
@@ -1030,6 +1028,9 @@ def refresh_editions(conn, context, edition_ids, complete=False):
     ``complete`` also gives an unchanged verified Edition the quote variant the active rule now names
     (``complete_quote_variant``).
     """
+    # The price runner imports the pure rule helpers without PostgreSQL installed.
+    from psycopg.errors import LockNotAvailable
+
     if not edition_ids:
         return 0
     rows = conn.execute("""SELECT e.id,e.printing_id,e.descriptor,p.source,p.source_id,em.mapping_candidate,
