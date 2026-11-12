@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { undoDismissals } from "../inventoryUndoNotice";
+import { applyUndo, dismissUndo } from "../inventoryUndo";
+import { MoveError } from "../moves_generated";
 import type { MoveLocks } from "./moveRecovery";
 import { indexLocations } from "./locationTree";
+
+const toastHost = vi.hoisted(() => ({
+  version: 0,
+  getVersion() {
+    return toastHost.version;
+  },
+}));
+vi.mock("../ui/Toast", () => ({ useToast: () => toastHost }));
 
 // Small hook host: effects and state transitions run without a browser or a new test dependency.
 const host = vi.hoisted(() => {
@@ -233,6 +244,8 @@ function render(opts: ReturnType<typeof options>) {
 beforeEach(() => {
   host.reset();
   vi.clearAllMocks();
+  undoDismissals.reset();
+  toastHost.version = 0;
   serverNow = Date.parse("2026-10-31T20:00:00Z");
   vi.stubGlobal("navigator", { locks: testLocks() });
   disk = storage();
@@ -872,4 +885,181 @@ test("a delayed Dismiss failure cannot replace a newer Add", async () => {
   reject(new TypeError("DELETE failed"));
   await dismissing;
   expect(render(opts).toast).toEqual(newer);
+});
+
+const freshNotice = () => ({
+  ...older,
+  expires_at: new Date(Date.now() + 600000).toISOString(),
+});
+async function tick() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+async function mountedOffer() {
+  const opts = options();
+  vi.mocked(listUndo).mockResolvedValue([freshNotice()]);
+  render(opts);
+  await tick();
+  return opts;
+}
+function pendingDelete() {
+  let resolve!: () => void, reject!: (cause: Error) => void;
+  vi.mocked(dismissUndo).mockReturnValueOnce(
+    new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    })
+  );
+  return { resolve, reject };
+}
+test("delayed restore cannot replace another owner's notification", async () => {
+  let resolve!: (entries: ReturnType<typeof freshNotice>[]) => void;
+  vi.mocked(listUndo).mockReturnValueOnce(
+    new Promise((yes) => {
+      resolve = yes;
+    })
+  );
+  const opts = options();
+  render(opts);
+  toastHost.version++;
+  resolve([freshNotice()]);
+  await tick();
+  expect(render(opts).toast).toBeNull();
+});
+test.each([false, true])(
+  "restore after own re-show yields only to another owner: %s",
+  async (other) => {
+    const opts = { ...options(), active: true };
+    await render(opts).added({
+      locationId: "source",
+      path: "Binder",
+      copies: 1,
+      items: [],
+      ownerRevision: 1,
+      undoId: "old",
+      from: "bar",
+    });
+    opts.active = false;
+    render(opts);
+    let resolve!: (entries: ReturnType<typeof freshNotice>[]) => void;
+    vi.mocked(listUndo).mockReturnValueOnce(
+      new Promise((yes) => {
+        resolve = yes;
+      })
+    );
+    opts.active = true;
+    render(opts);
+    toastHost.version++;
+    render(opts).hostNotice.current = toastHost.version;
+    const kept = render(opts).toast;
+    if (other) toastHost.version++;
+    resolve([freshNotice()]);
+    await tick();
+    if (other) expect(render(opts).toast).toEqual(kept);
+    else expect(render(opts).toast?.entry?.id).toBe(older.id);
+  }
+);
+test.each(["shell", "quiet", "account"])(
+  "Dismiss failure respects %s",
+  async (change) => {
+    const opts = await mountedOffer(),
+      d = pendingDelete();
+    const before = render(opts).toast;
+    const pending = render(opts).closeToast();
+    if (change === "shell") toastHost.version++;
+    if (change === "account") {
+      vi.mocked(listUndo).mockResolvedValue([]);
+      render(options("B"));
+    }
+    d.reject(new TypeError());
+    await pending;
+    const after = render(change === "account" ? options("B") : opts).toast;
+    if (change === "quiet")
+      expect(after?.message).toBe("Couldn't dismiss this Undo. Try again.");
+    else if (change === "account") expect(after).toBeNull();
+    else expect(after?.id).toBe(before?.id);
+  }
+);
+test("two closeToast calls send one DELETE", async () => {
+  const opts = await mountedOffer(),
+    d = pendingDelete();
+  const a = render(opts).closeToast(),
+    b = render(opts).closeToast();
+  expect(dismissUndo).toHaveBeenCalledTimes(1);
+  d.resolve();
+  await Promise.all([a, b]);
+});
+test.each(["open", "dismissed", "failed"])(
+  "restore respects a registry record that is %s",
+  async (state) => {
+    const d = pendingDelete(),
+      pending = undoDismissals.dismiss(older.id);
+    if (state === "dismissed") {
+      d.resolve();
+      await pending;
+    }
+    if (state === "failed") {
+      d.reject(new Error());
+      await pending;
+    }
+    const opts = await mountedOffer();
+    if (state === "failed")
+      expect(render(opts).toast?.entry?.id).toBe(older.id);
+    else expect(render(opts).toast).toBeNull();
+    if (state === "open") {
+      d.resolve();
+      await pending;
+    }
+  }
+);
+test.each(["failed", "dismissed"])(
+  "Dismiss Undo %s respects newer shell feedback",
+  async (outcome) => {
+    const opts = await mountedOffer();
+    vi.mocked(applyUndo).mockRejectedValueOnce(
+      new MoveError(409, "UNDO_INCOMPATIBLE")
+    );
+    await render(opts).undo();
+    const before = render(opts).toast;
+    expect(before?.unavailable).toBe(true);
+    const d = pendingDelete(),
+      pending = render(opts).dismiss();
+    toastHost.version++;
+    if (outcome === "failed") d.reject(new Error());
+    else d.resolve();
+    await pending;
+    if (outcome === "failed") expect(render(opts).toast).toEqual(before);
+    else expect(render(opts).toast).toBeNull();
+  }
+);
+test("supersede clears only its named state", async () => {
+  const opts = await mountedOffer(),
+    notice = render(opts).toast!;
+  render(opts).superseded(notice.id - 1);
+  expect(render(opts).toast).toEqual(notice);
+  render(opts).superseded(notice.id);
+  expect(render(opts).toast).toBeNull();
+});
+test("delayed notices carry the turn host version but actions do not", async () => {
+  toastHost.version = 7;
+  const opts = await mountedOffer();
+  expect(render(opts).toast?.since).toBe(7);
+  const d = pendingDelete(),
+    pending = render(opts).closeToast();
+  d.reject(new Error());
+  await pending;
+  expect(render(opts).toast?.since).toBe(7);
+  await render(opts).added({
+    locationId: "source",
+    path: "Binder",
+    copies: 1,
+    items: [],
+    ownerRevision: 1,
+    undoId: "new",
+    from: "bar",
+  });
+  expect(render(opts).toast?.since).toBeUndefined();
 });

@@ -2,6 +2,7 @@
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { undoDismissals } from "../inventoryUndoNotice";
 import { applyUndo, dismissUndo, listUndo } from "../inventoryUndo";
 import { ToastProvider, useToast } from "../ui/Toast";
 import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
@@ -34,6 +35,7 @@ let kit: ReturnType<typeof useToast>;
 const onUndone = vi.fn();
 beforeEach(async () => {
   vi.clearAllMocks();
+  undoDismissals.reset();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.mocked(listUndo).mockResolvedValue([{ id: "add" }] as Awaited<
     ReturnType<typeof listUndo>
@@ -279,4 +281,68 @@ test("Dismiss remains persistent while Undo is pending", async () => {
     finish(removed);
     await pending;
   });
+});
+
+test("two Dismiss activations before commit send one DELETE", async () => {
+  await offer();
+  const button = host.querySelector<HTMLButtonElement>(
+    'button[aria-label="Dismiss"]'
+  )!;
+  await act(async () => {
+    button.click();
+    button.click();
+  });
+  expect(dismissUndo).toHaveBeenCalledTimes(1);
+});
+test.each(["failed", "dismissed"])(
+  "double Dismiss shares its %s outcome",
+  async (outcome) => {
+    let resolve!: () => void, reject!: (cause: Error) => void;
+    vi.mocked(dismissUndo).mockReturnValueOnce(
+      new Promise((yes, no) => {
+        resolve = yes;
+        reject = no;
+      })
+    );
+    await offer();
+    const button = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="Dismiss"]'
+    )!;
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    await act(async () => {
+      if (outcome === "failed") reject(new Error());
+      else resolve();
+    });
+    expect(dismissUndo).toHaveBeenCalledTimes(1);
+    if (outcome === "failed") {
+      expect(host.textContent?.match(/Couldn't dismiss/g)).toHaveLength(1);
+      expect(
+        host.querySelectorAll('button[aria-label="Dismiss"]')
+      ).toHaveLength(1);
+    } else expect(host.textContent).toBe("");
+  }
+);
+test("a Dismiss already open in another owner joins it", async () => {
+  let reject!: (cause: Error) => void;
+  vi.mocked(dismissUndo).mockReturnValueOnce(
+    new Promise((_, no) => {
+      reject = no;
+    })
+  );
+  const pending = undoDismissals.dismiss("add");
+  await offer();
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+      .click();
+  });
+  expect(dismissUndo).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    reject(new Error());
+    await pending;
+  });
+  expect(host.textContent).toContain("Couldn't dismiss");
 });

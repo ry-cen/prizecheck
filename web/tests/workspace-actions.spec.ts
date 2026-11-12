@@ -1,4 +1,10 @@
-import { expect, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Route,
+  type Request,
+} from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -237,8 +243,27 @@ for (const viewport of [
         response.request().method() === "DELETE" &&
         response.url().includes("/api/moves/undo/")
     );
-    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    let deletes = 0;
+    const countDelete = (request: Request) => {
+      if (
+        request.method() === "DELETE" &&
+        request.url().includes("/api/moves/undo/")
+      )
+        deletes++;
+    };
+    page.on("request", countDelete);
+    await page
+      .getByRole("button", { name: "Dismiss", exact: true })
+      .evaluate((button: HTMLElement) => {
+        button.click();
+        button.click();
+      });
     expect((await dismissed).ok()).toBeTruthy();
+    expect(deletes).toBe(1);
+    page.off("request", countDelete);
+    await expect(
+      page.getByText("Couldn't dismiss this Undo. Try again.")
+    ).toHaveCount(0);
     await page.reload();
     await expect(
       page.getByText("Your Collection has no cards yet.")
@@ -326,8 +351,27 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
         r.request().method() === "DELETE" &&
         r.url().includes("/api/moves/undo/")
     );
-    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    let deletes = 0;
+    const countDelete = (request: Request) => {
+      if (
+        request.method() === "DELETE" &&
+        request.url().includes("/api/moves/undo/")
+      )
+        deletes++;
+    };
+    page.on("request", countDelete);
+    await page
+      .getByRole("button", { name: "Dismiss", exact: true })
+      .evaluate((button: HTMLElement) => {
+        button.click();
+        button.click();
+      });
     expect((await dismissed).ok()).toBeTruthy();
+    expect(deletes).toBe(1);
+    page.off("request", countDelete);
+    await expect(
+      page.getByText("Couldn't dismiss this Undo. Try again.")
+    ).toHaveCount(0);
     const remaining = await page.request.get(
       new URL("/api/moves/undo", page.url()).href
     );
@@ -342,6 +386,62 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
     await expect(undo).toHaveCount(0);
   });
 }
+
+test("a delayed Dismiss failure never replaces a newer sign-out notice", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  promoteCatalog({ "card-1": "Signout Abra" });
+  await signIn(page);
+  const leaf = await createLocation(page, "Signout binder", null);
+  await addCopies(page, leaf, await editionOf("card-1"), 2);
+  await page.reload();
+  await expect(tiles(page)).toHaveCount(2);
+  await tiles(page).first().click();
+  await openActions(page, "Inventory Removal…");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove 1 copy", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Undo", exact: true })
+  ).toBeVisible();
+  let held!: Route, arrived!: () => void;
+  const incoming = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  await page.route("**/api/moves/undo/*", (route) => {
+    if (route.request().method() === "DELETE") {
+      held = route;
+      arrived();
+    } else void route.continue();
+  });
+  await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await incoming;
+  await tiles(page).first().click();
+  const actions = bar(page).getByRole("button", {
+    name: "Actions",
+    exact: true,
+  });
+  await expect(actions).toHaveAttribute("aria-disabled", "true");
+  await page.route("**/auth/sign-out", (route) =>
+    route.fulfill({ status: 500, json: {} })
+  );
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  const failure = page.getByText(
+    "Couldn't sign out. Check your connection and try again."
+  );
+  await expect(failure).toHaveCount(1);
+  await held.fulfill({ status: 503, json: {} });
+  await expect(actions).not.toHaveAttribute("aria-disabled", "true");
+  await expect(failure).toHaveCount(1);
+  await expect(
+    page.getByText("Couldn't dismiss this Undo. Try again.")
+  ).toHaveCount(0);
+  await page.unroute("**/api/moves/undo/*");
+  await page.unroute("**/auth/sign-out");
+});
 
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 860 } });

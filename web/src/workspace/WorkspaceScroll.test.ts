@@ -55,6 +55,8 @@ vi.mock("./useInventoryActions", () => ({
     pending: null,
     toast: fixtureToast,
     actionsButton: { current: null },
+    hostNotice: { current: null },
+    superseded: () => {},
   }),
 }));
 vi.mock("./useStaleCollection", () => ({

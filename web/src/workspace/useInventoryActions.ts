@@ -1,3 +1,5 @@
+import { useToast } from "../ui/Toast";
+import { noticeTurn, undoDismissals } from "../inventoryUndoNotice";
 import {
   MoveServerClock,
   MoveInAnotherTab,
@@ -20,12 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addUndoneText, batchAddedText } from "../catalog/catalogText";
 import type { AddedCards, InlineUndo } from "../catalog/useAddToast";
-import {
-  applyUndo,
-  dismissUndo,
-  listUndo,
-  type UndoEntry,
-} from "../inventoryUndo";
+import { applyUndo, listUndo, type UndoEntry } from "../inventoryUndo";
 import { MoveError, stageMove, startMove } from "../moves_generated";
 import {
   appendedFrom,
@@ -72,6 +69,8 @@ const ACTION_NAMES: Record<UndoEntry["action"], string> = {
 
 /** The success and Undo toast. `entry` is the newest Undo record, or null when none is offered. */
 export type ToastState = {
+  /** A delayed notice: the host version when its work began. The mirror draws it only while no other owner has shown since. */
+  since?: number;
   id: number;
   message: string;
   entry: UndoEntry | null;
@@ -124,6 +123,8 @@ export function useInventoryActions({
   const toastLive = useRef(toast);
   toastLive.current = toast;
   const toastId = useRef(0);
+  const kit = useToast();
+  const hostNotice = useRef<number | null>(null);
   const account = useRef({ userId, active: true });
   const lifetime = useRef(0);
   const clock = useMemo(() => new MoveServerClock(), [userId]);
@@ -303,6 +304,27 @@ export function useInventoryActions({
     setToast({ ...next, id: toastId.current });
   }, []);
 
+  const superseded = useCallback((id: number) => {
+    if (toastLive.current?.id !== id) return;
+    toastId.current += 1;
+    setToast(null);
+  }, []);
+
+  // Delayed notices show only on a free turn: same account and lifetime, unchanged local state,
+  // and no other owner's notification since. Collection's own re-show is fine.
+  const startTurn = useCallback(() => {
+    const local = toastId.current;
+    const started = lifetime.current;
+    const since = kit.getVersion();
+    const host = noticeTurn(kit, () => hostNotice.current);
+    const mine = () =>
+      account.current.active &&
+      account.current.userId === userId &&
+      lifetime.current === started &&
+      toastId.current === local;
+    return { since, mine, free: () => mine() && host() };
+  }, [kit, userId]);
+
   /** A tile that holds focus unmounts when the gallery reloads or the selection clears: move focus
    * to a stable control first. Tiles carry data-gallery-tile, not a class, since #164 moved them onto
    * the kit's CopyTile. */
@@ -330,24 +352,24 @@ export function useInventoryActions({
   useEffect(() => {
     if (!active || busyRef.current || operation.current?.op.noUndo) return;
     let cancelled = false;
-    const version = toastId.current;
+    const turn = startTurn();
     void readUndo()
       .then((entries) => {
         const entry = entries[0];
         if (
           cancelled ||
-          !account.current.active ||
-          account.current.userId !== userId ||
-          toastId.current !== version ||
+          !turn.free() ||
           busyRef.current ||
           operation.current?.op.noUndo ||
           !entry ||
+          undoDismissals.blocks(entry.id) ||
           entry.id === toastLive.current?.entry?.id ||
           Date.parse(entry.expires_at) <= Date.now() ||
           !Number.isFinite(Date.parse(entry.expires_at))
         )
           return;
         showToast({
+          since: turn.since,
           message: `The earlier ${ACTION_NAMES[entry.action]} can be undone.`,
           entry,
           unavailable: false,
@@ -359,7 +381,7 @@ export function useInventoryActions({
     return () => {
       cancelled = true;
     };
-  }, [active, userId, readUndo, showToast]);
+  }, [active, userId, readUndo, showToast, startTurn]);
 
   const runLocked = useCallback(
     async (
@@ -924,59 +946,60 @@ export function useInventoryActions({
       return;
     }
     if (!current || !entry || busyRef.current) return;
+    const turn = startTurn();
     busyRef.current = true;
     setBusy(true);
     try {
-      try {
-        await dismissUndo(entry.id);
-      } catch (cause) {
-        if (!(cause instanceof MoveError && cause.status === 404)) {
+      const outcome = await undoDismissals.dismiss(entry.id);
+      if (outcome === "failed") {
+        if (turn.free())
           showToast({
             ...current,
+            since: turn.since,
             message: "Couldn't dismiss this Undo. Try again.",
           });
-          return;
-        }
+        return;
       }
       const entries = await readUndo().catch(() => [] as UndoEntry[]);
-      const next = entries[0] ?? null;
-      showToast({
-        message: next
-          ? `Dismissed. The earlier ${ACTION_NAMES[next.action]} can be undone.`
-          : "Dismissed. There is no earlier action to undo.",
-        entry: next,
-        unavailable: false,
-        focus: true,
-      });
+      const next =
+        entries[0] && !undoDismissals.blocks(entries[0].id) ? entries[0] : null;
+      if (turn.free())
+        showToast({
+          since: turn.since,
+          message: next
+            ? `Dismissed. The earlier ${ACTION_NAMES[next.action]} can be undone.`
+            : "Dismissed. There is no earlier action to undo.",
+          entry: next,
+          unavailable: false,
+          focus: true,
+        });
+      else if (turn.mine()) {
+        toastId.current += 1;
+        setToast(null);
+      }
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
-  }, [showToast, readUndo]);
+  }, [showToast, readUndo, startTurn]);
 
   // Persist Dismiss so a reload cannot offer the same record again.
   const closeToast = useCallback(async () => {
     const current = toastLive.current;
     const entry = current?.entry;
-    const version = toastId.current;
-    const started = lifetime.current;
-    const isCurrent = () =>
-      account.current.active &&
-      account.current.userId === userId &&
-      lifetime.current === started &&
-      toastId.current === version;
+    const turn = startTurn();
     if (busyRef.current) return;
     focusWorkspaceHeading();
     if (entry) {
       busyRef.current = true;
       setBusy(true);
       try {
-        await dismissUndo(entry.id);
-      } catch (cause) {
-        if (!(cause instanceof MoveError && cause.status === 404)) {
-          if (current && isCurrent())
+        const outcome = await undoDismissals.dismiss(entry.id);
+        if (outcome === "failed") {
+          if (current && turn.free())
             showToast({
               ...current,
+              since: turn.since,
               message: "Couldn't dismiss this Undo. Try again.",
             });
           return;
@@ -986,10 +1009,10 @@ export function useInventoryActions({
         setBusy(false);
       }
     }
-    if (!isCurrent() || toastLive.current?.id !== current?.id) return;
+    if (!turn.mine() || toastLive.current?.id !== current?.id) return;
     toastId.current += 1;
     setToast(null);
-  }, [showToast, userId]);
+  }, [showToast, startTurn]);
 
   // An Undo record expires after ten minutes; its button goes with it.
   const entryId = toast?.entry?.id;
@@ -1199,5 +1222,7 @@ export function useInventoryActions({
     undo,
     dismiss,
     closeToast,
+    hostNotice,
+    superseded,
   };
 }

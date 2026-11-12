@@ -1,10 +1,6 @@
+import { undoDismissals, noticeTurn } from "../inventoryUndoNotice";
 import { useCallback, useEffect, useRef } from "react";
-import {
-  applyUndo,
-  dismissUndo,
-  listUndo,
-  type UndoEntry,
-} from "../inventoryUndo";
+import { applyUndo, listUndo, type UndoEntry } from "../inventoryUndo";
 import { MoveError } from "../moves_generated";
 import { useToast } from "../ui/Toast";
 import type { AddItem } from "./cardActions";
@@ -107,21 +103,17 @@ export function useAddToast({ shown, onUndone }: Options) {
   );
 
   function dismiss(added: AddedCards, id: number, undoable: boolean) {
-    // Dismiss removes the visible toast before this callback. A host version detects any replacement,
-    // even one shown and dismissed before React renders, while current guards this owner's lifetime.
-    const version = kit.getVersion();
-    void dismissUndo(added.undoId)
-      .then(() => {
-        if (current.current === id) current.current = null;
-      })
-      .catch((cause) => {
-        if (current.current !== id || kit.getVersion() !== version) return;
-        if (cause instanceof MoveError && cause.status === 404) {
-          current.current = null;
-          return;
-        }
+    // One DELETE per record is shared page-wide; retries show only while no other owner has shown since.
+    const turn = noticeTurn(kit, () => current.current);
+    void undoDismissals.dismiss(added.undoId).then((outcome) => {
+      if (current.current !== id) return;
+      if (outcome === "dismissed") {
+        current.current = null;
+        return;
+      }
+      if (turn())
         show("Couldn't dismiss this Undo. Try again.", added, false, undoable);
-      });
+    });
   }
 
   function undo(

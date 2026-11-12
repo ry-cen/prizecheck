@@ -716,6 +716,8 @@ export function Workspace({
   // Ticket 107's toast on the kit's toast host (#165). It shows only while Collection is the shown page;
   // kit dialogs, the Filters & display drawer among them, make it inert themselves (#166).
   const undoToast = useUndoToast({
+    hostNotice: actions.hostNotice,
+    onSuperseded: actions.superseded,
     toast: actions.toast,
     busy: actions.busy,
     shown: active,
