@@ -69,6 +69,9 @@ const ACTION_NAMES: Record<UndoEntry["action"], string> = {
 
 /** The success and Undo toast. `entry` is the newest Undo record, or null when none is offered. */
 export type ToastState = {
+  /** The Undo record this notice is about, known even when Undo can't be offered (the list read failed, or a newer
+   * record exists). Dismiss deletes it, so a later restore can't offer it again. */
+  undoId?: string;
   /** A delayed notice: the host version when its work began. The mirror draws it only while no other owner has shown since. */
   since?: number;
   id: number;
@@ -299,10 +302,17 @@ export function useInventoryActions({
     [labels]
   );
 
-  const showToast = useCallback((next: Omit<ToastState, "id">) => {
-    toastId.current += 1;
-    setToast({ ...next, id: toastId.current });
-  }, []);
+  const showToast = useCallback(
+    (next: Omit<ToastState, "id" | "since">, since?: number) => {
+      toastId.current += 1;
+      const state: ToastState = { ...next, id: toastId.current };
+      // A spread of an earlier delayed notice must not carry its turn into a new state.
+      delete state.since;
+      if (since !== undefined) state.since = since;
+      setToast(state);
+    },
+    []
+  );
 
   const superseded = useCallback((id: number) => {
     if (toastLive.current?.id !== id) return;
@@ -368,12 +378,14 @@ export function useInventoryActions({
           !Number.isFinite(Date.parse(entry.expires_at))
         )
           return;
-        showToast({
-          since: turn.since,
-          message: `The earlier ${ACTION_NAMES[entry.action]} can be undone.`,
-          entry,
-          unavailable: false,
-        });
+        showToast(
+          {
+            message: `The earlier ${ACTION_NAMES[entry.action]} can be undone.`,
+            entry,
+            unavailable: false,
+          },
+          turn.since
+        );
       })
       .catch(() => {
         /* A failed list read must not interrupt Collection. */
@@ -572,7 +584,15 @@ export function useInventoryActions({
           keepFocus("heading");
           live.current.selection.clear();
           setDialog(null);
-          showToast({ message, entry: null, unavailable: false });
+          showToast({
+            message,
+            entry: null,
+            unavailable: false,
+            undoId:
+              !op.noUndo && state.ownedResult
+                ? (state.ownedResult.undo_id ?? undefined)
+                : undefined,
+          });
           live.current.reloadGallery();
           void live.current.reloadTree();
           if (!op.noUndo && state.ownedResult) {
@@ -790,6 +810,7 @@ export function useInventoryActions({
       }
       showToast({
         message: batchAddedText(result.copies, result.path),
+        undoId: result.undoId,
         entry: null,
         unavailable: false,
       });
@@ -953,26 +974,30 @@ export function useInventoryActions({
       const outcome = await undoDismissals.dismiss(entry.id);
       if (outcome === "failed") {
         if (turn.free())
-          showToast({
-            ...current,
-            since: turn.since,
-            message: "Couldn't dismiss this Undo. Try again.",
-          });
+          showToast(
+            {
+              ...current,
+              message: "Couldn't dismiss this Undo. Try again.",
+            },
+            turn.since
+          );
         return;
       }
       const entries = await readUndo().catch(() => [] as UndoEntry[]);
       const next =
         entries[0] && !undoDismissals.blocks(entries[0].id) ? entries[0] : null;
       if (turn.free())
-        showToast({
-          since: turn.since,
-          message: next
-            ? `Dismissed. The earlier ${ACTION_NAMES[next.action]} can be undone.`
-            : "Dismissed. There is no earlier action to undo.",
-          entry: next,
-          unavailable: false,
-          focus: true,
-        });
+        showToast(
+          {
+            message: next
+              ? `Dismissed. The earlier ${ACTION_NAMES[next.action]} can be undone.`
+              : "Dismissed. There is no earlier action to undo.",
+            entry: next,
+            unavailable: false,
+            focus: true,
+          },
+          turn.since
+        );
       else if (turn.mine()) {
         toastId.current += 1;
         setToast(null);
@@ -986,22 +1011,24 @@ export function useInventoryActions({
   // Persist Dismiss so a reload cannot offer the same record again.
   const closeToast = useCallback(async () => {
     const current = toastLive.current;
-    const entry = current?.entry;
+    const record = current?.entry?.id ?? current?.undoId;
     const turn = startTurn();
     if (busyRef.current) return;
     focusWorkspaceHeading();
-    if (entry) {
+    if (record) {
       busyRef.current = true;
       setBusy(true);
       try {
-        const outcome = await undoDismissals.dismiss(entry.id);
+        const outcome = await undoDismissals.dismiss(record);
         if (outcome === "failed") {
           if (current && turn.free())
-            showToast({
-              ...current,
-              since: turn.since,
-              message: "Couldn't dismiss this Undo. Try again.",
-            });
+            showToast(
+              {
+                ...current,
+                message: "Couldn't dismiss this Undo. Try again.",
+              },
+              turn.since
+            );
           return;
         }
       } finally {

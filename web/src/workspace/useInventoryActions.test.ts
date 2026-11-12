@@ -1063,3 +1063,115 @@ test("delayed notices carry the turn host version but actions do not", async () 
   });
   expect(render(opts).toast?.since).toBeUndefined();
 });
+
+const barAdded = {
+  locationId: "source",
+  path: "Binder",
+  copies: 1,
+  items: [],
+  ownerRevision: 1,
+  undoId: "new",
+  from: "bar" as const,
+};
+test("Dismiss deletes a bar Add's record after a failed list and return never restores it", async () => {
+  const opts = { ...options(), active: false };
+  render(opts);
+  vi.mocked(listUndo).mockRejectedValueOnce(new Error("503"));
+  await render(opts).added(barAdded);
+  expect(render(opts).toast?.entry).toBeNull();
+  expect(render(opts).toast?.undoId).toBe("new");
+  await render(opts).closeToast();
+  expect(dismissUndo).toHaveBeenCalledExactlyOnceWith("new");
+  expect(render(opts).toast).toBeNull();
+  vi.mocked(listUndo).mockResolvedValue([{ ...freshNotice(), id: "new" }]);
+  opts.active = true;
+  render(opts);
+  await tick();
+  expect(render(opts).toast).toBeNull();
+});
+test("failed Dismiss of a record-only notice keeps its record for retry", async () => {
+  const opts = { ...options(), active: false };
+  render(opts);
+  vi.mocked(listUndo).mockRejectedValueOnce(new Error("503"));
+  await render(opts).added(barAdded);
+  vi.mocked(dismissUndo).mockRejectedValueOnce(new Error("503"));
+  await render(opts).closeToast();
+  expect(render(opts).toast?.message).toBe(
+    "Couldn't dismiss this Undo. Try again."
+  );
+  expect(render(opts).toast?.undoId).toBe("new");
+  await render(opts).closeToast();
+  expect(vi.mocked(dismissUndo).mock.calls).toEqual([["new"], ["new"]]);
+});
+test("owned Move success whose list read failed still dismisses its record", async () => {
+  const { commitMove } = await import("../moves_generated");
+  vi.mocked(commitMove).mockResolvedValueOnce({
+    copy_count: "2",
+    edition_count: 1,
+    source_count: 1,
+    already_at_destination_count: "0",
+    owner_revision: 2,
+    undo_id: "removal",
+  });
+  const opts = { ...options(), active: false };
+  render(opts);
+  vi.mocked(listUndo).mockRejectedValueOnce(new Error("503"));
+  await render(opts).dropMove("dest", { groups: owned, borrowed: [] });
+  expect(render(opts).toast?.message).toContain("Moved 2 copies");
+  expect(render(opts).toast?.entry).toBeNull();
+  await render(opts).closeToast();
+  expect(dismissUndo).toHaveBeenCalledExactlyOnceWith("removal");
+});
+test("mixed Move success has no record to dismiss", async () => {
+  vi.mocked(commitMoveWithoutUndo).mockResolvedValueOnce({
+    copy_count: "2",
+    edition_count: 1,
+    source_count: 1,
+    already_at_destination_count: "0",
+    owner_revision: 2,
+    undo_id: null,
+  });
+  const opts = { ...options(), active: false };
+  render(opts);
+  await render(opts).dropMove("dest", { groups: owned, borrowed });
+  expect(render(opts).toast?.message).toContain("Moved 3 copies");
+  expect(render(opts).toast?.undoId).toBeUndefined();
+  await render(opts).closeToast();
+  expect(dismissUndo).not.toHaveBeenCalled();
+});
+test.each([new TypeError("lost response"), new MoveError(400, "UNDO_REFUSED")])(
+  "Undo action feedback drops the restore turn: %s",
+  async (cause) => {
+    const opts = await mountedOffer(),
+      offer = render(opts).toast!;
+    expect(offer.since).toBeDefined();
+    let reject!: (cause: Error) => void;
+    vi.mocked(applyUndo).mockReturnValueOnce(
+      new Promise((_, no) => {
+        reject = no;
+      })
+    );
+    const pending = render(opts).undo();
+    toastHost.version++;
+    reject(cause);
+    await pending;
+    expect(render(opts).toast?.message).toBe(
+      cause instanceof MoveError
+        ? "Undo couldn't be completed. Nothing was restored."
+        : "Undo may not have finished. Try again to check safely."
+    );
+    expect(render(opts).toast?.entry).toEqual(offer.entry);
+    expect(render(opts).toast?.since).toBeUndefined();
+  }
+);
+test("restore and both Dismiss retry paths still carry a turn", async () => {
+  toastHost.version = 9;
+  const opts = await mountedOffer();
+  expect(render(opts).toast?.since).toBe(9);
+  vi.mocked(dismissUndo).mockRejectedValueOnce(new Error());
+  await render(opts).dismiss();
+  expect(render(opts).toast?.since).toBe(9);
+  vi.mocked(dismissUndo).mockRejectedValueOnce(new Error());
+  await render(opts).closeToast();
+  expect(render(opts).toast?.since).toBe(9);
+});

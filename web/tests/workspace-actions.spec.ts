@@ -443,6 +443,131 @@ test("a delayed Dismiss failure never replaces a newer sign-out notice", async (
   await page.unroute("**/auth/sign-out");
 });
 
+test("Undo feedback still shows after a newer sign-out notice", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  promoteCatalog({ "card-1": "Signout Abra" });
+  await signIn(page);
+  const leaf = await createLocation(page, "Signout binder", null);
+  await addCopies(page, leaf, await editionOf("card-1"), 2);
+  await page.reload();
+  await expect(tiles(page)).toHaveCount(2);
+  await tiles(page).first().click();
+  await openActions(page, "Inventory Removal…");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove 1 copy", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Undo", exact: true })
+  ).toBeVisible();
+  await page.reload();
+  await expect(toastText(page)).toHaveText(
+    "The earlier Inventory Removal can be undone."
+  );
+  let held!: Route, arrived!: () => void;
+  const incoming = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  await page.route("**/api/moves/undo/*", (route) => {
+    if (route.request().method() === "POST") {
+      held = route;
+      arrived();
+    } else void route.continue();
+  });
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await incoming;
+  await page.route("**/auth/sign-out", (route) =>
+    route.fulfill({ status: 500, json: {} })
+  );
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  const failure = page.getByText(
+    "Couldn't sign out. Check your connection and try again."
+  );
+  await expect(failure).toHaveCount(1);
+  await held.fulfill({ status: 503, json: {} });
+  await expect(
+    page.getByText("Undo may not have finished. Try again to check safely.")
+  ).toBeVisible();
+  await page.unroute("**/api/moves/undo/*");
+  await page.unroute("**/auth/sign-out");
+});
+
+test("a bar Add whose Undo list failed is still dismissed for good", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  promoteCatalog({ "card-1": "Add Abra" });
+  await signIn(page);
+  const leaf = await createLocation(page, "Add binder", null);
+  await page.reload();
+  await sidebar(page)
+    .getByRole("button", { name: "Add binder", exact: true })
+    .click();
+  await page.route("**/api/moves/undo", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ status: 503, json: {} })
+      : route.continue()
+  );
+  await page.getByRole("button", { name: "Add cards", exact: true }).click();
+  const add = page.getByRole("dialog", { name: "Add cards to Add binder" });
+  await add
+    .getByRole("region", { name: "Catalog results" })
+    .getByRole("listitem")
+    .first()
+    .getByRole("button", { name: /^One more / })
+    .click();
+  await add
+    .getByRole("region", { name: "Add to a Location" })
+    .getByRole("button", { name: "Add 1 card", exact: true })
+    .click();
+  await expect(toastText(page)).toHaveText("Added 1 card to Add binder.");
+  await page.unroute("**/api/moves/undo");
+  let deletes = 0;
+  const countDelete = (request: Request) => {
+    if (
+      request.method() === "DELETE" &&
+      request.url().includes("/api/moves/undo/")
+    )
+      deletes++;
+  };
+  page.on("request", countDelete);
+  const deleted = page.waitForResponse(
+    (r) =>
+      r.request().method() === "DELETE" && r.url().includes("/api/moves/undo/")
+  );
+  await page
+    .getByRole("button", { name: "Dismiss", exact: true })
+    .evaluate((button: HTMLElement) => {
+      button.click();
+      button.click();
+    });
+  expect((await deleted).ok()).toBeTruthy();
+  const response = await page.request.get(
+    new URL("/api/moves/undo", page.url()).href
+  );
+  expect(await response.json()).toEqual([]);
+  expect(deletes).toBe(1);
+  page.off("request", countDelete);
+  await page
+    .getByRole("navigation", { name: "Main views" })
+    .getByRole("button", { name: "Catalog", exact: true })
+    .click();
+  const listed = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === "/api/moves/undo" &&
+      r.request().method() === "GET"
+  );
+  await page
+    .getByRole("navigation", { name: "Main views" })
+    .getByRole("button", { name: "Collection", exact: true })
+    .click();
+  expect((await listed).ok()).toBeTruthy();
+  await expect(page.getByText("The earlier Add can be undone.")).toHaveCount(0);
+});
+
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 860 } });
 
