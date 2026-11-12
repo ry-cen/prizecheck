@@ -25,12 +25,21 @@ vi.mock("../inventoryUndo", () => ({ applyUndo: vi.fn(), listUndo: vi.fn() }));
 vi.mock("../shell/keptRead", () => ({ useFirstReadSettled: () => {} }));
 vi.mock("./CatalogFilters", () => ({ CatalogFilters: () => null }));
 vi.mock("./AddBar", () => ({
-  AddBar: (props: { queue: ReadonlyMap<string, unknown>; onAdd: () => void }) =>
+  AddBar: (props: {
+    queue: ReadonlyMap<string, unknown>;
+    onAdd: () => void;
+    onClear: () => void;
+  }) =>
     h(
       "div",
       null,
       h("output", { "data-queue": true }, props.queue.size),
-      h("button", { onClick: props.onAdd }, "Add queued")
+      h("button", { onClick: props.onClear }, "Clear queue"),
+      h(
+        "button",
+        { onClick: props.onAdd, "data-queue-add": true },
+        "Add queued"
+      )
     ),
 }));
 vi.mock("./usePlaces", () => ({
@@ -115,6 +124,9 @@ const added: AddedCards = {
 let root: ReturnType<typeof createRoot>, host: HTMLDivElement;
 beforeEach(async () => {
   vi.clearAllMocks();
+  vi.mocked(useCatalogBrowse).mockReturnValue(
+    browse as unknown as ReturnType<typeof useCatalogBrowse>
+  );
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("CSS", { escape: (value: string) => value });
   vi.mocked(listUndo).mockResolvedValue([
@@ -677,4 +689,51 @@ test("a failed search hides the previous empty result and its query description"
   );
   expect(host.textContent).not.toContain("No cards match this search.");
   expect(host.textContent).not.toContain("no-card-review-xyz");
+});
+
+test("Clear recovery is focused inside the Add cards gallery", async () => {
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label^="One more"]')!
+      .click()
+  );
+  await act(async () => button("Clear queue")!.click());
+  const gallery =
+    host.querySelector("[data-queue]")!.parentElement!.parentElement!;
+  const undo = button("Undo", gallery);
+  expect(undo).toBeDefined();
+  expect(document.activeElement).toBe(undo);
+  await act(async () => undo!.click());
+  expect(host.querySelector("[data-queue]")!.textContent).toBe("1");
+  expect(document.activeElement).toBe(button("Add queued"));
+});
+
+test("Clear then Browse then Undo focuses the live search field", async () => {
+  function Owner() {
+    const [adding, change] = useState(true);
+    return h(
+      "div",
+      null,
+      h("button", { onClick: () => change(false) }, "Browse"),
+      h(CatalogGallery, {
+        active: true,
+        adding,
+        fixedTarget: { id: "box", label: "Box" },
+        undoToast: true,
+        stick: "page",
+      })
+    );
+  }
+  await act(async () => root.render(h(ToastProvider, null, h(Owner))));
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label^="One more"]')!
+      .click()
+  );
+  await act(async () => button("Clear queue")!.click());
+  await act(async () => button("Browse")!.click());
+  await act(async () => button("Undo")!.click());
+  expect(document.activeElement).toBe(
+    host.querySelector('input[type="search"]')
+  );
 });

@@ -232,6 +232,9 @@ export function CatalogGallery({
   const clearToast = useRef<number | null>(null);
   const restoreFocus = useRef(false);
   const clearedUndo = useRef<(() => boolean) | null>(null);
+  const [clearInline, setClearInline] = useState<{
+    undo: () => boolean;
+  } | null>(null);
   useEffect(() => {
     if (clearToast.current !== null) {
       queueToast.dismiss(clearToast.current);
@@ -239,7 +242,9 @@ export function CatalogGallery({
     }
     const undoClear = clearedUndo.current;
     clearedUndo.current = null;
-    if (undoClear)
+    setClearInline(null);
+    if (undoClear && stick === "dialog") setClearInline({ undo: undoClear });
+    else if (undoClear)
       clearToast.current = queueToast.show({
         message: "Queue cleared.",
         focus: true,
@@ -252,11 +257,20 @@ export function CatalogGallery({
       });
     if (restoreFocus.current) {
       restoreFocus.current = false;
-      galleryRoot.current
-        ?.querySelector<HTMLButtonElement>("[data-queue-add]")
-        ?.focus();
+      const root = galleryRoot.current;
+      (
+        root?.querySelector<HTMLButtonElement>(
+          "[data-queue-add]:not(:disabled)"
+        ) ?? root?.querySelector<HTMLInputElement>('input[type="search"]')
+      )?.focus();
     }
-  }, [stored.queue, stored.chosen, active, queueToast]);
+  }, [stored.queue, stored.chosen, active, queueToast, stick]);
+  useEffect(() => {
+    if (clearInline)
+      galleryRoot.current
+        ?.querySelector<HTMLButtonElement>("[data-clear-undo]")
+        ?.focus();
+  }, [clearInline]);
   useEffect(
     () => () => {
       if (clearToast.current !== null) queueToast.dismiss(clearToast.current);
@@ -593,6 +607,19 @@ export function CatalogGallery({
   const unavailable = first !== null && !first.available;
   return (
     <div ref={galleryRoot} className="flex min-w-0 flex-col gap-4">
+      {clearInline && (
+        <div role="status" className="flex flex-wrap items-center gap-2">
+          <p className="m-0 text-meta">Queue cleared.</p>
+          <Button
+            data-clear-undo
+            onClick={() => {
+              if (clearInline.undo()) restoreFocus.current = true;
+            }}
+          >
+            Undo
+          </Button>
+        </div>
+      )}
       {stored.restoreFailed && (
         <div role="alert" className="flex flex-wrap items-center gap-2">
           <p className="m-0 text-meta">{stored.notice}</p>

@@ -346,3 +346,29 @@ test("a Dismiss already open in another owner joins it", async () => {
   });
   expect(host.textContent).toContain("Couldn't dismiss");
 });
+
+test("a delayed Add notice leaves newer Clear recovery untouched", async () => {
+  let resolve!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+  vi.mocked(listUndo).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  let pending!: ReturnType<typeof notify>;
+  await act(async () => {
+    pending = notify(added);
+  });
+  await act(async () => {
+    kit.show({
+      message: "Queue cleared.",
+      action: { label: "Undo", onAction: vi.fn() },
+    });
+  });
+  let result: InlineUndo | null = null;
+  await act(async () => {
+    resolve([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>);
+    result = await pending;
+  });
+  expect(result).toBeNull();
+  expect(host.textContent).toContain("Queue cleared.");
+});

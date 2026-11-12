@@ -1373,3 +1373,57 @@ for (const viewport of [
     });
   });
 }
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`Clear recovery review regressions ${viewport.width}`, () => {
+    test.use({ viewport });
+    test("Clear Undo remains reachable inside Collection Add cards", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      await page.goto(`${ORIGIN}/collection`);
+      await page
+        .getByRole("button", { name: "Add cards", exact: true })
+        .click();
+      const dialog = page.getByRole("dialog").last();
+      await more(dialog, BULBASAUR).click();
+      await more(dialog, BULBASAUR).click();
+      const bar = addBar(dialog);
+      await bar
+        .getByRole("button", { name: "Clear queue", exact: true })
+        .click();
+      const recovery = dialog.getByRole("button", {
+        name: "Undo",
+        exact: true,
+      });
+      await expect(recovery).toBeFocused();
+      if (viewport.width === 375) await expectTouchTarget(recovery);
+      await recovery.click();
+      await expect(
+        bar.getByRole("button", { name: "Add 2 cards", exact: true })
+      ).toBeFocused();
+      await expect(queued(dialog)).toHaveText([`2× ${BULBASAUR}`]);
+    });
+    test("Clear then Browse then Undo focuses search", async ({ page }) => {
+      seedPopup();
+      await signIn(page);
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      await addBar(page)
+        .getByRole("button", { name: "Clear queue", exact: true })
+        .click();
+      await expect(undo(page)).toBeFocused();
+      await mode(page, "Browse").click();
+      await undo(page).click();
+      await expect(
+        page.getByRole("searchbox", { name: "Search the catalog" })
+      ).toBeFocused();
+      await mode(page, "Add to a Location").click();
+      await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`]);
+    });
+  });
+}
