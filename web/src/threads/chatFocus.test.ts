@@ -220,9 +220,10 @@ for (const kind of ["trade", "loan"] as const)
               expect(editor.readOnly).toBe(false);
               expect(host.textContent).toContain("Chat couldn't be checked.");
               expect(
-                host.querySelector<HTMLButtonElement>('button[type="submit"]')!
-                  .disabled
-              ).toBe(true);
+                host
+                  .querySelector<HTMLButtonElement>('button[type="submit"]')!
+                  .getAttribute("aria-disabled")
+              ).toBe("true");
               const retry = [...host.querySelectorAll("button")].find(
                 (b) => b.textContent === "Retry"
               )!;
@@ -313,7 +314,8 @@ for (const kind of ["loan", "trade"] as const) {
       )!;
       expect(retry.textContent).toBe("Retry");
       expect(retry.disabled).toBe(false);
-      expect(editor.disabled).toBe(true);
+      expect(editor.disabled).toBe(false);
+      expect(editor.readOnly).toBe(true);
       retry.focus();
       await act(async () => retry.click());
       expect(JSON.stringify(vi.mocked(sendThreadMessage).mock.calls[1])).toBe(
@@ -553,8 +555,10 @@ for (const kind of ["trade", "loan"] as const)
       expect(keys).not.toHaveBeenCalled();
       await act(async () => read.resolve(detail(kind, true)));
       expect(
-        host.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled
-      ).toBe(true);
+        host
+          .querySelector<HTMLButtonElement>('button[type="submit"]')
+          ?.getAttribute("aria-disabled")
+      ).toBe("true");
       expect(sendThreadMessage).not.toHaveBeenCalled();
       expect(keys).not.toHaveBeenCalled();
     } finally {
@@ -565,3 +569,60 @@ for (const kind of ["trade", "loan"] as const)
       vi.unstubAllGlobals();
     }
   });
+
+for (const kind of ["trade", "loan"] as const)
+  for (const outcome of ["success", "failure", "refusal", "away"] as const)
+    for (const path of ["box", "button"] as const)
+      it(`${kind} preserves send focus: ${path}, ${outcome}`, async () => {
+        const chat = await mountedChat(kind);
+        const outside = document.createElement("button");
+        document.body.append(outside);
+        try {
+          const post =
+            deferred<Awaited<ReturnType<typeof sendThreadMessage>>>();
+          vi.mocked(sendThreadMessage).mockReturnValueOnce(post.promise);
+          await chat.edit("One message");
+          const editor = chat.host.querySelector("textarea")!;
+          const button = chat.host.querySelector<HTMLButtonElement>(
+            'button[type="submit"]'
+          )!;
+          if (path === "button") button.focus();
+          await chat.press();
+          expect(editor.disabled).toBe(false);
+          expect(editor.readOnly).toBe(true);
+          expect(button.disabled).toBe(false);
+          expect(document.activeElement).toBe(path === "box" ? editor : button);
+          await chat.press();
+          expect(sendThreadMessage).toHaveBeenCalledTimes(1);
+          if (outcome === "away") outside.focus();
+          await act(async () => {
+            if (outcome === "failure")
+              post.reject(new TypeError("lost answer"));
+            else if (outcome === "refusal")
+              post.reject(new SocialError(429, "MESSAGE_RATE_LIMITED"));
+            else
+              post.resolve({
+                id: "sent",
+                from: "you",
+                body: "One message",
+                at: "2026-11-12T00:00:00Z",
+              });
+          });
+          expect(document.activeElement).toBe(
+            outcome === "away" ? outside : editor
+          );
+          if (outcome === "failure") {
+            const original = vi.mocked(sendThreadMessage).mock.calls[0];
+            await chat.press();
+            expect(vi.mocked(sendThreadMessage).mock.calls[1]).toEqual(
+              original
+            );
+          } else if (outcome === "refusal") {
+            expect(editor.readOnly).toBe(false);
+            expect(editor.value).toBe("One message");
+          } else expect(editor.value).toBe("");
+        } finally {
+          outside.remove();
+          await chat.cleanup();
+        }
+      });
