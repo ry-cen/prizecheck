@@ -349,3 +349,58 @@ it("keeps an authorized Send working when a background permission reply crosses 
     vi.unstubAllGlobals();
   }
 });
+
+it.each(["trade", "loan"] as const)(
+  "%s composer sends with Ctrl/Meta+Enter only",
+  async (kind) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.mocked(sendThreadMessage).mockResolvedValue({} as never);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () =>
+        root.render(h(ThreadTimeline, { kind, id: "shortcut" }))
+      );
+      const field = host.querySelector("textarea")!;
+      const key = async (init: KeyboardEventInit) =>
+        act(async () => {
+          field.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "Enter",
+              bubbles: true,
+              cancelable: true,
+              ...init,
+            })
+          );
+        });
+      await key({ ctrlKey: true });
+      expect(sendThreadMessage).not.toHaveBeenCalled();
+      for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
+        await act(async () => {
+          Object.getOwnPropertyDescriptor(
+            HTMLTextAreaElement.prototype,
+            "value"
+          )!.set!.call(field, "Hello");
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        await key({});
+        await key({ ...modifier, isComposing: true });
+        await key({ ...modifier, repeat: true });
+        expect(sendThreadMessage).not.toHaveBeenCalled();
+        await key(modifier);
+        expect(sendThreadMessage).toHaveBeenCalledWith(
+          kind,
+          "shortcut",
+          expect.objectContaining({ body: "Hello" })
+        );
+        vi.mocked(sendThreadMessage).mockClear();
+      }
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+      vi.clearAllMocks();
+    }
+  }
+);
