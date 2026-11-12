@@ -629,7 +629,7 @@ async function replayComposer(
 }
 
 for (const outcome of ["current", "unavailable"] as const) {
-  test(`an already-applied ${outcome} send settles the mounted draft after double-click and an in-flight edit`, async ({
+  test(`an already-applied ${outcome} send settles the mounted draft after double-click and refuses an in-flight edit`, async ({
     page,
     collectors,
   }) => {
@@ -675,10 +675,15 @@ for (const outcome of ["current", "unavailable"] as const) {
         button.click();
       });
       await expect.poll(() => keys.length).toBe(1);
-      await page.getByRole("radio", { name: "You pay", exact: true }).click();
       await page
-        .getByRole("textbox", { name: "Amount in US dollars" })
-        .fill("5.00");
+        .getByRole("radio", { name: "You pay", exact: true })
+        .click({ force: true });
+      await expect(
+        page.getByRole("radio", { name: "No cash", exact: true })
+      ).toBeChecked();
+      await expect(
+        page.getByRole("textbox", { name: "Amount in US dollars" })
+      ).toHaveCount(0);
     } finally {
       release();
     }
@@ -1007,7 +1012,89 @@ for (const viewport of [
         }
       }
 
-      test(`${builder}: edits during a send follow its leave rule and successful sends do not warn`, async ({
+      for (const outcome of ["refused", "unknown"] as const) {
+        test(`${builder}: ${outcome} send keeps focused cash read-only then resumes editing and warnings`, async ({
+          page,
+          collectors,
+        }) => {
+          const { address, dialog } = await discardBuilder(
+            page,
+            collectors,
+            counter
+          );
+          await editDiscardCards(page, counter);
+          await page
+            .getByRole("radio", { name: "You pay", exact: true })
+            .click();
+          const amount = page.getByRole("textbox", {
+            name: "Amount in US dollars",
+          });
+          await amount.fill("2.00");
+          let release!: () => void;
+          const held = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          let arrive!: () => void;
+          const arrived = new Promise<void>((resolve) => {
+            arrive = resolve;
+          });
+          await page.route(
+            counter ? /\/api\/trades\/[^/]+\/offer$/ : `${ORIGIN}/api/trades`,
+            async (route) => {
+              if (route.request().method() !== "POST") return route.fallback();
+              arrive();
+              await held;
+              if (outcome === "unknown") await route.abort("failed");
+              else
+                await route.fulfill({
+                  status: 422,
+                  json: { detail: { code: "TOO_MANY_LINES" } },
+                });
+            }
+          );
+          try {
+            await amount.focus();
+            // Start the command without moving the existing keyboard focus.
+            await page
+              .getByRole("button", {
+                name: counter ? "Send Counter" : "Send Trade Proposal",
+                exact: true,
+              })
+              .evaluate((button) => button.click());
+            await arrived;
+            await expect(amount).toBeFocused();
+            await expect(amount).toHaveAttribute("readonly", "");
+            await page.keyboard.type("5");
+            await expect(amount).toHaveValue("2.00");
+          } finally {
+            release();
+          }
+          await expect(page).toHaveURL(address);
+          await expect(amount).not.toHaveAttribute("readonly", "");
+          await expect(amount).toBeFocused();
+          await amount.fill("5.00");
+          await page
+            .getByRole("button", { name: "Increase Arven (SVI 166) you get" })
+            .click();
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            counter ? "3" : "2"
+          );
+          const warning = page.waitForEvent("dialog");
+          void page.reload().catch(() => {});
+          const prompt = await warning;
+          expect(prompt.type()).toBe("beforeunload");
+          await prompt.dismiss();
+          await expect(amount).toHaveValue("5.00");
+          await page.locator("main:visible").getByRole("link").first().click();
+          await expect(dialog).toBeVisible();
+          await dialog
+            .getByRole("button", { name: "Keep editing", exact: true })
+            .click();
+          await expect(page).toHaveURL(address);
+        });
+      }
+
+      test(`${builder}: draft edits freeze during a send without losing focus and successful sends do not warn`, async ({
         page,
         collectors,
       }) => {
@@ -1031,24 +1118,32 @@ for (const viewport of [
           }
         );
         try {
-          await page
-            .getByRole("button", {
-              name: counter ? "Send Counter" : "Send Trade Proposal",
-              exact: true,
-            })
-            .click();
+          const send = page.getByRole("button", {
+            name: counter ? "Send Counter" : "Send Trade Proposal",
+            exact: true,
+          });
+          await send.click();
           await sending;
+          await expect(send).toBeFocused();
           const payer = page.getByRole("radio", {
             name: "You pay",
             exact: true,
           });
-          if (counter) await expect(payer).toBeDisabled();
-          else {
-            await payer.click();
-            await page
-              .getByRole("textbox", { name: "Amount in US dollars" })
-              .fill("5");
-          }
+          await expect(payer).toBeDisabled();
+          // Forced activation also checks the handler boundary, beyond the accessible disabled state.
+          await payer.click({ force: true });
+          await expect(
+            page.getByRole("radio", { name: "No cash", exact: true })
+          ).toBeChecked();
+          await expect(
+            page.getByRole("textbox", { name: "Amount in US dollars" })
+          ).toHaveCount(0);
+          await page
+            .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+            .click({ force: true });
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            counter ? "2" : "1"
+          );
           // A synthetic event checks the in-flight rule without aborting the real pending request.
           expect(
             await page.evaluate(() => {

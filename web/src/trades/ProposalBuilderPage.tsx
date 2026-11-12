@@ -517,7 +517,12 @@ export function ProposalBuilderPage({
 
   // Any change makes a new send key: a send is the same only when the proposal is.
   function change(next: (p: Proposal) => Proposal) {
-    if (terminalRef.current || lifecycle?.phase === "sending") return;
+    if (
+      terminalRef.current ||
+      sending.current ||
+      lifecycle?.phase === "sending"
+    )
+      return;
     offerReview?.dispatch({ type: "draft_edited" });
     setProposal(next);
     key.current = null;
@@ -525,7 +530,12 @@ export function ProposalBuilderPage({
 
   // A cash change is an edit like a card: it makes a new send key.
   function editCash(next: CashDraft) {
-    if (terminalRef.current || lifecycle?.phase === "sending") return;
+    if (
+      terminalRef.current ||
+      sending.current ||
+      lifecycle?.phase === "sending"
+    )
+      return;
     offerReview?.dispatch({ type: "draft_edited" });
     key.current = null;
     setCash(next);
@@ -544,7 +554,7 @@ export function ProposalBuilderPage({
   }
 
   function add(side: ProposalSide, libraryCard: LibraryCard) {
-    if (!capsReady || lifecycle?.phase === "sending") return;
+    if (!capsReady || sending.current || lifecycle?.phase === "sending") return;
     const card = toProposalCard(libraryCard.card);
     const label = tradeCardName(card);
     const n = quantityIn(proposal, side, card.edition_id);
@@ -670,7 +680,7 @@ export function ProposalBuilderPage({
       }
       return;
     }
-    // Capture this submission even if an edit clears the ref while it is in flight.
+    // Capture the submission key for this frozen draft.
     const submittedKey = key.current ?? crypto.randomUUID();
     if (terminalRef.current) return;
     key.current = submittedKey;
@@ -916,6 +926,7 @@ export function ProposalBuilderPage({
         proposal[side].length > 0
       )}
       onChange={(line, quantity) => {
+        if (sending.current) return;
         say(
           `${tradeCardName(line)}: ${quantity} in ${SIDE_LABEL[side]}`,
           "proposal"
@@ -926,7 +937,16 @@ export function ProposalBuilderPage({
     />
   );
   const proposalPane = (
-    <fieldset disabled={lifecycle?.phase === "sending"} className="contents">
+    <fieldset
+      aria-disabled={busy || undefined}
+      className="contents"
+      onClickCapture={(event) => {
+        // Keep controls focusable while the submitted draft is frozen. Handler guards also protect late events.
+        if (!sending.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
       <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
         {lifecycle &&
           (reviewNeeded ||
@@ -1060,6 +1080,7 @@ export function ProposalBuilderPage({
               placeholder="0.00"
               autoComplete="off"
               maxLength={14}
+              readOnly={busy}
               value={cash.amount}
               onChange={(event) =>
                 editCash({ ...cash, amount: event.currentTarget.value })
@@ -1082,13 +1103,14 @@ export function ProposalBuilderPage({
             variant="primary"
             className="disabled:opacity-45"
             disabled={
-              empty ||
-              gone ||
-              unchanged ||
-              reviewNeeded ||
-              (controls !== null && !controls.send) ||
-              (!replaying && (!capsReady || overCap)) ||
-              terminal !== null
+              !busy &&
+              (empty ||
+                gone ||
+                unchanged ||
+                reviewNeeded ||
+                (controls !== null && !controls.send) ||
+                (!replaying && (!capsReady || overCap)) ||
+                terminal !== null)
             }
             aria-disabled={busy || undefined}
             aria-describedby={reason ? reasonId : undefined}
@@ -1111,8 +1133,14 @@ export function ProposalBuilderPage({
             label="Message (optional)"
             value={initialMessage}
             maxLength={4000}
-            disabled={busy || terminal !== null || key.current !== null}
+            readOnly={busy || terminal !== null || key.current !== null}
             onChange={(event) => {
+              if (
+                sending.current ||
+                terminalRef.current ||
+                key.current !== null
+              )
+                return;
               setInitialMessage(event.target.value);
             }}
           />
@@ -1129,7 +1157,7 @@ export function ProposalBuilderPage({
   const library = (
     <ProposalLibrary
       headingId={libraryId}
-      additionsBlocked={!capsReady || lifecycle?.phase === "sending"}
+      additionsBlocked={!capsReady || busy || lifecycle?.phase === "sending"}
       announcement={libraryAnnounces ? announcement.text : null}
       ownScroll={!phone}
       friendName={name}

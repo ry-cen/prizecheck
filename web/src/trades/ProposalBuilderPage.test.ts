@@ -317,9 +317,15 @@ it("freezes draft controls while sending, then exposes the identical-key retry a
       reject = no;
     })
   );
+  send().focus();
   await click(send());
-  expect(send().disabled).toBe(true);
-  expect(increase().matches(":disabled")).toBe(true);
+  expect(document.activeElement).toBe(send());
+  expect(send().disabled).toBe(false);
+  expect(send().getAttribute("aria-disabled")).toBe("true");
+  expect(increase().closest("fieldset")?.getAttribute("aria-disabled")).toBe(
+    "true"
+  );
+  expect(increase().matches(":disabled")).toBe(false);
   await click(increase());
   expect(
     host.querySelector('[role="group"][aria-label="Iono (PAL 185) you get"]')
