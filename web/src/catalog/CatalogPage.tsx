@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { catalogHref, parseCatalogView, type CatalogView } from "./catalogUrl";
+import { AddQueueAccount, hasStoredAddQueue } from "./useStoredAddQueue";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import { MyMetadataReports } from "../MetadataReport";
 import {
@@ -17,6 +19,11 @@ import { MODES, type CatalogMode } from "./catalogText";
 type Props = {
   /** False while the shell keeps the page mounted but hidden. */
   active: boolean;
+  address: string;
+  onNavigate: (
+    address: string,
+    options?: { replace?: boolean; preserveScroll?: boolean }
+  ) => void;
   /** The app's last service message. */
   message: string;
 };
@@ -29,8 +36,29 @@ type Props = {
  * page" predates infinite scroll). The page stays mounted while the collector is elsewhere, so the mode, search,
  * filters, queue, loaded rows and scroll are kept.
  */
-export function CatalogPage({ active, message }: Props) {
-  const [mode, setMode] = useState<CatalogMode>("browse");
+export function CatalogPage({ active, message, address, onNavigate }: Props) {
+  const account = useContext(AddQueueAccount);
+  const owner = useRef(account);
+  const lastAddress = useRef(address);
+  if (active) lastAddress.current = address;
+  const view = parseCatalogView(lastAddress.current);
+  const mode =
+    view.mode ?? (hasStoredAddQueue(account, "page") ? "add" : "browse");
+  const changeView = (next: CatalogView) => {
+    if (active)
+      onNavigate(catalogHref(next), { replace: true, preserveScroll: true });
+  };
+  const setMode = (mode: CatalogMode) => changeView({ ...view, mode });
+  useEffect(() => {
+    if (!active) return;
+    if (owner.current !== account) {
+      owner.current = account;
+      changeView({
+        ...view,
+        mode: hasStoredAddQueue(account, "page") ? "add" : "browse",
+      });
+    } else if (view.mode === null && mode === "add") setMode("add");
+  }, [active, account, address]);
   const [link, setLink] = useState<CardRequest | null>(null);
   const [reportsKey, setReportsKey] = useState(0);
   const [reportsOpen, setReportsOpen] = useState(false);
@@ -84,6 +112,8 @@ export function CatalogPage({ active, message }: Props) {
       />
       <CatalogGallery
         active={active}
+        view={view}
+        onViewChange={changeView}
         adding={mode === "add"}
         fixedTarget={null}
         undoToast

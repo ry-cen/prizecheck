@@ -1,3 +1,5 @@
+import type { CatalogView } from "./catalogUrl";
+import { getCatalogSets } from "../catalog_browse_generated";
 import { useStoredAddQueue } from "./useStoredAddQueue";
 import { useFirstReadSettled } from "../shell/keptRead";
 import {
@@ -52,6 +54,8 @@ const SCROLL_AHEAD = "0px 0px 800px 0px";
 type Props = {
   /** False while hidden: the Catalog page kept mounted on another tab, or Collection's Add cards closed. */
   active: boolean;
+  view?: CatalogView;
+  onViewChange?: (view: CatalogView) => void;
   /** Add mode (#175): the bar, and a quick + on every tile that becomes a −/N/+ stepper. */
   adding: boolean;
   /** Collection's Add cards from a Location: the Location to add to, shown rather than chosen. Null: the bar's
@@ -91,6 +95,8 @@ type Props = {
  */
 export function CatalogGallery({
   active,
+  view,
+  onViewChange,
   adding,
   fixedTarget,
   undoToast,
@@ -103,15 +109,54 @@ export function CatalogGallery({
   onLinkOpened,
   onReported,
 }: Props) {
-  const [text, setText] = useState("");
+  const [localText, setLocalText] = useState("");
+  const [localFormat, setLocalFormat] = useState<BrowseFormat | null>(null);
+  const [localKind, setLocalKind] = useState<BrowseKind | null>(null);
+  const [set, storeSet] = useState<CatalogSet | null>(null);
+  const [localOwned, setLocalOwned] = useState(false);
+  const text = view?.q ?? localText;
+  const format = view ? view.format : localFormat;
+  const kind = view ? view.kind : localKind;
+  const owned = view?.owned ?? localOwned;
+  const setId = view ? view.setId : (set?.set_id ?? null);
+  const setText = (q: string) =>
+    view && onViewChange ? onViewChange({ ...view, q }) : setLocalText(q);
+  const setFormat = (format: BrowseFormat | null) =>
+    view && onViewChange
+      ? onViewChange({ ...view, format })
+      : setLocalFormat(format);
+  const setKind = (kind: BrowseKind | null) =>
+    view && onViewChange ? onViewChange({ ...view, kind }) : setLocalKind(kind);
+  const setOwned = (owned: boolean) =>
+    view && onViewChange
+      ? onViewChange({ ...view, owned })
+      : setLocalOwned(owned);
+  const setSet = (set: CatalogSet | null) => {
+    storeSet(set);
+    if (view && onViewChange)
+      onViewChange({ ...view, setId: set?.set_id ?? null });
+  };
+  useEffect(() => {
+    if (!view) return;
+    if (!setId) {
+      storeSet(null);
+      return;
+    }
+    let live = true;
+    void getCatalogSets()
+      .then((list) => {
+        if (live)
+          storeSet(list.sets.find((set) => set.set_id === setId) ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [setId, !!view]);
   const q = useDebouncedValue(text.trim(), SEARCH_DELAY_MS);
-  const [format, setFormat] = useState<BrowseFormat | null>(null);
-  const [kind, setKind] = useState<BrowseKind | null>(null);
-  const [set, setSet] = useState<CatalogSet | null>(null);
-  const [owned, setOwned] = useState(false);
   const query = useMemo(
-    () => ({ q, format, kind, set_id: set?.set_id ?? null, owned }),
-    [q, format, kind, set, owned]
+    () => ({ q, format, kind, set_id: setId, owned }),
+    [q, format, kind, setId, owned]
   );
   const tiles = useRef<HTMLUListElement>(null);
   const browse = useCatalogBrowse(query, active, tiles);

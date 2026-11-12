@@ -408,7 +408,14 @@ function App() {
         );
       }
       case "catalog":
-        return <CatalogPage active={active} message={message} />;
+        return (
+          <CatalogPage
+            active={active}
+            message={message}
+            address={address}
+            onNavigate={navigate}
+          />
+        );
       case "loans":
         // /loans lists the Loans; /loans/<id> is one Loan (#252).
         return (
