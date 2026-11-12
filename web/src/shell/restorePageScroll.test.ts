@@ -159,17 +159,22 @@ it("ignores the scroll event its own restore causes", () => {
   stop();
 });
 
-it("keeps restoring when scroll anchoring carries the view toward the saved position before the next retry", () => {
+it("releases a move toward the saved position that no clamp explains", () => {
   vi.useFakeTimers();
   const view = layout(0, 683);
   const stop = restorePageScroll(document.createElement("main"), 721);
-  expect(window.scrollY).toBe(683);
-  view.setHeight(1500); // grows with no resize callback
-  vi.stubGlobal("scrollY", 700); // anchoring: below the saved position, on a page that now ends at 1500
-  window.dispatchEvent(new Event("scroll"));
-  vi.advanceTimersByTime(RESTORE_POLL_MS);
-  expect(window.scrollY).toBe(721);
-  stop();
+  try {
+    view.setHeight(1500);
+    vi.stubGlobal("scrollY", 700);
+    window.dispatchEvent(new Event("scroll"));
+    const calls = view.scroll.mock.calls.length;
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(700);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+    expect(view.scroll).toHaveBeenCalledTimes(calls);
+  } finally {
+    stop();
+  }
 });
 
 it("keeps restoring when the browser clamps the view to a page that shrank", () => {
@@ -252,13 +257,18 @@ it.each(["pointerdown", "keydown", "wheel"])(
     vi.useFakeTimers();
     const root = document.documentElement;
     const previous = root.style.overflowAnchor;
+    const body = document.body;
+    const previousBody = body.style.overflowAnchor;
+    body.style.overflowAnchor = "auto";
     root.style.overflowAnchor = "auto";
     const view = layout(0, 900);
     const stop = restorePageScroll(document.createElement("main"), 500);
     try {
       expect(root.style.overflowAnchor).toBe("none");
+      expect(body.style.overflowAnchor).toBe("none");
       window.dispatchEvent(new Event(input));
       expect(root.style.overflowAnchor).toBe("auto");
+      expect(body.style.overflowAnchor).toBe("auto");
       vi.stubGlobal("scrollY", 120);
       view.grow(1500);
       vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
@@ -266,6 +276,7 @@ it.each(["pointerdown", "keydown", "wheel"])(
     } finally {
       stop();
       root.style.overflowAnchor = previous;
+      body.style.overflowAnchor = previousBody;
     }
   }
 );
@@ -274,19 +285,27 @@ it("bounds the anchoring guard and restores its previous style exactly once", ()
   vi.useFakeTimers();
   const root = document.documentElement;
   const previous = root.style.overflowAnchor;
+  const body = document.body;
+  const previousBody = body.style.overflowAnchor;
+  body.style.overflowAnchor = "auto";
   root.style.overflowAnchor = "auto";
   layout(0, 900);
   const stop = restorePageScroll(document.createElement("main"), 500);
   try {
     expect(root.style.overflowAnchor).toBe("none");
+    expect(body.style.overflowAnchor).toBe("none");
     vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
     expect(root.style.overflowAnchor).toBe("auto");
+    expect(body.style.overflowAnchor).toBe("auto");
     root.style.overflowAnchor = "none";
+    body.style.overflowAnchor = "none";
     stop();
     expect(root.style.overflowAnchor).toBe("none");
+    expect(body.style.overflowAnchor).toBe("none");
   } finally {
     stop();
     root.style.overflowAnchor = previous;
+    body.style.overflowAnchor = previousBody;
   }
 });
 
@@ -330,23 +349,38 @@ it("S5-R1 still retries a native clamp when the poll precedes its scroll event",
 });
 
 it.each(["cleanup", "wheel", "expiry"])(
-  "S5-R2 restores the inline anchoring value and priority on %s",
+  "keeps both anchoring guards on html and body and restores each exactly once (%s)",
   (release) => {
     vi.useFakeTimers();
-    const style = document.documentElement.style;
-    const previous = style.cssText;
-    style.setProperty("overflow-anchor", "auto", "important");
+    const styles = [document.documentElement.style, document.body.style];
+    const previous = styles.map((style) => style.cssText);
+    styles.forEach((style) =>
+      style.setProperty("overflow-anchor", "auto", "important")
+    );
+    const writes = styles.map((style) => vi.spyOn(style, "setProperty"));
     layout(0, 1500);
     const stop = restorePageScroll(document.createElement("main"), 721);
     try {
+      for (const style of styles) {
+        expect(style.getPropertyValue("overflow-anchor")).toBe("none");
+        expect(style.getPropertyPriority("overflow-anchor")).toBe("important");
+      }
       if (release === "cleanup") stop();
       else if (release === "wheel") window.dispatchEvent(new Event("wheel"));
       else vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
-      expect(style.getPropertyValue("overflow-anchor")).toBe("auto");
-      expect(style.getPropertyPriority("overflow-anchor")).toBe("important");
+      styles.forEach((style, index) => {
+        expect(style.getPropertyValue("overflow-anchor")).toBe("auto");
+        expect(style.getPropertyPriority("overflow-anchor")).toBe("important");
+        expect(writes[index]).toHaveBeenCalledTimes(2);
+      });
+      stop();
+      writes.forEach((write) => expect(write).toHaveBeenCalledTimes(2));
     } finally {
       stop();
-      style.cssText = previous;
+      styles.forEach((style, index) => {
+        writes[index].mockRestore();
+        style.cssText = previous[index];
+      });
     }
   }
 );
@@ -436,6 +470,117 @@ it("S5-R3 does not treat every position above a historical end as a clamp", () =
     vi.stubGlobal("scrollY", 400);
     vi.advanceTimersByTime(RESTORE_POLL_MS);
     expect(window.scrollY).toBe(400);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
+
+it("restores the phone Want List position through a clamp and later growth", () => {
+  vi.useFakeTimers();
+  const styles = [document.documentElement.style, document.body.style];
+  const previous = styles.map((style) => style.cssText);
+  styles.forEach((style) => style.setProperty("overflow-anchor", "auto"));
+  const view = layout(0, 1468);
+  const stop = restorePageScroll(document.createElement("main"), 1498);
+  try {
+    view.grow(1520);
+    view.grow(1917);
+    vi.advanceTimersByTime(RESTORE_POLL_MS * 2);
+    expect(window.scrollY).toBe(1498);
+    expect(view.disconnect).not.toHaveBeenCalled();
+    styles.forEach((style) => expect(style.overflowAnchor).toBe("none"));
+    vi.advanceTimersByTime(RESTORE_WINDOW_MS - RESTORE_POLL_MS * 2);
+    expect(view.disconnect).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+    styles.forEach((style) => expect(style.overflowAnchor).toBe("auto"));
+  } finally {
+    stop();
+    styles.forEach((style, index) => {
+      style.cssText = previous[index];
+    });
+  }
+});
+
+it.each(["scroll", "poll", "resize"])(
+  "releases a later scroll past a reached target after an earlier clamp (%s first)",
+  (ordering) => {
+    vi.useFakeTimers();
+    const view = layout(0, 450);
+    const stop = restorePageScroll(document.createElement("main"), 500);
+    try {
+      expect(window.scrollY).toBe(450);
+      view.setHeight(1000);
+      vi.advanceTimersByTime(RESTORE_POLL_MS);
+      expect(window.scrollY).toBe(500);
+      view.setHeight(1400);
+      vi.stubGlobal("scrollY", 900);
+      const calls = view.scroll.mock.calls.length;
+      if (ordering === "scroll") window.dispatchEvent(new Event("scroll"));
+      else if (ordering === "poll") vi.advanceTimersByTime(RESTORE_POLL_MS);
+      else view.grow(1400);
+      window.dispatchEvent(new Event("scroll"));
+      vi.advanceTimersByTime(RESTORE_POLL_MS * 2);
+      expect(window.scrollY).toBe(900);
+      expect(view.disconnect).toHaveBeenCalledOnce();
+      expect(view.scroll).toHaveBeenCalledTimes(calls);
+    } finally {
+      stop();
+    }
+  }
+);
+
+it("consumes clamp evidence once the target is reached", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1000);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  try {
+    view.setHeight(450);
+    vi.stubGlobal("scrollY", 450);
+    window.dispatchEvent(new Event("scroll"));
+    expect(view.disconnect).not.toHaveBeenCalled();
+    view.setHeight(1000);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(500);
+    vi.stubGlobal("scrollY", 450);
+    window.dispatchEvent(new Event("scroll"));
+    const calls = view.scroll.mock.calls.length;
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(450);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+    expect(view.scroll).toHaveBeenCalledTimes(calls);
+  } finally {
+    stop();
+  }
+});
+
+it("does not reuse reconciled growth to claim a later unrelated scroll", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1520);
+  const stop = restorePageScroll(document.createElement("main"), 1498);
+  try {
+    view.grow(1917);
+    vi.stubGlobal("scrollY", 1895);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(1895);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
+
+it("releases a scroll matching document growth when restoration never clamped", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1000);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  try {
+    view.setHeight(1400);
+    vi.stubGlobal("scrollY", 900);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(900);
     expect(view.disconnect).toHaveBeenCalledOnce();
   } finally {
     stop();

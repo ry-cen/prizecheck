@@ -1,4 +1,6 @@
-import { test, expect, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { test, expect } from "./support/collectors";
+import { befriend, nameCollector } from "./support/loans";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -688,3 +690,79 @@ test("Want List Back returns to where the page was when Open Deck was pressed, a
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(atClick);
   await expect(open).toBeFocused();
 });
+
+for (const width of [375, 1280]) {
+  test.describe(`lower Want List entry return at ${width}px`, () => {
+    test.use({
+      viewport: { width, height: width === 375 ? 812 : 800 },
+      isMobile: width === 375,
+      hasTouch: width === 375,
+    });
+    test("Back restores the lower entry and its focused Open Deck link", async ({
+      page,
+      collectors,
+    }) => {
+      const friend = await collectors.signIn();
+      await nameCollector(friend.page, "Scroll Friend");
+      await signIn(page);
+      await nameCollector(page, "Scroll Collector");
+      await befriend(page, friend.page);
+      const { iono } = editions();
+      const suffix = randomUUID().slice(0, 6);
+      for (const [index, name] of [
+        "Weekend",
+        "Standard",
+        "Published",
+      ].entries()) {
+        const id = await createDeck(page, `${name} ${suffix}`, 3 - index);
+        await setLine(page, id, iono, 4);
+      }
+      await page.goto(`${ORIGIN}/decks/want-list`);
+      await expect(
+        page.getByRole("radio", { name: "Buy", exact: true })
+      ).toBeVisible();
+      await expect(
+        page.getByText("Checking prices…", { exact: true })
+      ).toHaveCount(0);
+      const open = deckSection(page, `Published ${suffix}`).getByRole("link", {
+        name: `Open Deck Published ${suffix}`,
+      });
+      await open.evaluate((element) =>
+        element.scrollIntoView({ block: "center" })
+      );
+      const saved = await page.evaluate(() => window.scrollY);
+      expect(saved).toBeGreaterThan(0);
+      await open.click();
+      // Wait for the actual Deck, rather than returning while its lazy module is still loading.
+      await expect(
+        page.locator("main:visible").getByRole("heading", { level: 1 })
+      ).toHaveText(`Published ${suffix}`);
+      let releaseMatches!: () => void;
+      const matchesGate = new Promise<void>((resolve) => {
+        releaseMatches = resolve;
+      });
+      await page.route("**/api/social/want-list-matches**", async (route) => {
+        await matchesGate;
+        await route.continue();
+      });
+      try {
+        await page.goBack();
+        await expect(open).toBeFocused();
+        // Mount Buy/Friends only after restoration has moved into the lower sections.
+        await expect
+          .poll(() => page.evaluate(() => window.scrollY))
+          .toBeGreaterThan(0);
+      } finally {
+        releaseMatches();
+      }
+      await expect(
+        page.getByRole("radio", { name: "Buy", exact: true })
+      ).toBeVisible();
+      await expect(
+        page.getByText("Checking prices…", { exact: true })
+      ).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(saved);
+      await expect(open).toBeInViewport();
+    });
+  });
+}
