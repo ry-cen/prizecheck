@@ -319,6 +319,52 @@ test.describe("desktop", () => {
     );
   });
 
+  test("the popup offers the Undo toast's Undo beside its own line, since the modal popup covers the toast", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await tile(page, "Switch, MEG 130").click();
+    const card = page.getByRole("dialog", { name: "Switch" });
+    await addRow(page)
+      .getByRole("button", { name: "Increase Copies to add" })
+      .click();
+    await addRow(page).getByRole("button", { name: "Add 2" }).click();
+    await expect(card.getByText("Added 2 copies to Unsorted.")).toBeVisible();
+    await expect(card).toContainText("2 copies owned");
+    const undo = card.getByRole("button", { name: "Undo", exact: true });
+    // The popup's own control: the topmost thing where it is drawn, so a press reaches it.
+    await expect
+      .poll(() =>
+        undo.evaluate((button) => {
+          const box = button.getBoundingClientRect();
+          return (
+            document.elementFromPoint(
+              box.x + box.width / 2,
+              box.y + box.height / 2
+            ) === button
+          );
+        })
+      )
+      .toBe(true);
+    await undo.click();
+    await expect(
+      card.getByText("Undo removed 2 cards from Unsorted.")
+    ).toBeVisible();
+    await expect(undo).toHaveCount(0);
+    await expect(
+      addRow(page).getByRole("button", { name: /^Add \d/ })
+    ).toBeFocused();
+    await expect(card).not.toContainText("2 copies owned");
+    await page.keyboard.press("Escape");
+    await expect(tile(page, "Switch, MEG 130")).toHaveAccessibleName(
+      "Switch, MEG 130, Mega Evolution, Normal, not owned"
+    );
+    await expect(
+      page.getByRole("region", { name: "Notifications" })
+    ).toContainText("Undo removed 2 cards from Unsorted.");
+  });
+
   test("picking another Edition keeps the typed report and the Add count, and the report follows the pick (#174)", async ({
     page,
   }) => {

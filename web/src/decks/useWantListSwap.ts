@@ -60,6 +60,7 @@ export function swapChanges(
 }
 
 type UndoJob = {
+  generation: number;
   deckId: string;
   message: string;
   changes: DeckListChange[];
@@ -75,6 +76,8 @@ export type WantListSwap = {
 };
 
 type Options = {
+  /** Selected Deck, or all Decks; independent of the last loaded answer. */
+  scope: string | null;
   /** The Want List the page shows now (null while it has none): a new answer ends the wait that follows a command. */
   list: WantList | null;
   /** Whether the page's last read failed: that also ends the wait. */
@@ -101,6 +104,7 @@ type Options = {
  * Want List takes the toast down.
  */
 export function useWantListSwap({
+  scope,
   list,
   failed,
   reload,
@@ -113,24 +117,34 @@ export function useWantListSwap({
   const working = useRef(false);
   // A command landed and the page is reading the Want List again: the buttons stay off until the new answer draws.
   const pending = useRef(false);
+  const queuedUndo = useRef<UndoJob | null>(null);
   const toastId = useRef<number | null>(null);
   const mounted = useRef(true);
+  const generation = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
+    setBusy(false);
     return () => {
       mounted.current = false;
+      generation.current += 1;
+      pending.current = false;
+      working.current = false;
+      queuedUndo.current = null;
       if (toastId.current !== null) kit.dismiss(toastId.current);
     };
-  }, [kit]);
+  }, [kit, scope]);
 
   // The new answer (or a failed read) ends the wait.
   useEffect(() => {
-    if (!pending.current) return;
+    if (!pending.current || (list && list.deck_id !== scope)) return;
     pending.current = false;
     working.current = false;
-    setBusy(false);
-  }, [list, failed]);
+    const job = queuedUndo.current;
+    queuedUndo.current = null;
+    if (job) void undo(job);
+    else setBusy(false);
+  }, [list, failed, scope]);
 
   function start(): boolean {
     if (working.current) return false;
@@ -139,8 +153,12 @@ export function useWantListSwap({
     return true;
   }
 
-  function finish() {
-    if (!mounted.current) return;
+  function current(epoch: number) {
+    return mounted.current && generation.current === epoch;
+  }
+
+  function finish(epoch: number) {
+    if (!current(epoch)) return;
     pending.current = true;
     live.current.reload();
   }
@@ -167,6 +185,7 @@ export function useWantListSwap({
   async function swap(section: WantListSection, line: WantListLine) {
     const hint = line.swap;
     if (!hint || !start()) return;
+    const epoch = generation.current;
     live.current.notify("");
     const { changes, inverse } = swapChanges(line, hint);
     const message = `Swapped ${hint.count} ${line.name} for ${swapVersion(hint)} in ${section.name}.`;
@@ -176,15 +195,17 @@ export function useWantListSwap({
         idempotency_key: crypto.randomUUID(),
         changes,
       });
-      say(message, {
-        deckId: section.deck_id,
-        message,
-        changes: inverse,
-        revision: result.deck_list.revision,
-        key: crypto.randomUUID(),
-      });
+      if (current(epoch) && queuedUndo.current === null)
+        say(message, {
+          generation: epoch,
+          deckId: section.deck_id,
+          message,
+          changes: inverse,
+          revision: result.deck_list.revision,
+          key: crypto.randomUUID(),
+        });
     } catch (cause) {
-      if (mounted.current)
+      if (current(epoch))
         live.current.notify(
           !(cause instanceof DeckError) || cause.status >= 500
             ? "Your swap may not have been saved. The Want List is up to date now: check the line and try again."
@@ -195,12 +216,21 @@ export function useWantListSwap({
                 : "The Deck List couldn't be changed. Please try again."
         );
     } finally {
-      finish();
+      finish(epoch);
     }
   }
 
   async function undo(job: UndoJob) {
-    if (!start()) return;
+    if (!current(job.generation)) return;
+    if (!start()) {
+      // A prior toast can still offer Undo during another command's POST or refresh. Retain
+      // the accepted press through either phase; duplicate presses never add another inverse.
+      if (queuedUndo.current === null) {
+        queuedUndo.current = job;
+        say(job.message, job, true);
+      }
+      return;
+    }
     say(job.message, job, true);
     try {
       await changeDeckList(job.deckId, {
@@ -208,8 +238,9 @@ export function useWantListSwap({
         idempotency_key: job.key,
         changes: job.changes,
       });
-      say(`Undone: ${job.message}`, null);
+      if (current(job.generation)) say(`Undone: ${job.message}`, null);
     } catch (cause) {
+      if (!current(job.generation)) return;
       if (!(cause instanceof DeckError) || cause.status >= 500)
         // No answer: the same key makes pressing Undo again apply it once.
         say("Undo may not have finished. Try again to check safely.", job);
@@ -221,7 +252,7 @@ export function useWantListSwap({
           null
         );
     } finally {
-      finish();
+      finish(job.generation);
     }
   }
 

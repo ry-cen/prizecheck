@@ -185,6 +185,14 @@ async function unsortedId(page: Page): Promise<string> {
 const MAY_HAVE_COMPLETED =
   "Adding may have completed. Press Add again to check safely.";
 
+/** Whether the page asks before a reload or close (the beforeunload event is cancelled). */
+const warns = (page: Page) =>
+  page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -215,7 +223,10 @@ test.describe("desktop", () => {
     await picker.selectOption({ label: "Trade box" });
 
     // + queues a copy and becomes − N +; the tile is outlined and says how many it will add.
+    expect(await warns(page)).toBe(false);
     await more(page, BULBASAUR).click();
+    // The queue lives only on this page: reload or close asks first while cards wait in it.
+    expect(await warns(page)).toBe(true);
     await more(page, BULBASAUR).click();
     await expect(
       results(page).getByRole("group", { name: `${BULBASAUR}: 2 to add` })
@@ -265,6 +276,7 @@ test.describe("desktop", () => {
     await expect(toast(page)).toHaveText("Added 4 cards to Trade box.");
     await expect(undo(page)).toBeVisible();
     await expect(bar).toContainText("Tap + on cards, then add them together.");
+    expect(await warns(page)).toBe(false);
     await expect(
       tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal")
     ).toHaveAccessibleName(
@@ -351,6 +363,48 @@ test.describe("desktop", () => {
     await expect(toast(page)).toHaveText(
       "Undo removed 3 cards from Trade box."
     );
+    await expect(cards(page)).toHaveCount(0);
+  });
+
+  test("Collection popup Undo is reachable while Add cards stays open", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await createLocation(page, "Trade box");
+    await page.goto(`${ORIGIN}/collection`);
+    await sidebarButton(page, "Trade box").click();
+    await page.getByRole("button", { name: "Add cards", exact: true }).click();
+    const add = page.getByRole("dialog", { name: "Add cards to Trade box" });
+    await tile(add, "Switch, MEG 130").click();
+    const popup = page.getByRole("dialog", { name: "Switch", exact: true });
+    await addRow(page)
+      .getByRole("button", { name: "Add 1", exact: true })
+      .click();
+    const popupUndo = popup.getByRole("button", { name: "Undo", exact: true });
+    await expect(popupUndo).toBeVisible();
+    await expect(add).toBeVisible();
+    await expect(popup).toContainText("1 copy owned");
+    await popupUndo.click();
+    await expect(
+      popup.getByText("Undo removed 1 card from Trade box.")
+    ).toBeVisible();
+    await expect(popupUndo).toHaveCount(0);
+    await expect(
+      addRow(page).getByRole("button", { name: "Add 1", exact: true })
+    ).toBeFocused();
+    await expect(popup).not.toContainText("1 copy owned");
+    await expectPageChecks(
+      page,
+      "Collection, popup Undo while Add cards stays open"
+    );
+    await page.keyboard.press("Escape");
+    await expect(add).toBeVisible();
+    await expect(tile(add, "Switch, MEG 130")).toHaveAccessibleName(
+      "Switch, MEG 130, Mega Evolution, Normal, not owned"
+    );
+    await page.keyboard.press("Escape");
+    await expect(add).toHaveCount(0);
     await expect(cards(page)).toHaveCount(0);
   });
 

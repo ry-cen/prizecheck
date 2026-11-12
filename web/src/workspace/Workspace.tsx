@@ -8,7 +8,7 @@ import React, {
   useState,
 } from "react";
 import { Camera as CameraIcon, Menu as MenuIcon, Plus } from "lucide-react";
-import type { AddedCards } from "../catalog/useAddToast";
+import { useAddToast, type AddedCards } from "../catalog/useAddToast";
 import {
   getLocationTree,
   type TreeLocation,
@@ -449,6 +449,13 @@ export function Workspace({
   );
   // Add N cards closes Add cards and leaves the collector in the Location the cards went to, with its folders open,
   // and Collection's toast offers Undo. The popup's Add N inside it leaves it open.
+  const popupAddToast = useAddToast({
+    shown: active,
+    onUndone: () => {
+      gallery.reload();
+      void loadTree();
+    },
+  });
   const addedCards = (added: AddedCards) => {
     if (added.from === "bar") {
       setAdding(null);
@@ -458,7 +465,10 @@ export function Workspace({
       );
       setView(added.locationId);
     }
-    void actions.added(added);
+    return actions.added(
+      added,
+      added.from === "popup" ? popupAddToast : undefined
+    );
   };
   const linkReloaded = useRef<string | null>(null);
   // Expand ancestors after a deep link loads; an unavailable Location stays safe and explains the fallback.

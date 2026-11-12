@@ -627,3 +627,31 @@ test("a refused normal drag Move focuses Actions before the refreshed tile unmou
   );
   expect(render(opts).barError).toContain("Nothing moved.");
 });
+
+test("Collection returns the popup's Undo from its add notification owner", async () => {
+  const notify = vi
+    .fn()
+    .mockResolvedValue(
+      Object.assign(
+        async () => ({ message: "Removed", next: null, undone: true }),
+        { isAvailable: () => true }
+      )
+    );
+  const opts = options();
+  const result = {
+    locationId: "source",
+    path: "Box",
+    copies: 1,
+    items: [],
+    ownerRevision: 1,
+    undoId: "new",
+    from: "popup" as const,
+  };
+  const actions = render(opts);
+  const inline = await actions.added(result, notify);
+  expect(notify).toHaveBeenCalledWith(result);
+  expect(inline).toBe(await notify.mock.results[0].value);
+  expect(render(opts).toast).toBeNull();
+  expect(opts.reloadGallery).toHaveBeenCalled();
+  expect(opts.reloadTree).toHaveBeenCalled();
+});

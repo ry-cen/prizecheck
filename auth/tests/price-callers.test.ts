@@ -1,9 +1,9 @@
+import { createGatewayPost, freePort, signUp } from "./support/gateway";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { createServer as netServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
@@ -114,20 +114,7 @@ let base = "";
 let cookie = "";
 let userId = "";
 const seen: IncomingMessage["headers"][] = [];
-const freePort = () =>
-  new Promise<number>((resolve) => {
-    const probe = netServer();
-    probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address() as { port: number };
-      probe.close(() => resolve(port));
-    });
-  });
-const post = (path: string, body: string, extra: Record<string, string> = {}) =>
-  fetch(base + path, {
-    method: "POST",
-    headers: { origin, "content-type": "application/json", cookie, ...extra },
-    body,
-  });
+const post = createGatewayPost(() => ({ base, origin, cookie }));
 
 describe("gateway seam", () => {
   // The timeout covers serverReady's 30 s deadline plus the migration and sign-in on a loaded host.
@@ -174,21 +161,12 @@ describe("gateway seam", () => {
     );
     gateway = launch("node", ["--import", "tsx", "auth/src/server.ts"], env);
     await serverReady([gateway], base + "/auth/session");
-    const email = "caller-reader@example.test";
-    expect(
-      (await post("/auth/request-code", JSON.stringify({ email }))).status
-    ).toBe(202);
-    const code = JSON.parse(
-      readFileSync(join(directory, "mail"), "utf8").trim().split("\n").at(-1)!
-    ).otp;
-    const signin = await post(
-      "/auth/verify-code",
-      JSON.stringify({ email, code })
-    );
-    expect(signin.status).toBe(200);
-    cookie = signin.headers.get("set-cookie")!.split(";")[0];
-    userId = (await pool.query('SELECT id FROM "user" WHERE email=$1', [email]))
-      .rows[0].id;
+    ({ cookie, userId } = await signUp(
+      post,
+      "caller-reader@example.test",
+      directory,
+      pool
+    ));
   }, 60_000);
 
   afterAll(async () => {

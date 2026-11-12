@@ -78,6 +78,8 @@ The doctor reports `local server backend: none` and `start` and `run` stop with 
 
 The script downloads nothing and installs nothing. Do not borrow another session's server or binaries (under `/tmp` or another worktree): they disappear without warning and their data is not yours.
 
+The commit hook runs on macOS; `verify:local` and local admission remain Linux-only.
+
 ## Host admission (Linux)
 
 The shared queue lives at `~/.local/state/prizecheck-admission-v1/`, outside every worktree. All cooperating Prizecheck worktrees/clones under the same OS user and HOME use it. A short `flock` transaction and atomic durable state replacement admit either two API runs or one exclusive task. Each API run must declare 1–2 workers; at most four workers run together. No two admitted tasks use the same worktree simultaneously. An earlier waiting exclusive request stops newer API requests from overtaking it; healthy active runs drain first. A retained owner blocks the queue rather than expiring on a timer.

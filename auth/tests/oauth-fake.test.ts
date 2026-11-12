@@ -1,10 +1,10 @@
+import { freePort } from "./support/gateway";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   createServer as createHttpServer,
   type RequestListener,
 } from "node:http";
-import { createServer as createNetServer } from "node:net";
 import {
   CONSENT_PATH,
   FakeRefused,
@@ -24,14 +24,6 @@ const CREDENTIALS = {
   DISCORD_CLIENT_SECRET: "fake-discord-secret",
 };
 const OWNER = "owner@example.test";
-
-async function freePort(): Promise<number> {
-  const probe = createNetServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const port = (probe.address() as { port: number }).port;
-  await new Promise((resolve) => probe.close(resolve));
-  return port;
-}
 
 function launch(env: NodeJS.ProcessEnv): ChildProcess {
   return spawn("node", ["--import", "tsx", "--import", PRELOAD, FIXTURE], {

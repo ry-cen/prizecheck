@@ -1,6 +1,6 @@
 import { useRef, type RefObject } from "react";
 import { CatalogGallery } from "../catalog/CatalogGallery";
-import type { AddedCards } from "../catalog/useAddToast";
+import type { AddedCards, InlineUndo } from "../catalog/useAddToast";
 import type { Place } from "../catalog/usePlaces";
 import { Dialog } from "../ui/Dialog";
 
@@ -11,7 +11,7 @@ type Props = {
   target: Place | null;
   onClose: () => void;
   /** A batch add succeeded: Add N cards (Collection closes this and opens that Location) or the popup's Add N. */
-  onAdded: (added: AddedCards) => void;
+  onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
   /** Add N cards found its Location gone: Collection reads its tree again. */
   onTargetGone: () => void;
   returnFocus?: RefObject<HTMLElement | null>;

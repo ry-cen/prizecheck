@@ -1,6 +1,6 @@
+import { freePort } from "./support/gateway";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
 import { CONSENT_PATH } from "../testing/oauth-fake/core.js";
 import { PLACEHOLDER_CREDENTIALS } from "./support/oauth-gateway.js";
 import { waitForServer } from "./support/servers.js";
@@ -10,14 +10,6 @@ const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
 let child: ChildProcess;
 let base = "";
 let logs = "";
-
-async function freePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const port = (probe.address() as { port: number }).port;
-  await new Promise((resolve) => probe.close(resolve));
-  return port;
-}
 
 beforeAll(async () => {
   const port = await freePort();

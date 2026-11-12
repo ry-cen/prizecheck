@@ -498,6 +498,9 @@ async function story(
   await send.click();
   await expect(page).toHaveURL(new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`));
   await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
+  // Send went away with the builder: focus moves to the sent Trade's headline instead of the page body.
+  await expect(heading(page)).toBeFocused();
+  await expect(heading(page)).toBeInViewport();
   await expect(toast(page)).toContainText("Trade Proposal sent to Ash K");
   await expect.poll(warns).toBe(false);
   await page.goBack();

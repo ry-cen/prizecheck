@@ -19,7 +19,7 @@ import {
 } from "./moveOperation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addUndoneText, batchAddedText } from "../catalog/catalogText";
-import type { AddedCards } from "../catalog/useAddToast";
+import type { AddedCards, InlineUndo } from "../catalog/useAddToast";
 import {
   applyUndo,
   dismissUndo,
@@ -715,7 +715,16 @@ export function useInventoryActions({
   /** A batch add from Add cards (#175) succeeded: the toast names it, the gallery and the tree read again, and Undo
    * is offered for the add's one record while it is the newest (Undo applies the newest record alone). */
   const added = useCallback(
-    async (result: AddedCards) => {
+    async (
+      result: AddedCards,
+      notify?: (added: AddedCards) => Promise<InlineUndo | null>
+    ) => {
+      if (notify) {
+        setToast(null);
+        live.current.reloadGallery();
+        void live.current.reloadTree();
+        return notify(result);
+      }
       showToast({
         message: batchAddedText(result.copies, result.path),
         entry: null,
@@ -729,6 +738,7 @@ export function useInventoryActions({
       setToast((current) =>
         current && current.id === id ? { ...current, entry: mine } : current
       );
+      return null;
     },
     [showToast, readUndo]
   );

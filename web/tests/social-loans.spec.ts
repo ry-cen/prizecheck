@@ -523,7 +523,20 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   await popup
     .getByRole("button", { name: "Ask to borrow Iono from Misty W" })
     .click();
-  await popup.getByRole("button", { name: /^Close/ }).click();
+  // The modal popup covers the tray: its own Review closes it and opens the composer, which gives focus back to the
+  // card's tile.
+  await popup
+    .getByRole("button", { name: "Review Borrow Request to Misty W" })
+    .click();
+  await expect(composer).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", { name: /^Iono, PAL 185/ })
+  ).toBeFocused();
   await expect(tray(page)).toContainText("1 card");
   await page.setViewportSize(PHONE);
   await page

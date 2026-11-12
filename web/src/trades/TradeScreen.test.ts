@@ -3,7 +3,7 @@ import { act, createElement as h, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { TradeView } from "../social_generated";
-import { getTrade, declineTrade } from "../social_generated";
+import { getTrade, declineTrade, SocialError } from "../social_generated";
 import { acceptTrade, confirmSwap, getTradeSide } from "../trades_generated";
 import { ListDetailLayout } from "../ui/ListDetailLayout";
 import { ToastProvider } from "../ui/Toast";
@@ -133,7 +133,7 @@ it("canonicalizes an old round URL before acceptance so route-scoped feedback st
   ).toContain("Accepted. Swap the cards in person, then confirm.");
 });
 
-it("declines a proposal in one press without a redundant confirmation", async () => {
+it("asks before declining a proposal, and Keep it leaves it open", async () => {
   vi.mocked(getTrade).mockResolvedValue({ ...trade, actions: ["decline"] });
   vi.mocked(declineTrade).mockResolvedValue({
     ...trade,
@@ -156,12 +156,70 @@ it("declines a proposal in one press without a redundant confirmation", async ()
     (button) => button.textContent === "Decline"
   )!;
   await act(async () => decline.click());
+  expect(declineTrade).not.toHaveBeenCalled();
+  const sure = host.querySelector('[role="group"][aria-label="Decline"]')!;
+  expect(sure.textContent).toContain("You can't undo it");
+  const keep = [...sure.querySelectorAll("button")].find(
+    (button) => button.textContent === "Keep it"
+  )!;
+  await act(async () => keep.click());
+  expect(declineTrade).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="group"][aria-label="Decline"]')).toBeNull();
+  const again = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent === "Decline"
+  )!;
+  expect(document.activeElement).toBe(again);
+  await act(async () => again.click());
+  const yes = [
+    ...host
+      .querySelector('[role="group"][aria-label="Decline"]')!
+      .querySelectorAll("button"),
+  ].find((button) => button.textContent === "Decline")!;
+  await act(async () => yes.click());
   expect(declineTrade).toHaveBeenCalledTimes(1);
   expect(declineTrade).toHaveBeenCalledWith(
     "item",
     expect.objectContaining({ offer_id: "old-round", revision: 1 })
   );
   expect(host.querySelector('[role="group"][aria-label="Decline"]')).toBeNull();
+});
+it("closes the Decline question and focuses the heading when the Trade has moved on", async () => {
+  vi.mocked(getTrade)
+    .mockResolvedValueOnce({ ...trade, actions: ["decline"] })
+    .mockResolvedValue({
+      ...trade,
+      state: "closed",
+      actions: [],
+      closed_reason: "withdrawn",
+    });
+  vi.mocked(declineTrade).mockRejectedValue(
+    new SocialError(409, "TRADE_CHANGED")
+  );
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  const press = async (label: string, within: ParentNode = host) =>
+    act(async () =>
+      [...within.querySelectorAll("button")]
+        .find((button) => button.textContent === label)!
+        .click()
+    );
+  await press("Decline");
+  await press(
+    "Decline",
+    host.querySelector('[role="group"][aria-label="Decline"]')!
+  );
+  expect(declineTrade).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[role="group"][aria-label="Decline"]')).toBeNull();
+  expect(document.activeElement).toBe(host.querySelector("h1, h2"));
 });
 it("shows the physical swap disclosure before its single confirmation control", async () => {
   const agreed: TradeView = {

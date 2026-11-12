@@ -69,17 +69,17 @@ it("does not watch page layout for an already reached top position", () => {
   stop();
 });
 
-it("retries while content is too short, then releases restoration at the saved position", () => {
+it("retries while content is too short and guards the saved position until release", () => {
   const view = layout(0, 100);
   const stop = restorePageScroll(document.createElement("main"), 500);
   expect(window.scrollY).toBe(100);
   view.grow(900);
   expect(window.scrollY).toBe(500);
-  expect(view.disconnect).toHaveBeenCalled();
   const calls = view.scroll.mock.calls.length;
   view.grow(1200);
   expect(view.scroll).toHaveBeenCalledTimes(calls);
   stop();
+  expect(view.disconnect).toHaveBeenCalled();
 });
 
 it("lets keyboard focus take over while content is still loading", () => {
@@ -212,4 +212,232 @@ it("still lets an upward scroll away from the saved position take over once the 
   view.setHeight(900);
   vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
   expect(view.scroll).toHaveBeenCalledTimes(calls);
+});
+
+it.each(["pointerdown", "keydown", "wheel"])(
+  "leaves the collector's position alone after %s interrupts a pending restore",
+  (input) => {
+    vi.useFakeTimers();
+    const view = layout(0, 683);
+    const stop = restorePageScroll(document.createElement("main"), 721);
+    window.dispatchEvent(new Event(input));
+    vi.stubGlobal("scrollY", 120);
+    view.grow(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+    expect(window.scrollY).toBe(120);
+    stop();
+  }
+);
+
+it("retries a later clamp even after first reaching the history position", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1204);
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    expect(window.scrollY).toBe(721);
+    view.setHeight(683);
+    vi.stubGlobal("scrollY", 683);
+    window.dispatchEvent(new Event("scroll"));
+    view.setHeight(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+  } finally {
+    stop();
+  }
+});
+
+it.each(["pointerdown", "keydown", "wheel"])(
+  "releases a reached history position and its anchoring guard on %s",
+  (input) => {
+    vi.useFakeTimers();
+    const root = document.documentElement;
+    const previous = root.style.overflowAnchor;
+    root.style.overflowAnchor = "auto";
+    const view = layout(0, 900);
+    const stop = restorePageScroll(document.createElement("main"), 500);
+    try {
+      expect(root.style.overflowAnchor).toBe("none");
+      window.dispatchEvent(new Event(input));
+      expect(root.style.overflowAnchor).toBe("auto");
+      vi.stubGlobal("scrollY", 120);
+      view.grow(1500);
+      vi.advanceTimersByTime(RESTORE_POLL_MS * 3);
+      expect(window.scrollY).toBe(120);
+    } finally {
+      stop();
+      root.style.overflowAnchor = previous;
+    }
+  }
+);
+
+it("bounds the anchoring guard and restores its previous style exactly once", () => {
+  vi.useFakeTimers();
+  const root = document.documentElement;
+  const previous = root.style.overflowAnchor;
+  root.style.overflowAnchor = "auto";
+  layout(0, 900);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  try {
+    expect(root.style.overflowAnchor).toBe("none");
+    vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
+    expect(root.style.overflowAnchor).toBe("auto");
+    root.style.overflowAnchor = "none";
+    stop();
+    expect(root.style.overflowAnchor).toBe("none");
+  } finally {
+    stop();
+    root.style.overflowAnchor = previous;
+  }
+});
+
+it.each(["scroll before poll", "poll before scroll", "resize before scroll"])(
+  "S5-R1 keeps a newer programmatic position: %s",
+  (ordering) => {
+    vi.useFakeTimers();
+    const view = layout(0, 1500);
+    const stop = restorePageScroll(document.createElement("main"), 721);
+    try {
+      expect(window.scrollY).toBe(721);
+      vi.stubGlobal("scrollY", 400);
+      if (ordering === "scroll before poll")
+        window.dispatchEvent(new Event("scroll"));
+      if (ordering === "resize before scroll") view.grow(1800);
+      else vi.advanceTimersByTime(RESTORE_POLL_MS);
+      window.dispatchEvent(new Event("scroll"));
+      vi.advanceTimersByTime(RESTORE_POLL_MS * 2);
+      expect(window.scrollY).toBe(400);
+    } finally {
+      stop();
+    }
+  }
+);
+
+it("S5-R1 still retries a native clamp when the poll precedes its scroll event", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    view.setHeight(683);
+    vi.stubGlobal("scrollY", 683);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    window.dispatchEvent(new Event("scroll"));
+    view.setHeight(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+  } finally {
+    stop();
+  }
+});
+
+it.each(["cleanup", "wheel", "expiry"])(
+  "S5-R2 restores the inline anchoring value and priority on %s",
+  (release) => {
+    vi.useFakeTimers();
+    const style = document.documentElement.style;
+    const previous = style.cssText;
+    style.setProperty("overflow-anchor", "auto", "important");
+    layout(0, 1500);
+    const stop = restorePageScroll(document.createElement("main"), 721);
+    try {
+      if (release === "cleanup") stop();
+      else if (release === "wheel") window.dispatchEvent(new Event("wheel"));
+      else vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
+      expect(style.getPropertyValue("overflow-anchor")).toBe("auto");
+      expect(style.getPropertyPriority("overflow-anchor")).toBe("important");
+    } finally {
+      stop();
+      style.cssText = previous;
+    }
+  }
+);
+
+it("S5-R3 remembers an observed shrink before growth and the queued scroll event", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  // The observer runs now; its animation frame and the scroll event are still queued.
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn(() => 1)
+  );
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    expect(window.scrollY).toBe(721);
+    vi.stubGlobal("scrollY", 683);
+    view.grow(683);
+    view.grow(1500);
+    expect(window.scrollY).toBe(683);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+  } finally {
+    stop();
+  }
+});
+
+it("S5-R3 retains every observed short end until the next owned write", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn(() => 1)
+  );
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    vi.stubGlobal("scrollY", 683);
+    view.grow(683);
+    view.grow(700);
+    view.grow(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(721);
+    // The old short end cannot explain a new app scroll after our owned write.
+    vi.stubGlobal("scrollY", 683);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(683);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
+
+it("S5-R3 releases a shrink and growth with no observable layout or scroll delivery", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    // No observer, rendering step, poll or scroll handler sees the short page.
+    // This is indistinguishable from an app scroll to 683, so ownership releases.
+    view.setHeight(683);
+    vi.stubGlobal("scrollY", 683);
+    view.setHeight(1500);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(683);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
+
+it("S5-R3 does not treat every position above a historical end as a clamp", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1500);
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    vi.fn(() => 1)
+  );
+  const stop = restorePageScroll(document.createElement("main"), 721);
+  try {
+    vi.stubGlobal("scrollY", 300);
+    view.grow(300);
+    view.grow(1500);
+    vi.stubGlobal("scrollY", 400);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(400);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
 });

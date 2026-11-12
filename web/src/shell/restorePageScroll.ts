@@ -2,19 +2,40 @@
 export const RESTORE_WINDOW_MS = 5000;
 export const RESTORE_POLL_MS = 100;
 
-/** Retry a clamped history position as content arrives; release it on success, interaction or after a bounded wait. */
+/** Guard a history position while content arrives; release it on interaction or after a bounded wait. */
 export function restorePageScroll(
   container: HTMLElement | null | undefined,
   target: number
 ): () => void {
+  // Anchoring late content can move the page again after scrollTo first reaches the target.
+  // Keep the saved position authoritative only within the existing restore window.
+  const root = document.documentElement;
+  const previousAnchor = root.style.getPropertyValue("overflow-anchor");
+  const previousAnchorPriority =
+    root.style.getPropertyPriority("overflow-anchor");
+  if (target !== 0)
+    root.style.setProperty("overflow-anchor", "none", previousAnchorPriority);
   let stopped = false;
   let frame = 0;
   let observer: ResizeObserver | undefined;
   let poll: ReturnType<typeof setInterval> | undefined;
   // Where the last restore left the page; a scroll that lands elsewhere was not ours.
   let left = window.scrollY;
+  let attempted = false;
+  // Geometry may grow again before a queued scroll event or retry sees the clamp.
+  const observedEnds = new Set<number>();
+  function observeEnd() {
+    const end = Math.max(0, root.scrollHeight - root.clientHeight);
+    if (end < target) observedEnds.add(end);
+  }
   const stop = () => {
+    if (stopped) return;
     stopped = true;
+    root.style.setProperty(
+      "overflow-anchor",
+      previousAnchor,
+      previousAnchorPriority
+    );
     observer?.disconnect();
     cancelAnimationFrame(frame);
     clearInterval(poll);
@@ -29,14 +50,14 @@ export function restorePageScroll(
   // scroll anchoring carrying the view from where we left it up to the saved position. A scroll past the saved
   // position, or any other move, releases the restoration.
   function foreign() {
+    observeEnd();
     const at = window.scrollY;
     if (at === left) return;
-    const end = Math.max(
-      0,
-      document.documentElement.scrollHeight -
-        document.documentElement.clientHeight
-    );
-    const clamped = at >= end - 1 && at < target;
+    // A shrink and growth with no rendering/observer delivery or other sample in between
+    // leaves no clamp evidence; release an unexplained move just like an app scroll.
+    const clamped =
+      at < target &&
+      [...observedEnds].some((end) => at >= end - 1 && at <= end);
     const toward =
       Math.sign(at - left) === Math.sign(target - left) &&
       Math.abs(at - left) <= Math.abs(target - left);
@@ -46,14 +67,25 @@ export function restorePageScroll(
   const restore = () => {
     frame = 0;
     if (stopped) return;
-    if (window.scrollY !== target) window.scrollTo(0, target);
+    observeEnd();
+    // Scroll events are queued: a poll or resize callback may see a newer position first.
+    if (attempted) foreign();
+    if (stopped) return;
+    attempted = true;
+    if (window.scrollY !== target) {
+      window.scrollTo(0, target);
+      observedEnds.clear();
+      observeEnd();
+    }
     left = window.scrollY;
-    if (left === target) stop();
+    if (target === 0 && left === target) stop();
   };
   restore();
-  // First loads and already laid-out pages need no observer or input listeners.
+  // Fresh top-of-page visits need no guard; nonzero history positions can still shift as content arrives.
   if (stopped) return stop;
   observer = new ResizeObserver(() => {
+    if (stopped) return;
+    observeEnd();
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(restore);
   });

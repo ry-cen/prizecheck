@@ -91,6 +91,7 @@ function PanelBody({ deckId, pins }: { deckId: string; pins: string }) {
     load.kind === "ready" && load.list.deck_id === deckId ? load.list : null;
   const cost = useWantListCost(list, reload);
   const swap = useWantListSwap({
+    scope: deckId,
     list,
     failed: load.kind === "failed",
     // A Swap or its Undo changed the Deck List: read again, and the builder reads the Deck again.

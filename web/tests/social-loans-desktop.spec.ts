@@ -185,6 +185,10 @@ test("Loans keep a stable queue, canonical selection and open forms across width
   const quantity = page.getByRole("group", { name: /^Copies of Iono,/ });
   await quantity.getByRole("button", { name: /^Decrease/ }).click();
   await expect(quantity.locator("output")).toHaveText("2");
+  const queueBeforeWidths = await queueViewport.evaluate(
+    (element) => element.scrollTop
+  );
+  expect(queueBeforeWidths).toBeGreaterThan(0);
   for (const width of [1280, 1440, 1920, 390, 1600]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     await expect(quantity.locator("output")).toHaveText("2");
@@ -196,6 +200,9 @@ test("Loans keep a stable queue, canonical selection and open forms across width
       fullPage: true,
     });
   }
+  await expect
+    .poll(() => queueViewport.evaluate((element) => element.scrollTop))
+    .toBe(queueBeforeWidths);
   await queueViewport.evaluate((element) => element.scrollTo(0, 120));
   await page.goBack();
   await expect(row).toBeFocused();
