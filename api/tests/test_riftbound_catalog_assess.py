@@ -119,11 +119,65 @@ def test_normalisation_shape_errors_are_held(monkeypatch, error_type):
     assert result.quality == 'suspicious' and result.reasons == ('malformed_response',)
 
 
-def test_unexpected_normalisation_error_propagates(monkeypatch):
-    error = RuntimeError('Synthetic programming error')
+def test_normalisation_error_outside_caught_tuple_propagates(monkeypatch):
+    error = RuntimeError('Synthetic error outside the caught tuple')
     def unexpected(*args):
         raise error
     monkeypatch.setattr(assess, 'normalise_group', unexpected)
     with pytest.raises(RuntimeError) as caught:
         assess.assess_pull(INFO, envelope([product()]), envelope([price()]))
     assert caught.value is error
+
+
+@pytest.mark.parametrize('which', ['products', 'prices'])
+@pytest.mark.parametrize('identifier', [-1, 0, 10**19, True, '5'])
+def test_invalid_product_id_is_held_while_sibling_is_compared(which, identifier):
+    payloads = {'products': envelope([product()]), 'prices': envelope([price()])}
+    payloads[which]['results'][0]['productId'] = identifier
+    held = assess.assess_pull(INFO, **payloads)
+    sibling = assess.assess_pull(plan.GroupInfo(901, 'Synthetic Set 901'),
+                                 envelope([product(9000002, '002', gid=901)]), envelope([]))
+    assert held.quality == 'suspicious' and 'invalid_id' in held.reasons
+    result = plan.plan_run(plan.PreviousState({}, {}, {}), [held, sibling])
+    assert [(o.group_id, o.status) for o in result.outcomes] == [(900, 'pull_failed'), (901, 'compared')]
+    assert result.compared == 1 and [p.source_id for p in result.printings] == ['9000002']
+    assert len(result.reviews) == 1
+    assert result.reviews[0].kind == 'group_pull_held'
+    assert result.reviews[0].source_id == 'group:900'
+    assert 'invalid_id' in result.reviews[0].candidate['reasons']
+
+
+@pytest.mark.parametrize('identifier', [-1, 0, 2147483648, True])
+def test_listed_groups_rejects_out_of_domain_id(identifier):
+    with pytest.raises(ValueError):
+        assess.listed_groups(envelope([{'groupId': identifier, 'name': 'Synthetic', 'categoryId': 89}]))
+
+
+@pytest.mark.parametrize('which', ['products', 'prices'])
+@pytest.mark.parametrize('identifier', [-1, 0, 2147483648, True, '5'])
+def test_raw_group_ids_must_fit_storage_domain(which, identifier):
+    payloads = {'products': envelope([product()]), 'prices': envelope([price()])}
+    payloads[which]['results'][0]['groupId'] = identifier
+    held = assess.assess_pull(INFO, **payloads)
+    assert held.quality == 'suspicious' and 'invalid_id' in held.reasons
+
+
+@pytest.mark.parametrize('field,identifier', [('product_id', -1), ('product_id', 10**19), ('group_id', 2147483648)])
+def test_normalised_printing_keys_are_rechecked(monkeypatch, field, identifier):
+    from dataclasses import replace
+    result = assess.normalise_group(envelope([product()]), envelope([]))
+    printing = result.printings[0]
+    result = replace(result, printings=(replace(printing, key=replace(printing.key, **{field: identifier})),))
+    monkeypatch.setattr(assess, 'normalise_group', lambda *args: result)
+    held = assess.assess_pull(INFO, envelope([product()]), envelope([]))
+    assert held.quality == 'suspicious' and held.reasons == ('invalid_id',)
+    assert held.result is None
+
+
+def test_id_domain_upper_and_lower_bounds_are_accepted():
+    for gid in (1, 2_147_483_647):
+        assert assess.listed_groups(envelope([{'groupId': gid, 'name': 'Synthetic', 'categoryId': 89}]))[0].group_id == gid
+        for pid in (1, 9_999_999_999_999_999_999):
+            result = assess.assess_pull(plan.GroupInfo(gid, 'Synthetic'),
+                envelope([product(pid=pid, gid=gid)]), envelope([price(pid=pid)]))
+            assert result.quality == 'acceptable'
