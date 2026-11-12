@@ -656,3 +656,149 @@ test("Collection returns the popup's Undo from its add notification owner", asyn
   expect(opts.reloadGallery).toHaveBeenCalled();
   expect(opts.reloadTree).toHaveBeenCalled();
 });
+
+test.each(["remove", "move", "add"] as const)(
+  "restores newest %s Undo on mount without taking focus",
+  async (action) => {
+    const entry = {
+      ...older,
+      action,
+      expires_at: new Date(Date.now() + 600000).toISOString(),
+    };
+    vi.mocked(listUndo).mockResolvedValue([entry, older]);
+    const opts = options();
+    render(opts);
+    await Promise.resolve();
+    await Promise.resolve();
+    const toast = render(opts).toast;
+    expect(toast?.entry).toEqual(entry);
+    expect(toast?.focus).toBeFalsy();
+  }
+);
+
+test.each([
+  { entries: [] },
+  { entries: [{ ...older, expires_at: new Date(0).toISOString() }] },
+])("does not restore empty or expired lists", async ({ entries }) => {
+  vi.mocked(listUndo).mockResolvedValue(entries);
+  const opts = options();
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(render(opts).toast).toBeNull();
+});
+
+test("a late mount response cannot replace a newer action", async () => {
+  let resolve!: (entries: (typeof older)[]) => void;
+  vi.mocked(listUndo).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  const opts = options();
+  const actions = render(opts);
+  const added = actions.added({
+    copies: 1,
+    locationId: "source",
+    items: [],
+    ownerRevision: 2,
+    from: "bar",
+    path: "Binder",
+    undoId: "new",
+  });
+  await added;
+  const newer = render(opts).toast;
+  resolve([
+    { ...older, expires_at: new Date(Date.now() + 600000).toISOString() },
+  ]);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(render(opts).toast).toEqual(newer);
+});
+
+test.each(["unmount", "account"])(
+  "cancels restoration on %s",
+  async (change) => {
+    let resolve!: (entries: (typeof older)[]) => void;
+    vi.mocked(listUndo).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    const opts = options();
+    render(opts);
+    if (change === "unmount") host.unmount();
+    else {
+      vi.mocked(listUndo).mockResolvedValue([]);
+      render(options("B"));
+    }
+    resolve([
+      { ...older, expires_at: new Date(Date.now() + 600000).toISOString() },
+    ]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(render(change === "account" ? options("B") : opts).toast).toBeNull();
+  }
+);
+
+test("restores on return to Collection and expires through the existing timer", async () => {
+  const entry = {
+    ...older,
+    expires_at: new Date(Date.now() + 600000).toISOString(),
+  };
+  vi.mocked(listUndo).mockResolvedValue([entry]);
+  const opts = { ...options(), active: false };
+  render(opts);
+  expect(listUndo).not.toHaveBeenCalled();
+  opts.active = true;
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(render(opts).toast?.entry).toEqual(entry);
+  const calls = vi.mocked(window.setTimeout).mock.calls;
+  const expire = calls[calls.length - 1][0] as () => void;
+  expire();
+  expect(render(opts).toast?.message).toBe("Undo expired.");
+  expect(render(opts).toast?.entry).toBeNull();
+});
+
+test("Dismiss deletes a restored record and an empty list never offers it again", async () => {
+  const { dismissUndo } = await import("../inventoryUndo");
+  vi.mocked(listUndo).mockResolvedValue([
+    { ...older, expires_at: new Date(Date.now() + 600000).toISOString() },
+  ]);
+  const opts = options();
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  await render(opts).closeToast();
+  expect(dismissUndo).toHaveBeenCalledWith(older.id);
+  expect(render(opts).toast).toBeNull();
+  host.unmount();
+  host.reset();
+  vi.mocked(listUndo).mockResolvedValue([]);
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(render(opts).toast).toBeNull();
+});
+
+test("a persisted mixed Move never restores an Undo offer", async () => {
+  const { createOperation } = await import("./moveOperation");
+  const held = createOperation("dest", owned, borrowed, serverNow);
+  held.state.ownedResult = {
+    copy_count: "2",
+    edition_count: 1,
+    source_count: 1,
+    already_at_destination_count: "0",
+    owner_revision: 2,
+    undo_id: "forbidden",
+  };
+  pendingMoves("A").save(held);
+  const opts = options();
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(render(opts).toast).toBeNull();
+  expect(listUndo).not.toHaveBeenCalled();
+});

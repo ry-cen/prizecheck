@@ -82,6 +82,7 @@ export type ToastState = {
 };
 
 type Options = {
+  active?: boolean;
   userId: string;
   selection: SelectionState;
   holdings: GalleryHolding[];
@@ -101,6 +102,7 @@ type Carried = { toastText: string; selection: Selection; mixed: boolean };
 /** Move, Inventory Removal and Undo for the workspace (ticket 107), on the multi-source manifest API, and the toast
  * for Add cards' batch adds (#175). */
 export function useInventoryActions({
+  active = true,
   userId,
   selection,
   holdings,
@@ -160,6 +162,7 @@ export function useInventoryActions({
         operation.current = null;
         setRecovery({ held: null, blocked: true });
       }
+      toastLive.current = null;
       setToast(null);
       setBarError("");
       setDialogError("");
@@ -320,6 +323,47 @@ export function useInventoryActions({
     const entries = await listUndo();
     return undoProtectionUnconfirmed(operation.current) ? [] : entries;
   }, []);
+
+  // Only the newest record is actionable. Reuse the toast's expiry effect below.
+  useEffect(() => {
+    if (
+      !active ||
+      toastLive.current ||
+      busyRef.current ||
+      operation.current?.op.noUndo
+    )
+      return;
+    let cancelled = false;
+    const version = toastId.current;
+    void readUndo()
+      .then((entries) => {
+        const entry = entries[0];
+        if (
+          cancelled ||
+          !account.current.active ||
+          account.current.userId !== userId ||
+          toastId.current !== version ||
+          toastLive.current ||
+          busyRef.current ||
+          operation.current?.op.noUndo ||
+          !entry ||
+          Date.parse(entry.expires_at) <= Date.now() ||
+          !Number.isFinite(Date.parse(entry.expires_at))
+        )
+          return;
+        showToast({
+          message: `The earlier ${ACTION_NAMES[entry.action]} can be undone.`,
+          entry,
+          unavailable: false,
+        });
+      })
+      .catch(() => {
+        /* A failed list read must not interrupt Collection. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, userId, readUndo, showToast]);
 
   const runLocked = useCallback(
     async (
@@ -720,6 +764,7 @@ export function useInventoryActions({
       notify?: (added: AddedCards) => Promise<InlineUndo | null>
     ) => {
       if (notify) {
+        toastId.current += 1;
         setToast(null);
         live.current.reloadGallery();
         void live.current.reloadTree();
@@ -913,12 +958,40 @@ export function useInventoryActions({
     }
   }, [showToast, readUndo]);
 
-  // Dismiss is pressed inside the toast, which goes away with this. The heading takes focus now, while
-  // the toast is still there, rather than in an effect that can run before the toast is removed.
-  const closeToast = useCallback(() => {
+  // Persist Dismiss so a reload cannot offer the same record again.
+  const closeToast = useCallback(async () => {
+    const current = toastLive.current;
+    const entry = current?.entry;
+    if (busyRef.current) return;
     focusWorkspaceHeading();
+    if (entry) {
+      busyRef.current = true;
+      setBusy(true);
+      try {
+        await dismissUndo(entry.id);
+      } catch (cause) {
+        if (!(cause instanceof MoveError && cause.status === 404)) {
+          if (current)
+            showToast({
+              ...current,
+              message: "Couldn't dismiss this Undo. Try again.",
+            });
+          return;
+        }
+      } finally {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    }
+    if (
+      !account.current.active ||
+      account.current.userId !== userId ||
+      toastLive.current?.id !== current?.id
+    )
+      return;
+    toastId.current += 1;
     setToast(null);
-  }, []);
+  }, [showToast, userId]);
 
   // An Undo record expires after ten minutes; its button goes with it.
   const entryId = toast?.entry?.id;

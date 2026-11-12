@@ -355,6 +355,7 @@ export function Workspace({
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
+    active,
     userId,
     selection,
     holdings: gallery.holdings,

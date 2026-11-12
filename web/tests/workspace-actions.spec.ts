@@ -188,6 +188,65 @@ async function expectActionsOverToast(page: Page) {
   await expect(actions).toHaveAttribute("aria-expanded", "false");
 }
 
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test(`Inventory Removal Undo survives reload and Dismiss at ${viewport.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    promoteCatalog({ "card-1": "Reload Abra" });
+    await signIn(page);
+    const location = await createLocation(page, "Reload binder", null);
+    await addCopies(page, location, await editionOf("card-1"), 1);
+    await page.reload();
+    const remove = async () => {
+      await expect(tiles(page)).toHaveCount(1);
+      const select = page.getByRole("button", { name: "Select", exact: true });
+      if (viewport.width === 375 && (await select.isVisible()))
+        await select.click();
+      await tiles(page).first().click();
+      await page.getByRole("button", { name: "Actions", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Inventory Removal…", exact: true })
+        .click();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Remove 1 copy", exact: true })
+        .click();
+      await expect(
+        page.getByRole("button", { name: "Undo", exact: true })
+      ).toBeVisible();
+    };
+    await remove();
+    await page.reload();
+    const undo = page.getByRole("button", { name: "Undo", exact: true });
+    await expect(undo).toBeVisible();
+    await expectPageChecks(page, "restored Undo");
+    await page
+      .getByRole("link", { name: "Skip to selection actions and Undo" })
+      .focus();
+    await page.keyboard.press("Enter");
+    await expect(undo).toBeFocused();
+    await undo.click();
+    await expect(tiles(page)).toHaveCount(1);
+    await remove();
+    const dismissed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().includes("/api/moves/undo/")
+    );
+    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    expect((await dismissed).ok()).toBeTruthy();
+    await page.reload();
+    await expect(
+      page.getByText("Your Collection has no cards yet.")
+    ).toBeVisible();
+    await expect(undo).toHaveCount(0);
+  });
+}
+
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 860 } });
 
