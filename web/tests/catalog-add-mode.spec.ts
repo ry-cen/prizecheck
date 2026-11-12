@@ -918,6 +918,87 @@ for (const viewport of [
 ]) {
   test.describe(`queue reload at ${viewport.width}`, () => {
     test.use({ viewport });
+    for (const hidden of [false, true]) {
+      test(`resolves an unknown set before browsing (hidden=${hidden})`, async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        let release!: () => void;
+        const held = new Promise<void>((done) => {
+          release = done;
+        });
+        let sawLookup!: () => void;
+        const lookup = new Promise<void>((done) => {
+          sawLookup = done;
+        });
+        await page.route("**/api/catalog/sets", async (route) => {
+          sawLookup();
+          await held;
+          await route.continue();
+        });
+        const requestedSets: string[] = [];
+        page.on("request", (request) => {
+          const url = new URL(request.url());
+          if (url.pathname === "/api/catalog/editions")
+            requestedSets.push(url.searchParams.get("set_id") ?? "");
+        });
+        try {
+          await page.goto(`${ORIGIN}/catalog?set=unknown`);
+          await lookup;
+          const tabs = page
+            .getByRole("navigation", { name: "Main views" })
+            .filter({ visible: true });
+          if (hidden)
+            await tabs
+              .getByRole("button", { name: "Collection", exact: true })
+              .click();
+          const validated = page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === "/api/catalog/sets"
+          );
+          const resolvedBrowse = page.waitForResponse((response) => {
+            const url = new URL(response.url());
+            return (
+              url.pathname === "/api/catalog/editions" &&
+              !url.searchParams.get("set_id")
+            );
+          });
+          release();
+          await validated;
+          await resolvedBrowse;
+          if (hidden)
+            await tabs
+              .getByRole("button", { name: "Catalog", exact: true })
+              .click();
+          await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+          await expect(
+            page.getByRole("region", { name: "Catalog results" })
+          ).toBeVisible();
+          expect(requestedSets).not.toContain("unknown");
+        } finally {
+          release();
+        }
+      });
+    }
+    test("opens a metadata report link with a kept Add queue", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      page.on("dialog", (dialog) => void dialog.accept());
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      const response = await page.request.get(`${ORIGIN}/api/catalog/editions`);
+      const edition = (await response.json()).editions[0];
+      await page.goto(
+        `${ORIGIN}/catalog?${new URLSearchParams({ printing: edition.printing_id, edition: edition.edition_id })}`
+      );
+      await expect(
+        page.getByRole("region", { name: "Report card metadata" })
+      ).toBeVisible();
+      await expect(page).toHaveURL(`${ORIGIN}/catalog?mode=add`);
+    });
     test("keeps search and filters in reloadable shared URLs", async ({
       page,
       context,

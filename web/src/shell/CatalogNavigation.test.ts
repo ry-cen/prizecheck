@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import React, { act, createElement as h, type ReactNode } from "react";
+import React, {
+  act,
+  createElement as h,
+  type ReactNode,
+  type FormEvent,
+} from "react";
 import { expect, it, vi } from "vitest";
 
 const bootstrap = vi.hoisted(() => ({
@@ -20,11 +25,13 @@ vi.mock("./Shell", () => ({
   Shell: ({
     renderPage,
     onNavigate,
+    onSignOut,
     page,
   }: {
     renderPage: (page: string, active: boolean) => ReactNode;
     onNavigate: (page: string) => void;
     page: string;
+    onSignOut: () => Promise<boolean>;
   }) =>
     h(
       React.Fragment,
@@ -35,7 +42,24 @@ vi.mock("./Shell", () => ({
         { onClick: () => onNavigate("collection") },
         "Collection tab"
       ),
+      h("button", { onClick: () => void onSignOut() }, "Sign out"),
       renderPage(page, true)
+    ),
+}));
+vi.mock("../public/PublicLayout", () => ({
+  PublicLayout: ({ children }: { children: ReactNode }) => children,
+}));
+vi.mock("../public/SignIn", () => ({
+  SignInScreen: ({ emailForms }: { emailForms: ReactNode }) => emailForms,
+  EmailCodeForms: ({
+    onVerifyCode,
+  }: {
+    onVerifyCode: (event: FormEvent) => void;
+  }) =>
+    h(
+      "form",
+      { onSubmit: onVerifyCode },
+      h("button", { type: "submit" }, "Sign in B")
     ),
 }));
 vi.mock("./lazyPages", () => {
@@ -100,59 +124,71 @@ vi.mock("./lazyPages", () => {
 
 import "../main";
 
-it("Catalog tab returns to its last address, including empty-queue Add mode", async () => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({
-      json: async () => ({ signedIn: true, userId: "collector" }),
-    }))
-  );
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-  );
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn(() => ({
-      matches: false,
-      addEventListener() {},
-      removeEventListener() {},
-    }))
-  );
-  window.history.replaceState(null, "", "/collection");
-  const host = document.createElement("div");
-  host.id = "root";
-  document.body.append(host);
-  const { createRoot } =
-    await vi.importActual<typeof import("react-dom/client")>(
-      "react-dom/client"
+it.each([false, true])(
+  "Catalog tab isolates a signed-out account (signOut=%s)",
+  async (signOut) => {
+    let userId = "A";
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ signedIn: true, userId }),
+      }))
     );
-  let root = createRoot(host);
-  try {
-    const app = bootstrap.render.mock.calls[0][0];
-    await act(async () => root.render(app));
-    const click = async (name: string) => {
-      await act(async () =>
-        [...host.querySelectorAll("button")]
-          .find((button) => button.textContent === name)!
-          .click()
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        addEventListener() {},
+        removeEventListener() {},
+      }))
+    );
+    window.history.replaceState(null, "", "/collection");
+    const host = document.createElement("div");
+    host.id = "root";
+    document.body.append(host);
+    const { createRoot } =
+      await vi.importActual<typeof import("react-dom/client")>(
+        "react-dom/client"
       );
-    };
-    await click("Catalog tab");
-    await click("Set catalog view");
-    await click("Collection tab");
-    await click("Catalog tab");
-    expect(host.querySelector("output")?.textContent).toBe(
-      "/catalog?q=Ivysaur&format=standard&mode=add"
-    );
-  } finally {
-    await act(async () => root.unmount());
-    host.remove();
-    vi.unstubAllGlobals();
+    let root = createRoot(host);
+    try {
+      const app = bootstrap.render.mock.calls[0][0];
+      await act(async () => root.render(app));
+      const click = async (name: string) => {
+        await act(async () =>
+          [...host.querySelectorAll("button")]
+            .find((button) => button.textContent === name)!
+            .click()
+        );
+      };
+      await click("Catalog tab");
+      await click("Set catalog view");
+      await click("Collection tab");
+      await click("Catalog tab");
+      expect(host.querySelector("output")?.textContent).toBe(
+        "/catalog?q=Ivysaur&format=standard&mode=add"
+      );
+      if (signOut) {
+        await click("Sign out");
+        userId = "B";
+        await click("Sign in B");
+        await click("Catalog tab");
+        expect(host.querySelector("output")?.textContent).toBe("/catalog");
+      }
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
   }
-});
+);

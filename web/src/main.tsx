@@ -118,6 +118,21 @@ function App() {
   const [sent, setSent] = useState(false);
   const [message, setMessage] = useState("");
 
+  // Every account exit shares this cleanup, including an ordinary sign-out.
+  function transitionAccount(next: string | null) {
+    const gone = accountToScrub(lastUserId.current, next);
+    if (gone) {
+      scrubLoanBodies(gone);
+      forgetBorrowDrafts();
+      forgetAddQueues();
+      catalogAddress.current = "/catalog";
+      // A live account switch must also discard the address currently on screen.
+      if (window.location.pathname === "/catalog")
+        navigate("/catalog", { replace: true, force: true });
+    }
+    lastUserId.current = next;
+  }
+
   // The session and whether this user is the owner arrive together, so the shell never shows an owner-only
   // page or menu item before it knows.
   async function refresh() {
@@ -135,19 +150,7 @@ function App() {
         }
       }
       setOwnerCatalog(owner);
-      const gone = accountToScrub(
-        lastUserId.current,
-        result.signedIn ? result.userId : null
-      );
-      if (gone) {
-        scrubLoanBodies(gone);
-        forgetAddQueues();
-        // The remembered mode is account-local; a later explicit link is read normally.
-        const keptCatalog = new URL(catalogAddress.current, location.origin);
-        keptCatalog.searchParams.delete("mode");
-        catalogAddress.current = keptCatalog.pathname + keptCatalog.search;
-      }
-      lastUserId.current = result.signedIn ? result.userId : null;
+      transitionAccount(result.signedIn ? result.userId : null);
       setSession(result);
     } catch {
       setMessage("Service temporarily unavailable. Please retry.");
@@ -257,10 +260,7 @@ function App() {
       return false;
     }
     // Borrow Request drafts (#252) are the account's: none stay in this tab for whoever signs in next.
-    forgetBorrowDrafts();
-    scrubLoanBodies(lastUserId.current);
-    lastUserId.current = null;
-    forgetAddQueues();
+    transitionAccount(null);
     setSession({ signedIn: false, userId: null });
     setOwnerCatalog(null);
     // An unsent proposal is lost with the session: sign-out never asks.
@@ -416,6 +416,7 @@ function App() {
       case "catalog":
         return (
           <CatalogPage
+            key={userId}
             active={active}
             message={message}
             address={address}

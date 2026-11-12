@@ -3,10 +3,7 @@ import { AddQueueAccount, hasStoredAddQueue } from "./useStoredAddQueue";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import { MyMetadataReports } from "../MetadataReport";
-import {
-  clearMetadataReportLink,
-  readMetadataReportLink,
-} from "../metadataReportLink";
+import { readMetadataReportLink } from "../metadataReportLink";
 import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -47,10 +44,7 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
     owner.current !== account && active && lastAddress.current === address;
   if (owner.current !== account) {
     owner.current = account;
-    lastAddress.current = catalogHref({
-      ...parseCatalogView(lastAddress.current),
-      mode: null,
-    });
+    lastAddress.current = "/catalog";
   }
   if (active && !staleActiveMode) lastAddress.current = address;
   const view = parseCatalogView(lastAddress.current);
@@ -61,11 +55,6 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
       onNavigate(catalogHref(next), { replace: true, preserveScroll: true });
   };
   const setMode = (mode: CatalogMode) => changeView({ ...view, mode });
-  useEffect(() => {
-    if (!active) return;
-    if (staleActiveMode || (view.mode === null && mode === "add"))
-      setMode(mode);
-  }, [active, account, address]);
   const [link, setLink] = useState<CardRequest | null>(null);
   const [reportsKey, setReportsKey] = useState(0);
   const [reportsOpen, setReportsOpen] = useState(false);
@@ -73,12 +62,13 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
   const linkOpened = useCallback(() => setLink(null), []);
   const reported = useCallback(() => setReportsKey((value) => value + 1), []);
 
-  // The inspector's metadata report link (/catalog?printing=…&edition=…) opens the Printing's details with the
-  // report form preset, whenever the page is shown with it; the link then leaves the address.
+  // Consume one-use report parameters from the supplied address before making
+  // any URL replacement. The shell must see the consumed address too, otherwise
+  // its remembered Catalog tab would reopen the report on the next visit.
   useEffect(() => {
     if (!active) return;
-    const report = readMetadataReportLink();
-    clearMetadataReportLink();
+    const next = new URL(lastAddress.current, window.location.origin);
+    const report = readMetadataReportLink(next.href);
     if (report)
       setLink({
         printingId: report.printingId,
@@ -86,7 +76,19 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
         row: null,
         report: { kind: "metadata", editionId: report.editionId },
       });
-  }, [active]);
+    const hasReportParams =
+      next.searchParams.has("printing") || next.searchParams.has("edition");
+    next.searchParams.delete("printing");
+    next.searchParams.delete("edition");
+    const normaliseMode =
+      staleActiveMode || (view.mode === null && mode === "add");
+    if (normaliseMode) next.searchParams.set("mode", mode);
+    if (hasReportParams || normaliseMode)
+      onNavigate(next.pathname + next.search + next.hash, {
+        replace: true,
+        preserveScroll: true,
+      });
+  }, [active, account, address]);
 
   return (
     <main className="mx-auto box-border flex w-full max-w-7xl min-w-0 flex-col gap-4 px-7 py-7 phone:px-4 phone:py-5">
