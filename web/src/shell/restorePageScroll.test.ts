@@ -441,3 +441,54 @@ it("S5-R3 does not treat every position above a historical end as a clamp", () =
     stop();
   }
 });
+
+it.each(["scroll", "resize", "poll"])(
+  "keeps restoring when growth carries a clamped page end past the saved position (%s first)",
+  (ordering) => {
+    vi.useFakeTimers();
+    const view = layout(0, 1468);
+    const stop = restorePageScroll(document.createElement("main"), 1498);
+    try {
+      view.setHeight(1917);
+      vi.stubGlobal("scrollY", 1917);
+      if (ordering === "resize") view.grow(1917);
+      else if (ordering === "poll") vi.advanceTimersByTime(RESTORE_POLL_MS);
+      window.dispatchEvent(new Event("scroll"));
+      vi.advanceTimersByTime(RESTORE_POLL_MS);
+      expect(window.scrollY).toBe(1498);
+    } finally {
+      stop();
+    }
+  }
+);
+
+it("keeps restoring when late content carries the viewport by the exact document growth after reaching the target", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1520);
+  const stop = restorePageScroll(document.createElement("main"), 1498);
+  try {
+    view.setHeight(1917);
+    vi.stubGlobal("scrollY", 1895);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(1498);
+  } finally {
+    stop();
+  }
+});
+
+it("does not reuse reconciled growth to claim a later unrelated scroll", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1520);
+  const stop = restorePageScroll(document.createElement("main"), 1498);
+  try {
+    view.grow(1917);
+    vi.stubGlobal("scrollY", 1895);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(1895);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});

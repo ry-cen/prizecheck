@@ -67,13 +67,21 @@ export function Segmented<T extends string>(
   // On a phone the row scrolls, so a deep link to a late tab (/owner/rules) shows the selected tab.
   useEffect(() => {
     if (!window.matchMedia("(max-width: 760px)").matches) return;
-    list.current
-      ?.querySelector(
-        choice
-          ? '[role="radio"][aria-checked="true"]'
-          : '[role="tab"][aria-selected="true"]'
-      )
-      ?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    const row = list.current;
+    const selected = row?.querySelector<HTMLElement>(
+      choice
+        ? '[role="radio"][aria-checked="true"]'
+        : '[role="tab"][aria-selected="true"]'
+    );
+    if (!row || !selected) return;
+    // scrollIntoView also moves the document when this row mounts below a restored history position.
+    // Reveal the selection on this row's horizontal axis only.
+    const viewport = row.getBoundingClientRect();
+    const option = selected.getBoundingClientRect();
+    if (option.left < viewport.left)
+      row.scrollLeft += option.left - viewport.left;
+    else if (option.right > viewport.right)
+      row.scrollLeft += option.right - viewport.right;
   }, []);
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {

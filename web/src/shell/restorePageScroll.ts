@@ -24,8 +24,12 @@ export function restorePageScroll(
   let attempted = false;
   // Geometry may grow again before a queued scroll event or retry sees the clamp.
   const observedEnds = new Set<number>();
+  let lastEnd = Math.max(0, root.scrollHeight - root.clientHeight);
+  const observedGrowth = new Set<number>();
   function observeEnd() {
     const end = Math.max(0, root.scrollHeight - root.clientHeight);
+    if (end > lastEnd) observedGrowth.add(end - lastEnd);
+    lastEnd = end;
     if (end < target) observedEnds.add(end);
   }
   const stop = () => {
@@ -48,7 +52,7 @@ export function restorePageScroll(
   // Scrollbar drags, find-in-page and assistive scrolling fire no input event, so a scroll we did not cause counts
   // as the collector's unless it is the browser clamping to the page's end while content is still arriving, or
   // scroll anchoring carrying the view from where we left it up to the saved position. A scroll past the saved
-  // position, or any other move, releases the restoration.
+  // position without evidence of being carried along the page end, or any other move, releases the restoration.
   function foreign() {
     observeEnd();
     const at = window.scrollY;
@@ -58,10 +62,13 @@ export function restorePageScroll(
     const clamped =
       at < target &&
       [...observedEnds].some((end) => at >= end - 1 && at <= end);
+    // Native layout movement can carry even a reached target by exactly the content's growth.
+    // Geometry is required: an unrelated scroll past the target still releases ownership.
+    const carried = at > left && observedGrowth.has(at - left);
     const toward =
       Math.sign(at - left) === Math.sign(target - left) &&
       Math.abs(at - left) <= Math.abs(target - left);
-    if (clamped || toward) left = at;
+    if (clamped || carried || toward) left = at;
     else stop();
   }
   const restore = () => {
@@ -75,9 +82,11 @@ export function restorePageScroll(
     if (window.scrollY !== target) {
       window.scrollTo(0, target);
       observedEnds.clear();
+      observedGrowth.clear();
       observeEnd();
     }
     left = window.scrollY;
+    observedGrowth.clear();
     if (target === 0 && left === target) stop();
   };
   restore();
