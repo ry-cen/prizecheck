@@ -2,7 +2,12 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { browseEditions } from "../catalog_browse_generated";
 import { getLocationTree } from "../location_generated";
 import { EMPTY_QUEUE, minus, without, type AddQueue } from "./addQueue";
-import { outcomeKind, type AddItem, type AddOutcome } from "./cardActions";
+import {
+  outcomeKind,
+  type AddItem,
+  type AddOutcome,
+  type AddCommand,
+} from "./cardActions";
 import { MAX_ADD, MAX_BATCH_EDITIONS } from "./catalogText";
 
 export const AddQueueAccount = createContext<string | null>(null);
@@ -11,6 +16,7 @@ type Draft = {
   items: { editionId: string; printingId: string; quantity: number }[];
   target: string | null;
   uncertain: boolean;
+  pending?: AddCommand | null;
 };
 const empty = (): Draft => ({ items: [], target: null, uncertain: false });
 export function forgetAddQueues(account: string | null = null) {
@@ -46,6 +52,25 @@ function read(key: string): Draft {
       new Set(d.items.map((i) => i.editionId)).size !== d.items.length
     )
       throw Error();
+    if (
+      d.pending &&
+      (typeof d.pending.key !== "string" ||
+        !d.pending.key ||
+        typeof d.pending.locationId !== "string" ||
+        !d.pending.locationId ||
+        typeof d.pending.path !== "string" ||
+        !Array.isArray(d.pending.items) ||
+        !d.pending.items.length ||
+        d.pending.items.length > MAX_BATCH_EDITIONS ||
+        !d.pending.items.every(
+          (i) =>
+            typeof i.editionId === "string" &&
+            Number.isInteger(i.quantity) &&
+            i.quantity > 0 &&
+            i.quantity <= MAX_ADD
+        ))
+    )
+      throw Error();
     return d;
   } catch {
     try {
@@ -68,6 +93,7 @@ export function hasStoredAddQueue(
 }
 
 type State = {
+  pending: { current: AddCommand | null };
   phase: "restoring" | "failed" | "ready";
   draft: Draft;
   queue: AddQueue;
@@ -81,11 +107,12 @@ type State = {
 };
 function initial(draft = empty()): State {
   return {
+    pending: { current: draft.pending ?? null },
     phase: "restoring",
     draft,
     queue: EMPTY_QUEUE,
     chosen: null,
-    restoredMarker: draft.uncertain,
+    restoredMarker: draft.uncertain && !draft.pending,
     current: [],
     lost: [],
     open: false,
@@ -120,7 +147,10 @@ function record(s: State): Draft | null {
     s.phase !== "ready"
       ? s.draft.items
       : Array.from(
-          minus(s.queue, maxEach(s.current, s.lost)).values(),
+          minus(
+            s.queue,
+            s.pending.current ? s.lost : maxEach(s.current, s.lost)
+          ).values(),
           ({ edition, count }) => ({
             editionId: edition.edition_id,
             printingId: edition.printing_id,
@@ -128,11 +158,13 @@ function record(s: State): Draft | null {
           })
         );
   const target = s.phase !== "ready" ? s.draft.target : s.chosen;
-  return items.length || uncertain ? { items, target, uncertain } : null;
+  return items.length || uncertain || s.pending.current
+    ? { items, target, uncertain, pending: s.pending.current }
+    : null;
 }
 
 /** Held current and lost copies are capped to the visible queue after every queue change (I1).
- * Storage is record(s): draft items before readiness, then visible copies less held copies, plus the uncertainty marker. */
+ * Storage retains the visible queue and immutable replay command; legacy submissions without a command retain only their uncertainty marker. */
 export function useStoredAddQueue(scope: string) {
   const account = useContext(AddQueueAccount);
   const key = account ? PREFIX + account + ":" + scope : null;
@@ -216,7 +248,7 @@ export function useStoredAddQueue(scope: string) {
         );
         if (!live || !liveOwner() || restoration.current !== restoreId) return;
         s.current.queue = queue;
-        s.current.chosen = target;
+        s.current.chosen = target ?? (draft.pending ? draft.target : null);
         s.current.phase = "ready";
         if (queue.size !== draft.items.length || (draft.target && !target))
           s.current.notice =
@@ -236,6 +268,8 @@ export function useStoredAddQueue(scope: string) {
     };
   }, [key, account]);
   return {
+    pending: view.pending,
+    blocked: view.lost.length > 0,
     queue: view.queue,
     chosen: view.chosen,
     uncertain: view.restoredMarker,
@@ -253,8 +287,9 @@ export function useStoredAddQueue(scope: string) {
       s.current.chosen = id;
       publish();
     },
-    submitting(items: readonly AddItem[]) {
+    submitting(items: readonly AddItem[], command?: AddCommand) {
       if (!liveOwner()) return;
+      if (command) s.current.pending.current = structuredClone(command);
       s.current.current = cap(items, s.current.queue);
       s.current.open = true;
       publish();
@@ -262,6 +297,8 @@ export function useStoredAddQueue(scope: string) {
     settle(o: AddOutcome) {
       if (!liveOwner()) return;
       const kind = outcomeKind(o);
+      if (o.ok || kind === "refused" || kind === "lost")
+        s.current.pending.current = null;
       if (o.ok) {
         s.current.queue = minus(s.current.queue, o.items);
         s.current.current = [];

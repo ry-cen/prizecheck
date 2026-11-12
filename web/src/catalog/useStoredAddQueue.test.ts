@@ -9,6 +9,10 @@ import { browseEditions } from "../catalog_browse_generated";
 import { outcomeKind, type AddOutcome, type AddItem } from "./cardActions";
 import { getLocationTree } from "../location_generated";
 vi.mock("../catalog_browse_generated", () => ({ browseEditions: vi.fn() }));
+vi.mock("../holdings_generated", async (original) => ({
+  ...(await original<typeof import("../holdings_generated")>()),
+  batchAddHoldings: vi.fn(),
+}));
 vi.mock("../location_generated", () => ({ getLocationTree: vi.fn() }));
 const edition = {
   edition_id: "one",
@@ -752,3 +756,134 @@ test.each([34, 35])(
     await close();
   }
 );
+
+test("pending immutable command and visible copies survive reload", async () => {
+  const command = {
+    locationId: "box",
+    path: "Box",
+    key: "original-key",
+    items: A2,
+  };
+  let close = await mount();
+  await edit();
+  await edit();
+  await act(async () => queue.submitting(A2, command));
+  await settle(no(""));
+  expect(rec().pending).toEqual(command);
+  expect(storedCounts()).toEqual(a(2));
+  await close();
+  close = await mount();
+  expect(counts()).toEqual(a(2));
+  expect(queue.pending.current).toEqual(command);
+  expect(queue.uncertain).toBe(false);
+  await edit(second);
+  await settle(ok(A2, true));
+  expect(counts()).toEqual([["two", 1]]);
+  await close();
+});
+
+test.each([false, true])(
+  "reload replays original key exactly once (committed=%s)",
+  async (committed) => {
+    const { addCards } = await import("./cardActions");
+    const { batchAddHoldings } = await import("../holdings_generated");
+    const send = vi.mocked(batchAddHoldings);
+    const keys = new Set<string>();
+    let copies = 0;
+    let loseResponse = true;
+    send.mockImplementation(async (request) => {
+      if (!loseResponse || committed) {
+        if (!keys.has(request.idempotency_key)) {
+          keys.add(request.idempotency_key);
+          copies += Number(request.items[0].quantity);
+        }
+      }
+      if (loseResponse) throw Error("response lost");
+      return {
+        copy_count: "2",
+        edition_count: 1,
+        owner_revision: 2,
+        undo_id: "undo",
+        location_id: "box",
+      };
+    });
+    let close = await mount();
+    await edit();
+    await edit();
+    await act(async () =>
+      queue.settle(
+        await addCards(
+          "box",
+          "Original Box",
+          A2,
+          queue.pending,
+          queue.submitting
+        )
+      )
+    );
+    const key = rec().pending.key;
+    await close();
+    close = await mount();
+    await edit(second);
+    loseResponse = false;
+    await act(async () =>
+      queue.settle(
+        await addCards(
+          "different-box",
+          "Different Box",
+          AB,
+          queue.pending,
+          queue.submitting
+        )
+      )
+    );
+    expect(copies).toBe(2);
+    expect(send.mock.lastCall?.[0]).toMatchObject({
+      location_id: "box",
+      idempotency_key: key,
+    });
+    expect(counts()).toEqual([["two", 1]]);
+    expect(queue.pending.current).toBe(null);
+    await close();
+  }
+);
+
+test("a missing original Location never changes the replay command", async () => {
+  const command = {
+    locationId: "missing",
+    path: "Old Box",
+    key: "original",
+    items: A2,
+  };
+  let close = await mount();
+  await edit();
+  await edit();
+  await act(async () => {
+    queue.setChosen("missing");
+    queue.submitting(A2, command);
+  });
+  await close();
+  vi.mocked(getLocationTree).mockResolvedValueOnce({
+    locations: [],
+    owner_revision: 1,
+    lent_copies: "0",
+    borrowed_copies: "0",
+  });
+  close = await mount();
+  expect(queue.pending.current).toEqual(command);
+  expect(queue.chosen).toBe("missing");
+  expect(counts()).toEqual(a(2));
+  await close();
+});
+test("storage read errors leave Add usable in memory", async () => {
+  const spy = vi
+    .spyOn(Object.getPrototypeOf(sessionStorage), "getItem")
+    .mockImplementation(() => {
+      throw Error("disabled");
+    });
+  const close = await mount();
+  await edit();
+  expect(counts()).toEqual(a(1));
+  await close();
+  spy.mockRestore();
+});

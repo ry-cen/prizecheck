@@ -59,7 +59,7 @@ test("C2 settle-first: a refused earlier batch is followed by the new one", asyn
   };
   const submitting = vi.fn();
   const outcome = await addCards("box", "Box", AB, pending, submitting);
-  expect(submitting.mock.calls).toEqual([[A2], [AB]]);
+  expect(submitting.mock.calls.map(([items]) => items)).toEqual([A2, AB]);
   expect(outcome.ok).toBe(true);
   expect(pending.current).toBe(null);
 });

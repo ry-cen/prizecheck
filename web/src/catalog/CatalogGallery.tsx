@@ -229,9 +229,16 @@ export function CatalogGallery({
   );
   const stored = useStoredAddQueue(queueScope);
   const { queue, setQueue, chosen, setChosen } = stored;
-  // The bar's choice while it still exists, else Unsorted (the Location every collector has), else the first.
+  // Keep an uncertain command at its original Location, even if that Location is gone.
+  // Otherwise use the chosen Location, Unsorted, or the first available leaf.
   const picked =
     places.leaves.find((leaf) => leaf.id === chosen) ??
+    (stored.pending.current && chosen === stored.pending.current.locationId
+      ? {
+          id: stored.pending.current.locationId,
+          label: stored.pending.current.path,
+        }
+      : null) ??
     places.leaves.find((leaf) => leaf.label === "Unsorted") ??
     places.leaves[0] ??
     null;
@@ -250,7 +257,7 @@ export function CatalogGallery({
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [failure, setFailure] = useState("");
-  const pendingAdd = useRef<AddCommand | null>(null);
+  const pendingAdd = stored.pending;
   // What the last Add found: an earlier add that may have completed was settled (#196), or "".
   const [settledAdd, setSettledAdd] = useState<{
     copies: number | string;
@@ -490,7 +497,14 @@ export function CatalogGallery({
   }
 
   async function addAll() {
-    if (busyRef.current || !stored.ready || !target || queue.size === 0) return;
+    if (
+      busyRef.current ||
+      !stored.ready ||
+      stored.blocked ||
+      !target ||
+      queue.size === 0
+    )
+      return;
     busyRef.current = true;
     setBusy(true);
     setFailure("");
@@ -559,7 +573,11 @@ export function CatalogGallery({
       {adding && (
         <AddBar
           fixed={fixedTarget}
-          options={places.leaves}
+          options={
+            picked && !places.leaves.some((leaf) => leaf.id === picked.id)
+              ? [picked, ...places.leaves]
+              : places.leaves
+          }
           targetId={picked?.id ?? null}
           onTarget={setChosen}
           optionsText={
@@ -570,9 +588,16 @@ export function CatalogGallery({
                 : "Loading Locations…"
           }
           queue={queue}
-          ready={target !== null && stored.ready}
+          ready={target !== null && stored.ready && !stored.blocked}
           busy={busy}
-          failure={failure}
+          failure={
+            failure ||
+            (stored.blocked
+              ? batchFailed("REPLAY_OUTCOME_UNAVAILABLE", false, null)
+              : !busy && pendingAdd.current
+                ? batchFailed("", true, null)
+                : "")
+          }
           settled={settled}
           note={
             (!stored.restoreFailed && stored.notice) ||
@@ -598,7 +623,11 @@ export function CatalogGallery({
           onChange={(event) => setText(event.target.value)}
         />
         <p id={hintId} className="m-0 text-meta text-text-muted">
-          {searchHint(first?.search ?? null)}
+          {searchHint(
+            searchError || browse.loading || text.trim() !== q
+              ? null
+              : (first?.search ?? null)
+          )}
         </p>
       </div>
       <CatalogFilters
@@ -645,7 +674,7 @@ export function CatalogGallery({
           <Button onClick={retrySearch}>Retry</Button>
         </div>
       )}
-      {first?.available && (
+      {first?.available && (!searchError || browse.errorMore) && (
         <section aria-label="Catalog results" className="flex flex-col gap-3">
           <p className="m-0 text-meta text-text-subtle">
             {browse.editions.length === 0
@@ -802,10 +831,9 @@ function CatalogTile({
   );
 }
 
-// 26 px on desktop; 36 px on a phone, where a square pseudo-element widens the tap area to 44 px (a rounded one would
-// leave its corners out of the tap area).
+// Preserve the compact desktop control; phone controls have a full 44 px hit area.
 const QUICK =
-  "relative m-0 box-border inline-flex size-quick shrink-0 cursor-pointer items-center justify-center rounded-round border-0 p-0 font-sans disabled:cursor-default disabled:opacity-45 phone:size-quick-phone phone:before:absolute phone:before:-inset-1";
+  "relative m-0 box-border inline-flex size-quick shrink-0 cursor-pointer items-center justify-center rounded-round border-0 p-0 font-sans disabled:cursor-default disabled:opacity-45 phone:size-11";
 
 /**
  * A tile's quick add (#175): a + over the art's lower right corner that becomes − N + once the card is queued. It is
