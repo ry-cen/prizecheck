@@ -415,7 +415,12 @@ export function TradeScreen({
     >
       {back}
       <div className="[&>div]:mb-0 [&>div]:flex-nowrap [&>div]:items-start [&_h1]:min-w-0 [&_h1]:flex-1 phone:[&>div>div]:basis-auto">
-        <PageHeader title={title} actions={actions} headingRef={heading} />
+        <PageHeader
+          loading={load.kind === "loading"}
+          title={title}
+          actions={actions}
+          headingRef={heading}
+        />
       </div>
       {children}
       {dialog}

@@ -135,7 +135,55 @@ it("carries a pending request through a canonical replacement to a late heading"
   }
 });
 
-it("keeps a section tab focused when it switches the Decks view and restores it on Back", async () => {
+for (const role of ["tab", undefined])
+  it(`keeps a section tab focused when it switches the Decks view and restores it on Back (role: ${role ?? "button"})`, async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    window.history.replaceState(null, "", "/decks");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    let route!: Route;
+    function View() {
+      route = useRoute();
+      const container = useRef<HTMLDivElement>(null);
+      useLayoutEffect(
+        () => restorePageFocus(container.current, route.focusFor()),
+        [route.entry, route.path]
+      );
+      return h(
+        "div",
+        { ref: container },
+        h("h1", { key: route.path }, "Decks"),
+        route.path !== "/decks/example"
+          ? h(
+              "button",
+              { role, onClick: () => route.navigate("/decks/want-list") },
+              "Want List"
+            )
+          : null
+      );
+    }
+    try {
+      await act(async () => root.render(h(View)));
+      const tab = host.querySelector("button")!;
+      tab.focus();
+      await act(async () => tab.click());
+      expect(document.activeElement).toBe(tab);
+      const wantList = window.history.state;
+      await act(async () => route.navigate("/decks/example"));
+      await act(async () => {
+        window.history.replaceState(wantList, "", "/decks/want-list");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      expect(document.activeElement).toBe(host.querySelector("button"));
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+it("opens a Deck with heading focus even when a Decks tab had focus", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   window.history.replaceState(null, "", "/decks");
   const host = document.createElement("div");
@@ -152,26 +200,19 @@ it("keeps a section tab focused when it switches the Decks view and restores it 
     return h(
       "div",
       { ref: container },
-      h("h1", null, "Decks"),
-      route.path !== "/decks/example"
-        ? h(
-            "button",
-            { role: "tab", onClick: () => route.navigate("/decks/want-list") },
-            "Want List"
-          )
-        : null
+      route.path === "/decks"
+        ? h("button", { role: "tab" }, "My Decks")
+        : h("h1", null, "Deck")
     );
   }
   try {
     await act(async () => root.render(h(View)));
-    const tab = host.querySelector("button")!;
-    tab.focus();
-    await act(async () => tab.click());
-    expect(document.activeElement).toBe(tab);
-    const wantList = window.history.state;
+    const entry = window.history.state;
+    host.querySelector("button")!.focus();
     await act(async () => route.navigate("/decks/example"));
+    expect(document.activeElement).toBe(host.querySelector("h1"));
     await act(async () => {
-      window.history.replaceState(wantList, "", "/decks/want-list");
+      window.history.replaceState(entry, "", "/decks");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     expect(document.activeElement).toBe(host.querySelector("button"));

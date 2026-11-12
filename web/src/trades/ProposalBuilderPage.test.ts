@@ -17,6 +17,7 @@ import {
   createPageEntryFocus,
   restorePageFocus,
 } from "../shell/restorePageFocus";
+import { RESTORE_WINDOW_MS } from "../shell/restorePageScroll";
 import { useRoute, type Route } from "../shell/useRoute";
 import { ProposalRedirect } from "./ProposalRedirect";
 import { CounterPage } from "./CounterPage";
@@ -863,7 +864,8 @@ for (const interacted of [false, true])
     expect(loading.textContent).toBe("Counter");
     const stop = restorePageFocus(host, createPageEntryFocus());
     try {
-      expect(document.activeElement).toBe(loading);
+      expect(loading.getAttribute("data-page-heading")).toBe("loading");
+      expect(document.activeElement).toBe(document.body);
       if (interacted) window.dispatchEvent(new Event("pointerdown"));
       await act(async () => resolve(original));
       const final = host.querySelector("h1")!;
@@ -897,7 +899,8 @@ it("keeps entry focus when the real proposal builder finishes its initial party 
   expect(loading.textContent).toBe("Trade Proposal");
   const stop = restorePageFocus(host, createPageEntryFocus());
   try {
-    expect(document.activeElement).toBe(loading);
+    expect(loading.getAttribute("data-page-heading")).toBe("loading");
+    expect(document.activeElement).toBe(document.body);
     await act(async () =>
       resolve({
         trader_id: "misty",
@@ -911,6 +914,7 @@ it("keeps entry focus when the real proposal builder finishes its initial party 
     const ready = host.querySelector("h1")!;
     expect(ready.textContent).toBe("Trade Proposal to Misty");
     expect(ready).toBe(loading);
+    expect(ready.hasAttribute("data-page-heading")).toBe(false);
     expect(document.activeElement).toBe(ready);
   } finally {
     stop();
@@ -962,7 +966,8 @@ for (const interacted of [false, true])
       await act(async () => route.navigate("/trades/new/misty_handle"));
       const redirect = host.querySelector("h1")!;
       expect(redirect.textContent).toBe("Trade Proposal");
-      expect(document.activeElement).toBe(redirect);
+      expect(redirect.getAttribute("data-page-heading")).toBe("loading");
+      expect(document.activeElement).toBe(document.body);
       if (interacted) control.focus();
       await act(async () =>
         resolve({
@@ -984,3 +989,26 @@ for (const interacted of [false, true])
       control.remove();
     }
   });
+
+it("focuses the Counter builder when its trade read resolves after the restore window", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  let resolve!: (trade: TradeView) => void;
+  vi.mocked(getTrade).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      })
+  );
+  await mount(true);
+  const stop = restorePageFocus(host, createPageEntryFocus());
+  try {
+    vi.advanceTimersByTime(RESTORE_WINDOW_MS + 1000);
+    await act(async () => resolve(original));
+    const final = host.querySelector("h1")!;
+    expect(final.textContent).toBe("Counter to Misty");
+    expect(document.activeElement).toBe(final);
+  } finally {
+    stop();
+    vi.useRealTimers();
+  }
+});

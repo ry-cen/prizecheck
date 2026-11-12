@@ -81,7 +81,7 @@ export function CounterPage({
           ? `${load.trade.other.display_name}'s Trade Proposal`
           : "Trade Proposal"}
       </a>
-      <PageHeader title={title} />
+      <PageHeader loading={load.kind === "loading"} title={title} />
       {children}
     </main>
   );

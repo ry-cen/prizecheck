@@ -255,11 +255,12 @@ function ShellFrame({
       otherKey !== null ? otherContainer.current : containers.current.get(page);
     const stopScroll = restorePageScroll(container, scrollFor(path));
     // Once per visit to an entry: a rerun for another reason must not bring back an old focus.
+    const focus = focusFor?.();
     const stopFocus =
-      restoredFocusEntry.current === `${entry}:${path}`
+      restoredFocusEntry.current === entry && !(focus && "kind" in focus)
         ? () => {}
-        : restorePageFocus(container, focusFor?.());
-    restoredFocusEntry.current = `${entry}:${path}`;
+        : restorePageFocus(container, focus);
+    restoredFocusEntry.current = entry;
     return () => {
       stopScroll();
       stopFocus();

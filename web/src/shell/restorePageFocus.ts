@@ -49,72 +49,69 @@ function find(container: HTMLElement, saved: SavedFocus): HTMLElement | null {
   return twins.length === 1 ? twins[0] : null;
 }
 
-/** Wait for entry content, then watch briefly for a loading heading being replaced. A completed
- * request can recover its own removed heading in this visit, but cannot restart on a canonical replacement. */
+function entryHeading(container: HTMLElement): HTMLElement | "loading" | null {
+  const heading = [...container.querySelectorAll<HTMLElement>("h1")].find(
+    (element) => !element.closest("[hidden],[inert]")
+  );
+  if (!heading) return null;
+  return heading.matches('[data-page-heading="loading"]') ? "loading" : heading;
+}
+
+/** Pending until the page's first visible H1 is ready (not marked `data-page-heading="loading"`); no timer.
+ * Interaction, focus elsewhere, or effect cleanup by a new navigation end it. */
 function focusPageEntry(
   container: HTMLElement,
   request: PageEntryFocus
 ): () => void {
   if (request.state !== "pending") return () => {};
-  let heading: HTMLElement | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let target: HTMLElement | null = null;
   const detach = () => {
     observer.disconnect();
-    clearTimeout(timer);
-    window.removeEventListener("pointerdown", cancel);
-    window.removeEventListener("keydown", cancel);
-    window.removeEventListener("focusin", focused);
+    window.removeEventListener("pointerdown", cancel, true);
+    window.removeEventListener("keydown", cancel, true);
+    window.removeEventListener("wheel", cancel, true);
+    window.removeEventListener("focusin", focused, true);
   };
   const cancel = () => {
     request.state = "cancelled";
     detach();
   };
   const focused = (event: FocusEvent) => {
-    if (event.target !== heading) cancel();
-  };
-  const complete = () => {
-    // A loading redirect is an intermediate heading, not the completed page entry.
-    if (heading?.closest('[aria-busy="true"]')) return;
-    request.state = "completed";
-    timer ??= setTimeout(detach, RESTORE_WINDOW_MS);
+    if (event.target !== target) cancel();
   };
   const attempt = () => {
     const active = document.activeElement;
-    if (heading?.isConnected) {
-      if (active !== heading) cancel();
-      else complete();
-      return;
-    }
     if (
+      active &&
       active !== document.body &&
-      !(request.state === "pending" && active === request.opener)
+      !(request.opener?.isConnected && active === request.opener)
     ) {
       cancel();
       return;
     }
-    const next = container.querySelector<HTMLElement>("h1");
-    if (!next || next.closest("[hidden],[inert]")) return;
-    heading = next;
+    const heading = entryHeading(container);
+    if (!heading || heading === "loading") return;
+    target = heading;
     heading.tabIndex = -1;
     heading.classList.add("outline-none");
     heading.focus({ preventScroll: true });
     if (document.activeElement === heading) {
-      // Start the recovery window only after the actual page receives focus.
-      complete();
-    }
+      request.state = "completed";
+      detach();
+    } else target = null;
   };
   const observer = new MutationObserver(attempt);
   observer.observe(container, {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["aria-busy"],
+    attributeFilter: ["data-page-heading", "hidden", "inert"],
   });
-  window.addEventListener("pointerdown", cancel, { once: true });
-  window.addEventListener("keydown", cancel, { once: true });
-  window.addEventListener("focusin", focused);
+  window.addEventListener("pointerdown", cancel, true);
+  window.addEventListener("keydown", cancel, true);
+  window.addEventListener("wheel", cancel, { capture: true, passive: true });
+  window.addEventListener("focusin", focused, true);
   attempt();
-  // Effect cleanup detaches this visit without reviving or cancelling the shared request.
   return detach;
 }
 

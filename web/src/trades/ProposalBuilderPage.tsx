@@ -763,10 +763,10 @@ export function ProposalBuilderPage({
       ? "Change offer"
       : "Counter"
     : "Trade Proposal";
-  const frame = (title: string, children: ReactNode) => (
+  const frame = (title: string, children: ReactNode, loading = false) => (
     <main className={FRAME}>
       {back}
-      <PageHeader title={title} />
+      <PageHeader title={title} loading={loading} />
       {children}
     </main>
   );
@@ -852,7 +852,8 @@ export function ProposalBuilderPage({
       frameTitle,
       <p role="status" className="m-0 text-body text-text-muted">
         Loading…
-      </p>
+      </p>,
+      true
     );
 
   const name = party.display_name;

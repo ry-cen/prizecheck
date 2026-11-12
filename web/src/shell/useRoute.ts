@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PAGES, pageAt } from "./routes";
+import { PAGES, opensPage, isViewAddress } from "./routes";
 import {
   saveFocus,
   createPageEntryFocus,
@@ -39,7 +39,7 @@ export type Route = {
   closeOverlay: (to: string) => void;
   /** The current entry's saved scroll, with a last-visited fallback for tab roots. */
   scrollFor: (path: string) => number;
-  /** Forward page entry requests its heading; history traversal offers the saved opener. */
+  /** The entry's heading request, or the saved opener for a history traversal. */
   focusFor: () => PageFocus | null;
 };
 
@@ -218,22 +218,22 @@ export function useRoute(): Route {
           );
         }
         const target = new URL(to, window.location.href).pathname;
-        // Canonical replacements carry existing intent; they cannot create it on a direct load.
+        // A replace can continue pending entry intent, but returning to a view ends it.
         if (!replace)
           headingEntry.current =
-            !overlay &&
-            target !== current.current &&
-            // Section tabs change the selected view while keeping focus on that tab.
-            !(
-              document.activeElement?.getAttribute("role") === "tab" &&
-              pageAt(target)?.id === pageAt(current.current)?.id
-            ) &&
-            !PAGES.some((page) => page.path === target)
+            !overlay && opensPage(current.current, target)
               ? {
                   entry: window.history.state.prizecheckEntry,
                   request: createPageEntryFocus(),
                 }
               : null;
+        else if (
+          headingEntry.current?.entry === currentEntry.current &&
+          isViewAddress(target)
+        ) {
+          headingEntry.current.request.state = "cancelled";
+          headingEntry.current = null;
+        }
         update();
       };
       if (

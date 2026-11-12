@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
+import { OWNER_SUBPATHS } from "../owner/sections";
 import { useLeaveGuard, useRoute, type Route } from "./useRoute";
 
 it("keeps Collection queries reactive and restores separate visits to the same detail address", async () => {
@@ -254,6 +255,30 @@ it("only requests heading focus for forward in-app page entry", async () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     expect(route.focusFor()).toBeNull();
+
+    for (const [from, to, pending] of [
+      ["/decks", "/decks/want-list", false],
+      ["/decks/d1", "/decks/want-list?deck=d1", true],
+      ["/trades", "/trades/find", false],
+      ["/trades/find", "/trades/t1", true],
+      ["/owner", `/owner/${OWNER_SUBPATHS[0]}`, false],
+    ] as const) {
+      await act(async () => route.navigate(from));
+      await act(async () => route.navigate(to));
+      if (pending)
+        expect(route.focusFor()).toMatchObject({
+          kind: "heading",
+          state: "pending",
+        });
+      else expect(route.focusFor()).toBeNull();
+    }
+    await act(async () => route.navigate("/decks/overlay", { overlay: true }));
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/trades/t1"));
+    const pending = route.focusFor();
+    await act(async () => route.navigate("/trades", { replace: true }));
+    expect(route.focusFor()).toBeNull();
+    expect(pending).toMatchObject({ state: "cancelled" });
   } finally {
     await act(async () => root.unmount());
     vi.unstubAllGlobals();

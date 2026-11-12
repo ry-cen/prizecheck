@@ -1,3 +1,4 @@
+import { WANT_LIST_SEGMENT } from "../decks/wantListModel";
 import { OWNER_SUBPATHS } from "../owner/sections";
 
 /** The signed-in shell tabs and their addresses. Tab roots stay mounted; detail screens exist only while shown. */
@@ -19,6 +20,9 @@ export type PageDef = {
   /** Sub-addresses under `path` that open this page on one of its sections, for example /owner/rules for
    * Owner controls' Rules tab. The page reads its section with sectionAt. */
   sections?: readonly string[];
+  /** Sub-addresses that show another view of this page under its own view switch (a tab list), not a page of their
+   * own. Moving between the page's address and its views is a view switch, never a page entry. */
+  views?: readonly string[];
   /** Sections that take exactly one further segment, for example `/trades/new/<Friend's Handle>` for the proposal
    * builder (Trading #284). The page reads `"<section>/<item>"` with sectionAt. */
   sectionItems?: readonly string[];
@@ -42,6 +46,7 @@ export const PAGES: readonly PageDef[] = [
     id: "decks",
     path: "/decks",
     label: "Decks",
+    views: [WANT_LIST_SEGMENT],
     param: true,
     itemSections: ["replace"],
   },
@@ -68,6 +73,7 @@ export const PAGES: readonly PageDef[] = [
     path: "/trades",
     label: "Trades",
     sections: ["find", "list"],
+    views: ["find", "list"],
     sectionItems: ["new", "with", "conversation", "trader"],
     param: true,
     itemSections: ["counter"],
@@ -87,6 +93,7 @@ export const PAGES: readonly PageDef[] = [
     path: "/owner",
     label: "Owner controls",
     sections: OWNER_SUBPATHS,
+    views: OWNER_SUBPATHS,
   },
 ];
 
@@ -164,4 +171,31 @@ export function sectionAt(path: string): string | null {
 
 export function pageDef(id: PageId): PageDef {
   return PAGES.find((page) => page.id === id)!;
+}
+
+/** A tab root or one of its views (`views`). */
+export function isViewAddress(path: string): boolean {
+  return PAGES.some(
+    (page) =>
+      path === page.path ||
+      (page.views ?? []).some((view) => path === `${page.path}/${view}`)
+  );
+}
+
+/** Both addresses show the same page under its view switch. */
+export function isViewSwitch(from: string, to: string): boolean {
+  return (
+    isViewAddress(from) &&
+    isViewAddress(to) &&
+    pageAt(from)?.id === pageAt(to)?.id
+  );
+}
+
+/** A forward in-app move to a page of its own (pathnames, no query). */
+export function opensPage(from: string, to: string): boolean {
+  return (
+    to !== from &&
+    !PAGES.some((page) => page.path === to) &&
+    !isViewSwitch(from, to)
+  );
 }

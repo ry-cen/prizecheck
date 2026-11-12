@@ -178,15 +178,85 @@ it("keeps forward entry intent through a slow data read until the collector inte
   stop();
 });
 
-it("only recovers a removed heading within the entry window", async () => {
-  vi.useFakeTimers();
+it("waits for a loading heading to become ready", async () => {
   const page = document.createElement("div");
-  page.innerHTML = "<h1>Loading</h1>";
+  page.innerHTML = '<h1 data-page-heading="loading">Loading</h1>';
+  document.body.append(page);
+  const heading = page.querySelector("h1")!;
+  const stop = restorePageFocus(page, createPageEntryFocus());
+  try {
+    expect(document.activeElement).toBe(document.body);
+    heading.removeAttribute("data-page-heading");
+    await flush();
+    expect(document.activeElement).toBe(heading);
+  } finally {
+    stop();
+  }
+});
+
+it("skips a loading heading and focuses its replacement", async () => {
+  const page = document.createElement("div");
+  page.innerHTML = '<h1 data-page-heading="loading">Loading</h1>';
   document.body.append(page);
   const stop = restorePageFocus(page, createPageEntryFocus());
-  vi.advanceTimersByTime(RESTORE_WINDOW_MS + 1);
-  page.innerHTML = "<h1>Ready</h1>";
-  await vi.runAllTimersAsync();
-  expect(document.activeElement).toBe(document.body);
-  stop();
+  try {
+    expect(document.activeElement).toBe(document.body);
+    page.innerHTML = "<h1>Ready</h1>";
+    await flush();
+    expect(document.activeElement).toBe(page.firstChild);
+  } finally {
+    stop();
+  }
+});
+
+it("focuses a heading that becomes ready long after the restore window", async () => {
+  vi.useFakeTimers();
+  const page = document.createElement("div");
+  page.innerHTML = '<h1 data-page-heading="loading">Loading</h1>';
+  document.body.append(page);
+  const stop = restorePageFocus(page, createPageEntryFocus());
+  try {
+    expect(document.activeElement).toBe(document.body);
+    vi.advanceTimersByTime(RESTORE_WINDOW_MS * 3);
+    page.firstElementChild!.removeAttribute("data-page-heading");
+    await vi.runAllTimersAsync();
+    expect(document.activeElement).toBe(page.firstChild);
+  } finally {
+    stop();
+  }
+});
+
+for (const input of ["pointerdown", "keydown", "wheel"])
+  it(`a ${input} before the heading is ready cancels for good`, async () => {
+    const page = document.createElement("div");
+    document.body.append(page);
+    const stop = restorePageFocus(page, createPageEntryFocus());
+    try {
+      window.dispatchEvent(new Event(input));
+      page.innerHTML = "<h1>Ready</h1>";
+      await flush();
+      expect(document.activeElement).toBe(document.body);
+      page.innerHTML = "<h1>Another ready heading</h1>";
+      await flush();
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      stop();
+    }
+  });
+
+it("an interaction whose propagation is stopped still cancels", async () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const child = document.createElement("button");
+  child.addEventListener("pointerdown", (event) => event.stopPropagation());
+  page.append(child);
+  const stop = restorePageFocus(page, createPageEntryFocus());
+  try {
+    child.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    page.innerHTML = "<h1>Ready</h1>";
+    await flush();
+    expect(document.activeElement).toBe(document.body);
+  } finally {
+    stop();
+  }
 });
