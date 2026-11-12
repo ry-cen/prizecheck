@@ -330,7 +330,9 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
         .getByRole("navigation", { name: "Main views" })
         .getByRole("button", { name: "Collection", exact: true })
         .click();
-      await expect(toast(page)).toHaveText("The earlier Add can be undone.");
+      await expect(toastText(page)).toHaveText(
+        "The earlier Add can be undone."
+      );
       await expect(undo).toBeVisible();
       await undo.click();
       await expect(toastText(page)).toContainText("Undo removed 1 card");
