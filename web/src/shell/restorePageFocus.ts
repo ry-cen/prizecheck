@@ -36,8 +36,16 @@ export function createPageEntryFocus(): PageEntryFocus {
 
 export type PageFocus = SavedFocus | PageEntryFocus;
 
-const nameOf = (element: Element) =>
-  (element.getAttribute("aria-label") ?? element.textContent ?? "").trim();
+const nameOf = (element: Element) => {
+  const label = element.getAttribute("aria-label");
+  if (label !== null) return label.trim();
+  // Descriptive tile facts can change during a read; aria-hidden text is not part of the control's name.
+  const named = element.cloneNode(true) as Element;
+  named
+    .querySelectorAll('[aria-hidden="true"]')
+    .forEach((child) => child.remove());
+  return (named.textContent ?? "").trim();
+};
 
 /** What had focus, unless nothing in particular did. */
 export function saveFocus(): SavedFocus | null {

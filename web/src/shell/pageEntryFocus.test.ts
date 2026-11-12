@@ -271,3 +271,59 @@ it("a query-only replace cancels loading entry focus and disconnects its observe
     vi.unstubAllGlobals();
   }
 });
+
+it("Back restores the originating Deck link after its descriptive price facts rerender", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/decks");
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let route!: Route;
+  let facts = "Checking prices…";
+  function View() {
+    route = useRoute();
+    const container = useRef<HTMLDivElement>(null);
+    useLayoutEffect(
+      () => restorePageFocus(container.current, route.focusFor()),
+      [route.entry, route.path]
+    );
+    return h(
+      "div",
+      { ref: container },
+      route.path === "/decks"
+        ? h(
+            "a",
+            {
+              href: "/decks/example",
+              onClick: (event) => {
+                event.preventDefault();
+                route.navigate("/decks/example");
+              },
+            },
+            "Focus Deck",
+            h("span", { "aria-hidden": "true" }, facts)
+          )
+        : h("h1", null, "Focus Deck")
+    );
+  }
+  try {
+    await act(async () => root.render(h(View)));
+    const entry = window.history.state;
+    const opener = host.querySelector("a")!;
+    opener.focus();
+    await act(async () => opener.click());
+    expect(document.activeElement).toBe(host.querySelector("h1"));
+    facts = "To complete: no prices yet";
+    await act(async () => {
+      window.history.replaceState(entry, "", "/decks");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    const restored = host.querySelector("a")!;
+    expect(restored).not.toBe(opener);
+    expect(document.activeElement).toBe(restored);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});

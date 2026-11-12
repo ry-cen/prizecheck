@@ -298,3 +298,28 @@ for (const state of ["cancelled", "completed"] as const)
       vi.unstubAllGlobals();
     }
   });
+
+it("restores the Deck link when its aria-hidden price facts change after Back", () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const opener = link(page, "Focus Deck");
+  const facts = document.createElement("span");
+  facts.setAttribute("aria-hidden", "true");
+  facts.textContent = "0/1 in DeckChecking prices…";
+  opener.append(facts);
+  opener.focus();
+  const saved = saveFocus();
+  page.replaceChildren();
+  const restored = link(page, "Focus Deck");
+  const changedFacts = facts.cloneNode(true);
+  changedFacts.textContent = "0/1 in DeckTo complete: no prices yet";
+  restored.append(changedFacts);
+  const focus = vi.spyOn(restored, "focus");
+  const stop = restorePageFocus(page, saved);
+  try {
+    expect(document.activeElement).toBe(restored);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  } finally {
+    stop();
+  }
+});
