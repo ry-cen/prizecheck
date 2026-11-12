@@ -1,3 +1,4 @@
+import { useStoredAddQueue } from "./useStoredAddQueue";
 import { useFirstReadSettled } from "../shell/keptRead";
 import {
   useCallback,
@@ -25,20 +26,12 @@ import { variantLabel } from "../ui/variantLabel";
 import { TILE_PRICE } from "../workspace/Gallery";
 import { useDebouncedValue } from "../workspace/useDebouncedValue";
 import { AddBar } from "./AddBar";
-import {
-  bump,
-  EMPTY_QUEUE,
-  editionWords,
-  hasRoom,
-  minus,
-  queueItems,
-  without,
-  type AddQueue,
-} from "./addQueue";
+import { bump, editionWords, hasRoom, queueItems } from "./addQueue";
 import { addCards, type AddCommand } from "./cardActions";
 import { CatalogCardPopup, type CardRequest } from "./CatalogCardPopup";
 import { CatalogFilters } from "./CatalogFilters";
 import {
+  ADD_UNKNOWN,
   batchFailed,
   batchAddedText,
   CATALOG_UNAVAILABLE,
@@ -140,7 +133,13 @@ export function CatalogGallery({
 
   // Add mode: where the copies go, the queue, and the last Add N cards.
   const places = usePlaces(active && adding && !fixedTarget);
-  const [chosen, setChosen] = useState<string | null>(null);
+  // AddCardsGallery mounts this gallery for each opening. Capture that opening's destination:
+  // a later fallback to the picker keeps its queue, while opening another Location gets its own.
+  const [queueScope] = useState(() =>
+    stick === "dialog" ? `dialog:${fixedTarget?.id ?? "picker"}` : "page"
+  );
+  const stored = useStoredAddQueue(queueScope);
+  const { queue, setQueue, chosen, setChosen } = stored;
   // The bar's choice while it still exists, else Unsorted (the Location every collector has), else the first.
   const picked =
     places.leaves.find((leaf) => leaf.id === chosen) ??
@@ -148,8 +147,7 @@ export function CatalogGallery({
     places.leaves[0] ??
     null;
   const target = fixedTarget ?? picked;
-  const [queue, setQueue] = useState<AddQueue>(EMPTY_QUEUE);
-  // The queue lives only on this page: the browser's own warning on reload or close while cards wait in it.
+  // Closing the tab still loses its sessionStorage, so keep the browser warning.
   const queued = queue.size > 0;
   useEffect(() => {
     if (!queued) return;
@@ -395,29 +393,36 @@ export function CatalogGallery({
   }, [targetId]);
 
   function queueChange(edition: BrowseEdition, by: 1 | -1) {
-    if (busyRef.current) return;
+    if (busyRef.current || !stored.ready) return;
     setFailure("");
     setSettledAdd(null);
+    if (target) setChosen(target.id);
     setQueue((current) => bump(current, edition, by));
   }
 
   async function addAll() {
-    if (busyRef.current || !target || queue.size === 0) return;
+    if (busyRef.current || !stored.ready || !target || queue.size === 0) return;
     busyRef.current = true;
     setBusy(true);
     setFailure("");
     setSettledAdd(null);
     const items = queueItems(queue);
-    const outcome = await addCards(target.id, target.label, items, pendingAdd);
+    const outcome = await addCards(
+      target.id,
+      target.label,
+      items,
+      pendingAdd,
+      stored.submitting
+    );
+    stored.settle(outcome);
     busyRef.current = false;
     setBusy(false);
     if (outcome.ok) {
       // A batch that may have completed earlier is settled first (#196): only its copies leave the queue, and the rest
       // stay for the collector to review before the next press.
       if (outcome.settledEarlier) {
-        setQueue((current) => minus(current, outcome.items));
         setSettledAdd({ copies: outcome.copies, path: outcome.path });
-      } else setQueue(EMPTY_QUEUE);
+      }
       added({
         locationId: outcome.locationId,
         path: outcome.path,
@@ -439,9 +444,6 @@ export function CatalogGallery({
         refused ? editionWords(refused) : null
       )
     );
-    // A card no longer available can't be added: it leaves the queue, so the rest can go.
-    if (outcome.code === "EDITION_UNAVAILABLE" && outcome.editionId)
-      setQueue((current) => without(current, outcome.editionId!));
     if (outcome.code === "LOCATION_NOT_FOUND") {
       places.reload();
       onTargetGone?.();
@@ -453,6 +455,18 @@ export function CatalogGallery({
   const unavailable = first !== null && !first.available;
   return (
     <div ref={galleryRoot} className="flex min-w-0 flex-col gap-4">
+      {stored.restoreFailed && (
+        <div role="alert" className="flex flex-wrap items-center gap-2">
+          <p className="m-0 text-meta">{stored.notice}</p>
+          <Button onClick={stored.clear}>Discard queue</Button>
+        </div>
+      )}
+      {stored.uncertain && (
+        <div role="status" className="flex flex-wrap items-center gap-2">
+          <p className="m-0 text-meta">{ADD_UNKNOWN}</p>
+          <Button onClick={stored.dismiss}>Dismiss</Button>
+        </div>
+      )}
       {adding && (
         <AddBar
           fixed={fixedTarget}
@@ -467,15 +481,18 @@ export function CatalogGallery({
                 : "Loading Locations…"
           }
           queue={queue}
-          ready={target !== null}
+          ready={target !== null && stored.ready}
           busy={busy}
           failure={failure}
           settled={settled}
-          note={hasRoom(queue) ? "" : QUEUE_FULL}
+          note={
+            (!stored.restoreFailed && stored.notice) ||
+            (hasRoom(queue) ? "" : QUEUE_FULL)
+          }
           onClear={() => {
             setFailure("");
             setSettledAdd(null);
-            setQueue(EMPTY_QUEUE);
+            stored.clear();
           }}
           onAdd={() => void addAll()}
           stick={stick}

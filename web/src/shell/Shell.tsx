@@ -1,3 +1,4 @@
+import { AddQueueAccount } from "../catalog/useStoredAddQueue";
 import { restorePageFocus, type SavedFocus } from "./restorePageFocus";
 import { restorePageScroll } from "./restorePageScroll";
 import { usePageTitle } from "./usePageTitle";
@@ -128,7 +129,9 @@ export function Shell(props: Props) {
               userId={props.userId}
               onOpenLoan={props.onOpenLoan}
             >
-              <ShellFrame {...props} />
+              <AddQueueAccount.Provider value={props.userId}>
+                <ShellFrame {...props} />
+              </AddQueueAccount.Provider>
             </BorrowDraftsProvider>
           </LoanRecoveryProvider>
         </FriendsProvider>

@@ -1,3 +1,4 @@
+import { forgetAddQueues } from "./catalog/useStoredAddQueue";
 import { accountToScrub, scrubLoanBodies } from "./loans/loanIntents";
 import { pageAddress } from "./shell/keptPages";
 import React, {
@@ -136,7 +137,10 @@ function App() {
         lastUserId.current,
         result.signedIn ? result.userId : null
       );
-      if (gone) scrubLoanBodies(gone);
+      if (gone) {
+        scrubLoanBodies(gone);
+        forgetAddQueues();
+      }
       lastUserId.current = result.signedIn ? result.userId : null;
       setSession(result);
     } catch {
@@ -250,6 +254,7 @@ function App() {
     forgetBorrowDrafts();
     scrubLoanBodies(lastUserId.current);
     lastUserId.current = null;
+    forgetAddQueues();
     setSession({ signedIn: false, userId: null });
     setOwnerCatalog(null);
     // An unsent proposal is lost with the session: sign-out never asks.

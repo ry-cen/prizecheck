@@ -126,7 +126,7 @@ export function AddBar({
           className={`ml-auto flex shrink-0 items-center gap-2${total === 0 ? " phone:hidden" : ""}`}
         >
           <Button disabled={total === 0} onClick={onClear}>
-            Clear
+            Clear queue
           </Button>
           <Button
             variant="primary"
