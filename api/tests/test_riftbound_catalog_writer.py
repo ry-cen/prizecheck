@@ -106,7 +106,7 @@ def test_identical_rerun_creates_no_generation_and_keeps_revision(conn):
 def test_each_group_outcome_preserves_printings_editions_and_holdings(conn, quality, result, status):
     seed(conn)
     before = accepted(conn)
-    p = replace(pull(quality=quality, prices=[price()]), result=None) if result is None else pull(quality=quality, prices=[price()])
+    p = replace(pull(quality=quality, prices=[price()]), quality='suspicious', result=None) if result is None else pull(quality=quality, prices=[price()])
     pulls = [] if result is False else [p]
     pulls.append(pull([product(9000010, '010', gid=901)], gid=901))
     report = writer.apply_run(conn, pulls)
@@ -338,7 +338,7 @@ def test_all_groups_held_records_reviews_and_failed_run_without_touching_catalog
     seed(conn)
     before = catalog_rows(conn)
     current = pull(quality={'unknown':'unknown','suspicious':'suspicious'}.get(mode,'acceptable'))
-    if mode=='failed': current=replace(current,result=None)
+    if mode=='failed': current=replace(current,quality='suspicious',result=None)
     report = writer.apply_run(conn, [] if mode=='not_pulled' else [current])
     assert not report.promoted and catalog_rows(conn)==before
     review = one(conn,"SELECT * FROM catalog_review WHERE kind='group_pull_held'")
@@ -465,3 +465,20 @@ def _storage_case(conn,field,value,reason,hand_built=False):
 
 def test_hand_built_acceptable_pull_with_nul_is_downgraded_by_plan_run(conn):
     _storage_case(conn,'name','a\x00b','invalid_text',hand_built=True)
+
+
+@pytest.mark.parametrize('location', ['extra', 'extended', 'price'])
+@pytest.mark.parametrize('value_index', [0, 1])
+def test_huge_integer_hold_does_not_block_sibling_promotion(conn, location, value_index):
+    from app.games.riftbound.catalog.assess import assess_pull
+    from test_riftbound_catalog_assess import complete_payload, huge_integer_payload
+    value = 10**5000 if value_index == 0 else -(10**19)
+    held = assess_pull(plan.GroupInfo(901, 'Synthetic Set 901'), **huge_integer_payload(location, value))
+    valid = assess_pull(plan.GroupInfo(900, 'Synthetic Set 900'), **complete_payload(900))
+    report = writer.apply_run(conn, [valid, held])
+    assert report.promoted and report.plan.compared == 1
+    assert [(o.group_id, o.status) for o in report.plan.outcomes] == [(900, 'compared'), (901, 'pull_failed')]
+    assert {r['source_id'] for r in accepted(conn)} == {'9000001', '9000002'}
+    hold = one(conn, "SELECT candidate,status FROM catalog_review WHERE kind='group_pull_held'")
+    assert hold == {'status': 'pending', 'candidate': {'group_id': 901, 'status': 'pull_failed', 'reasons': ['invalid_value']}}
+    assert one(conn, 'SELECT outcome FROM catalog_run WHERE id=%s', (report.run_id,))['outcome'] == 'succeeded'

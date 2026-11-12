@@ -39,6 +39,9 @@ def valid_text(value):
     return True
 
 
+PULL_REASONS = ('fetch_failed', 'response_not_success', 'total_items_mismatch', 'malformed_response',
+                'wrong_group', 'wrong_category', 'invalid_id', 'invalid_text', 'invalid_value', 'text_too_long')
+
 GROUP_PULL_HELD = 'group_pull_held'
 REVIEW_KINDS = FLAGS + ('missing_from_source', 'group_change', 'display_change', 'duplicate_product_id', GROUP_PULL_HELD)  # 14, in this order
 PRODUCT_HOLD_FLAGS = frozenset({FLAG_IDENTITY_TEXT_CONFLICT, FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING,
@@ -57,12 +60,30 @@ class GroupInfo:
         if not valid_id(self.group_id, MAX_GROUP_ID) or not valid_text(self.name):
             raise ValueError('invalid group metadata')
 @dataclass(frozen=True)
-class GroupPull:                    # quality has NO default: constructing without it is a TypeError
+class GroupPull:
+    """Caller contract: valid quality, sorted unique known reason codes and dict raw.
+
+    Acceptable pulls require no reasons, a GroupResult, and products/prices raw keys.
+    Violations raise ValueError at construction, before planning can read the content.
+    """
     info: GroupInfo
     result: Union[GroupResult, SourceResponseError, None]
     quality: PullQuality
     raw: dict                       # {"products": <response as received>, "prices": <response as received>} or {"error": str}
     reasons: Tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if self.quality not in ('acceptable', 'suspicious', 'unknown'):
+            raise ValueError('invalid pull quality')
+        if (type(self.reasons) is not tuple or any(type(code) is not str or
+                code not in PULL_REASONS + ('not_pulled', 'quality_unknown') for code in self.reasons) or
+                self.reasons != tuple(sorted(set(self.reasons)))):
+            raise ValueError('pull reasons must be sorted unique known codes')
+        if not isinstance(self.raw, dict):
+            raise ValueError('pull raw must be a dict')
+        if self.quality == 'acceptable' and (self.reasons or not isinstance(self.result, GroupResult) or
+                                             not {'products', 'prices'} <= self.raw.keys()):
+            raise ValueError('acceptable pulls require a result, raw payloads and no reasons')
 @dataclass(frozen=True)
 class ExistingPrinting:             # one per catalog_generation_printing row of the ACTIVE generation, any source
     printing_id: UUID
@@ -157,7 +178,10 @@ def storage_violations(info, raw, result) -> Tuple[str, ...]:
             elif kind is float:
                 if not math.isfinite(value):
                     codes.add('invalid_value')
-            elif kind not in (int, bool, type(None)):
+            elif kind is int:
+                if abs(value) > MAX_PRODUCT_ID:
+                    codes.add('invalid_value')
+            elif kind not in (bool, type(None)):
                 codes.add('invalid_value')
 
     try:
@@ -173,7 +197,7 @@ def storage_violations(info, raw, result) -> Tuple[str, ...]:
                         continue
                     if not valid_id(row.get('productId'), MAX_PRODUCT_ID):
                         codes.add('invalid_id')
-                    if (what == 'products' or 'groupId' in row) and not valid_id(row.get('groupId'), MAX_GROUP_ID):
+                    if what == 'products' and not valid_id(row.get('groupId'), MAX_GROUP_ID):
                         codes.add('invalid_id')
                     fields = ('cleanName', 'imageUrl', 'modifiedOn') if what == 'products' else ('subTypeName',)
                     if any(row.get(field) is not None and type(row[field]) is not str for field in fields):

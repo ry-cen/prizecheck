@@ -173,7 +173,7 @@ def test_each_noncompared_status_preserves_every_existing_row_and_edition(status
     old = previous(run(pull(prices=[price(), price(finish='Normal')]), pull([product(9000002, gid=901)], gid=901)))
     current = pull(quality={'pull_suspicious': 'suspicious', 'quality_unknown': 'unknown'}.get(status, 'acceptable'))
     if status == 'pull_failed':
-        current = replace(current, result=SourceResponseError('Synthetic failure'))
+        current = replace(current, quality='suspicious', result=SourceResponseError('Synthetic failure'))
     result = plan.plan_run(old, [] if status == 'not_pulled' else [current])
     assert result.outcomes[0].status == status
     assert {p.source_id for p in result.printings} == {'9000001', '9000002'}
@@ -344,13 +344,13 @@ def test_same_run_evidence_conflict_preserves_existing_printings_and_editions():
 @pytest.mark.parametrize('status', ['pull_failed','pull_suspicious','quality_unknown','not_pulled'])
 def test_held_group_records_one_review_per_status(status):
     old = previous(run(pull()))
-    current = replace(pull(), quality={'pull_suspicious':'suspicious','quality_unknown':'unknown'}.get(status,'acceptable'),
-                      reasons=('synthetic_reason',))
+    current = replace(pull(), quality={'quality_unknown':'unknown'}.get(status,'suspicious'),
+                      reasons=('fetch_failed',))
     if status == 'pull_failed': current = replace(current, result=None)
     result = plan.plan_run(old, [] if status=='not_pulled' else [current])
     assert len(result.reviews)==1
     review = result.reviews[0]
-    reasons = [status] if status in ('quality_unknown','not_pulled') else ['synthetic_reason']
+    reasons = [status] if status in ('quality_unknown','not_pulled') else ['fetch_failed']
     assert (review.source_id, review.kind, review.detail)==('group:900',plan.GROUP_PULL_HELD,', '.join(reasons))
     assert review.candidate == {'group_id':900,'status':status,'reasons':reasons}
     raw_sha = None if status=='not_pulled' else hashlib.sha256(json.dumps(current.raw,sort_keys=True,separators=(',',':')).encode()).hexdigest()
@@ -366,7 +366,7 @@ def test_known_group_missing_from_pulls_is_held_not_pulled():
 
 
 def test_same_failure_same_fingerprint_and_new_evidence_new_fingerprint():
-    a=replace(pull(),result=None,reasons=('fetch_failed',),raw={'error':'Synthetic A'})
+    a=replace(pull(),quality='suspicious',result=None,reasons=('fetch_failed',),raw={'error':'Synthetic A'})
     b=replace(a,raw={'error':'Synthetic B'})
     assert run(a).reviews==run(a).reviews
     assert run(a).reviews[0].source_fingerprint!=run(b).reviews[0].source_fingerprint
@@ -405,3 +405,27 @@ def test_plan_run_downgrades_hand_built_acceptable_pull_with_storage_violation()
     assert result.compared==0 and not result.printings
     assert result.reviews[0].kind==plan.GROUP_PULL_HELD
     assert 'invalid_text' in result.reviews[0].candidate['reasons']
+
+
+@pytest.mark.parametrize('changes', [
+    {'quality': 'bad'}, {'raw': []}, {'raw': None}, {'raw': {}}, {'raw': {'prices': []}},
+    {'raw': {'products': []}}, {'result': None}, {'result': 'bad'},
+    {'reasons': ('invalid_id',)}, {'reasons': ('a\x00b',)}, {'reasons': ('\ud800',)},
+    {'reasons': ('unknown_reason',)}, {'reasons': ('invalid_value', 'invalid_id')},
+    {'reasons': ('invalid_id', 'invalid_id')}, {'reasons': ['invalid_id']}, {'reasons': (1,)},
+])
+def test_group_pull_construction_precondition(changes):
+    args = dict(vars(pull()))
+    args.update(changes)
+    with pytest.raises(ValueError):
+        plan.GroupPull(**args)
+
+
+def test_group_pull_hold_reason_contract():
+    args = dict(vars(pull()))
+    args.update(quality='suspicious', result=None, raw={})
+    for reasons in (('invalid_value', 'invalid_id'), ('invalid_id', 'invalid_id'),
+                    ('unknown_reason',), ('a\x00b',), ('\ud800',), [ 'invalid_id' ], (1,)):
+        with pytest.raises(ValueError):
+            plan.GroupPull(**{**args, 'reasons': reasons})
+    assert plan.GroupPull(**{**args, 'reasons': ('invalid_id', 'invalid_value')}).quality == 'suspicious'

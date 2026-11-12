@@ -2,11 +2,10 @@
 from typing import Optional, Tuple
 
 from .normalize import SourceResponseError, normalise_group
-from .plan import GroupInfo, GroupPull, storage_violations
+from .plan import GroupInfo, GroupPull, storage_violations, PULL_REASONS
 
 RIFTBOUND_CATEGORY_ID = 89
-REASONS = ('fetch_failed', 'response_not_success', 'total_items_mismatch', 'malformed_response',
-           'wrong_group', 'wrong_category', 'invalid_id', 'invalid_text', 'invalid_value', 'text_too_long')
+REASONS = PULL_REASONS
 
 
 def _envelope(payload: object, what: str) -> list:

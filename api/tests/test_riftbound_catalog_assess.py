@@ -159,7 +159,10 @@ def test_raw_group_ids_must_fit_storage_domain(which, identifier):
     payloads = {'products': envelope([product()]), 'prices': envelope([price()])}
     payloads[which]['results'][0]['groupId'] = identifier
     held = assess.assess_pull(INFO, **payloads)
-    assert held.quality == 'suspicious' and 'invalid_id' in held.reasons
+    if which == 'products':
+        assert held.quality == 'suspicious' and 'invalid_id' in held.reasons
+    else:
+        assert held.quality == 'acceptable' and held.reasons == ()
 
 
 @pytest.mark.parametrize('field,identifier', [('product_id', -1), ('product_id', 10**19), ('group_id', 2147483648)])
@@ -170,7 +173,8 @@ def test_normalised_printing_keys_are_rechecked(monkeypatch, field, identifier):
     result = replace(result, printings=(replace(printing, key=replace(printing.key, **{field: identifier})),))
     monkeypatch.setattr(assess, 'normalise_group', lambda *args: result)
     held = assess.assess_pull(INFO, envelope([product()]), envelope([]))
-    assert held.quality == 'suspicious' and held.reasons == ('invalid_id',)
+    assert held.quality == 'suspicious'
+    assert held.reasons == (('invalid_id', 'invalid_value') if identifier == 10**19 else ('invalid_id',))
     assert held.result is None
 
 
@@ -241,66 +245,125 @@ def storable(result):
     return errors
 
 
-def allowed_compared(path, value_index, hand_built=False):
-    # Explicit equivalent-valid/unchecked combinations, by matrix value index.
-    safe_strings={10,13,14}
-    finite_json={0,1,2,3,4,5,6,7,10,13,14,15,16,17,18}
-    field=path[-1]
-    if hand_built and len(path)==2 and field in ('success','totalItems'):
-        # These envelope fields do not change the normalised result in a replay.
-        return value_index in finite_json
-    if hand_built and field=='categoryId':
-        return value_index in finite_json
-    if len(path)==2:
-        return value_index in {'success':{2},'errors':{0,1,3,10,15,16},'results':{15},'totalItems':{0}}[field]
-    if 'extendedData' in path:
-        if field=='extendedData': return value_index in {0,1,15}
-        if field=='name': return value_index in {0}|safe_strings
-        original=_BASE['products']['results'][0]['extendedData'][path[-2]]['name']
-        return value_index in {0,1,10} | (safe_strings if original!='Number' else set())
-    if path[0]=='prices':
-        if field=='productId': return value_index==6
-        if field=='subTypeName': return value_index in {0,1}|safe_strings
-        return value_index in finite_json
-    return value_index in {'productId':{6},'groupId':set(),'categoryId':{0},'name':{0,10},
-                           'cleanName':{0,1}|safe_strings,'imageUrl':{0,1}|safe_strings,
-                           'modifiedOn':{0,1}|safe_strings}[field]
+def declared_expectation(path, index):
+    """Independent specification table: (assessment outcome, codes, replay codes).
+
+    This uses only the path and mutation index, never an implementation verdict.
+    """
+    field = path[-1]
+    raw_codes = set()
+    if index in {11, 12, 19, 20}:
+        raw_codes.add('invalid_text')
+    if index in {5, 8, 9, 21}:
+        raw_codes.add('invalid_value')
+    if len(path) > 2 and field in ('productId', 'groupId'):
+        if field == 'groupId' or index != 6:
+            raw_codes.add('invalid_id')
+    if len(path) == 4 and field in ('cleanName', 'imageUrl', 'modifiedOn', 'subTypeName'):
+        if index not in {0, 1, 10, 11, 12, 13, 14}:
+            raw_codes.add('invalid_value')
+    codes = set(raw_codes)
+    derived_codes = set()
+    if len(path) == 2:
+        if field == 'success' and index != 2:
+            codes.add('response_not_success')
+        elif field == 'errors' and index not in {0, 1, 3, 10, 15, 16}:
+            codes.add('response_not_success')
+        elif field == 'results' and index not in {15, 17, 21}:
+            codes.add('response_not_success')
+        elif field == 'totalItems' and index != 0:
+            codes.add('total_items_mismatch')
+        elif field == 'results' and index == 17:
+            codes.add('malformed_response')
+        if field == 'results' and index in {15, 17, 21}:
+            codes.add('total_items_mismatch')
+    elif not raw_codes:
+        if field == 'categoryId' and index != 0:
+            codes.add('wrong_category')
+        elif len(path) == 4 and field == 'name':
+            if index in {13, 14}:
+                derived_codes.add('text_too_long')
+            elif index not in {0, 10}:
+                codes.add('malformed_response')
+        elif field == 'extendedData' and index not in {0, 1, 15}:
+            codes.add('malformed_response')
+        elif 'extendedData' in path and field == 'name' and index not in {10, 13, 14}:
+            codes.add('malformed_response')
+        elif 'extendedData' in path and field == 'value':
+            if index not in {0, 1, 10, 13, 14}:
+                codes.add('malformed_response')
+            elif index in {13, 14} and _BASE['products']['results'][0]['extendedData'][path[-2]]['name'] == 'Number':
+                derived_codes.add('text_too_long')
+    codes.update(derived_codes)
+    return ('hold' if codes else 'accept', tuple(sorted(codes)), tuple(sorted(raw_codes | derived_codes)))
 
 
-@pytest.mark.parametrize('path',PATHS,ids=lambda p:'.'.join(map(str,p)))
-@pytest.mark.parametrize('value_index',range(len(MUTATIONS)))
-def test_mutation_property(path,value_index):
+# Each case carries independently declared assessment and replay expectations.
+MUTATION_CASES = [(path, index, *declared_expectation(path, index))
+                  for path in PATHS for index in range(len(MUTATIONS))]
+
+
+def check_mutation_case(path, value_index, outcome, expected_codes, replay_codes):
     from app.games.riftbound.catalog.normalize import normalise_group
-    raw=deepcopy(_BASE)
-    parent=raw
-    for key in path[:-1]: parent=parent[key]
-    value=MUTATIONS[value_index]
-    if value is DELETE: parent.pop(path[-1],None)
-    else: parent[path[-1]]=value
-    info=plan.GroupInfo(901,'Synthetic Set 901')
-    assessed=assess.assess_pull(info,**raw)
-    sibling=assess.assess_pull(plan.GroupInfo(900,'Synthetic Set 900'),**complete_payload(900))
-    try: normalised=normalise_group(**raw)
-    except (ValueError,TypeError,KeyError,AttributeError,IndexError,RecursionError): normalised=None
-    handmade=plan.GroupPull(info,normalised,'acceptable',raw)
-    for current in (assessed,handmade):
-        result=plan.plan_run(plan.PreviousState({}, {}, {}),[sibling,current])
-        assert result.outcomes[0].status=='compared'
-        assert any(p.group_id==900 and not p.carried for p in result.printings)
-        assert storable(result)==[]
-        if result.outcomes[1].status=='compared':
-            assert allowed_compared(path,value_index,current is handmade), ('STOP: unlisted compared mutation',path,value_index)
+    from app.games.riftbound.catalog.model import GroupResult
+    raw = deepcopy(_BASE)
+    parent = raw
+    for key in path[:-1]:
+        parent = parent[key]
+    value = MUTATIONS[value_index]
+    if value is DELETE:
+        parent.pop(path[-1], None)
+    else:
+        parent[path[-1]] = value
+    info = plan.GroupInfo(901, 'Synthetic Set 901')
+    assessed = assess.assess_pull(info, **raw)
+    assert assessed.quality == ('acceptable' if outcome == 'accept' else 'suspicious')
+    assert assessed.reasons == expected_codes
+    sibling = assess.assess_pull(plan.GroupInfo(900, 'Synthetic Set 900'), **complete_payload(900))
+    assert sibling.quality == 'acceptable'
+
+    def check_plan(current, codes):
+        result = plan.plan_run(plan.PreviousState({}, {}, {}), [sibling, current])
+        assert result.outcomes[0].status == 'compared'
+        assert any(p.group_id == 900 and not p.carried for p in result.printings)
+        assert storable(result) == []
+        if not codes:
+            assert result.outcomes[1].status == 'compared'
         else:
-            hold=next(r for r in result.reviews if r.source_id=='group:901')
-            assert hold.kind=='group_pull_held'
-            expected=set(plan.storage_violations(info,raw,normalised))
-            if expected:
-                assert expected <= set(hold.candidate['reasons'])
-            else:
-                assert set(hold.candidate['reasons']) & (set(assess.REASONS)|{'pull_failed'})
-    if value_index==21:
-        assert 'invalid_value' in assessed.reasons
-        assert 'invalid_value' in plan.storage_violations(info,raw,None)
+            assert result.outcomes[1].status != 'compared'
+            hold = next(r for r in result.reviews if r.source_id == 'group:901')
+            assert hold.kind == 'group_pull_held'
+            assert tuple(hold.candidate['reasons']) == codes
+
+    check_plan(assessed, expected_codes)
+    try:
+        normalised = normalise_group(**raw)
+    except (ValueError, TypeError, KeyError, AttributeError, IndexError, RecursionError):
+        normalised = None
+    if not isinstance(normalised, GroupResult):
+        with pytest.raises(ValueError):
+            plan.GroupPull(info, normalised, 'acceptable', raw)
+    else:
+        check_plan(plan.GroupPull(info, normalised, 'acceptable', raw), replay_codes)
+
+
+@pytest.mark.parametrize('case', MUTATION_CASES,
+                         ids=[f"{'.'.join(map(str,c[0]))}-{c[1]}" for c in MUTATION_CASES])
+def test_mutation_property(case):
+    check_mutation_case(*case)
+
+
+@pytest.mark.parametrize('codes', [('invalid_value',), ()], ids=['reject-all', 'accept-all'])
+def test_mutation_property_detects_sabotaged_gate(monkeypatch, codes):
+    monkeypatch.setattr(plan, 'storage_violations', lambda *args: codes)
+    monkeypatch.setattr(assess, 'storage_violations', lambda *args: codes)
+    failures = 0
+    for case in MUTATION_CASES:
+        try:
+            check_mutation_case(*case)
+        except Exception:
+            failures += 1
+    assert failures > 0
 
 
 def test_valid_group_passes_raw_and_derived_storage_gate():
@@ -315,3 +378,43 @@ def test_valid_group_passes_raw_and_derived_storage_gate():
 def test_group_metadata_precondition(gid,name):
     with pytest.raises(ValueError): plan.GroupInfo(gid,name)
     with pytest.raises(ValueError): assess.listed_groups(envelope([{'groupId':gid,'name':name,'categoryId':89}]))
+
+
+@pytest.mark.parametrize('value', [0, None, 'ignored'])
+def test_ignored_price_group_id_is_acceptable(value):
+    baseline = assess.assess_pull(INFO, envelope([product()]), envelope([price()]))
+    result = assess.assess_pull(INFO, envelope([product()]), envelope([{**price(), 'groupId': value}]))
+    assert result.quality == 'acceptable' and result.reasons == ()
+    assert result.result == baseline.result
+
+
+def huge_integer_payload(location, value):
+    raw = complete_payload(901)
+    if location == 'extra':
+        raw['products']['results'][0]['unknown'] = value
+    elif location == 'extended':
+        raw['products']['results'][0]['extendedData'].append({'name': 'unknown', 'value': value})
+    else:
+        raw['prices']['results'][0]['market'] = value
+    return raw
+
+
+@pytest.mark.parametrize('location', ['extra', 'extended', 'price'])
+@pytest.mark.parametrize('value_index', [0, 1])
+def test_huge_integer_is_held_and_sibling_is_compared(location, value_index):
+    value = 10**5000 if value_index == 0 else -(10**19)
+    held = assess.assess_pull(plan.GroupInfo(901, 'Synthetic Set 901'), **huge_integer_payload(location, value))
+    assert held.quality == 'suspicious' and held.reasons == ('invalid_value',)
+    sibling = assess.assess_pull(INFO, **complete_payload(900))
+    result = plan.plan_run(plan.PreviousState({}, {}, {}), [sibling, held])
+    assert [(o.group_id, o.status) for o in result.outcomes] == [(900, 'compared'), (901, 'pull_failed')]
+    assert result.reviews[0].candidate['reasons'] == ['invalid_value']
+    assert storable(result) == []
+
+
+@pytest.mark.parametrize('sign', [-1, 1])
+def test_unknown_integer_boundary_is_accepted(sign):
+    current = assess.assess_pull(plan.GroupInfo(901, 'Synthetic Set 901'),
+                                 **huge_integer_payload('extra', sign * 9_999_999_999_999_999_999))
+    assert current.quality == 'acceptable' and current.reasons == ()
+    assert plan.plan_run(plan.PreviousState({}, {}, {}), [current]).outcomes[0].status == 'compared'
