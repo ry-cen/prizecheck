@@ -364,6 +364,30 @@ export function Workspace({
     reloadGallery: gallery.reload,
     reloadTree: loadTree,
   });
+  // A sheet shortcut temporarily selects exactly its tile. Cancellation restores the selection;
+  // success follows the existing action flow (clear selection and close the details sheet).
+  const sheetAction = useRef<(() => void) | null>(null);
+  const sheetActionOpener = useRef<HTMLButtonElement | null>(null);
+  function openSheetAction(kind: "move" | "remove", opener: HTMLButtonElement) {
+    if (!selection.details || actions.busy || actions.dialog) return;
+    if (kind === "remove" && selection.details.holding.borrowed) return;
+    sheetActionOpener.current = opener;
+    sheetAction.current = selection.selectForAction(selection.details);
+    if (kind === "move") actions.openMove();
+    else actions.openRemoval();
+  }
+  function cancelInventoryDialog(forced = false) {
+    if (actions.busy && !forced) return;
+    actions.closeDialog(forced);
+    const restore = sheetAction.current;
+    sheetAction.current = null;
+    restore?.();
+  }
+  useEffect(() => {
+    if (actions.dialog || !sheetAction.current) return;
+    sheetAction.current = null;
+    selection.closeDetails();
+  }, [actions.dialog, selection.closeDetails]);
   // Lend to a Friend… (#258) closing: its Dialog gives focus back to Actions, but an offer that went out cleared the
   // selection, and Actions with it, so the workspace heading takes focus then rather than the page.
   const lendingOpen = active && lending !== null;
@@ -1090,6 +1114,9 @@ export function Workspace({
         <DetailsSheet
           card={selection.details}
           notice={cardNotice}
+          onMove={(opener) => openSheetAction("move", opener)}
+          onRemove={(opener) => openSheetAction("remove", opener)}
+          actionsDisabled={actions.busy}
           locationPath={locationPath}
           ownerRevision={gallery.ownerRevision}
           ownedTotals={ownedTotals}
@@ -1107,7 +1134,8 @@ export function Workspace({
           progress={actions.progress}
           error={actions.dialogError}
           onConfirm={actions.confirmMove}
-          onCancel={actions.closeDialog}
+          onCancel={cancelInventoryDialog}
+          returnFocus={sheetAction.current ? sheetActionOpener : undefined}
         />
       )}
       {active && actions.dialog === "remove" && (
@@ -1118,7 +1146,8 @@ export function Workspace({
           progress={actions.progress}
           error={actions.dialogError}
           onConfirm={actions.confirmRemoval}
-          onCancel={actions.closeDialog}
+          onCancel={cancelInventoryDialog}
+          returnFocus={sheetAction.current ? sheetActionOpener : undefined}
         />
       )}
       <DragBadge badge={drag.badge} />

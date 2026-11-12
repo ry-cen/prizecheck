@@ -207,6 +207,7 @@ function options(userId = "A"): Parameters<typeof useInventoryActions>[0] {
       inspected: null,
       details: null,
       selectMode: false,
+      selectForAction: vi.fn(),
       setSelectMode: vi.fn(),
       activate: vi.fn(),
       marquee: vi.fn(),
