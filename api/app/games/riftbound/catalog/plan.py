@@ -18,7 +18,8 @@ from .normalize import (SourceResponseError, DETAIL_FIELDS, MULTI_VALUE_DETAILS,
 # True matches #626; the alternative preserves only the existing options.
 NAMED_FINISH_UNPRICED_ADDS_UNSPECIFIED: bool = True
 
-REVIEW_KINDS = FLAGS + ('missing_from_source', 'group_change', 'display_change', 'duplicate_product_id')  # 13, in this order
+GROUP_PULL_HELD = 'group_pull_held'
+REVIEW_KINDS = FLAGS + ('missing_from_source', 'group_change', 'display_change', 'duplicate_product_id', GROUP_PULL_HELD)  # 14, in this order
 PRODUCT_HOLD_FLAGS = frozenset({FLAG_IDENTITY_TEXT_CONFLICT, FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING,
                                 FLAG_DUPLICATE_NUMBER_PENDING, FLAG_EXTENDED_FIELD_REPEATED, FLAG_PRINTING_DETAILS_DIFFER})
 UNSPECIFIED = {"kind": "unspecified", "label": "Unspecified Variant"}           # Pokémon's descriptor, catalog.py:122
@@ -34,6 +35,7 @@ class GroupPull:                    # quality has NO default: constructing witho
     result: Union[GroupResult, SourceResponseError, None]
     quality: PullQuality
     raw: dict                       # {"products": <response as received>, "prices": <response as received>} or {"error": str}
+    reasons: Tuple[str, ...] = ()
 @dataclass(frozen=True)
 class ExistingPrinting:             # one per catalog_generation_printing row of the ACTIVE generation, any source
     printing_id: UUID
@@ -108,6 +110,12 @@ def row_order(source_id: str) -> Tuple[int, int, str]:
         except ValueError:
             pass
     raise ValueError('invalid generation source_id')
+
+
+def review_order(source_id: str) -> Tuple[int, int, str]:
+    if re.fullmatch(r'group:[0-9]+', source_id):
+        return (2, int(source_id[6:]), '')
+    return row_order(source_id)
 
 
 def content_digest(printings: Iterable[PrintingRow]) -> str:
@@ -196,7 +204,17 @@ def plan_run(previous: PreviousState, pulls: Sequence[GroupPull]) -> RunPlan:
         e.group_id for e in previous.printings.values() if e.group_id is not None}
     for gid in sorted(all_groups):
         if gid not in decisions or decisions[gid].status != 'compared':
-            outcomes.append(GroupOutcome(gid, decisions[gid].status if gid in decisions else 'not_pulled', 0, 0, 0))
+            status = decisions[gid].status if gid in decisions else 'not_pulled'
+            pull = by_group.get(gid)
+            reasons = ((status,) if status in ('not_pulled', 'quality_unknown')
+                       else pull.reasons or (status,))
+            raw_sha = _sha(pull.raw) if pull is not None else None
+            fingerprint = _sha([status, sorted(reasons), raw_sha])
+            sid = f'group:{gid}'
+            reviews[sid, GROUP_PULL_HELD, fingerprint] = ReviewRow(
+                sid, GROUP_PULL_HELD, fingerprint, ', '.join(reasons),
+                {'group_id': gid, 'status': status, 'reasons': sorted(reasons)})
+            outcomes.append(GroupOutcome(gid, status, 0, 0, 0))
             continue
         pull, decision = by_group[gid], decisions[gid]
         identities = {i.identity_key: i for i in pull.result.identities}
@@ -260,5 +278,5 @@ def plan_run(previous: PreviousState, pulls: Sequence[GroupPull]) -> RunPlan:
                 review(gid, p.key.product_id, 'card_scope_pending', 'previously accepted product is now excluded as a token')
         outcomes.append(GroupOutcome(gid, 'compared', written, missing, held))
     ordered = tuple(rows[sid] for sid in sorted(rows, key=row_order))
-    return RunPlan(ordered, tuple(reviews[k] for k in sorted(reviews, key=lambda k: (row_order(k[0]), *k[1:]))),
+    return RunPlan(ordered, tuple(reviews[k] for k in sorted(reviews, key=lambda k: (review_order(k[0]), *k[1:]))),
                    snapshots, evidence, tuple(outcomes), content_digest(ordered), len(snapshots))

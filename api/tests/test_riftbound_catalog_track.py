@@ -19,12 +19,12 @@ DEVIATIONS = {
  'constraint:catalog_printing.catalog_printing_tcgcsv_source_id_check': '^[1-9][0-9]{0,18}$',
  'column:catalog_generation_printing.basic_energy': "'not_applicable'",
  'constraint:catalog_generation_printing.catalog_generation_printing_basic_energy_check': "'not_applicable'",
- 'constraint:catalog_review.catalog_review_kind_check': "'missing_from_source'",
+ 'constraint:catalog_review.catalog_review_kind_check': "'group_pull_held'",
  'view:catalog_printing_set_code': "''::text",
  'view:catalog_printing_art': 'NULL::text',
  'view:catalog_edition_art': 'false',
 }
-KINDS = 'identity_text_conflict card_scope_pending finish_policy_pending marker_grouping_pending duplicate_number_pending multi_value_delimiter_unrecognised price_without_product extended_field_repeated printing_details_differ missing_from_source group_change display_change duplicate_product_id'.split()
+KINDS = 'identity_text_conflict card_scope_pending finish_policy_pending marker_grouping_pending duplicate_number_pending multi_value_delimiter_unrecognised price_without_product extended_field_repeated printing_details_differ missing_from_source group_change display_change duplicate_product_id group_pull_held'.split()
 
 @pytest.fixture(scope='module')
 def history(databases):
@@ -52,7 +52,7 @@ def shared(snap):
 def test_entry_applies_core_then_the_riftbound_catalog_track(fresh):
     url, lines = fresh
     names = ['core/000_baseline.sql', 'core/001_zip_centroids.sql'] + [f'riftbound/{name}' for name in
-        ('001_catalog.sql', '002_core_references.sql', '003_set_codes.sql', '004_writer_state.sql')]
+        ('001_catalog.sql', '002_core_references.sql', '003_set_codes.sql', '004_writer_state.sql', '005_group_pull_review.sql')]
     assert lines == [f'Applied {name}' for name in names]
     assert [row[0] for row in ledger(url)] == sorted(names)
     assert migrate(ROOT, url) == []
@@ -127,7 +127,7 @@ def test_basic_energy_defaults_and_rejects_pokemon_values(conn):
         assert error.value.diag.constraint_name == 'catalog_generation_printing_basic_energy_check'
 
 
-def test_review_kinds_are_the_thirteen(conn):
+def test_review_kinds_are_the_fourteen(conn):
     for kind in KINDS:
         conn.execute("INSERT INTO catalog_review(source_id,kind,source_fingerprint,detail) VALUES ('9000001',%s,'synthetic','Synthetic review')", (kind,))
     with pytest.raises(psycopg.errors.CheckViolation) as error, conn.transaction():

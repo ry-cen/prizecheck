@@ -180,7 +180,8 @@ def test_each_noncompared_status_preserves_every_existing_row_and_edition(status
     assert {p.source_id: p.editions for p in result.printings} == {
         sid: p.editions for sid, p in old.printings.items()}
     assert all(p.carried for p in result.printings)
-    assert not result.snapshots and not result.reviews and not result.compared
+    assert not result.snapshots and not result.compared
+    assert {r.kind for r in result.reviews} == {plan.GROUP_PULL_HELD}
 
 
 @pytest.mark.parametrize('conflict', [False, True])
@@ -256,8 +257,8 @@ def test_duplicate_group_pull_is_refused():
 
 
 def test_review_kinds_cover_every_flag():
-    assert plan.REVIEW_KINDS == FLAGS + ('missing_from_source', 'group_change', 'display_change', 'duplicate_product_id')
-    assert len(plan.REVIEW_KINDS) == 13
+    assert plan.REVIEW_KINDS == FLAGS + ('missing_from_source', 'group_change', 'display_change', 'duplicate_product_id', plan.GROUP_PULL_HELD)
+    assert len(plan.REVIEW_KINDS) == 14
 
 
 def test_existing_evidence_holds_only_conflicting_group():
@@ -338,3 +339,46 @@ def test_same_run_evidence_conflict_preserves_existing_printings_and_editions():
     assert {(r.source_id, r.kind) for r in result.reviews} == {
         ('9000001', 'identity_text_conflict'), ('9000002', 'identity_text_conflict')}
     assert not result.evidence
+
+
+@pytest.mark.parametrize('status', ['pull_failed','pull_suspicious','quality_unknown','not_pulled'])
+def test_held_group_records_one_review_per_status(status):
+    old = previous(run(pull()))
+    current = replace(pull(), quality={'pull_suspicious':'suspicious','quality_unknown':'unknown'}.get(status,'acceptable'),
+                      reasons=('synthetic_reason',))
+    if status == 'pull_failed': current = replace(current, result=None)
+    result = plan.plan_run(old, [] if status=='not_pulled' else [current])
+    assert len(result.reviews)==1
+    review = result.reviews[0]
+    reasons = [status] if status in ('quality_unknown','not_pulled') else ['synthetic_reason']
+    assert (review.source_id, review.kind, review.detail)==('group:900',plan.GROUP_PULL_HELD,', '.join(reasons))
+    assert review.candidate == {'group_id':900,'status':status,'reasons':reasons}
+    raw_sha = None if status=='not_pulled' else hashlib.sha256(json.dumps(current.raw,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    assert review.source_fingerprint == hashlib.sha256(json.dumps([status,reasons,raw_sha],sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+
+def test_known_group_missing_from_pulls_is_held_not_pulled():
+    old = previous(run(pull()))
+    for state in (old, replace(old,snapshots={}), replace(old,printings={})):
+        result=plan.plan_run(state,[])
+        assert result.outcomes[0].status=='not_pulled'
+        assert result.reviews[0].candidate['reasons']==['not_pulled']
+
+
+def test_same_failure_same_fingerprint_and_new_evidence_new_fingerprint():
+    a=replace(pull(),result=None,reasons=('fetch_failed',),raw={'error':'Synthetic A'})
+    b=replace(a,raw={'error':'Synthetic B'})
+    assert run(a).reviews==run(a).reviews
+    assert run(a).reviews[0].source_fingerprint!=run(b).reviews[0].source_fingerprint
+
+
+def test_review_order_puts_group_reviews_last():
+    manual='manual:00000000-0000-0000-0000-000000000001'
+    assert sorted(['group:10',manual,'10','group:9','9'],key=plan.review_order)==['9','10',manual,'group:9','group:10']
+    with pytest.raises(ValueError): plan.row_order('group:900')
+    with pytest.raises(ValueError): plan.review_order('group:bad')
+
+
+def test_group_pull_reasons_default_is_empty_and_quality_still_required():
+    assert pull().reasons==()
+    with pytest.raises(TypeError): plan.GroupPull(info=pull().info,result=None,raw={})

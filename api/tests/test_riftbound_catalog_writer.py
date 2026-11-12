@@ -325,3 +325,51 @@ def test_every_product_hold_flag_keeps_accepted_rows(conn, flag):
     assert report.plan.printings[0].carried
     assert report.plan.outcomes[0].held_review == 1
     assert_survives(conn, before)
+
+
+def catalog_rows(conn):
+    tables = ('catalog_state','catalog_identity','catalog_printing','catalog_edition','catalog_generation',
+              'catalog_generation_printing','catalog_generation_edition','riftbound_group_snapshot','riftbound_identity_evidence')
+    return {table: rows(conn, f'SELECT * FROM {table} ORDER BY 1,2') for table in tables}
+
+
+@pytest.mark.parametrize('mode', ['failed','suspicious','unknown','not_pulled'])
+def test_all_groups_held_records_reviews_and_failed_run_without_touching_catalog(conn, mode):
+    seed(conn)
+    before = catalog_rows(conn)
+    current = pull(quality={'unknown':'unknown','suspicious':'suspicious'}.get(mode,'acceptable'))
+    if mode=='failed': current=replace(current,result=None)
+    report = writer.apply_run(conn, [] if mode=='not_pulled' else [current])
+    assert not report.promoted and catalog_rows(conn)==before
+    review = one(conn,"SELECT * FROM catalog_review WHERE kind='group_pull_held'")
+    assert review['source_id']=='group:900' and review['printing_id'] is None and review['status']=='pending'
+    assert one(conn,'SELECT outcome FROM catalog_run WHERE id=%s',(report.run_id,))['outcome']=='failed'
+    writer.apply_run(conn, [] if mode=='not_pulled' else [current])
+    assert one(conn,"SELECT count(*) AS n FROM catalog_review WHERE kind='group_pull_held'")['n']==1
+    assert catalog_rows(conn)==before
+
+
+def test_one_held_group_keeps_its_rows_and_snapshot_while_others_promote(conn):
+    seed(conn)
+    before=accepted(conn)
+    snapshot=rows(conn,'SELECT * FROM riftbound_group_snapshot WHERE group_id=900')
+    editions=rows(conn,'SELECT * FROM catalog_edition ORDER BY id')
+    report=writer.apply_run(conn,[pull(quality='suspicious'),pull([product(9000002,'002',gid=901)],gid=901)])
+    assert report.promoted and report.plan.compared==1
+    assert_survives(conn,before)
+    assert rows(conn,'SELECT * FROM riftbound_group_snapshot WHERE group_id=900')==snapshot
+    assert all(e in rows(conn,'SELECT * FROM catalog_edition') for e in editions)
+    assert one(conn,"SELECT candidate FROM catalog_review WHERE kind='group_pull_held'")['candidate']=={
+        'group_id':900,'status':'pull_suspicious','reasons':['pull_suspicious']}
+
+
+def test_assessed_suspicious_pull_end_to_end(conn):
+    from app.games.riftbound.catalog.assess import assess_pull
+    seed(conn)
+    before=catalog_rows(conn)
+    current=assess_pull(plan.GroupInfo(900,'Synthetic Set 900'),
+        {'success':True,'results':[product()],'totalItems':2}, {'success':True,'results':[]})
+    report=writer.apply_run(conn,[current])
+    assert not report.promoted and catalog_rows(conn)==before
+    assert one(conn,"SELECT detail,candidate FROM catalog_review WHERE kind='group_pull_held'")=={
+        'detail':'total_items_mismatch', 'candidate':{'group_id':900,'status':'pull_suspicious','reasons':['total_items_mismatch']}}
