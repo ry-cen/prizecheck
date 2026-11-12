@@ -216,7 +216,8 @@ async function story(
       name: "Confirm swap",
       exact: true,
     });
-    await opener.click();
+    await opener.focus();
+    await ash.page.keyboard.press("Enter");
     const ask = ashDialog.getByRole("group", {
       name: "Confirm swap",
       exact: true,
@@ -224,6 +225,13 @@ async function story(
     await expect(ask).toContainText(
       "Confirm the swap with Misty W? You can't undo it."
     );
+    await expect(ask.locator("p")).toBeFocused();
+    await ash.page.keyboard.press("Enter");
+    await expect(ask).toBeVisible();
+    await ash.page.keyboard.press("Tab");
+    await expect(
+      ask.getByRole("button", { name: "Confirm swap", exact: true })
+    ).toBeFocused();
     await ask.getByRole("button", { name: "Not yet" }).click();
     await expect(opener).toBeFocused();
     await expect(ask).toBeHidden();
@@ -232,10 +240,9 @@ async function story(
     await expect(opener).toBeFocused();
     await expect(ask).toBeHidden();
     await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
-    await ashDialog
-      .getByRole("group", { name: "Confirm swap", exact: true })
-      .getByRole("button", { name: "Confirm swap", exact: true })
-      .click();
+    await expect(ask.locator("p")).toBeFocused();
+    await ash.page.keyboard.press("Tab");
+    await ash.page.keyboard.press("Enter");
     await expect(ashDialog).toBeHidden();
     expect(stalePickConfirmations).toBe(1);
     await expect(ashMain.getByRole("alert")).toHaveText(

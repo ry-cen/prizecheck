@@ -301,16 +301,25 @@ async function story(
 
     // Ash declines one of the gifts, and Misty's Iono comes back to her Trade List and to his read of it.
     await ash.page.goto(`${ORIGIN}/trades/${declined}`);
-    await ashMain.getByRole("button", { name: "Decline" }).click();
+    await ashMain.getByRole("button", { name: "Decline" }).focus();
+    await ash.page.keyboard.press("Enter");
     const sure = ashMain.getByRole("group", { name: "Decline" });
     await expect(sure).toContainText("You can't undo it");
+    await expect(sure.locator("p")).toBeFocused();
+    await ash.page.keyboard.press("Enter");
+    await expect(sure).toBeVisible();
+    await ash.page.keyboard.press("Tab");
+    await expect(
+      sure.getByRole("button", { name: "Decline", exact: true })
+    ).toBeFocused();
     await sure.getByRole("button", { name: "Keep it" }).click();
     await expect(sure).toHaveCount(0);
     await expect(
       ashMain.getByRole("button", { name: "Decline" })
     ).toBeFocused();
     await ashMain.getByRole("button", { name: "Decline" }).click();
-    await sure.getByRole("button", { name: "Decline", exact: true }).click();
+    await ash.page.keyboard.press("Tab");
+    await ash.page.keyboard.press("Enter");
     await expect(sure).toHaveCount(0);
     await expect(heading(ash.page)).toHaveText("You declined");
     await expect(toast(ash.page)).toContainText("Declined");
@@ -350,9 +359,7 @@ async function story(
     await expect(withdrawing).toContainText(
       "Withdraw this Trade Proposal to Ash K? None of these cards stay promised."
     );
-    await expect(
-      withdrawing.getByRole("button", { name: "Withdraw", exact: true })
-    ).toBeFocused();
+    await expect(withdrawing.locator("p")).toBeFocused();
     await withdrawing.getByRole("button", { name: "Keep it" }).click();
     await expect(withdrawing).toHaveCount(0);
     await expect(more(page)).toBeFocused();
@@ -401,9 +408,7 @@ async function story(
     await expect(cancelling).toContainText(
       `Cancel this Trade with ${otherName}? None of these cards stay promised.`
     );
-    await expect(
-      cancelling.getByRole("button", { name: "Cancel Trade" })
-    ).toBeFocused();
+    await expect(cancelling.locator("p")).toBeFocused();
     await expectPageChecks(mine, `the Cancel Trade question at ${width}`);
     await cancelling.getByRole("button", { name: "Keep it" }).click();
     await expect(cancelling).toHaveCount(0);

@@ -103,7 +103,9 @@ export function PublicLayout({ current, onNavigate, children }: Props) {
           )}
         </nav>
       </header>
-      {children}
+      <div id="main-content" tabIndex={-1} className="flex flex-1 flex-col">
+        {children}
+      </div>
     </div>
   );
 }

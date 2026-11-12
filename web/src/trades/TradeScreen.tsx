@@ -100,7 +100,7 @@ type SwapPlace = { id: string; path: string; label: string };
 /** Cancel, Decline and Withdraw ask once inline. */
 type Asking = "cancel" | "decline" | "withdraw";
 
-/** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
+/** Where focus goes after the next render, when the control that had it goes away: the confirmation question when
  * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Trade), and the heading after a step or a
  * refusal that reads the Trade again. */
 type FocusNext = "ask" | "menu" | "decline" | "heading";
@@ -174,7 +174,7 @@ export function TradeScreen({
   const [asking, setAsking] = useState<Asking | null>(null);
   // Inline physical-swap consent and the destination for incoming copies ("" for Unsorted).
   const [swapAsked, setSwapAsked] = useState(false);
-  const swapYes = useRef<HTMLButtonElement>(null);
+  const swapQuestion = useRef<HTMLParagraphElement>(null);
   const swapPosting = useRef(false);
   const swapReturnFocus = useRef(false);
   useLayoutEffect(() => {
@@ -184,7 +184,7 @@ export function TradeScreen({
     }
   });
   useLayoutEffect(() => {
-    if (swapAsked) swapYes.current?.focus();
+    if (swapAsked) swapQuestion.current?.focus();
   }, [swapAsked]);
   const [confirming, setConfirming] = useState(false);
   const [destination, setDestination] = useState("");
@@ -229,7 +229,7 @@ export function TradeScreen({
   };
   const heading = useRef<HTMLHeadingElement>(null);
   const menuAnchor = useRef<HTMLDivElement>(null);
-  const askButton = useRef<HTMLButtonElement>(null);
+  const askQuestion = useRef<HTMLParagraphElement>(null);
   const declineButton = useRef<HTMLButtonElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const focusNext = useRef<FocusNext | null>(null);
@@ -332,7 +332,7 @@ export function TradeScreen({
     focusNext.current = null;
     const element =
       target === "ask"
-        ? askButton.current
+        ? askQuestion.current
         : target === "decline"
           ? declineButton.current
           : target === "menu"
@@ -468,7 +468,7 @@ export function TradeScreen({
     a.from_edition_id === b.from_edition_id &&
     a.to_edition_id === b.to_edition_id;
 
-  /** Asks before a step that ends the Trade, with focus on the confirmation's button. */
+  /** Asks before a step that ends the Trade, with focus on the question. */
   function ask(step: Asking) {
     if (busy) return;
     setMessage("");
@@ -823,11 +823,14 @@ export function TradeScreen({
           }}
           className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
         >
-          <p className="m-0 min-w-0 flex-1 text-body">
+          <p
+            ref={askQuestion}
+            tabIndex={-1}
+            className="m-0 min-w-0 flex-1 text-body"
+          >
             {ASK[asking].question(name)}
           </p>
           <Button
-            ref={askButton}
             variant="danger"
             aria-disabled={busy || undefined}
             onClick={run[asking]}
@@ -970,11 +973,14 @@ export function TradeScreen({
                 setSwapAsked(false);
               }}
             >
-              <p className="m-0 min-w-0 flex-1 text-body">
+              <p
+                ref={swapQuestion}
+                tabIndex={-1}
+                className="m-0 min-w-0 flex-1 text-body"
+              >
                 Confirm the swap with {name}? You can't undo it.
               </p>
               <Button
-                ref={swapYes}
                 variant="primary"
                 aria-disabled={busy || undefined}
                 onClick={runConfirm}

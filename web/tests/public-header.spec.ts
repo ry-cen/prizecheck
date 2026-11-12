@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { captureFontEvidence } from "./support/font-evidence";
 // The slim public header fits the page at every width down to 320 px (WCAG 1.4.10 Reflow), on the landing page and
 // Discover: under 360 px its Discover decks link shows Discover and keeps Discover decks as its name, and the header
@@ -187,3 +188,30 @@ test.describe("public header", () => {
 test.afterEach(async ({ page }, info) => {
   await captureFontEvidence(page, info);
 });
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test(`sign-in skip target and landmarks at ${viewport.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await page.goto(`${ORIGIN}/sign-in`);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    const link = page.getByRole("link", { name: "Skip to main content" });
+    await expect(page.locator("#main-content")).toContainText(
+      "Sign in to PrizeCheck"
+    );
+    await link.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+    expect(
+      (
+        await new AxeBuilder({ page })
+          .withRules(["skip-link", "region"])
+          .analyze()
+      ).violations
+    ).toEqual([]);
+  });
+}

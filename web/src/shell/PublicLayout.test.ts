@@ -3,7 +3,7 @@ import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { PublicLayout } from "../public/PublicLayout";
-it("puts the skip link first and focuses the page heading on activation", async () => {
+it("puts the skip link first and focuses the page content on activation", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
     "ResizeObserver",
@@ -27,6 +27,9 @@ it("puts the skip link first and focuses the page heading on activation", async 
     const link = host.querySelector("a")!;
     expect(link.textContent).toBe("Skip to main content");
     await act(async () => link.click());
+    const target = host.querySelector(link.getAttribute("href")!)!;
+    expect(target).not.toBeNull();
+    expect(target.querySelector("main")).not.toBeNull();
     expect(document.activeElement).toBe(host.querySelector("h1"));
   } finally {
     await act(async () => root.unmount());
