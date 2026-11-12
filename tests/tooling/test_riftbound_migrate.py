@@ -34,7 +34,7 @@ class RiftboundEntryTest(unittest.TestCase):
         self.assertEqual(entry.TRACKS, (Track("core"), Track("riftbound")))
         self.assertEqual(migration_tracks.recorded_names(entry.TRACKS), set())
         plan = migration_tracks.planned(ROOT / "migrations", entry.TRACKS)
-        self.assertEqual([name for name, _ in plan], [f"core/{path.name}" for path in sorted((ROOT / "migrations/core").glob("*.sql"))])
+        self.assertEqual([name for name, _ in plan], [f"core/{path.name}" for path in sorted((ROOT / "migrations/core").glob("*.sql"))] + ["riftbound/001_catalog.sql", "riftbound/002_core_references.sql", "riftbound/003_set_codes.sql", "riftbound/004_writer_state.sql"])
 
     def test_each_entry_excludes_the_other_game_even_when_both_have_pending_files(self):
         pokemon, riftbound = load("migrate"), load("migrate_riftbound")

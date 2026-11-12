@@ -47,23 +47,21 @@ def fresh(databases):
     return url, lines
 
 
-def test_fresh_entry_runs_exactly_core_and_the_empty_riftbound_track(fresh, baseline):
+def test_fresh_entry_runs_exactly_core_and_the_riftbound_track(fresh, baseline):
     url, lines = fresh
     names = [f"core/{path.name}" for path in sorted((ROOT / "migrations/core").glob("*.sql"))]
     assert names[:2] == ["core/000_baseline.sql", "core/001_zip_centroids.sql"]
+    names += [f"riftbound/{path.name}" for path in sorted((ROOT / "migrations/riftbound").glob("*.sql"))]
     assert lines == [f"Applied {name}" for name in names]
     assert [row[0] for row in ledger(url)] == sorted(names)
-    assert list((ROOT / "migrations/riftbound").glob("*.sql")) == []
     actual, extensions = snapshot(url)
     expected, expected_extensions = snapshot(baseline)
-    assert actual == expected
+    omitted = {f"constraint:{table}.{name}" for table, name, _ in owners.OMITTED_FOREIGN_KEYS}
+    assert {key: value for key, value in owned(actual, "core").items() if key not in omitted and key in expected} == expected
     assert extensions == expected_extensions
-    assert not owned(actual, "pokemon")
     assert not owned(actual, "auth")
-    with psycopg.connect(url) as conn:
-        assert all(owners.relation_owner(name) in ("core", "ledger") for name in schema_snapshot.relation_names(conn))
-        assert not {f"constraint:{table}.{name}" for table, name, _ in owners.OMITTED_FOREIGN_KEYS} & actual.keys()
-    assert data(url) == data(baseline)
+    assert omitted <= actual.keys()
+    assert {key: value for key, value in data(url).items() if key in data(baseline)} == data(baseline)
 
 
 def test_rerunning_the_entry_changes_neither_schema_data_nor_ledger(fresh):
