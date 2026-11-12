@@ -19,6 +19,7 @@ type Load =
   | { kind: "failed" };
 
 type Pending = { action: string; value: string; key: string };
+type NameFeedback = { kind: "validation" | "request"; message: string } | null;
 
 /** The Invite Link's address on this site. */
 export function inviteUrl(token: string): string {
@@ -44,7 +45,9 @@ export function PrivacySection({
   const [name, setName] = useState("");
   const [handle, setHandleText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [nameNotice, setNameNotice] = useState("");
+  const [nameFeedback, setNameFeedback] = useState<NameFeedback>(null);
+  const nameNotice = nameFeedback?.message ?? "";
+  const nameInvalid = nameFeedback?.kind === "validation";
   const [handleNotice, setHandleNotice] = useState("");
   const [linkNotice, setLinkNotice] = useState("");
   const [status, setStatus] = useState("");
@@ -53,17 +56,20 @@ export function PrivacySection({
   const newLinkButton = useRef<HTMLButtonElement>(null);
   const base = useId();
   const nameInput = useRef<HTMLInputElement>(null);
-  const [nameInvalid, setNameInvalid] = useState(false);
+
+  function setNameNotice(message: string) {
+    setNameFeedback(message ? { kind: "request", message } : null);
+  }
 
   function refuseName(message: string) {
-    setNameInvalid(true);
-    setNameNotice(message);
+    setNameFeedback({ kind: "validation", message });
     nameInput.current?.focus();
   }
 
   function show(profile: CollectorProfile) {
     setLoad({ kind: "ready", profile });
     setName(profile.display_name);
+    setNameNotice("");
     setHandleText(profile.handle);
   }
   useEffect(() => {
@@ -181,7 +187,6 @@ export function PrivacySection({
                     const value = event.target.value;
                     setName(value);
                     if (value.trim() && [...value.trim()].length <= 40) {
-                      setNameInvalid(false);
                       setNameNotice("");
                     }
                   }}
