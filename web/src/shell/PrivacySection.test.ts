@@ -169,3 +169,131 @@ it.each(["pending", "saved"])(
     }
   }
 );
+
+async function pendingNameSave() {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let reject!: (cause: ProfileError) => void;
+  vi.mocked(setDisplayName).mockImplementation(
+    () =>
+      new Promise((_resolve, refuse) => {
+        reject = refuse;
+      })
+  );
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(h(PrivacySection)));
+  const [name, handle] = [...host.querySelectorAll<HTMLInputElement>("input")];
+  const save = name.closest("form")!.querySelector("button")!;
+  const helpId = name.getAttribute("aria-describedby")!;
+  const edit = async (value: string) =>
+    act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )!.set!.call(name, value);
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  await edit("bad");
+  name.focus();
+  await act(async () =>
+    name
+      .closest("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+  );
+  return {
+    host,
+    name,
+    handle,
+    save,
+    helpId,
+    edit,
+    refuse: async (code: string) =>
+      act(async () => reject(new ProfileError(422, code))),
+    cleanup: async () => {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
+it.each([
+  ["Sam", true],
+  ["Jordan", false],
+] as const)(
+  "drops a refusal for a name edited to %s while the save was pending",
+  async (value, enabled) => {
+    const fixture = await pendingNameSave();
+    try {
+      await fixture.edit(value);
+      fixture.handle.focus();
+      expect(document.activeElement).toBe(fixture.handle);
+      await fixture.refuse("DISPLAY_NAME_NOT_ALLOWED");
+      expect(document.activeElement).toBe(fixture.handle);
+      expect(fixture.name.getAttribute("aria-invalid")).toBeNull();
+      expect(fixture.host.querySelector('[role="alert"]')).toBeNull();
+      expect(fixture.name.getAttribute("aria-describedby")).toBe(
+        fixture.helpId
+      );
+      expect(fixture.save.disabled).toBe(!enabled);
+    } finally {
+      await fixture.cleanup();
+    }
+  }
+);
+
+it.each(["Handle", "outside button"])(
+  "marks but doesn't take focus when the collector moved to %s",
+  async (where) => {
+    const fixture = await pendingNameSave();
+    const outside = document.createElement("button");
+    outside.textContent = "Elsewhere";
+    if (where === "outside button") document.body.append(outside);
+    const target = where === "Handle" ? fixture.handle : outside;
+    try {
+      target.focus();
+      expect(document.activeElement).toBe(target);
+      await fixture.refuse("INVALID_DISPLAY_NAME");
+      expect(document.activeElement).toBe(target);
+      expect(fixture.name.getAttribute("aria-invalid")).toBe("true");
+      const alert = fixture.host.querySelector('[role="alert"]')!;
+      expect(alert.textContent).toBe("Enter a name of 1 to 40 characters.");
+      expect(fixture.name.getAttribute("aria-describedby")!.split(" ")).toEqual(
+        [fixture.helpId, alert.id]
+      );
+      expect(
+        document.getElementById(fixture.helpId)?.textContent?.trim()
+      ).toMatch(/^Friends see this name/);
+    } finally {
+      outside.remove();
+      await fixture.cleanup();
+    }
+  }
+);
+
+it("takes focus on a late refusal when focus fell to the page", async () => {
+  const fixture = await pendingNameSave();
+  try {
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    await fixture.refuse("INVALID_DISPLAY_NAME");
+    expect(document.activeElement).toBe(fixture.name);
+    expect(fixture.name.getAttribute("aria-invalid")).toBe("true");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+it("applies a refusal after editing away and back", async () => {
+  const fixture = await pendingNameSave();
+  try {
+    await fixture.edit("Sam");
+    await fixture.edit("bad");
+    await fixture.refuse("INVALID_DISPLAY_NAME");
+    expect(fixture.name.getAttribute("aria-invalid")).toBe("true");
+    expect(fixture.host.querySelector('[role="alert"]')).not.toBeNull();
+  } finally {
+    await fixture.cleanup();
+  }
+});

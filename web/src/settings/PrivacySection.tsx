@@ -31,6 +31,7 @@ export function inviteUrl(token: string): string {
  * the Handle and the Invite Link, then the children (Hidden Locations, #249), as the spec orders them. Each change is an idempotent owner
  * command; a change that failed for a reason other than a refusal is sent again with the same key when the collector
  * retries the same value, so a change that was saved isn't made twice.
+ * A refusal applies only to the name it refused, and moves focus only if the collector hasn't left the name form.
  */
 export function PrivacySection({
   blocked,
@@ -56,19 +57,30 @@ export function PrivacySection({
   const newLinkButton = useRef<HTMLButtonElement>(null);
   const base = useId();
   const nameInput = useRef<HTMLInputElement>(null);
+  const nameForm = useRef<HTMLFormElement>(null);
+  const currentName = useRef("");
 
   function setNameNotice(message: string) {
     setNameFeedback(message ? { kind: "request", message } : null);
   }
 
-  function refuseName(message: string) {
+  function refuseName(message: string, focus: "always" | "if-here") {
     setNameFeedback({ kind: "validation", message });
-    nameInput.current?.focus();
+    const active = document.activeElement;
+    if (
+      focus === "always" ||
+      active === null ||
+      active === document.body ||
+      nameForm.current?.contains(active)
+    ) {
+      nameInput.current?.focus();
+    }
   }
 
   function show(profile: CollectorProfile) {
     setLoad({ kind: "ready", profile });
     setName(profile.display_name);
+    currentName.current = profile.display_name;
     setNameNotice("");
     setHandleText(profile.handle);
   }
@@ -111,7 +123,9 @@ export function PrivacySection({
         (cause.code === "INVALID_DISPLAY_NAME" ||
           cause.code === "DISPLAY_NAME_NOT_ALLOWED")
       ) {
-        refuseName(profileMessage(cause));
+        if (currentName.current === value) {
+          refuseName(profileMessage(cause), "if-here");
+        }
       } else notice(profileMessage(cause));
     } finally {
       setBusy(false);
@@ -154,11 +168,12 @@ export function PrivacySection({
               Your name
             </h3>
             <form
+              ref={nameForm}
               className="flex flex-wrap items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!name.trim() || [...name.trim()].length > 40) {
-                  refuseName("Enter a name of 1 to 40 characters.");
+                  refuseName("Enter a name of 1 to 40 characters.", "always");
                   return;
                 }
                 void change(
@@ -186,6 +201,7 @@ export function PrivacySection({
                   onChange={(event) => {
                     const value = event.target.value;
                     setName(value);
+                    currentName.current = value;
                     if (value.trim() && [...value.trim()].length <= 40) {
                       setNameNotice("");
                     }
