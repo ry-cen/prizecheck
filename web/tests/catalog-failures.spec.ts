@@ -88,6 +88,96 @@ for (const viewport of [
         ).toBe(2);
       });
     }
+    test("Discard abandons a failed restored Add before adding a different Edition", async ({
+      page,
+    }) => {
+      await prepare(page);
+      const main = page.locator("main:visible");
+      await main
+        .getByRole("button", { name: /^One more Bulbasaur/ })
+        .first()
+        .click();
+      await page.route("**/api/holdings/batch", (route) => route.abort());
+      await main
+        .getByRole("button", { name: "Add 1 card", exact: true })
+        .click();
+      await expect(main).toContainText("Press Add again to check safely");
+      await page.route("**/api/catalog/editions?*", (route) =>
+        new URL(route.request().url()).searchParams.has("printing_id")
+          ? route.abort()
+          : route.continue()
+      );
+      page.on("dialog", (dialog) => dialog.accept());
+      await page.reload();
+      await main
+        .getByRole("button", { name: "Discard queue", exact: true })
+        .click();
+      await expect(main).toContainText("Your earlier add may have finished.");
+      await page.unroute("**/api/catalog/editions?*");
+      await page.unroute("**/api/holdings/batch");
+      await main
+        .getByRole("button", { name: /^One more Rare Candy/ })
+        .first()
+        .click();
+      const request = page.waitForRequest(
+        (r) =>
+          new URL(r.url()).pathname === "/api/holdings/batch" &&
+          r.method() === "POST"
+      );
+      const editionId = await main
+        .locator("li[data-edition-id]")
+        .filter({
+          has: page.getByRole("button", { name: /^One more Rare Candy/ }),
+        })
+        .first()
+        .getAttribute("data-edition-id");
+      await main
+        .getByRole("button", { name: "Add 1 card", exact: true })
+        .click();
+      expect((await request).postDataJSON().items).toEqual([
+        { edition_id: editionId, quantity: "1" },
+      ]);
+      await expect(
+        main.getByRole("list", { name: "Cards to add" })
+      ).toHaveCount(0);
+    });
+    for (const pending of [false, 0, "", [], { key: "partial" }]) {
+      test(`malformed pending ${JSON.stringify(pending)} does not block a new Add`, async ({
+        page,
+      }) => {
+        await prepare(page);
+        const main = page.locator("main:visible");
+        await main
+          .getByRole("button", { name: /^One more Bulbasaur/ })
+          .first()
+          .click();
+        await page.evaluate((value) => {
+          const key = Object.keys(sessionStorage).find(
+            (k) => k.startsWith("prizecheck:add-queue:") && k.endsWith(":page")
+          )!;
+          const draft = JSON.parse(sessionStorage.getItem(key)!);
+          sessionStorage.setItem(
+            key,
+            JSON.stringify({ ...draft, pending: value })
+          );
+        }, pending);
+        page.on("dialog", (dialog) => dialog.accept());
+        await page.reload();
+        await expect(
+          main.getByRole("list", { name: "Cards to add" })
+        ).toHaveCount(0);
+        await main
+          .getByRole("button", { name: /^One more Rare Candy/ })
+          .first()
+          .click();
+        await main
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await expect(
+          main.getByRole("list", { name: "Cards to add" })
+        ).toHaveCount(0);
+      });
+    }
     test("search error replaces empty results and recovers", async ({
       page,
     }) => {

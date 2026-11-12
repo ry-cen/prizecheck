@@ -887,3 +887,97 @@ test("storage read errors leave Add usable in memory", async () => {
   await close();
   spy.mockRestore();
 });
+
+test("Discard abandons a persisted pending command after failed restoration and retains the warning", async () => {
+  const { addCards } = await import("./cardActions");
+  const { batchAddHoldings } = await import("../holdings_generated");
+  const send = vi.mocked(batchAddHoldings);
+  send.mockReset().mockRejectedValueOnce(Error("never committed"));
+  let close = await mount();
+  await edit();
+  await edit();
+  await act(async () =>
+    queue.settle(
+      await addCards("box", "Box", A2, queue.pending, queue.submitting)
+    )
+  );
+  const abandonedKey = rec().pending.key;
+  await close();
+  vi.mocked(browseEditions).mockRejectedValueOnce(Error("restore offline"));
+  close = await mount();
+  expect(queue.restoreFailed).toBe(true);
+  expect(queue.pending.current?.key).toBe(abandonedKey);
+  await act(async () => queue.clear());
+  expect(queue.pending.current).toBe(null);
+  expect(rec().pending).toBe(null);
+  expect(queue.uncertain).toBe(true);
+  await close();
+  close = await mount();
+  expect(queue.uncertain).toBe(true);
+  expect(queue.pending.current).toBe(null);
+  await edit(second);
+  await act(async () => queue.setChosen("different-box"));
+  send.mockClear().mockResolvedValueOnce({
+    copy_count: "1",
+    edition_count: 1,
+    owner_revision: 2,
+    undo_id: "undo",
+    location_id: "different-box",
+  });
+  await act(async () =>
+    queue.settle(
+      await addCards(
+        "different-box",
+        "Different Box",
+        [{ editionId: "two", quantity: 1 }],
+        queue.pending,
+        queue.submitting
+      )
+    )
+  );
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send.mock.lastCall?.[0]).toMatchObject({
+    location_id: "different-box",
+    items: [{ edition_id: "two", quantity: "1" }],
+  });
+  expect(send.mock.lastCall?.[0].idempotency_key).not.toBe(abandonedKey);
+  expect(counts()).toEqual([]);
+  expect(queue.uncertain).toBe(true);
+  await close();
+});
+
+test.each([false, 0, "", [], { key: "partial" }])(
+  "malformed pending %j is dropped and Add remains usable",
+  async (pending) => {
+    preset(false);
+    sessionStorage.setItem(K, JSON.stringify({ ...rec(), pending }));
+    const close = await mount();
+    expect(queue.pending.current).toBe(null);
+    expect(rec()).toBe(null);
+    const { addCards } = await import("./cardActions");
+    const { batchAddHoldings } = await import("../holdings_generated");
+    const send = vi.mocked(batchAddHoldings);
+    send.mockReset().mockResolvedValueOnce({
+      copy_count: "1",
+      edition_count: 1,
+      owner_revision: 2,
+      undo_id: "undo",
+      location_id: "box",
+    });
+    await edit(second);
+    await act(async () =>
+      queue.settle(
+        await addCards(
+          "box",
+          "Box",
+          [{ editionId: "two", quantity: 1 }],
+          queue.pending,
+          queue.submitting
+        )
+      )
+    );
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(counts()).toEqual([]);
+    await close();
+  }
+);

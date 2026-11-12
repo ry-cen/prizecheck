@@ -53,8 +53,11 @@ function read(key: string): Draft {
     )
       throw Error();
     if (
-      d.pending &&
-      (typeof d.pending.key !== "string" ||
+      d.pending !== undefined &&
+      d.pending !== null &&
+      (typeof d.pending !== "object" ||
+        Array.isArray(d.pending) ||
+        typeof d.pending.key !== "string" ||
         !d.pending.key ||
         typeof d.pending.locationId !== "string" ||
         !d.pending.locationId ||
@@ -65,10 +68,13 @@ function read(key: string): Draft {
         !d.pending.items.every(
           (i) =>
             typeof i.editionId === "string" &&
+            i.editionId.length > 0 &&
             Number.isInteger(i.quantity) &&
             i.quantity > 0 &&
             i.quantity <= MAX_ADD
-        ))
+        ) ||
+        new Set(d.pending.items.map((i) => i.editionId)).size !==
+          d.pending.items.length)
     )
       throw Error();
     return d;
@@ -321,6 +327,12 @@ export function useStoredAddQueue(scope: string) {
     clear() {
       if (!liveOwner()) return;
       ++restoration.current;
+      // Discard explicitly abandons replay, but cannot prove the earlier Add never committed.
+      if (s.current.pending.current) {
+        s.current.pending.current = null;
+        s.current.restoredMarker = true;
+        s.current.open = false;
+      }
       s.current.phase = "ready";
       s.current.notice = "";
       s.current.queue = EMPTY_QUEUE;
