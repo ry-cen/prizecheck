@@ -654,6 +654,10 @@ test("a late quiet read cannot restore an open item after Withdraw completes", a
       .getByRole("button", { name: "More for this Trade" })
       .click();
     await page.getByRole("menuitem", { name: "Withdraw", exact: true }).click();
+    await main(page)
+      .getByRole("group", { name: "Withdraw", exact: true })
+      .getByRole("button", { name: "Withdraw", exact: true })
+      .click();
     await commanding;
     releaseCommand();
     await expect(open).toHaveCount(0);
@@ -933,6 +937,10 @@ for (const first of ["withdraw", "page"] as const) {
         .click();
       await page
         .getByRole("menuitem", { name: "Withdraw", exact: true })
+        .click();
+      await main(page)
+        .getByRole("group", { name: "Withdraw", exact: true })
+        .getByRole("button", { name: "Withdraw", exact: true })
         .click();
       await commanding;
       if (first === "withdraw") {

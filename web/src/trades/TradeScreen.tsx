@@ -91,17 +91,17 @@ const RELOAD = new Set([
 ]);
 
 /** A step the screen runs; its idempotency key is kept under this name until it settles. */
-type StepName = Asking | "withdraw" | "accept" | "use_suggested" | "confirm";
+type StepName = Asking | "accept" | "use_suggested" | "confirm";
 
 /** A place the confirm dialog offers for the cards the reader gets: one of their Storage Leaves or Decks, by full
  * path, a Deck marked " (Deck)". */
 type SwapPlace = { id: string; path: string; label: string };
 
-/** Cancel and Decline ask once inline; Withdraw acts directly. */
-type Asking = "cancel" | "decline";
+/** Cancel, Decline and Withdraw ask once inline. */
+type Asking = "cancel" | "decline" | "withdraw";
 
 /** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
- * it asks, its opener after Keep it (Decline, or ⋯ for Cancel Trade), and the heading after a step or a
+ * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Trade), and the heading after a step or a
  * refusal that reads the Trade again. */
 type FocusNext = "ask" | "menu" | "decline" | "heading";
 
@@ -114,6 +114,11 @@ const ASK: Record<
       `Decline this Trade Proposal from ${other}? You can't undo it.`,
     yes: "Decline",
   },
+  withdraw: {
+    question: (other) =>
+      `Withdraw this Trade Proposal to ${other}? None of these cards stay promised.`,
+    yes: "Withdraw",
+  },
   cancel: {
     question: (other) =>
       `Cancel this Trade with ${other}? None of these cards stay promised.`,
@@ -122,7 +127,7 @@ const ASK: Record<
 };
 
 /** What each step's toast says once it went through. Confirm swap's names where the cards went (swapDoneMessage). */
-const DONE: Record<Asking | "withdraw" | "accept" | "use_suggested", string> = {
+const DONE: Record<Asking | "accept" | "use_suggested", string> = {
   accept: "Accepted. Swap the cards in person, then confirm.",
   use_suggested: "Picks updated",
   decline: "Declined",
@@ -131,7 +136,7 @@ const DONE: Record<Asking | "withdraw" | "accept" | "use_suggested", string> = {
 };
 
 /** The live item offer, its actions and inline physical-swap consent, beside its chat on wide screens.
- * Withdraw acts directly; Decline and Cancel ask once inline. Unknown commands retain their exact consent and key.
+ * Withdraw, Decline and Cancel ask once inline. Unknown commands retain their exact consent and key.
  * Picks, destinations and selected Deck switches come only from the reader's own inventory. */
 export function TradeScreen({
   tradeId,
@@ -631,7 +636,7 @@ export function TradeScreen({
         ]
       : []),
     ...(trade.actions.includes("withdraw")
-      ? [{ label: "Withdraw", onSelect: () => run.withdraw() }]
+      ? [{ label: "Withdraw", onSelect: () => ask("withdraw") }]
       : []),
     ...(trade.actions.includes("cancel")
       ? [{ label: "Cancel Trade", onSelect: () => ask("cancel") }]
