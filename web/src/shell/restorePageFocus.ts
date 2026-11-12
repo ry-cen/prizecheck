@@ -8,8 +8,44 @@ export type SavedFocus = {
   name: string;
 };
 
-const nameOf = (element: Element) =>
-  (element.getAttribute("aria-label") ?? element.textContent ?? "").trim();
+export type PageEntryFocus = {
+  kind: "heading";
+  state: "pending" | "completed" | "cancelled";
+  opener: Element | null;
+};
+
+const entryFocusCleanup = new WeakMap<PageEntryFocus, () => void>();
+
+/** One request per pushed entry. Replacements share its lifecycle, never a fresh exemption. */
+export function createPageEntryFocus(): PageEntryFocus {
+  let state: PageEntryFocus["state"] = "pending";
+  const request: PageEntryFocus = {
+    kind: "heading",
+    get state() {
+      return state;
+    },
+    set state(next) {
+      state = next;
+      // Route changes can settle a request without rerunning the Shell effect.
+      if (next !== "pending") entryFocusCleanup.get(request)?.();
+    },
+    opener: document.activeElement,
+  };
+  return request;
+}
+
+export type PageFocus = SavedFocus | PageEntryFocus;
+
+const nameOf = (element: Element) => {
+  const label = element.getAttribute("aria-label");
+  if (label !== null) return label.trim();
+  // Descriptive tile facts can change during a read; aria-hidden text is not part of the control's name.
+  const named = element.cloneNode(true) as Element;
+  named
+    .querySelectorAll('[aria-hidden="true"]')
+    .forEach((child) => child.remove());
+  return (named.textContent ?? "").trim();
+};
 
 /** What had focus, unless nothing in particular did. */
 export function saveFocus(): SavedFocus | null {
@@ -36,13 +72,89 @@ function find(container: HTMLElement, saved: SavedFocus): HTMLElement | null {
   return twins.length === 1 ? twins[0] : null;
 }
 
-/** Back or Forward to an entry gives focus back to the control that left it, once it is drawn again; focus moved by
- * the collector or the page first, any input, or a bounded wait releases it. Scroll is the shell's to restore. */
+function entryHeading(container: HTMLElement): HTMLElement | "loading" | null {
+  const heading = [...container.querySelectorAll<HTMLElement>("h1")].find(
+    (element) => !element.closest("[hidden],[inert]")
+  );
+  if (!heading) return null;
+  return heading.matches('[data-page-heading="loading"]') ? "loading" : heading;
+}
+
+/** Pending until the page's first visible H1 is ready (not marked `data-page-heading="loading"`); no timer.
+ * Interaction, focus elsewhere, or effect cleanup by a new navigation end it. */
+function focusPageEntry(
+  container: HTMLElement,
+  request: PageEntryFocus
+): () => void {
+  if (request.state !== "pending") return () => {};
+  let target: HTMLElement | null = null;
+  let detached = false;
+  const detach = () => {
+    if (detached) return;
+    detached = true;
+    if (entryFocusCleanup.get(request) === detach)
+      entryFocusCleanup.delete(request);
+    observer.disconnect();
+    window.removeEventListener("pointerdown", cancel, true);
+    window.removeEventListener("keydown", cancel, true);
+    window.removeEventListener("wheel", cancel, true);
+    window.removeEventListener("focusin", focused, true);
+  };
+  const cancel = () => {
+    request.state = "cancelled";
+    detach();
+  };
+  const focused = (event: FocusEvent) => {
+    if (event.target !== target) cancel();
+  };
+  const attempt = () => {
+    if (detached || request.state !== "pending") {
+      detach();
+      return;
+    }
+    const active = document.activeElement;
+    if (
+      active &&
+      active !== document.body &&
+      !(request.opener?.isConnected && active === request.opener)
+    ) {
+      cancel();
+      return;
+    }
+    const heading = entryHeading(container);
+    if (!heading || heading === "loading") return;
+    target = heading;
+    heading.tabIndex = -1;
+    heading.classList.add("outline-none");
+    heading.focus({ preventScroll: true });
+    if (request.state === "pending" && document.activeElement === heading) {
+      request.state = "completed";
+      detach();
+    } else target = null;
+  };
+  const observer = new MutationObserver(attempt);
+  observer.observe(container, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-page-heading", "hidden", "inert"],
+  });
+  window.addEventListener("pointerdown", cancel, true);
+  window.addEventListener("keydown", cancel, true);
+  window.addEventListener("wheel", cancel, { capture: true, passive: true });
+  window.addEventListener("focusin", focused, true);
+  entryFocusCleanup.set(request, detach);
+  attempt();
+  return detach;
+}
+
+/** Back or Forward gives focus back to the saved control. Scroll is the shell's to restore. */
 export function restorePageFocus(
   container: HTMLElement | null | undefined,
-  saved: SavedFocus | null | undefined
+  saved: PageFocus | null | undefined
 ): () => void {
   if (!container || !saved) return () => {};
+  if ("kind" in saved) return focusPageEntry(container, saved);
   let observer: MutationObserver | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
@@ -60,7 +172,6 @@ export function restorePageFocus(
     if (document.activeElement === element) stop();
   };
   attempt();
-  // Leaving dropped focus to the body while the page was hidden or remounted; wait for the control to be drawn.
   if (document.activeElement === document.body) {
     observer = new MutationObserver(attempt);
     observer.observe(container, { childList: true, subtree: true });

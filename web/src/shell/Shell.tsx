@@ -1,5 +1,5 @@
 import { AddQueueAccount } from "../catalog/useStoredAddQueue";
-import { restorePageFocus, type SavedFocus } from "./restorePageFocus";
+import { restorePageFocus, type PageFocus } from "./restorePageFocus";
 import { restorePageScroll } from "./restorePageScroll";
 import { usePageTitle } from "./usePageTitle";
 import { LoanRecoveryProvider } from "../loans/LoanRecovery";
@@ -91,8 +91,8 @@ type Props = {
   onSignOut: () => Promise<boolean>;
   /** The scroll position the page at a path had when it was last left (useRoute). */
   scrollFor: (path: string) => number;
-  /** The control that had focus when the current history entry was last left. */
-  focusFor?: () => SavedFocus | null;
+  /** Forward entry heading intent, or the control saved for a history traversal. */
+  focusFor?: () => PageFocus | null;
   /** Renders a page; `active` is false while a kept-mounted page is hidden. */
   renderPage: (page: PageId, active: boolean) => ReactNode;
   /** A page that isn't one of the app's pages: Discover or a Published Deck, signed in (#163), or a Friend's
@@ -255,10 +255,11 @@ function ShellFrame({
       otherKey !== null ? otherContainer.current : containers.current.get(page);
     const stopScroll = restorePageScroll(container, scrollFor(path));
     // Once per visit to an entry: a rerun for another reason must not bring back an old focus.
+    const focus = focusFor?.();
     const stopFocus =
-      restoredFocusEntry.current === entry
+      restoredFocusEntry.current === entry && !(focus && "kind" in focus)
         ? () => {}
-        : restorePageFocus(container, focusFor?.());
+        : restorePageFocus(container, focus);
     restoredFocusEntry.current = entry;
     return () => {
       stopScroll();

@@ -419,7 +419,11 @@ export function LoanScreen({
           <Avatar name={load.loan.other.display_name} />
         )}
         <div className="min-w-0 flex-1">
-          <PageHeader title={title} headingRef={heading} />
+          <PageHeader
+            loading={load.kind === "loading"}
+            title={title}
+            headingRef={heading}
+          />
         </div>
         {!commandFenced && actions && (
           <div className="absolute top-0 right-0">{actions}</div>

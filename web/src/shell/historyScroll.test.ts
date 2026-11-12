@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
+import { OWNER_SUBPATHS } from "../owner/sections";
 import { useLeaveGuard, useRoute, type Route } from "./useRoute";
 
 it("keeps Collection queries reactive and restores separate visits to the same detail address", async () => {
@@ -185,7 +186,10 @@ it("records the control that left each entry and offers it back on Back, not on 
     const wantList = window.history.state;
     link.focus();
     await act(async () => route.navigate("/decks/d1"));
-    expect(route.focusFor()).toBeNull();
+    expect(route.focusFor()).toMatchObject({
+      kind: "heading",
+      state: "pending",
+    });
     link.remove();
     await act(async () => {
       window.history.replaceState(wantList, "", "/decks/want-list");
@@ -205,6 +209,77 @@ it("records the control that left each entry and offers it back on Back, not on 
     expect(route.focusFor()).toBeNull();
   } finally {
     link.remove();
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
+it("only requests heading focus for forward in-app page entry", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/decks");
+  let route!: Route;
+  function View() {
+    route = useRoute();
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  try {
+    await act(async () => root.render(createElement(View)));
+    expect(route.focusFor()).toBeNull();
+    await act(async () =>
+      route.navigate("/decks/canonical", { replace: true })
+    );
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/decks/d1"));
+    expect(route.focusFor()).toMatchObject({
+      kind: "heading",
+      state: "pending",
+    });
+    await act(async () => route.navigate("/decks/d1?view=list"));
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/loans"));
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/loans/l1"));
+    expect(route.focusFor()).toMatchObject({
+      kind: "heading",
+      state: "pending",
+    });
+    const detail = window.history.state;
+    await act(async () => route.navigate("/loans/l2", { replace: true }));
+    expect(route.focusFor()).toMatchObject({
+      kind: "heading",
+      state: "pending",
+    });
+    await act(async () => {
+      window.history.replaceState(detail, "", "/loans/l1");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(route.focusFor()).toBeNull();
+
+    for (const [from, to, pending] of [
+      ["/decks", "/decks/want-list", false],
+      ["/decks/d1", "/decks/want-list?deck=d1", true],
+      ["/trades", "/trades/find", false],
+      ["/trades/find", "/trades/t1", true],
+      ["/owner", `/owner/${OWNER_SUBPATHS[0]}`, false],
+    ] as const) {
+      await act(async () => route.navigate(from));
+      await act(async () => route.navigate(to));
+      if (pending)
+        expect(route.focusFor()).toMatchObject({
+          kind: "heading",
+          state: "pending",
+        });
+      else expect(route.focusFor()).toBeNull();
+    }
+    await act(async () => route.navigate("/decks/overlay", { overlay: true }));
+    expect(route.focusFor()).toBeNull();
+    await act(async () => route.navigate("/trades/t1"));
+    const pending = route.focusFor();
+    await act(async () => route.navigate("/trades", { replace: true }));
+    expect(route.focusFor()).toBeNull();
+    expect(pending).toMatchObject({ state: "cancelled" });
+  } finally {
     await act(async () => root.unmount());
     vi.unstubAllGlobals();
   }
