@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { signInAsOwner } from "./support/sign-in";
 import { createDeck } from "./support/loans";
@@ -31,7 +32,7 @@ for (const viewport of [
     ).toEqual([]);
     await handle.fill("valid_handle");
     await expect(handle).not.toHaveAttribute("aria-invalid", "true");
-    const deck = await createDeck(page, "Title focus");
+    const deck = await createDeck(page, `Title focus ${randomUUID()}`);
     await page.goto(`/decks/${deck}`);
     await page.getByRole("button", { name: "Publish", exact: true }).click();
     const title = page.getByRole("textbox", {

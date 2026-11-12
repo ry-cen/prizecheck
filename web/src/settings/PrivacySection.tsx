@@ -272,7 +272,7 @@ export function PrivacySection({
               className="flex flex-wrap items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!/^[a-zA-Z0-9_]{3,20}$/.test(handle)) {
+                if (!/^[a-zA-Z0-9_]{3,20}$/.test(handle.trim())) {
                   refuseField(
                     "Use 3 to 20 letters, digits and underscores.",
                     "always",
@@ -306,7 +306,8 @@ export function PrivacySection({
                     const value = event.target.value;
                     setHandleText(value);
                     currentHandle.current = value;
-                    if (/^[a-zA-Z0-9_]{3,20}$/.test(value)) setHandleNotice("");
+                    if (/^[a-zA-Z0-9_]{3,20}$/.test(value.trim()))
+                      setHandleNotice("");
                   }}
                 />
               </div>
