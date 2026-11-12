@@ -40,6 +40,7 @@ const switched: SwitchedDeck = {
 function host() {
   let current: ToastInput | null = null;
   const toast: ReturnType<typeof useToast> = {
+    getVersion: () => 1,
     show: vi.fn((input) => {
       current = input;
       return 1;

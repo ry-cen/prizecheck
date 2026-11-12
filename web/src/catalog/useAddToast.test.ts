@@ -162,3 +162,121 @@ test.each(["bar", "popup"] as const)(
     expect(dismissUndo).toHaveBeenCalledExactlyOnceWith(added.undoId);
   }
 );
+
+test.each(["bar", "popup"] as const)(
+  "Dismiss survives a failed Undo list from %s",
+  async (from) => {
+    vi.mocked(listUndo).mockRejectedValueOnce(new Error("503"));
+    await act(async () => {
+      expect(await notify({ ...added, from })).toBeNull();
+    });
+    expect(host.querySelector('button:not([aria-label="Dismiss"])')).toBeNull();
+    await act(async () => {
+      host
+        .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+        .click();
+    });
+    expect(dismissUndo).toHaveBeenCalledExactlyOnceWith(added.undoId);
+  }
+);
+
+test.each([false, true])(
+  "a delayed Dismiss error preserves a newer shell notification (already dismissed: %s)",
+  async (dismissed) => {
+    await offer();
+    let reject!: (error: Error) => void;
+    vi.mocked(dismissUndo).mockReturnValueOnce(
+      new Promise((_, fail) => {
+        reject = fail;
+      })
+    );
+    await act(async () => {
+      host
+        .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+        .click();
+    });
+    await act(async () => {
+      const id = kit.show({ message: "Sign-out failed" });
+      if (dismissed) kit.dismiss(id);
+      reject(new Error("503"));
+    });
+    expect(host.textContent).not.toContain("Couldn't dismiss");
+    if (!dismissed) expect(host.textContent).toContain("Sign-out failed");
+  }
+);
+
+test("a missing record is harmless after a failed list request", async () => {
+  const { MoveError } = await import("../moves_generated");
+  vi.mocked(listUndo).mockRejectedValueOnce(new Error("503"));
+  vi.mocked(dismissUndo).mockRejectedValueOnce(
+    new MoveError(404, "UNDO_NOT_FOUND")
+  );
+  await offer();
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+      .click();
+  });
+  expect(dismissUndo).toHaveBeenCalledWith(added.undoId);
+  expect(host.textContent).toBe("");
+});
+
+test("a failed Dismiss retries deletion without inventing an Undo offer", async () => {
+  vi.mocked(listUndo).mockRejectedValueOnce(new Error("503"));
+  vi.mocked(dismissUndo).mockRejectedValueOnce(new Error("503"));
+  await offer();
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+      .click();
+  });
+  expect(host.textContent).toContain("Couldn't dismiss");
+  expect(host.querySelector('button:not([aria-label="Dismiss"])')).toBeNull();
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+      .click();
+  });
+  expect(dismissUndo).toHaveBeenCalledTimes(2);
+});
+
+test("an incompatible Undo keeps its persistent Dismiss", async () => {
+  const { MoveError } = await import("../moves_generated");
+  vi.mocked(applyUndo).mockRejectedValueOnce(
+    new MoveError(409, "UNDO_INCOMPATIBLE")
+  );
+  const undo = await offer();
+  await act(async () => {
+    await undo();
+  });
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+      .click();
+  });
+  expect(dismissUndo).toHaveBeenCalledWith(added.undoId);
+});
+
+test("Dismiss remains persistent while Undo is pending", async () => {
+  let finish!: (result: typeof removed) => void;
+  vi.mocked(applyUndo).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  const undo = await offer();
+  let pending!: ReturnType<InlineUndo>;
+  await act(async () => {
+    pending = undo();
+  });
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+      .click();
+  });
+  expect(dismissUndo).toHaveBeenCalledWith(added.undoId);
+  await act(async () => {
+    finish(removed);
+    await pending;
+  });
+});
