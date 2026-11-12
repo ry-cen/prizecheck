@@ -46,6 +46,8 @@ type Options = {
 
 export type SelectionState = {
   selected: Selection;
+  /** Select one viewed tile through the same selection model; returns a cancellation restore. */
+  selectForAction: (card: Inspected) => () => void;
   summary: SelectionSummary;
   /** The inspector's card: the last clicked selected Holding, or nothing without a selection. */
   inspected: Inspected | null;
@@ -242,6 +244,12 @@ export function useSelection({
       : null;
   return {
     selected,
+    selectForAction: (card) => {
+      const previous = latest.current.selected;
+      const previousFocus = latest.current.focus;
+      commit(toggleTile(EMPTY_SELECTION, card.holding, card.ordinal), card);
+      return () => commit(previous, previousFocus ?? undefined);
+    },
     dropBorrowed: () => commit(dropBorrowedSelection(latest.current.selected)),
     summary,
     inspected:
