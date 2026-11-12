@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { signInAsOwner } from "./support/sign-in";
 import { createDeck, ORIGIN } from "./support/loans";
+import { showAsLegal } from "./support/publish-gate";
 
 for (const viewport of [
   { width: 1280, height: 800 },
@@ -33,9 +34,16 @@ for (const viewport of [
     await handle.fill("valid_handle");
     await expect(handle).not.toHaveAttribute("aria-invalid", "true");
     const deck = await createDeck(page, `Title focus ${randomUUID()}`);
+    // Match publications.spec.ts: the page requires a legal Target Format result.
+    // This journey only opens the dialog; it sends no publish command to the server.
+    await showAsLegal(page, deck);
     await page.goto(`${ORIGIN}/decks/${deck}`);
-    await page.getByRole("button", { name: "Publish", exact: true }).click();
-    const title = page.getByRole("textbox", {
+    const publish = page.getByRole("button", { name: "Publish", exact: true });
+    await expect(publish).toBeEnabled();
+    await publish.click();
+    const dialog = page.getByRole("dialog", { name: "Publish", exact: true });
+    await expect(dialog).toBeVisible();
+    const title = dialog.getByRole("textbox", {
       name: "Public title",
       exact: true,
     });
@@ -45,7 +53,7 @@ for (const viewport of [
       /A public title is required to publish\./
     );
     await expect(
-      page.getByRole("button", { name: "Publish Unlisted snapshot" })
+      dialog.getByRole("button", { name: "Publish Unlisted snapshot" })
     ).toBeDisabled();
     expect(
       (
