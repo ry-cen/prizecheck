@@ -1,8 +1,7 @@
 """Riftbound TCGCSV group normaliser (#534), on synthetic groups only; no database, no network.
 
-Case IDs are from docs/planning/shared-core/riftbound-catalog-acceptance.md. A case marked "pending policy" asserts
-that the product is kept and flagged for an owner decision, and that no data is lost. It does not assert the
-outcome the acceptance spec proposes, which the owner has not adopted.
+Case IDs are from docs/planning/shared-core/riftbound-catalog-acceptance.md. Review cases assert retention under the owner-approved rules. Unsupported evidence remains in review;
+confirmed Token records remain in the separate excluded-source list. No real source records are fixtures.
 """
 import ast
 import json
@@ -56,7 +55,7 @@ def test_rb_id_01_alternate_art_is_one_identity_with_two_printings():
     assert result.review == ()
 
 
-def test_rb_id_01_pending_policy_other_markers_are_kept_and_not_merged():
+def test_rb_id_01_unsupported_marker_matches_are_kept_unmerged_for_review():
     base = product('Synthetic Unit 01')
     over = product('Synthetic Unit 01 (Overnumbered)', number='101/100')
     signed = product('Synthetic Unit 01 (Signature)', number='101*/100')
@@ -152,21 +151,17 @@ def test_rb_scope_01_a_product_with_number_and_card_type_has_no_scope_flag():
 
 
 @pytest.mark.parametrize('case, item, expected', [
-    # Pending policy. Each stays in the output, classified by what it has, and is flagged.
+    # Approved scope rule: incomplete evidence stays in the output for review.
     ('RB-SCOPE-02 sealed', product('Synthetic Booster Pack', number=None, card_type=None, domain=None, rarity=None),
      (False, False, True, False)),
-    ('RB-SCOPE-03 token', product('Synthetic Token', number=None, card_type='Token', domain=None),
-     (False, True, False, True)),
     ('RB-SCOPE-04 number, no card type', product('Synthetic Unit 07', card_type=None), (True, False, False, False)),
-    ('RB-SCOPE-05 token among types', product('Synthetic Unit 08', card_type='Unit;Token'),
-     (True, True, False, True)),
 ])
-def test_rb_scope_pending_policy_is_retained_classified_and_flagged(case, item, expected):
+def test_rb_scope_incomplete_evidence_is_retained_classified_and_flagged(case, item, expected):
     result = normalise_group([item], [price(item, 'Normal')])
     [kept] = result.printings
     assert (kept.scope.has_number, kept.scope.has_card_type, kept.scope.looks_sealed, kept.scope.looks_token) == expected
     assert FLAG_CARD_SCOPE_PENDING in kept.flags
-    assert kept.identity_key is None and result.identities == ()  # no identity is proposed before the decision
+    assert kept.identity_key is None and result.identities == ()  # no identity without enough scope evidence
     assert result.counts['products'] == 1 and result.counts[FLAG_CARD_SCOPE_PENDING] == 1
     assert kept.name == item['name'] and kept.editions  # nothing lost
 
@@ -187,7 +182,7 @@ def test_rb_pe_04_the_same_number_in_two_groups_is_two_printings():
     assert (first.printings[0].key.group_id, second.printings[0].key.group_id) == (900, 901)
 
 
-def test_rb_pe_05_pending_policy_duplicate_numbers_are_flagged_and_the_rest_normalise():
+def test_rb_pe_05_duplicate_numbers_hold_only_affected_products():
     one, two = product('Synthetic Unit 10'), product('Synthetic Unit 11')  # both 001/100
     other = product('Synthetic Unit 12', number='002/100')
     result = normalise_group([one, two, other], [price(p, 'Normal') for p in (one, two, other)])
@@ -222,16 +217,17 @@ def test_rb_fin_02_and_03_only_the_observed_finish_is_an_edition(subtype, finish
     assert [(e.subtype, e.finish) for e in kept.editions] == [(subtype, finish)]
 
 
-def test_rb_fin_04_pending_policy_an_unpriced_product_has_no_edition_and_a_flag():
+def test_rb_fin_04_an_eligible_unpriced_product_has_one_unspecified_edition():
     item = product('Synthetic Unit 01')
     result = normalise_group([item], [])
     [kept] = result.printings
-    assert kept.editions == () and kept.price_subtypes == ()
-    assert FLAG_FINISH_POLICY_PENDING in kept.flags
-    assert codes(result) == [FLAG_FINISH_POLICY_PENDING]
+    assert [(e.subtype, e.finish, e.prices) for e in kept.editions] == [(None, 'unspecified', ())]
+    assert kept.price_subtypes == ()
+    assert FLAG_FINISH_POLICY_PENDING not in kept.flags
+    assert result.review == ()
 
 
-def test_rb_fin_06_pending_policy_an_unknown_subtype_is_kept_and_flagged():
+def test_rb_fin_06_an_unknown_subtype_is_kept_and_flagged():
     item = product('Synthetic Unit 01')
     result = normalise_group([item], [price(item, 'Normal'), price(item, 'Synthetic Finish', 9.0)])
     [kept] = result.printings
@@ -250,7 +246,7 @@ def test_rb_promo_01_a_promo_without_rarity_is_not_an_error():
     assert result.review == ()
 
 
-def test_rb_promo_02_pending_policy_a_sealed_promo_is_kept_and_flagged():
+def test_rb_promo_02_an_apparently_sealed_promo_is_kept_for_review():
     pack = product('Synthetic Promo Pack', group=901, number=None, card_type=None, domain=None, rarity=None)
     result = normalise_group([pack], [price(pack, 'Normal')])
     assert len(result.printings) == 1 and FLAG_CARD_SCOPE_PENDING in result.printings[0].flags
@@ -314,7 +310,7 @@ def test_no_product_and_no_price_row_is_lost_and_the_output_is_ordered():
     result = normalise_group(list(reversed(items)), rows)
     assert [p.key.product_id for p in result.printings] == sorted(i['productId'] for i in items)
     assert sum(len(e.prices) for p in result.printings for e in p.editions) == len(rows)
-    assert result.counts['products'] == 5 and result.counts['editions'] == 4
+    assert result.counts['products'] == 5 and result.counts['editions'] == 5
     assert normalise_group(items, rows) == result  # same input, same result
 
 
@@ -332,7 +328,7 @@ def test_a_synthetic_group_file_round_trips():
     prices = json.loads((directory / 'group-900-prices.json').read_text())
     result = normalise_group(products, prices)
     assert result.group_id == 900
-    assert result.counts['products'] == len(products['results'])
+    assert result.counts['products'] == len(result.printings) + len(result.excluded) == len(products['results'])
     assert all(p.image_url.startswith('https://example.invalid/') for p in result.printings)
     assert {FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING, FLAG_MULTI_VALUE_UNPARSED,
             FLAG_FINISH_POLICY_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_IDENTITY_TEXT_CONFLICT} == set(codes(result))
@@ -347,12 +343,12 @@ def alternate_pair(**overrides):
     return base, alt
 
 
-def test_grouped_printings_that_differ_on_card_details_stay_grouped_and_are_flagged_for_review():
-    """Pending policy: whether such a difference should block the grouping is for the owner. Not a text conflict."""
+def test_printings_with_conflicting_details_are_kept_unmerged_for_review():
+    """Decision 5: unmerged candidates do not assert distinct underlying cards."""
     base, alt = alternate_pair(domain=None, tag='TagC')
     result = normalise_group([base, alt], [price(base, 'Normal'), price(alt, 'Normal')])
-    assert [(i.display_name, len(i.printings)) for i in result.identities] == [('Synthetic Unit 20', 2)]
-    assert all(p.identity_key is not None and FLAG_PRINTING_DETAILS_DIFFER in p.flags for p in result.printings)
+    assert result.identities == ()
+    assert all(p.identity_key is None and FLAG_PRINTING_DETAILS_DIFFER in p.flags for p in result.printings)
     assert FLAG_IDENTITY_TEXT_CONFLICT not in codes(result)
     [item] = [i for i in result.review if i.code == FLAG_PRINTING_DETAILS_DIFFER]
     assert item.product_ids == (base['productId'], alt['productId'])
@@ -368,6 +364,8 @@ def test_each_compared_detail_is_named_when_it_differs(field, override):
     result = normalise_group([base, alt], [price(base, 'Normal'), price(alt, 'Normal')])
     [item] = [i for i in result.review if i.code == FLAG_PRINTING_DETAILS_DIFFER]
     assert item.detail.endswith('differ on ' + field)
+    assert result.identities == ()
+    assert all(p.identity_key is None for p in result.printings)
 
 
 def test_a_difference_in_rarity_alone_is_not_a_details_difference():
@@ -487,3 +485,162 @@ def test_the_module_imports_no_pokemon_code():
             names = [a.name for a in node.names] if isinstance(node, ast.Import) else (
                 [node.module or ''] if isinstance(node, ast.ImportFrom) else [])
             assert not any('pokemon' in name for name in names), path
+
+
+@pytest.mark.parametrize('card_type', ['Token', 'Unit;Token', 'Unit;Battlefield;Token', 'Gear;Token'])
+@pytest.mark.parametrize('number', [None, 'T01'])
+def test_explicit_token_types_are_excluded_and_the_source_data_is_retained(card_type, number):
+    item = product('Synthetic token-shaped product', card_type=card_type, number=number)
+    result = normalise_group([item], [price(item, 'Foil')])
+    assert result.printings == result.identities == ()
+    [excluded] = result.excluded
+    assert excluded.scope.exclusion == 'token' and excluded.identity_key is None
+    assert excluded.extended_entries == tuple((e['name'], e['value']) for e in item['extendedData'])
+    assert excluded.editions[0].prices[0].market == 1.5  # retained source observation, not a catalog proposal
+    assert FLAG_CARD_SCOPE_PENDING not in excluded.flags
+    assert result.counts['products'] == result.counts['excluded_products'] == 1
+    assert normalise_group([item]).excluded[0].editions == ()
+
+
+@pytest.mark.parametrize('first,second', [('Token', 'Unit'), ('Unit', 'Token')])
+def test_a_conflicting_repeated_token_type_is_not_a_confirmed_exclusion(first, second):
+    item = product('Synthetic ambiguous type', card_type=first)
+    item['extendedData'].append({'name': 'Card Type', 'value': second})
+    result = normalise_group([item])
+    assert result.excluded == ()
+    [kept] = result.printings
+    assert kept.scope.exclusion is None
+    assert {FLAG_CARD_SCOPE_PENDING, FLAG_EXTENDED_FIELD_REPEATED} <= set(kept.flags)
+    assert kept.editions == ()
+
+
+@pytest.mark.parametrize('number,card_type', [(None, 'Unit'), ('001/100', None), (None, None),
+                                                   ('001/100', 'Unit,Token')])
+def test_incomplete_or_ambiguous_scope_gets_no_invented_edition(number, card_type):
+    result = normalise_group([product('Synthetic Booster Token name alone', number=number, card_type=card_type)])
+    assert result.excluded == ()  # names and missing fields never confirm a sealed product or Token
+    [kept] = result.printings
+    assert FLAG_CARD_SCOPE_PENDING in kept.flags and kept.editions == ()
+    assert FLAG_FINISH_POLICY_PENDING not in kept.flags
+
+
+@pytest.mark.parametrize('label', ['Overnumbered', 'Signature'])
+def test_recognised_labels_group_with_explicit_matching_details_and_rules_text(label):
+    base, labelled = alternate_pair()
+    labelled['name'] = 'Synthetic Unit 20 (' + label + ')'
+    result = normalise_group([labelled, base])
+    assert [len(i.printings) for i in result.identities] == [2]
+    assert all(p.identity_key == result.identities[0].identity_key for p in result.printings)
+    assert result.review == ()
+    assert len({p.key for p in result.printings}) == 2
+    assert all(p.editions[0].finish == 'unspecified' for p in result.printings)
+
+
+@pytest.mark.parametrize('label', ['Overnumbered', 'Signature', 'Unknown Label', 'Metal', 'Prize Wall'])
+def test_name_and_number_matches_and_suffix_stripping_are_not_version_evidence(label):
+    base = product('Synthetic Unit 40', text=None)
+    labelled = product('Synthetic Unit 40 (' + label + ')', text=None)
+    result = normalise_group([base, labelled])
+    kept = by_id(result)[labelled['productId']]
+    assert kept.identity_key is None and FLAG_MARKER_GROUPING_PENDING in kept.flags
+    assert FLAG_DUPLICATE_NUMBER_PENDING in kept.flags
+    assert [len(i.printings) for i in result.identities] == [1]
+
+
+@pytest.mark.parametrize('override,missing', [({'text': None}, 'Description'), ({'tag': None}, 'Tag'),
+                                                  ({'domain': '; ;'}, 'Domain'),
+                                                  ({'Might': None}, 'Might')])
+def test_recognised_label_review_names_the_missing_evidence(override, missing):
+    base, labelled = alternate_pair(**override)
+    labelled['name'] = 'Synthetic Unit 20 (Signature)'
+    result = normalise_group([base, labelled])
+    [review] = [i for i in result.review if i.code == FLAG_MARKER_GROUPING_PENDING]
+    assert missing in review.detail and 'lacks explicit evidence' in review.detail
+    assert by_id(result)[labelled['productId']].identity_key is None
+
+
+@pytest.mark.parametrize('override,conflict', [({'text': 'Different synthetic rules.'}, 'rules text'),
+                                                    ({'tag': 'TagC'}, 'Tag')])
+def test_recognised_labels_with_conflicting_evidence_stay_unmerged(override, conflict):
+    base, labelled = alternate_pair(**override)
+    labelled['name'] = 'Synthetic Unit 20 (Overnumbered)'
+    result = normalise_group([base, labelled])
+    [review] = [i for i in result.review if i.code == FLAG_MARKER_GROUPING_PENDING]
+    assert conflict in review.detail
+    assert by_id(result)[labelled['productId']].identity_key is None
+    assert [len(i.printings) for i in result.identities] == ([] if conflict == 'Tag' else [1])
+
+
+def test_labels_cannot_corroborate_each_other_without_an_unmarked_base():
+    base, labelled = alternate_pair()
+    base['name'], labelled['name'] = 'Synthetic Unit 20 (Overnumbered)', 'Synthetic Unit 20 (Signature)'
+    result = normalise_group([base, labelled])
+    assert result.identities == ()
+    assert all(p.identity_key is None and FLAG_MARKER_GROUPING_PENDING in p.flags for p in result.printings)
+    assert all('unmarked base' in i.detail for i in result.review)
+
+
+@pytest.mark.parametrize('case,override', [('fervent-shape', {'tag': 'TagC'}),
+                                               ('graceful-shape', {'domain': None}),
+                                               ('forge-god-shape', {'domain': 'DomainB', 'tag': 'TagC'})])
+def test_conflicting_detail_shapes_keep_all_source_records_and_prices(case, override):
+    base, alt = alternate_pair(**override)
+    result = normalise_group([base, alt], [price(base, 'Normal'), price(alt, 'Foil')])
+    assert result.identities == () and len(result.printings) == 2
+    for raw in (base, alt):
+        kept = by_id(result)[raw['productId']]
+        assert kept.identity_key is None and FLAG_PRINTING_DETAILS_DIFFER in kept.flags
+        assert kept.extended_entries == tuple((e['name'], e['value']) for e in raw['extendedData'])
+        assert len(kept.editions[0].prices) == 1
+
+
+@pytest.mark.parametrize('label', ['Overnumbered', 'Signature', 'Alternate Art'])
+@pytest.mark.parametrize('field,override', [
+    ('Domain', {'domain': 'DomainB'}), ('Tag', {'tag': 'TagC'}), ('Card Type', {'card_type': 'Spell'}),
+    ('Energy Cost', {'Energy Cost': '4'}), ('Power Cost', {'Power Cost': '1'}), ('Might', {'Might': '3'})])
+def test_label_detail_conflicts_hold_all_products_with_their_data_and_prices(label, field, override):
+    base, labelled = alternate_pair(**override)
+    labelled['name'] = 'Synthetic Unit 20 (' + label + ')'
+    result = normalise_group([base, labelled], [price(base, 'Normal'), price(labelled, 'Foil')])
+    assert result.identities == ()
+    [review] = [i for i in result.review if i.code == FLAG_PRINTING_DETAILS_DIFFER]
+    assert review.product_ids == (base['productId'], labelled['productId'])
+    assert review.detail.endswith('differ on ' + field)
+    for raw in (base, labelled):
+        kept = by_id(result)[raw['productId']]
+        assert kept.identity_key is None and FLAG_PRINTING_DETAILS_DIFFER in kept.flags
+        assert kept.extended_entries == tuple((e['name'], e['value']) for e in raw['extendedData'])
+        assert kept.editions[0].prices[0].market == 1.5
+    if label != 'Alternate Art':
+        assert FLAG_MARKER_GROUPING_PENDING in by_id(result)[labelled['productId']].flags
+
+
+@pytest.mark.parametrize('label', ['Overnumbered', 'Signature'])
+def test_marker_evidence_must_also_be_present_on_the_base(label):
+    base, labelled = alternate_pair()
+    base['extendedData'] = [e for e in base['extendedData'] if e['name'] != 'Description']
+    labelled['name'] = 'Synthetic Unit 20 (' + label + ')'
+    result = normalise_group([base, labelled])
+    [review] = [i for i in result.review if i.code == FLAG_MARKER_GROUPING_PENDING]
+    assert review.detail == f'product {base["productId"]} lacks explicit evidence: Description'
+    assert by_id(result)[labelled['productId']].identity_key is None
+
+
+@pytest.mark.parametrize('label', ['Unknown Label', 'Metal', 'Prize Wall'])
+def test_unsupported_labels_stay_pending_with_complete_matching_evidence(label):
+    base, labelled = alternate_pair()
+    labelled['name'] = 'Synthetic Unit 20 (' + label + ')'
+    result = normalise_group([base, labelled])
+    kept = by_id(result)[labelled['productId']]
+    assert kept.identity_key is None and FLAG_MARKER_GROUPING_PENDING in kept.flags
+    assert [len(i.printings) for i in result.identities] == [1]
+
+
+@pytest.mark.parametrize('label', ['Alternate Art', 'Overnumbered', 'Signature'])
+def test_text_and_detail_conflicts_both_flag_all_affected_printings(label):
+    base, labelled = alternate_pair(tag='TagC', text='Conflicting synthetic rules.')
+    labelled['name'] = 'Synthetic Unit 20 (' + label + ')'
+    result = normalise_group([base, labelled])
+    assert result.identities == ()
+    assert all({FLAG_IDENTITY_TEXT_CONFLICT, FLAG_PRINTING_DETAILS_DIFFER} <= set(p.flags)
+               for p in result.printings)

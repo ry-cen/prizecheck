@@ -1,8 +1,8 @@
 """The in-memory result of normalising one TCGCSV group (#534).
 
-Nothing here is a schema, a `catalog_*` row or a source value for the database. A candidate is a proposal the
-writer has yet to decide on. Behaviour the owner has not decided is never applied: the product stays in the
-output and carries a flag from FLAGS naming the open question, with the source data intact.
+Nothing here is a schema, a `catalog_*` row or a database writer. Candidates apply the owner's approved
+scope, finish, conditional version-matching and review rules. Unsupported cases keep their source data and
+carry review flags. Confirmed exclusions are retained separately, without catalog identity proposals.
 """
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
@@ -11,8 +11,9 @@ from typing import Optional, Tuple
 # Identity; same name with conflicting rules text goes to review and is never merged.
 FLAG_IDENTITY_TEXT_CONFLICT = 'identity_text_conflict'
 
-# "Retained and flagged, policy pending": the acceptance spec proposes an answer (PC-2, PC-5, PC-9 and the marker
-# and duplicate-number cases), but the owner has not adopted it.
+# Stable flag names describe cases held for review under approved policy, not unapproved policies. Incomplete
+# scope evidence and unknown finishes need review; version matching needs supporting evidence; duplicate
+# numbers hold only the affected products. Confirmation of sealed products and other delimiters remain open.
 FLAG_CARD_SCOPE_PENDING = 'card_scope_pending'
 FLAG_FINISH_POLICY_PENDING = 'finish_policy_pending'
 FLAG_MARKER_GROUPING_PENDING = 'marker_grouping_pending'
@@ -23,8 +24,8 @@ FLAG_MULTI_VALUE_UNPARSED = 'multi_value_delimiter_unrecognised'
 FLAG_PRICE_WITHOUT_PRODUCT = 'price_without_product'
 # An extended field name that appears more than once on a product: every value is kept, none is chosen.
 FLAG_EXTENDED_FIELD_REPEATED = 'extended_field_repeated'
-# Printings grouped into one identity by name and rules text that disagree on other card details (Domain, Tag, Card
-# Type, costs, Might; not Rarity, which belongs to each printing). The identity is kept and not split; the flag names the fields and sends it to review.
+# Apparent variants disagree on Domain, Tag, Card Type, costs or Might (not Rarity). They remain unmerged
+# candidates pending review; this does not assert that they represent distinct underlying cards.
 FLAG_PRINTING_DETAILS_DIFFER = 'printing_details_differ'
 
 FLAGS = (FLAG_IDENTITY_TEXT_CONFLICT, FLAG_CARD_SCOPE_PENDING, FLAG_FINISH_POLICY_PENDING,
@@ -41,13 +42,14 @@ class PrintingKey:
 
 @dataclass(frozen=True)
 class CardScope:
-    """What the product has, as observed. It does not say whether the product is a card."""
+    """Observed scope evidence; `exclusion` is set only for an explicitly typed, unambiguous Token."""
     has_number: bool
     has_card_type: bool
     card_types: Tuple[str, ...]
     card_type_unparsed: bool  # the Card Type had an unrecognised separator and was kept raw
     looks_sealed: bool  # neither a Number nor a Card Type
     looks_token: bool   # `Token` is one of the Card Type values
+    exclusion: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -62,8 +64,9 @@ class PriceObservation:
 
 @dataclass(frozen=True)
 class EditionCandidate:
-    """A price subtype the product has. `finish` is None for a subtype outside FINISH_BY_SUBTYPE."""
-    subtype: str
+    """A finish proposal or retained price observation. `finish=None` is an unknown subtype for review, not a
+    proposed edition. An unpriced eligible card has `subtype=None`, `finish='unspecified'`, and no prices."""
+    subtype: Optional[str]
     finish: Optional[str]
     prices: Tuple[PriceObservation, ...]  # one per price row with this subtype
     flags: Tuple[str, ...] = ()
@@ -122,3 +125,27 @@ class GroupResult:
     printings: Tuple[PrintingCandidate, ...]
     review: Tuple[ReviewItem, ...]
     counts: dict = field(default_factory=dict, hash=False)
+    # Source-only records, excluded from catalog proposals. Price candidates here retain observations only.
+    excluded: Tuple[PrintingCandidate, ...] = ()
+
+
+@dataclass(frozen=True)
+class GroupSnapshot:
+    """Minimal accepted group state for pure lifecycle comparison: source keys, product data and editions.
+
+    This is not a generation, persistence schema or identity assignment. A caller supplies the group ID even
+    for an empty group, whose normaliser result cannot identify its group.
+    """
+    group_id: int
+    printings: Tuple[PrintingCandidate, ...]
+
+
+@dataclass(frozen=True)
+class GroupDecision:
+    """A pure comparison proposal, never a write or promotion. Non-`compared` decisions keep the exact snapshot.
+    Held keys require review; there is no retirement/deletion instruction or reassignment of editions.
+    """
+    snapshot: GroupSnapshot
+    status: str
+    held_missing: Tuple[PrintingKey, ...] = ()
+    held_review: Tuple[PrintingKey, ...] = ()
