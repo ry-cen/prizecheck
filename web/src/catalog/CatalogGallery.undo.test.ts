@@ -2,6 +2,7 @@
 import { act, createElement as h, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { AddQueueAccount } from "./useStoredAddQueue";
 import { CatalogGallery } from "./CatalogGallery";
 import type { CatalogCardPopup } from "./CatalogCardPopup";
 import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
@@ -12,7 +13,15 @@ import type { BrowseEdition } from "../catalog_browse_generated";
 vi.mock("../inventoryUndo", () => ({ applyUndo: vi.fn(), listUndo: vi.fn() }));
 vi.mock("../shell/keptRead", () => ({ useFirstReadSettled: () => {} }));
 vi.mock("./CatalogFilters", () => ({ CatalogFilters: () => null }));
-vi.mock("./AddBar", () => ({ AddBar: () => null }));
+vi.mock("./AddBar", () => ({
+  AddBar: (props: { queue: ReadonlyMap<string, unknown>; onAdd: () => void }) =>
+    h(
+      "div",
+      null,
+      h("output", { "data-queue": true }, props.queue.size),
+      h("button", { onClick: props.onAdd }, "Add queued")
+    ),
+}));
 vi.mock("./usePlaces", () => ({
   usePlaces: () => ({ leaves: [], state: "ready" }),
 }));
@@ -228,3 +237,224 @@ test("a retry after step and close keeps the original Undo idempotency key", asy
     vi.mocked(applyUndo).mock.calls[1]
   );
 });
+
+test("dialog queue survives its fixed Location falling back to the picker", async () => {
+  async function render(fixedTarget: { id: string; label: string } | null) {
+    await act(async () =>
+      root.render(
+        h(
+          ToastProvider,
+          null,
+          h(
+            AddQueueAccount.Provider,
+            { value: "fallback-owner" },
+            h(CatalogGallery, {
+              active: true,
+              adding: true,
+              fixedTarget,
+              undoToast: false,
+              stick: "dialog",
+            })
+          )
+        )
+      )
+    );
+  }
+  await render({ id: "box", label: "Box" });
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label^="One more first"]')!
+      .click()
+  );
+  expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+  await render(null);
+  expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+});
+test("failed restoration exposes a discard action even with no rendered queue", async () => {
+  sessionStorage.setItem(
+    "prizecheck:add-queue:failed-owner:page",
+    JSON.stringify({
+      items: [{ editionId: "first", printingId: "first", quantity: 1 }],
+      target: null,
+      uncertain: false,
+    })
+  );
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockRejectedValue(Error("offline"));
+  try {
+    await act(async () =>
+      root.render(
+        h(
+          ToastProvider,
+          null,
+          h(
+            AddQueueAccount.Provider,
+            { value: "failed-owner" },
+            h(CatalogGallery, {
+              active: true,
+              adding: true,
+              fixedTarget: null,
+              undoToast: false,
+              stick: "page",
+            })
+          )
+        )
+      )
+    );
+    const discard = button("Discard queue");
+    expect(discard).toBeDefined();
+    expect(discard!.disabled).toBe(false);
+    await act(async () => discard!.click());
+    expect(
+      sessionStorage.getItem("prizecheck:add-queue:failed-owner:page")
+    ).toBe(null);
+    expect(host.textContent).not.toContain("Couldn't restore");
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="One more first"]'
+        )!
+        .click()
+    );
+    expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+  } finally {
+    fetch.mockRestore();
+  }
+});
+
+test.each([
+  { destination: "a", expected: "1" },
+  { destination: "b", expected: "0" },
+])(
+  "closing A then opening $destination restores only that Location's queue",
+  async ({ destination, expected }) => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const data = String(input).includes("location-tree")
+          ? { locations: [{ id: "a", kind: "storage_leaf" }] }
+          : { available: true, editions, next_cursor: null };
+        return new Response(JSON.stringify(data), { status: 200 });
+      });
+    async function opening(id: string | null) {
+      await act(async () =>
+        root.render(
+          h(
+            ToastProvider,
+            null,
+            h(
+              AddQueueAccount.Provider,
+              { value: "opening-owner" },
+              id === null
+                ? null
+                : h(CatalogGallery, {
+                    active: true,
+                    adding: true,
+                    fixedTarget: { id, label: id },
+                    undoToast: false,
+                    stick: "dialog",
+                  })
+            )
+          )
+        )
+      );
+    }
+    try {
+      await opening("a");
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label^="One more first"]'
+          )!
+          .click()
+      );
+      expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+      await opening(null);
+      await opening(destination);
+      expect(host.querySelector("[data-queue]")?.textContent).toBe(expected);
+      await opening(null);
+      await opening("a");
+      expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+    } finally {
+      fetch.mockRestore();
+    }
+  }
+);
+
+test.each([
+  ["G1", "QUANTITY_OVERFLOW", false],
+  ["G2", "EDITION_UNAVAILABLE", true],
+] as const)(
+  "%s refused add preserves remaining cards across remount (%s)",
+  async (_id, code, two) => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("holdings/batch"))
+          return new Response(
+            JSON.stringify({ detail: { code, edition_id: "first" } }),
+            { status: 422 }
+          );
+        if (url.includes("location-tree"))
+          return new Response(
+            JSON.stringify({
+              locations: [{ id: "box", kind: "storage_leaf" }],
+              owner_revision: 1,
+              lent_copies: "0",
+              borrowed_copies: "0",
+            })
+          );
+        return new Response(
+          JSON.stringify({ available: true, editions, next_cursor: null })
+        );
+      });
+    async function render() {
+      await act(async () =>
+        root.render(
+          h(
+            ToastProvider,
+            null,
+            h(
+              AddQueueAccount.Provider,
+              { value: "refusal-owner" },
+              h(CatalogGallery, {
+                active: true,
+                adding: true,
+                fixedTarget: { id: "box", label: "Box" },
+                undoToast: false,
+                stick: "dialog",
+              })
+            )
+          )
+        )
+      );
+    }
+    try {
+      await render();
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label^="One more first"]'
+          )!
+          .click()
+      );
+      if (two)
+        await act(async () =>
+          host
+            .querySelector<HTMLButtonElement>(
+              'button[aria-label^="One more second"]'
+            )!
+            .click()
+        );
+      await act(async () => button("Add queued")!.click());
+      expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+      await act(async () => root.render(null));
+      await render();
+      expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+    } finally {
+      fetch.mockRestore();
+    }
+  }
+);

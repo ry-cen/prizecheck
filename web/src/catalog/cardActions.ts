@@ -98,6 +98,13 @@ const REFUSED_FOR_GOOD: ReadonlySet<string> = new Set([
 /** The answer for a key whose replay row no longer says what it did: resending can never settle it. */
 export const OUTCOME_UNAVAILABLE = "REPLAY_OUTCOME_UNAVAILABLE";
 
+export type OutcomeKind = "added" | "refused" | "unknown" | "lost";
+export function outcomeKind(o: AddOutcome): OutcomeKind {
+  if (o.ok) return "added";
+  if (REFUSED_FOR_GOOD.has(o.code)) return "refused";
+  return o.code === OUTCOME_UNAVAILABLE ? "lost" : "unknown";
+}
+
 function failed(cause: unknown): Extract<AddOutcome, { ok: false }> {
   const failure = cause instanceof HoldingError ? cause : null;
   const code = failure?.code ?? "";
@@ -124,7 +131,8 @@ export async function addCards(
   locationId: string,
   path: string,
   items: readonly AddItem[],
-  pending: { current: AddCommand | null }
+  pending: { current: AddCommand | null },
+  onSubmitting?: (items: readonly AddItem[]) => void
 ): Promise<AddOutcome> {
   const previous = pending.current;
   if (
@@ -132,6 +140,7 @@ export async function addCards(
     !(previous.locationId === locationId && sameItems(previous.items, items))
   ) {
     try {
+      onSubmitting?.(previous.items);
       const result = await send(previous);
       pending.current = null;
       return succeeded(previous, result, true);
@@ -152,6 +161,7 @@ export async function addCards(
   };
   pending.current = command;
   try {
+    onSubmitting?.(command.items);
     const result = await send(command);
     pending.current = null;
     return succeeded(command, result, false);
