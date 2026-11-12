@@ -373,3 +373,28 @@ def test_assessed_suspicious_pull_end_to_end(conn):
     assert not report.promoted and catalog_rows(conn)==before
     assert one(conn,"SELECT detail,candidate FROM catalog_review WHERE kind='group_pull_held'")=={
         'detail':'total_items_mismatch', 'candidate':{'group_id':900,'status':'pull_suspicious','reasons':['total_items_mismatch']}}
+
+
+@pytest.mark.parametrize('subtype', [[], {}], ids=['list', 'object'])
+def test_malformed_group_does_not_stop_complete_sibling(conn, subtype):
+    from app.games.riftbound.catalog.assess import assess_pull
+    from test_riftbound_catalog_assess import envelope
+    seed(conn)
+    before = accepted(conn)
+    snapshot = rows(conn, 'SELECT * FROM riftbound_group_snapshot WHERE group_id=900')
+    pulls = [
+        assess_pull(plan.GroupInfo(900, 'Synthetic Set 900'), envelope([product()]),
+                    envelope([{**price(), 'subTypeName': subtype}])),
+        assess_pull(plan.GroupInfo(901, 'Synthetic Set 901'),
+                    envelope([product(9000002, '002', gid=901)]), envelope([])),
+    ]
+    report = writer.apply_run(conn, pulls)
+    assert report.promoted and report.plan.compared == 1
+    assert [(o.group_id, o.status) for o in report.plan.outcomes] == [(900, 'pull_failed'), (901, 'compared')]
+    assert_survives(conn, before)
+    assert rows(conn, 'SELECT * FROM riftbound_group_snapshot WHERE group_id=900') == snapshot
+    assert {r['source_id'] for r in accepted(conn)} == {'9000001', '9000002'}
+    assert one(conn, "SELECT source_id,detail,candidate FROM catalog_review WHERE kind='group_pull_held'") == {
+        'source_id': 'group:900', 'detail': 'malformed_response',
+        'candidate': {'group_id': 900, 'status': 'pull_failed', 'reasons': ['malformed_response']}}
+    assert one(conn, 'SELECT outcome FROM catalog_run WHERE id=%s', (report.run_id,))['outcome'] == 'succeeded'

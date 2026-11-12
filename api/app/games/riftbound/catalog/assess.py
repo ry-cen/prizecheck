@@ -42,7 +42,7 @@ def assess_pull(info: GroupInfo, products: object, prices: object, *,
     except SourceResponseError as error:
         return GroupPull(info, error, 'suspicious', raw,
                          tuple(sorted(set(reasons + ['response_not_success']))))
-    except ValueError:
+    except (ValueError, TypeError, KeyError, AttributeError, IndexError):
         return GroupPull(info, None, 'suspicious', raw,
                          tuple(sorted(set(reasons + ['malformed_response']))))
     if any(p['groupId'] != info.group_id for p in product_rows):

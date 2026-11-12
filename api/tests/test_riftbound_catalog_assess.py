@@ -92,3 +92,38 @@ def test_collects_sorted_reasons_and_keeps_raw():
     result = assess.assess_pull(INFO, products, envelope([]))
     assert result.reasons == ('total_items_mismatch','wrong_category','wrong_group')
     assert result.raw['products'] is products
+
+
+@pytest.mark.parametrize('subtype', [[], {}], ids=['list', 'object'])
+def test_malformed_price_subtype_becomes_group_hold(subtype):
+    result = assess.assess_pull(INFO, envelope([product()]),
+                                envelope([{**price(), 'subTypeName': subtype}]))
+    assert result.quality == 'suspicious'
+    assert result.reasons == ('malformed_response',)
+    assert result.result is None
+    assert compare_group(GroupSnapshot(900, ()), result.result, quality=result.quality).status == 'pull_failed'
+    planned = plan.plan_run(plan.PreviousState({}, {}, {}), [result])
+    assert len(planned.reviews) == 1
+    review = planned.reviews[0]
+    assert (review.source_id, review.kind, review.detail) == ('group:900', 'group_pull_held', 'malformed_response')
+    assert review.candidate == {'group_id': 900, 'status': 'pull_failed', 'reasons': ['malformed_response']}
+
+
+@pytest.mark.parametrize('error_type', [ValueError, TypeError, KeyError, AttributeError, IndexError])
+def test_normalisation_shape_errors_are_held(monkeypatch, error_type):
+    def malformed(*args):
+        raise error_type('Synthetic malformed source shape')
+    monkeypatch.setattr(assess, 'normalise_group', malformed)
+    result = assess.assess_pull(INFO, envelope([product()]), envelope([price()]))
+    assert result.result is None
+    assert result.quality == 'suspicious' and result.reasons == ('malformed_response',)
+
+
+def test_unexpected_normalisation_error_propagates(monkeypatch):
+    error = RuntimeError('Synthetic programming error')
+    def unexpected(*args):
+        raise error
+    monkeypatch.setattr(assess, 'normalise_group', unexpected)
+    with pytest.raises(RuntimeError) as caught:
+        assess.assess_pull(INFO, envelope([product()]), envelope([price()]))
+    assert caught.value is error
