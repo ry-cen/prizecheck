@@ -106,7 +106,9 @@ function App() {
   const { path, address, entry, navigate, closeOverlay, scrollFor, focusFor } =
     useRoute();
   const collectionAddress = useRef("/collection");
+  const catalogAddress = useRef("/catalog");
   if (path === "/collection") collectionAddress.current = address;
+  if (path === "/catalog") catalogAddress.current = address;
   const [session, setSession] = useState<Session | null>(null);
   const [ownerCatalog, setOwnerCatalog] = useState<OwnerCatalogStatus | null>(
     null
@@ -115,6 +117,21 @@ function App() {
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
   const [message, setMessage] = useState("");
+
+  // Every account exit shares this cleanup, including an ordinary sign-out.
+  function transitionAccount(next: string | null) {
+    const gone = accountToScrub(lastUserId.current, next);
+    if (gone) {
+      scrubLoanBodies(gone);
+      forgetBorrowDrafts();
+      forgetAddQueues();
+      catalogAddress.current = "/catalog";
+      // A live account switch must also discard the address currently on screen.
+      if (window.location.pathname === "/catalog")
+        navigate("/catalog", { replace: true, force: true });
+    }
+    lastUserId.current = next;
+  }
 
   // The session and whether this user is the owner arrive together, so the shell never shows an owner-only
   // page or menu item before it knows.
@@ -133,15 +150,7 @@ function App() {
         }
       }
       setOwnerCatalog(owner);
-      const gone = accountToScrub(
-        lastUserId.current,
-        result.signedIn ? result.userId : null
-      );
-      if (gone) {
-        scrubLoanBodies(gone);
-        forgetAddQueues();
-      }
-      lastUserId.current = result.signedIn ? result.userId : null;
+      transitionAccount(result.signedIn ? result.userId : null);
       setSession(result);
     } catch {
       setMessage("Service temporarily unavailable. Please retry.");
@@ -251,10 +260,7 @@ function App() {
       return false;
     }
     // Borrow Request drafts (#252) are the account's: none stay in this tab for whoever signs in next.
-    forgetBorrowDrafts();
-    scrubLoanBodies(lastUserId.current);
-    lastUserId.current = null;
-    forgetAddQueues();
+    transitionAccount(null);
     setSession({ signedIn: false, userId: null });
     setOwnerCatalog(null);
     // An unsent proposal is lost with the session: sign-out never asks.
@@ -408,7 +414,15 @@ function App() {
         );
       }
       case "catalog":
-        return <CatalogPage active={active} message={message} />;
+        return (
+          <CatalogPage
+            key={userId}
+            active={active}
+            message={message}
+            address={address}
+            onNavigate={navigate}
+          />
+        );
       case "loans":
         // /loans lists the Loans; /loans/<id> is one Loan (#252).
         return (
@@ -473,7 +487,9 @@ function App() {
             navigate(
               next === "collection"
                 ? collectionAddress.current
-                : pageDef(next).path
+                : next === "catalog"
+                  ? catalogAddress.current
+                  : pageDef(next).path
             );
         }}
         onOpenFriend={(handle) => {

@@ -3,13 +3,24 @@ import { act, createElement as h, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { AddQueueAccount } from "./useStoredAddQueue";
+import { useCatalogBrowse } from "./useCatalogBrowse";
 import { CatalogGallery } from "./CatalogGallery";
 import type { CatalogCardPopup } from "./CatalogCardPopup";
 import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
 import { applyUndo, listUndo } from "../inventoryUndo";
 import { ToastProvider } from "../ui/Toast";
+import { getCatalogSets } from "../catalog_browse_generated";
+import { parseCatalogView } from "./catalogUrl";
 import type { BrowseEdition } from "../catalog_browse_generated";
 
+vi.mock("../catalog_browse_generated", async (original) => ({
+  ...(await original<typeof import("../catalog_browse_generated")>()),
+  getCatalogSets: vi.fn(async () => ({
+    available: true,
+    catalog_revision: 1,
+    sets: [],
+  })),
+}));
 vi.mock("../inventoryUndo", () => ({ applyUndo: vi.fn(), listUndo: vi.fn() }));
 vi.mock("../shell/keptRead", () => ({ useFirstReadSettled: () => {} }));
 vi.mock("./CatalogFilters", () => ({ CatalogFilters: () => null }));
@@ -25,7 +36,9 @@ vi.mock("./AddBar", () => ({
 vi.mock("./usePlaces", () => ({
   usePlaces: () => ({ leaves: [], state: "ready" }),
 }));
-vi.mock("./useCatalogBrowse", () => ({ useCatalogBrowse: () => browse }));
+vi.mock("./useCatalogBrowse", () => ({
+  useCatalogBrowse: vi.fn(() => browse),
+}));
 vi.mock("./CatalogCardPopup", () => ({
   // Keep Gallery's real close/step callbacks. The popup's local feedback resets on a card step, as AddRows does.
   CatalogCardPopup: (props: Parameters<typeof CatalogCardPopup>[0]) => {
@@ -458,3 +471,177 @@ test.each([
     }
   }
 );
+
+test("unknown set becomes Any set once the catalog set list is known", async () => {
+  const onViewChange = vi.fn();
+  await act(async () =>
+    root.render(
+      h(
+        ToastProvider,
+        null,
+        h(CatalogGallery, {
+          active: true,
+          adding: false,
+          fixedTarget: null,
+          undoToast: false,
+          stick: "page",
+          view: parseCatalogView("/catalog?set=unknown"),
+          onViewChange,
+        })
+      )
+    )
+  );
+  expect(getCatalogSets).toHaveBeenCalled();
+  expect(onViewChange).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null })
+  );
+});
+
+test.each([false, true])(
+  "delayed unknown set never browses unresolved and normalises after activation (hidden=%s)",
+  async (hidden) => {
+    let resolve!: (list: Awaited<ReturnType<typeof getCatalogSets>>) => void;
+    vi.mocked(getCatalogSets).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    const onViewChange = vi.fn();
+    const render = async (active: boolean) =>
+      act(async () =>
+        root.render(
+          h(
+            ToastProvider,
+            null,
+            h(CatalogGallery, {
+              active,
+              adding: false,
+              fixedTarget: null,
+              undoToast: false,
+              stick: "page",
+              view: parseCatalogView("/catalog?set=unknown"),
+              onViewChange,
+            })
+          )
+        )
+      );
+    await render(true);
+    const last = vi.mocked(useCatalogBrowse).mock.calls.at(-1)!;
+    expect(last[3]).toBe(false);
+    if (hidden) await render(false);
+    await act(async () =>
+      resolve({ available: true, catalog_revision: 1, sets: [] })
+    );
+    if (hidden) {
+      expect(onViewChange).not.toHaveBeenCalled();
+      await render(true);
+    }
+    expect(onViewChange).toHaveBeenCalledWith(
+      expect.objectContaining({ setId: null })
+    );
+    const final = vi.mocked(useCatalogBrowse).mock.calls.at(-1)!;
+    expect(final[0]).toMatchObject({ set_id: null });
+    expect(final[3]).toBe(true);
+  }
+);
+
+test("unknown set resolved while hidden is replayed on activation", async () => {
+  let resolve!: (list: Awaited<ReturnType<typeof getCatalogSets>>) => void;
+  vi.mocked(getCatalogSets).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  const applied = vi.fn();
+  let active = true;
+  const onViewChange = (view: unknown) => {
+    if (active) applied(view);
+  };
+  const render = async () =>
+    act(async () =>
+      root.render(
+        h(
+          ToastProvider,
+          null,
+          h(CatalogGallery, {
+            active,
+            adding: false,
+            fixedTarget: null,
+            undoToast: false,
+            stick: "page",
+            view: parseCatalogView("/catalog?set=unknown"),
+            onViewChange,
+          })
+        )
+      )
+    );
+  await render();
+  active = false;
+  await render();
+  await act(async () =>
+    resolve({ available: true, catalog_revision: 1, sets: [] })
+  );
+  active = true;
+  await render();
+  expect(applied).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null })
+  );
+});
+
+test("set-list lookup failure can be retried without browsing an unresolved filter", async () => {
+  vi.mocked(getCatalogSets).mockRejectedValueOnce(new Error("offline"));
+  const onViewChange = vi.fn();
+  await act(async () =>
+    root.render(
+      h(
+        ToastProvider,
+        null,
+        h(CatalogGallery, {
+          active: true,
+          adding: false,
+          fixedTarget: null,
+          undoToast: false,
+          stick: "page",
+          view: parseCatalogView("/catalog?set=unknown"),
+          onViewChange,
+        })
+      )
+    )
+  );
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    "Catalog search is temporarily unavailable."
+  );
+  expect(vi.mocked(useCatalogBrowse).mock.calls.at(-1)![3]).toBe(false);
+  await act(async () => button("Retry")!.click());
+  expect(onViewChange).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null })
+  );
+});
+
+test("pending set normalisation keeps a concurrently normalised Add mode", async () => {
+  const onViewChange = vi.fn();
+  const render = async (address: string) =>
+    act(async () =>
+      root.render(
+        h(
+          ToastProvider,
+          null,
+          h(CatalogGallery, {
+            active: true,
+            adding: true,
+            fixedTarget: null,
+            undoToast: false,
+            stick: "page",
+            view: parseCatalogView(address),
+            onViewChange,
+          })
+        )
+      )
+    );
+  await render("/catalog?set=unknown");
+  onViewChange.mockClear();
+  await render("/catalog?set=unknown&mode=add");
+  expect(onViewChange).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null, mode: "add" })
+  );
+});

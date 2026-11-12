@@ -11,8 +11,10 @@ export function metadataReportHref(printingId: string, editionId: string) {
 }
 
 /** The linked Printing and Card Edition in the current address, or null unless both are present. */
-export function readMetadataReportLink(): MetadataReportLink | null {
-  const params = new URLSearchParams(window.location.search);
+export function readMetadataReportLink(
+  address = window.location.href
+): MetadataReportLink | null {
+  const params = new URL(address, window.location.origin).searchParams;
   const printingId = params.get(PRINTING);
   const editionId = params.get(EDITION);
   return printingId && editionId ? { printingId, editionId } : null;

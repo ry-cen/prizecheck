@@ -57,6 +57,16 @@ function read(key: string): Draft {
   }
 }
 
+/** Only this account and gallery scope may influence the initial mode. */
+export function hasStoredAddQueue(
+  account: string | null,
+  scope: string
+): boolean {
+  if (!account) return false;
+  const draft = read(PREFIX + account + ":" + scope);
+  return draft.items.length > 0 || draft.uncertain;
+}
+
 type State = {
   phase: "restoring" | "failed" | "ready";
   draft: Draft;

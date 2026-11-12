@@ -138,3 +138,31 @@ it.each([false, true])(
     }
   }
 );
+
+it("does not issue browse requests until the set has been resolved", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.mocked(browseEditions).mockClear();
+  vi.mocked(browseEditions).mockResolvedValue({ ...first, next_cursor: null });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  function Probe({ enabled }: { enabled: boolean }) {
+    useCatalogBrowse(
+      { set_id: enabled ? null : "unknown" },
+      true,
+      undefined,
+      enabled
+    );
+    return null;
+  }
+  try {
+    await act(async () => root.render(h(Probe, { enabled: false })));
+    expect(browseEditions).not.toHaveBeenCalled();
+    await act(async () => root.render(h(Probe, { enabled: true })));
+    expect(browseEditions).toHaveBeenCalledExactlyOnceWith({ set_id: null });
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});

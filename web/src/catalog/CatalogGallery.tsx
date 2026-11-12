@@ -1,3 +1,5 @@
+import type { CatalogView } from "./catalogUrl";
+import { getCatalogSets } from "../catalog_browse_generated";
 import { useStoredAddQueue } from "./useStoredAddQueue";
 import { useFirstReadSettled } from "../shell/keptRead";
 import {
@@ -33,6 +35,7 @@ import { CatalogFilters } from "./CatalogFilters";
 import {
   ADD_UNKNOWN,
   batchFailed,
+  BROWSE_FAILED,
   batchAddedText,
   CATALOG_UNAVAILABLE,
   earlierBatchFinished,
@@ -52,6 +55,8 @@ const SCROLL_AHEAD = "0px 0px 800px 0px";
 type Props = {
   /** False while hidden: the Catalog page kept mounted on another tab, or Collection's Add cards closed. */
   active: boolean;
+  view?: CatalogView;
+  onViewChange?: (view: CatalogView) => void;
   /** Add mode (#175): the bar, and a quick + on every tile that becomes a −/N/+ stepper. */
   adding: boolean;
   /** Collection's Add cards from a Location: the Location to add to, shown rather than chosen. Null: the bar's
@@ -91,6 +96,8 @@ type Props = {
  */
 export function CatalogGallery({
   active,
+  view,
+  onViewChange,
   adding,
   fixedTarget,
   undoToast,
@@ -103,19 +110,101 @@ export function CatalogGallery({
   onLinkOpened,
   onReported,
 }: Props) {
-  const [text, setText] = useState("");
+  const [localText, setLocalText] = useState("");
+  const [localFormat, setLocalFormat] = useState<BrowseFormat | null>(null);
+  const [localKind, setLocalKind] = useState<BrowseKind | null>(null);
+  const [set, storeSet] = useState<CatalogSet | null>(null);
+  const [resolvedSet, setResolvedSet] = useState<{
+    id: string;
+    found: CatalogSet | null;
+  } | null>(null);
+  const [failedSet, setFailedSet] = useState<string | null>(null);
+  const [setAttempt, retrySet] = useState(0);
+  const [localOwned, setLocalOwned] = useState(false);
+  const text = view?.q ?? localText;
+  const format = view ? view.format : localFormat;
+  const kind = view ? view.kind : localKind;
+  const owned = view?.owned ?? localOwned;
+  const setId = view ? view.setId : (set?.set_id ?? null);
+  const setText = (q: string) =>
+    view && onViewChange ? onViewChange({ ...view, q }) : setLocalText(q);
+  const setFormat = (format: BrowseFormat | null) =>
+    view && onViewChange
+      ? onViewChange({ ...view, format })
+      : setLocalFormat(format);
+  const setKind = (kind: BrowseKind | null) =>
+    view && onViewChange ? onViewChange({ ...view, kind }) : setLocalKind(kind);
+  const setOwned = (owned: boolean) =>
+    view && onViewChange
+      ? onViewChange({ ...view, owned })
+      : setLocalOwned(owned);
+  const setSet = (set: CatalogSet | null) => {
+    storeSet(set);
+    if (view && set) setResolvedSet({ id: set.set_id, found: set });
+    if (view && onViewChange)
+      onViewChange({ ...view, setId: set?.set_id ?? null });
+  };
+  const setResolved = !view || !setId || resolvedSet?.id === setId;
+  const browseSetId =
+    view && setId
+      ? resolvedSet?.id === setId
+        ? (resolvedSet.found?.set_id ?? null)
+        : null
+      : setId;
+  const viewOwner = useRef({ view, onViewChange });
+  viewOwner.current = { view, onViewChange };
+  useEffect(() => {
+    if (!view) return;
+    if (!setId) {
+      storeSet(null);
+      return;
+    }
+    let live = true;
+    setFailedSet(null);
+    void getCatalogSets()
+      .then((list) => {
+        if (!live) return;
+        if (!list.available) {
+          setFailedSet(setId);
+          return;
+        }
+        const found = list.sets.find((set) => set.set_id === setId) ?? null;
+        storeSet(found);
+        setResolvedSet({ id: setId!, found });
+      })
+      .catch(() => {
+        if (live) setFailedSet(setId);
+      });
+    return () => {
+      live = false;
+    };
+  }, [setId, !!view, setAttempt]);
+  // A validation may finish while the kept page is hidden. Keep its result and
+  // replay URL normalisation on activation instead of discarding it there.
+  useEffect(() => {
+    const current = viewOwner.current;
+    if (
+      active &&
+      setId &&
+      resolvedSet?.id === setId &&
+      !resolvedSet.found &&
+      current.view?.setId === setId
+    )
+      current.onViewChange?.({ ...current.view, setId: null });
+  }, [active, setId, resolvedSet, view]);
   const q = useDebouncedValue(text.trim(), SEARCH_DELAY_MS);
-  const [format, setFormat] = useState<BrowseFormat | null>(null);
-  const [kind, setKind] = useState<BrowseKind | null>(null);
-  const [set, setSet] = useState<CatalogSet | null>(null);
-  const [owned, setOwned] = useState(false);
   const query = useMemo(
-    () => ({ q, format, kind, set_id: set?.set_id ?? null, owned }),
-    [q, format, kind, set, owned]
+    () => ({ q, format, kind, set_id: browseSetId, owned }),
+    [q, format, kind, browseSetId, owned]
   );
   const tiles = useRef<HTMLUListElement>(null);
-  const browse = useCatalogBrowse(query, active, tiles);
+  const browse = useCatalogBrowse(query, active, tiles, setResolved);
   const { loadMore, noteAdded } = browse;
+  const setLookupFailed = !setResolved && failedSet === setId;
+  const searchError = setLookupFailed ? BROWSE_FAILED : browse.error;
+  const retrySearch = setLookupFailed
+    ? () => retrySet((attempt) => attempt + 1)
+    : browse.retry;
   const [card, setCard] = useState<CardRequest | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   // The popup's place among the loaded tiles, found by Edition: the list can be replaced under it (a restart).
@@ -450,7 +539,7 @@ export function CatalogGallery({
     }
   }
 
-  useFirstReadSettled(browse.first !== null || !!browse.error);
+  useFirstReadSettled(browse.first !== null || !!searchError);
   const first = browse.first;
   const unavailable = first !== null && !first.available;
   return (
@@ -517,7 +606,9 @@ export function CatalogGallery({
         onFormat={setFormat}
         kind={kind}
         onKind={setKind}
-        set={set}
+        set={
+          view ? (resolvedSet?.id === setId ? resolvedSet.found : null) : set
+        }
         onSet={setSet}
         owned={owned}
         onOwned={setOwned}
@@ -540,18 +631,18 @@ export function CatalogGallery({
           {/* No Printing count here: the results line under it already says how many cards match. */}
           {unavailable
             ? CATALOG_UNAVAILABLE
-            : !first && browse.loading
+            : !first && browse.loading && !setLookupFailed
               ? "Loading the catalog…"
               : ""}
         </p>
       </div>
-      {browse.error && !browse.errorMore && (
+      {searchError && !browse.errorMore && (
         <div
           role="alert"
           className="flex flex-wrap items-center gap-3 text-body text-danger"
         >
-          <p className="m-0">{browse.error}</p>
-          <Button onClick={browse.retry}>Retry</Button>
+          <p className="m-0">{searchError}</p>
+          <Button onClick={retrySearch}>Retry</Button>
         </div>
       )}
       {first?.available && (
