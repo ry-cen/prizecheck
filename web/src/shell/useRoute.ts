@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PAGES } from "./routes";
+import { saveFocus, type SavedFocus } from "./restorePageFocus";
 
 /** Session-only history positions: keep recent entries without growing with every navigation. */
 const SCROLL_CACHE_LIMIT = 128;
@@ -32,6 +33,8 @@ export type Route = {
   closeOverlay: (to: string) => void;
   /** The current entry's saved scroll, with a last-visited fallback for tab roots. */
   scrollFor: (path: string) => number;
+  /** The control that had focus when the current entry was last left, if any. */
+  focusFor: () => SavedFocus | null;
 };
 
 /** A page that can't be left without asking (the proposal builder, Trading #284). */
@@ -107,6 +110,7 @@ export function useRoute(): Route {
   const currentEntry = useRef(entry);
   const currentState = useRef(window.history.state);
   const positions = useRef(new Map<string, number>()).current;
+  const focuses = useRef(new Map<string, SavedFocus | null>()).current;
   const update = () => {
     setPath(window.location.pathname);
     setAddress(addressAt());
@@ -143,6 +147,7 @@ export function useRoute(): Route {
       save(scrolls, current.current, window.scrollY);
       save(addresses, current.current, currentAddress.current);
       save(positions, currentEntry.current, window.scrollY);
+      save(focuses, currentEntry.current, saveFocus());
       update();
     };
     window.addEventListener("popstate", onPopState);
@@ -168,6 +173,9 @@ export function useRoute(): Route {
         save(scrolls, current.current, window.scrollY);
         save(addresses, current.current, currentAddress.current);
         save(positions, currentEntry.current, window.scrollY);
+        // A replaced entry shows another address: the control that left it is not on it.
+        if (replace) focuses.delete(currentEntry.current);
+        else save(focuses, currentEntry.current, saveFocus());
         if (replace)
           window.history.replaceState(
             {
@@ -229,5 +237,6 @@ export function useRoute(): Route {
     },
     [navigate]
   );
-  return { path, address, entry, navigate, closeOverlay, scrollFor };
+  const focusFor = useCallback(() => focuses.get(entry) ?? null, [entry]);
+  return { path, address, entry, navigate, closeOverlay, scrollFor, focusFor };
 }

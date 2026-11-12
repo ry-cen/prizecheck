@@ -529,6 +529,8 @@ test("phone Want List restores its history entry scroll after opening a Deck", a
   await page.goBack();
   await expect(page).toHaveURL(/want-list/);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(saved);
+  // Focus returns to the Open Deck link that left, so the next Tab continues from there.
+  await expect(open).toBeFocused();
   await test.info().attach("continuity-scroll.json", {
     body: JSON.stringify({
       saved,
@@ -648,3 +650,41 @@ for (const width of [375, 1280]) {
     }
   });
 }
+test("Want List Back returns to where the page was when Open Deck was pressed, after a scripted scroll", async ({
+  page,
+}) => {
+  // The review's path: window.scrollTo, then the first Open Deck link. Playwright scrolls that link into view before
+  // it clicks, so the position to come back to is the one at the click, not the one scrolled to. At the phone size the
+  // link is centred below the top (the review measured 393); at 1280×800 it lands at 0, which proves nothing.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await signIn(page);
+  await world(page);
+  await page.goto(`${ORIGIN}/decks/want-list`);
+  const open = page
+    .getByRole("main")
+    .getByRole("link", { name: /^Open Deck / })
+    .first();
+  await expect(open).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 9999));
+  const scripted = await page.evaluate(() => window.scrollY);
+  await page.evaluate(() => {
+    document.addEventListener(
+      "click",
+      () => {
+        (window as unknown as { atClick: number }).atClick = window.scrollY;
+      },
+      { capture: true, once: true }
+    );
+  });
+  await open.click();
+  const atClick = await page.evaluate(
+    () => (window as unknown as { atClick: number }).atClick
+  );
+  expect(atClick).toBeGreaterThan(0);
+  expect(atClick).not.toBe(scripted);
+  await expect(page).not.toHaveURL(/want-list/);
+  await page.goBack();
+  await expect(page).toHaveURL(/want-list/);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(atClick);
+  await expect(open).toBeFocused();
+});

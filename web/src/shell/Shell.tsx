@@ -1,3 +1,4 @@
+import { restorePageFocus, type SavedFocus } from "./restorePageFocus";
 import { restorePageScroll } from "./restorePageScroll";
 import { usePageTitle } from "./usePageTitle";
 import { LoanRecoveryProvider } from "../loans/LoanRecovery";
@@ -89,6 +90,8 @@ type Props = {
   onSignOut: () => Promise<boolean>;
   /** The scroll position the page at a path had when it was last left (useRoute). */
   scrollFor: (path: string) => number;
+  /** The control that had focus when the current history entry was last left. */
+  focusFor?: () => SavedFocus | null;
   /** Renders a page; `active` is false while a kept-mounted page is hidden. */
   renderPage: (page: PageId, active: boolean) => ReactNode;
   /** A page that isn't one of the app's pages: Discover or a Published Deck, signed in (#163), or a Friend's
@@ -145,6 +148,7 @@ function ShellFrame({
   onNavigate,
   onSignOut,
   scrollFor,
+  focusFor,
   renderPage,
   other = null,
 }: Props) {
@@ -194,6 +198,7 @@ function ShellFrame({
   );
   const containers = useRef(new Map<PageId, HTMLDivElement>());
   const otherContainer = useRef<HTMLDivElement>(null);
+  const restoredFocusEntry = useRef<string | null>(null);
   const current = pageDef(page);
   // The page whose tab is current: none while another page is shown.
   const showing = other ? null : page;
@@ -243,10 +248,19 @@ function ShellFrame({
           .querySelectorAll<HTMLDialogElement>("dialog[open]")
           .forEach((dialog) => dialog.close());
     });
-    return restorePageScroll(
-      otherKey !== null ? otherContainer.current : containers.current.get(page),
-      scrollFor(path)
-    );
+    const container =
+      otherKey !== null ? otherContainer.current : containers.current.get(page);
+    const stopScroll = restorePageScroll(container, scrollFor(path));
+    // Once per visit to an entry: a rerun for another reason must not bring back an old focus.
+    const stopFocus =
+      restoredFocusEntry.current === entry
+        ? () => {}
+        : restorePageFocus(container, focusFor?.());
+    restoredFocusEntry.current = entry;
+    return () => {
+      stopScroll();
+      stopFocus();
+    };
   }, [page, path, otherKey, entry]);
 
   usePageTitle(

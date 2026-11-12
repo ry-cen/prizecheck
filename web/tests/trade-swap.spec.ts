@@ -182,6 +182,9 @@ async function story(
     const ashMain = ash.page.getByRole("main");
     await ashMain.getByRole("button", { name: "Accept" }).click();
     await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
+    // Focus moves to the new headline, scrolled into view even when Accept sat low on a phone.
+    await expect(heading(ash.page)).toBeFocused();
+    await expect(heading(ash.page)).toBeInViewport();
     await expect(toast(ash.page)).toContainText(
       "Accepted. Swap the cards in person, then confirm."
     );
