@@ -20,6 +20,63 @@ for (const viewport of [
 ]) {
   test.describe(`missing counts at ${viewport.width}px`, () => {
     test.use({ viewport });
+    for (const outcome of ["delayed", "failed"] as const) {
+      test(`does not explain an old acquisition count after removing an unowned copy (${outcome} read)`, async ({
+        collectors,
+      }) => {
+        const ids = seedCatalog();
+        const owner = await collectors.signIn({ contextOptions: { viewport } });
+        const active = owner.page;
+        const deck = await createDeck(active, `Unowned ${randomUUID()}`);
+        await setLine(active, deck, ids["SVE 5"], 2);
+        await active.goto(`${ORIGIN}/decks/${deck}`);
+        const summary = active.getByRole("group", {
+          name: "Where this Deck's cards are",
+        });
+        await expect(summary).toContainText("Not owned2");
+        await active.getByRole("radio", { name: "List", exact: true }).click();
+        let release!: () => void;
+        let arrived!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const requested = new Promise<void>((resolve) => {
+          arrived = resolve;
+        });
+        await active.route(`${ORIGIN}/api/decks/${deck}`, async (route) => {
+          arrived();
+          if (outcome === "failed")
+            await route.fulfill({
+              status: 503,
+              contentType: "application/json",
+              body: "{}",
+            });
+          else {
+            await gate;
+            await route.continue();
+          }
+        });
+        try {
+          await active.getByRole("button", { name: /^Remove one / }).click();
+          await requested;
+          await expect(summary).toContainText("Not owned1");
+          if (outcome === "failed")
+            await expect(
+              active
+                .getByRole("status")
+                .filter({ hasText: "This Deck couldn't be loaded" })
+            ).toBeVisible();
+          await expect(summary).not.toContainText("more copy:");
+        } finally {
+          release();
+        }
+        if (outcome === "delayed") {
+          await active.unroute(`${ORIGIN}/api/decks/${deck}`);
+          await expect(summary).toContainText("Not owned1");
+          await expect(summary).not.toContainText("more copy:");
+        }
+      });
+    }
     test("explains the owned copy promised to a Trade before and after borrowing", async ({
       page,
       collectors,

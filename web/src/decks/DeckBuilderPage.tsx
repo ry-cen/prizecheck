@@ -58,7 +58,7 @@ type Props = {
 
 type Load =
   | { kind: "loading" }
-  | { kind: "ready"; detail: DeckDetail }
+  | { kind: "ready"; detail: DeckDetail; readinessToGet?: string }
   | { kind: "missing" }
   | { kind: "failed" };
 
@@ -153,7 +153,7 @@ export function DeckBuilderPage({
       if (ticket !== reads.current) return null;
       if (detail.deck_list.revision < shownRevision.current) return null;
       shownRevision.current = detail.deck_list.revision;
-      setLoad({ kind: "ready", detail });
+      setLoad({ kind: "ready", detail, readinessToGet: detail.to_get });
       setNotice("");
       return detail;
     } catch (cause) {
@@ -198,7 +198,10 @@ export function DeckBuilderPage({
       previous.kind === "ready" &&
       result.deck_list.revision >= previous.detail.deck_list.revision
         ? {
+            ...previous,
             kind: "ready",
+            // The command updates the list without acquisition counts; a failed read must not revive the old count.
+            readinessToGet: undefined,
             detail: {
               ...previous.detail,
               deck_list: result.deck_list,
@@ -244,6 +247,7 @@ export function DeckBuilderPage({
       setLoad((previous) =>
         previous.kind === "ready"
           ? {
+              ...previous,
               kind: "ready",
               detail: {
                 ...previous.detail,
@@ -305,6 +309,7 @@ export function DeckBuilderPage({
       setLoad((previous) =>
         previous.kind === "ready"
           ? {
+              ...previous,
               kind: "ready",
               detail: { ...previous.detail, cover_edition_id: id },
             }
@@ -320,7 +325,7 @@ export function DeckBuilderPage({
     onRenamed: (deck) =>
       setLoad((previous) =>
         previous.kind === "ready"
-          ? { kind: "ready", detail: { ...previous.detail, deck } }
+          ? { ...previous, detail: { ...previous.detail, deck } }
           : previous
       ),
     reread: readDeck,
@@ -521,7 +526,10 @@ export function DeckBuilderPage({
         </div>
         <div className="col-start-1 row-start-2 flex min-w-0 flex-col gap-1">
           <DeckCostLine settled={cost} />
-          <DeckReadinessSummary lines={model.lines} toGet={detail.to_get} />
+          <DeckReadinessSummary
+            lines={model.lines}
+            toGet={load.kind === "ready" ? load.readinessToGet : undefined}
+          />
         </div>
         <div className="col-start-2 row-span-2 row-start-1 flex flex-wrap items-center gap-2 phone:[&>button]:flex-1 phone:[&>button]:px-2">
           <Button
