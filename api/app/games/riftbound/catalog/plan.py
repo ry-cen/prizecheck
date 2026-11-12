@@ -240,8 +240,10 @@ def plan_run(previous: PreviousState, pulls: Sequence[GroupPull]) -> RunPlan:
                     tuple(editions[k] for k in sorted(editions)), False)
             rows[sid] = row
             written += 1
-            if p.identity_key not in previous.evidence:
-                evidence[p.identity_key] = next(iter(proposed[p.identity_key]))
+            # A display-change proposal may keep the accepted identity on this row.
+            # Its proposed identity's evidence is eligible only when this row uses it.
+            if row.identity_key == p.identity_key and row.identity_key not in previous.evidence:
+                evidence[row.identity_key] = identity_shas[gid, row.identity_key]
         missing = 0
         for key in decision.held_missing:
             e = previous.printings.get(str(key.product_id))

@@ -162,7 +162,10 @@ def test_moved_group():
     old = previous(run(pull(prices=[price()])))
     result = plan.plan_run(old, [pull([]), pull([product(gid=901)], gid=901)])
     assert kinds(result) == {'group_change', 'missing_from_source'}
+    assert {p.source_id for p in result.printings} == {'9000001'}
     assert result.printings[0].carried and result.printings[0].group_id == 900
+    assert {p.source_id: p.editions for p in result.printings} == {
+        sid: p.editions for sid, p in old.printings.items()}
 
 
 @pytest.mark.parametrize('status', ['pull_failed', 'pull_suspicious', 'quality_unknown', 'not_pulled'])
@@ -173,7 +176,10 @@ def test_each_noncompared_status_preserves_every_existing_row_and_edition(status
         current = replace(current, result=SourceResponseError('Synthetic failure'))
     result = plan.plan_run(old, [] if status == 'not_pulled' else [current])
     assert result.outcomes[0].status == status
-    assert all(p.carried and p.editions == old.printings[p.source_id].editions for p in result.printings)
+    assert {p.source_id for p in result.printings} == {'9000001', '9000002'}
+    assert {p.source_id: p.editions for p in result.printings} == {
+        sid: p.editions for sid, p in old.printings.items()}
+    assert all(p.carried for p in result.printings)
     assert not result.snapshots and not result.reviews and not result.compared
 
 
@@ -281,3 +287,54 @@ def test_other_product_holds_keep_accepted_editions(reason):
 def test_snapshot_round_trip_retains_price_observations():
     snapshot = GroupSnapshot(900, pull(prices=[price()]).result.printings)
     assert plan.snapshot_from_json(plan.snapshot_to_json(snapshot)) == snapshot
+
+
+
+def test_rename_does_not_persist_evidence_for_unwritten_identity():
+    old = previous(run(pull(prices=[price()])))
+    renamed = pull([product(name='Synthetic Renamed', Description='Unaccepted rename rules.')])
+    result = plan.plan_run(old, [renamed])
+    assert {p.source_id for p in result.printings} == {'9000001'}
+    assert result.printings[0].identity_key == old.printings['9000001'].identity_key
+    assert kinds(result) == {'display_change'}
+    assert result.evidence == {}
+    assert all(p.identity_key != 'synthetic renamed' for p in result.printings)
+
+    # Rebuild persisted state by retaining old evidence and applying only the emitted additions.
+    after_rename = replace(previous(result), evidence={**old.evidence, **result.evidence})
+    new_printing = pull([product(9000002, '002', name='Synthetic Renamed',
+                                Description='Accepted new printing rules.')], [price(9000002)])
+    later = plan.plan_run(after_rename, [new_printing])
+    assert {p.source_id for p in later.printings} == {'9000001', '9000002'}
+    written = next(p for p in later.printings if p.source_id == '9000002')
+    assert not written.carried and written.identity_key == 'synthetic renamed'
+    assert 'identity_text_conflict' not in kinds(later)
+    assert set(later.evidence) == {written.identity_key}
+
+
+def test_persisted_evidence_conflict_preserves_existing_printing_and_editions():
+    old = previous(run(pull(prices=[price(), price(finish='Normal')])))
+    conflict = pull([product(Description='Conflicting rules.')])
+    result = plan.plan_run(old, [conflict])
+    assert {p.source_id for p in result.printings} == {'9000001'}
+    assert {p.source_id: p.editions for p in result.printings} == {
+        sid: p.editions for sid, p in old.printings.items()}
+    assert all(p.carried for p in result.printings)
+    assert kinds(result) == {'identity_text_conflict'}
+    assert not result.evidence
+
+
+def test_same_run_evidence_conflict_preserves_existing_printings_and_editions():
+    a = pull(prices=[price(), price(finish='Normal')])
+    b = pull([product(9000002, gid=901, name='Synthetic Unit 01')], [price(9000002)], gid=901)
+    old = replace(previous(run(a, b)), evidence={})
+    conflicting_b = pull([product(9000002, gid=901, name='Synthetic Unit 01',
+                                  Description='Conflicting rules.')], gid=901)
+    result = plan.plan_run(old, [a, conflicting_b])
+    assert {p.source_id for p in result.printings} == {'9000001', '9000002'}
+    assert {p.source_id: p.editions for p in result.printings} == {
+        sid: p.editions for sid, p in old.printings.items()}
+    assert all(p.carried for p in result.printings)
+    assert {(r.source_id, r.kind) for r in result.reviews} == {
+        ('9000001', 'identity_text_conflict'), ('9000002', 'identity_text_conflict')}
+    assert not result.evidence
