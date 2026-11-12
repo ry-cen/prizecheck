@@ -19,7 +19,7 @@ type Load =
   | { kind: "failed" };
 
 type Pending = { action: string; value: string; key: string };
-type NameFeedback = { kind: "validation" | "request"; message: string } | null;
+type FieldFeedback = { kind: "validation" | "request"; message: string } | null;
 
 /** The Invite Link's address on this site. */
 export function inviteUrl(token: string): string {
@@ -46,10 +46,12 @@ export function PrivacySection({
   const [name, setName] = useState("");
   const [handle, setHandleText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [nameFeedback, setNameFeedback] = useState<NameFeedback>(null);
+  const [nameFeedback, setNameFeedback] = useState<FieldFeedback>(null);
   const nameNotice = nameFeedback?.message ?? "";
   const nameInvalid = nameFeedback?.kind === "validation";
-  const [handleNotice, setHandleNotice] = useState("");
+  const [handleFeedback, setHandleFeedback] = useState<FieldFeedback>(null);
+  const handleNotice = handleFeedback?.message ?? "";
+  const handleInvalid = handleFeedback?.kind === "validation";
   const [linkNotice, setLinkNotice] = useState("");
   const [status, setStatus] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -59,21 +61,38 @@ export function PrivacySection({
   const nameInput = useRef<HTMLInputElement>(null);
   const nameForm = useRef<HTMLFormElement>(null);
   const currentName = useRef("");
+  const handleInput = useRef<HTMLInputElement>(null);
+  const handleForm = useRef<HTMLFormElement>(null);
+  const currentHandle = useRef("");
+
+  function setHandleNotice(message: string) {
+    setHandleFeedback(message ? { kind: "request", message } : null);
+  }
 
   function setNameNotice(message: string) {
     setNameFeedback(message ? { kind: "request", message } : null);
   }
 
   function refuseName(message: string, focus: "always" | "if-here") {
-    setNameFeedback({ kind: "validation", message });
+    refuseField(message, focus, setNameFeedback, nameForm, nameInput);
+  }
+
+  function refuseField(
+    message: string,
+    focus: "always" | "if-here",
+    feedback: (value: FieldFeedback) => void,
+    form: React.RefObject<HTMLFormElement | null>,
+    input: React.RefObject<HTMLInputElement | null>
+  ) {
+    feedback({ kind: "validation", message });
     const active = document.activeElement;
     if (
       focus === "always" ||
       active === null ||
       active === document.body ||
-      nameForm.current?.contains(active)
+      form.current?.contains(active)
     ) {
-      nameInput.current?.focus();
+      input.current?.focus();
     }
   }
 
@@ -83,6 +102,7 @@ export function PrivacySection({
     currentName.current = profile.display_name;
     setNameNotice("");
     setHandleText(profile.handle);
+    currentHandle.current = profile.handle;
   }
   useEffect(() => {
     getProfile()
@@ -125,6 +145,22 @@ export function PrivacySection({
       ) {
         if (currentName.current === value) {
           refuseName(profileMessage(cause), "if-here");
+        }
+      } else if (
+        action === "handle" &&
+        cause instanceof ProfileError &&
+        ["INVALID_HANDLE", "HANDLE_NOT_ALLOWED", "HANDLE_TAKEN"].includes(
+          cause.code
+        )
+      ) {
+        if (currentHandle.current === value) {
+          refuseField(
+            profileMessage(cause),
+            "if-here",
+            setHandleFeedback,
+            handleForm,
+            handleInput
+          );
         }
       } else notice(profileMessage(cause));
     } finally {
@@ -232,9 +268,20 @@ export function PrivacySection({
               )}
             </form>
             <form
+              ref={handleForm}
               className="flex flex-wrap items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (!/^[a-zA-Z0-9_]{3,20}$/.test(handle)) {
+                  refuseField(
+                    "Use 3 to 20 letters, digits and underscores.",
+                    "always",
+                    setHandleFeedback,
+                    handleForm,
+                    handleInput
+                  );
+                  return;
+                }
                 void change(
                   "handle",
                   handle,
@@ -247,13 +294,20 @@ export function PrivacySection({
               <div className="min-w-0 flex-[1_1_16rem]">
                 <TextField
                   label="Handle"
+                  ref={handleInput}
+                  aria-invalid={handleInvalid || undefined}
                   value={handle}
                   maxLength={20}
                   autoComplete="username"
                   autoCapitalize="none"
                   spellCheck={false}
-                  aria-describedby={`${base}-handle-help`}
-                  onChange={(event) => setHandleText(event.target.value)}
+                  aria-describedby={`${base}-handle-help${handleNotice ? ` ${base}-handle-error` : ""}`}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setHandleText(value);
+                    currentHandle.current = value;
+                    if (/^[a-zA-Z0-9_]{3,20}$/.test(value)) setHandleNotice("");
+                  }}
                 />
               </div>
               <Button
@@ -273,6 +327,7 @@ export function PrivacySection({
               </p>
               {handleNotice && (
                 <p
+                  id={`${base}-handle-error`}
                   role="alert"
                   className="m-0 basis-full text-meta text-danger"
                 >

@@ -59,6 +59,22 @@ export function PublicLayout({ current, onNavigate, children }: Props) {
       ref={frame}
       className="flex min-h-dvh flex-col bg-bg font-sans text-text scheme-dark"
     >
+      <a
+        href="#main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          const target =
+            frame.current?.querySelector<HTMLElement>("main h1") ??
+            frame.current?.querySelector<HTMLElement>("main");
+          if (!target) return;
+          if (!target.hasAttribute("tabindex"))
+            target.setAttribute("tabindex", "-1");
+          target.focus();
+        }}
+        className="fixed left-2 top-2 z-(--layer-modal) inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline focus:translate-y-0"
+      >
+        Skip to main content
+      </a>
       <header
         ref={header}
         className="sticky top-0 z-(--layer-sticky) box-border flex min-h-header shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-bg px-7 py-2 compact:px-5 phone:gap-x-2 phone:px-3"
