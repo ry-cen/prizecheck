@@ -981,3 +981,141 @@ test.each([false, 0, "", [], { key: "partial" }])(
     await close();
   }
 );
+
+test.each(
+  ["discarded", "unavailable", "legacy"].flatMap((origin) =>
+    ["added", "refused", "lost"].flatMap((terminal) =>
+      [false, true].map((reload) => ({ origin, terminal, reload }))
+    )
+  )
+)(
+  "independent warning survives $origin → B → $terminal (reload=$reload)",
+  async ({ origin, terminal, reload }) => {
+    const { addCards } = await import("./cardActions");
+    const { batchAddHoldings, HoldingError } =
+      await import("../holdings_generated");
+    const send = vi.mocked(batchAddHoldings);
+    send.mockReset();
+    const committed = new Set<string>();
+    if (origin !== "legacy")
+      send.mockImplementationOnce(async (request) => {
+        committed.add(request.idempotency_key);
+        throw Error("A committed, response lost");
+      });
+    let close = await mount();
+    const remount = async () => {
+      if (reload) {
+        await close();
+        close = await mount();
+      }
+    };
+    const submit = async (items: readonly AddItem[]) =>
+      act(async () =>
+        queue.settle(
+          await addCards("box", "Box", items, queue.pending, queue.submitting)
+        )
+      );
+    if (origin === "legacy") {
+      await close();
+      preset();
+      close = await mount();
+      await act(async () => queue.clear());
+    } else {
+      await edit();
+      await edit();
+      await submit(A2);
+      expect(committed.size).toBe(1);
+      expect(queue.uncertain).toBe(false);
+      await remount();
+      expect(queue.pending.current).not.toBe(null);
+      if (origin === "unavailable") {
+        send.mockRejectedValueOnce(
+          new HoldingError(409, "REPLAY_OUTCOME_UNAVAILABLE", null)
+        );
+        await submit(A2);
+        await remount();
+      }
+      await act(async () => queue.clear());
+    }
+    expect(queue.uncertain).toBe(true);
+    await remount();
+    expect(queue.uncertain).toBe(true);
+    await edit(second);
+    await remount();
+    expect(queue.uncertain).toBe(true);
+    const b = [{ editionId: "two", quantity: 1 }];
+    send.mockRejectedValueOnce(Error("B response lost"));
+    await submit(b);
+    const bKey = queue.pending.current?.key;
+    expect(bKey).toBeTruthy();
+    expect(queue.uncertain).toBe(true);
+    await remount();
+    expect(queue.uncertain).toBe(true);
+    expect(queue.pending.current?.key).toBe(bKey);
+    if (terminal === "added")
+      send.mockResolvedValueOnce({
+        copy_count: "1",
+        edition_count: 1,
+        owner_revision: 3,
+        undo_id: "undo-b",
+        location_id: "box",
+      });
+    else
+      send.mockRejectedValueOnce(
+        new HoldingError(
+          terminal === "lost" ? 409 : 422,
+          terminal === "lost"
+            ? "REPLAY_OUTCOME_UNAVAILABLE"
+            : "QUANTITY_OVERFLOW",
+          null
+        )
+      );
+    await submit(b);
+    expect(queue.pending.current).toBe(null);
+    expect(queue.uncertain).toBe(true);
+    expect(rec()).not.toBe(null);
+    await remount();
+    expect(queue.uncertain).toBe(true);
+    // Dismiss is the only UI action that acknowledges this independent warning.
+    await act(async () => queue.dismiss());
+    expect(queue.uncertain).toBe(false);
+    await close();
+    close = await mount();
+    expect(queue.uncertain).toBe(false);
+    await close();
+  }
+);
+
+test("Dismiss acknowledges an earlier warning without abandoning the current replay command", async () => {
+  let close = await mount();
+  const a = { locationId: "box", path: "Box", key: "a", items: A2 };
+  await edit();
+  await edit();
+  await act(async () => queue.submitting(A2, a));
+  await settle(no(""));
+  await act(async () => queue.clear());
+  await edit(second);
+  const b = {
+    locationId: "box",
+    path: "Box",
+    key: "b",
+    items: [{ editionId: "two", quantity: 1 }],
+  };
+  await act(async () => queue.submitting(b.items, b));
+  await settle(no(""));
+  await act(async () => queue.dismiss());
+  expect(queue.uncertain).toBe(false);
+  expect(queue.pending.current).toEqual(b);
+  await close();
+  close = await mount();
+  expect(queue.uncertain).toBe(false);
+  expect(queue.pending.current).toEqual(b);
+  await act(async () => queue.submitting(b.items, b));
+  await settle(no("REPLAY_OUTCOME_UNAVAILABLE"));
+  expect(queue.uncertain).toBe(true);
+  await act(async () => queue.dismiss());
+  await close();
+  close = await mount();
+  expect(queue.uncertain).toBe(false);
+  await close();
+});

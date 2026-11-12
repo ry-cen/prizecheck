@@ -16,6 +16,8 @@ type Draft = {
   items: { editionId: string; printingId: string; quantity: number }[];
   target: string | null;
   uncertain: boolean;
+  /** An abandoned or unresolvable Add, independently acknowledged by Dismiss. */
+  unresolved?: boolean;
   pending?: AddCommand | null;
 };
 const empty = (): Draft => ({ items: [], target: null, uncertain: false });
@@ -40,6 +42,7 @@ function read(key: string): Draft {
       !Array.isArray(d.items) ||
       d.items.length > MAX_BATCH_EDITIONS ||
       typeof d.uncertain !== "boolean" ||
+      (d.unresolved !== undefined && typeof d.unresolved !== "boolean") ||
       (d.target !== null && typeof d.target !== "string") ||
       !d.items.every(
         (i) =>
@@ -118,7 +121,7 @@ function initial(draft = empty()): State {
     draft,
     queue: EMPTY_QUEUE,
     chosen: null,
-    restoredMarker: draft.uncertain && !draft.pending,
+    restoredMarker: draft.unresolved ?? (draft.uncertain && !draft.pending),
     current: [],
     lost: [],
     open: false,
@@ -149,6 +152,10 @@ function maxEach(a: readonly AddItem[], b: readonly AddItem[]): AddItem[] {
 }
 function record(s: State): Draft | null {
   const uncertain = s.restoredMarker || s.open || s.lostEarlier;
+  // A replayable command must never hide an unrelated warning. Legacy submissions
+  // without a command can only retain a warning, since they cannot be replayed.
+  const unresolved =
+    s.restoredMarker || s.lostEarlier || (s.open && !s.pending.current);
   const items =
     s.phase !== "ready"
       ? s.draft.items
@@ -165,7 +172,7 @@ function record(s: State): Draft | null {
         );
   const target = s.phase !== "ready" ? s.draft.target : s.chosen;
   return items.length || uncertain || s.pending.current
-    ? { items, target, uncertain, pending: s.pending.current }
+    ? { items, target, uncertain, unresolved, pending: s.pending.current }
     : null;
 }
 
@@ -278,7 +285,7 @@ export function useStoredAddQueue(scope: string) {
     blocked: view.lost.length > 0,
     queue: view.queue,
     chosen: view.chosen,
-    uncertain: view.restoredMarker,
+    uncertain: view.restoredMarker || view.lostEarlier,
     ready: view.phase === "ready",
     notice: view.notice,
     restoreFailed: view.phase === "failed",
@@ -342,6 +349,7 @@ export function useStoredAddQueue(scope: string) {
     dismiss() {
       if (!liveOwner()) return;
       s.current.restoredMarker = false;
+      s.current.lostEarlier = false;
       publish();
     },
   };

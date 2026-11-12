@@ -141,6 +141,64 @@ for (const viewport of [
         main.getByRole("list", { name: "Cards to add" })
       ).toHaveCount(0);
     });
+    test("an abandoned Add warning survives another failed Add and its replay", async ({
+      page,
+    }) => {
+      await prepare(page);
+      const main = page.locator("main:visible");
+      const warning = "Your earlier add may have finished.";
+      page.on("dialog", (dialog) => dialog.accept());
+      await main
+        .getByRole("button", { name: /^One more Bulbasaur/ })
+        .first()
+        .click();
+      await page.reload();
+      await page.route("**/api/holdings/batch", async (route) => {
+        await route.fetch();
+        await route.abort();
+      });
+      await main
+        .getByRole("button", { name: "Add 1 card", exact: true })
+        .click();
+      await expect(main).toContainText("Press Add again to check safely");
+      await page.unroute("**/api/holdings/batch");
+      await page.reload();
+      await main
+        .getByRole("button", { name: "Clear queue", exact: true })
+        .click();
+      await expect(main).toContainText(warning);
+      await page.reload();
+      await expect(main).toContainText(warning);
+      await main
+        .getByRole("button", { name: /^One more Rare Candy/ })
+        .first()
+        .click();
+      await page.reload();
+      await expect(main).toContainText(warning);
+      await page.route("**/api/holdings/batch", async (route) => {
+        await route.fetch();
+        await route.abort();
+      });
+      await main
+        .getByRole("button", { name: "Add 1 card", exact: true })
+        .click();
+      await expect(main).toContainText("Press Add again to check safely");
+      await page.unroute("**/api/holdings/batch");
+      await page.reload();
+      await expect(main).toContainText(warning);
+      await main
+        .getByRole("button", { name: "Add 1 card", exact: true })
+        .click();
+      await expect(
+        main.getByRole("list", { name: "Cards to add" })
+      ).toHaveCount(0);
+      await expect(main).toContainText(warning);
+      await page.reload();
+      await expect(main).toContainText(warning);
+      await main.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await page.reload();
+      await expect(main).not.toContainText(warning);
+    });
     for (const pending of [false, 0, "", [], { key: "partial" }]) {
       test(`malformed pending ${JSON.stringify(pending)} does not block a new Add`, async ({
         page,
