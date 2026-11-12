@@ -3,7 +3,12 @@ import { act, createElement as h, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { TradeView } from "../social_generated";
-import { getTrade, declineTrade, SocialError } from "../social_generated";
+import {
+  getTrade,
+  declineTrade,
+  withdrawTrade,
+  SocialError,
+} from "../social_generated";
 import { acceptTrade, confirmSwap, getTradeSide } from "../trades_generated";
 import { ListDetailLayout } from "../ui/ListDetailLayout";
 import { ToastProvider } from "../ui/Toast";
@@ -12,6 +17,7 @@ vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
   getTrade: vi.fn(),
   declineTrade: vi.fn(),
+  withdrawTrade: vi.fn(),
 }));
 vi.mock("../trades_generated", async (original) => ({
   ...(await original<typeof import("../trades_generated")>()),
@@ -398,4 +404,126 @@ it("S2-08: keeps compact phone terms together and every consent fact before the 
     disclosure.querySelector("select")?.getAttribute("disabled")
   ).toBeNull();
   expect(confirmSwap).not.toHaveBeenCalled();
+});
+
+async function openWithdraw() {
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  vi.stubGlobal("visualViewport", {
+    offsetLeft: 0,
+    offsetTop: 0,
+    width: 1024,
+    height: 768,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
+  const opener = host.querySelector<HTMLButtonElement>(
+    '[aria-label="More for this Trade"]'
+  )!;
+  vi.spyOn(opener, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(20, 20, 30, 30)
+  );
+  await act(async () => opener.click());
+  await act(async () =>
+    document.querySelector<HTMLElement>('[role="menuitem"]')!.click()
+  );
+}
+function withdrawQuestion() {
+  return host.querySelector('[role="group"][aria-label="Withdraw"]')!;
+}
+it("asks before withdrawing, Keep it restores focus, and double confirmation sends once", async () => {
+  vi.mocked(getTrade).mockResolvedValue({
+    ...trade,
+    role: "proposer",
+    actions: ["withdraw"],
+  });
+  let finish!: (value: TradeView) => void;
+  vi.mocked(withdrawTrade).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  await openWithdraw();
+  expect(withdrawTrade).not.toHaveBeenCalled();
+  const question = withdrawQuestion();
+  expect(question).not.toBeNull();
+  expect(question.textContent).toContain(
+    "Withdraw this Trade Proposal to Misty? None of these cards stay promised."
+  );
+  const yes = question.querySelector("button")!;
+  expect(document.activeElement).toBe(yes);
+  await act(async () =>
+    [...question.querySelectorAll("button")]
+      .find((b) => b.textContent === "Keep it")!
+      .click()
+  );
+  expect(withdrawTrade).not.toHaveBeenCalled();
+  expect(withdrawQuestion()).toBeNull();
+  const menu = host.querySelector<HTMLButtonElement>(
+    '[aria-label="More for this Trade"]'
+  )!;
+  expect(document.activeElement).toBe(menu);
+  await act(async () => menu.click());
+  await act(async () =>
+    document.querySelector<HTMLElement>('[role="menuitem"]')!.click()
+  );
+  const confirm = withdrawQuestion().querySelector("button")!;
+  await act(async () => confirm.click());
+  expect(confirm.getAttribute("aria-disabled")).toBe("true");
+  await act(async () => confirm.click());
+  expect(withdrawTrade).toHaveBeenCalledTimes(1);
+  expect(withdrawTrade).toHaveBeenCalledWith(
+    "item",
+    expect.objectContaining({ offer_id: "old-round", revision: 1 })
+  );
+  await act(async () =>
+    finish({
+      ...trade,
+      role: "proposer",
+      state: "closed",
+      closed_reason: "withdrawn",
+      actions: [],
+    })
+  );
+  expect(withdrawQuestion()).toBeNull();
+  expect(document.activeElement).toBe(host.querySelector("h1, h2"));
+  expect(host.querySelector("h1, h2")?.textContent).toContain(
+    "withdrew this Trade Proposal"
+  );
+});
+it("re-reads a refused withdrawal and focuses the heading", async () => {
+  vi.mocked(getTrade)
+    .mockResolvedValueOnce({
+      ...trade,
+      role: "proposer",
+      actions: ["withdraw"],
+    })
+    .mockResolvedValue({ ...trade, state: "accepted", actions: [] });
+  vi.mocked(withdrawTrade).mockRejectedValue(
+    new SocialError(409, "TRADE_CHANGED")
+  );
+  await openWithdraw();
+  expect(withdrawQuestion()).not.toBeNull();
+  expect(withdrawTrade).not.toHaveBeenCalled();
+  vi.mocked(getTrade).mockClear();
+  await act(async () =>
+    withdrawQuestion().querySelector<HTMLButtonElement>("button")!.click()
+  );
+  expect(withdrawTrade).toHaveBeenCalledTimes(1);
+  expect(getTrade).toHaveBeenCalledWith("item", expect.any(AbortSignal));
+  expect(withdrawQuestion()).toBeNull();
+  expect(document.activeElement).toBe(host.querySelector("h1, h2"));
+  expect(host.textContent).toContain(
+    "This Trade has changed. Check it and try again."
+  );
 });

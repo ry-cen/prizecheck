@@ -328,20 +328,48 @@ async function story(
     await expect(heading(page)).toHaveText("Ash K declined");
     await expectOnlyReport(page);
 
-    // C: Withdraw acts once inline, while Ash has the gift open. Cancel and Decline ask first.
+    // C: Withdraw asks once inline, while Ash has the gift open. Keep it leaves the proposal open.
     await ash.page.goto(`${ORIGIN}/trades/${withdrawn}`);
     await expect(heading(ash.page)).toHaveText(
       "Misty W wants to give you 1 card"
     );
     await page.goto(`${ORIGIN}/trades/${withdrawn}`);
     const mistyMain = page.getByRole("main");
+    let withdrawals = 0;
+    const countWithdrawal = (request: import("@playwright/test").Request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === `/api/trades/${withdrawn}/withdraw`
+      )
+        withdrawals += 1;
+    };
+    page.on("request", countWithdrawal);
     await more(page).click();
     await page.getByRole("menuitem", { name: "Withdraw" }).click();
+    const withdrawing = mistyMain.getByRole("group", { name: "Withdraw" });
+    await expect(withdrawing).toContainText(
+      "Withdraw this Trade Proposal to Ash K? None of these cards stay promised."
+    );
     await expect(
-      mistyMain.getByRole("group", { name: "Withdraw" })
-    ).toHaveCount(0);
+      withdrawing.getByRole("button", { name: "Withdraw", exact: true })
+    ).toBeFocused();
+    await withdrawing.getByRole("button", { name: "Keep it" }).click();
+    await expect(withdrawing).toHaveCount(0);
+    await expect(more(page)).toBeFocused();
+    const kept = await api(page, "GET", `/api/trades/${withdrawn}`);
+    expect(kept.live_offer.state).toBe("proposed");
+    expect(withdrawals).toBe(0);
+    await more(page).click();
+    await page.getByRole("menuitem", { name: "Withdraw" }).click();
+    await withdrawing
+      .getByRole("button", { name: "Withdraw", exact: true })
+      .click();
+    await expect(withdrawing).toHaveCount(0);
     await expect(heading(page)).toHaveText("You withdrew this Trade Proposal");
     await expect(toast(page)).toContainText("Withdrawn");
+    expect(withdrawals).toBe(1);
+    page.off("request", countWithdrawal);
+    await expect(heading(page)).toBeFocused();
     // Ash's screen still shows the proposal he opened: his accept finds it changed, and the screen reads it again.
     await ashMain.getByRole("button", { name: "Accept" }).click();
     await expect(ashMain.getByRole("alert")).toHaveText(
