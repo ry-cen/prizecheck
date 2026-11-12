@@ -791,6 +791,14 @@ export function TradeScreen({
         <div
           role="group"
           aria-label={ASK[asking].yes}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (busy) return;
+            focusNext.current = asking === "decline" ? "decline" : "menu";
+            setAsking(null);
+          }}
           className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
         >
           <p className="m-0 min-w-0 flex-1 text-body">
@@ -805,7 +813,9 @@ export function TradeScreen({
             {ASK[asking].yes}
           </Button>
           <Button
+            aria-disabled={busy || undefined}
             onClick={() => {
+              if (busy) return;
               focusNext.current = asking === "decline" ? "decline" : "menu";
               setAsking(null);
             }}

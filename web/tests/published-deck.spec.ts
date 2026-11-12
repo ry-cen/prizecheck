@@ -5,6 +5,7 @@
 // the deck; and, signed in, the owner bar. The decks come from api/tests/test_published_deck_page.py's page_world on
 // this worker's stack: real catalog cards judged by the real rules files. Every state runs the shared page check at
 // 1280×800 and 375×812, with each dialog open as well as closed.
+import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
@@ -134,13 +135,17 @@ for (const viewport of [
         views(page).getByRole("radio", { name: phone ? "Stacked" : "Spread" })
       ).toHaveAttribute("aria-checked", "true");
       await expect(
-        deckList(page).getByRole("heading", { level: 3 })
+        deckList(page).getByRole("heading", { level: 2 })
       ).toHaveText([
         "Pokémon, 1 card",
         "Other Trainers, 8 cards",
         "Energy, 51 cards",
       ]);
       await expectPageChecks(page, "Published Deck, signed out");
+      expect(
+        (await new AxeBuilder({ page }).withRules(["heading-order"]).analyze())
+          .violations
+      ).toEqual([]);
 
       // Spread: one plain tile per copy, each with one card's price.
       await views(page).getByRole("radio", { name: "Spread" }).click();
@@ -309,6 +314,10 @@ for (const viewport of [
       await expect(bar).not.toContainText("Hidden from Discover");
       await expect(bar.getByRole("link", { name: "Open Deck" })).toBeVisible();
       await expectPageChecks(page, "Published Deck with the owner bar");
+      expect(
+        (await new AxeBuilder({ page }).withRules(["heading-order"]).analyze())
+          .violations
+      ).toEqual([]);
       await bar.getByRole("button", { name: "Make Unlisted" }).click();
       await expect(bar.getByRole("heading", { level: 2 })).toHaveText(
         "Your Published Deck · Unlisted · v1"

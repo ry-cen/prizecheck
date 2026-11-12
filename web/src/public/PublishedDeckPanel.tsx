@@ -80,7 +80,7 @@ export function PublishedDeckPanel({
       </span>
       {groups.map((group, index) => (
         <section key={group.key} aria-labelledby={`${base}-group-${index}`}>
-          <h3
+          <h2
             id={`${base}-group-${index}`}
             className="m-0 mb-2 flex items-baseline gap-2 text-meta font-semibold text-text-muted"
           >
@@ -92,7 +92,7 @@ export function PublishedDeckPanel({
                 {group.copies === 1n ? " card" : " cards"}
               </span>
             </span>
-          </h3>
+          </h2>
           {view === "list" ? (
             <ul className="m-0 list-none p-0">
               {group.lines.map((line) => (

@@ -116,7 +116,7 @@ export function AccountSheetProvider({
         open={open}
         onClose={() => setOpen(false)}
         title="Account"
-        closeLabel="Close account"
+        closeLabel="Close account menu"
         returnFocus={opener}
       >
         {/* Drawn only while open: the desktop avatar menu shows the same name and email. */}

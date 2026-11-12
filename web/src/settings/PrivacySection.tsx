@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   getProfile,
+  ProfileError,
   newInviteLink,
   setDisplayName,
   setHandle,
@@ -18,6 +19,7 @@ type Load =
   | { kind: "failed" };
 
 type Pending = { action: string; value: string; key: string };
+type NameFeedback = { kind: "validation" | "request"; message: string } | null;
 
 /** The Invite Link's address on this site. */
 export function inviteUrl(token: string): string {
@@ -29,6 +31,7 @@ export function inviteUrl(token: string): string {
  * the Handle and the Invite Link, then the children (Hidden Locations, #249), as the spec orders them. Each change is an idempotent owner
  * command; a change that failed for a reason other than a refusal is sent again with the same key when the collector
  * retries the same value, so a change that was saved isn't made twice.
+ * A refusal applies only to the name it refused, and moves focus only if the collector hasn't left the name form.
  */
 export function PrivacySection({
   blocked,
@@ -43,7 +46,9 @@ export function PrivacySection({
   const [name, setName] = useState("");
   const [handle, setHandleText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [nameNotice, setNameNotice] = useState("");
+  const [nameFeedback, setNameFeedback] = useState<NameFeedback>(null);
+  const nameNotice = nameFeedback?.message ?? "";
+  const nameInvalid = nameFeedback?.kind === "validation";
   const [handleNotice, setHandleNotice] = useState("");
   const [linkNotice, setLinkNotice] = useState("");
   const [status, setStatus] = useState("");
@@ -51,10 +56,32 @@ export function PrivacySection({
   const pending = useRef<Pending | null>(null);
   const newLinkButton = useRef<HTMLButtonElement>(null);
   const base = useId();
+  const nameInput = useRef<HTMLInputElement>(null);
+  const nameForm = useRef<HTMLFormElement>(null);
+  const currentName = useRef("");
+
+  function setNameNotice(message: string) {
+    setNameFeedback(message ? { kind: "request", message } : null);
+  }
+
+  function refuseName(message: string, focus: "always" | "if-here") {
+    setNameFeedback({ kind: "validation", message });
+    const active = document.activeElement;
+    if (
+      focus === "always" ||
+      active === null ||
+      active === document.body ||
+      nameForm.current?.contains(active)
+    ) {
+      nameInput.current?.focus();
+    }
+  }
 
   function show(profile: CollectorProfile) {
     setLoad({ kind: "ready", profile });
     setName(profile.display_name);
+    currentName.current = profile.display_name;
+    setNameNotice("");
     setHandleText(profile.handle);
   }
   useEffect(() => {
@@ -90,7 +117,16 @@ export function PrivacySection({
       setStatus(saved);
     } catch (cause) {
       if (!retryable(cause)) pending.current = null;
-      notice(profileMessage(cause));
+      if (
+        action === "display_name" &&
+        cause instanceof ProfileError &&
+        (cause.code === "INVALID_DISPLAY_NAME" ||
+          cause.code === "DISPLAY_NAME_NOT_ALLOWED")
+      ) {
+        if (currentName.current === value) {
+          refuseName(profileMessage(cause), "if-here");
+        }
+      } else notice(profileMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -132,9 +168,14 @@ export function PrivacySection({
               Your name
             </h3>
             <form
+              ref={nameForm}
               className="flex flex-wrap items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (!name.trim() || [...name.trim()].length > 40) {
+                  refuseName("Enter a name of 1 to 40 characters.", "always");
+                  return;
+                }
                 void change(
                   "display_name",
                   name,
@@ -151,11 +192,20 @@ export function PrivacySection({
               <div className="min-w-0 flex-[1_1_16rem]">
                 <TextField
                   label="Display Name"
+                  ref={nameInput}
+                  aria-invalid={nameInvalid || undefined}
                   value={name}
                   maxLength={40}
                   autoComplete="nickname"
-                  aria-describedby={`${base}-name-help`}
-                  onChange={(event) => setName(event.target.value)}
+                  aria-describedby={`${base}-name-help${nameNotice ? ` ${base}-name-error` : ""}`}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setName(value);
+                    currentName.current = value;
+                    if (value.trim() && [...value.trim()].length <= 40) {
+                      setNameNotice("");
+                    }
+                  }}
                 />
               </div>
               <Button
@@ -173,6 +223,7 @@ export function PrivacySection({
               </p>
               {nameNotice && (
                 <p
+                  id={`${base}-name-error`}
                   role="alert"
                   className="m-0 basis-full text-meta text-danger"
                 >
