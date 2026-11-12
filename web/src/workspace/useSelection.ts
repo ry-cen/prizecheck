@@ -93,32 +93,49 @@ export function useSelection({
   const shown = useRef(active);
   shown.current = active;
 
-  const completeGallery = useRef(byKey);
-  if (status === "ready") completeGallery.current = byKey;
-
   const latest = useRef({
     selected,
     holdings,
     byKey,
     mobile,
     selectMode,
+    status,
     focus,
   });
-  latest.current = { ...latest.current, holdings, byKey, mobile, selectMode };
+  latest.current = {
+    ...latest.current,
+    holdings,
+    byKey,
+    mobile,
+    selectMode,
+    status,
+  };
 
   const commit = useCallback((next: Selection, clicked?: Inspected) => {
-    const previous = latest.current.focus;
-    let nextFocus: Inspected | null = null;
-    if (next.size) {
-      if (clicked && isTileSelected(next, clicked.holding.key, clicked.ordinal))
-        nextFocus = clicked;
-      else if (previous && next.has(previous.holding.key)) nextFocus = previous;
-      else {
-        const last = Array.from(next.values()).pop()!;
-        const holding = latest.current.byKey.get(last.key);
-        nextFocus = holding ? { holding, ordinal: last.runs[0][0] } : null;
-      }
-    }
+    const candidates = [clicked, latest.current.focus];
+    // Keep a surviving inspected copy, otherwise use a surviving ordinal in its Holding.
+    // Merely retaining the Holding key can leave focus beyond its new quantity after a refresh.
+    const preferred =
+      candidates.find(
+        (card) => card && isTileSelected(next, card.holding.key, card.ordinal)
+      ) ?? candidates.find((card) => card && next.has(card.holding.key));
+    const entry = preferred
+      ? next.get(preferred.holding.key)
+      : Array.from(next.values()).pop();
+    const holding =
+      entry &&
+      (latest.current.byKey.get(entry.key) ??
+        (preferred?.holding.key === entry.key ? preferred.holding : undefined));
+    const nextFocus =
+      entry && holding
+        ? {
+            holding,
+            ordinal:
+              preferred && isTileSelected(next, entry.key, preferred.ordinal)
+                ? preferred.ordinal
+                : entry.runs[0][0],
+          }
+        : null;
     latest.current.selected = next;
     latest.current.focus = nextFocus;
     setSelected(next);
@@ -199,7 +216,7 @@ export function useSelection({
   useEffect(() => {
     if (status !== "ready") return;
     const next = reconcileSelection(latest.current.selected, byKey);
-    if (next !== latest.current.selected) commit(next);
+    commit(next);
   }, [status, byKey, commit]);
 
   // Escape clears the selection unless a dialog, drawer or sheet is open (they handle Escape themselves).
@@ -252,22 +269,13 @@ export function useSelection({
       const previousFocus = latest.current.focus;
       commit(toggleTile(EMPTY_SELECTION, card.holding, card.ordinal), card);
       return () => {
-        const gallery = completeGallery.current;
-        const restored = reconcileSelection(previous, gallery);
-        const focused =
-          (previousFocus && restored.get(previousFocus.holding.key)) ||
-          Array.from(restored.values()).pop();
-        const holding = focused && gallery.get(focused.key);
-        const ordinal =
-          previousFocus &&
-          focused?.key === previousFocus.holding.key &&
-          isTileSelected(restored, focused.key, previousFocus.ordinal)
-            ? previousFocus.ordinal
-            : focused?.runs[0][0];
-        commit(
-          restored,
-          holding && ordinal !== undefined ? { holding, ordinal } : undefined
-        );
+        // An incomplete walk cannot disprove saved copies, even if an older complete
+        // map exists. Restore exactly now; the ready-state effect reconciles once this walk finishes.
+        const restored =
+          latest.current.status === "ready"
+            ? reconcileSelection(previous, latest.current.byKey)
+            : previous;
+        commit(restored, previousFocus ?? undefined);
       };
     },
     dropBorrowed: () => commit(dropBorrowedSelection(latest.current.selected)),
