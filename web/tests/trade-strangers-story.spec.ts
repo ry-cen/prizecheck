@@ -163,6 +163,10 @@ async function confirmSwap(page: Page, other: string) {
   await dialog(page, other)
     .getByRole("button", { name: "Confirm swap" })
     .click();
+  await dialog(page, other)
+    .getByRole("group", { name: "Confirm swap", exact: true })
+    .getByRole("button", { name: "Confirm swap", exact: true })
+    .click();
   await expect(dialog(page, other)).toBeHidden();
 }
 

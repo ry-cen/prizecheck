@@ -592,6 +592,10 @@ async function story(
       `the Confirm swap dialog with a destination and a Deck switch at ${width}`
     );
     await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
+    await ashDialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(toast(ash.page)).toContainText(
       `Swapped. 1 card is in ${ashPlace} Box. ${ashPlace} Deck now uses Iono (PAL 185).`
     );
@@ -633,6 +637,10 @@ async function story(
       `the Confirm swap dialog with a Deck destination at ${width}`
     );
     await dialog.getByRole("button", { name: "Confirm swap" }).click();
+    await dialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(toast(page)).toContainText(
       `Swapped. 2 cards are in ${mistyPlace} Deck.`
     );

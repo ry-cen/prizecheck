@@ -212,7 +212,30 @@ async function story(
     await expect(
       ashDialog.getByRole("combobox", { name: "Put the cards you get in" })
     ).toHaveValue("");
+    const opener = ashDialog.getByRole("button", {
+      name: "Confirm swap",
+      exact: true,
+    });
+    await opener.click();
+    const ask = ashDialog.getByRole("group", {
+      name: "Confirm swap",
+      exact: true,
+    });
+    await expect(ask).toContainText(
+      "Confirm the swap with Misty W? You can't undo it."
+    );
+    await ask.getByRole("button", { name: "Not yet" }).click();
+    await expect(opener).toBeFocused();
+    await expect(ask).toBeHidden();
+    await opener.click();
+    await ask.press("Escape");
+    await expect(opener).toBeFocused();
+    await expect(ask).toBeHidden();
     await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
+    await ashDialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(ashDialog).toBeHidden();
     expect(stalePickConfirmations).toBe(1);
     await expect(ashMain.getByRole("alert")).toHaveText(
@@ -281,6 +304,10 @@ async function story(
       .getByRole("combobox", { name: "Put the cards you get in" })
       .selectOption({ label: `${secret} Box` });
     await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
+    await ashDialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(toast(ash.page)).toContainText(
       `Swapped. 1 card is in ${secret} Box.`
     );
@@ -303,6 +330,10 @@ async function story(
       .getByRole("combobox", { name: "Put the cards you get in" })
       .selectOption({ label: `${secret} Deck (Deck)` });
     await dialog.getByRole("button", { name: "Confirm swap" }).click();
+    await dialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(toast(page)).toContainText(
       `Swapped. 1 card is in ${secret} Deck.`
     );
@@ -375,6 +406,10 @@ async function story(
         reviewConfirmations++;
     });
     await dialog.getByRole("button", { name: "Confirm swap" }).click();
+    await dialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(main.getByRole("alert")).toHaveText(
       "This Trade has changed. Check it and try again."
     );
@@ -414,6 +449,10 @@ async function story(
     await expect(dialog.getByRole("combobox")).toHaveCount(0);
     await expectPageChecks(page, `the confirm dialog of a gift at ${width}`);
     await dialog.getByRole("button", { name: "Confirm swap" }).click();
+    await dialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(toast(page)).toContainText(
       "Swapped. The cards you gave left your Collection."
     );

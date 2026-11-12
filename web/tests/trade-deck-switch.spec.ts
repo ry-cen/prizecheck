@@ -110,6 +110,10 @@ async function story(
   await offer.uncheck();
   await expect(offer).not.toBeChecked();
   await dialog.getByRole("button", { name: "Confirm swap" }).click();
+  await dialog
+    .getByRole("group", { name: "Confirm swap", exact: true })
+    .getByRole("button", { name: "Confirm swap", exact: true })
+    .click();
   await expect(toast(page)).toContainText("Swapped. 1 card is in Unsorted.");
   await expect(toast(page)).not.toContainText("Deck now uses");
   await expect(
@@ -125,6 +129,10 @@ async function story(
   await expect(dialog).toBeVisible();
   await expect(offer).toBeChecked();
   await dialog.getByRole("button", { name: "Confirm swap" }).click();
+  await dialog
+    .getByRole("group", { name: "Confirm swap", exact: true })
+    .getByRole("button", { name: "Confirm swap", exact: true })
+    .click();
   await expect(toast(page)).toContainText(
     `Swapped. 1 card is in Unsorted. ${secret} Deck now uses Arven (SVI 166).`
   );

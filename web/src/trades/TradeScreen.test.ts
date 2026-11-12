@@ -272,6 +272,33 @@ it("shows the physical swap disclosure before its single confirmation control", 
   );
   expect(buttons).toHaveLength(1);
   await act(async () => buttons[0].click());
+  expect(confirmSwap).not.toHaveBeenCalled();
+  expect(disclosure.textContent).toContain(
+    "Confirm the swap with Misty? You can't undo it."
+  );
+  await act(async () =>
+    [...disclosure.querySelectorAll("button")]
+      .find((b) => b.textContent === "Not yet")!
+      .click()
+  );
+  expect(document.activeElement).toBe(buttons[0]);
+  await act(async () => buttons[0].click());
+  await act(async () =>
+    disclosure
+      .querySelector('[role="group"]')!
+      .dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      )
+  );
+  expect(document.activeElement).toBe(buttons[0]);
+  await act(async () => buttons[0].click());
+  const yes = disclosure.querySelector(
+    '[role="group"] button'
+  ) as HTMLButtonElement;
+  await act(async () => {
+    yes.click();
+    yes.click();
+  });
   expect(confirmSwap).toHaveBeenCalledTimes(1);
   expect(confirmSwap).toHaveBeenCalledWith(
     "item",
