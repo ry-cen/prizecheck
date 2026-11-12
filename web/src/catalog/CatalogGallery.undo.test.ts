@@ -737,3 +737,98 @@ test("Clear then Browse then Undo focuses the live search field", async () => {
     host.querySelector('input[type="search"]')
   );
 });
+
+for (const stick of ["page", "dialog"] as const) {
+  async function mountRecoveryContext() {
+    function Owner() {
+      const notify = useAddToast({ shown: true, onUndone: vi.fn() });
+      return h(CatalogGallery, {
+        active: true,
+        adding: true,
+        fixedTarget: { id: "box", label: "Box" },
+        undoToast: stick === "page",
+        onAdded: stick === "dialog" ? notify : undefined,
+        stick,
+      });
+    }
+    await act(async () => root.render(h(ToastProvider, null, h(Owner))));
+  }
+  async function clearOne() {
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>('button[aria-label^="One more"]')!
+        .click()
+    );
+    await act(async () => button("Clear queue")!.click());
+  }
+  function recoveryButtons() {
+    return [...host.querySelectorAll<HTMLButtonElement>("button")].filter(
+      (b) => b.textContent === "Undo"
+    );
+  }
+  test(`${stick}: completed Add then Clear leaves only queue recovery`, async () => {
+    await mountRecoveryContext();
+    await addFromPopup();
+    await act(async () => button("Close popup")!.click());
+    await clearOne();
+    expect(recoveryButtons()).toHaveLength(1);
+    expect(
+      host.querySelector('[aria-label="Notifications"]')!.textContent
+    ).not.toContain("Added");
+    await act(async () => recoveryButtons()[0].click());
+    expect(host.querySelector("[data-queue]")!.textContent).toBe("1");
+    expect(applyUndo).not.toHaveBeenCalled();
+  });
+  test(`${stick}: delayed Add yields to newer Clear ownership`, async () => {
+    await mountRecoveryContext();
+    let resolve!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+    vi.mocked(listUndo).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    await addFromPopup();
+    await act(async () => button("Close popup")!.click());
+    await clearOne();
+    await act(async () =>
+      resolve([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>)
+    );
+    expect(recoveryButtons()).toHaveLength(1);
+    expect(
+      host.querySelector('[aria-label="Notifications"]')!.textContent
+    ).not.toContain("Added");
+    await act(async () => recoveryButtons()[0].click());
+    expect(host.querySelector("[data-queue]")!.textContent).toBe("1");
+    expect(applyUndo).not.toHaveBeenCalled();
+  });
+  test(`${stick}: newer Add retires Clear before its Undo list resolves`, async () => {
+    await mountRecoveryContext();
+    await clearOne();
+    expect(recoveryButtons()).toHaveLength(1);
+    let resolve!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+    vi.mocked(listUndo).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    await addFromPopup();
+    expect(host.textContent).not.toContain("Queue cleared.");
+    expect(host.querySelector("[data-clear-undo]")).toBeNull();
+    await act(async () =>
+      resolve([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>)
+    );
+    await act(async () => button("Close popup")!.click());
+    const scope =
+      stick === "dialog"
+        ? host.firstElementChild!
+        : host.querySelector('[aria-label="Notifications"]')!;
+    expect(
+      [...scope.querySelectorAll("button")].filter(
+        (b) => b.textContent === "Undo"
+      )
+    ).toHaveLength(1);
+    await act(async () => button("Undo", scope)!.click());
+    expect(applyUndo).toHaveBeenCalledTimes(1);
+    expect(host.querySelector("[data-queue]")!.textContent).toBe("0");
+  });
+}

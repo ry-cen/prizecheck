@@ -234,6 +234,7 @@ export function CatalogGallery({
   const clearedUndo = useRef<(() => boolean) | null>(null);
   const [clearInline, setClearInline] = useState<{
     undo: () => boolean;
+    noticeId: number;
   } | null>(null);
   useEffect(() => {
     if (clearToast.current !== null) {
@@ -243,18 +244,27 @@ export function CatalogGallery({
     const undoClear = clearedUndo.current;
     clearedUndo.current = null;
     setClearInline(null);
-    if (undoClear && stick === "dialog") setClearInline({ undo: undoClear });
-    else if (undoClear)
-      clearToast.current = queueToast.show({
+    if (undoClear) {
+      // Add and Clear share the toast's version: newest success owns recovery.
+      // A dialog mirrors that owner inline; it never keeps an independent Undo.
+      ++feedbackVersion.current;
+      setFeedback(null);
+      const id = queueToast.show({
         message: "Queue cleared.",
-        focus: true,
-        action: {
-          label: "Undo",
-          onAction: () => {
-            if (undoClear()) restoreFocus.current = true;
-          },
-        },
+        focus: stick !== "dialog",
+        action:
+          stick === "dialog"
+            ? undefined
+            : {
+                label: "Undo",
+                onAction: () => {
+                  if (undoClear()) restoreFocus.current = true;
+                },
+              },
       });
+      clearToast.current = id;
+      if (stick === "dialog") setClearInline({ undo: undoClear, noticeId: id });
+    }
     if (restoreFocus.current) {
       restoreFocus.current = false;
       const root = galleryRoot.current;
@@ -354,7 +364,7 @@ export function CatalogGallery({
     onUndone: () => {},
     focusAfterUndo: () => {},
   });
-  useShownToastId();
+  const shownNoticeId = useShownToastId();
 
   function renderAddFeedback(
     onUndone: () => void,
@@ -413,6 +423,10 @@ export function CatalogGallery({
         result.ownerRevision
       );
       const version = ++feedbackVersion.current;
+      setClearInline(null);
+      clearToast.current = null;
+      // Reserve ownership before awaiting Add's Undo list, retiring earlier recovery now.
+      queueToast.show({ message: batchAddedText(result.copies, result.path) });
       const external = live.current.onAdded?.(result);
       const undo = live.current.undoToast
         ? live.current.addToast(result)
@@ -441,7 +455,7 @@ export function CatalogGallery({
       }
       return undo;
     },
-    [noteAdded]
+    [noteAdded, queueToast]
   );
 
   const show = useCallback((edition: BrowseEdition) => {
@@ -607,13 +621,17 @@ export function CatalogGallery({
   const unavailable = first !== null && !first.available;
   return (
     <div ref={galleryRoot} className="flex min-w-0 flex-col gap-4">
-      {clearInline && (
+      {clearInline && clearInline.noticeId === shownNoticeId && (
         <div role="status" className="flex flex-wrap items-center gap-2">
           <p className="m-0 text-meta">Queue cleared.</p>
           <Button
             data-clear-undo
             onClick={() => {
-              if (clearInline.undo()) restoreFocus.current = true;
+              if (
+                queueToast.isShown(clearInline.noticeId) &&
+                clearInline.undo()
+              )
+                restoreFocus.current = true;
             }}
           >
             Undo

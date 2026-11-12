@@ -1427,3 +1427,99 @@ for (const viewport of [
     });
   });
 }
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  for (const context of ["page", "dialog"] as const) {
+    test.describe(`single recovery owner ${context} ${viewport.width}`, () => {
+      test.use({ viewport });
+      test("Add and Clear replace each other's recovery, including a delayed Add notice", async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        let scope: Page | Locator = page;
+        if (context === "dialog") {
+          await page.goto(`${ORIGIN}/collection`);
+          await page
+            .getByRole("button", { name: "Add cards", exact: true })
+            .click();
+          scope = page.getByRole("dialog").last();
+        } else await mode(page, "Add to a Location").click();
+        const bar = addBar(scope);
+        const recovery =
+          context === "dialog"
+            ? scope.getByRole("button", { name: "Undo", exact: true })
+            : undo(page);
+        async function popupAdd() {
+          await tile(
+            scope,
+            "Bulbasaur, MEG 001, Mega Evolution, Normal"
+          ).click();
+          await addRow(page)
+            .getByRole("button", { name: "Add 1", exact: true })
+            .click();
+        }
+        await popupAdd();
+        await expect(undo(page)).toHaveCount(1);
+        await page.keyboard.press("Escape");
+        await more(scope, BULBASAUR).click();
+        await bar
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        await expect(recovery).toHaveCount(1);
+        await expect(recovery).toBeFocused();
+        await expect(toast(page)).toHaveText("Queue cleared.");
+        await recovery.click();
+        await expect(queued(scope)).toHaveText([`1× ${BULBASAUR}`]);
+        let release!: () => void;
+        let arrived!: () => void;
+        let served!: () => void;
+        const waiting = new Promise<void>((done) => {
+          arrived = done;
+        });
+        const gate = new Promise<void>((done) => {
+          release = done;
+        });
+        const completed = new Promise<void>((done) => {
+          served = done;
+        });
+        await page.route("**/api/moves/undo", async (route) => {
+          const response = await route.fetch();
+          arrived();
+          await gate;
+          await route.fulfill({ response });
+          served();
+        });
+        await popupAdd();
+        await waiting;
+        await page.keyboard.press("Escape");
+        await bar
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        release();
+        await completed;
+        await expect(toast(page)).toHaveText("Queue cleared.");
+        await expect(recovery).toHaveCount(1);
+        await recovery.click();
+        await expect(queued(scope)).toHaveText([`1× ${BULBASAUR}`]);
+        await page.unroute("**/api/moves/undo");
+        await bar
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        await popupAdd();
+        await page.keyboard.press("Escape");
+        await expect(
+          scope.getByText("Queue cleared.", { exact: true })
+        ).toHaveCount(0);
+        await expect(recovery).toHaveCount(1);
+        await expect(toast(page)).toHaveText(/Added 1 card/);
+        await expect(
+          bar.getByRole("list", { name: "Cards to add" })
+        ).toHaveCount(0);
+      });
+    });
+  }
+}

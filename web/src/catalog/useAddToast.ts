@@ -191,7 +191,7 @@ export function useAddToast({ shown, onUndone }: Options) {
 
   return useCallback(
     async (added: AddedCards): Promise<InlineUndo | null> => {
-      const turn = noticeTurn(kit, () => current.current);
+      const turn = noticeTurn(kit, () => null);
       const entries = await listUndo().catch(() => [] as UndoEntry[]);
       if (!turn()) return null;
       const undoable = entries[0]?.id === added.undoId;
