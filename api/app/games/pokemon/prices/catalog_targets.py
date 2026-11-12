@@ -5,9 +5,9 @@ registries; a database row records which version the maintainer activated and th
 digest of the code that was approved. A rule whose version or digest no longer matches
 is treated as inactive, so changed code cannot silently approve anything.
 
-State only moves toward caution on import. A verified mapping or eligible Live
-Printing that is contradicted becomes quarantined or suspended, and only a maintainer
-decision (not an import, not a rule activation) can clear it. Everything here runs inside
+Imports may re-verify changed rule mappings when no collector reported the Edition.
+Other contradicted mappings and Live identities become quarantined or suspended;
+imports never lift an existing quarantine or suspension (ADR 0025). Everything here runs inside
 the caller's transaction after ``catalog_begin_correction()`` has taken the clock.
 """
 import hashlib
@@ -16,7 +16,11 @@ import json
 import re
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+
+from psycopg.errors import LockNotAvailable
+
+from ..catalog.settlement_audit import record_settlement
 
 
 def number_key(number):
@@ -640,6 +644,55 @@ def _product_variant(facts, found):
     return product, MatchingRulesV1.variant(facts["descriptor"], key)
 
 
+def _projection_fp(facts):
+    return fingerprint(rule_projection({"correspondence": facts["correspondence"], "candidate": facts["lookup"],
+                                                 "card_tcgplayer": facts.get("card_tcgplayer")}))
+
+
+def default_accept_edition(current, facts, rejections, active, verified_elsewhere):
+    """Re-verify a rule mapping against current evidence; owner choices are never followed."""
+    if (current.basis != 'matching_rule' or active is None
+            or facts['correspondence'] != 'source_candidate' or facts['fingerprint'] in rejections):
+        return None
+    result = active.rule.evaluate(facts, verified_elsewhere)
+    if isinstance(result, Failure):
+        return None
+    product_id, quote_variant = result
+    # Check the derived result too: a rule may select a different product than the raw lookup.
+    if verified_elsewhere(product_id, quote_variant):
+        return None
+    return EditionState(state='verified', product_id=product_id, quote_variant=quote_variant,
+                        basis='matching_rule', activation_id=active.activation_id,
+                        accepted_fingerprint=facts['fingerprint'], accepted_projection=_projection_fp(facts),
+                        auto_closed=True)
+
+
+def lock_report_target(conn, kind, target_id):
+    """Serialize report insertion using its physical-target foreign key (migration 023).
+
+    Call after the catalog clock. Report
+    submission takes KEY SHARE on this row. Never wait while holding the clock:
+    existing writers can hold target FK locks before requesting that clock.
+    Recheck reports in a fresh statement after acquiring UPDATE NOWAIT.
+    """
+    if kind == 'edition':
+        conn.execute('SELECT id FROM catalog_edition WHERE id=%s FOR UPDATE NOWAIT', (target_id,))
+    else:
+        conn.execute('SELECT id FROM catalog_printing WHERE id=%s FOR UPDATE NOWAIT', (target_id,))
+
+
+def open_marketplace_report(conn, edition_id):
+    # Literal statuses mirror metadata_reviews.OPEN; importing it here would create a cycle.
+    return conn.execute("""SELECT 1 FROM catalog_metadata_report WHERE target='marketplace'
+      AND edition_id=%s AND status IN ('pending','needs_info') LIMIT 1""", (edition_id,)).fetchone() is not None
+
+
+def open_live_report(conn, printing_id):
+    # Literal statuses mirror metadata_reviews.OPEN.
+    return conn.execute("""SELECT 1 FROM catalog_metadata_report WHERE target='live'
+      AND printing_id=%s AND status IN ('pending','needs_info') LIMIT 1""", (printing_id,)).fetchone() is not None
+
+
 def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
     """Next marketplace state for one Edition given a changed or re-examined candidate.
 
@@ -651,8 +704,7 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
     candidate_fp = facts["fingerprint"]
     if current.state == "quarantined":
         return current  # Strict clearing: nothing but a maintainer decision lifts it.
-    projection_fp = fingerprint(rule_projection({"correspondence": facts["correspondence"], "candidate": facts["lookup"],
-                                                 "card_tcgplayer": facts.get("card_tcgplayer")}))
+    projection_fp = _projection_fp(facts)
     if current.state == "verified":
         if candidate_fp == current.accepted_fingerprint or candidate_fp in rejections:
             return current
@@ -949,6 +1001,29 @@ def add_card_tcgplayer(conn, edition_ids):
     return gained
 
 
+def edition_facts(conn, context, row):
+    candidate = row["mapping_candidate"]
+    rule = reviewed_rule(context.matching)
+    facts = {"fingerprint": fingerprint(candidate), "correspondence": candidate.get("correspondence"),
+             "lookup": candidate.get("candidate") or {}, "card_tcgplayer": candidate.get("card_tcgplayer"),
+             "descriptor": row["descriptor"], "source": row["source"],
+             "source_id": row["source_id"], "source_record": row["source_record"] or {},
+             "display": {"set_id": row["set_id"], "collector_number": row["collector_number"],
+                         "display_name": row["display_name"]} if row["set_id"] is not None else None}
+    if hasattr(rule, "TCGPLAYER_GROUPS"):  # a release whose newest rule predates v4 has no set table
+        facts.update(v6_set_path_facts(conn, rule, row) or set_path_facts(conn, rule, row))  # one candidate query per row
+    return facts
+
+
+def write_edition_state(conn, edition_id, current, new):
+    bump = 1 if (new.state == "verified") != (current.state == "verified") else 0
+    conn.execute("""UPDATE catalog_edition_metadata SET mapping_state=%s,mapping_reason=%s,product_id=%s,quote_variant=%s,
+      mapping_basis=%s,mapping_decision_id=%s,matching_activation_id=%s,accepted_fingerprint=%s,accepted_projection=%s,
+      auto_closed=%s,mapping_revision=mapping_revision+%s,updated_at=now() WHERE edition_id=%s""",
+                 (new.state, new.reason, new.product_id, new.quote_variant, new.basis, new.decision_id,
+                  new.activation_id, new.accepted_fingerprint, new.accepted_projection, new.auto_closed, bump, edition_id))
+
+
 def refresh_editions(conn, context, edition_ids, complete=False):
     """Re-evaluate marketplace state for Editions whose candidate changed or whose rule changed.
 
@@ -967,35 +1042,39 @@ def refresh_editions(conn, context, edition_ids, complete=False):
       LEFT JOIN catalog_printing_display d ON d.printing_id=p.id
       WHERE e.id=ANY(%s) ORDER BY e.id""", (list(edition_ids),)).fetchall()
     changed = 0
-    rule = reviewed_rule(context.matching)
     for row in rows:
         candidate = row["mapping_candidate"]
         if not candidate:
             continue  # Never imported: nothing to evaluate.
-        facts = {"fingerprint": fingerprint(candidate), "correspondence": candidate.get("correspondence"),
-                 "lookup": candidate.get("candidate") or {}, "card_tcgplayer": candidate.get("card_tcgplayer"),
-                 "descriptor": row["descriptor"], "source": row["source"],
-                 "source_id": row["source_id"], "source_record": row["source_record"] or {},
-                 "display": {"set_id": row["set_id"], "collector_number": row["collector_number"],
-                             "display_name": row["display_name"]} if row["set_id"] is not None else None}
-        if hasattr(rule, "TCGPLAYER_GROUPS"):  # a release whose newest rule predates v4 has no set table
-            facts.update(v6_set_path_facts(conn, rule, row) or set_path_facts(conn, rule, row))  # one candidate query per row
+        facts = edition_facts(conn, context, row)
         rejections = LazySet(lambda edition_id=row["id"]: [r["source_fingerprint"] for r in conn.execute(
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])
         current = edition_state(row)
         elsewhere = verified_elsewhere(conn, row["printing_id"], row["id"])
         new = evaluate_edition(current, facts, rejections, context.matching, elsewhere)
+        if (current.state == 'verified' and new.state == 'quarantined' and new.reason == 'candidate_changed'
+                and not open_marketplace_report(conn, row['id'])):
+            accepted = default_accept_edition(current, facts, rejections, context.matching, elsewhere)
+            if accepted is not None:
+                try:
+                    # A busy physical target is an ordinary quarantine, not an import failure.
+                    with conn.transaction():
+                        lock_report_target(conn, 'edition', row['id'])
+                        reported = open_marketplace_report(conn, row['id'])
+                        if not reported:
+                            record_settlement(conn, subject='edition', action='default_accepted', edition_id=row['id'],
+                                              printing_id=row['printing_id'], before=asdict(current), after=asdict(accepted))
+                    if not reported:
+                        new = accepted
+                except LockNotAvailable:
+                    pass  # savepoint rolled back; retain candidate_changed and write no audit
+
         if complete and new == current:
             new = complete_quote_variant(current, facts, context.matching, elsewhere)
         if new == current:
             continue
-        bump = 1 if (new.state == "verified") != (current.state == "verified") else 0
-        conn.execute("""UPDATE catalog_edition_metadata SET mapping_state=%s,mapping_reason=%s,product_id=%s,quote_variant=%s,
-          mapping_basis=%s,mapping_decision_id=%s,matching_activation_id=%s,accepted_fingerprint=%s,accepted_projection=%s,
-          auto_closed=%s,mapping_revision=mapping_revision+%s,updated_at=now() WHERE edition_id=%s""",
-                     (new.state, new.reason, new.product_id, new.quote_variant, new.basis, new.decision_id,
-                      new.activation_id, new.accepted_fingerprint, new.accepted_projection, new.auto_closed, bump, row["id"]))
+        write_edition_state(conn, row["id"], current, new)
         changed += 1
     return changed
 
