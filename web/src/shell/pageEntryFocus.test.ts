@@ -134,3 +134,50 @@ it("carries a pending request through a canonical replacement to a late heading"
     vi.unstubAllGlobals();
   }
 });
+
+it("keeps a section tab focused when it switches the Decks view and restores it on Back", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/decks");
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let route!: Route;
+  function View() {
+    route = useRoute();
+    const container = useRef<HTMLDivElement>(null);
+    useLayoutEffect(
+      () => restorePageFocus(container.current, route.focusFor()),
+      [route.entry, route.path]
+    );
+    return h(
+      "div",
+      { ref: container },
+      h("h1", null, "Decks"),
+      route.path !== "/decks/example"
+        ? h(
+            "button",
+            { role: "tab", onClick: () => route.navigate("/decks/want-list") },
+            "Want List"
+          )
+        : null
+    );
+  }
+  try {
+    await act(async () => root.render(h(View)));
+    const tab = host.querySelector("button")!;
+    tab.focus();
+    await act(async () => tab.click());
+    expect(document.activeElement).toBe(tab);
+    const wantList = window.history.state;
+    await act(async () => route.navigate("/decks/example"));
+    await act(async () => {
+      window.history.replaceState(wantList, "", "/decks/want-list");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(document.activeElement).toBe(host.querySelector("button"));
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});

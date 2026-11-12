@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PAGES } from "./routes";
+import { PAGES, pageAt } from "./routes";
 import {
   saveFocus,
   createPageEntryFocus,
@@ -223,6 +223,11 @@ export function useRoute(): Route {
           headingEntry.current =
             !overlay &&
             target !== current.current &&
+            // Section tabs change the selected view while keeping focus on that tab.
+            !(
+              document.activeElement?.getAttribute("role") === "tab" &&
+              pageAt(target)?.id === pageAt(current.current)?.id
+            ) &&
             !PAGES.some((page) => page.path === target)
               ? {
                   entry: window.history.state.prizecheckEntry,

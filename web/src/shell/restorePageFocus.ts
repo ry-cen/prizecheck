@@ -72,10 +72,17 @@ function focusPageEntry(
   const focused = (event: FocusEvent) => {
     if (event.target !== heading) cancel();
   };
+  const complete = () => {
+    // A loading redirect is an intermediate heading, not the completed page entry.
+    if (heading?.closest('[aria-busy="true"]')) return;
+    request.state = "completed";
+    timer ??= setTimeout(detach, RESTORE_WINDOW_MS);
+  };
   const attempt = () => {
     const active = document.activeElement;
     if (heading?.isConnected) {
       if (active !== heading) cancel();
+      else complete();
       return;
     }
     if (
@@ -92,13 +99,17 @@ function focusPageEntry(
     heading.classList.add("outline-none");
     heading.focus({ preventScroll: true });
     if (document.activeElement === heading) {
-      request.state = "completed";
-      // The entry window starts with the first heading, so slow initial data reads still work.
-      timer ??= setTimeout(detach, RESTORE_WINDOW_MS);
+      // Start the recovery window only after the actual page receives focus.
+      complete();
     }
   };
   const observer = new MutationObserver(attempt);
-  observer.observe(container, { childList: true, subtree: true });
+  observer.observe(container, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["aria-busy"],
+  });
   window.addEventListener("pointerdown", cancel, { once: true });
   window.addEventListener("keydown", cancel, { once: true });
   window.addEventListener("focusin", focused);

@@ -57,7 +57,7 @@ export function ProposalRedirect({
     onNavigate(TRADE_FIND_PATH);
   };
   return (
-    <main className={FRAME}>
+    <main className={FRAME} aria-busy={load === "loading"}>
       <a href={TRADE_FIND_PATH} onClick={go} className={BACK}>
         <Icon icon={ChevronLeft} />
         Find trades
