@@ -12,6 +12,10 @@ import {
 import { TradesError, counterTrade, getTradeList } from "../trades_generated";
 import { ToastProvider } from "../ui/Toast";
 import { peekProposalSeed } from "./openProposal";
+import {
+  createPageEntryFocus,
+  restorePageFocus,
+} from "../shell/restorePageFocus";
 import { CounterPage } from "./CounterPage";
 import { ProposalBuilderPage } from "./ProposalBuilderPage";
 vi.mock("../social_generated", async (original) => ({
@@ -839,4 +843,72 @@ it("keeps the Reverse Holo re-add actionable after removing its last selected co
     button("Decrease Arven (SVI 166, Reverse Holo) you get").disabled
   ).toBe(false);
   expect(counterTrade).not.toHaveBeenCalled();
+});
+
+for (const interacted of [false, true])
+  it(`keeps Counter entry focus through loading to the real builder (interaction: ${interacted})`, async () => {
+    let resolve!: (trade: TradeView) => void;
+    vi.mocked(getTrade).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    await mount(true);
+    const loading = host.querySelector("h1")!;
+    expect(loading.textContent).toBe("Counter");
+    const stop = restorePageFocus(host, createPageEntryFocus());
+    try {
+      expect(document.activeElement).toBe(loading);
+      if (interacted) window.dispatchEvent(new Event("pointerdown"));
+      await act(async () => resolve(original));
+      const final = host.querySelector("h1")!;
+      expect(final.textContent).toBe("Counter to Misty");
+      expect(final).not.toBe(loading);
+      expect(document.activeElement).toBe(interacted ? document.body : final);
+    } finally {
+      stop();
+    }
+  });
+
+it("keeps entry focus when the real proposal builder finishes its initial party read", async () => {
+  let resolve!: (value: Awaited<ReturnType<typeof getTraderTradeList>>) => void;
+  vi.mocked(getTraderTradeList).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      })
+  );
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(ProposalBuilderPage, {
+          traderId: "misty",
+          onNavigate: navigate,
+        }),
+      })
+    )
+  );
+  const loading = host.querySelector("h1")!;
+  expect(loading.textContent).toBe("Trade Proposal");
+  const stop = restorePageFocus(host, createPageEntryFocus());
+  try {
+    expect(document.activeElement).toBe(loading);
+    await act(async () =>
+      resolve({
+        trader_id: "misty",
+        display_name: "Misty",
+        band: null,
+        completed_trades: 0,
+        cards: [],
+        next_page: null,
+      })
+    );
+    const ready = host.querySelector("h1")!;
+    expect(ready.textContent).toBe("Trade Proposal to Misty");
+    expect(ready).toBe(loading);
+    expect(document.activeElement).toBe(ready);
+  } finally {
+    stop();
+  }
 });

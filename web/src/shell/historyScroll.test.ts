@@ -185,7 +185,10 @@ it("records the control that left each entry and offers it back on Back, not on 
     const wantList = window.history.state;
     link.focus();
     await act(async () => route.navigate("/decks/d1"));
-    expect(route.focusFor()).toBe("heading");
+    expect(route.focusFor()).toMatchObject({
+      kind: "heading",
+      state: "pending",
+    });
     link.remove();
     await act(async () => {
       window.history.replaceState(wantList, "", "/decks/want-list");
@@ -227,16 +230,25 @@ it("only requests heading focus for forward in-app page entry", async () => {
     );
     expect(route.focusFor()).toBeNull();
     await act(async () => route.navigate("/decks/d1"));
-    expect(route.focusFor()).toBe("heading");
+    expect(route.focusFor()).toMatchObject({
+      kind: "heading",
+      state: "pending",
+    });
     await act(async () => route.navigate("/decks/d1?view=list"));
     expect(route.focusFor()).toBeNull();
     await act(async () => route.navigate("/loans"));
     expect(route.focusFor()).toBeNull();
     await act(async () => route.navigate("/loans/l1"));
-    expect(route.focusFor()).toBe("heading");
+    expect(route.focusFor()).toMatchObject({
+      kind: "heading",
+      state: "pending",
+    });
     const detail = window.history.state;
     await act(async () => route.navigate("/loans/l2", { replace: true }));
-    expect(route.focusFor()).toBe("heading");
+    expect(route.focusFor()).toMatchObject({
+      kind: "heading",
+      state: "pending",
+    });
     await act(async () => {
       window.history.replaceState(detail, "", "/loans/l1");
       window.dispatchEvent(new PopStateEvent("popstate"));

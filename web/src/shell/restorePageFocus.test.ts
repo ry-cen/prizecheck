@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { RESTORE_WINDOW_MS } from "./restorePageScroll";
-import { restorePageFocus, saveFocus } from "./restorePageFocus";
+import {
+  createPageEntryFocus,
+  restorePageFocus,
+  saveFocus,
+} from "./restorePageFocus";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -122,7 +126,7 @@ it("focuses the forward entry heading without scrolling", () => {
   document.body.append(page);
   const heading = page.querySelector("h1")!;
   const focus = vi.spyOn(heading, "focus");
-  restorePageFocus(page, "heading");
+  restorePageFocus(page, createPageEntryFocus());
   expect(document.activeElement).toBe(heading);
   expect(heading.tabIndex).toBe(-1);
   expect(focus).toHaveBeenCalledWith({ preventScroll: true });
@@ -131,7 +135,7 @@ it("focuses the forward entry heading without scrolling", () => {
 it("waits for a forward entry heading", async () => {
   const page = document.createElement("div");
   document.body.append(page);
-  const stop = restorePageFocus(page, "heading");
+  const stop = restorePageFocus(page, createPageEntryFocus());
   page.innerHTML = "<h1>Loan</h1>";
   await flush();
   expect(document.activeElement).toBe(page.firstChild);
@@ -141,7 +145,7 @@ it("waits for a forward entry heading", async () => {
 it("never takes heading focus after the collector focused elsewhere, even if focus returns to body", async () => {
   const page = document.createElement("div");
   document.body.append(page);
-  const stop = restorePageFocus(page, "heading");
+  const stop = restorePageFocus(page, createPageEntryFocus());
   const control = link(page, "Something else");
   control.focus();
   control.remove();
@@ -155,7 +159,7 @@ it("waits while the navigation opener remains in the page during loading", async
   const page = document.createElement("div");
   document.body.append(page);
   link(page, "Open Deck").focus();
-  const stop = restorePageFocus(page, "heading");
+  const stop = restorePageFocus(page, createPageEntryFocus());
   page.innerHTML = "<h1>Deck</h1>";
   await flush();
   expect(document.activeElement).toBe(page.firstChild);
@@ -166,10 +170,23 @@ it("keeps forward entry intent through a slow data read until the collector inte
   vi.useFakeTimers();
   const page = document.createElement("div");
   document.body.append(page);
-  const stop = restorePageFocus(page, "heading");
+  const stop = restorePageFocus(page, createPageEntryFocus());
   vi.advanceTimersByTime(RESTORE_WINDOW_MS + 1);
   page.innerHTML = "<h1>Deck</h1>";
   await vi.runAllTimersAsync();
   expect(document.activeElement).toBe(page.firstChild);
+  stop();
+});
+
+it("only recovers a removed heading within the entry window", async () => {
+  vi.useFakeTimers();
+  const page = document.createElement("div");
+  page.innerHTML = "<h1>Loading</h1>";
+  document.body.append(page);
+  const stop = restorePageFocus(page, createPageEntryFocus());
+  vi.advanceTimersByTime(RESTORE_WINDOW_MS + 1);
+  page.innerHTML = "<h1>Ready</h1>";
+  await vi.runAllTimersAsync();
+  expect(document.activeElement).toBe(document.body);
   stop();
 });

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PAGES } from "./routes";
-import { saveFocus, type SavedFocus, type PageFocus } from "./restorePageFocus";
+import {
+  saveFocus,
+  createPageEntryFocus,
+  type PageEntryFocus,
+  type SavedFocus,
+  type PageFocus,
+} from "./restorePageFocus";
 
 /** Session-only history positions: keep recent entries without growing with every navigation. */
 const SCROLL_CACHE_LIMIT = 128;
@@ -108,7 +114,10 @@ export function useRoute(): Route {
   const [entry, setEntry] = useState(entryAt);
   const [path, setPath] = useState(() => window.location.pathname);
   // Intent is session-only: reloads and history traversal never invent a forward entry.
-  const headingEntry = useRef<string | null>(null);
+  const headingEntry = useRef<{
+    entry: string;
+    request: PageEntryFocus;
+  } | null>(null);
   const currentEntry = useRef(entry);
   const currentState = useRef(window.history.state);
   const positions = useRef(new Map<string, number>()).current;
@@ -215,7 +224,10 @@ export function useRoute(): Route {
             !overlay &&
             target !== current.current &&
             !PAGES.some((page) => page.path === target)
-              ? window.history.state.prizecheckEntry
+              ? {
+                  entry: window.history.state.prizecheckEntry,
+                  request: createPageEntryFocus(),
+                }
               : null;
         update();
       };
@@ -251,7 +263,9 @@ export function useRoute(): Route {
   );
   const focusFor = useCallback(
     () =>
-      headingEntry.current === entry ? "heading" : (focuses.get(entry) ?? null),
+      headingEntry.current?.entry === entry
+        ? headingEntry.current.request
+        : (focuses.get(entry) ?? null),
     [entry, address]
   );
   return { path, address, entry, navigate, closeOverlay, scrollFor, focusFor };
