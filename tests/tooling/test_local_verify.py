@@ -43,6 +43,7 @@ class LocalVerificationTest(unittest.TestCase):
         self.assertEqual(local_verify.verify.parse_arguments(['--admin-url', other]).admin_url, other)
         self.assertEqual(local_verify.verify.parse_arguments(['--admin-u=' + other]).admin_url, other)
 
+    @unittest.skipUnless(sys.platform == 'linux', 'requires Linux /proc')
     def test_child_receives_only_generated_url_and_release_follows_pg_stop(self):
         generated = 'postgresql://owned@127.0.0.1:5439/postgres'
         args, command, _, _ = local_verify.arguments(['--suite', 'api', '--pytest-workers', '2', '--', 'api/tests/test_holdings.py'])
@@ -127,12 +128,14 @@ class LocalVerificationTest(unittest.TestCase):
                 code = str(error)
             return code, events
 
+    @unittest.skipUnless(sys.platform == 'linux', 'requires Linux /proc')
     def test_fresh_selection_releases_exclusive_preparation_then_requeues_api_tests(self):
         code, events = self.automatic_run(dict(version=1, complete=True, nodeids=['case'], serial=[]))
         self.assertEqual(code, 0)
         self.assertEqual([(e[0], e[1]) for e in events], [('prepare', 'exclusive'), ('tests', 'api')])
         self.assertEqual(events[0][2:], events[1][2:])  # Same exact selector/worker/fingerprint identity.
 
+    @unittest.skipUnless(sys.platform == 'linux', 'requires Linux /proc')
     def test_serial_and_unknown_selections_never_share_slots(self):
         code, events = self.automatic_run(dict(version=1, complete=True, nodeids=['case'], serial=['case']))
         self.assertEqual(code, 0)
@@ -141,11 +144,13 @@ class LocalVerificationTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([(e[0], e[1]) for e in events], [('tests', 'exclusive')])
 
+    @unittest.skipUnless(sys.platform == 'linux', 'requires Linux /proc')
     def test_cached_selection_needs_no_extra_prepare(self):
         code, events = self.automatic_run(dict(version=1, complete=True, nodeids=['case'], serial=[]), cached=True)
         self.assertEqual(code, 0)
         self.assertEqual([(e[0], e[1]) for e in events], [('tests', 'api')])
 
+    @unittest.skipUnless(sys.platform == 'linux', 'requires Linux /proc')
     def test_preparation_failure_missing_evidence_or_changed_fingerprint_stops_before_tests(self):
         report = dict(version=1, complete=True, nodeids=['case'], serial=[])
         for options, expected in ((dict(outcome=7), 7), (dict(report={}), 'no complete classification'),

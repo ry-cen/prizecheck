@@ -8,7 +8,11 @@ import { deckReadiness } from "./deckReadiness";
  * from "not owned", so no to-get count is shown here. Owned elsewhere reserves nothing, so it is never called
  * available. Nothing renders for an empty Deck List.
  */
-export function DeckReadiness({ lines }: { lines: readonly DeckLine[] }) {
+export function DeckReadinessSummary({
+  lines,
+}: {
+  lines: readonly DeckLine[];
+}) {
   const parts = deckReadiness(lines);
   if (parts.total === 0n) return null;
   if (parts.inDeck === parts.total)
