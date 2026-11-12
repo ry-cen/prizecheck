@@ -134,6 +134,10 @@ for (const viewport of [DESKTOP, PHONE]) {
     await disclosure
       .getByRole("button", { name: "Confirm swap", exact: true })
       .click();
+    await disclosure
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(notice(page)).toContainText("Swapped.");
     expect(confirmations).toBe(1);
     await expect(notice(page)).toHaveAttribute("aria-live", "polite");

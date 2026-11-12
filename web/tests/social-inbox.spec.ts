@@ -389,6 +389,11 @@ async function tradeStory(
     .getByRole("region", { name: "Confirm swap with Ash K" })
     .getByRole("button", { name: "Confirm swap" })
     .click();
+  await page
+    .getByRole("region", { name: "Confirm swap with Ash K" })
+    .getByRole("group", { name: "Confirm swap", exact: true })
+    .getByRole("button", { name: "Confirm swap", exact: true })
+    .click();
   await expect(title(page)).toHaveText("Swapped with Ash K");
   await expect(bell(page)).toHaveAccessibleName("Inbox");
   await expect(tradesTab(page)).toHaveAccessibleName("Trades");
