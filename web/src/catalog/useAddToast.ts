@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
-import { applyUndo, listUndo, type UndoEntry } from "../inventoryUndo";
+import {
+  applyUndo,
+  dismissUndo,
+  listUndo,
+  type UndoEntry,
+} from "../inventoryUndo";
 import { MoveError } from "../moves_generated";
 import { useToast } from "../ui/Toast";
 import type { AddItem } from "./cardActions";
@@ -86,6 +91,22 @@ export function useAddToast({ shown, onUndone }: Options) {
             }
           : undefined,
         focus,
+        onDismiss: added
+          ? () => {
+              void dismissUndo(added.undoId)
+                .then(() => {
+                  if (current.current === id) current.current = null;
+                })
+                .catch((cause) => {
+                  if (current.current !== id) return;
+                  if (cause instanceof MoveError && cause.status === 404) {
+                    current.current = null;
+                    return;
+                  }
+                  show("Couldn't dismiss this Undo. Try again.", added, false);
+                });
+            }
+          : undefined,
       });
       current.current = id;
       return id;

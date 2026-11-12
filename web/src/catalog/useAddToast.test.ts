@@ -2,11 +2,15 @@
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { applyUndo, listUndo } from "../inventoryUndo";
+import { applyUndo, dismissUndo, listUndo } from "../inventoryUndo";
 import { ToastProvider, useToast } from "../ui/Toast";
 import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
 
-vi.mock("../inventoryUndo", () => ({ applyUndo: vi.fn(), listUndo: vi.fn() }));
+vi.mock("../inventoryUndo", () => ({
+  applyUndo: vi.fn(),
+  listUndo: vi.fn(),
+  dismissUndo: vi.fn(),
+}));
 const added: AddedCards = {
   locationId: "box",
   path: "Box",
@@ -35,6 +39,7 @@ beforeEach(async () => {
     ReturnType<typeof listUndo>
   >);
   vi.mocked(applyUndo).mockResolvedValue(removed);
+  vi.mocked(dismissUndo).mockResolvedValue(undefined);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -142,3 +147,18 @@ test("inline Undo awaits the toast Undo already in flight without sending anothe
   expect(outcome.undone).toBe(true);
   expect(outcome.next).toBeNull();
 });
+
+test.each(["bar", "popup"] as const)(
+  "Dismiss persistently deletes an Add from %s",
+  async (from) => {
+    await act(async () => {
+      await notify({ ...added, from });
+    });
+    await act(async () => {
+      host
+        .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+        .click();
+    });
+    expect(dismissUndo).toHaveBeenCalledExactlyOnceWith(added.undoId);
+  }
+);

@@ -247,6 +247,102 @@ for (const viewport of [
   });
 }
 
+for (const entryPoint of ["Catalog", "Collection popup"] as const) {
+  test(`${entryPoint} Add Dismiss stays dismissed in Collection`, async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Dismiss Abra" });
+    await signIn(page);
+    const leaf = await createLocation(page, "Dismiss binder", null);
+    await addCopies(page, leaf, await editionOf("card-1"), 1);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(1);
+    // Leave an older success notice open, as in the return-to-Collection regression.
+    await tiles(page).first().click();
+    await openActions(page, "Inventory Removal…");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Remove 1 copy", exact: true })
+      .click();
+    const undo = page.getByRole("button", { name: "Undo", exact: true });
+    await expect(undo).toBeVisible();
+    await undo.click();
+    await expect(toast(page)).toContainText("Undo restored 1 copy");
+    if (entryPoint === "Catalog") {
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("button", { name: "Catalog", exact: true })
+        .click();
+    } else {
+      await sidebar(page)
+        .getByRole("button", { name: "Dismiss binder", exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "Add cards", exact: true })
+        .click();
+    }
+    await page
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", { name: /^Dismiss Abra,/ })
+      .click();
+    const popup = page.getByRole("dialog", {
+      name: "Dismiss Abra",
+      exact: true,
+    });
+    await popup.getByRole("button", { name: "Add 1", exact: true }).click();
+    await expect(
+      popup.getByRole("button", { name: "Undo", exact: true })
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    if (entryPoint === "Collection popup") await page.keyboard.press("Escape");
+    await expect(undo).toBeVisible();
+    if (entryPoint === "Catalog") {
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("button", { name: "Collection", exact: true })
+        .click();
+      await expect(toast(page)).toHaveText("The earlier Add can be undone.");
+      await expect(undo).toBeVisible();
+      await undo.click();
+      await expect(toastText(page)).toContainText("Undo removed 1 card");
+      // Dismiss through the Catalog notification owner after returning there.
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("button", { name: "Catalog", exact: true })
+        .click();
+      // Catalog takes down its toast on navigation; make another Add to exercise its Dismiss.
+      await page
+        .getByRole("region", { name: "Catalog results" })
+        .getByRole("button", { name: /^Dismiss Abra,/ })
+        .click();
+      await popup.getByRole("button", { name: "Add 1", exact: true }).click();
+      await expect(
+        popup.getByRole("button", { name: "Undo", exact: true })
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+    }
+    const dismissed = page.waitForResponse(
+      (r) =>
+        r.request().method() === "DELETE" &&
+        r.url().includes("/api/moves/undo/")
+    );
+    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    expect((await dismissed).ok()).toBeTruthy();
+    const remaining = await page.request.get(
+      new URL("/api/moves/undo", page.url()).href
+    );
+    expect(await remaining.json()).toEqual([]);
+    // Both navigation and reload must leave the dismissed Add unavailable.
+    await page
+      .getByRole("navigation", { name: "Main views" })
+      .getByRole("button", { name: "Collection", exact: true })
+      .click();
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(undo).toHaveCount(0);
+  });
+}
+
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 860 } });
 

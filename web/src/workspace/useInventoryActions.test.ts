@@ -802,3 +802,74 @@ test("a persisted mixed Move never restores an Undo offer", async () => {
   expect(render(opts).toast).toBeNull();
   expect(listUndo).not.toHaveBeenCalled();
 });
+
+test("return reconciles a newer Add over an existing success notice and preserves the same offer", async () => {
+  const { applyUndo } = await import("../inventoryUndo");
+  const entry = {
+    ...older,
+    action: "remove" as const,
+    expires_at: new Date(Date.now() + 600000).toISOString(),
+  };
+  vi.mocked(listUndo).mockResolvedValue([entry]);
+  vi.mocked(applyUndo).mockResolvedValue({
+    copy_count: "1",
+    source_count: 1,
+    edition_count: 1,
+    already_at_destination_count: "0",
+    owner_revision: 2,
+  });
+  const opts = { ...options(), active: true };
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  await render(opts).undo();
+  expect(render(opts).toast?.entry).toBeNull();
+  opts.active = false;
+  render(opts);
+  const add = { ...entry, id: "catalog-add", action: "add" as const };
+  vi.mocked(listUndo).mockResolvedValue([add]);
+  opts.active = true;
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(render(opts).toast?.entry).toEqual(add);
+  const notice = render(opts).toast;
+  opts.active = false;
+  render(opts);
+  opts.active = true;
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(render(opts).toast).toEqual(notice);
+});
+
+test("a delayed Dismiss failure cannot replace a newer Add", async () => {
+  const { dismissUndo } = await import("../inventoryUndo");
+  let reject!: (error: Error) => void;
+  vi.mocked(dismissUndo).mockReturnValueOnce(
+    new Promise((_, fail) => {
+      reject = fail;
+    })
+  );
+  vi.mocked(listUndo).mockResolvedValue([
+    { ...older, expires_at: new Date(Date.now() + 600000).toISOString() },
+  ]);
+  const opts = options();
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  const dismissing = render(opts).closeToast();
+  await render(opts).added({
+    locationId: "source",
+    copies: 1,
+    path: "Binder",
+    items: [],
+    ownerRevision: 3,
+    from: "bar",
+    undoId: "new",
+  });
+  const newer = render(opts).toast;
+  reject(new TypeError("DELETE failed"));
+  await dismissing;
+  expect(render(opts).toast).toEqual(newer);
+});

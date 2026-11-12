@@ -125,6 +125,7 @@ export function useInventoryActions({
   toastLive.current = toast;
   const toastId = useRef(0);
   const account = useRef({ userId, active: true });
+  const lifetime = useRef(0);
   const clock = useMemo(() => new MoveServerClock(), [userId]);
   const lockRequest = useRef(false);
   const [otherTab, setOtherTab] = useState(false);
@@ -172,6 +173,7 @@ export function useInventoryActions({
     account.current.active = true;
     return () => {
       account.current.active = false;
+      lifetime.current += 1;
     };
   }, [userId, store]);
   const refreshPending = useCallback(async () => {
@@ -326,13 +328,7 @@ export function useInventoryActions({
 
   // Only the newest record is actionable. Reuse the toast's expiry effect below.
   useEffect(() => {
-    if (
-      !active ||
-      toastLive.current ||
-      busyRef.current ||
-      operation.current?.op.noUndo
-    )
-      return;
+    if (!active || busyRef.current || operation.current?.op.noUndo) return;
     let cancelled = false;
     const version = toastId.current;
     void readUndo()
@@ -343,10 +339,10 @@ export function useInventoryActions({
           !account.current.active ||
           account.current.userId !== userId ||
           toastId.current !== version ||
-          toastLive.current ||
           busyRef.current ||
           operation.current?.op.noUndo ||
           !entry ||
+          entry.id === toastLive.current?.entry?.id ||
           Date.parse(entry.expires_at) <= Date.now() ||
           !Number.isFinite(Date.parse(entry.expires_at))
         )
@@ -962,6 +958,13 @@ export function useInventoryActions({
   const closeToast = useCallback(async () => {
     const current = toastLive.current;
     const entry = current?.entry;
+    const version = toastId.current;
+    const started = lifetime.current;
+    const isCurrent = () =>
+      account.current.active &&
+      account.current.userId === userId &&
+      lifetime.current === started &&
+      toastId.current === version;
     if (busyRef.current) return;
     focusWorkspaceHeading();
     if (entry) {
@@ -971,7 +974,7 @@ export function useInventoryActions({
         await dismissUndo(entry.id);
       } catch (cause) {
         if (!(cause instanceof MoveError && cause.status === 404)) {
-          if (current)
+          if (current && isCurrent())
             showToast({
               ...current,
               message: "Couldn't dismiss this Undo. Try again.",
@@ -983,12 +986,7 @@ export function useInventoryActions({
         setBusy(false);
       }
     }
-    if (
-      !account.current.active ||
-      account.current.userId !== userId ||
-      toastLive.current?.id !== current?.id
-    )
-      return;
+    if (!isCurrent() || toastLive.current?.id !== current?.id) return;
     toastId.current += 1;
     setToast(null);
   }, [showToast, userId]);
