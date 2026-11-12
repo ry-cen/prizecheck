@@ -17,6 +17,7 @@ from local_admission import Registry, group_alive, identity, reservation, superv
 from local_api_selection import eligible, narrow, source_fingerprint
 
 
+@unittest.skipUnless(sys.platform == 'linux', 'requires Linux /proc')
 class AdmissionTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -112,23 +113,6 @@ class AdmissionTest(unittest.TestCase):
                 self.registry.admit(token)
         self.assertEqual(len(self.registry.snapshot()), 1)
 
-    def test_entry_helper_restores_inherited_sigchld_and_child_exit_status(self):
-        helper = """import json,signal,subprocess,sys
-assert signal.getsignal(signal.SIGCHLD) == signal.SIG_IGN
-sys.path.insert(0, sys.argv[1])
-from local_admission import reset_sigchld
-reset_sigchld()
-code = subprocess.run([sys.executable, '-c', 'raise SystemExit(7)']).returncode
-print(json.dumps(dict(exit_code=code, sigchld_default=signal.getsignal(signal.SIGCHLD) == signal.SIG_DFL)))
-"""
-        # exec preserves ignored SIGCHLD without changing the test runner's disposition.
-        launcher = ("import os,signal,sys\n"
-                    "signal.signal(signal.SIGCHLD, signal.SIG_IGN)\n"
-                    "os.execv(sys.executable, [sys.executable, '-c', sys.argv[1], sys.argv[2]])\n")
-        result = subprocess.run([sys.executable, '-c', launcher, helper, str(SCRIPTS)],
-                                cwd=self.root, capture_output=True, text=True, timeout=10)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), dict(exit_code=7, sigchld_default=True))
 
     def test_child_failure_preserves_exit_status_and_proves_empty_group(self):
         token = self.enqueue('run', 'exclusive')
@@ -282,6 +266,34 @@ Path({str(result)!r}).write_text(json.dumps([code, empty, Path({str(done)!r}).ex
         self.assertEqual(process.returncode, 0)
         self.assertEqual(json.loads(result.read_text()), [143, True, True])
 
+
+
+
+class PortableAdmissionTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_entry_helper_restores_inherited_sigchld_and_child_exit_status(self):
+        helper = """import json,signal,subprocess,sys
+assert signal.getsignal(signal.SIGCHLD) == signal.SIG_IGN
+sys.path.insert(0, sys.argv[1])
+from local_admission import reset_sigchld
+reset_sigchld()
+code = subprocess.run([sys.executable, '-c', 'raise SystemExit(7)']).returncode
+print(json.dumps(dict(exit_code=code, sigchld_default=signal.getsignal(signal.SIGCHLD) == signal.SIG_DFL)))
+"""
+        # exec preserves ignored SIGCHLD without changing the test runner's disposition.
+        launcher = ("import os,signal,sys\n"
+                    "signal.signal(signal.SIGCHLD, signal.SIG_IGN)\n"
+                    "os.execv(sys.executable, [sys.executable, '-c', sys.argv[1], sys.argv[2]])\n")
+        result = subprocess.run([sys.executable, '-c', launcher, helper, str(SCRIPTS)],
+                                cwd=self.root, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), dict(exit_code=7, sigchld_default=True))
+
+
     def test_unknown_and_serial_collection_evidence_fails_closed(self):
         self.assertFalse(eligible({}))
         self.assertFalse(eligible(dict(version=1, complete=True, nodeids=['a'], serial=['a'])))
@@ -292,11 +304,20 @@ Path({str(result)!r}).write_text(json.dumps([code, empty, Path({str(done)!r}).ex
             self.assertFalse(narrow(selectors))
         self.assertTrue(narrow(['api/tests/test_a.py::Test::test_case', '-k', 'one or two']))
 
+
     def test_snapshot_matches_copied_bytes_and_changes_invalidate_it(self):
         (self.root / 'test.py').write_text('one')
         first = source_fingerprint(self.root, ['test.py', 'missing.py'])
         (self.root / 'test.py').write_text('two')
         self.assertNotEqual(first, source_fingerprint(self.root, ['test.py', 'missing.py']))
+
+
+    def test_registry_refuses_darwin_without_creating_directory(self):
+        directory = self.root / 'registry'
+        with mock.patch('local_admission.sys.platform', 'darwin'):
+            with self.assertRaisesRegex(RuntimeError, '^Local admission requires Linux /proc; use coordinated exclusive legacy runs on other hosts$'):
+                Registry(directory)
+        self.assertFalse(directory.exists())
 
 
 if __name__ == '__main__':

@@ -42,7 +42,7 @@ import { editionText, type DeckLine } from "./deckListModel";
 import { DeckDragBadge, dropLook, useDeckDrag } from "./useDeckDrag";
 import { useDeckListEdits } from "./useDeckListEdits";
 import { useDeckListChanged } from "./deckListChanged";
-import { DeckReadiness } from "./DeckReadiness";
+import { DeckReadinessSummary } from "./DeckReadinessSummary";
 import { DeckWantListPanel } from "./DeckWantListPanel";
 
 type Props = {
@@ -82,7 +82,7 @@ const VIEWS = [
  * Every edit goes through the batch Deck List command, one at a time (useDeckListEdits), with an Undo toast.
  *
  * Row 1's Gather N opens the Pick List dialog (#179), as does the copy sheet's Gather on that card.
- * Under row 1's cost, DeckReadiness counts the Deck List's copies in this Deck, owned elsewhere, lent out and not owned.
+ * Under row 1's cost, DeckReadinessSummary counts the Deck List's copies in this Deck, owned elsewhere, lent out and not owned.
  * While copies are missing from this Deck, Ways to get missing cards opens its Want List lines in place (DeckWantListPanel).
  *
  * Header row 2 holds the Target Format control (#178): its menu changes the Deck's Target Format through its Deck List
@@ -521,7 +521,7 @@ export function DeckBuilderPage({
         </div>
         <div className="col-start-1 row-start-2 flex min-w-0 flex-col gap-1">
           <DeckCostLine settled={cost} />
-          <DeckReadiness lines={model.lines} />
+          <DeckReadinessSummary lines={model.lines} />
         </div>
         <div className="col-start-2 row-span-2 row-start-1 flex flex-wrap items-center gap-2 phone:[&>button]:flex-1 phone:[&>button]:px-2">
           <Button
