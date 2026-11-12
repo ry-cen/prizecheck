@@ -259,3 +259,31 @@ test("cancelling a sheet action preserves an existing multi-copy selection", asy
       .getByRole("button", { pressed: true })
   ).toHaveCount(2);
 });
+
+for (const cause of ["breakpoint", "Back"] as const) {
+  test(`${cause} while a sheet action is open releases the final scroll lock`, async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Sheet Abra" });
+    await signIn(page);
+    const source = await createLocation(page, "Scroll binder", null);
+    await addCopies(page, source, await editionOf("card-1"), 2);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(2);
+    await tiles(page).first().click();
+    await sheet(page)
+      .getByRole("button", { name: "Move…", exact: true })
+      .click();
+    const move = page.getByRole("dialog", { name: "Move 1 copy", exact: true });
+    await expect(move).toBeVisible();
+    if (cause === "breakpoint")
+      await page.setViewportSize({ width: 1280, height: 800 });
+    else await page.goBack();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(move).toBeVisible();
+    await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+    await move.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+  });
+}

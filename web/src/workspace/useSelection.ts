@@ -93,6 +93,9 @@ export function useSelection({
   const shown = useRef(active);
   shown.current = active;
 
+  const completeGallery = useRef(byKey);
+  if (status === "ready") completeGallery.current = byKey;
+
   const latest = useRef({
     selected,
     holdings,
@@ -248,7 +251,24 @@ export function useSelection({
       const previous = latest.current.selected;
       const previousFocus = latest.current.focus;
       commit(toggleTile(EMPTY_SELECTION, card.holding, card.ordinal), card);
-      return () => commit(previous, previousFocus ?? undefined);
+      return () => {
+        const gallery = completeGallery.current;
+        const restored = reconcileSelection(previous, gallery);
+        const focused =
+          (previousFocus && restored.get(previousFocus.holding.key)) ||
+          Array.from(restored.values()).pop();
+        const holding = focused && gallery.get(focused.key);
+        const ordinal =
+          previousFocus &&
+          focused?.key === previousFocus.holding.key &&
+          isTileSelected(restored, focused.key, previousFocus.ordinal)
+            ? previousFocus.ordinal
+            : focused?.runs[0][0];
+        commit(
+          restored,
+          holding && ordinal !== undefined ? { holding, ordinal } : undefined
+        );
+      };
     },
     dropBorrowed: () => commit(dropBorrowedSelection(latest.current.selected)),
     summary,
