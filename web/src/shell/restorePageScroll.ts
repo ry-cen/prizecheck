@@ -22,6 +22,8 @@ export function restorePageScroll(
   // Where the last restore left the page; a scroll that lands elsewhere was not ours.
   let left = window.scrollY;
   let attempted = false;
+  // Growth can extend a restoration that actually hit the page end, within this bounded restoration.
+  let restoringClamp = false;
   // Geometry may grow again before a queued scroll event or retry sees the clamp.
   const observedEnds = new Set<number>();
   let lastEnd = Math.max(0, root.scrollHeight - root.clientHeight);
@@ -62,9 +64,11 @@ export function restorePageScroll(
     const clamped =
       at < target &&
       [...observedEnds].some((end) => at >= end - 1 && at <= end);
-    // Native layout movement can carry even a reached target by exactly the content's growth.
-    // Geometry is required: an unrelated scroll past the target still releases ownership.
-    const carried = at > left && observedGrowth.has(at - left);
+    if (clamped) restoringClamp = true;
+    // Growth alone cannot distinguish native movement from assistive or app scrolling.
+    // Only continue a restoration sequence that actually clamped within this restore window.
+    const carried =
+      restoringClamp && at > left && observedGrowth.has(at - left);
     const toward =
       Math.sign(at - left) === Math.sign(target - left) &&
       Math.abs(at - left) <= Math.abs(target - left);
@@ -81,6 +85,7 @@ export function restorePageScroll(
     attempted = true;
     if (window.scrollY !== target) {
       window.scrollTo(0, target);
+      if (window.scrollY < target) restoringClamp = true;
       observedEnds.clear();
       observedGrowth.clear();
       observeEnd();

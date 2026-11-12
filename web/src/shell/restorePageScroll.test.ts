@@ -462,11 +462,16 @@ it.each(["scroll", "resize", "poll"])(
   }
 );
 
-it("keeps restoring when late content carries the viewport by the exact document growth after reaching the target", () => {
+it("keeps restoring when late content carries a previously clamped restoration after reaching the target", () => {
   vi.useFakeTimers();
-  const view = layout(0, 1520);
+  const view = layout(0, 1468);
   const stop = restorePageScroll(document.createElement("main"), 1498);
   try {
+    view.setHeight(1520);
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(1498);
+    // Intermediate observer/poll deliveries at the target do not erase the preceding clamp.
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
     view.setHeight(1917);
     vi.stubGlobal("scrollY", 1895);
     window.dispatchEvent(new Event("scroll"));
@@ -487,6 +492,22 @@ it("does not reuse reconciled growth to claim a later unrelated scroll", () => {
     window.dispatchEvent(new Event("scroll"));
     vi.advanceTimersByTime(RESTORE_POLL_MS);
     expect(window.scrollY).toBe(1895);
+    expect(view.disconnect).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
+
+it("releases a scroll matching document growth when restoration never clamped", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 1000);
+  const stop = restorePageScroll(document.createElement("main"), 500);
+  try {
+    view.setHeight(1400);
+    vi.stubGlobal("scrollY", 900);
+    window.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESTORE_POLL_MS);
+    expect(window.scrollY).toBe(900);
     expect(view.disconnect).toHaveBeenCalledOnce();
   } finally {
     stop();
