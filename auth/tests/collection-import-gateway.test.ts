@@ -1,14 +1,14 @@
+import { freePort, hex, signer, signUp } from "./support/gateway";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash, createHmac, randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import {
   createServer,
   type IncomingMessage,
   type Server,
   type ServerResponse,
 } from "node:http";
-import { createServer as netServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
@@ -38,19 +38,7 @@ type Seen = {
 };
 const seen: Seen[] = [];
 
-function freePort() {
-  return new Promise<number>((resolve) => {
-    const probe = netServer();
-    probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address() as { port: number };
-      probe.close(() => resolve(port));
-    });
-  });
-}
-const hex = (value: string | Buffer) =>
-  createHash("sha256").update(value).digest("hex");
-const sign = (message: string) =>
-  createHmac("sha256", secret).update(message).digest("hex");
+const sign = signer(secret);
 
 async function post(
   path: string,
@@ -120,21 +108,12 @@ beforeAll(async () => {
   );
   gateway = launch("node", ["--import", "tsx", "auth/src/server.ts"], env);
   await serverReady([gateway], base + "/auth/session");
-  const email = "collection-importer@example.test";
-  expect(
-    (await post("/auth/request-code", JSON.stringify({ email }))).status
-  ).toBe(202);
-  const code = JSON.parse(
-    readFileSync(join(directory, "mail"), "utf8").trim().split("\n").at(-1)!
-  ).otp;
-  const signin = await post(
-    "/auth/verify-code",
-    JSON.stringify({ email, code })
-  );
-  expect(signin.status).toBe(200);
-  cookie = signin.headers.get("set-cookie")!.split(";")[0];
-  userId = (await pool.query('SELECT id FROM "user" WHERE email=$1', [email]))
-    .rows[0].id;
+  ({ cookie, userId } = await signUp(
+    post,
+    "collection-importer@example.test",
+    directory,
+    pool
+  ));
 }, 60_000);
 
 afterAll(async () => {
