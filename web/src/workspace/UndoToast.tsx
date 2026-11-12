@@ -8,6 +8,9 @@ type Options = {
   /** False while another page is shown, or a sheet or drawer covers Collection: the toast leaves with
    * Collection and comes back with it, still offering its Undo. */
   shown: boolean;
+  /** The host id of Collection's notice while it is drawn, for useInventoryActions' notice turn. */
+  hostNotice: { current: number | null };
+  onSuperseded: (stateId: number) => void;
   onUndo: () => void;
   onDismiss: () => void;
   onClose: () => void;
@@ -25,24 +28,28 @@ export function useUndoToast({
   toast,
   busy,
   shown,
+  hostNotice,
+  onSuperseded,
   onUndo,
   onDismiss,
   onClose,
 }: Options) {
   const kit = useToast();
   const shownId = useShownToastId();
-  const live = useRef({ onUndo, onDismiss, onClose });
-  live.current = { onUndo, onDismiss, onClose };
+  const live = useRef({ onUndo, onDismiss, onClose, onSuperseded });
+  live.current = { onUndo, onDismiss, onClose, onSuperseded };
   // The kit toast that shows `toast`, and which state it shows.
   const current = useRef<{ kitId: number; stateId: number } | null>(null);
   // The newest state whose request for focus was honoured: a toast shown again (back on Collection)
   // doesn't take focus a second time.
   const focused = useRef(0);
+  const published = useRef(0);
 
   useEffect(() => {
     if (!toast || !shown) {
       if (current.current) kit.dismiss(current.current.kitId);
       current.current = null;
+      hostNotice.current = null;
       return;
     }
     const entry = toast.entry;
@@ -73,7 +80,20 @@ export function useUndoToast({
     if (toast.focus) focused.current = Math.max(focused.current, toast.id);
     if (current.current?.stateId === toast.id)
       kit.update(current.current.kitId, input);
-    else current.current = { kitId: kit.show(input), stateId: toast.id };
+    else {
+      if (toast.since !== undefined && toast.id > published.current) {
+        const now = kit.getVersion();
+        if (now !== toast.since && now !== hostNotice.current) {
+          published.current = toast.id;
+          current.current = { kitId: 0, stateId: toast.id };
+          live.current.onSuperseded(toast.id);
+          return;
+        }
+      }
+      current.current = { kitId: kit.show(input), stateId: toast.id };
+      hostNotice.current = current.current.kitId;
+      published.current = Math.max(published.current, toast.id);
+    }
   }, [toast, busy, shown, kit]);
 
   // Signing out unmounts Collection: its toast goes with it.
@@ -81,6 +101,7 @@ export function useUndoToast({
     () => () => {
       if (current.current) kit.dismiss(current.current.kitId);
       current.current = null;
+      hostNotice.current = null;
     },
     [kit]
   );

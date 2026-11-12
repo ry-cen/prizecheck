@@ -1,3 +1,4 @@
+import { undoDismissals, noticeTurn } from "../inventoryUndoNotice";
 import { useCallback, useEffect, useRef } from "react";
 import { applyUndo, listUndo, type UndoEntry } from "../inventoryUndo";
 import { MoveError } from "../moves_generated";
@@ -75,17 +76,24 @@ export function useAddToast({ shown, onUndone }: Options) {
   );
 
   const show = useCallback(
-    (message: string, added: AddedCards | null, focus: boolean) => {
+    (
+      message: string,
+      added: AddedCards | null,
+      focus: boolean,
+      undoable = !!added
+    ) => {
       const id = kit.show({
         message,
-        action: added
-          ? {
-              label: "Undo",
-              keepOpen: true,
-              onAction: () => void undo(added, id, message),
-            }
-          : undefined,
+        action:
+          added && undoable
+            ? {
+                label: "Undo",
+                keepOpen: true,
+                onAction: () => void undo(added, id, message),
+              }
+            : undefined,
         focus,
+        onDismiss: added ? () => dismiss(added, id, undoable) : undefined,
       });
       current.current = id;
       return id;
@@ -93,6 +101,20 @@ export function useAddToast({ shown, onUndone }: Options) {
     // undo reads only refs and calls show; both live as long as the toast host.
     [kit]
   );
+
+  function dismiss(added: AddedCards, id: number, undoable: boolean) {
+    // One DELETE per record is shared page-wide; retries show only while no other owner has shown since.
+    const turn = noticeTurn(kit, () => current.current);
+    void undoDismissals.dismiss(added.undoId).then((outcome) => {
+      if (current.current !== id) return;
+      if (outcome === "dismissed") {
+        current.current = null;
+        return;
+      }
+      if (turn())
+        show("Couldn't dismiss this Undo. Try again.", added, false, undoable);
+    });
+  }
 
   function undo(
     added: AddedCards,
@@ -116,6 +138,7 @@ export function useAddToast({ shown, onUndone }: Options) {
     kit.update(toastId, {
       message,
       action: { label: "Undo", onAction: () => {}, busy: true, keepOpen: true },
+      onDismiss: () => dismiss(added, toastId, false),
     });
     const key = keys.current.get(added.undoId) ?? crypto.randomUUID();
     keys.current.set(added.undoId, key);
@@ -141,7 +164,7 @@ export function useAddToast({ shown, onUndone }: Options) {
       );
       let next: InlineUndo | null = null;
       if (kit.isShown(toastId)) {
-        const id = show(outcome, retry ? added : null, true);
+        const id = show(outcome, added, true, retry);
         if (retry) next = inline(id, added, outcome);
       }
       return { message: outcome, next, undone: false };
@@ -172,8 +195,9 @@ export function useAddToast({ shown, onUndone }: Options) {
       const undoable = entries[0]?.id === added.undoId;
       show(
         batchAddedText(added.copies, added.path),
-        undoable ? added : null,
-        added.from === "bar"
+        added,
+        added.from === "bar",
+        undoable
       );
       const id = current.current;
       return undoable && id !== null

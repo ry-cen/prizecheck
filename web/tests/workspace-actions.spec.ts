@@ -1,4 +1,10 @@
-import { expect, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Route,
+  type Request,
+} from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -187,6 +193,394 @@ async function expectActionsOverToast(page: Page) {
   await actions.click();
   await expect(actions).toHaveAttribute("aria-expanded", "false");
 }
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test(`Inventory Removal Undo survives reload and Dismiss at ${viewport.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    promoteCatalog({ "card-1": "Reload Abra" });
+    await signIn(page);
+    const location = await createLocation(page, "Reload binder", null);
+    await addCopies(page, location, await editionOf("card-1"), 1);
+    await page.reload();
+    const remove = async () => {
+      await expect(tiles(page)).toHaveCount(1);
+      const select = page.getByRole("button", { name: "Select", exact: true });
+      if (viewport.width === 375 && (await select.isVisible()))
+        await select.click();
+      await tiles(page).first().click();
+      await page.getByRole("button", { name: "Actions", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Inventory Removal…", exact: true })
+        .click();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Remove 1 copy", exact: true })
+        .click();
+      await expect(
+        page.getByRole("button", { name: "Undo", exact: true })
+      ).toBeVisible();
+    };
+    await remove();
+    await page.reload();
+    const undo = page.getByRole("button", { name: "Undo", exact: true });
+    await expect(undo).toBeVisible();
+    await expectPageChecks(page, "restored Undo");
+    await page
+      .getByRole("link", { name: "Skip to selection actions and Undo" })
+      .focus();
+    await page.keyboard.press("Enter");
+    await expect(undo).toBeFocused();
+    await undo.click();
+    await expect(tiles(page)).toHaveCount(1);
+    await remove();
+    const dismissed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().includes("/api/moves/undo/")
+    );
+    let deletes = 0;
+    const countDelete = (request: Request) => {
+      if (
+        request.method() === "DELETE" &&
+        request.url().includes("/api/moves/undo/")
+      )
+        deletes++;
+    };
+    page.on("request", countDelete);
+    await page
+      .getByRole("region", { name: "Notifications" })
+      .getByRole("button", { name: "Dismiss", exact: true })
+      .evaluate((button: HTMLElement) => {
+        button.click();
+        button.click();
+      });
+    expect((await dismissed).ok()).toBeTruthy();
+    expect(deletes).toBe(1);
+    page.off("request", countDelete);
+    await expect(
+      page.getByText("Couldn't dismiss this Undo. Try again.")
+    ).toHaveCount(0);
+    await page.reload();
+    await expect(
+      page.getByText("Your Collection has no cards yet.")
+    ).toBeVisible();
+    await expect(undo).toHaveCount(0);
+  });
+}
+
+for (const entryPoint of ["Catalog", "Collection popup"] as const) {
+  test(`${entryPoint} Add Dismiss stays dismissed in Collection`, async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Dismiss Abra" });
+    await signIn(page);
+    const leaf = await createLocation(page, "Dismiss binder", null);
+    await addCopies(page, leaf, await editionOf("card-1"), 1);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(1);
+    // Leave an older success notice open, as in the return-to-Collection regression.
+    await tiles(page).first().click();
+    await openActions(page, "Inventory Removal…");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Remove 1 copy", exact: true })
+      .click();
+    const undo = page.getByRole("button", { name: "Undo", exact: true });
+    await expect(undo).toBeVisible();
+    await undo.click();
+    await expect(toast(page)).toContainText("Undo restored 1 copy");
+    if (entryPoint === "Catalog") {
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("button", { name: "Catalog", exact: true })
+        .click();
+    } else {
+      await sidebar(page)
+        .getByRole("button", { name: "Dismiss binder", exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "Add cards", exact: true })
+        .click();
+    }
+    await page
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", {
+        name: "Dismiss Abra, fixture 1, Fixture Set, Normal, 1 owned",
+        exact: true,
+      })
+      .click();
+    const popup = page.getByRole("dialog", {
+      name: "Dismiss Abra",
+      exact: true,
+    });
+    await popup.getByRole("button", { name: "Add 1", exact: true }).click();
+    await expect(
+      popup.getByRole("button", { name: "Undo", exact: true })
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    if (entryPoint === "Collection popup") await page.keyboard.press("Escape");
+    await expect(undo).toBeVisible();
+    if (entryPoint === "Catalog") {
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("button", { name: "Collection", exact: true })
+        .click();
+      await expect(toastText(page)).toHaveText(
+        "The earlier Add can be undone."
+      );
+      await expect(undo).toBeVisible();
+      await undo.click();
+      await expect(toastText(page)).toContainText("Undo removed 1 card");
+      // Dismiss through the Catalog notification owner after returning there.
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("button", { name: "Catalog", exact: true })
+        .click();
+      // Catalog takes down its toast on navigation; make another Add to exercise its Dismiss.
+      await page
+        .getByRole("region", { name: "Catalog results" })
+        .getByRole("button", {
+          name: "Dismiss Abra, fixture 1, Fixture Set, Normal, 1 owned",
+          exact: true,
+        })
+        .click();
+      await popup.getByRole("button", { name: "Add 1", exact: true }).click();
+      await expect(
+        popup.getByRole("button", { name: "Undo", exact: true })
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+    }
+    const dismissed = page.waitForResponse(
+      (r) =>
+        r.request().method() === "DELETE" &&
+        r.url().includes("/api/moves/undo/")
+    );
+    let deletes = 0;
+    const countDelete = (request: Request) => {
+      if (
+        request.method() === "DELETE" &&
+        request.url().includes("/api/moves/undo/")
+      )
+        deletes++;
+    };
+    page.on("request", countDelete);
+    await page
+      .getByRole("region", { name: "Notifications" })
+      .getByRole("button", { name: "Dismiss", exact: true })
+      .evaluate((button: HTMLElement) => {
+        button.click();
+        button.click();
+      });
+    expect((await dismissed).ok()).toBeTruthy();
+    expect(deletes).toBe(1);
+    page.off("request", countDelete);
+    await expect(
+      page.getByText("Couldn't dismiss this Undo. Try again.")
+    ).toHaveCount(0);
+    const remaining = await page.request.get(
+      new URL("/api/moves/undo", page.url()).href
+    );
+    expect(await remaining.json()).toEqual([]);
+    // Both navigation and reload must leave the dismissed Add unavailable.
+    await page
+      .getByRole("navigation", { name: "Main views" })
+      .getByRole("button", { name: "Collection", exact: true })
+      .click();
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(undo).toHaveCount(0);
+  });
+}
+
+test("a delayed Dismiss failure never replaces a newer sign-out notice", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  promoteCatalog({ "card-1": "Signout Abra" });
+  await signIn(page);
+  const leaf = await createLocation(page, "Signout binder", null);
+  await addCopies(page, leaf, await editionOf("card-1"), 2);
+  await page.reload();
+  await expect(tiles(page)).toHaveCount(2);
+  await tiles(page).first().click();
+  await openActions(page, "Inventory Removal…");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove 1 copy", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Undo", exact: true })
+  ).toBeVisible();
+  let held!: Route, arrived!: () => void;
+  const incoming = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  await page.route("**/api/moves/undo/*", (route) => {
+    if (route.request().method() === "DELETE") {
+      held = route;
+      arrived();
+    } else void route.continue();
+  });
+  await page
+    .getByRole("region", { name: "Notifications" })
+    .getByRole("button", { name: "Dismiss", exact: true })
+    .click();
+  await incoming;
+  await tiles(page).first().click();
+  const actions = bar(page).getByRole("button", {
+    name: "Actions",
+    exact: true,
+  });
+  await expect(actions).toHaveAttribute("aria-disabled", "true");
+  await page.route("**/auth/sign-out", (route) =>
+    route.fulfill({ status: 500, json: {} })
+  );
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  const failure = page.getByText(
+    "Couldn't sign out. Check your connection and try again."
+  );
+  await expect(failure).toHaveCount(1);
+  await held.fulfill({ status: 503, json: {} });
+  await expect(actions).not.toHaveAttribute("aria-disabled", "true");
+  await expect(failure).toHaveCount(1);
+  await expect(
+    page.getByText("Couldn't dismiss this Undo. Try again.")
+  ).toHaveCount(0);
+  await page.unroute("**/api/moves/undo/*");
+  await page.unroute("**/auth/sign-out");
+});
+
+test("Undo feedback still shows after a newer sign-out notice", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  promoteCatalog({ "card-1": "Signout Abra" });
+  await signIn(page);
+  const leaf = await createLocation(page, "Signout binder", null);
+  await addCopies(page, leaf, await editionOf("card-1"), 2);
+  await page.reload();
+  await expect(tiles(page)).toHaveCount(2);
+  await tiles(page).first().click();
+  await openActions(page, "Inventory Removal…");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove 1 copy", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Undo", exact: true })
+  ).toBeVisible();
+  await page.reload();
+  await expect(toastText(page)).toHaveText(
+    "The earlier Inventory Removal can be undone."
+  );
+  let held!: Route, arrived!: () => void;
+  const incoming = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  await page.route("**/api/moves/undo/*", (route) => {
+    if (route.request().method() === "POST") {
+      held = route;
+      arrived();
+    } else void route.continue();
+  });
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await incoming;
+  await page.route("**/auth/sign-out", (route) =>
+    route.fulfill({ status: 500, json: {} })
+  );
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  const failure = page.getByText(
+    "Couldn't sign out. Check your connection and try again."
+  );
+  await expect(failure).toHaveCount(1);
+  await held.fulfill({ status: 503, json: {} });
+  await expect(
+    page.getByText("Undo may not have finished. Try again to check safely.")
+  ).toBeVisible();
+  await page.unroute("**/api/moves/undo/*");
+  await page.unroute("**/auth/sign-out");
+});
+
+test("a bar Add whose Undo list failed is still dismissed for good", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  promoteCatalog({ "card-1": "Add Abra" });
+  await signIn(page);
+  const leaf = await createLocation(page, "Add binder", null);
+  await page.reload();
+  await sidebar(page)
+    .getByRole("button", { name: "Add binder", exact: true })
+    .click();
+  await page.route("**/api/moves/undo", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ status: 503, json: {} })
+      : route.continue()
+  );
+  await page.getByRole("button", { name: "Add cards", exact: true }).click();
+  const add = page.getByRole("dialog", { name: "Add cards to Add binder" });
+  await add
+    .getByRole("region", { name: "Catalog results" })
+    .getByRole("listitem")
+    .first()
+    .getByRole("button", { name: /^One more / })
+    .click();
+  await add
+    .getByRole("region", { name: "Add to a Location" })
+    .getByRole("button", { name: "Add 1 card", exact: true })
+    .click();
+  await expect(toastText(page)).toHaveText("Added 1 card to Add binder.");
+  await page.unroute("**/api/moves/undo");
+  let deletes = 0;
+  const countDelete = (request: Request) => {
+    if (
+      request.method() === "DELETE" &&
+      request.url().includes("/api/moves/undo/")
+    )
+      deletes++;
+  };
+  page.on("request", countDelete);
+  const deleted = page.waitForResponse(
+    (r) =>
+      r.request().method() === "DELETE" && r.url().includes("/api/moves/undo/")
+  );
+  await page
+    .getByRole("region", { name: "Notifications" })
+    .getByRole("button", { name: "Dismiss", exact: true })
+    .evaluate((button: HTMLElement) => {
+      button.click();
+      button.click();
+    });
+  expect((await deleted).ok()).toBeTruthy();
+  const response = await page.request.get(
+    new URL("/api/moves/undo", page.url()).href
+  );
+  expect(await response.json()).toEqual([]);
+  expect(deletes).toBe(1);
+  page.off("request", countDelete);
+  await page
+    .getByRole("navigation", { name: "Main views" })
+    .getByRole("button", { name: "Catalog", exact: true })
+    .click();
+  const listed = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === "/api/moves/undo" &&
+      r.request().method() === "GET"
+  );
+  await page
+    .getByRole("navigation", { name: "Main views" })
+    .getByRole("button", { name: "Collection", exact: true })
+    .click();
+  expect((await listed).ok()).toBeTruthy();
+  await expect(page.getByText("The earlier Add can be undone.")).toHaveCount(0);
+});
 
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 860 } });
