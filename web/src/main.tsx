@@ -106,7 +106,9 @@ function App() {
   const { path, address, entry, navigate, closeOverlay, scrollFor, focusFor } =
     useRoute();
   const collectionAddress = useRef("/collection");
+  const catalogAddress = useRef("/catalog");
   if (path === "/collection") collectionAddress.current = address;
+  if (path === "/catalog") catalogAddress.current = address;
   const [session, setSession] = useState<Session | null>(null);
   const [ownerCatalog, setOwnerCatalog] = useState<OwnerCatalogStatus | null>(
     null
@@ -140,6 +142,10 @@ function App() {
       if (gone) {
         scrubLoanBodies(gone);
         forgetAddQueues();
+        // The remembered mode is account-local; a later explicit link is read normally.
+        const keptCatalog = new URL(catalogAddress.current, location.origin);
+        keptCatalog.searchParams.delete("mode");
+        catalogAddress.current = keptCatalog.pathname + keptCatalog.search;
       }
       lastUserId.current = result.signedIn ? result.userId : null;
       setSession(result);
@@ -480,7 +486,9 @@ function App() {
             navigate(
               next === "collection"
                 ? collectionAddress.current
-                : pageDef(next).path
+                : next === "catalog"
+                  ? catalogAddress.current
+                  : pageDef(next).path
             );
         }}
         onOpenFriend={(handle) => {

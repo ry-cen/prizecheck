@@ -947,6 +947,27 @@ for (const viewport of [
       await expect(rows(page)).toHaveCount(ids.length);
       await expect(page).toHaveURL(/q=Bulbasaur&format=standard/);
       const url = page.url();
+      await mode(page, "Add to a Location").click();
+      const keptUrl = page.url();
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .filter({ visible: true })
+        .getByRole("button", { name: "Collection", exact: true })
+        .click();
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .filter({ visible: true })
+        .getByRole("button", { name: "Catalog", exact: true })
+        .click();
+      await expect(page).toHaveURL(keptUrl);
+      await expect(
+        page.getByRole("searchbox", { name: "Search the catalog" })
+      ).toHaveValue("Bulbasaur");
+      await expect(mode(page, "Add to a Location")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+
       await page.reload();
       await expect(
         page.getByRole("searchbox", { name: "Search the catalog" })

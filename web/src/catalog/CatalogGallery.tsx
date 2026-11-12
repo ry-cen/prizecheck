@@ -136,6 +136,8 @@ export function CatalogGallery({
     if (view && onViewChange)
       onViewChange({ ...view, setId: set?.set_id ?? null });
   };
+  const viewOwner = useRef({ view, onViewChange });
+  viewOwner.current = { view, onViewChange };
   useEffect(() => {
     if (!view) return;
     if (!setId) {
@@ -145,8 +147,12 @@ export function CatalogGallery({
     let live = true;
     void getCatalogSets()
       .then((list) => {
-        if (live)
-          storeSet(list.sets.find((set) => set.set_id === setId) ?? null);
+        if (!live || !list.available) return;
+        const found = list.sets.find((set) => set.set_id === setId) ?? null;
+        storeSet(found);
+        const current = viewOwner.current;
+        if (!found && current.view?.setId === setId)
+          current.onViewChange?.({ ...current.view, setId: null });
       })
       .catch(() => {});
     return () => {

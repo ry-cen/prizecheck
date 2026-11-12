@@ -8,8 +8,18 @@ import type { CatalogCardPopup } from "./CatalogCardPopup";
 import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
 import { applyUndo, listUndo } from "../inventoryUndo";
 import { ToastProvider } from "../ui/Toast";
+import { getCatalogSets } from "../catalog_browse_generated";
+import { parseCatalogView } from "./catalogUrl";
 import type { BrowseEdition } from "../catalog_browse_generated";
 
+vi.mock("../catalog_browse_generated", async (original) => ({
+  ...(await original<typeof import("../catalog_browse_generated")>()),
+  getCatalogSets: vi.fn(async () => ({
+    available: true,
+    catalog_revision: 1,
+    sets: [],
+  })),
+}));
 vi.mock("../inventoryUndo", () => ({ applyUndo: vi.fn(), listUndo: vi.fn() }));
 vi.mock("../shell/keptRead", () => ({ useFirstReadSettled: () => {} }));
 vi.mock("./CatalogFilters", () => ({ CatalogFilters: () => null }));
@@ -458,3 +468,28 @@ test.each([
     }
   }
 );
+
+test("unknown set becomes Any set once the catalog set list is known", async () => {
+  const onViewChange = vi.fn();
+  await act(async () =>
+    root.render(
+      h(
+        ToastProvider,
+        null,
+        h(CatalogGallery, {
+          active: true,
+          adding: false,
+          fixedTarget: null,
+          undoToast: false,
+          stick: "page",
+          view: parseCatalogView("/catalog?set=unknown"),
+          onViewChange,
+        })
+      )
+    )
+  );
+  expect(getCatalogSets).toHaveBeenCalled();
+  expect(onViewChange).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null })
+  );
+});

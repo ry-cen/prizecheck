@@ -40,7 +40,19 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
   const account = useContext(AddQueueAccount);
   const owner = useRef(account);
   const lastAddress = useRef(address);
-  if (active) lastAddress.current = address;
+  // Observe every account transition even while hidden (including A → B → A).
+  // A hidden page's kept mode belongs to its old account. A newly supplied
+  // active address still takes precedence, including an explicit mode.
+  const staleActiveMode =
+    owner.current !== account && active && lastAddress.current === address;
+  if (owner.current !== account) {
+    owner.current = account;
+    lastAddress.current = catalogHref({
+      ...parseCatalogView(lastAddress.current),
+      mode: null,
+    });
+  }
+  if (active && !staleActiveMode) lastAddress.current = address;
   const view = parseCatalogView(lastAddress.current);
   const mode =
     view.mode ?? (hasStoredAddQueue(account, "page") ? "add" : "browse");
@@ -51,13 +63,8 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
   const setMode = (mode: CatalogMode) => changeView({ ...view, mode });
   useEffect(() => {
     if (!active) return;
-    if (owner.current !== account) {
-      owner.current = account;
-      changeView({
-        ...view,
-        mode: hasStoredAddQueue(account, "page") ? "add" : "browse",
-      });
-    } else if (view.mode === null && mode === "add") setMode("add");
+    if (staleActiveMode || (view.mode === null && mode === "add"))
+      setMode(mode);
   }, [active, account, address]);
   const [link, setLink] = useState<CardRequest | null>(null);
   const [reportsKey, setReportsKey] = useState(0);

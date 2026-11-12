@@ -11,10 +11,16 @@ export type CatalogView = {
 export function parseCatalogView(address: string): CatalogView {
   const p = new URL(address, "http://localhost").searchParams;
   return {
-    q: p.get("q") ?? "",
+    // catalog_browse.py: q max_length=120, set_id max_length=80.
+    q: Array.from(p.get("q") ?? "").length <= 120 ? (p.get("q") ?? "") : "",
     format: FORMATS.find((o) => o.value === p.get("format"))?.value ?? null,
     kind: KINDS.find((o) => o.value === p.get("kind"))?.value ?? null,
-    setId: /^[a-zA-Z0-9_-]+$/.test(p.get("set") ?? "") ? p.get("set") : null,
+    // catalog.py SOURCE_ID_PATTERN, with the browse endpoint's narrower length.
+    setId:
+      /^[A-Za-z0-9_.!%~-]{1,80}$/.test(p.get("set") ?? "") &&
+      /[^.]/.test(p.get("set") ?? "")
+        ? p.get("set")
+        : null,
     owned: p.get("owned") === "1",
     mode:
       p.get("mode") === "add"
