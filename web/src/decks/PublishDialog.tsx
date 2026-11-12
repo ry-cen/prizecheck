@@ -78,6 +78,13 @@ export function PublishDialog({
     // Only an opening resets the form; a reload while open keeps what was typed.
   }, [open]);
 
+  // The publication may finish loading after the dialog opens.
+  useEffect(() => {
+    if (open && publication.kind === "ready" && !status?.title) {
+      titleField.current?.focus();
+    }
+  }, [open, publication.kind]);
+
   async function act(action: Action, visibility?: "listed" | "unlisted") {
     if (busy) return;
     setBusy(true);
@@ -197,12 +204,19 @@ export function PublishDialog({
             <TextField
               ref={titleField}
               label="Public title"
+              data-autofocus={!status?.title ? "" : undefined}
               required
               maxLength={120}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              aria-describedby={blocked ? reasonId : undefined}
+              aria-describedby={`${idBase}-title-help${blocked ? ` ${reasonId}` : ""}`}
             />
+            <p
+              id={`${idBase}-title-help`}
+              className="m-0 text-meta text-text-muted"
+            >
+              A public title is required to publish.
+            </p>
             {blocked && (
               <p id={reasonId} className="m-0 text-meta text-warning">
                 {blocked}
