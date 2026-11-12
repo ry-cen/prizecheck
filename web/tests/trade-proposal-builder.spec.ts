@@ -445,8 +445,8 @@ async function story(
   await expect(findLink).toBeVisible();
   await expect(listLink).toHaveCount(0);
   page.off("dialog", accept);
-  // Chromium may skip the warning, but any dialog that did show is the browser's own.
-  expect(seen.every((type) => type === "beforeunload")).toBe(true);
+  // Real clicks above provide Chromium sticky activation.
+  expect(seen).toEqual(["beforeunload"]);
 
   // 8: nothing is asked when no card was added.
   await tradesTab(page).click();
@@ -765,3 +765,315 @@ test("an unknown initial-send outcome keeps its key and a known nonterminal refu
   expect(keys).toHaveLength(3);
   expect(keys[2]).not.toBe(keys[1]);
 });
+
+/** Small independent journeys for semantic draft loss; the long builder story above owns layout. */
+async function discardBuilder(
+  page: Page,
+  collectors: Parameters<typeof story>[1],
+  counter: boolean
+) {
+  const ids = seedCatalog();
+  const ash = await collectors.signIn();
+  const handle = await nameCollector(ash.page, "Ash K");
+  const shelf = await forTradeBinder(ash.page, "Ash Shelf");
+  await hold(ash.page, shelf, ids["SVI 166"], 3);
+  await noArtwork(page);
+  await signInAsOwner(page, "/collection");
+  await nameCollector(page, "Misty W");
+  await befriend(page, ash.page);
+  let previous = `/friends/${handle}/trade-list`;
+  if (counter) {
+    const trade = await api(ash.page, "POST", "/api/trades", {
+      recipient_trader_id: await traderIdOf(page),
+      you_give: [{ edition_id: ids["SVI 166"], quantity: "1" }],
+      you_get: [],
+      idempotency_key: randomUUID(),
+    });
+    previous = `/trades/${trade.thread_id}`;
+  }
+  await page.goto(`${ORIGIN}${previous}`);
+  await page
+    .getByRole("button", {
+      name: counter ? "Counter" : "Propose trade to Ash K",
+      exact: true,
+    })
+    .click();
+  await expect(heading(page)).toHaveText(
+    counter ? "Counter to Ash K" : "Trade Proposal to Ash K"
+  );
+  return {
+    address: page.url(),
+    previous: `${ORIGIN}${previous}`,
+    dialog: page.getByRole("dialog", { name: /Discard this/ }),
+  };
+}
+
+async function editDiscardCards(page: Page, counter: boolean) {
+  if (!counter) {
+    await show(page, "Cards");
+    await tile(
+      page.getByRole("list", { name: "Ash K's Trade List" }),
+      "get",
+      ARVEN
+    ).click();
+  }
+  await show(page, "Proposal");
+  if (counter)
+    await page
+      .getByRole("button", { name: "Increase Arven (SVI 166) you get" })
+      .click();
+}
+
+async function reloadWithoutWarning(page: Page) {
+  const seen: string[] = [];
+  const accept = (dialog: Dialog) => {
+    seen.push(dialog.type());
+    void dialog.accept();
+  };
+  page.on("dialog", accept);
+  try {
+    await page.reload();
+    await expect(heading(page)).not.toHaveText("Counter");
+    await expect(
+      page.getByRole("button", {
+        name: /Send (Counter|Trade Proposal)/,
+        includeHidden: true,
+      })
+    ).toBeAttached();
+    expect(seen).toEqual([]);
+  } finally {
+    page.off("dialog", accept);
+  }
+}
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`draft discard at ${viewport.width}px`, () => {
+    test.use({ viewport });
+    for (const counter of [false, true]) {
+      const builder = counter ? "Counter" : "new proposal";
+      test(`${builder}: real reload dismissal keeps edits and acceptance discards them`, async ({
+        page,
+        collectors,
+      }) => {
+        const { address } = await discardBuilder(page, collectors, counter);
+        await editDiscardCards(page, counter);
+        const warning = page.waitForEvent("dialog");
+        // A dismissed Chromium reload may not settle its navigation promise. The dialog and retained UI are the evidence.
+        void page.reload().catch(() => {});
+        const native = await warning;
+        expect(native.type()).toBe("beforeunload");
+        await native.dismiss();
+        await expect(page).toHaveURL(address);
+        await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+          counter ? "2" : "1"
+        );
+        const accepted = page.waitForEvent("dialog");
+        const reload = page.reload();
+        const prompt = await accepted;
+        expect(prompt.type()).toBe("beforeunload");
+        await prompt.accept();
+        await reload;
+        await show(page, "Proposal");
+        if (counter)
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            "1"
+          );
+        else await expect(lists(page).get).toHaveText("Nothing yet");
+      });
+
+      test(`${builder}: cash counts, reverting does not, and removing opening cards counts`, async ({
+        page,
+        collectors,
+      }) => {
+        const { address, dialog } = await discardBuilder(
+          page,
+          collectors,
+          counter
+        );
+        await show(page, "Proposal");
+        await page.getByRole("radio", { name: "You pay", exact: true }).click();
+        const amount = page.getByRole("textbox", {
+          name: "Amount in US dollars",
+        });
+        await amount.fill("5.00");
+        const warning = page.waitForEvent("dialog");
+        void page.reload().catch(() => {});
+        const native = await warning;
+        expect(native.type()).toBe("beforeunload");
+        await native.dismiss();
+        await expect(amount).toHaveValue("5.00");
+        await page.locator("main:visible").getByRole("link").first().click();
+        await expect(
+          dialog.getByRole("button", { name: "Keep editing", exact: true })
+        ).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(page).toHaveURL(address);
+        await page.getByRole("radio", { name: "No cash", exact: true }).click();
+        await editDiscardCards(page, counter);
+        await page
+          .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+          .click();
+        await reloadWithoutWarning(page);
+        if (counter) {
+          await show(page, "Proposal");
+          await page
+            .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+            .click();
+          await expect(lists(page).get).toHaveText("Nothing yet");
+          await page
+            .getByRole("navigation", { name: "Main views" })
+            .getByRole("button", { name: "Collection", exact: true })
+            .click();
+          await expect(dialog).toBeVisible();
+          await dialog
+            .getByRole("button", { name: "Keep editing", exact: true })
+            .click();
+          const removedWarning = page.waitForEvent("dialog");
+          void page.reload().catch(() => {});
+          const removed = await removedWarning;
+          expect(removed.type()).toBe("beforeunload");
+          await removed.dismiss();
+          await expect(lists(page).get).toHaveText("Nothing yet");
+        } else {
+          await page
+            .getByRole("navigation", { name: "Main views" })
+            .getByRole("button", { name: "Collection", exact: true })
+            .click();
+          await expect(page).toHaveURL(`${ORIGIN}/collection`);
+          await expect(dialog).toHaveCount(0);
+        }
+      });
+
+      for (const direction of ["link", "Back", "Forward"] as const) {
+        for (const answer of ["Escape", "Keep editing", "Discard"] as const) {
+          test(`${builder}: ${direction} with ${answer} keeps focus or reaches its target`, async ({
+            page,
+            collectors,
+          }) => {
+            const { address, previous, dialog } = await discardBuilder(
+              page,
+              collectors,
+              counter
+            );
+            if (direction === "Forward") {
+              await page
+                .getByRole("navigation", { name: "Main views" })
+                .getByRole("button", { name: "Collection", exact: true })
+                .click();
+              await expect(page).toHaveURL(`${ORIGIN}/collection`);
+              await page.goBack();
+              await expect(page).toHaveURL(address);
+            }
+            await editDiscardCards(page, counter);
+            const link = page.locator("main:visible").getByRole("link").first();
+            const target =
+              direction === "Forward"
+                ? `${ORIGIN}/collection`
+                : direction === "Back"
+                  ? previous
+                  : new URL((await link.getAttribute("href"))!, ORIGIN).href;
+            const opener =
+              direction === "link"
+                ? link
+                : page.getByRole("button", {
+                    name: "Increase Arven (SVI 166) you get",
+                  });
+            await opener.focus();
+            if (direction === "link") await link.click();
+            else if (direction === "Back") void page.goBack().catch(() => {});
+            else void page.goForward().catch(() => {});
+            await expect(dialog).toBeVisible();
+            await expect(
+              dialog.getByRole("button", { name: "Keep editing", exact: true })
+            ).toBeFocused();
+            if (answer === "Escape") await page.keyboard.press("Escape");
+            else
+              await dialog
+                .getByRole("button", { name: answer, exact: true })
+                .click();
+            await expect(dialog).toHaveCount(0);
+            if (answer === "Discard") await expect(page).toHaveURL(target);
+            else {
+              await expect(page).toHaveURL(address);
+              await expect(
+                group(page, "Arven (SVI 166) you get")
+              ).toContainText(counter ? "2" : "1");
+              await expect(opener).toBeFocused();
+            }
+          });
+        }
+      }
+
+      test(`${builder}: edits during a send follow its leave rule and successful sends do not warn`, async ({
+        page,
+        collectors,
+      }) => {
+        const { address } = await discardBuilder(page, collectors, counter);
+        await editDiscardCards(page, counter);
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let arrived!: () => void;
+        const sending = new Promise<void>((resolve) => {
+          arrived = resolve;
+        });
+        await page.route(
+          counter ? /\/api\/trades\/[^/]+\/offer$/ : `${ORIGIN}/api/trades`,
+          async (route) => {
+            if (route.request().method() !== "POST") return route.fallback();
+            arrived();
+            await held;
+            await route.continue();
+          }
+        );
+        try {
+          await page
+            .getByRole("button", {
+              name: counter ? "Send Counter" : "Send Trade Proposal",
+              exact: true,
+            })
+            .click();
+          await sending;
+          const payer = page.getByRole("radio", {
+            name: "You pay",
+            exact: true,
+          });
+          if (counter) await expect(payer).toBeDisabled();
+          else {
+            await payer.click();
+            await page
+              .getByRole("textbox", { name: "Amount in US dollars" })
+              .fill("5");
+          }
+          // A synthetic event checks the in-flight rule without aborting the real pending request.
+          expect(
+            await page.evaluate(() => {
+              const event = new Event("beforeunload", { cancelable: true });
+              window.dispatchEvent(event);
+              return event.defaultPrevented;
+            })
+          ).toBe(false);
+        } finally {
+          release();
+        }
+        await expect(page).not.toHaveURL(address);
+        const seen: string[] = [];
+        const accept = (dialog: Dialog) => {
+          seen.push(dialog.type());
+          void dialog.accept();
+        };
+        page.on("dialog", accept);
+        await page.reload();
+        await expect(heading(page)).not.toHaveText(
+          /^(Counter|Trade Proposal) to/
+        );
+        expect(seen).toEqual([]);
+        page.off("dialog", accept);
+      });
+    }
+  });
+}

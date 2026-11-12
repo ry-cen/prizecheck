@@ -101,6 +101,29 @@ import {
 import { TRADER_LIST_TITLE } from "./traderMessages";
 import { sideValueText, useTradeValue } from "./useTradeValue";
 
+/** Compare content only: row order and empty representations do not make an unsent edit. */
+export function proposalDraftChanged(
+  opening: Proposal,
+  openingCash: CashDraft,
+  draft: Proposal,
+  cash: CashDraft
+): boolean {
+  const key = (cards: Proposal, money: CashDraft) =>
+    termsKey(
+      {
+        get: cards.get.filter((line) => line.quantity > 0),
+        give: cards.give.filter((line) => line.quantity > 0),
+      },
+      money.payer !== "none" &&
+        /^(?:(?:0+|0{1,3}(?:,000)+)(?:\.0{0,2})?|\.0{1,2})$/.test(
+          money.amount.replace(/\s/g, "").replace(/^\$/, "")
+        )
+        ? NO_CASH
+        : money
+    );
+  return key(opening, openingCash) !== key(draft, cash);
+}
+
 type Party = { trader_id: string; display_name: string };
 
 type Theirs =
@@ -134,8 +157,8 @@ const BACK =
  * The proposal starts empty, with one copy in You get from Ask to trade, or with the visible match cards from Find
  * trades. It lives only in this page: nothing is kept, so leaving ends it. Once the collector has changed it, leaving through the shell, a link,
  * the back link or the browser's Back and Forward asks "Discard this proposal to <name>?" (the router's leave guard),
- * and a reload or close shows the browser's own warning. Nothing is asked for a proposal that holds no cards, for one
- * left as it opened, when the collector didn't load, or after a successful send. A card can't be on both sides; a
+ * and a reload or close shows the browser's own warning. Nothing is asked for a draft left as it opened, when the
+ * collector didn't load, or after a successful send. A card can't be on both sides; a
  * refused send keeps the proposal and says which card and how many are on the Trade List now. The back link returns
  * to the Trade List page the builder was opened from, and to Find trades otherwise.
  *
@@ -239,9 +262,14 @@ export function ProposalBuilderPage({
   const sent = useRef(false);
   const terminalRef = useRef<TerminalSend | null>(null);
   const [terminal, setTerminal] = useState<TerminalSend | null>(null);
-  const edited = useRef(false);
-  const latest = useRef(proposal);
-  latest.current = proposal;
+  const opening = useRef({ proposal, cash });
+  const changed = useRef(false);
+  changed.current = proposalDraftChanged(
+    opening.current.proposal,
+    opening.current.cash,
+    proposal,
+    cash
+  );
   // The guard reads these: it is made once. A collector who is gone (a 404 after load) can't be sent to, so nothing asks.
   const reachable = useRef(false);
   reachable.current = party !== null && theirs.kind !== "missing";
@@ -491,7 +519,6 @@ export function ProposalBuilderPage({
   function change(next: (p: Proposal) => Proposal) {
     if (terminalRef.current || lifecycle?.phase === "sending") return;
     offerReview?.dispatch({ type: "draft_edited" });
-    edited.current = true;
     setProposal(next);
     key.current = null;
   }
@@ -500,7 +527,6 @@ export function ProposalBuilderPage({
   function editCash(next: CashDraft) {
     if (terminalRef.current || lifecycle?.phase === "sending") return;
     offerReview?.dispatch({ type: "draft_edited" });
-    edited.current = true;
     key.current = null;
     setCash(next);
   }
@@ -701,8 +727,7 @@ export function ProposalBuilderPage({
         !sending.current &&
         reachable.current &&
         !offerReview?.unavailable &&
-        edited.current &&
-        proposalCopies(latest.current) > 0,
+        changed.current,
       ask: (leave) => {
         const active = document.activeElement;
         // Focus inside a dialog (the account sheet, the inbox, the Friends drawer) can't be returned to once it
@@ -721,15 +746,11 @@ export function ProposalBuilderPage({
   useLeaveGuard(guard);
 
   // The browser's own warning on reload or close, while something the collector changed is unsent.
-  const dirty =
-    !terminal &&
-    reachable.current &&
-    !gone &&
-    edited.current &&
-    proposalCopies(proposal) > 0;
+  const dirty = !terminal && reachable.current && !gone && changed.current;
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
+      if (sent.current || sending.current || terminalRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -1188,10 +1209,14 @@ export function ProposalBuilderPage({
           <p className="m-0 text-body">
             {counter
               ? `Your changes aren't kept. ${name}'s Trade Proposal stays as it was.`
-              : "The cards you added aren't kept."}
+              : "Your changes aren't kept."}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="secondary" onClick={() => setAsking(null)}>
+            <Button
+              data-autofocus
+              variant="secondary"
+              onClick={() => setAsking(null)}
+            >
               Keep editing
             </Button>
             <Button
