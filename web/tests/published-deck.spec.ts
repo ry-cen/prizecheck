@@ -135,7 +135,7 @@ for (const viewport of [
         views(page).getByRole("radio", { name: phone ? "Stacked" : "Spread" })
       ).toHaveAttribute("aria-checked", "true");
       await expect(
-        deckList(page).getByRole("heading", { level: 3 })
+        deckList(page).getByRole("heading", { level: 2 })
       ).toHaveText([
         "Pokémon, 1 card",
         "Other Trainers, 8 cards",
