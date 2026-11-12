@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   getProfile,
+  ProfileError,
   newInviteLink,
   setDisplayName,
   setHandle,
@@ -54,6 +55,12 @@ export function PrivacySection({
   const nameInput = useRef<HTMLInputElement>(null);
   const [nameInvalid, setNameInvalid] = useState(false);
 
+  function refuseName(message: string) {
+    setNameInvalid(true);
+    setNameNotice(message);
+    nameInput.current?.focus();
+  }
+
   function show(profile: CollectorProfile) {
     setLoad({ kind: "ready", profile });
     setName(profile.display_name);
@@ -92,7 +99,14 @@ export function PrivacySection({
       setStatus(saved);
     } catch (cause) {
       if (!retryable(cause)) pending.current = null;
-      notice(profileMessage(cause));
+      if (
+        action === "display_name" &&
+        cause instanceof ProfileError &&
+        (cause.code === "INVALID_DISPLAY_NAME" ||
+          cause.code === "DISPLAY_NAME_NOT_ALLOWED")
+      ) {
+        refuseName(profileMessage(cause));
+      } else notice(profileMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -138,9 +152,7 @@ export function PrivacySection({
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!name.trim() || [...name.trim()].length > 40) {
-                  setNameInvalid(true);
-                  setNameNotice("Enter a name of 1 to 40 characters.");
-                  nameInput.current?.focus();
+                  refuseName("Enter a name of 1 to 40 characters.");
                   return;
                 }
                 void change(

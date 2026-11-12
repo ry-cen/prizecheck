@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useToast, type ToastInput } from "../ui/Toast";
+import { useToast, useShownToastId, type ToastInput } from "../ui/Toast";
 import type { ToastState } from "./useInventoryActions";
 
 type Options = {
@@ -30,6 +30,7 @@ export function useUndoToast({
   onClose,
 }: Options) {
   const kit = useToast();
+  const shownId = useShownToastId();
   const live = useRef({ onUndo, onDismiss, onClose });
   live.current = { onUndo, onDismiss, onClose };
   // The kit toast that shows `toast`, and which state it shows.
@@ -85,6 +86,7 @@ export function useUndoToast({
   );
 
   return {
+    shown: shownId !== null && shownId === current.current?.kitId,
     focus: () => !!current.current && kit.focus(current.current.kitId),
   };
 }

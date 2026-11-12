@@ -710,7 +710,7 @@ export function Workspace({
     target?.focus();
   }
   const dockHasControls =
-    active && (actions.toast !== null || selection.summary.copies > 0);
+    active && (undoToast.shown || selection.summary.copies > 0);
 
   return (
     // Collection's own root (#166 retired the workspace CSS root and the old .legacy wrapper): the kit's body type

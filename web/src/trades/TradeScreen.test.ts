@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { TradeView } from "../social_generated";
 import {
   getTrade,
+  cancelTrade,
   declineTrade,
   withdrawTrade,
   SocialError,
@@ -16,6 +17,7 @@ import { TradeScreen } from "./TradeScreen";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
   getTrade: vi.fn(),
+  cancelTrade: vi.fn(),
   declineTrade: vi.fn(),
   withdrawTrade: vi.fn(),
 }));
@@ -559,5 +561,79 @@ it.each(["withdraw", "cancel"] as const)(
       host.querySelector('[aria-label="More for this Trade"]')
     );
     expect(withdrawTrade).not.toHaveBeenCalled();
+  }
+);
+
+it.each(["decline", "withdraw", "cancel"] as const)(
+  "pending %s consumes Escape and ignores Keep it",
+  async (action) => {
+    const request =
+      action === "decline"
+        ? declineTrade
+        : action === "withdraw"
+          ? withdrawTrade
+          : cancelTrade;
+    let finish!: (value: TradeView) => void;
+    vi.mocked(request).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    vi.mocked(getTrade).mockResolvedValue({
+      ...trade,
+      role: action === "decline" ? "recipient" : "proposer",
+      state: action === "cancel" ? "accepted" : "proposed",
+      actions: [action],
+    });
+    if (action === "decline") {
+      await act(async () =>
+        root.render(
+          h(ToastProvider, {
+            children: h(TradeScreen, {
+              tradeId: "item",
+              onAllTrades: vi.fn(),
+              onNavigate: vi.fn(),
+            }),
+          })
+        )
+      );
+      await act(async () =>
+        [...host.querySelectorAll("button")]
+          .find((b) => b.textContent === "Decline")!
+          .click()
+      );
+    } else await openWithdraw();
+    const label =
+      action === "cancel"
+        ? "Cancel Trade"
+        : action === "decline"
+          ? "Decline"
+          : "Withdraw";
+    const question = host.querySelector(
+      `[role="group"][aria-label="${label}"]`
+    )!;
+    const yes = question.querySelector("button")!;
+    const keep = [...question.querySelectorAll("button")].find(
+      (b) => b.textContent === "Keep it"
+    )!;
+    await act(async () => yes.click());
+    expect(request).toHaveBeenCalledTimes(1);
+    const escape = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => yes.dispatchEvent(escape));
+    expect(escape.defaultPrevented).toBe(true);
+    expect(question.getAttribute("aria-label")).toBe(label);
+    expect(question.isConnected).toBe(true);
+    expect(document.activeElement).toBe(yes);
+    await act(async () => keep.click());
+    expect(question.getAttribute("aria-label")).toBe(label);
+    expect(question.isConnected).toBe(true);
+    expect(keep.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => finish({ ...trade, state: "closed", actions: [] }));
+    expect(question.isConnected).toBe(false);
   }
 );

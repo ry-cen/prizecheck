@@ -795,6 +795,7 @@ export function TradeScreen({
             if (event.key !== "Escape") return;
             event.preventDefault();
             event.stopPropagation();
+            if (busy) return;
             focusNext.current = asking === "decline" ? "decline" : "menu";
             setAsking(null);
           }}
@@ -812,7 +813,9 @@ export function TradeScreen({
             {ASK[asking].yes}
           </Button>
           <Button
+            aria-disabled={busy || undefined}
             onClick={() => {
+              if (busy) return;
               focusNext.current = asking === "decline" ? "decline" : "menu";
               setAsking(null);
             }}
