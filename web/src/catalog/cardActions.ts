@@ -132,7 +132,7 @@ export async function addCards(
   path: string,
   items: readonly AddItem[],
   pending: { current: AddCommand | null },
-  onSubmitting?: (items: readonly AddItem[]) => void
+  onSubmitting?: (items: readonly AddItem[], command: AddCommand) => void
 ): Promise<AddOutcome> {
   const previous = pending.current;
   if (
@@ -140,7 +140,7 @@ export async function addCards(
     !(previous.locationId === locationId && sameItems(previous.items, items))
   ) {
     try {
-      onSubmitting?.(previous.items);
+      onSubmitting?.(previous.items, previous);
       const result = await send(previous);
       pending.current = null;
       return succeeded(previous, result, true);
@@ -161,7 +161,7 @@ export async function addCards(
   };
   pending.current = command;
   try {
-    onSubmitting?.(command.items);
+    onSubmitting?.(command.items, command);
     const result = await send(command);
     pending.current = null;
     return succeeded(command, result, false);

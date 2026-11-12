@@ -1164,7 +1164,7 @@ for (const viewport of [
       expect(await held(page, await unsortedId(page))).toEqual([]);
     });
     for (const committed of [false, true]) {
-      test(`reload ${committed ? "after commit" : "before commit"} offers only a dismissible uncertainty notice`, async ({
+      test(`reload ${committed ? "after commit" : "before commit"} restores the queue and replays the pending Add exactly once`, async ({
         page,
       }) => {
         seedPopup();
@@ -1175,7 +1175,16 @@ for (const viewport of [
         const started = new Promise<void>((resolve) => (entered = resolve));
         let release!: () => void;
         const blocked = new Promise<void>((resolve) => (release = resolve));
+        const requests: unknown[] = [];
+        const keys: string[] = [];
         await page.route("**/api/holdings/batch", async (route) => {
+          const body = route.request().postDataJSON();
+          requests.push(body);
+          keys.push(body.idempotency_key);
+          if (requests.length > 1) {
+            await route.continue();
+            return;
+          }
           if (committed) {
             const response = await route.fetch();
             expect(response.ok()).toBe(true);
@@ -1194,26 +1203,100 @@ for (const viewport of [
         } finally {
           release();
         }
+        await expect(mode(page, "Add to a Location")).toHaveAttribute(
+          "aria-checked",
+          "true"
+        );
+        await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`]);
+        await expect(addBar(page)).toContainText(MAY_HAVE_COMPLETED);
         await expect(
           page.getByText(
             "Your earlier add may have finished. Check your collection before adding again.",
             { exact: true }
           )
-        ).toBeVisible();
-        await mode(page, "Add to a Location").click();
+        ).toHaveCount(0);
+        const unsorted = await unsortedId(page);
+        expect(await held(page, unsorted)).toEqual(
+          committed ? ["1 Bulbasaur"] : []
+        );
+
+        // The restored command must replay the original key, Location and exact items.
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
         await expect(queued(page)).toHaveCount(0);
-        expect(await held(page, await unsortedId(page))).toEqual(
+        expect(requests).toHaveLength(2);
+        expect(requests[1]).toEqual(requests[0]);
+        expect(await held(page, unsorted)).toEqual(["1 Bulbasaur"]);
+        await page.reload();
+        await expect(queued(page)).toHaveCount(0);
+        expect(await held(page, unsorted)).toEqual(["1 Bulbasaur"]);
+
+        // A later queue remains independent of the settled command, including across reload.
+        await more(page, CANDY).click();
+        await page.reload();
+        await expect(queued(page)).toHaveText([`1× ${CANDY}`]);
+        expect(await held(page, unsorted)).toEqual(["1 Bulbasaur"]);
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await expect(queued(page)).toHaveCount(0);
+        expect(keys).toHaveLength(3);
+        expect(keys[2]).not.toBe(keys[0]);
+        expect(await held(page, unsorted)).toEqual([
+          "1 Bulbasaur",
+          "1 Rare Candy",
+        ]);
+      });
+      test(`discarding an uncertain Add ${committed ? "after commit" : "before commit"} preserves a dismissible warning and permits a fresh queue`, async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        page.on("dialog", (dialog) => void dialog.accept());
+        await mode(page, "Add to a Location").click();
+        const keys = await scriptBatch(page, [committed ? "lost" : "dropped"]);
+        await more(page, BULBASAUR).click();
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await expect(addBar(page)).toContainText(MAY_HAVE_COMPLETED);
+        await page.reload();
+        await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`]);
+        await addBar(page)
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        const warning = page.getByText(
+          "Your earlier add may have finished. Check your collection before adding again.",
+          { exact: true }
+        );
+        await expect(warning).toBeVisible();
+        await page.reload();
+        await expect(warning).toBeVisible();
+        await expect(queued(page)).toHaveCount(0);
+        const unsorted = await unsortedId(page);
+        expect(await held(page, unsorted)).toEqual(
           committed ? ["1 Bulbasaur"] : []
         );
         await page
           .getByRole("button", { name: "Dismiss", exact: true })
           .click();
+        await expect(warning).toHaveCount(0);
         await more(page, CANDY).click();
         await page.reload();
-        await mode(page, "Add to a Location").click();
         await expect(queued(page)).toHaveText([`1× ${CANDY}`]);
-        expect(await held(page, await unsortedId(page))).toEqual(
+        await expect(warning).toHaveCount(0);
+        expect(await held(page, unsorted)).toEqual(
           committed ? ["1 Bulbasaur"] : []
+        );
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await expect(queued(page)).toHaveCount(0);
+        expect(keys).toHaveLength(2);
+        expect(keys[1]).not.toBe(keys[0]);
+        expect(await held(page, unsorted)).toEqual(
+          committed ? ["1 Bulbasaur", "1 Rare Candy"] : ["1 Rare Candy"]
         );
       });
     }

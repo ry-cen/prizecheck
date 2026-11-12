@@ -645,3 +645,36 @@ test("pending set normalisation keeps a concurrently normalised Add mode", async
     expect.objectContaining({ setId: null, mode: "add" })
   );
 });
+
+test("a failed search hides the previous empty result and its query description", async () => {
+  vi.mocked(useCatalogBrowse).mockReturnValue({
+    ...browse,
+    first: {
+      ...browse.first,
+      search: { mode: "name", text: "no-card-review-xyz" },
+    },
+    editions: [],
+    error: "Catalog search is temporarily unavailable. Please retry.",
+  } as unknown as ReturnType<typeof useCatalogBrowse>);
+  await act(async () =>
+    root.render(
+      h(
+        ToastProvider,
+        null,
+        h(CatalogGallery, {
+          active: true,
+          adding: false,
+          fixedTarget: null,
+          undoToast: false,
+          stick: "page",
+          view: parseCatalogView("/catalog?q=Pikachu"),
+        })
+      )
+    )
+  );
+  expect(host.textContent).toContain(
+    "Catalog search is temporarily unavailable"
+  );
+  expect(host.textContent).not.toContain("No cards match this search.");
+  expect(host.textContent).not.toContain("no-card-review-xyz");
+});
