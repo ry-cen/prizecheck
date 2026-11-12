@@ -482,3 +482,24 @@ def test_huge_integer_hold_does_not_block_sibling_promotion(conn, location, valu
     hold = one(conn, "SELECT candidate,status FROM catalog_review WHERE kind='group_pull_held'")
     assert hold == {'status': 'pending', 'candidate': {'group_id': 901, 'status': 'pull_failed', 'reasons': ['invalid_value']}}
     assert one(conn, 'SELECT outcome FROM catalog_run WHERE id=%s', (report.run_id,))['outcome'] == 'succeeded'
+
+
+def test_vanished_foil_price_preserves_owned_edition_without_adding_unspecified(conn):
+    _, edition, _, _ = seed(conn)
+    foil_before = one(conn, 'SELECT * FROM catalog_edition WHERE id=%s', (edition,))
+    holding_before = rows(conn, 'SELECT * FROM holding WHERE edition_id=%s', (edition,))
+    assert foil_before['descriptor'] == {'finish': 'foil'}
+    assert holding_before
+    # A new valid product changes the digest so this exercises an actual promotion.
+    report = writer.apply_run(conn, [pull([product(), product(9000002, '002')])])
+    assert report.promoted
+    assert one(conn, 'SELECT outcome FROM catalog_run WHERE id=%s', (report.run_id,))['outcome'] == 'succeeded'
+    assert rows(conn, 'SELECT * FROM catalog_edition WHERE printing_id=%s',
+                (foil_before['printing_id'],)) == [foil_before]
+    assert rows(conn, 'SELECT * FROM holding WHERE edition_id=%s', (edition,)) == holding_before
+    assert one(conn, '''SELECT count(*) AS n FROM catalog_edition
+        WHERE printing_id=%s AND descriptor_key=%s''',
+        (foil_before['printing_id'], plan.descriptor_key(plan.UNSPECIFIED)))['n'] == 0
+    assert one(conn, '''SELECT ge.active FROM catalog_generation_edition ge
+        JOIN catalog_state s ON s.active_generation=ge.generation_id WHERE ge.edition_id=%s''',
+        (edition,))['active'] is True

@@ -15,10 +15,6 @@ from .lifecycle import PullQuality, compare_group
 from .normalize import (SourceResponseError, DETAIL_FIELDS, MULTI_VALUE_DETAILS, NO_VALUE,
                         rules_text, split_values)
 
-# Open owner question: add Unspecified when an existing named finish becomes unpriced.
-# True matches #626; the alternative preserves only the existing options.
-NAMED_FINISH_UNPRICED_ADDS_UNSPECIFIED: bool = True
-
 MAX_PRODUCT_ID = 9_999_999_999_999_999_999
 MAX_GROUP_ID = 2_147_483_647
 MAX_KEY_TEXT_BYTES = 500
@@ -374,7 +370,7 @@ def plan_run(previous: PreviousState, pulls: Sequence[GroupPull]) -> RunPlan:
             for finish in sorted(finishes - {'unspecified'}):
                 d = dict(DESCRIPTOR_BY_FINISH[finish])
                 editions[descriptor_key(d)] = EditionRow(descriptor_key(d), d)
-            if 'unspecified' in finishes and (NAMED_FINISH_UNPRICED_ADDS_UNSPECIFIED or not editions):
+            if 'unspecified' in finishes and not editions:
                 d = dict(UNSPECIFIED)
                 editions[descriptor_key(d)] = EditionRow(descriptor_key(d), d)
             if (set(p.flags) & PRODUCT_HOLD_FLAGS or p.identity_key is None or conflict or duplicate or moved
