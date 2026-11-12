@@ -1302,3 +1302,74 @@ for (const viewport of [
     }
   });
 }
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`clear queue recovery ${viewport.width}`, () => {
+    test.use({ viewport });
+    test("Clear focuses Undo, restores the stored queue, and keeps phone rows readable", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      await more(page, BULBASAUR).click();
+      await more(page, CANDY).click();
+      const bar = addBar(page);
+      const before = await queued(page).allTextContents();
+      if (viewport.width === 375) {
+        for (const row of await queued(page).all()) {
+          await expect
+            .poll(() =>
+              row.evaluate((el) => {
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                return new Set(
+                  Array.from(range.getClientRects(), (rect) => rect.top)
+                ).size;
+              })
+            )
+            .toBeLessThanOrEqual(2);
+        }
+        for (const control of [
+          ...(await bar.getByRole("button").all()),
+          bar.getByRole("combobox"),
+        ]) {
+          await expectTouchTarget(control);
+        }
+        await expect
+          .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+          .toBeLessThanOrEqual(375);
+      }
+      const requests: string[] = [];
+      page.on("request", (request) => {
+        if (request.method() === "POST") requests.push(request.url());
+      });
+      await bar
+        .getByRole("button", { name: "Clear queue", exact: true })
+        .click();
+      await expect(undo(page)).toBeFocused();
+      await undo(page).click();
+      await expect(
+        bar.getByRole("button", { name: "Add 3 cards", exact: true })
+      ).toBeFocused();
+      await expect(queued(page)).toHaveText(before);
+      expect(requests).toEqual([]);
+      await page.reload();
+      await expect(queued(page)).toHaveCount(2);
+      await expect(queued(page)).toHaveText(before);
+      await bar
+        .getByRole("button", { name: "Clear queue", exact: true })
+        .click();
+      await expect(undo(page)).toBeFocused();
+      await page.reload();
+      await mode(page, "Add to a Location").click();
+      await expect(bar.getByRole("list", { name: "Cards to add" })).toHaveCount(
+        0
+      );
+    });
+  });
+}

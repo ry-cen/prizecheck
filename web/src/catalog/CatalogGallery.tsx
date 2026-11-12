@@ -19,7 +19,7 @@ import type {
   CatalogSet,
 } from "../catalog_browse_generated";
 import { EditionPrice } from "../EditionPrice";
-import { useShownToastId } from "../ui/Toast";
+import { useToast, useShownToastId } from "../ui/Toast";
 import { Button } from "../ui/Button";
 import { EditionTile } from "../ui/EditionTile";
 import { Icon } from "../ui/Icon";
@@ -228,6 +228,41 @@ export function CatalogGallery({
     stick === "dialog" ? `dialog:${fixedTarget?.id ?? "picker"}` : "page"
   );
   const stored = useStoredAddQueue(queueScope);
+  const queueToast = useToast();
+  const clearToast = useRef<number | null>(null);
+  const restoreFocus = useRef(false);
+  const clearedUndo = useRef<(() => boolean) | null>(null);
+  useEffect(() => {
+    if (clearToast.current !== null) {
+      queueToast.dismiss(clearToast.current);
+      clearToast.current = null;
+    }
+    const undoClear = clearedUndo.current;
+    clearedUndo.current = null;
+    if (undoClear)
+      clearToast.current = queueToast.show({
+        message: "Queue cleared.",
+        focus: true,
+        action: {
+          label: "Undo",
+          onAction: () => {
+            if (undoClear()) restoreFocus.current = true;
+          },
+        },
+      });
+    if (restoreFocus.current) {
+      restoreFocus.current = false;
+      galleryRoot.current
+        ?.querySelector<HTMLButtonElement>("[data-queue-add]")
+        ?.focus();
+    }
+  }, [stored.queue, stored.chosen, active, queueToast]);
+  useEffect(
+    () => () => {
+      if (clearToast.current !== null) queueToast.dismiss(clearToast.current);
+    },
+    [queueToast]
+  );
   const { queue, setQueue, chosen, setChosen } = stored;
   // Keep an uncertain command at its original Location, even if that Location is gone.
   // Otherwise use the chosen Location, Unsorted, or the first available leaf.
@@ -606,7 +641,11 @@ export function CatalogGallery({
           onClear={() => {
             setFailure("");
             setSettledAdd(null);
-            stored.clear();
+            clearedUndo.current = stored.clearUndo();
+            if (!clearedUndo.current)
+              galleryRoot.current
+                ?.querySelector<HTMLInputElement>('input[type="search"]')
+                ?.focus();
           }}
           onAdd={() => void addAll()}
           stick={stick}

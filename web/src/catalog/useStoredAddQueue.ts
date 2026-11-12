@@ -207,7 +207,9 @@ export function useStoredAddQueue(scope: string) {
       }
     }
   }
+  const revision = useRef(0);
   function publish() {
+    ++revision.current;
     render({ ...s.current });
     persist();
   }
@@ -330,6 +332,28 @@ export function useStoredAddQueue(scope: string) {
         s.current.lostEarlier = true;
       }
       publish();
+    },
+    /** Recovery is local only; uncertain submissions retain the existing Discard behavior. */
+    clearUndo(): (() => boolean) | null {
+      if (!liveOwner() || s.current.phase !== "ready") return null;
+      const before = s.current;
+      const recoverable =
+        !before.pending.current &&
+        !before.open &&
+        !before.restoredMarker &&
+        !before.lostEarlier &&
+        !before.lost.length;
+      const saved = { queue: before.queue, chosen: before.chosen };
+      this.clear();
+      if (!recoverable || !saved.queue.size) return null;
+      const version = revision.current;
+      return () => {
+        if (!liveOwner() || revision.current !== version) return false;
+        s.current.queue = saved.queue;
+        s.current.chosen = saved.chosen;
+        publish();
+        return true;
+      };
     },
     clear() {
       if (!liveOwner()) return;

@@ -100,12 +100,12 @@ export function AddBar({
         ) : (
           <ul
             aria-label="Cards to add"
-            className="m-0 flex min-w-0 flex-1 list-none flex-wrap items-center gap-1.5 p-0"
+            className="m-0 flex min-w-0 flex-1 list-none flex-wrap items-center gap-1.5 p-0 phone:basis-full phone:flex-none phone:w-full"
           >
             {recent.map((item, index) => (
               <li
                 key={item.edition.edition_id}
-                className={`box-border min-w-0 max-w-full whitespace-normal break-words rounded-round border border-border-strong bg-surface px-2 py-0.5 text-meta tabular-nums${index < recent.length - SHOWN_PHONE ? " phone:hidden" : ""}`}
+                className={`box-border min-w-0 max-w-full whitespace-normal break-words rounded-round border border-border-strong bg-surface px-2 py-0.5 text-meta tabular-nums phone:w-full phone:rounded-control${index < recent.length - SHOWN_PHONE ? " phone:hidden" : ""}`}
               >
                 {item.count}× {editionWords(item.edition)}
               </li>
@@ -129,6 +129,7 @@ export function AddBar({
             Clear queue
           </Button>
           <Button
+            data-queue-add
             variant="primary"
             disabled={total === 0 || !ready}
             aria-disabled={busy || undefined}

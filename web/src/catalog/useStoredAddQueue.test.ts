@@ -1119,3 +1119,60 @@ test("Dismiss acknowledges an earlier warning without abandoning the current rep
   expect(queue.uncertain).toBe(false);
   await close();
 });
+
+test("clear Undo restores exact counts and destination in storage and expires on newer work", async () => {
+  let close = await mount();
+  await act(async () => {
+    queue.setQueue((q) =>
+      bump(bump(bump(q, edition, 1), edition, 1), second, 1)
+    );
+    queue.setChosen("box");
+  });
+  let undo: (() => boolean) | null = null;
+  await act(async () => {
+    undo = queue.clearUndo();
+  });
+  expect(queue.queue.size).toBe(0);
+  expect(sessionStorage.length).toBe(0);
+  await act(async () => {
+    expect(undo!()).toBe(true);
+  });
+  await close();
+  close = await mount();
+  expect(queue.queue.get("one")?.count).toBe(2);
+  expect(queue.queue.get("two")?.count).toBe(1);
+  expect(queue.chosen).toBe("box");
+  await act(async () => {
+    undo = queue.clearUndo();
+    queue.setChosen("elsewhere");
+  });
+  expect(undo!()).toBe(false);
+  await act(async () => {
+    queue.setQueue((q) => bump(q, second, 1));
+    undo = queue.clearUndo();
+    queue.setQueue((q) => bump(q, edition, 1));
+  });
+  expect(undo!()).toBe(false);
+  expect(queue.queue.has("two")).toBe(false);
+  await close();
+});
+
+test("clear does not offer recovery or replay an uncertain submission", async () => {
+  const close = await mount();
+  await act(async () => {
+    queue.setQueue((q) => bump(q, edition, 1));
+    queue.submitting([{ editionId: "one", quantity: 1 }], {
+      key: "pending",
+      locationId: "box",
+      path: "Box",
+      items: [{ editionId: "one", quantity: 1 }],
+    });
+  });
+  await act(async () => {
+    expect(queue.clearUndo()).toBeNull();
+  });
+  expect(queue.pending.current).toBeNull();
+  expect(queue.queue.size).toBe(0);
+  expect(queue.uncertain).toBe(true);
+  await close();
+});
