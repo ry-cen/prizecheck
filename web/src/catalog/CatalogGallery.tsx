@@ -459,8 +459,25 @@ export function CatalogGallery({
       );
       const message = batchAddedText(result.copies, result.path);
       const live = alive.current.mounted && alive.current.active;
-      if (live && latest.current.undoToast && result.from === "popup")
-        retireClear();
+      if (live && latest.current.undoToast && result.from === "popup") {
+        const id = ownToast.current;
+        const host = document.activeElement?.closest("#app-toasts");
+        if (
+          recovery.current()?.kind === "clear" &&
+          id !== null &&
+          queueToast.isShown(id) &&
+          host
+        ) {
+          // Retire authority now, but keep a usable focus destination until the
+          // Undo lookup can replace this notice. Toast.show inherits focus only
+          // if it is still in the host; a later user focus move must win.
+          recovery.retire();
+          host
+            .querySelector<HTMLButtonElement>('[aria-label="Dismiss"]')
+            ?.focus();
+          queueToast.update(id, { message: "" });
+        } else retireClear();
+      }
       const token = live
         ? claimNotice({ kind: "add", message, undo: null })
         : null;

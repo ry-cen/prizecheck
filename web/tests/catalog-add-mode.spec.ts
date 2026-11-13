@@ -1463,8 +1463,36 @@ for (const viewport of [
             .click();
         }
         await popupAdd();
-        await expect(undo(page)).toHaveCount(1);
+        const allUndo = page.getByRole("button", {
+          name: "Undo",
+          exact: true,
+          includeHidden: true,
+        });
+        const toastUndo = page
+          .getByRole("region", { name: "Notifications", includeHidden: true })
+          .getByRole("button", {
+            name: "Undo",
+            exact: true,
+            includeHidden: true,
+          });
+        if (context === "page") {
+          const inlineUndo = page
+            .getByRole("dialog")
+            .getByRole("button", { name: "Undo", exact: true });
+          await expect(inlineUndo).toBeVisible();
+          await expect(inlineUndo).toBeEnabled();
+          await expect(allUndo).toHaveCount(1);
+          await expect(toastUndo).toHaveCount(0);
+        } else {
+          await expect(undo(page)).toHaveCount(1);
+        }
         await page.keyboard.press("Escape");
+        if (context === "page") {
+          await expect(allUndo).toHaveCount(1);
+          await expect(toastUndo).toHaveCount(1);
+          await expect(toastUndo).toBeVisible();
+          await expect(toastUndo).toBeEnabled();
+        }
         await more(scope, BULBASAUR).click();
         await bar
           .getByRole("button", { name: "Clear queue", exact: true })
