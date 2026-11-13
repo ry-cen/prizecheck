@@ -2,6 +2,7 @@
 from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
+import math
 import re
 from typing import Iterable, Mapping, Optional, Sequence, Tuple, Union
 from uuid import UUID
@@ -18,7 +19,31 @@ from .normalize import (SourceResponseError, DETAIL_FIELDS, MULTI_VALUE_DETAILS,
 # True matches #626; the alternative preserves only the existing options.
 NAMED_FINISH_UNPRICED_ADDS_UNSPECIFIED: bool = True
 
-REVIEW_KINDS = FLAGS + ('missing_from_source', 'group_change', 'display_change', 'duplicate_product_id')  # 13, in this order
+MAX_PRODUCT_ID = 9_999_999_999_999_999_999
+MAX_GROUP_ID = 2_147_483_647
+MAX_KEY_TEXT_BYTES = 500
+MAX_DEPTH = 32
+
+
+def valid_id(value, maximum):
+    return type(value) is int and 1 <= value <= maximum
+
+
+def valid_text(value):
+    if not isinstance(value, str) or '\x00' in value:
+        return False
+    try:
+        value.encode('utf-8')
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+PULL_REASONS = ('fetch_failed', 'response_not_success', 'total_items_mismatch', 'malformed_response',
+                'wrong_group', 'wrong_category', 'invalid_id', 'invalid_text', 'invalid_value', 'text_too_long')
+
+GROUP_PULL_HELD = 'group_pull_held'
+REVIEW_KINDS = FLAGS + ('missing_from_source', 'group_change', 'display_change', 'duplicate_product_id', GROUP_PULL_HELD)  # 14, in this order
 PRODUCT_HOLD_FLAGS = frozenset({FLAG_IDENTITY_TEXT_CONFLICT, FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING,
                                 FLAG_DUPLICATE_NUMBER_PENDING, FLAG_EXTENDED_FIELD_REPEATED, FLAG_PRINTING_DETAILS_DIFFER})
 UNSPECIFIED = {"kind": "unspecified", "label": "Unspecified Variant"}           # Pokémon's descriptor, catalog.py:122
@@ -27,13 +52,38 @@ DESCRIPTOR_BY_FINISH = {'normal': {"finish": "normal"}, 'foil': {"finish": "foil
 @dataclass(frozen=True)
 class EditionRow: descriptor_key: str; descriptor: dict    # editions tuples are always sorted by descriptor_key
 @dataclass(frozen=True)
-class GroupInfo: group_id: int; name: str
+class GroupInfo:
+    group_id: int
+    name: str
+
+    def __post_init__(self):
+        if not valid_id(self.group_id, MAX_GROUP_ID) or not valid_text(self.name):
+            raise ValueError('invalid group metadata')
 @dataclass(frozen=True)
-class GroupPull:                    # quality has NO default: constructing without it is a TypeError
+class GroupPull:
+    """Caller contract: valid quality, sorted unique known reason codes and dict raw.
+
+    Acceptable pulls require no reasons, a GroupResult, and products/prices raw keys.
+    Violations raise ValueError at construction, before planning can read the content.
+    """
     info: GroupInfo
     result: Union[GroupResult, SourceResponseError, None]
     quality: PullQuality
     raw: dict                       # {"products": <response as received>, "prices": <response as received>} or {"error": str}
+    reasons: Tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if self.quality not in ('acceptable', 'suspicious', 'unknown'):
+            raise ValueError('invalid pull quality')
+        if (type(self.reasons) is not tuple or any(type(code) is not str or
+                code not in PULL_REASONS + ('not_pulled', 'quality_unknown') for code in self.reasons) or
+                self.reasons != tuple(sorted(set(self.reasons)))):
+            raise ValueError('pull reasons must be sorted unique known codes')
+        if not isinstance(self.raw, dict):
+            raise ValueError('pull raw must be a dict')
+        if self.quality == 'acceptable' and (self.reasons or not isinstance(self.result, GroupResult) or
+                                             not {'products', 'prices'} <= self.raw.keys()):
+            raise ValueError('acceptable pulls require a result, raw payloads and no reasons')
 @dataclass(frozen=True)
 class ExistingPrinting:             # one per catalog_generation_printing row of the ACTIVE generation, any source
     printing_id: UUID
@@ -89,6 +139,86 @@ class RunPlan:
     compared: int                               # number of groups with status 'compared'
 
 
+def raw_bytes(value: object) -> bytes:
+    """Encode raw evidence with ASCII escapes, or a stable unencodable marker."""
+    try:
+        return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True,
+                          allow_nan=True).encode('ascii')
+    except (TypeError, ValueError, RecursionError):
+        return b'{"unencodable":' + json.dumps(type(value).__name__).encode('ascii') + b'}'
+
+
+def storage_violations(info, raw, result) -> Tuple[str, ...]:
+    """Check text, JSON values, ID domains and indexed text limits without recursion.
+
+    Raw tuples are invalid. Tuples from the model's derived data serialize as arrays.
+    """
+    codes = set()
+
+    def walk(root, derived=False):
+        stack = [(root, 0)]
+        while stack:
+            value, depth = stack.pop()
+            kind = type(value)
+            if kind is str:
+                if not valid_text(value):
+                    codes.add('invalid_text')
+            elif kind in (dict, list) or derived and kind is tuple:
+                if depth > MAX_DEPTH:
+                    codes.add('invalid_value')
+                    continue
+                if kind is dict:
+                    for key, item in value.items():
+                        if type(key) is not str:
+                            codes.add('invalid_value')
+                        stack.append((key, depth + 1))
+                        stack.append((item, depth + 1))
+                else:
+                    stack.extend((item, depth + 1) for item in value)
+            elif kind is float:
+                if not math.isfinite(value):
+                    codes.add('invalid_value')
+            elif kind is int:
+                if abs(value) > MAX_PRODUCT_ID:
+                    codes.add('invalid_value')
+            elif kind not in (bool, type(None)):
+                codes.add('invalid_value')
+
+    try:
+        walk(raw)
+        if type(raw) is dict:
+            for what in ('products', 'prices'):
+                payload = raw.get(what)
+                records = payload.get('results') if type(payload) is dict else payload
+                if type(records) is not list:
+                    continue
+                for row in records:
+                    if type(row) is not dict:
+                        continue
+                    if not valid_id(row.get('productId'), MAX_PRODUCT_ID):
+                        codes.add('invalid_id')
+                    if what == 'products' and not valid_id(row.get('groupId'), MAX_GROUP_ID):
+                        codes.add('invalid_id')
+                    fields = ('cleanName', 'imageUrl', 'modifiedOn') if what == 'products' else ('subTypeName',)
+                    if any(row.get(field) is not None and type(row[field]) is not str for field in fields):
+                        codes.add('invalid_value')
+        if isinstance(result, GroupResult):
+            walk(asdict(result), derived=True)
+            if result.group_id is not None and result.group_id != info.group_id:
+                codes.add('invalid_id')
+            for p in (*result.printings, *result.excluded):
+                if not valid_id(p.key.product_id, MAX_PRODUCT_ID) or not valid_id(p.key.group_id, MAX_GROUP_ID):
+                    codes.add('invalid_id')
+            for p in result.printings:
+                for text in (p.name, p.name.casefold(), p.identity_key, p.number):
+                    if text is not None and valid_text(text) and len(text.encode('utf-8')) > MAX_KEY_TEXT_BYTES:
+                        codes.add('text_too_long')
+    except Exception:
+        # The gate must return a verdict even for non-JSON inputs or recursive model data.
+        codes.add('invalid_value')
+    return tuple(sorted(codes))
+
+
 def descriptor_key(descriptor: dict) -> str:
     return json.dumps(descriptor, sort_keys=True)
 
@@ -108,6 +238,12 @@ def row_order(source_id: str) -> Tuple[int, int, str]:
         except ValueError:
             pass
     raise ValueError('invalid generation source_id')
+
+
+def review_order(source_id: str) -> Tuple[int, int, str]:
+    if re.fullmatch(r'group:[0-9]+', source_id):
+        return (2, int(source_id[6:]), '')
+    return row_order(source_id)
 
 
 def content_digest(printings: Iterable[PrintingRow]) -> str:
@@ -158,6 +294,14 @@ def plan_run(previous: PreviousState, pulls: Sequence[GroupPull]) -> RunPlan:
     by_group = {p.info.group_id: p for p in pulls}
     if len(by_group) != len(pulls):
         raise ValueError('duplicate group pull')
+    for pull in pulls:
+        if pull.quality not in ('acceptable', 'suspicious', 'unknown'):
+            raise ValueError('invalid pull quality')
+        if pull.result is not None and not isinstance(pull.result, (GroupResult, SourceResponseError)):
+            raise TypeError('invalid pull result')
+    by_group = {gid: replace(p, quality='suspicious', reasons=tuple(sorted(set(p.reasons) | set(codes))))
+                if p.quality == 'acceptable' and (codes := storage_violations(p.info, p.raw, p.result)) else p
+                for gid, p in by_group.items()}
     snapshots, outcomes, reviews, evidence = {}, [], {}, {}
     decisions, candidates, fingerprints, proposed, seen = {}, {}, {}, {}, {}
     identity_shas = {}
@@ -196,7 +340,17 @@ def plan_run(previous: PreviousState, pulls: Sequence[GroupPull]) -> RunPlan:
         e.group_id for e in previous.printings.values() if e.group_id is not None}
     for gid in sorted(all_groups):
         if gid not in decisions or decisions[gid].status != 'compared':
-            outcomes.append(GroupOutcome(gid, decisions[gid].status if gid in decisions else 'not_pulled', 0, 0, 0))
+            status = decisions[gid].status if gid in decisions else 'not_pulled'
+            pull = by_group.get(gid)
+            reasons = ((status,) if status in ('not_pulled', 'quality_unknown')
+                       else pull.reasons or (status,))
+            raw_sha = hashlib.sha256(raw_bytes(pull.raw)).hexdigest() if pull is not None else None
+            fingerprint = _sha([status, sorted(reasons), raw_sha])
+            sid = f'group:{gid}'
+            reviews[sid, GROUP_PULL_HELD, fingerprint] = ReviewRow(
+                sid, GROUP_PULL_HELD, fingerprint, ', '.join(reasons),
+                {'group_id': gid, 'status': status, 'reasons': sorted(reasons)})
+            outcomes.append(GroupOutcome(gid, status, 0, 0, 0))
             continue
         pull, decision = by_group[gid], decisions[gid]
         identities = {i.identity_key: i for i in pull.result.identities}
@@ -260,5 +414,5 @@ def plan_run(previous: PreviousState, pulls: Sequence[GroupPull]) -> RunPlan:
                 review(gid, p.key.product_id, 'card_scope_pending', 'previously accepted product is now excluded as a token')
         outcomes.append(GroupOutcome(gid, 'compared', written, missing, held))
     ordered = tuple(rows[sid] for sid in sorted(rows, key=row_order))
-    return RunPlan(ordered, tuple(reviews[k] for k in sorted(reviews, key=lambda k: (row_order(k[0]), *k[1:]))),
+    return RunPlan(ordered, tuple(reviews[k] for k in sorted(reviews, key=lambda k: (review_order(k[0]), *k[1:]))),
                    snapshots, evidence, tuple(outcomes), content_digest(ordered), len(snapshots))

@@ -83,6 +83,12 @@ def apply_run(conn, pulls: Sequence[plan.GroupPull], *, run_id: Optional[UUID] =
             previous = load_previous(conn)
             result = plan.plan_run(previous, pulls)
             if result.compared == 0:
+                for review in result.reviews:
+                    found = cur.execute('SELECT id FROM catalog_printing WHERE source_id=%s', (review.source_id,)).fetchone()
+                    cur.execute('''INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate)
+                        VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (source_id,kind,source_fingerprint) DO NOTHING''',
+                                (found['id'] if found else None, review.source_id, review.kind,
+                                 review.source_fingerprint, review.detail, Jsonb(review.candidate)))
                 cur.execute("""UPDATE catalog_run SET phase='failed',outcome='failed',finished_at=now(),
                     error='No group pull was accepted; the previous catalog is kept' WHERE id=%s""", (run_id,))
                 return RunReport(run_id, False, state['active_generation'], state['revision'], result)
@@ -114,8 +120,7 @@ def apply_run(conn, pulls: Sequence[plan.GroupPull], *, run_id: Optional[UUID] =
                         WHERE printing_id=%s AND descriptor_key=%s''', (printing, edition.descriptor_key)).fetchone()['id']
             promoted = state['active_generation'] is None or plan.content_digest(previous.printings.values()) != result.content_sha256
             if promoted:
-                raw = gzip.compress(json.dumps({str(p.info.group_id): p.raw for p in pulls}, sort_keys=True,
-                                               separators=(',', ':')).encode('utf-8'))
+                raw = gzip.compress(plan.raw_bytes({str(p.info.group_id): p.raw for p in pulls}))
                 cur.execute('INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256) VALUES (%s,%s,%s,%s)',
                             (run_id, len(result.printings), raw, hashlib.sha256(raw).hexdigest()))
                 for row in result.printings:

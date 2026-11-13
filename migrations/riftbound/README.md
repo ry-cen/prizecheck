@@ -15,3 +15,5 @@ thirteen reasons. Art views retain their shared shape but return no art, pending
 image decisions. Set codes have no marketplace-id fallback in collector output.
 
 The planner, writer, sync job and quality verdict computation are separate work.
+
+`005_group_pull_review.sql` appends the fourteenth review kind, `group_pull_held`.
