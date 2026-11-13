@@ -1,8 +1,7 @@
 """Normalise one TCGCSV group's `products` and `prices` JSON into catalog candidates (#534).
 
-Pure: no database, no HTTP, no clock. Nothing is dropped. A product the owner has not ruled on stays in the
-result with a flag (see model.FLAGS), and the review list says what is open. Generation promotion, tombstones
-and bulk-drop handling are not here.
+Pure: no database, no HTTP, no clock. Every source record is retained, including confirmed exclusions.
+Review flags describe uncertain cases under approved policy. Persistence and generation promotion are not here.
 
 Rules and where they come from:
 
@@ -11,15 +10,21 @@ Rules and where they come from:
   The text comparison is a conservative comparison applying the owner's approved rule that conflicting or
   uncertain matches go to review: differences other than case, whitespace and HTML tags go to review, so a
   difference inside the reminder text is a conflict. `(Alternate Art)` groups only as a name's sole bracketed
-  part, by the same rule. Printings grouped by name and text that differ on other card details keep their
-  identity and carry `printing_details_differ` for review.
+  part, by the same rule.
+* Owner-approved (2026-11-11): apparent variants with conflicting details remain unmerged for review. Normal
+  and Foil require source subtypes; eligible unpriced cards get one unspecified edition. Unknown finishes are
+  retained observations for review. Explicit, unambiguous Token types are excluded; incomplete scope stays in
+  review. Duplicate numbers hold only affected products. Overnumbered and Signature group only with supporting
+  evidence: an unmarked base, nonempty matching rules text and explicit matching DETAIL_FIELDS. This narrow
+  implementation of the approved conditional rule never matches on names or numbers alone.
 * Read off real TCGCSV data (the delimiter, the literal `None`): parsing facts only.
-* Everything else the acceptance spec proposes (PC-2 card scope, PC-5 finishes, PC-9 other delimiters, other
-  name markers, duplicate numbers) is flagged as pending, not decided.
+* Still open: other delimiters, sealed-product confirmation signals, recognition/evidence for other labels,
+  retirement policy, review UI and schema. The lifecycle module supplies comparison only, not persistence.
 """
 import html
 import re
 import unicodedata
+from dataclasses import replace
 
 from .model import (FLAG_CARD_SCOPE_PENDING, FLAG_DUPLICATE_NUMBER_PENDING, FLAG_EXTENDED_FIELD_REPEATED,
                     FLAG_FINISH_POLICY_PENDING, FLAG_IDENTITY_TEXT_CONFLICT, FLAG_MARKER_GROUPING_PENDING,
@@ -43,13 +48,13 @@ DETAIL_FIELDS = ('Domain', 'Tag', 'Card Type', 'Energy Cost', 'Power Cost', 'Mig
 # These hold several values; their order is not compared.
 MULTI_VALUE_DETAILS = ('Domain', 'Tag', 'Card Type')
 
-# The one marker the owner approved for automatic grouping.
+# The one marker that does not require the additional source-evidence check below.
 GROUPED_MARKER = 'alternate art'
+EVIDENCE_MARKERS = ('overnumbered', 'signature')
 _MARKER = re.compile(r'\s*\(([^()]*)\)\s*$')
 _BRACKETED = re.compile(r'\(([^()]*)\)')
 
-# Working mapping of price subtypes to finishes. Mapping these two is allowed; deciding what an unpriced product
-# or another subtype becomes is not.
+# Approved source-identified finishes. Unknown subtypes remain flagged observations, never finish proposals.
 FINISH_BY_SUBTYPE = {'Normal': 'normal', 'Foil': 'foil'}
 
 _TAGS = re.compile(r'<[^>]*>')
@@ -215,12 +220,51 @@ def normalise_group(products, prices=()):
         if len(product_ids) > 1:
             flag(product_ids, FLAG_DUPLICATE_NUMBER_PENDING, f'Number {number} is on {len(product_ids)} products')
 
+    # Recognised labels are conditional, not a suffix-stripping rule. Compare against unmarked, review-free
+    # anchors only; labelled products cannot bootstrap evidence for each other.
+    anchors = {}
+    for d in drafts:
+        if d['marker'] is None and not flags[d['key'].product_id] and not d['scope'].exclusion:
+            anchors.setdefault(fold(d['base_name']), []).append(d)
+    for d in drafts:
+        pid = d['key'].product_id
+        if not d['evidence_marker'] or d['scope'].exclusion:
+            continue
+        gap = marker_evidence_gap(d, anchors.get(fold(d['base_name']), []))
+        other_flags = set(flags[pid]) - {FLAG_MARKER_GROUPING_PENDING}
+        if other_flags:
+            gap = 'product has review flags: ' + ', '.join(sorted(other_flags))
+        review = [item for item in review if not (
+            item.code == FLAG_MARKER_GROUPING_PENDING and item.product_ids == (pid,))]
+        if gap:
+            review.append(ReviewItem(FLAG_MARKER_GROUPING_PENDING, (pid,), gap))
+        else:
+            flags[pid].remove(FLAG_MARKER_GROUPING_PENDING)
+
+    # Detail conflicts hold the whole apparent identity, even when marker evidence blocks grouping.
+    detail_groups = {}
+    for d in drafts:
+        pid = d['key'].product_id
+        if (not d['scope'].exclusion
+                and not (set(flags[pid]) & {FLAG_CARD_SCOPE_PENDING, FLAG_EXTENDED_FIELD_REPEATED})
+                and (not (set(flags[pid]) & {FLAG_MARKER_GROUPING_PENDING}) or d['evidence_marker'])):
+            detail_groups.setdefault(fold(d['base_name']), []).append(d)
+    for members in detail_groups.values():
+        differing = differing_details(members)
+        if differing:
+            product_ids = [d['key'].product_id for d in members]
+            flag(product_ids, FLAG_PRINTING_DETAILS_DIFFER,
+                 f'{members[0]["base_name"]!r}: the printings differ on ' + ', '.join(differing))
+            if len({d['rules_text'] for d in members}) > 1:
+                flag(product_ids, FLAG_IDENTITY_TEXT_CONFLICT,
+                     f'{members[0]["base_name"]!r}: the products disagree on rules text')
+
     # Card Identity: proposed only for a product with no open question about its scope or marker.
     candidates = {}
     for d in drafts:
         pid = d['key'].product_id
-        if not (set(flags[pid]) & {FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING,
-                                   FLAG_EXTENDED_FIELD_REPEATED}):
+        if not d['scope'].exclusion and not (set(flags[pid]) & {FLAG_CARD_SCOPE_PENDING, FLAG_MARKER_GROUPING_PENDING,
+                                   FLAG_EXTENDED_FIELD_REPEATED, FLAG_PRINTING_DETAILS_DIFFER}):
             candidates.setdefault(fold(d['base_name']), []).append(d)
     identities, identity_of = [], {}
     for identity_key, members in candidates.items():
@@ -229,10 +273,6 @@ def normalise_group(products, prices=()):
             flag(product_ids, FLAG_IDENTITY_TEXT_CONFLICT,
                  f'{members[0]["base_name"]!r}: the products disagree on rules text')
             continue
-        differing = differing_details(members)
-        if differing:
-            flag([d['key'].product_id for d in members], FLAG_PRINTING_DETAILS_DIFFER,
-                 f'{members[0]["base_name"]!r}: the printings differ on ' + ', '.join(differing))
         unmarked = [d for d in members if d['marker'] is None]
         identities.append(IdentityCandidate(identity_key, (unmarked or members)[0]['base_name'],
                                             tuple(d['key'] for d in members)))
@@ -246,7 +286,32 @@ def normalise_group(products, prices=()):
                                  f'{len(by_product[product_id])} price rows for a product not in the group'))
 
     return GroupResult(group_id=group_id, identities=tuple(sorted(identities, key=lambda i: i.identity_key)),
-                       printings=printings, review=tuple(review), counts=counts_of(printings, identities, review))
+                       printings=tuple(p for p in printings if not p.scope.exclusion), review=tuple(review),
+                       counts=counts_of(printings, identities, review),
+                       excluded=tuple(p for p in printings if p.scope.exclusion))
+
+
+def marker_evidence_gap(labelled, anchors):
+    """Missing or conflicting evidence for the two expressly recognised labels. No collector-number pattern
+    is inferred. Requiring explicit values avoids treating two incomplete records as corroboration.
+    """
+    if not anchors:
+        return 'no review-free unmarked base product in this group'
+    for d in [labelled, *anchors]:
+        missing = [field for field in ('Description', *DETAIL_FIELDS)
+                   if not d['extended'].get(field) or d['extended'][field].strip() in ('', NO_VALUE)
+                   or (field in MULTI_VALUE_DETAILS and not split_values(d['extended'][field])[0])]
+        if missing:
+            return f'product {d["key"].product_id} lacks explicit evidence: ' + ', '.join(missing)
+        if not d['rules_text']:
+            return f'product {d["key"].product_id} has no nonempty rules text'
+    members = [labelled, *anchors]
+    if len({d['rules_text'] for d in members}) > 1:
+        return 'recognised label conflicts with unmarked base rules text'
+    differing = differing_details(members)
+    if differing:
+        return 'recognised label conflicts with unmarked base details: ' + ', '.join(differing)
+    return None
 
 
 def differing_details(members):
@@ -278,15 +343,19 @@ def draft(product, group_id, rows):
     domains, domains_unparsed = split_values(extended.get('Domain'))
     tags, tags_unparsed = split_values(extended.get('Tag'))
     scope = scope_of(number, card_types, card_types_unparsed)
+    repeated_card_type = sum(entry_name == 'Card Type' for entry_name, _ in entries) > 1
+    if scope.looks_token and not scope.card_type_unparsed and not repeated_card_type:
+        scope = replace(scope, exclusion='token')
     pending = []
-    if not (scope.has_number and scope.has_card_type) or scope.looks_token or scope.card_type_unparsed:
+    if not scope.exclusion and (not (scope.has_number and scope.has_card_type)
+                                or scope.looks_token or scope.card_type_unparsed or repeated_card_type):
         missing = [label for label, present in (('Number', scope.has_number), ('Card Type', scope.has_card_type))
                    if not present]
         pending.append((FLAG_CARD_SCOPE_PENDING,
                         'no ' + ' or '.join(missing) if missing else 'Card Type includes Token'
-                        if scope.looks_token else 'Card Type has an unrecognised separator'))
-    # `(Alternate Art)` groups only as the name's one bracketed part; any other bracketed part, trailing or not,
-    # is an open question.
+                        if scope.looks_token else 'Card Type appears more than once' if repeated_card_type
+                        else 'Card Type has an unrecognised separator'))
+    # Sole Alternate Art is unconditional; sole recognised labels need evidence checked across products.
     if brackets and not (len(brackets) == 1 and marker is not None and fold(marker) == GROUPED_MARKER):
         pending.append((FLAG_MARKER_GROUPING_PENDING, 'bracketed parts ' + ', '.join(
             f'({part})' for part in brackets) + f' on proposed base name {base_name!r}'))
@@ -295,9 +364,7 @@ def draft(product, group_id, rows):
     if repeated:
         pending.append((FLAG_EXTENDED_FIELD_REPEATED, 'repeated: ' + ', '.join(repeated)))
     subtypes = tuple(dict.fromkeys(row.get('subTypeName') for row in rows))
-    if not rows:
-        pending.append((FLAG_FINISH_POLICY_PENDING, 'no price rows'))
-    elif any(subtype not in FINISH_BY_SUBTYPE for subtype in subtypes):
+    if any(subtype not in FINISH_BY_SUBTYPE for subtype in subtypes):
         pending.append((FLAG_FINISH_POLICY_PENDING, 'price subtype outside Normal and Foil: ' + ', '.join(
             repr(subtype) for subtype in subtypes if subtype not in FINISH_BY_SUBTYPE)))
     unparsed = [label for label, flagged in (('Card Type', card_types_unparsed), ('Domain', domains_unparsed),
@@ -307,12 +374,16 @@ def draft(product, group_id, rows):
     return {'key': PrintingKey(group_id, product['productId']), 'product': product, 'extended': extended, 'entries': entries,
             'name': name, 'base_name': base_name, 'marker': marker, 'number': number, 'scope': scope,
             'card_types': card_types, 'domains': domains, 'tags': tags, 'rows': rows, 'subtypes': subtypes,
-            'rules_text': rules_text(extended.get('Description')), 'pending': pending, 'flags': ()}
+            'rules_text': rules_text(extended.get('Description')), 'pending': pending, 'flags': (),
+            'evidence_marker': len(brackets) == 1 and marker is not None and fold(marker) in EVIDENCE_MARKERS}
 
 
 def printing(d, identity_key, flags):
     product, extended = d['product'], d['extended']
     flavor = extended.get('Flavor Text')
+    editions = editions_of(d['rows'])
+    if not d['rows'] and not d['scope'].exclusion and FLAG_CARD_SCOPE_PENDING not in flags:
+        editions = (EditionCandidate(subtype=None, finish='unspecified', prices=()),)
     return PrintingCandidate(
         key=d['key'], name=d['name'], clean_name=product.get('cleanName'), base_name=d['base_name'],
         marker=d['marker'], identity_key=identity_key, number=d['number'], rarity=extended.get('Rarity') or None,
@@ -321,11 +392,12 @@ def printing(d, identity_key, flags):
         description_html=extended.get('Description'), flavor_text_html=flavor,
         flavor_text_plain=plain_text(flavor) if flavor is not None else None, image_url=product.get('imageUrl'),
         modified_on=product.get('modifiedOn'), extended=extended, extended_entries=d['entries'], price_subtypes=d['subtypes'],
-        editions=editions_of(d['rows']), flags=flags)
+        editions=editions, flags=flags)
 
 
 def counts_of(printings, identities, review):
-    counts = {'products': len(printings), 'identities': len(identities),
+    counts = {'products': len(printings), 'excluded_products': sum(bool(p.scope.exclusion) for p in printings),
+              'identities': len(identities),
               'editions': sum(len(p.editions) for p in printings),
               'products_without_identity': sum(1 for p in printings if p.identity_key is None),
               'products_flagged': sum(1 for p in printings if p.flags), 'review_items': len(review)}
