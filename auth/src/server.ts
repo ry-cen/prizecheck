@@ -654,6 +654,13 @@ const server = createServer(async (request, response) => {
               ? "manual"
               : "follow",
         });
+        // The caller can leave while fetch is waiting for upstream headers. Do not create a Readable for a
+        // closed destination: pipeline can reject during setup before installing its source error listeners
+        // (Node 26), leaving fromWeb's later upstream error unhandled. Release the body at the Web Stream boundary.
+        if (response.destroyed) {
+          await upstream.body?.cancel();
+          return;
+        }
         const link = upstream.headers.get("location");
         if (
           (ART_PATH.test(path) || EDITION_ART_PATH.test(path)) &&
@@ -751,7 +758,7 @@ const server = createServer(async (request, response) => {
     }
     json(response, 404, { error: "Not found" });
   } catch (error) {
-    if (response.headersSent) {
+    if (response.destroyed || response.headersSent) {
       // A failure after the status line (a download pipe): the only honest signal left is a broken connection.
       response.destroy();
       return;
