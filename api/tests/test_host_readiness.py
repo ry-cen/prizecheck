@@ -116,12 +116,12 @@ def test_one_unapplied_rule_is_named_with_the_resume_command():
     owner, _ = prepare_ready_host()
     with connect() as conn:
         conn.execute("UPDATE catalog_rule_state SET activation_id=NULL WHERE kind=%s", (LIVE,))
-    code, text = report(READINESS_GUIDE="docs/deployment-unraid.md")
+    code, text = report(READINESS_GUIDE="docs/deployment-dev.md")
     assert code == 0
     assert "The marketplace matching rule is applied (version 1)" in text
     assert "missing  The live derivation rule is not applied" in text
     assert f"{SCRIPT} tool /app/scripts/rule_rollout.py resume" in text
-    assert "'Apply the catalog rules' in docs/deployment-unraid.md" in text
+    assert "'Apply the catalog rules' in docs/deployment-dev.md" in text
     assert "(bind the owner first)" not in text
 
 

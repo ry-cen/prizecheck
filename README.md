@@ -206,8 +206,8 @@ authorized.
 - [Signup readiness](docs/signup-readiness.md): email adapters and the gate for opening
   public signup. Console/file email modes are local-only.
 - [Public projections](docs/public-projections.md): snapshot storage, privacy, and recovery.
-- [Dev deployment on Unraid](docs/deployment-unraid.md): the private, tailnet-only dev
-  environment that `dev` pushes deploy to.
+- [Dev deployment on Linux](docs/deployment-dev.md): the private, tailnet-only dev
+  environment deployed manually from `dev`.
 - [Production on Oracle Cloud](docs/deployment-oracle.md): setting up the instance, Caddy,
   Tailscale and the GitHub `prod` environment that `main` pushes deploy to.
 - [Local recovery](docs/operations/local-recovery.md),

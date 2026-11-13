@@ -1431,7 +1431,7 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('missing  Docker is not installed', output)
         self.assertIn('next: sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin', output)
         self.assertIn('docs/deployment-oracle.md, step 3', output)
-        # A dev host gets the Unraid steps.
+        # Dev diagnostics retain the legacy guide; its stub maps these to the Linux guide.
         home = self.make_home(DEV)
         code, output = self.host(home, 'readiness', **self.host_env(home, docker=False, systemd=False))
         self.assertEqual(code, 1, output)
@@ -1473,7 +1473,7 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn('(docs/deployment-unraid.md, "Perform the initial deployment")', output)
         self.assertNotIn('Perform the first release', output)
-        # Unraid's operator is root: no sudo before a script command.
+        # The dev operator is root: no sudo before a script command.
         home = self.make_home(DEV)
         (home / 'bin/prizecheck-backup.timer').unlink()
         code, output = self.host(home, 'readiness', **self.host_env(home, docker=False, systemd=False))
@@ -1574,7 +1574,7 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('READINESS_SIGNUP_MODE=owner-only', args)
         self.assertIn(f'READINESS_SCRIPT=sudo bash {(home / "bin/prizecheck-deploy.sh").resolve()}', args)
         self.assertIn('READINESS_GUIDE=docs/deployment-oracle.md', args)
-        # Unraid's operator is root: the forwarded command has no sudo.
+        # The dev operator is root: the forwarded command has no sudo.
         dev_home, dev_env = self.ready_home(DEV)
         (dev_home / 'state').mkdir(exist_ok=True)
         (dev_home / 'state/current').write_text(COMMIT + '\n')
