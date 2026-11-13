@@ -89,7 +89,9 @@ export function useAddToast({ shown, onUndone }: Options) {
             ? {
                 label: "Undo",
                 keepOpen: true,
-                onAction: () => void undo(added, id, message),
+                onAction: () => {
+                  if (kit.isShown(id)) void undo(added, id, message);
+                },
               }
             : undefined,
         focus,
@@ -191,7 +193,9 @@ export function useAddToast({ shown, onUndone }: Options) {
 
   return useCallback(
     async (added: AddedCards): Promise<InlineUndo | null> => {
+      const turn = noticeTurn(kit, () => null);
       const entries = await listUndo().catch(() => [] as UndoEntry[]);
+      if (!turn()) return null;
       const undoable = entries[0]?.id === added.undoId;
       show(
         batchAddedText(added.copies, added.path),
@@ -205,6 +209,6 @@ export function useAddToast({ shown, onUndone }: Options) {
         : null;
     },
     // inline reads only refs and calls undo; both live as long as the toast host.
-    [show]
+    [show, kit]
   );
 }

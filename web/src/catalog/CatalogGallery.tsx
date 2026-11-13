@@ -1,11 +1,18 @@
 import type { CatalogView } from "./catalogUrl";
 import { getCatalogSets } from "../catalog_browse_generated";
+import {
+  QUEUE_CLEARED,
+  useRecoveryNotice,
+  type AddNotice,
+  type ClearNotice,
+} from "./recoveryNotice";
 import { useStoredAddQueue } from "./useStoredAddQueue";
 import { useFirstReadSettled } from "../shell/keptRead";
 import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,7 +26,7 @@ import type {
   CatalogSet,
 } from "../catalog_browse_generated";
 import { EditionPrice } from "../EditionPrice";
-import { useShownToastId } from "../ui/Toast";
+import { useToast, useShownToastId } from "../ui/Toast";
 import { Button } from "../ui/Button";
 import { EditionTile } from "../ui/EditionTile";
 import { Icon } from "../ui/Icon";
@@ -228,6 +235,92 @@ export function CatalogGallery({
     stick === "dialog" ? `dialog:${fixedTarget?.id ?? "picker"}` : "page"
   );
   const stored = useStoredAddQueue(queueScope);
+  const queueToast = useToast();
+  const recovery = useRecoveryNotice();
+  const ownToast = useRef<number | null>(null);
+  const alive = useRef({ active, mounted: true });
+  alive.current.active = active;
+  type FocusTarget = "bar-undo" | "add-or-search" | "search";
+  const focusAfter = useRef<FocusTarget | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
+  const held = useRef<{ el: HTMLElement; home: () => void } | null>(null);
+  function search() {
+    galleryRoot.current
+      ?.querySelector<HTMLInputElement>('input[type="search"]')
+      ?.focus();
+  }
+  function focusAfterCommit(target: FocusTarget) {
+    focusAfter.current = target;
+    setFocusTick((t) => t + 1);
+  }
+  // New claims retire older recovery. Every action checks its token at activation.
+  function claimNotice(n: AddNotice | ClearNotice) {
+    return recovery.claim(n);
+  }
+  function retireNotice(token?: number) {
+    const gone = recovery.retire(token);
+    if (!gone) return;
+    if (gone.kind === "clear" && ownToast.current !== null) {
+      queueToast.dismiss(ownToast.current);
+      ownToast.current = null;
+    }
+  }
+  function retireClear() {
+    if (recovery.current()?.kind === "clear") retireNotice();
+  }
+  function undoClear(token: number, toastId: number | null) {
+    const n = recovery.current();
+    if (!recovery.owns(token) || n?.kind !== "clear") return;
+    if (toastId !== null && !queueToast.isShown(toastId)) {
+      retireNotice(token);
+      return;
+    }
+    const restored = n.restore();
+    retireNotice(token);
+    focusAfterCommit(restored ? "add-or-search" : "search");
+  }
+  useEffect(() => {
+    alive.current.mounted = true;
+    return () => {
+      alive.current.mounted = false;
+      if (ownToast.current !== null) queueToast.dismiss(ownToast.current);
+    };
+  }, [queueToast]);
+  useEffect(() => {
+    if (active) return;
+    recovery.retire();
+    if (ownToast.current !== null) {
+      queueToast.dismiss(ownToast.current);
+      ownToast.current = null;
+    }
+  }, [active, recovery, queueToast]);
+  // A removed recovery control returns to the home captured when it took focus.
+  useLayoutEffect(() => {
+    const h = held.current;
+    if (h && !h.el.isConnected) {
+      held.current = null;
+      const a = document.activeElement;
+      if (a === null || a === document.body) {
+        h.home();
+        if (document.activeElement === document.body) search();
+      }
+    }
+  });
+  useLayoutEffect(() => {
+    const target = focusAfter.current;
+    focusAfter.current = null;
+    if (target === "bar-undo")
+      galleryRoot.current
+        ?.querySelector<HTMLButtonElement>('[data-recovery-action="bar"]')
+        ?.focus();
+    else if (target === "add-or-search") {
+      const add = galleryRoot.current?.querySelector<HTMLButtonElement>(
+        "[data-queue-add]:not(:disabled)"
+      );
+      if (add) add.focus();
+      else search();
+    } else if (target === "search") search();
+  }, [focusTick]);
   const { queue, setQueue, chosen, setChosen } = stored;
   // Keep an uncertain command at its original Location, even if that Location is gone.
   // Otherwise use the chosen Location, Unsorted, or the first available leaf.
@@ -293,13 +386,8 @@ export function CatalogGallery({
       ),
   });
   // Collection's feedback belongs to the gallery, rather than the AddRows that unmounts on close/step.
-  const [feedback, setFeedback] = useState<{
-    message: string;
-    undo: InlineUndo | null;
-  } | null>(null);
   const [undoing, setUndoing] = useState(false);
   const feedbackBusy = useRef(false);
-  const feedbackVersion = useRef(0);
   const galleryRoot = useRef<HTMLDivElement>(null);
   const feedbackEffects = useRef({
     onUndone: () => {},
@@ -310,23 +398,27 @@ export function CatalogGallery({
   function renderAddFeedback(
     onUndone: () => void,
     focusAfterUndo: () => void,
-    announce = true
+    announce = true,
+    slot: "popup" | "gallery" = "popup"
   ) {
     feedbackEffects.current = { onUndone, focusAfterUndo };
+    const n = recovery.notice;
+    const feedback = n?.kind === "add" ? n : null;
     async function pressUndo() {
       if (!feedback?.undo || feedbackBusy.current) return;
-      const version = feedbackVersion.current;
+      const token = feedback.token;
+      if (!recovery.owns(token)) return;
       feedbackBusy.current = true;
       setUndoing(true);
       try {
         const result = await feedback.undo();
-        if (version !== feedbackVersion.current) return;
-        setFeedback({
+        if (result.undone) feedbackEffects.current.onUndone();
+        if (!recovery.owns(token)) return;
+        recovery.update(token, {
           message: result.message || feedback.message,
           undo: result.next,
         });
         // Close/step can move the control while this request is in flight: refresh and focus the current view.
-        if (result.undone) feedbackEffects.current.onUndone();
         if (!result.next) feedbackEffects.current.focusAfterUndo();
       } finally {
         feedbackBusy.current = false;
@@ -343,6 +435,8 @@ export function CatalogGallery({
         </p>
         {feedback?.undo?.isAvailable() && (
           <Button
+            data-recovery-action="feedback"
+            data-recovery-slot={slot}
             aria-disabled={undoing || undefined}
             onClick={() => void pressUndo()}
           >
@@ -352,8 +446,8 @@ export function CatalogGallery({
       </div>
     );
   }
-  const live = useRef({ undoToast, onAdded, addToast });
-  live.current = { undoToast, onAdded, addToast };
+  const latest = useRef({ undoToast, onAdded, addToast });
+  latest.current = { undoToast, onAdded, addToast };
   const added = useCallback(
     (result: AddedCards) => {
       noteAdded(
@@ -363,10 +457,15 @@ export function CatalogGallery({
         })),
         result.ownerRevision
       );
-      const version = ++feedbackVersion.current;
-      const external = live.current.onAdded?.(result);
-      const undo = live.current.undoToast
-        ? live.current.addToast(result)
+      const message = batchAddedText(result.copies, result.path);
+      const live = alive.current.mounted && alive.current.active;
+      const token = live
+        ? claimNotice({ kind: "add", message, undo: null })
+        : null;
+      if (live) ownToast.current = queueToast.show({ message });
+      const external = latest.current.onAdded?.(result);
+      const undo = latest.current.undoToast
+        ? latest.current.addToast(result)
         : Promise.resolve(external ?? null).then((undo) =>
             undo
               ? observeUndo(undo, (ownerRevision) =>
@@ -380,19 +479,13 @@ export function CatalogGallery({
                 )
               : null
           );
-      if (!live.current.undoToast) {
-        setFeedback(null);
+      if (!latest.current.undoToast && token !== null)
         void undo.then((offered) => {
-          if (version === feedbackVersion.current)
-            setFeedback({
-              message: batchAddedText(result.copies, result.path),
-              undo: offered,
-            });
+          if (alive.current.mounted) recovery.update(token, { undo: offered });
         });
-      }
       return undo;
     },
-    [noteAdded]
+    [noteAdded, queueToast, recovery]
   );
 
   const show = useCallback((edition: BrowseEdition) => {
@@ -490,6 +583,7 @@ export function CatalogGallery({
 
   function queueChange(edition: BrowseEdition, by: 1 | -1) {
     if (busyRef.current || !stored.ready) return;
+    retireClear();
     setFailure("");
     setSettledAdd(null);
     if (target) setChosen(target.id);
@@ -556,8 +650,26 @@ export function CatalogGallery({
   useFirstReadSettled(browse.first !== null || !!searchError);
   const first = browse.first;
   const unavailable = first !== null && !first.available;
+  const clearRecovery =
+    !undoToast && recovery.notice?.kind === "clear" ? recovery.notice : null;
   return (
-    <div ref={galleryRoot} className="flex min-w-0 flex-col gap-4">
+    <div
+      ref={galleryRoot}
+      className="flex min-w-0 flex-col gap-4"
+      onFocus={(event) => {
+        const el = event.target.closest<HTMLElement>("[data-recovery-action]");
+        held.current = el
+          ? {
+              el,
+              home:
+                el.dataset.recoveryAction === "feedback" &&
+                el.dataset.recoverySlot === "popup"
+                  ? feedbackEffects.current.focusAfterUndo
+                  : search,
+            }
+          : null;
+      }}
+    >
       {stored.restoreFailed && (
         <div role="alert" className="flex flex-wrap items-center gap-2">
           <p className="m-0 text-meta">{stored.notice}</p>
@@ -579,7 +691,10 @@ export function CatalogGallery({
               : places.leaves
           }
           targetId={picked?.id ?? null}
-          onTarget={setChosen}
+          onTarget={(id) => {
+            retireClear();
+            setChosen(id);
+          }}
           optionsText={
             places.state === "failed"
               ? "Locations unavailable"
@@ -603,10 +718,35 @@ export function CatalogGallery({
             (!stored.restoreFailed && stored.notice) ||
             (hasRoom(queue) ? "" : QUEUE_FULL)
           }
+          recovery={
+            clearRecovery
+              ? {
+                  message: QUEUE_CLEARED,
+                  onUndo: () => undoClear(clearRecovery.token, null),
+                }
+              : null
+          }
           onClear={() => {
             setFailure("");
             setSettledAdd(null);
-            stored.clear();
+            const restore = stored.clearUndo();
+            if (!restore) {
+              focusAfterCommit("search");
+              return;
+            }
+            const token = claimNotice({ kind: "clear", restore });
+            if (undoToast) {
+              const id: number = queueToast.show({
+                message: QUEUE_CLEARED,
+                focus: true,
+                action: { label: "Undo", onAction: () => undoClear(token, id) },
+                onDismiss: () => retireNotice(token),
+              });
+              ownToast.current = id;
+            } else {
+              ownToast.current = queueToast.show({ message: QUEUE_CLEARED });
+              focusAfterCommit("bar-undo");
+            }
           }}
           onAdd={() => void addAll()}
           stick={stick}
@@ -651,7 +791,8 @@ export function CatalogGallery({
               galleryRoot.current
                 ?.querySelector<HTMLInputElement>('input[type="search"]')
                 ?.focus(),
-            false
+            false,
+            "gallery"
           )}
         {browse.notice && (
           <p className="m-0 font-medium text-text">{browse.notice}</p>

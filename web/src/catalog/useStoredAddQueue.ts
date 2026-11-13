@@ -207,7 +207,9 @@ export function useStoredAddQueue(scope: string) {
       }
     }
   }
+  const revision = useRef(0);
   function publish() {
+    ++revision.current;
     render({ ...s.current });
     persist();
   }
@@ -280,6 +282,21 @@ export function useStoredAddQueue(scope: string) {
       mounted.current = false;
     };
   }, [key, account]);
+  function clear() {
+    if (!liveOwner()) return;
+    ++restoration.current;
+    // Discard explicitly abandons replay, but cannot prove the earlier Add never committed.
+    if (s.current.pending.current) {
+      s.current.pending.current = null;
+      s.current.restoredMarker = true;
+      s.current.open = false;
+    }
+    s.current.phase = "ready";
+    s.current.notice = "";
+    s.current.queue = EMPTY_QUEUE;
+    capHeld();
+    publish();
+  }
   return {
     pending: view.pending,
     blocked: view.lost.length > 0,
@@ -331,21 +348,29 @@ export function useStoredAddQueue(scope: string) {
       }
       publish();
     },
-    clear() {
-      if (!liveOwner()) return;
-      ++restoration.current;
-      // Discard explicitly abandons replay, but cannot prove the earlier Add never committed.
-      if (s.current.pending.current) {
-        s.current.pending.current = null;
-        s.current.restoredMarker = true;
-        s.current.open = false;
-      }
-      s.current.phase = "ready";
-      s.current.notice = "";
-      s.current.queue = EMPTY_QUEUE;
-      capHeld();
-      publish();
+    /** Local recovery only. Restore returns false after another publish or unmount; uncertain submissions keep Discard behavior. */
+    clearUndo(): (() => boolean) | null {
+      if (!liveOwner() || s.current.phase !== "ready") return null;
+      const before = s.current;
+      const recoverable =
+        !before.pending.current &&
+        !before.open &&
+        !before.restoredMarker &&
+        !before.lostEarlier &&
+        !before.lost.length;
+      const saved = { queue: before.queue, chosen: before.chosen };
+      clear();
+      if (!recoverable || !saved.queue.size) return null;
+      const version = revision.current;
+      return () => {
+        if (!liveOwner() || revision.current !== version) return false;
+        s.current.queue = saved.queue;
+        s.current.chosen = saved.chosen;
+        publish();
+        return true;
+      };
     },
+    clear,
     dismiss() {
       if (!liveOwner()) return;
       s.current.restoredMarker = false;

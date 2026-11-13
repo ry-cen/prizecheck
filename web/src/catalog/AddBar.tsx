@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { editionWords, totalCopies, type AddQueue } from "./addQueue";
@@ -26,6 +27,8 @@ type Props = {
   settled: string;
   /** A note under the queue, such as the 200-Edition limit, or "". */
   note: string;
+  /** Dialog only: the latest Clear's Undo, shown where the queue was. */
+  recovery: { message: string; onUndo: () => void } | null;
   onClear: () => void;
   onAdd: () => void;
   /** "page": stuck under the shell's header (none on a phone); "dialog": stuck to the top of the dialog's body. */
@@ -48,10 +51,12 @@ export function AddBar({
   failure,
   settled,
   note,
+  recovery,
   onClear,
   onAdd,
   stick,
 }: Props) {
+  const messageId = useId();
   const total = totalCopies(queue);
   const queued = Array.from(queue.values());
   const recent = queued.slice(-SHOWN);
@@ -93,19 +98,32 @@ export function AddBar({
             </div>
           )}
         </div>
-        {queued.length === 0 ? (
+        {queued.length === 0 && recovery ? (
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 phone:basis-full">
+            <p id={messageId} className="m-0 text-meta text-text">
+              {recovery.message}
+            </p>
+            <Button
+              data-recovery-action="bar"
+              aria-describedby={messageId}
+              onClick={recovery.onUndo}
+            >
+              Undo
+            </Button>
+          </div>
+        ) : queued.length === 0 ? (
           <p className="m-0 min-w-0 flex-1 text-meta text-text-muted">
             {QUEUE_HINT}
           </p>
         ) : (
           <ul
             aria-label="Cards to add"
-            className="m-0 flex min-w-0 flex-1 list-none flex-wrap items-center gap-1.5 p-0"
+            className="m-0 flex min-w-0 flex-1 list-none flex-wrap items-center gap-1.5 p-0 phone:basis-full phone:flex-none phone:w-full"
           >
             {recent.map((item, index) => (
               <li
                 key={item.edition.edition_id}
-                className={`box-border min-w-0 max-w-full whitespace-normal break-words rounded-round border border-border-strong bg-surface px-2 py-0.5 text-meta tabular-nums${index < recent.length - SHOWN_PHONE ? " phone:hidden" : ""}`}
+                className={`box-border min-w-0 max-w-full whitespace-normal break-words rounded-round border border-border-strong bg-surface px-2 py-0.5 text-meta tabular-nums phone:w-full phone:rounded-control${index < recent.length - SHOWN_PHONE ? " phone:hidden" : ""}`}
               >
                 {item.count}× {editionWords(item.edition)}
               </li>
@@ -129,6 +147,7 @@ export function AddBar({
             Clear queue
           </Button>
           <Button
+            data-queue-add
             variant="primary"
             disabled={total === 0 || !ready}
             aria-disabled={busy || undefined}
