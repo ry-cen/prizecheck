@@ -284,7 +284,16 @@ function ThreadTimelineContent({
       } else setMessage("The answer was lost. Retry sends the same message.");
     } finally {
       posting.current = false;
-      if (alive.current) setBusy(false);
+      if (alive.current) {
+        // Keep focus in the composer only if the collector stayed there.
+        // Do this before rendering an empty draft or removing a closed chat.
+        if (editor.current?.form?.contains(document.activeElement)) {
+          if (currentPermission.current === false && !pending.current)
+            title.current?.focus();
+          else editor.current?.focus();
+        }
+        setBusy(false);
+      }
     }
   }
   return (
@@ -359,8 +368,7 @@ function ThreadTimelineContent({
               pressSend();
             }}
             value={body}
-            disabled={busy || pending.current !== null}
-            readOnly={holding}
+            readOnly={busy || holding || pending.current !== null}
             onChange={(event) => {
               if (!held.current && !pending.current)
                 setBody(event.target.value);
@@ -373,7 +381,7 @@ function ThreadTimelineContent({
           )}
           <Button
             type="submit"
-            disabled={
+            aria-disabled={
               busy ||
               holding ||
               (checkingPermission && canMessage !== true && !pending.current) ||
