@@ -375,11 +375,12 @@ def test_activating_a_rule_after_import_verifies_unverified_editions_once():
     assert {key: row["mapping_revision"] for key, row in rows.items()} == {key: value + 1 for key, value in before.items()}
 
 
-def test_changed_mapping_quarantines_immediately_and_never_auto_reverifies():
+def test_a_reported_changed_mapping_quarantines_immediately_and_never_auto_reverifies():
     reset_catalog(); activate(MATCHING, 1); activate(LIVE, 99)
     run(Records(card(1)))
     before_printing, before = metadata()
     assert before_printing["live_state"] == "eligible"
+    report_id = open_report(before["normal"]["id"])
     changed = card(1)
     changed["variants_detailed"][0]["pricing"]["tcgplayer"]["normal"]["productId"] = 999
     run(Records(changed))
@@ -397,12 +398,37 @@ def test_changed_mapping_quarantines_immediately_and_never_auto_reverifies():
     assert targets[rows["reverse"]["id"]].product_id == 1001
     assert live.state == "eligible" and live.identity["set_code"] == "DAA"  # independent valid Live eligibility remains
     # The source reverting, repeating, or a fresh rule activation never clears the quarantine.
+    close_report(report_id)
     for source in (card(1), changed, card(1)):
         run(Records(source))
     activate(MATCHING, 1)
     assert metadata()[1]["normal"]["mapping_state"] == "quarantined"
     [urgent] = [row for row in outbox(rows["normal"]["id"]) if row["revision"] == rows["normal"]["public_revision"]]
     assert urgent["priority"] == 0
+
+
+def test_an_unreported_changed_rule_mapping_follows_the_source():
+    reset_catalog(); activate(MATCHING, 1); activate(LIVE, 99)
+    run(Records(card(1)))
+    before_printing, before = metadata()
+    changed = card(1)
+    changed["variants_detailed"][0]["pricing"]["tcgplayer"]["normal"]["productId"] = 999
+    run(Records(changed))
+    printing, rows = metadata()
+    normal = rows["normal"]
+    assert (normal["mapping_state"], normal["mapping_reason"], normal["product_id"], normal["quote_variant"], normal["mapping_basis"]) == (
+        "verified", None, 999, "normal", "matching_rule")
+    assert normal["mapping_revision"] == before["normal"]["mapping_revision"] + 1
+    assert normal["public_revision"] > before["normal"]["public_revision"]
+    assert rows["reverse"] == before["reverse"]
+    with connect() as conn:
+        assert edition_targets(conn, [normal["id"]])[normal["id"]].product_id == 999
+        assert printing_live(conn, [printing["printing_id"]])[printing["printing_id"]].state == "eligible"
+        assert [r["action"] for r in conn.execute("SELECT action FROM catalog_auto_settlement WHERE edition_id=%s", (normal["id"],))] == ["default_accepted"]
+    run(Records(card(1)))
+    assert (metadata()[1]["normal"]["mapping_state"], metadata()[1]["normal"]["product_id"]) == ("verified", 1001)
+    with connect() as conn:
+        assert [r["action"] for r in conn.execute("SELECT action FROM catalog_auto_settlement WHERE edition_id=%s", (normal["id"],))] == ["default_accepted", "default_accepted"]
 
 
 def test_contradiction_reasons_distinguish_physical_duplicate_and_conflicting_candidates():
@@ -419,6 +445,20 @@ def test_contradiction_reasons_distinguish_physical_duplicate_and_conflicting_ca
     assert {row["mapping_reason"] for row in metadata("meta-4")[1].values()} == {"physical_conflict"}
     assert {row["mapping_state"] for row in metadata("meta-4")[1].values()} == {"quarantined"}
     assert {row["mapping_state"] for row in metadata("meta-1")[1].values()} == {"verified"}
+
+
+def open_report(edition_id, status="pending"):
+    """A collector's open marketplace report on one Edition (ADR 0025 keeps it quarantined on change)."""
+    with connect() as conn:
+        return conn.execute("""INSERT INTO catalog_metadata_report(reporter_id,target,issue,printing_id,edition_id,status)
+          SELECT %s,'marketplace','incorrect',printing_id,id,%s FROM catalog_edition WHERE id=%s RETURNING id""",
+                            (owner(), status, edition_id)).fetchone()["id"]
+
+
+def close_report(report_id):
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_metadata_report SET status='rejected',reviewer_id=%s,reviewed_at=now(),
+          review_reason='Not an issue' WHERE id=%s""", (owner(), report_id))
 
 
 def decide_mapping(edition_id, source_candidate, product_id, variant):
@@ -447,7 +487,7 @@ def test_reviewed_correction_outranks_a_repeated_rejected_source_value_but_not_a
     changed["variants_detailed"][0]["pricing"]["tcgplayer"]["normal"]["productId"] = 999
     run(Records(changed))
     _, rows = metadata()
-    assert rows["normal"]["mapping_state"] == "quarantined"
+    assert (rows["normal"]["mapping_state"], rows["normal"]["product_id"], rows["normal"]["mapping_basis"]) == ("verified", 999, "matching_rule")  # ADR 0025: an unreported rule mapping follows the source
     source_candidate = rows["normal"]["mapping_candidate"]
     decide_mapping(rows["normal"]["id"], source_candidate, 4321, "normal")
     corrected = metadata()[1]["normal"]
@@ -1533,13 +1573,13 @@ def test_v5_tables_follow_the_active_rule_and_v4_ignores_the_30th_sets(tcgplayer
     assert rematched() == 0 and states("th-21") == [("unverified", "rule_failed", None, None)]
 
 
-def test_v5_card_level_id_change_quarantines_an_edition_verified_from_it(tcgplayer_products):
+def test_v5_card_level_id_change_re_verifies_an_unreported_edition_verified_from_it(tcgplayer_products):
     reset_catalog()
     run(Records(xy11_116()))
     activate(MATCHING, 5)
     assert states("xy11-116") == [("verified", None, 121240, "normal")]
     run(Records(xy11_116(product=121241)))
-    assert states("xy11-116") == [("quarantined", "candidate_changed", 121240, "normal")]
+    assert states("xy11-116") == [("verified", None, 121241, "normal")]
     reset_catalog()
     run(Records(xy11_116()))
     activate(MATCHING, 5)
@@ -1599,7 +1639,7 @@ def test_v5_over_candidates_stored_before_the_card_field_never_quarantines_on_th
     assert states("xy11-116") == [("verified", None, 121240, "normal")]
 
 
-def test_v5_a_gained_card_field_is_enrichment_and_a_later_change_or_removal_quarantines(tcgplayer_products):
+def test_v5_a_gained_card_field_is_enrichment_a_later_change_re_verifies_and_a_removal_quarantines(tcgplayer_products):
     reset_catalog()
     run(Records(xy11_116()))
     activate(MATCHING, 5)
@@ -1621,7 +1661,7 @@ def test_v5_a_gained_card_field_is_enrichment_and_a_later_change_or_removal_quar
     assert stored["card_tcgplayer"] == 121240 and after["mapping_revision"] == revision
     assert after["accepted_projection"] == fingerprint(rule_projection(stored)) and after["accepted_fingerprint"] == fingerprint(stored)
     run(Records(xy11_116(product=121241)))
-    assert states("xy11-116") == [("quarantined", "candidate_changed", 121240, "normal")]
+    assert states("xy11-116") == [("verified", None, 121241, "normal")]
     reset_catalog()
     run(Records(xy11_116()))
     activate(MATCHING, 5)

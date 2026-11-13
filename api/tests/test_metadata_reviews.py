@@ -188,9 +188,17 @@ def changed_card(number=1, product=999):
 
 @pytest.fixture
 def quarantined(world):
-    """card(1) verified under the matching rule, then its normal Edition's source product changes."""
+    """card(1) verified under the matching rule; its normal Edition's product changes while no rule is active, so it is
+    quarantined as candidate_changed (ADR 0025 re-verifies only under an active rule), and the rule is active again."""
     activate_as_owner(MATCHING, 1)
+    with connect() as conn:
+        conn.execute("UPDATE catalog_rule_state SET activation_id=NULL WHERE kind=%s", (MATCHING,))
     run(Records(changed_card()))
+    row = edition_row(world["normal"])
+    assert (row["mapping_state"], row["mapping_reason"]) == ("quarantined", "candidate_changed")
+    activate_as_owner(MATCHING, 1)
+    row = edition_row(world["normal"])
+    assert (row["mapping_state"], row["mapping_reason"]) == ("quarantined", "candidate_changed")
     return world
 
 
