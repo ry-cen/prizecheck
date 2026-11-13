@@ -478,6 +478,53 @@ class RunPlaywrightTest(unittest.TestCase):
         self.assertEqual(run_playwright.parse(['--workers', '2', '--repeat-each', '3', '--', 'web/tests/moves.spec.ts']),
                          (2, False, 3, None, ['web/tests/moves.spec.ts']))
 
+    def test_duration_plan_is_complete_deterministic_and_balances_heavy_files(self):
+        files = ['a.spec.ts', 'b.spec.ts', 'c.spec.ts', 'new.spec.ts']
+        weights = {'a.spec.ts': 100, 'b.spec.ts': 60, 'c.spec.ts': 40}
+        plan = run_playwright.plan_shards(files, weights, 2)
+        self.assertEqual(plan, run_playwright.plan_shards(reversed(files), weights, 2))
+        self.assertEqual(sorted(sum(plan, [])), sorted(files))
+        self.assertEqual(len(set(sum(plan, []))), len(files))
+        self.assertNotEqual(next(i for i, leg in enumerate(plan) if 'a.spec.ts' in leg),
+                            next(i for i, leg in enumerate(plan) if 'b.spec.ts' in leg))
+        self.assertEqual(run_playwright.plan_shards([], {}, 3), [[], [], []])
+
+    def test_full_suite_shard_uses_collection_and_escapes_exact_file_names(self):
+        collected = SimpleNamespace(stdout=json.dumps({'suites': [
+            {'file': 'new.spec.ts'}, {'file': 'other.spec.ts'}]}))
+        with mock.patch.object(run_playwright.subprocess, 'run', return_value=collected) as run:
+            first = run_playwright.full_suite_shard('1/2')
+            second = run_playwright.full_suite_shard('2/2')
+            self.assertEqual(sorted(first + second), sorted(
+                '^' + run_playwright.re.escape(str(ROOT / 'web/tests' / file)) + '$'
+                for file in ('new.spec.ts', 'other.spec.ts')))
+            self.assertIn('--list', run.call_args.args[0])
+            with self.assertRaises(ValueError):
+                run_playwright.full_suite_shard('3/3')
+
+    def test_full_shard_routes_the_same_files_to_both_passes_without_native_sharding(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.dict(os.environ, {'TEST_LOG_DIR': directory}), \
+                mock.patch.object(run_playwright, 'full_suite_shard', return_value=['chosen.spec.ts$']), \
+                mock.patch.object(run_playwright, 'report_totals', return_value={'passed': 1, 'failed': 0, 'flaky': 0, 'skipped': 0}), \
+                mock.patch.object(run_playwright.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as run:
+            self.assertEqual(run_playwright.main(['--fast', '--shard', '1/10']), 0)
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                self.assertIn('chosen.spec.ts$', call.args[0])
+                self.assertNotIn('--shard', call.args[0])
+
+    def test_committed_duration_plan_covers_each_current_spec_once(self):
+        files = [str(file.relative_to(ROOT / 'web/tests'))
+                 for file in (ROOT / 'web/tests').rglob('*.spec.ts')]
+        durations = json.loads((SCRIPTS / 'browser_shard_durations.json').read_text())['seconds']
+        self.assertTrue(all(value >= 0 for value in durations.values()))
+        shards = run_playwright.plan_shards(files, durations, 10)
+        self.assertEqual(len(shards), 10)
+        self.assertTrue(all(shards))
+        self.assertEqual(sorted(sum(shards, [])), sorted(files))
+        self.assertEqual(len(set(sum(shards, []))), len(files))
+
     def test_a_shard_reaches_both_passes(self):
         (_, parallel), (_, serial) = run_playwright.passes(2, True, 1, '3/10')
         self.assertEqual(parallel, ['--workers', '2', '--grep-invert', '@serial|@slow', '--shard', '3/10'])

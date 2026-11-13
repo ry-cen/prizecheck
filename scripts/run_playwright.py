@@ -8,13 +8,15 @@ R times in both passes (--burn-in and --repeat in scripts/verify.py); the repeat
 different stacks. Selectors (spec files or
 file:line locations) apply to both passes; worker, grep, reporter and output options belong to this runner. Each pass
 has its own JSON report and its own output directory, because Playwright empties its output directory when it starts.
-``--shard K/N`` passes Playwright's own --shard to both passes. playwright.config.ts keeps fullyParallel off, so a shard
-takes whole spec files; each pass splits its own tests, so a shard whose serial pass matches nothing is normal, but a
+``--shard K/N`` assigns the full suite by measured whole-file durations to both passes.
+Explicit selectors retain Playwright's native sharding semantics. playwright.config.ts keeps fullyParallel off, so a shard
+takes whole spec files; a shard whose serial pass matches nothing is normal, but a
 shard in which neither pass matched a test fails like any other empty run.
 """
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -64,12 +66,45 @@ def report_totals(paths):
     return totals
 
 
+def plan_shards(files, durations, count):
+    """Longest measured files first, with stable ties; unseen files weigh 60 seconds.
+
+    Adding/removing a file can redistribute later files, but never drops coverage.
+    Durations affect placement only, not selection, timeouts or test expectations.
+    """
+    shards, loads = [[] for _ in range(count)], [0.0] * count
+    for file in sorted(files, key=lambda file: (-durations.get(file, 60), file)):
+        index = min(range(count), key=lambda index: (loads[index], index))
+        shards[index].append(file)
+        loads[index] += durations.get(file, 60)
+    return [sorted(files) for files in shards]
+
+
+def full_suite_shard(shard):
+    # Collect through Playwright rather than globbing: its config owns suite membership.
+    collected = subprocess.run(['npx', 'playwright', 'test', '--list', '--reporter=json'],
+                               cwd=ROOT, check=True, capture_output=True, text=True)
+    files = sorted({suite['file'] for suite in json.loads(collected.stdout)['suites']})
+    index, count = map(int, shard.split('/'))
+    if not 1 <= index <= count:
+        raise ValueError('shard must be K/N with 1 <= K <= N')
+    durations = json.loads((ROOT / 'scripts/browser_shard_durations.json').read_text())['seconds']
+    selected = plan_shards(files, durations, count)[index - 1]
+    # Empty shards must not accidentally become an unfiltered full-suite run.
+    if not selected:
+        raise ValueError('browser shard contains no spec files')
+    print(f'== browser shard {shard}: {", ".join(selected)}', flush=True)
+    return ['^' + re.escape(str(ROOT / 'web/tests' / file)) + '$' for file in selected]
+
+
 def main(argv=None):
     workers, fast, repeat, shard, selectors = parse(argv)
     reserved = reserved_argument(selectors)
     if reserved:
         print(f'run_playwright: {reserved} is set by the verification runner; select spec files instead', file=sys.stderr)
         return 2
+    if shard and not selectors:
+        selectors, shard = full_suite_shard(shard), None
     logs = Path(os.environ.get('TEST_LOG_DIR') or '.')
     output = Path(os.environ.get('TEST_BROWSER_OUTPUT') or 'test-results')
     codes, reports = [], []
