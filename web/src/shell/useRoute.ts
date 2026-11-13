@@ -35,7 +35,8 @@ export type Route = {
       overlay?: boolean;
     }
   ) => void;
-  /** Closes a pushed overlay, or replaces a directly opened overlay address. */
+  /** Closes a pushed overlay by going back one entry, or replaces a directly opened overlay address. Closing the
+   * same pushed entry again before its Back lands (a double tap, then Escape) goes back only once. */
   closeOverlay: (to: string) => void;
   /** The current entry's saved scroll, with a last-visited fallback for tab roots. */
   scrollFor: (path: string) => number;
@@ -138,9 +139,12 @@ export function useRoute(): Route {
   const addresses = useRef(new Map<string, string>()).current;
   // Approval belongs to these exact registrations, never to an unconditional next popstate.
   const leaving = useRef<Set<RegisteredGuard> | null>(null);
+  // The pushed overlay entry whose Back is already on its way; cleared by the next popstate or navigation.
+  const closing = useRef<string | null>(null);
 
   useEffect(() => {
     const onPopState = () => {
+      closing.current = null;
       const approved = leaving.current ?? new Set<RegisteredGuard>();
       leaving.current = null;
       if (blocking(approved) && addressAt() !== currentAddress.current) {
@@ -182,6 +186,7 @@ export function useRoute(): Route {
       } = {}
     ) => {
       const go = () => {
+        closing.current = null;
         save(scrolls, current.current, window.scrollY);
         save(addresses, current.current, currentAddress.current);
         save(positions, currentEntry.current, window.scrollY);
@@ -260,9 +265,11 @@ export function useRoute(): Route {
   );
   const closeOverlay = useCallback(
     (to: string) => {
-      if (typeof window.history.state?.prizecheckOverlayParent === "string")
+      if (typeof window.history.state?.prizecheckOverlayParent === "string") {
+        if (closing.current === currentEntry.current) return;
+        closing.current = currentEntry.current;
         window.history.back();
-      else navigate(to, { replace: true, preserveScroll: true });
+      } else navigate(to, { replace: true, preserveScroll: true });
     },
     [navigate]
   );

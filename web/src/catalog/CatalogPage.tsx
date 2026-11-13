@@ -1,4 +1,12 @@
-import { catalogHref, parseCatalogView, type CatalogView } from "./catalogUrl";
+import {
+  catalogCardHref,
+  catalogHref,
+  isCatalogId,
+  parseCatalogCard,
+  parseCatalogView,
+  type CatalogCard,
+  type CatalogView,
+} from "./catalogUrl";
 import { AddQueueAccount, hasStoredAddQueue } from "./useStoredAddQueue";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
@@ -18,8 +26,14 @@ type Props = {
   address: string;
   onNavigate: (
     address: string,
-    options?: { replace?: boolean; preserveScroll?: boolean }
+    options?: {
+      replace?: boolean;
+      preserveScroll?: boolean;
+      overlay?: boolean;
+    }
   ) => void;
+  /** Closes the open card: back one entry when it was pushed, else replaces the address with this one. */
+  onCloseCard: (address: string) => void;
   /** The app's last service message. */
   message: string;
 };
@@ -32,7 +46,13 @@ type Props = {
  * page" predates infinite scroll). The page stays mounted while the collector is elsewhere, so the mode, search,
  * filters, queue, loaded rows and scroll are kept.
  */
-export function CatalogPage({ active, message, address, onNavigate }: Props) {
+export function CatalogPage({
+  active,
+  message,
+  address,
+  onNavigate,
+  onCloseCard,
+}: Props) {
   const account = useContext(AddQueueAccount);
   const owner = useRef(account);
   const lastAddress = useRef(address);
@@ -49,10 +69,39 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
   const view = parseCatalogView(lastAddress.current);
   const mode =
     view.mode ?? (hasStoredAddQueue(account, "page") ? "add" : "browse");
+  const routeCard = parseCatalogCard(lastAddress.current);
+  // A view change while a card is open (the unknown-set reset of a shared link) keeps the card in the address.
   const changeView = (next: CatalogView) => {
     if (active)
-      onNavigate(catalogHref(next), { replace: true, preserveScroll: true });
+      onNavigate(catalogCardHref(next, routeCard), {
+        replace: true,
+        preserveScroll: true,
+        overlay: true,
+      });
   };
+  // The open card is written to the address, only while this page is the one shown.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const latest = useRef({ view, address: lastAddress.current });
+  latest.current = { view, address: lastAddress.current };
+  const onCardRoute = useCallback(
+    (card: CatalogCard | null, how: "open" | "replace" | "close") => {
+      if (!activeRef.current) return;
+      const { view, address } = latest.current;
+      if (how === "close") {
+        onCloseCard(catalogHref(view));
+        return;
+      }
+      const to = catalogCardHref(view, card);
+      if (to === address) return;
+      onNavigate(to, {
+        ...(how === "replace" ? { replace: true } : {}),
+        overlay: true,
+        preserveScroll: true,
+      });
+    },
+    [onNavigate, onCloseCard]
+  );
   const setMode = (mode: CatalogMode) => changeView({ ...view, mode });
   const [link, setLink] = useState<CardRequest | null>(null);
   const [reportsKey, setReportsKey] = useState(0);
@@ -67,7 +116,15 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
   useEffect(() => {
     if (!active) return;
     const next = new URL(lastAddress.current, window.location.origin);
-    const report = readMetadataReportLink(next.href);
+    const params = next.searchParams;
+    let changed = false;
+    // The inspector's report link: `printing` and `edition` open the card with the Edition's report form.
+    const printing = params.get("printing");
+    const link = readMetadataReportLink(next.href);
+    const report =
+      link && isCatalogId(link.printingId) && isCatalogId(link.editionId)
+        ? link
+        : null;
     if (report)
       setLink({
         printingId: report.printingId,
@@ -75,18 +132,44 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
         row: null,
         report: { kind: "metadata", editionId: report.editionId },
       });
-    const hasReportParams =
-      next.searchParams.has("printing") || next.searchParams.has("edition");
-    next.searchParams.delete("printing");
-    next.searchParams.delete("edition");
+    let cardId = params.get("card");
+    let editionId = params.get("edition");
+    if (printing !== null) {
+      params.delete("printing");
+      changed = true;
+      if (isCatalogId(printing)) {
+        cardId = printing;
+        if (!report) editionId = null;
+      }
+    }
+    // `edition` only means something beside a well-formed `card`.
+    if (!isCatalogId(cardId)) {
+      cardId = null;
+      editionId = null;
+    } else if (!isCatalogId(editionId)) editionId = null;
+    if (cardId !== params.get("card") || editionId !== params.get("edition")) {
+      params.delete("card");
+      params.delete("edition");
+      changed = true;
+    }
     const normaliseMode =
       staleActiveMode || (view.mode === null && mode === "add");
-    if (normaliseMode) next.searchParams.set("mode", mode);
-    if (hasReportParams || normaliseMode)
+    if (normaliseMode) {
+      params.set("mode", mode);
+      changed = true;
+    }
+    if (changed) {
+      // Order as catalogCardHref writes it: the view, then the card.
+      params.delete("card");
+      params.delete("edition");
+      if (cardId) params.set("card", cardId);
+      if (cardId && editionId) params.set("edition", editionId);
       onNavigate(next.pathname + next.search + next.hash, {
         replace: true,
         preserveScroll: true,
+        overlay: true,
       });
+    }
   }, [active, account, address]);
 
   return (
@@ -131,6 +214,8 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
         link={link}
         onLinkOpened={linkOpened}
         onReported={reported}
+        routeCard={routeCard}
+        onCardRoute={onCardRoute}
       />
       <Dialog
         open={reportsOpen}

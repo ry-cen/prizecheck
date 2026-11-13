@@ -225,6 +225,8 @@ export function CardArt({
   const thumbnail = useRef<HTMLButtonElement>(null);
   const [loaded, setLoaded] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // The enlarged image belongs to the phone layout: leaving it must not bring the image back on return.
+  if (!phone && expanded !== null) setExpanded(null);
   if (art.waiting)
     return (
       <div
