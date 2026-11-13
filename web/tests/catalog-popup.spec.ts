@@ -594,7 +594,9 @@ for (const viewport of [
 // S13f journeys are also copied verbatim into the scratch-only Mac proof.
 async function singleUndoOwnership(page: Page, scenario: string) {
   const initial =
-    scenario === "edition" ? "Bulbasaur, MEG 001" : "Switch, MEG 130";
+    scenario === "edition" || scenario === "failure-edition"
+      ? "Bulbasaur, MEG 001"
+      : "Switch, MEG 130";
   const opener = tile(page, initial).first();
   await opener.click();
   const card = page.getByRole("dialog");
@@ -664,7 +666,91 @@ async function singleUndoOwnership(page: Page, scenario: string) {
   const started = new Promise<void>((resolve) => {
     arrived = resolve;
   });
-  if (scenario === "failure" || scenario === "close-failure") {
+  if (scenario.startsWith("lookup-")) {
+    const waiting: { release: (entries: unknown[]) => void }[] = [];
+    let firstArrived!: () => void, secondArrived!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      firstArrived = resolve;
+    });
+    const secondStarted = new Promise<void>((resolve) => {
+      secondArrived = resolve;
+    });
+    await page.route("**/api/moves/undo", async (route) => {
+      const response = await route.fetch();
+      let resolve!: (entries: unknown[]) => void;
+      const done = new Promise<unknown[]>((finish) => {
+        resolve = finish;
+      });
+      waiting.push({ release: resolve });
+      if (waiting.length === 1) firstArrived();
+      else secondArrived();
+      await route.fulfill({ response, json: await done });
+    });
+    await add();
+    await firstStarted;
+    const firstEntries = await page.request
+      .get(`${ORIGIN}/api/moves/undo`)
+      .then((r) => r.json());
+    await add();
+    await secondStarted;
+    const secondEntries = await page.request
+      .get(`${ORIGIN}/api/moves/undo`)
+      .then((r) => r.json());
+    expect(secondEntries[0].id).not.toBe(firstEntries[0].id);
+    if (scenario === "lookup-older-first") {
+      const delivered = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/moves/undo"
+      );
+      waiting[0].release(firstEntries);
+      await (await delivered).finished();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      );
+      // Resolve the older response before the newer one, without a timer.
+      await expect
+        .poll(() => page.locator("#app-toasts").textContent())
+        .toBe("");
+      waiting[1].release(secondEntries);
+    } else {
+      waiting[1].release(secondEntries);
+      await expect(
+        card.getByRole("button", { name: "Undo", exact: true })
+      ).toBeVisible();
+      const delivered = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/moves/undo"
+      );
+      waiting[0].release(firstEntries);
+      await (await delivered).finished();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      );
+    }
+    await expect(
+      card.getByRole("button", { name: "Undo", exact: true })
+    ).toBeVisible();
+    await expect(allUndo).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(opener).toBeFocused();
+    const sent = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        request.url().endsWith(`/api/moves/undo/${secondEntries[0].id}`)
+    );
+    await toast.getByRole("button", { name: "Undo", exact: true }).click();
+    await sent;
+    await expect(toast).toContainText("Undo removed 1 card from Unsorted.");
+    await expect(allUndo).toHaveCount(0);
+  } else if (
+    [
+      "failure",
+      "close-failure",
+      "failure-edition",
+      "failure-card",
+      "failure-reopen",
+    ].includes(scenario)
+  ) {
     await page.route("**/api/holdings/batch", async (route) => {
       arrived();
       await held;
@@ -675,6 +761,14 @@ async function singleUndoOwnership(page: Page, scenario: string) {
     });
     await add();
     await started;
+    if (scenario === "failure-edition")
+      await editions(page).filter({ hasText: "Reverse Holo" }).click();
+    if (scenario === "failure-card") await page.keyboard.press("ArrowLeft");
+    if (scenario === "failure-reopen") {
+      await page.keyboard.press("Escape");
+      await expect(opener).toBeFocused();
+      await opener.click();
+    }
     if (scenario === "close-failure") {
       await page.keyboard.press("Escape");
       await expect(opener).toBeFocused();
@@ -682,10 +776,12 @@ async function singleUndoOwnership(page: Page, scenario: string) {
     release();
     const failure = "This Edition is no longer available to add.";
     await expect(
-      scenario === "failure" ? card.getByRole("alert") : toast
+      scenario === "close-failure"
+        ? toast
+        : card.getByRole("alert").filter({ hasText: failure })
     ).toContainText(failure);
     await expect(allUndo).toHaveCount(0);
-    if (scenario === "failure") {
+    if (scenario !== "close-failure") {
       await expect(card.locator(":focus")).toHaveCount(1);
       await page.keyboard.press("Escape");
     } else {
@@ -834,28 +930,33 @@ async function singleUndoOwnership(page: Page, scenario: string) {
   const messages = JSON.parse(
     (await page.locator("html").getAttribute("data-s13f-announcements")) ?? "[]"
   );
-  const expected =
-    scenario === "failure" || scenario === "close-failure"
-      ? ["This Edition is no longer available to add."]
-      : scenario === "retry"
-        ? [
-            "Added 1 copy to Unsorted.",
-            "Undo may not have finished. Try again to check safely.",
-            "Undo removed 1 card from Unsorted.",
-          ]
-        : scenario === "close-undo" || scenario === "toast"
-          ? ["Added 1 copy to Unsorted.", "Undo removed 1 card from Unsorted."]
-          : scenario === "newer"
-            ? [
-                "Added 1 copy to Unsorted.",
-                "Added 1 copy to Unsorted.",
-                "Undo removed 1 card from Unsorted.",
-              ]
-            : [
-                scenario === "close-add"
-                  ? "Added 1 card to Unsorted."
-                  : "Added 1 copy to Unsorted.",
-              ];
+  const expected = [
+    "failure",
+    "close-failure",
+    "failure-edition",
+    "failure-card",
+    "failure-reopen",
+  ].includes(scenario)
+    ? ["This Edition is no longer available to add."]
+    : scenario === "retry"
+      ? [
+          "Added 1 copy to Unsorted.",
+          "Undo may not have finished. Try again to check safely.",
+          "Undo removed 1 card from Unsorted.",
+        ]
+      : scenario === "close-undo" || scenario === "toast"
+        ? ["Added 1 copy to Unsorted.", "Undo removed 1 card from Unsorted."]
+        : scenario === "newer" || scenario.startsWith("lookup-")
+          ? [
+              "Added 1 copy to Unsorted.",
+              "Added 1 copy to Unsorted.",
+              "Undo removed 1 card from Unsorted.",
+            ]
+          : [
+              scenario === "close-add"
+                ? "Added 1 card to Unsorted."
+                : "Added 1 copy to Unsorted.",
+            ];
   expect(messages).toEqual(expected);
 }
 // End S13f shared journeys.
@@ -877,6 +978,11 @@ for (const viewport of [
       "toast",
       "failure",
       "close-failure",
+      "failure-edition",
+      "failure-card",
+      "failure-reopen",
+      "lookup-older-first",
+      "lookup-newer-first",
     ]) {
       test(`${scenario}: one Undo and one announcement per outcome`, async ({
         page,

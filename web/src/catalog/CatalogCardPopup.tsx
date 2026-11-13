@@ -154,6 +154,16 @@ export function CatalogCardPopup({
   returnFocus,
 }: Props) {
   const open = request !== null;
+  // The popup outlives its keyed AddRows, so delayed failures follow the currently open modal.
+  const [lateFailure, setLateFailure] = useState("");
+  if (!open && lateFailure) setLateFailure("");
+  const failureOwner = useRef({ open, onAddFailed });
+  failureOwner.current = { open, onAddFailed };
+  function reportLateFailure(message: string) {
+    if (failureOwner.current.open) setLateFailure(message);
+    else failureOwner.current.onAddFailed?.(message);
+  }
+
   const { details, reload } = useCardDetails(request?.printingId ?? null);
   const places = usePlaces(open);
   const cardKey = request
@@ -424,7 +434,8 @@ export function CatalogCardPopup({
                 setWhereVersion((value) => value + 1);
                 return undo;
               }}
-              onAddFailed={onAddFailed}
+              onAddFailed={onAddFailed ? reportLateFailure : undefined}
+              onAddStarted={onAddFailed ? () => setLateFailure("") : undefined}
               renderAddFeedback={renderAddFeedback}
               onUndone={() => {
                 reload();
@@ -434,6 +445,9 @@ export function CatalogCardPopup({
           )}
         </>
       )}
+      <p role="alert" className="m-0 text-meta text-danger">
+        {lateFailure}
+      </p>
     </CardPopup>
   );
 }
@@ -655,6 +669,7 @@ function AddRows({
   onLocation,
   onAdded,
   onAddFailed,
+  onAddStarted,
   onUndone,
   renderAddFeedback,
 }: {
@@ -668,6 +683,7 @@ function AddRows({
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
   /** Catalog keeps a failure reachable when its Add row closed during the request. */
   onAddFailed?: (message: string) => void;
+  onAddStarted?: () => void;
   /** The Add row's Undo took the copies out again. */
   onUndone: () => void;
   renderAddFeedback?: AddFeedbackRenderer;
@@ -677,6 +693,7 @@ function AddRows({
   // The toast's Undo for the last add, offered here while the popup covers the toast.
   const [undo, setUndo] = useState<InlineUndo | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const latestAdd = useRef(0);
   useLayoutEffect(() => {
     if (!renderAddFeedback) return undo?.claimInline?.();
   }, [undo, renderAddFeedback]);
@@ -738,6 +755,8 @@ function AddRows({
 
   async function add() {
     if (!location || busy) return;
+    const request = ++latestAdd.current;
+    onAddStarted?.();
     setBusy(true);
     setDone("");
     setUndo(null);
@@ -781,7 +800,12 @@ function AddRows({
         undoId: outcome.undoId,
         from: "popup",
       });
-      if (mounted.current && shown.current === sent.id) setUndo(() => offered);
+      if (
+        mounted.current &&
+        shown.current === sent.id &&
+        request === latestAdd.current
+      )
+        setUndo(() => offered);
     } else {
       if (onAddFailed && (!mounted.current || shown.current !== sent.id)) {
         onAddFailed(addFailed(outcome.code, outcome.retry));

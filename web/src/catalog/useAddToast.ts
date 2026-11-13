@@ -60,6 +60,7 @@ export function useAddToast({ shown, onUndone }: Options) {
   const live = useRef(onUndone);
   live.current = onUndone;
   const current = useRef<number | null>(null);
+  const latestAdd = useRef(0);
   const inputs = useRef(new Map<number, ToastInput>());
   const owned = useRef(new Set<number>());
   const keys = useRef(new Map<string, string>());
@@ -218,9 +219,15 @@ export function useAddToast({ shown, onUndone }: Options) {
 
   return useCallback(
     async (added: AddedCards): Promise<InlineUndo | null> => {
+      // Add ordering cannot depend on a preliminary toast having advanced the host's version.
+      const request = ++latestAdd.current;
+      if (current.current !== null) {
+        kit.dismiss(current.current);
+        current.current = null;
+      }
       const turn = noticeTurn(kit, () => null);
       const entries = await listUndo().catch(() => [] as UndoEntry[]);
-      if (!turn()) return null;
+      if (request !== latestAdd.current || !turn()) return null;
       const undoable = entries[0]?.id === added.undoId;
       show(
         batchAddedText(added.copies, added.path),

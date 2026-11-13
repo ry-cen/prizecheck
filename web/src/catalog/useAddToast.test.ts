@@ -466,3 +466,86 @@ test("owned retry and success never move focus, including release during outstan
   );
   focusTarget.remove();
 });
+
+test.each(["older-first", "newer-first"])(
+  "newest add wins two outstanding Undo lookups (%s)",
+  async (order) => {
+    let older!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+    let newer!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+    vi.mocked(listUndo)
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          older = resolve;
+        })
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          newer = resolve;
+        })
+      );
+    let first!: ReturnType<typeof notify>, second!: ReturnType<typeof notify>;
+    await act(async () => {
+      first = notify(added);
+      second = notify({ ...added, undoId: "newer", path: "New box" });
+    });
+    let oldOffer: InlineUndo | null = null,
+      newOffer: InlineUndo | null = null;
+    const finishOlder = async () => {
+      await act(async () => {
+        older([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>);
+        oldOffer = await first;
+      });
+    };
+    const finishNewer = async () => {
+      await act(async () => {
+        newer([{ id: "newer" }] as Awaited<ReturnType<typeof listUndo>>);
+        newOffer = await second;
+      });
+    };
+    if (order === "older-first") {
+      await finishOlder();
+      expect(oldOffer).toBeNull();
+      expect(host.textContent).not.toContain("Added");
+      await finishNewer();
+    } else {
+      await finishNewer();
+      await finishOlder();
+    }
+    expect(oldOffer).toBeNull();
+    expect(newOffer).toBeTypeOf("function");
+    expect(host.textContent).toContain("New box");
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>("button")!.click()
+    );
+    expect(applyUndo).toHaveBeenCalledExactlyOnceWith(
+      "newer",
+      expect.any(String)
+    );
+  }
+);
+
+test("a newer add immediately invalidates an older inline offer while its lookup waits", async () => {
+  const older = await offer();
+  let release!: () => void;
+  await act(async () => {
+    release = older.claimInline!();
+  });
+  let finish!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+  vi.mocked(listUndo).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  let pending!: ReturnType<typeof notify>;
+  await act(async () => {
+    pending = notify({ ...added, undoId: "newer" });
+  });
+  expect(older.isAvailable()).toBe(false);
+  await act(async () => release());
+  expect(host.querySelector("button")).toBeNull();
+  await act(async () => {
+    finish([{ id: "newer" }] as Awaited<ReturnType<typeof listUndo>>);
+    await pending;
+  });
+  expect(older.isAvailable()).toBe(false);
+});

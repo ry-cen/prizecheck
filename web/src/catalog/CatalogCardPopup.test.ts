@@ -386,3 +386,126 @@ test("close during outstanding Undo preserves restored opener focus and never re
     }
   });
 });
+
+test.each(["edition", "card", "reopen"])(
+  "a delayed Add failure is announced in the current modal after %s",
+  async (transition) => {
+    await journey(async ({ host, button, render }) => {
+      let finish!: (value: AddOutcome) => void;
+      vi.mocked(addToCollection).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      await act(async () => button("Add 1").click());
+      if (transition === "edition")
+        await act(async () =>
+          [...host.querySelectorAll("button[aria-pressed]")][1].dispatchEvent(
+            new MouseEvent("click", { bubbles: true })
+          )
+        );
+      if (transition === "card") await render("other");
+      if (transition === "reopen") {
+        await render(null);
+        await render("p");
+      }
+      const messages: string[] = [];
+      const observer = new MutationObserver((records) => {
+        const targets = new Set<Element>();
+        for (const record of records) {
+          const target =
+            record.target instanceof Element
+              ? record.target
+              : record.target.parentElement;
+          const alert = target?.closest('[role="alert"]');
+          if (alert) targets.add(alert);
+        }
+        for (const target of targets)
+          if (target.textContent) messages.push(target.textContent);
+      });
+      observer.observe(host, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+      try {
+        await act(async () =>
+          finish({
+            ok: false,
+            code: "EDITION_UNAVAILABLE",
+            editionId: "e",
+            retry: false,
+          })
+        );
+        const failure = "This Edition is no longer available to add.";
+        expect(
+          [...host.querySelectorAll('[role="dialog"] [role="alert"]')].filter(
+            (p) => p.textContent === failure
+          )
+        ).toHaveLength(1);
+        expect(host.querySelector("#app-toasts p")).toBeNull();
+        expect(messages).toEqual([failure]);
+        await render(null);
+        await render("p");
+        expect(messages).toEqual([failure]);
+        expect(host.textContent).not.toContain(failure);
+      } finally {
+        observer.disconnect();
+      }
+    });
+  }
+);
+
+test.each(["older-first", "newer-first"])(
+  "two popup adds retain the newest inline Undo regardless of lookup order (%s)",
+  async (order) => {
+    await journey(async ({ host, button }) => {
+      let older!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+      let newer!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+      vi.mocked(listUndo)
+        .mockReturnValueOnce(
+          new Promise((resolve) => {
+            older = resolve;
+          })
+        )
+        .mockReturnValueOnce(
+          new Promise((resolve) => {
+            newer = resolve;
+          })
+        );
+      await act(async () => button("Add 1").click());
+      vi.mocked(addToCollection).mockResolvedValueOnce({
+        ...result,
+        undoId: "second",
+      });
+      await act(async () => button("Add 1").click());
+      const finishOlder = async () => {
+        await act(async () =>
+          older([{ id: "first" }] as Awaited<ReturnType<typeof listUndo>>)
+        );
+      };
+      const finishNewer = async () => {
+        await act(async () =>
+          newer([{ id: "second" }] as Awaited<ReturnType<typeof listUndo>>)
+        );
+      };
+      if (order === "older-first") {
+        await finishOlder();
+        expect(undoCount(host)).toBe(0);
+        await finishNewer();
+      } else {
+        await finishNewer();
+        await finishOlder();
+      }
+      expect(undoCount(host)).toBe(1);
+      expect(host.querySelector("#app-toasts button")?.textContent).not.toBe(
+        "Undo"
+      );
+      await act(async () => button("Undo").click());
+      expect(applyUndo).toHaveBeenCalledExactlyOnceWith(
+        "second",
+        expect.any(String)
+      );
+    });
+  }
+);
