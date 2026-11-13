@@ -130,13 +130,42 @@ def test_missing_and_existing_duplicate():
     assert kinds(duplicate) == {'duplicate_number_pending'} and duplicate.printings[0].carried
 
 
-@pytest.mark.parametrize('adds', [True, False])
-def test_vanished_foil_price_open_owner_question(monkeypatch, adds):
-    monkeypatch.setattr(plan, 'NAMED_FINISH_UNPRICED_ADDS_UNSPECIFIED', adds)
+def test_vanished_foil_price_keeps_only_known_foil():
     old = previous(run(pull(prices=[price()])))
     result = plan.plan_run(old, [pull()])
     assert {e.descriptor_key for e in result.printings[0].editions} == {
-        plan.descriptor_key({'finish': 'foil'}), *([plan.descriptor_key(plan.UNSPECIFIED)] if adds else [])}
+        plan.descriptor_key({'finish': 'foil'})}
+    assert not result.printings[0].carried
+    assert result.outcomes[0].written == 1 and result.outcomes[0].held_review == 0
+    assert not result.reviews
+
+
+def test_new_unpriced_card_gets_unspecified_finish():
+    result = run(pull())
+    assert [e.descriptor for e in result.printings[0].editions] == [plan.UNSPECIFIED]
+    assert not result.printings[0].carried
+    assert result.outcomes[0].written == 1 and result.outcomes[0].held_review == 0
+    assert not result.reviews
+
+
+def test_unclassified_source_finish_writes_no_edition_and_keeps_review():
+    current = pull(prices=[price(finish='Unknown')])
+    assert current.result.printings[0].editions[0].finish is None
+    result = run(current)
+    assert result.printings == ()
+    assert result.outcomes[0].written == 0 and result.outcomes[0].held_review == 1
+    assert kinds(result) == {'finish_policy_pending'}
+
+
+def test_vanished_price_preserves_existing_foil_and_unspecified():
+    both = plan.plan_run(previous(run(pull())), [pull(prices=[price()])])
+    result = plan.plan_run(previous(both), [pull()])
+    assert {e.descriptor_key for e in result.printings[0].editions} == {
+        plan.descriptor_key({'finish': 'foil'}), plan.descriptor_key(plan.UNSPECIFIED)}
+    assert result.printings[0].editions == both.printings[0].editions
+    assert not result.printings[0].carried
+    assert result.outcomes[0].written == 1 and result.outcomes[0].held_review == 0
+    assert not result.reviews
 
 
 def test_unspecified_then_foil_keeps_both():
