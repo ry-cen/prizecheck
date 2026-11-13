@@ -55,10 +55,12 @@ jobs:
   # Optional (integration: sharded, and every pull request to main). The fast tier of the deep suites, split into legs
   # that run at once, each on its own runner with its own database server and stacks: three shards of api/tests, the
   # auth leg (guardrails, the build and vitest, run once for every leg) and ten shards of the Playwright specs
-  # (scripts/verify.py --shard). On one hosted runner the fast tier took about 32 minutes, 22 of them in Playwright
-  # (October 2026). Across 14 sharded runs, browser-8 took 10.6–15.8 minutes (5 capped runs), browser-7
-  # 9.6–14.2, and the other browser legs 4.1–10.8, including 1.5–2 minutes of setup. Browser legs get
-  # 25 minutes to finish whole-file shards; api/auth keep 15. The caps remain hang guards, not timing targets.
+  # (scripts/verify.py --shard). Run 43349720713 took 24m27s on browser-7: proposal-builder alone
+  # used 776 test seconds alongside 1278 seconds in neighboring files. The duration-weighted planner
+  # now distributes whole files using that run's measurements (scripts/browser_shard_durations.json).
+  # Projected test load is about 905 seconds per leg before concurrency; with two workers and 120s setup,
+  # the longest leg projects to about 16 minutes. These are estimates, pending a hosted run.
+  # Browser legs keep 25 minutes; api/auth keep 15. Caps remain hang guards, not timing targets.
   # inputs.integration is empty on pull_request and workflow_call, so these jobs run there only for a pull request to main.
   integration-legs:
     if: ${{ inputs.integration == 'sharded' || (github.event_name == 'pull_request' && github.base_ref == 'main') }}
