@@ -1,0 +1,2 @@
+ALTER TABLE catalog_review DROP CONSTRAINT catalog_review_kind_check;
+ALTER TABLE ONLY catalog_review ADD CONSTRAINT catalog_review_kind_check CHECK (kind IN ('identity_text_conflict', 'card_scope_pending', 'finish_policy_pending', 'marker_grouping_pending', 'duplicate_number_pending', 'multi_value_delimiter_unrecognised', 'price_without_product', 'extended_field_repeated', 'printing_details_differ', 'missing_from_source', 'group_change', 'display_change', 'duplicate_product_id', 'group_pull_held'));
