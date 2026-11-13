@@ -17,6 +17,10 @@ export type AddedCards = {
   undoId: string;
   /** Add N cards in Add mode's bar, or the card popup's Add N. */
   from: "bar" | "popup";
+  /** The mounted Add row has already presented this result in its inline live region. */
+  announcedInline?: boolean;
+  /** Whether this add's specific receiving row can still present an Undo outcome. */
+  presentsInlineUndo?: () => boolean;
 };
 
 /** The toast's Undo, pressed from inside the popup: it resolves to the toast's new message ("" when nothing was
@@ -62,7 +66,7 @@ export function useAddToast({ shown, onUndone }: Options) {
   const current = useRef<number | null>(null);
   const latestAdd = useRef(0);
   const inputs = useRef(new Map<number, ToastInput>());
-  const owned = useRef(new Set<number>());
+  const owned = useRef(new Map<number, symbol>());
   const keys = useRef(new Map<string, string>());
   const running = useRef(new Map<number, Promise<InlineUndoResult>>());
 
@@ -85,10 +89,12 @@ export function useAddToast({ shown, onUndone }: Options) {
       message: string,
       added: AddedCards | null,
       focus: boolean,
-      undoable = !!added
+      undoable = !!added,
+      announce = true
     ) => {
       const input: ToastInput = {
         message,
+        announce,
         action:
           added && undoable
             ? {
@@ -145,9 +151,15 @@ export function useAddToast({ shown, onUndone }: Options) {
     toastId: number,
     message: string
   ): Promise<InlineUndoResult> {
-    const inlineOwned = owned.current.has(toastId);
+    const receivingOwner = owned.current.get(toastId);
+    const inlineAnnounces = () =>
+      (receivingOwner !== undefined &&
+        owned.current.get(toastId) === receivingOwner) ||
+      added.presentsInlineUndo?.() === true;
+    const inlineOwned = inlineAnnounces();
     const input: ToastInput = {
       message,
+      announce: !inlineOwned,
       action: { label: "Undo", onAction: () => {}, busy: true, keepOpen: true },
       onDismiss: () => dismiss(added, toastId, false),
     };
@@ -163,7 +175,8 @@ export function useAddToast({ shown, onUndone }: Options) {
       keys.current.delete(added.undoId);
       const outcome = addUndoneText(result.copy_count, added.path);
       // Always report the actual outcome to the popup, while leaving a replacement toast alone.
-      if (kit.isShown(toastId)) show(outcome, null, !inlineOwned);
+      if (kit.isShown(toastId))
+        show(outcome, null, !inlineOwned, false, !inlineAnnounces());
       live.current(added, result.owner_revision);
       return {
         message: outcome,
@@ -180,7 +193,13 @@ export function useAddToast({ shown, onUndone }: Options) {
       );
       let next: InlineUndo | null = null;
       if (kit.isShown(toastId)) {
-        const id = show(outcome, added, !inlineOwned, retry);
+        const id = show(
+          outcome,
+          added,
+          !inlineOwned,
+          retry,
+          !inlineAnnounces()
+        );
         if (retry) next = inline(id, added, outcome);
       }
       return { message: outcome, next, undone: false };
@@ -204,10 +223,12 @@ export function useAddToast({ shown, onUndone }: Options) {
       {
         isAvailable: () => kit.isShown(toastId),
         claimInline: () => {
-          owned.current.add(toastId);
+          const owner = Symbol();
+          owned.current.set(toastId, owner);
           const input = inputs.current.get(toastId);
           if (input) kit.update(toastId, { ...input, action: undefined });
           return () => {
+            if (owned.current.get(toastId) !== owner) return;
             owned.current.delete(toastId);
             const latest = inputs.current.get(toastId);
             if (latest) kit.update(toastId, latest);
@@ -233,7 +254,9 @@ export function useAddToast({ shown, onUndone }: Options) {
         batchAddedText(added.copies, added.path),
         added,
         added.from === "bar",
-        undoable
+        undoable,
+        // Closing during the Undo lookup must not repeat feedback the Add row already presented.
+        !added.announcedInline
       );
       const id = current.current;
       return undoable && id !== null

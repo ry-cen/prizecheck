@@ -367,6 +367,31 @@ export function CatalogCardPopup({
               </p>
             )}
           </div>
+          {selected && (
+            <AddRows
+              key={cardKey}
+              cardName={name}
+              pendingFor={pendingFor}
+              edition={selected}
+              places={places}
+              alsoOffer={alsoOffer}
+              location={location}
+              onLocation={onLocation}
+              onAdded={(added) => {
+                const undo = onAdded(added);
+                reload();
+                setWhereVersion((value) => value + 1);
+                return undo;
+              }}
+              onAddFailed={onAddFailed ? reportLateFailure : undefined}
+              onAddStarted={onAddFailed ? () => setLateFailure("") : undefined}
+              renderAddFeedback={renderAddFeedback}
+              onUndone={() => {
+                reload();
+                setWhereVersion((value) => value + 1);
+              }}
+            />
+          )}
           <Legality
             standing={row?.standing ?? null}
             pending={ready.browse === "pending"}
@@ -418,31 +443,6 @@ export function CatalogCardPopup({
             )}
           />
           <AskToTrade printingId={ready.printing.id} />
-          {selected && (
-            <AddRows
-              key={cardKey}
-              cardName={name}
-              pendingFor={pendingFor}
-              edition={selected}
-              places={places}
-              alsoOffer={alsoOffer}
-              location={location}
-              onLocation={onLocation}
-              onAdded={(added) => {
-                const undo = onAdded(added);
-                reload();
-                setWhereVersion((value) => value + 1);
-                return undo;
-              }}
-              onAddFailed={onAddFailed ? reportLateFailure : undefined}
-              onAddStarted={onAddFailed ? () => setLateFailure("") : undefined}
-              renderAddFeedback={renderAddFeedback}
-              onUndone={() => {
-                reload();
-                setWhereVersion((value) => value + 1);
-              }}
-            />
-          )}
         </>
       )}
       <p role="alert" className="m-0 text-meta text-danger">
@@ -801,6 +801,12 @@ function AddRows({
         ownerRevision: outcome.ownerRevision,
         undoId: outcome.undoId,
         from: "popup",
+        announcedInline: mounted.current && shown.current === sent.id,
+        presentsInlineUndo: () =>
+          mounted.current &&
+          shown.current === sent.id &&
+          request === latestAdd.current &&
+          !!addButton.current?.closest("dialog[open]"),
       });
       if (
         mounted.current &&

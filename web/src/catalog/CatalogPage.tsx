@@ -4,7 +4,6 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import { MyMetadataReports } from "../MetadataReport";
 import { readMetadataReportLink } from "../metadataReportLink";
-import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
@@ -92,11 +91,12 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
 
   return (
     <main className="mx-auto box-border flex w-full max-w-7xl min-w-0 flex-col gap-4 px-7 py-7 phone:px-4 phone:py-5">
-      <PageHeader
-        title="Catalog"
-        actions={
-          // Wraps on a phone, so the switch and the reports button never push the page sideways.
-          <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-4 phone:mb-0 phone:gap-2">
+        <h1 className="m-0 text-display font-semibold phone:text-heading">
+          Catalog
+        </h1>
+        <div className="ml-auto flex flex-wrap items-center gap-2 phone:contents">
+          <div className="flex flex-wrap items-center justify-end gap-2 phone:contents phone:[&>div]:order-last phone:[&>div]:basis-full">
             <Segmented
               mode="choice"
               label="Catalog mode"
@@ -108,6 +108,7 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
               ref={reportsButton}
               variant="quiet"
               icon={FileText}
+              className="phone:ml-auto"
               aria-haspopup="dialog"
               onClick={() => {
                 setReportsKey((value) => value + 1);
@@ -117,8 +118,8 @@ export function CatalogPage({ active, message, address, onNavigate }: Props) {
               My metadata reports
             </Button>
           </div>
-        }
-      />
+        </div>
+      </div>
       <CatalogGallery
         active={active}
         view={view}

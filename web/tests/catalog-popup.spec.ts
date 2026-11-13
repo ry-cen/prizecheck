@@ -622,27 +622,32 @@ async function singleUndoOwnership(page: Page, scenario: string) {
             ? record.target
             : record.target.parentElement;
         const status = target?.closest(
-          '[role="status"], [role="alert"], #app-toasts p'
+          '[role="status"], [role="alert"], [aria-live], #app-toasts'
         );
         if (status) targets.add(status);
         for (const node of record.addedNodes) {
           if (!(node instanceof Element)) continue;
-          if (node.matches('[role="status"], [role="alert"], #app-toasts p'))
+          if (
+            node.matches(
+              '[role="status"], [role="alert"], [aria-live], #app-toasts'
+            )
+          )
             targets.add(node);
           node
-            .querySelectorAll('[role="status"], [role="alert"], #app-toasts p')
+            .querySelectorAll(
+              '[role="status"], [role="alert"], [aria-live], #app-toasts'
+            )
             .forEach((element) => targets.add(element));
         }
       }
       for (const target of targets) {
-        const text = target.textContent ?? "";
+        const text =
+          (target.id === "app-toasts"
+            ? target.querySelector("p")?.textContent
+            : target.textContent) ?? "";
         if (last.get(target) === text) continue;
         last.set(target, text);
-        if (
-          target.closest("#app-toasts") &&
-          document.querySelector("dialog[open]")
-        )
-          continue;
+        if (target.closest('[aria-live="off"]')) continue;
         if (
           /^(Added 1 (copy|card)|Undo removed|Undo may not|This Edition is no longer available to add)/.test(
             text

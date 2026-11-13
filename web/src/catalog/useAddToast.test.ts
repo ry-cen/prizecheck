@@ -599,3 +599,107 @@ test.each([false, true])(
     ).toHaveLength(1);
   }
 );
+
+test("a result already announced inline stays silent through a delayed Undo lookup and handoff", async () => {
+  let release!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+  vi.mocked(listUndo).mockReturnValueOnce(
+    new Promise((resolve) => {
+      release = resolve;
+    })
+  );
+  let request!: Promise<InlineUndo | null>;
+  await act(async () => {
+    request = notify({ ...added, announcedInline: true });
+  });
+  await act(async () => {
+    release([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>);
+    await request;
+  });
+  expect(host.querySelector("#app-toasts")?.getAttribute("aria-live")).toBe(
+    "off"
+  );
+  expect(host.textContent).toContain("Added 2 cards");
+  expect(host.querySelector("button")?.textContent).toBe("Undo");
+});
+
+for (const fails of [false, true]) {
+  test(`a released Undo owner announces its ${fails ? "failure" : "success"} even with a reopened dialog`, async () => {
+    let resolve!: (value: typeof removed) => void;
+    let reject!: (cause: unknown) => void;
+    vi.mocked(applyUndo).mockReturnValueOnce(
+      new Promise((yes, no) => {
+        resolve = yes;
+        reject = no;
+      })
+    );
+    let undo!: InlineUndo;
+    await act(async () => {
+      undo = (await notify({ ...added, announcedInline: true }))!;
+    });
+    let release!: () => void;
+    await act(async () => {
+      release = undo.claimInline!();
+    });
+    let pending!: ReturnType<InlineUndo>;
+    await act(async () => {
+      pending = undo();
+    });
+    const reopened = document.createElement("dialog");
+    reopened.setAttribute("open", "");
+    document.body.append(reopened);
+    try {
+      await act(async () => {
+        release();
+      });
+      await act(async () => {
+        if (fails) reject(new TypeError("lost"));
+        else resolve(removed);
+        await pending;
+      });
+      expect(host.querySelector("#app-toasts")?.getAttribute("aria-live")).toBe(
+        "polite"
+      );
+      expect(host.textContent).toContain(
+        fails ? "Undo may not have finished" : "Undo removed 2 cards"
+      );
+    } finally {
+      reopened.remove();
+    }
+  });
+}
+
+for (const fails of [false, true]) {
+  test(`a different inline claimant cannot silence the old receiver's ${fails ? "failure" : "success"}`, async () => {
+    let resolve!: (value: typeof removed) => void;
+    let reject!: (cause: unknown) => void;
+    vi.mocked(applyUndo).mockReturnValueOnce(
+      new Promise((yes, no) => {
+        resolve = yes;
+        reject = no;
+      })
+    );
+    const undo = await offer();
+    let release!: () => void;
+    await act(async () => {
+      release = undo.claimInline!();
+    });
+    let pending!: ReturnType<InlineUndo>;
+    await act(async () => {
+      pending = undo();
+    });
+    let releaseOther!: () => void;
+    await act(async () => {
+      release();
+      releaseOther = undo.claimInline!();
+    });
+    await act(async () => {
+      if (fails) reject(new TypeError("lost"));
+      else resolve(removed);
+      await pending;
+    });
+    expect(host.querySelector("#app-toasts")?.getAttribute("aria-live")).toBe(
+      "polite"
+    );
+    await act(async () => releaseOther());
+  });
+}
