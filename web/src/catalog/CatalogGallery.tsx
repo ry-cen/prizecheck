@@ -459,10 +459,38 @@ export function CatalogGallery({
       );
       const message = batchAddedText(result.copies, result.path);
       const live = alive.current.mounted && alive.current.active;
+      if (live && latest.current.undoToast && result.from === "popup") {
+        const id = ownToast.current;
+        const host = document.activeElement?.closest("#app-toasts");
+        if (
+          recovery.current()?.kind === "clear" &&
+          id !== null &&
+          queueToast.isShown(id) &&
+          host
+        ) {
+          // Retire authority now, but keep a usable focus destination until the
+          // Undo lookup can replace this notice. Toast.show inherits focus only
+          // if it is still in the host; a later user focus move must win.
+          recovery.retire();
+          host
+            .querySelector<HTMLButtonElement>('[aria-label="Dismiss"]')
+            ?.focus();
+          queueToast.update(id, {
+            message: QUEUE_CLEARED,
+            onDismiss: () => {
+              // Dismiss removes this focused control before the lookup settles.
+              // Give focus a live home, without reclaiming a later user move.
+              if (host.contains(document.activeElement)) search();
+            },
+          });
+        } else retireClear();
+      }
       const token = live
         ? claimNotice({ kind: "add", message, undo: null })
         : null;
-      if (live) ownToast.current = queueToast.show({ message });
+      // Catalog popup adds have one notice owner, including when the popup closed during the request.
+      if (live && !(latest.current.undoToast && result.from === "popup"))
+        ownToast.current = queueToast.show({ message });
       const external = latest.current.onAdded?.(result);
       const undo = latest.current.undoToast
         ? latest.current.addToast(result)
@@ -918,6 +946,13 @@ export function CatalogGallery({
         pendingFor={pendingFor}
         location={popupLocation}
         onLocation={setPopupLocation}
+        onAddFailed={
+          undoToast
+            ? (message) => {
+                queueToast.show({ message });
+              }
+            : undefined
+        }
         alsoOffer={adding ? target : null}
         onAdded={added}
         renderAddFeedback={undoToast ? undefined : renderAddFeedback}

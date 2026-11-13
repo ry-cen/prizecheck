@@ -534,3 +534,555 @@ test.describe("phone", () => {
     await expect(popup(page)).toHaveCount(0);
   });
 });
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`single Undo ${viewport.width}`, () => {
+    test.use({ viewport });
+    test("inline owns Undo until close and toast can then undo exactly once", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      const opener = tile(page, "Switch, MEG 130");
+      await opener.click();
+      const card = page.getByRole("dialog", { name: "Switch" });
+      await expect(
+        addRow(page).getByText("Location", { exact: true }).first()
+      ).toBeVisible();
+      await expect(
+        addRow(page).getByRole("combobox", { name: "Location" })
+      ).toBeVisible();
+      await addRow(page)
+        .getByRole("button", { name: "Add 1", exact: true })
+        .click();
+      await expect(card.getByText("Added 1 copy to Unsorted.")).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Undo", exact: true })
+      ).toHaveCount(1);
+      // Include the inert toast behind the modal: it must not render a duplicate control.
+      await expect(
+        page.getByRole("button", {
+          name: "Undo",
+          exact: true,
+          includeHidden: true,
+        })
+      ).toHaveCount(1);
+      await expect(
+        card.getByRole("button", { name: "Undo", exact: true })
+      ).toBeVisible();
+      await page.screenshot({
+        path: test.info().outputPath(`single-undo-${viewport.width}.png`),
+      });
+      await page.keyboard.press("Escape");
+      await expect(opener).toBeFocused();
+      const toast = page.getByRole("region", { name: "Notifications" });
+      await toast.getByRole("button", { name: "Undo", exact: true }).click();
+      await expect(toast).toContainText("Undo removed 1 card from Unsorted.");
+      await expect(
+        page.getByRole("button", { name: "Undo", exact: true })
+      ).toHaveCount(0);
+      await expect(opener).toHaveAccessibleName(
+        "Switch, MEG 130, Mega Evolution, Normal, not owned"
+      );
+    });
+  });
+}
+
+// S13f journeys are also copied verbatim into the scratch-only Mac proof.
+async function singleUndoOwnership(page: Page, scenario: string) {
+  const initial =
+    scenario === "edition" || scenario === "failure-edition"
+      ? "Bulbasaur, MEG 001"
+      : "Switch, MEG 130";
+  const opener = tile(page, initial).first();
+  await opener.click();
+  const card = page.getByRole("dialog");
+  const allUndo = page.getByRole("button", {
+    name: "Undo",
+    exact: true,
+    includeHidden: true,
+  });
+  const toast = page.getByRole("region", {
+    name: "Notifications",
+    includeHidden: true,
+  });
+  const add = () =>
+    addRow(page).getByRole("button", { name: "Add 1", exact: true }).click();
+  await page.evaluate(() => {
+    const messages: string[] = [];
+    const last = new WeakMap<Element, string>();
+    new MutationObserver((records) => {
+      const targets = new Set<Element>();
+      for (const record of records) {
+        const target =
+          record.target instanceof Element
+            ? record.target
+            : record.target.parentElement;
+        const status = target?.closest(
+          '[role="status"], [role="alert"], #app-toasts p'
+        );
+        if (status) targets.add(status);
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches('[role="status"], [role="alert"], #app-toasts p'))
+            targets.add(node);
+          node
+            .querySelectorAll('[role="status"], [role="alert"], #app-toasts p')
+            .forEach((element) => targets.add(element));
+        }
+      }
+      for (const target of targets) {
+        const text = target.textContent ?? "";
+        if (last.get(target) === text) continue;
+        last.set(target, text);
+        if (
+          target.closest("#app-toasts") &&
+          document.querySelector("dialog[open]")
+        )
+          continue;
+        if (
+          /^(Added 1 (copy|card)|Undo removed|Undo may not|This Edition is no longer available to add)/.test(
+            text
+          )
+        )
+          messages.push(text);
+      }
+      document.documentElement.dataset.s13fAnnouncements =
+        JSON.stringify(messages);
+    }).observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+  });
+  let release!: () => void;
+  let arrived!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  if (scenario.startsWith("lookup-")) {
+    const waiting: { release: (entries: unknown[]) => void }[] = [];
+    let firstArrived!: () => void, secondArrived!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      firstArrived = resolve;
+    });
+    const secondStarted = new Promise<void>((resolve) => {
+      secondArrived = resolve;
+    });
+    await page.route("**/api/moves/undo", async (route) => {
+      const response = await route.fetch();
+      let resolve!: (entries: unknown[]) => void;
+      const done = new Promise<unknown[]>((finish) => {
+        resolve = finish;
+      });
+      waiting.push({ release: resolve });
+      if (waiting.length === 1) firstArrived();
+      else secondArrived();
+      await route.fulfill({ response, json: await done });
+    });
+    await add();
+    await firstStarted;
+    const firstEntries = await page.request
+      .get(`${ORIGIN}/api/moves/undo`)
+      .then((r) => r.json());
+    await add();
+    await secondStarted;
+    const secondEntries = await page.request
+      .get(`${ORIGIN}/api/moves/undo`)
+      .then((r) => r.json());
+    expect(secondEntries[0].id).not.toBe(firstEntries[0].id);
+    if (scenario === "lookup-older-first") {
+      const delivered = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/moves/undo"
+      );
+      waiting[0].release(firstEntries);
+      await (await delivered).finished();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      );
+      // Resolve the older response before the newer one, without a timer.
+      await expect
+        .poll(() => page.locator("#app-toasts").textContent())
+        .toBe("");
+      waiting[1].release(secondEntries);
+    } else {
+      waiting[1].release(secondEntries);
+      await expect(
+        card.getByRole("button", { name: "Undo", exact: true })
+      ).toBeVisible();
+      const delivered = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/moves/undo"
+      );
+      waiting[0].release(firstEntries);
+      await (await delivered).finished();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      );
+    }
+    await expect(
+      card.getByRole("button", { name: "Undo", exact: true })
+    ).toBeVisible();
+    await expect(allUndo).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(opener).toBeFocused();
+    const sent = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        request.url().endsWith(`/api/moves/undo/${secondEntries[0].id}`)
+    );
+    await toast.getByRole("button", { name: "Undo", exact: true }).click();
+    await sent;
+    await expect(toast).toContainText("Undo removed 1 card from Unsorted.");
+    await expect(allUndo).toHaveCount(0);
+  } else if (
+    [
+      "failure",
+      "close-failure",
+      "failure-edition",
+      "failure-card",
+      "failure-reopen",
+    ].includes(scenario)
+  ) {
+    await page.route("**/api/holdings/batch", async (route) => {
+      arrived();
+      await held;
+      await route.fulfill({
+        status: 422,
+        json: { detail: { code: "EDITION_UNAVAILABLE" } },
+      });
+    });
+    await add();
+    await started;
+    if (scenario === "failure-edition")
+      await editions(page).filter({ hasText: "Reverse Holo" }).click();
+    if (scenario === "failure-card") await page.keyboard.press("ArrowLeft");
+    if (scenario === "failure-reopen") {
+      await page.keyboard.press("Escape");
+      await expect(opener).toBeFocused();
+      await opener.click();
+    }
+    if (scenario === "close-failure") {
+      await page.keyboard.press("Escape");
+      await expect(opener).toBeFocused();
+    }
+    release();
+    const failure = "This Edition is no longer available to add.";
+    await expect(
+      scenario === "close-failure"
+        ? toast
+        : card.getByRole("alert").filter({ hasText: failure })
+    ).toContainText(failure);
+    await expect(allUndo).toHaveCount(0);
+    if (scenario !== "close-failure") {
+      await expect(card.locator(":focus")).toHaveCount(1);
+      await page.keyboard.press("Escape");
+    } else {
+      await expect(opener).toBeFocused();
+      await opener.click();
+      await expect(card.getByText(failure)).toHaveCount(0);
+      await page.keyboard.press("Escape");
+    }
+  } else if (scenario === "close-add") {
+    await page.route("**/api/holdings/batch", async (route) => {
+      arrived();
+      await held;
+      await route.continue();
+    });
+    await add();
+    await started;
+    await page.keyboard.press("Escape");
+    await expect(opener).toBeFocused();
+    release();
+    await expect(toast).toContainText("Added 1 card to Unsorted.");
+    await expect(allUndo).toHaveCount(1);
+    await opener.click();
+    await expect(
+      card.getByRole("button", { name: "Undo", exact: true })
+    ).toHaveCount(0);
+    await expect(allUndo).toHaveCount(1);
+    await page.keyboard.press("Escape");
+  } else {
+    await add();
+    await expect(card.getByText("Added 1 copy to Unsorted.")).toBeVisible();
+    await expect(allUndo).toHaveCount(1);
+    await expect(
+      page.getByRole("button", { name: "Undo", exact: true })
+    ).toHaveCount(1);
+    await expect(card.locator(":focus")).toHaveCount(1);
+    if (process.env.S13F_PROOF_DIR)
+      await page.screenshot({
+        path: `${process.env.S13F_PROOF_DIR}/${scenario}-${page.viewportSize()!.width}.png`,
+      });
+    const notice = await page.locator("#app-toasts p").elementHandle();
+    if (
+      scenario === "card" ||
+      scenario === "edition" ||
+      scenario === "reopen"
+    ) {
+      if (scenario === "card") await page.keyboard.press("ArrowLeft");
+      if (scenario === "edition")
+        await editions(page).filter({ hasText: "Reverse Holo" }).click();
+      if (scenario === "reopen") {
+        await page.keyboard.press("Escape");
+        await expect(opener).toBeFocused();
+        await opener.click();
+      }
+      await expect(
+        card.getByRole("button", { name: "Undo", exact: true })
+      ).toHaveCount(0);
+      await expect(allUndo).toHaveCount(1);
+      expect(
+        await page
+          .locator("#app-toasts p")
+          .evaluate((node, original) => node === original, notice)
+      ).toBe(true);
+      await page.keyboard.press("Escape");
+    } else if (scenario === "newer") {
+      const earlier = (
+        await page.request.get(`${ORIGIN}/api/moves/undo`).then((r) => r.json())
+      )[0].id;
+      await add();
+      await expect(card.getByText("Added 1 copy to Unsorted.")).toBeVisible();
+      await expect(allUndo).toHaveCount(1);
+      const current = (
+        await page.request.get(`${ORIGIN}/api/moves/undo`).then((r) => r.json())
+      )[0].id;
+      expect(current).not.toBe(earlier);
+      const sent = page.waitForRequest(
+        (request) =>
+          request.method() === "POST" &&
+          request.url().endsWith(`/api/moves/undo/${current}`)
+      );
+      await card.getByRole("button", { name: "Undo", exact: true }).click();
+      await sent;
+      await expect(
+        card.getByText("Undo removed 1 card from Unsorted.")
+      ).toBeVisible();
+      await expect(allUndo).toHaveCount(0);
+      await page.keyboard.press("Escape");
+    } else if (scenario === "retry" || scenario === "close-undo") {
+      let attempts = 0;
+      const keys: string[] = [];
+      await page.route("**/api/moves/undo/*", async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        keys.push(route.request().postDataJSON().idempotency_key);
+        attempts++;
+        if (scenario === "retry" && attempts === 1)
+          return route.fulfill({
+            status: 503,
+            json: { detail: { code: "TEMPORARY" } },
+          });
+        if (scenario === "close-undo") {
+          arrived();
+          await held;
+        }
+        await route.continue();
+      });
+      await card.getByRole("button", { name: "Undo", exact: true }).click();
+      if (scenario === "retry") {
+        await expect(
+          card.getByText(
+            "Undo may not have finished. Try again to check safely."
+          )
+        ).toBeVisible();
+        await expect(card.locator(":focus")).toHaveCount(1);
+        await expect(allUndo).toHaveCount(1);
+        await card.getByRole("button", { name: "Undo", exact: true }).click();
+        await expect(
+          card.getByText("Undo removed 1 card from Unsorted.")
+        ).toBeVisible();
+        expect(keys).toHaveLength(2);
+        expect(keys[0]).toBe(keys[1]);
+        await expect(card.locator(":focus")).toHaveCount(1);
+        await page.keyboard.press("Escape");
+      } else {
+        await started;
+        await page.keyboard.press("Escape");
+        await expect(opener).toBeFocused();
+        release();
+        await expect(toast).toContainText("Undo removed 1 card from Unsorted.");
+        await expect(opener).toBeFocused();
+      }
+      await expect(allUndo).toHaveCount(0);
+    } else if (scenario === "toast") {
+      await page.keyboard.press("Escape");
+      await expect(opener).toBeFocused();
+      await toast.getByRole("button", { name: "Undo", exact: true }).click();
+      await expect(toast).toContainText("Undo removed 1 card from Unsorted.");
+      await expect(allUndo).toHaveCount(0);
+    } else if (scenario === "dismissed") {
+      await page.keyboard.press("Escape");
+      await toast.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await opener.click();
+      await expect(allUndo).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(allUndo).toHaveCount(0);
+    }
+  }
+  const messages = JSON.parse(
+    (await page.locator("html").getAttribute("data-s13f-announcements")) ?? "[]"
+  );
+  const expected = [
+    "failure",
+    "close-failure",
+    "failure-edition",
+    "failure-card",
+    "failure-reopen",
+  ].includes(scenario)
+    ? ["This Edition is no longer available to add."]
+    : scenario === "retry"
+      ? [
+          "Added 1 copy to Unsorted.",
+          "Undo may not have finished. Try again to check safely.",
+          "Undo removed 1 card from Unsorted.",
+        ]
+      : scenario === "close-undo" || scenario === "toast"
+        ? ["Added 1 copy to Unsorted.", "Undo removed 1 card from Unsorted."]
+        : scenario === "newer" || scenario.startsWith("lookup-")
+          ? [
+              "Added 1 copy to Unsorted.",
+              "Added 1 copy to Unsorted.",
+              "Undo removed 1 card from Unsorted.",
+            ]
+          : [
+              scenario === "close-add"
+                ? "Added 1 card to Unsorted."
+                : "Added 1 copy to Unsorted.",
+            ];
+  expect(messages).toEqual(expected);
+}
+// End S13f shared journeys.
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`Undo ownership transitions ${viewport.width}`, () => {
+    test.use({ viewport });
+    for (const scenario of [
+      "card",
+      "edition",
+      "reopen",
+      "close-add",
+      "newer",
+      "retry",
+      "close-undo",
+      "dismissed",
+      "toast",
+      "failure",
+      "close-failure",
+      "failure-edition",
+      "failure-card",
+      "failure-reopen",
+      "lookup-older-first",
+      "lookup-newer-first",
+    ]) {
+      test(`${scenario}: one Undo and one announcement per outcome`, async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        await singleUndoOwnership(page, scenario);
+      });
+    }
+  });
+}
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`stale Undo on the same Edition ${viewport.width}`, () => {
+    test.use({ viewport });
+    for (const fails of [false, true]) {
+      test(`a newer Add keeps its inline Undo after the older ${fails ? "failure" : "success"}`, async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        const opener = tile(page, "Switch, MEG 130").first();
+        await opener.click();
+        const card = page.getByRole("dialog");
+        const add = card.getByRole("button", { name: "Add 1", exact: true });
+        const undo = card.getByRole("button", { name: "Undo", exact: true });
+        const allUndo = page.getByRole("button", {
+          name: "Undo",
+          exact: true,
+          includeHidden: true,
+        });
+        await add.click();
+        await expect(undo).toBeEnabled();
+        let release!: () => void, arrived!: () => void;
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const started = new Promise<void>((resolve) => {
+          arrived = resolve;
+        });
+        await page.route(
+          "**/api/moves/undo/*",
+          async (route) => {
+            if (route.request().method() !== "POST") return route.continue();
+            const response = fails ? null : await route.fetch();
+            arrived();
+            await held;
+            if (response) await route.fulfill({ response });
+            else
+              await route.fulfill({ status: 500, json: { detail: "failed" } });
+          },
+          { times: 1 }
+        );
+        await undo.click();
+        await started;
+        await add.click();
+        await expect(undo).toBeEnabled();
+        await expect(allUndo).toHaveCount(1);
+        const current = (
+          await page.request
+            .get(`${ORIGIN}/api/moves/undo`)
+            .then((r) => r.json())
+        )[0].id;
+        const focus = card.getByRole("combobox", { name: "Location" });
+        await focus.focus();
+        const delivered = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            response.url().includes("/api/moves/undo/")
+        );
+        release();
+        await (await delivered).finished();
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve())
+            )
+        );
+        await expect(focus).toBeFocused();
+        await expect(card.getByText("Added 1 copy to Unsorted.")).toBeVisible();
+        await expect(undo).toBeEnabled();
+        await expect(allUndo).toHaveCount(1);
+        const sent = page.waitForRequest(
+          (request) =>
+            request.method() === "POST" &&
+            request.url().endsWith(`/api/moves/undo/${current}`)
+        );
+        await undo.click();
+        await sent;
+        await expect(
+          card.getByText("Undo removed 1 card from Unsorted.")
+        ).toBeVisible();
+        await expect(allUndo).toHaveCount(0);
+        await expect(add).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(opener).toBeFocused();
+      });
+    }
+  });
+}

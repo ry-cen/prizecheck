@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useId,
   useRef,
   useState,
@@ -93,6 +94,8 @@ type Props = {
    * moved by itself, and shows the Undo toast. It resolves to that toast's Undo, which the Add row offers beside its
    * own line while the popup covers the toast (null: none). */
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
+  /** Catalog keeps a failure reachable when its Add row closed during the request. */
+  onAddFailed?: (message: string) => void;
   renderAddFeedback?: AddFeedbackRenderer;
   /** A metadata report was sent: My metadata reports reads again. */
   onReported: () => void;
@@ -145,11 +148,22 @@ export function CatalogCardPopup({
   onLocation,
   alsoOffer,
   onAdded,
+  onAddFailed,
   onReported,
   renderAddFeedback,
   returnFocus,
 }: Props) {
   const open = request !== null;
+  // The popup outlives its keyed AddRows, so delayed failures follow the currently open modal.
+  const [lateFailure, setLateFailure] = useState("");
+  if (!open && lateFailure) setLateFailure("");
+  const failureOwner = useRef({ open, onAddFailed });
+  failureOwner.current = { open, onAddFailed };
+  function reportLateFailure(message: string) {
+    if (failureOwner.current.open) setLateFailure(message);
+    else failureOwner.current.onAddFailed?.(message);
+  }
+
   const { details, reload } = useCardDetails(request?.printingId ?? null);
   const places = usePlaces(open);
   const cardKey = request
@@ -420,6 +434,8 @@ export function CatalogCardPopup({
                 setWhereVersion((value) => value + 1);
                 return undo;
               }}
+              onAddFailed={onAddFailed ? reportLateFailure : undefined}
+              onAddStarted={onAddFailed ? () => setLateFailure("") : undefined}
               renderAddFeedback={renderAddFeedback}
               onUndone={() => {
                 reload();
@@ -429,6 +445,9 @@ export function CatalogCardPopup({
           )}
         </>
       )}
+      <p role="alert" className="m-0 text-meta text-danger">
+        {lateFailure}
+      </p>
     </CardPopup>
   );
 }
@@ -649,6 +668,8 @@ function AddRows({
   location: locationId,
   onLocation,
   onAdded,
+  onAddFailed,
+  onAddStarted,
   onUndone,
   renderAddFeedback,
 }: {
@@ -660,6 +681,9 @@ function AddRows({
   location: string | null;
   onLocation: (id: string) => void;
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
+  /** Catalog keeps a failure reachable when its Add row closed during the request. */
+  onAddFailed?: (message: string) => void;
+  onAddStarted?: () => void;
   /** The Add row's Undo took the copies out again. */
   onUndone: () => void;
   renderAddFeedback?: AddFeedbackRenderer;
@@ -669,6 +693,17 @@ function AddRows({
   // The toast's Undo for the last add, offered here while the popup covers the toast.
   const [undo, setUndo] = useState<InlineUndo | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const latestAdd = useRef(0);
+  useLayoutEffect(() => {
+    if (!renderAddFeedback) return undo?.claimInline?.();
+  }, [undo, renderAddFeedback]);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useShownToastId();
   const leaves =
     alsoOffer && !places.leaves.some((leaf) => leaf.id === alsoOffer.id)
@@ -703,7 +738,9 @@ function AddRows({
   // completed is not forgotten: the Edition picked now says so if it holds one, else the note names the other one.
   const [shownFor, setShownFor] = useState(edition.id);
   if (shownFor !== edition.id) {
+    ++latestAdd.current;
     setShownFor(edition.id);
+    setUndoing(false);
     setDone("");
     setUndo(null);
     setNote(
@@ -719,7 +756,10 @@ function AddRows({
 
   async function add() {
     if (!location || busy) return;
+    const request = ++latestAdd.current;
+    onAddStarted?.();
     setBusy(true);
+    setUndoing(false);
     setDone("");
     setUndo(null);
     setNote(null);
@@ -762,8 +802,17 @@ function AddRows({
         undoId: outcome.undoId,
         from: "popup",
       });
-      if (shown.current === sent.id) setUndo(() => offered);
+      if (
+        mounted.current &&
+        shown.current === sent.id &&
+        request === latestAdd.current
+      )
+        setUndo(() => offered);
     } else {
+      if (onAddFailed && (!mounted.current || shown.current !== sent.id)) {
+        onAddFailed(addFailed(outcome.code, outcome.retry));
+        return;
+      }
       setNote({
         editionId: sent.id,
         words: words(sent),
@@ -777,11 +826,14 @@ function AddRows({
   async function undoAdd() {
     if (!undo || undoing) return;
     setUndoing(true);
+    const request = latestAdd.current;
     const result = await undo();
+    // Data effects outlive presentation ownership, including close/reopen.
+    if (result.undone) onUndone();
+    if (!mounted.current || request !== latestAdd.current) return;
     setUndoing(false);
     setUndo(() => result.next);
     if (result.message) setDone(result.message);
-    if (result.undone) onUndone();
     // Undo goes once it is used: focus moves on to Add, beside it.
     if (!result.next) addButton.current?.focus();
   }
@@ -792,7 +844,7 @@ function AddRows({
         Add
       </h3>
       <div role="group" aria-label="Add to Collection" className={ROW}>
-        <span className={ROW_LABEL}>Collection</span>
+        <span className={ROW_LABEL}>Location</span>
         <div className="min-w-0 flex-1 basis-40">
           <Select
             label="Location"

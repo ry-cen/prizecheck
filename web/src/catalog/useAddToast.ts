@@ -2,7 +2,7 @@ import { undoDismissals, noticeTurn } from "../inventoryUndoNotice";
 import { useCallback, useEffect, useRef } from "react";
 import { applyUndo, listUndo, type UndoEntry } from "../inventoryUndo";
 import { MoveError } from "../moves_generated";
-import { useToast } from "../ui/Toast";
+import { type ToastInput, useToast } from "../ui/Toast";
 import type { AddItem } from "./cardActions";
 import { addUndoFailed, addUndoneText, batchAddedText } from "./catalogText";
 
@@ -31,6 +31,8 @@ export type InlineUndoResult = {
 export type InlineUndo = {
   (): Promise<InlineUndoResult>;
   isAvailable: () => boolean;
+  /** Catalog AddRows alone claims the action until its inline control leaves. */
+  claimInline?: () => () => void;
 };
 
 type Options = {
@@ -58,6 +60,9 @@ export function useAddToast({ shown, onUndone }: Options) {
   const live = useRef(onUndone);
   live.current = onUndone;
   const current = useRef<number | null>(null);
+  const latestAdd = useRef(0);
+  const inputs = useRef(new Map<number, ToastInput>());
+  const owned = useRef(new Set<number>());
   const keys = useRef(new Map<string, string>());
   const running = useRef(new Map<number, Promise<InlineUndoResult>>());
 
@@ -82,7 +87,7 @@ export function useAddToast({ shown, onUndone }: Options) {
       focus: boolean,
       undoable = !!added
     ) => {
-      const id = kit.show({
+      const input: ToastInput = {
         message,
         action:
           added && undoable
@@ -96,7 +101,10 @@ export function useAddToast({ shown, onUndone }: Options) {
             : undefined,
         focus,
         onDismiss: added ? () => dismiss(added, id, undoable) : undefined,
-      });
+      };
+      const id = kit.show(input);
+      inputs.current.clear();
+      inputs.current.set(id, input);
       current.current = id;
       return id;
     },
@@ -137,10 +145,16 @@ export function useAddToast({ shown, onUndone }: Options) {
     toastId: number,
     message: string
   ): Promise<InlineUndoResult> {
-    kit.update(toastId, {
+    const inlineOwned = owned.current.has(toastId);
+    const input: ToastInput = {
       message,
       action: { label: "Undo", onAction: () => {}, busy: true, keepOpen: true },
       onDismiss: () => dismiss(added, toastId, false),
+    };
+    inputs.current.set(toastId, input);
+    kit.update(toastId, {
+      ...input,
+      action: inlineOwned ? undefined : input.action,
     });
     const key = keys.current.get(added.undoId) ?? crypto.randomUUID();
     keys.current.set(added.undoId, key);
@@ -149,7 +163,7 @@ export function useAddToast({ shown, onUndone }: Options) {
       keys.current.delete(added.undoId);
       const outcome = addUndoneText(result.copy_count, added.path);
       // Always report the actual outcome to the popup, while leaving a replacement toast alone.
-      if (kit.isShown(toastId)) show(outcome, null, true);
+      if (kit.isShown(toastId)) show(outcome, null, !inlineOwned);
       live.current(added, result.owner_revision);
       return {
         message: outcome,
@@ -166,7 +180,7 @@ export function useAddToast({ shown, onUndone }: Options) {
       );
       let next: InlineUndo | null = null;
       if (kit.isShown(toastId)) {
-        const id = show(outcome, added, true, retry);
+        const id = show(outcome, added, !inlineOwned, retry);
         if (retry) next = inline(id, added, outcome);
       }
       return { message: outcome, next, undone: false };
@@ -187,15 +201,33 @@ export function useAddToast({ shown, onUndone }: Options) {
           return { message: "", next: null, undone: false };
         return undo(added, toastId, message);
       },
-      { isAvailable: () => kit.isShown(toastId) }
+      {
+        isAvailable: () => kit.isShown(toastId),
+        claimInline: () => {
+          owned.current.add(toastId);
+          const input = inputs.current.get(toastId);
+          if (input) kit.update(toastId, { ...input, action: undefined });
+          return () => {
+            owned.current.delete(toastId);
+            const latest = inputs.current.get(toastId);
+            if (latest) kit.update(toastId, latest);
+          };
+        },
+      }
     );
   }
 
   return useCallback(
     async (added: AddedCards): Promise<InlineUndo | null> => {
+      // Add ordering cannot depend on a preliminary toast having advanced the host's version.
+      const request = ++latestAdd.current;
+      if (current.current !== null) {
+        kit.dismiss(current.current);
+        current.current = null;
+      }
       const turn = noticeTurn(kit, () => null);
       const entries = await listUndo().catch(() => [] as UndoEntry[]);
-      if (!turn()) return null;
+      if (request !== latestAdd.current || !turn()) return null;
       const undoable = entries[0]?.id === added.undoId;
       show(
         batchAddedText(added.copies, added.path),
