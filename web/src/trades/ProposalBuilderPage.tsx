@@ -5,7 +5,12 @@ import {
   OfferInventoryChanged,
 } from "./offerInventory";
 import { OfferReview, offerChanges } from "./offerReview";
-import { offerCaps, offerControls, reviewRequired } from "./offerLifecycle";
+import {
+  offerCaps,
+  offerControls,
+  reviewRequired,
+  type OfferLifecycle,
+} from "./offerLifecycle";
 import { offerVersion } from "./offerInventory";
 import { offerLibrary, offerCopyMap } from "./offerCopies";
 import { ProposedOfferChanges } from "./ProposedOfferChanges";
@@ -123,6 +128,67 @@ export function proposalDraftChanged(
         : money
     );
   return key(opening, openingCash) !== key(draft, cash);
+}
+
+type FocusSlot =
+  | { kind: "send" }
+  | { kind: "stepper"; row: string; index: number }
+  | { kind: "printing"; side: ProposalSide }
+  | { kind: "library" }
+  | { kind: "review" }
+  | { kind: "other" };
+
+/** No layout reads: a closed dialog or hidden ancestor also makes a control unavailable to focus. */
+function focusLive(
+  element: Element | null | undefined
+): element is HTMLElement {
+  return (
+    element instanceof HTMLElement &&
+    element.isConnected &&
+    !element.matches(":disabled") &&
+    element.closest("[hidden], dialog:not([open])") === null
+  );
+}
+function firstLive(
+  ...candidates: (HTMLElement | null | undefined)[]
+): HTMLElement | null {
+  return candidates.find(focusLive) ?? null;
+}
+function focusSlot(
+  element: HTMLElement,
+  places: {
+    send: HTMLElement | null;
+    library: HTMLElement | null;
+    review: HTMLElement | null;
+  }
+): FocusSlot {
+  if (element === places.send) return { kind: "send" };
+  const row = element.closest<HTMLElement>("[data-focus-row]");
+  if (row)
+    return {
+      kind: "stepper",
+      row: row.dataset.focusRow!,
+      index: [...row.querySelectorAll<HTMLElement>("button")].indexOf(element),
+    };
+  const side =
+    element.closest<HTMLElement>("[data-focus-side]")?.dataset.focusSide;
+  if (side === "get" || side === "give") return { kind: "printing", side };
+  if (places.library?.contains(element)) return { kind: "library" };
+  if (places.review?.contains(element)) return { kind: "review" };
+  return { kind: "other" };
+}
+function reviewNoticeText(lifecycle: OfferLifecycle): string {
+  return lifecycle.phase === "gone"
+    ? "This Trade no longer accepts an offer change. Your draft is kept."
+    : lifecycle.phase === "read_failed"
+      ? lifecycle.failure === "version"
+        ? "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
+        : "Available copies couldn't be loaded. Your draft is kept."
+      : lifecycle.phase === "loading"
+        ? "Checking available copies…"
+        : lifecycle.phase === "checking"
+          ? "Checking the current offer. Your draft is kept."
+          : "The offer changed. Your draft is kept.";
 }
 
 type Party = { trader_id: string; display_name: string };
@@ -297,8 +363,49 @@ export function ProposalBuilderPage({
   const reviewNoticeRef = useRef<HTMLParagraphElement>(null);
   const sendMessageRef = useRef<HTMLParagraphElement>(null);
   const reasonRef = useRef<HTMLParagraphElement>(null);
-  const settleSendFocus = useRef(false);
-  const recoveryFocus = useRef<HTMLElement | null>(null);
+  const rootRef = useRef<HTMLElement>(null);
+  const libraryRef = useRef<HTMLDivElement>(null);
+  const lastFocus = useRef<{ element: HTMLElement; slot: FocusSlot } | null>(
+    null
+  );
+  const blurTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      lastFocus.current =
+        target instanceof HTMLElement && rootRef.current?.contains(target)
+          ? {
+              element: target,
+              slot: focusSlot(target, {
+                send: sendButtonRef.current,
+                library: libraryRef.current,
+                review: reviewRegionRef.current,
+              }),
+            }
+          : null;
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const left = lastFocus.current?.element;
+      if (event.target !== left) return;
+      window.clearTimeout(blurTimer.current);
+      blurTimer.current = window.setTimeout(() => {
+        // Decide after the commit: pre-removal blur still sees a live element in Chromium.
+        if (
+          lastFocus.current?.element === left &&
+          focusLive(left) &&
+          document.activeElement !== left
+        )
+          lastFocus.current = null;
+      }, 0);
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("focusout", onFocusOut, true);
+      window.clearTimeout(blurTimer.current);
+    };
+  }, []);
   const sideHeading = {
     get: useRef<HTMLHeadingElement>(null),
     give: useRef<HTMLHeadingElement>(null),
@@ -556,14 +663,35 @@ export function ProposalBuilderPage({
   // The same words twice are announced twice: the line is cleared first, then set a moment later.
   const announceTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(announceTimer.current), []);
-  function say(text: string, owner: "cards" | "proposal" = "cards") {
+  function say(
+    text: string,
+    owner: "cards" | "proposal" = "cards",
+    stillNeeded?: () => boolean
+  ) {
     window.clearTimeout(announceTimer.current);
     setAnnouncement({ text: "", owner });
-    announceTimer.current = window.setTimeout(
-      () => setAnnouncement({ text, owner }),
-      60
-    );
+    announceTimer.current = window.setTimeout(() => {
+      if (!stillNeeded || stillNeeded()) setAnnouncement({ text, owner });
+    }, 60);
   }
+
+  const announcedPhase = useRef(lifecycle?.phase);
+  useEffect(() => {
+    const phase = lifecycle?.phase;
+    if (
+      phase !== announcedPhase.current &&
+      lifecycle &&
+      ["changed", "gone", "read_failed"].includes(lifecycle.phase) &&
+      !reviewRegionRef.current?.contains(document.activeElement)
+    )
+      // A phase can enter before busy clears and the guard moves Send into review. Avoid duplicating that focus announcement.
+      say(
+        reviewNoticeText(lifecycle),
+        "proposal",
+        () => !reviewRegionRef.current?.contains(document.activeElement)
+      );
+    announcedPhase.current = phase;
+  }, [lifecycle?.phase, lifecycle?.failure]);
 
   function add(side: ProposalSide, libraryCard: LibraryCard) {
     if (!capsReady || sending.current || lifecycle?.phase === "sending") return;
@@ -586,13 +714,6 @@ export function ProposalBuilderPage({
       say(`${label}: ${n + 1} in ${SIDE_LABEL[side]}`);
     }
   }
-
-  // A line taken out moves focus to its side's heading, since the stepper left with it.
-  useEffect(() => {
-    const side = refocus.current;
-    refocus.current = null;
-    if (side) sideHeading[side].current?.focus();
-  }, [proposal]);
 
   function inventoryFailed(cause: unknown, expected: TradeView | undefined) {
     if (
@@ -660,50 +781,95 @@ export function ProposalBuilderPage({
   }
 
   function finishSending() {
-    settleSendFocus.current ||=
-      document.activeElement === sendButtonRef.current;
     sending.current = false;
     if (mounted.current) setBusy(false);
   }
 
-  // Follow only focus this command owned, including recovery controls later removed by async reads or review.
-  useLayoutEffect(() => {
-    if (busy) return;
-    const active = document.activeElement;
-    const previous = recoveryFocus.current;
-    if (!settleSendFocus.current) {
-      if (!previous) return;
-      const live = previous.isConnected && !previous.matches(":disabled");
-      if (active === previous && live) return;
-      if (active !== previous && (active !== document.body || live)) {
-        recoveryFocus.current = null; // The collector moved elsewhere; never take that focus back.
-        return;
-      }
-    }
-    settleSendFocus.current = false;
-    if (sent.current && !terminal) {
-      recoveryFocus.current = null; // Successful navigation owns page-entry focus.
-      return;
-    }
-    const sendButton = sendButtonRef.current;
-    const recovery = reviewNeeded
-      ? reviewRegionRef.current?.querySelector<HTMLButtonElement>(
-          "button:not(:disabled)"
-        )
-      : null;
+  function focusTarget(slot: FocusSlot): HTMLElement | null {
+    if (terminal) return firstLive(headingRef.current);
+    const actionRecovery =
+      lifecycle && ["changed", "gone", "read_failed"].includes(lifecycle.phase)
+        ? [
+            reviewRegionRef.current?.querySelector<HTMLElement>(
+              "button:not(:disabled)"
+            ),
+            reviewNoticeRef.current,
+          ]
+        : [];
     const message = sendMessageRef.current?.textContent?.trim()
       ? sendMessageRef.current
       : null;
-    const target =
-      sendButton && !sendButton.disabled
-        ? sendButton
-        : (recovery ??
-          (reviewNeeded ? reviewNoticeRef.current : null) ??
-          message ??
-          reasonRef.current ??
-          headingRef.current);
-    recoveryFocus.current = target;
-    if (target && active !== target) target.focus();
+    switch (slot.kind) {
+      case "send":
+        return firstLive(
+          ...actionRecovery,
+          message,
+          reasonRef.current,
+          headingRef.current
+        );
+      case "stepper": {
+        const row = [
+          ...(rootRef.current?.querySelectorAll<HTMLElement>(
+            "[data-focus-row]"
+          ) ?? []),
+        ].find((row) => row.dataset.focusRow === slot.row);
+        const side = slot.row.split(":")[0] as ProposalSide;
+        return firstLive(
+          row?.querySelectorAll<HTMLElement>("button")[1 - slot.index],
+          sideHeading[side].current,
+          headingRef.current
+        );
+      }
+      case "printing":
+        return firstLive(
+          rootRef.current?.querySelector<HTMLElement>(
+            `[data-focus-side="${slot.side}"] button:not(:disabled)`
+          ),
+          sideHeading[slot.side].current,
+          headingRef.current
+        );
+      case "library":
+        return firstLive(
+          libraryRef.current?.querySelector<HTMLElement>(
+            '[role="radiogroup"] [role="radio"][aria-checked="true"]'
+          ),
+          headingRef.current
+        );
+      case "review":
+        return firstLive(
+          ...actionRecovery,
+          reviewNoticeRef.current,
+          message,
+          sendButtonRef.current,
+          reasonRef.current,
+          headingRef.current
+        );
+      default:
+        return firstLive(
+          ...actionRecovery,
+          message,
+          sendButtonRef.current,
+          reasonRef.current,
+          headingRef.current
+        );
+    }
+  }
+
+  // Repair only unowned focus after a control dies. Take-out has no exception: a live owner always keeps focus.
+  useLayoutEffect(() => {
+    const removed = refocus.current;
+    refocus.current = null;
+    const lost = lastFocus.current;
+    const active = document.activeElement;
+    if (active && active !== document.body && focusLive(active)) {
+      if (lost && !focusLive(lost.element)) lastFocus.current = null;
+      return;
+    }
+    if (removed) return void sideHeading[removed].current?.focus();
+    if (!lost || focusLive(lost.element)) return;
+    lastFocus.current = null;
+    if (sent.current && !terminalRef.current) return;
+    focusTarget(lost.slot)?.focus();
   });
 
   async function send() {
@@ -743,9 +909,6 @@ export function ProposalBuilderPage({
     if (terminalRef.current) return;
     key.current = submittedKey;
     const settle = (result: TerminalSend) => {
-      settleSendFocus.current =
-        headingRef.current?.closest("main")?.contains(document.activeElement) ??
-        false;
       sent.current = true;
       terminalRef.current = result;
       key.current = submittedKey;
@@ -870,7 +1033,7 @@ export function ProposalBuilderPage({
     );
     if (terminal.kind === "unavailable")
       return (
-        <main className={FRAME}>
+        <main ref={rootRef} className={FRAME}>
           <PageHeader title="Trade Proposal" headingRef={headingRef} />
           <p role="status" className="m-0 text-body text-text">
             Your proposal was already sent. This Trade isn't available to view.
@@ -882,7 +1045,7 @@ export function ProposalBuilderPage({
     const trade = terminal.trade;
     const target = tradePath(trade.thread_id);
     return (
-      <main className={FRAME}>
+      <main ref={rootRef} className={FRAME}>
         <PageHeader title={terminal.label} headingRef={headingRef} />
         <p role="status" className="m-0 text-body text-text">
           Your proposal was already sent. These are the current terms.
@@ -1018,17 +1181,7 @@ export function ProposalBuilderPage({
               className="flex flex-col gap-2 rounded-panel border border-border p-3"
             >
               <p role="status" tabIndex={-1} ref={reviewNoticeRef}>
-                {lifecycle.phase === "gone"
-                  ? "This Trade no longer accepts an offer change. Your draft is kept."
-                  : lifecycle.phase === "read_failed"
-                    ? lifecycle.failure === "version"
-                      ? "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
-                      : "Available copies couldn't be loaded. Your draft is kept."
-                    : lifecycle.phase === "loading"
-                      ? "Checking available copies…"
-                      : lifecycle.phase === "checking"
-                        ? "Checking the current offer. Your draft is kept."
-                        : "The offer changed. Your draft is kept."}
+                {reviewNoticeText(lifecycle)}
               </p>
               {lifecycle.candidate ? (
                 <>
@@ -1089,29 +1242,39 @@ export function ProposalBuilderPage({
           )}
         {sideSection("get")}
         {fromMatch && match.kind === "ready" && (
-          <MatchPrintingChoices
-            side="get"
-            row={match.row}
-            proposal={proposal}
-            onChoose={(groupId, editionId) =>
-              change((p) =>
-                chooseMatchedPrinting(p, "get", match.row, groupId, editionId)
-              )
-            }
-          />
+          <div className="contents" data-focus-side="get">
+            <MatchPrintingChoices
+              side="get"
+              row={match.row}
+              proposal={proposal}
+              onChoose={(groupId, editionId) =>
+                change((p) =>
+                  chooseMatchedPrinting(p, "get", match.row, groupId, editionId)
+                )
+              }
+            />
+          </div>
         )}
         {sideSection("give")}
         {fromMatch && match.kind === "ready" && (
-          <MatchPrintingChoices
-            side="give"
-            row={match.row}
-            proposal={proposal}
-            onChoose={(groupId, editionId) =>
-              change((p) =>
-                chooseMatchedPrinting(p, "give", match.row, groupId, editionId)
-              )
-            }
-          />
+          <div className="contents" data-focus-side="give">
+            <MatchPrintingChoices
+              side="give"
+              row={match.row}
+              proposal={proposal}
+              onChoose={(groupId, editionId) =>
+                change((p) =>
+                  chooseMatchedPrinting(
+                    p,
+                    "give",
+                    match.row,
+                    groupId,
+                    editionId
+                  )
+                )
+              }
+            />
+          </div>
         )}
         <section
           aria-labelledby={cashHeadingId}
@@ -1228,6 +1391,7 @@ export function ProposalBuilderPage({
     announcement.owner === "cards" && (!phone || pane === "cards");
   const library = (
     <div
+      ref={libraryRef}
       className={
         busy
           ? "contents [&_button[aria-disabled=true]]:opacity-45 [&_button[aria-disabled=true]]:cursor-default!"
@@ -1261,7 +1425,7 @@ export function ProposalBuilderPage({
   );
 
   return (
-    <main className={FRAME}>
+    <main ref={rootRef} className={FRAME}>
       {back}
       <PageHeader title={`${frameTitle} to ${name}`} headingRef={headingRef} />
       {phone ? (
@@ -1393,14 +1557,19 @@ function ProposalSideSection({
                 key={line.edition_id}
                 card={line}
                 quantity={
-                  <Stepper
-                    label={`${tradeCardName(line)} ${side === "get" ? "you get" : "you give"}`}
-                    value={line.quantity}
-                    min={0}
-                    max={loadingCaps ? line.quantity : cap}
-                    announceValue={false}
-                    onChange={(value) => onChange(line, value)}
-                  />
+                  <span
+                    className="contents"
+                    data-focus-row={`${side}:${line.edition_id}`}
+                  >
+                    <Stepper
+                      label={`${tradeCardName(line)} ${side === "get" ? "you get" : "you give"}`}
+                      value={line.quantity}
+                      min={0}
+                      max={loadingCaps ? line.quantity : cap}
+                      announceValue={false}
+                      onChange={(value) => onChange(line, value)}
+                    />
+                  </span>
                 }
                 context={
                   <span className="text-meta text-text-subtle tabular-nums">

@@ -9,10 +9,11 @@ import {
   getTraderMatch,
   getTraderTradeList,
   type TradeView,
+  type TradeMatchCard,
 } from "../social_generated";
 import { TradesError, counterTrade, getTradeList } from "../trades_generated";
 import { ToastProvider } from "../ui/Toast";
-import { peekProposalSeed } from "./openProposal";
+import { peekProposalSeed, peekMatchProposal } from "./openProposal";
 import {
   createPageEntryFocus,
   restorePageFocus,
@@ -41,6 +42,7 @@ vi.mock("./useTradeValue", async (original) => ({
 vi.mock("./openProposal", async (original) => ({
   ...(await original<typeof import("./openProposal")>()),
   peekProposalSeed: vi.fn(),
+  peekMatchProposal: vi.fn(),
 }));
 const card = {
   edition_id: "Iono",
@@ -1164,4 +1166,589 @@ it("keeps the chosen recovery focus live when confirming the changed Counter rem
   expect(document.activeElement?.textContent).toContain(
     "Current offer reviewed"
   );
+});
+
+function held<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (cause: Error) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+async function cashEdit() {
+  await click(button("You pay"));
+  const amount = host.querySelector<HTMLInputElement>(
+    'input[inputmode="decimal"]'
+  )!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )!.set!.call(amount, "1");
+    amount.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  return amount;
+}
+function focusControl(kind: string): HTMLElement {
+  if (kind === "Increase") return increase();
+  if (kind === "Decrease") return decrease();
+  if (kind === "cash")
+    return host.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!;
+  if (kind === "payer") return button("You pay");
+  if (kind === "Send") return button("Send Trade Proposal");
+  return host.querySelector<HTMLElement>(
+    'button[aria-label^="Add to You get, Iono,"]'
+  )!;
+}
+const theirsInventory = () => ({
+  trader_id: "misty",
+  display_name: "Misty",
+  band: null,
+  completed_trades: 0,
+  cards: [{ ...card, copies: "2" }],
+  next_page: null,
+});
+const counterFocusCases = [
+  "Increase",
+  "Decrease",
+  "cash",
+  "payer",
+  "tile",
+].flatMap((control) =>
+  (
+    [
+      "changed",
+      "changed-read-failed",
+      "refused",
+      "failure",
+      "unknown",
+      "gone",
+    ] as const
+  ).map((outcome) => ({ control, outcome }))
+);
+it.each(counterFocusCases)(
+  "keeps focus live for a focused Counter $control after $outcome",
+  async ({ control, outcome }) => {
+    await mount();
+    await cashEdit();
+    const post = held<TradeView>();
+    vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+    await click(send());
+    const target = focusControl(control);
+    target.focus();
+    const version = held<TradeView>(),
+      inventory = held<ReturnType<typeof theirsInventory>>();
+    if (outcome === "changed") current = replacement;
+    if (outcome === "changed-read-failed")
+      vi.mocked(getTrade).mockRejectedValueOnce(new TypeError("offline"));
+    if (outcome === "refused") {
+      vi.mocked(getTrade).mockReturnValueOnce(version.promise);
+      vi.mocked(getTraderTradeList).mockReturnValue(inventory.promise);
+    }
+    try {
+      await act(async () =>
+        post.reject(
+          outcome.startsWith("changed")
+            ? new TradesError(409, "OFFER_CHANGED")
+            : outcome === "gone"
+              ? new TradesError(404, "TRADE_NOT_FOUND")
+              : outcome === "unknown"
+                ? new TypeError("lost")
+                : new TradesError(
+                    outcome === "failure" ? 503 : 422,
+                    "TOO_MANY_LINES"
+                  )
+        )
+      );
+      const expected =
+        control === "Increase" && !["failure", "unknown"].includes(outcome)
+          ? decrease()
+          : target;
+      expect(document.activeElement).toBe(expected);
+      expect(document.activeElement).not.toBe(document.body);
+      if (outcome === "refused") {
+        await act(async () => version.resolve(original));
+        expect(document.activeElement).toBe(expected);
+        await act(async () => inventory.resolve(theirsInventory()));
+        expect(document.activeElement).toBe(expected);
+      }
+    } finally {
+      version.resolve(original);
+      inventory.resolve(theirsInventory());
+    }
+  }
+);
+
+async function mountNewFocus() {
+  vi.mocked(peekProposalSeed).mockReturnValue({
+    get: [{ ...card, copies: "2", quantity: 1 }],
+    give: [],
+  });
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(ProposalBuilderPage, {
+          traderId: "misty",
+          onNavigate: navigate,
+        }),
+      })
+    )
+  );
+  await cashEdit();
+}
+const proposalFocusCases = [
+  "Increase",
+  "Decrease",
+  "cash",
+  "tile",
+  "Send",
+].flatMap((control) =>
+  (["refused", "failure", "unknown", "current", "unavailable"] as const).map(
+    (outcome) => ({ control, outcome })
+  )
+);
+it.each(proposalFocusCases)(
+  "keeps focus live for a focused new-proposal $control after $outcome",
+  async ({ control, outcome }) => {
+    const response = held<Response>();
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(response.promise));
+    await mountNewFocus();
+    await click(button("Send Trade Proposal"));
+    const target = focusControl(control);
+    target.focus();
+    await act(async () => {
+      if (outcome === "unknown") response.reject(new TypeError("lost"));
+      else
+        response.resolve(
+          new Response(
+            JSON.stringify(
+              outcome === "current"
+                ? {
+                    outcome: "already_applied",
+                    view: "current",
+                    label: "Current Trade",
+                    trade: original,
+                  }
+                : {
+                    detail:
+                      outcome === "unavailable"
+                        ? {
+                            code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+                            outcome: "already_applied",
+                            view: "unavailable",
+                          }
+                        : { code: "TOO_MANY_LINES" },
+                  }
+            ),
+            {
+              status:
+                outcome === "current"
+                  ? 201
+                  : outcome === "unavailable"
+                    ? 409
+                    : outcome === "failure"
+                      ? 503
+                      : 422,
+              headers: { "content-type": "application/json" },
+            }
+          )
+        );
+    });
+    expect(document.activeElement).toBe(
+      outcome === "current" || outcome === "unavailable"
+        ? host.querySelector("h1")
+        : target
+    );
+    expect(document.activeElement).not.toBe(document.body);
+  }
+);
+
+it.each(["Increase", "Decrease"])(
+  "keeps focus continuous through held checking, loading and ready: %s",
+  async (control) => {
+    await mount();
+    await cashEdit();
+    const post = held<TradeView>();
+    vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+    await click(send());
+    focusControl(control).focus();
+    const version = held<TradeView>(),
+      theirs = held<ReturnType<typeof theirsInventory>>(),
+      mine = held<Awaited<ReturnType<typeof getTradeList>>>();
+    vi.mocked(getTrade).mockReturnValueOnce(version.promise);
+    vi.mocked(getTraderTradeList).mockReturnValue(theirs.promise);
+    vi.mocked(getTradeList).mockReturnValue(mine.promise);
+    try {
+      await act(async () =>
+        post.reject(new TradesError(422, "TOO_MANY_LINES"))
+      );
+      expect(increase().disabled).toBe(true);
+      expect(document.activeElement).toBe(decrease());
+      await act(async () => version.resolve(original));
+      expect(document.activeElement).toBe(decrease());
+      await act(async () => theirs.resolve(theirsInventory()));
+      expect(increase().disabled).toBe(true);
+      expect(document.activeElement).toBe(decrease());
+      await act(async () => mine.resolve({ cards: [], locations: [] }));
+      expect(increase().disabled).toBe(false);
+      expect(document.activeElement).toBe(decrease());
+    } finally {
+      version.resolve(original);
+      theirs.resolve(theirsInventory());
+      mine.resolve({ cards: [], locations: [] });
+    }
+  }
+);
+
+it("moves a focused My Trade List tile to its list choice when a refused Counter re-reads it", async () => {
+  vi.mocked(getTradeList).mockResolvedValue({
+    cards: [{ ...card, places: [] }],
+    locations: [],
+  });
+  await mount();
+  await cashEdit();
+  await click(button("My Trade List"));
+  const post = held<TradeView>();
+  vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+  await click(send());
+  host
+    .querySelector<HTMLElement>('button[aria-label^="Add to You give, Iono,"]')!
+    .focus();
+  const mine = held<Awaited<ReturnType<typeof getTradeList>>>();
+  vi.mocked(getTradeList).mockReturnValue(mine.promise);
+  try {
+    await act(async () => post.reject(new TradesError(422, "TOO_MANY_LINES")));
+    expect(document.activeElement).toBe(button("My Trade List"));
+  } finally {
+    await act(async () =>
+      mine.resolve({ cards: [{ ...card, places: [] }], locations: [] })
+    );
+  }
+});
+
+it("moves an Increase focused during a background offer change to its Decrease and announces the notice", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.mocked(getTraderTradeList).mockImplementation(async (_id, options) => {
+    if (options?.q !== undefined) throw new Error("library offline");
+    return theirsInventory();
+  });
+  try {
+    await mount();
+    await cashEdit();
+    increase().focus();
+    current = replacement;
+    await click(button("Retry"));
+    expect(document.activeElement).toBe(decrease());
+    await act(async () => vi.advanceTimersByTime(60));
+    const proposalStatuses = [
+      ...host.querySelectorAll('[role="status"]'),
+    ].filter((e) => !e.closest('[aria-label="Current offer to review"]'));
+    expect(
+      proposalStatuses.some(
+        (e) => e.textContent === "The offer changed. Your draft is kept."
+      )
+    ).toBe(true);
+    expect(document.activeElement).toBe(decrease());
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("announces nothing extra when focus lands in the review region", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await mount();
+    await cashEdit();
+    current = replacement;
+    vi.mocked(counterTrade).mockRejectedValueOnce(
+      new TradesError(409, "OFFER_CHANGED")
+    );
+    send().focus();
+    await click(send());
+    expect(document.activeElement).toBe(button("I reviewed the current offer"));
+    await act(async () => vi.advanceTimersByTime(60));
+    expect(
+      [...host.querySelectorAll('[role="status"]')]
+        .filter((e) => !e.closest('[aria-label="Current offer to review"]'))
+        .some((e) => e.textContent === "The offer changed. Your draft is kept.")
+    ).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("moves a focused Increase pressed up to its cap to its Decrease", async () => {
+  // One spare plus the reserved opening copy makes the intended cap two.
+  vi.mocked(getTraderTradeList).mockResolvedValue({
+    ...theirsInventory(),
+    cards: [{ ...card, copies: "1" }],
+  });
+  await mount();
+  increase().focus();
+  await click(increase());
+  expect(increase().disabled).toBe(true);
+  expect(document.activeElement).toBe(decrease());
+});
+it("keeps taking a line out on its side heading", async () => {
+  await mount();
+  decrease().focus();
+  await click(decrease());
+  expect(document.activeElement).toBe(
+    [...host.querySelectorAll("h2")].find((e) => e.textContent === "You get")
+  );
+});
+
+it("moves a chosen printing's focus to the next choice, else its side heading", async () => {
+  vi.mocked(peekMatchProposal).mockReturnValue(true);
+  const base = await getTraderMatch("misty");
+  const matched: TradeMatchCard = {
+    ...card,
+    need: "3",
+    want_list_need: "3",
+    origin: "both",
+    accepts_as: "exact",
+    need_groups: ["shared"],
+  };
+  vi.mocked(getTraderMatch).mockResolvedValue({
+    ...base,
+    you_get: [
+      matched,
+      { ...matched, edition_id: "other", collector_number: "080", copies: "2" },
+    ],
+    you_get_groups: [{ id: "shared", need: "3", cards: "2" }],
+  });
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(ProposalBuilderPage, {
+          traderId: "misty",
+          onNavigate: navigate,
+        }),
+      })
+    )
+  );
+  let choices = [
+    ...host.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label^="Choose this printing:"]'
+    ),
+  ];
+  choices[0].focus();
+  await click(choices[0]);
+  expect(document.activeElement).toBe(choices[1]);
+  await click(choices[1]);
+  expect(document.activeElement).toBe(
+    [...host.querySelectorAll("h2")].find((e) => e.textContent === "You get")
+  );
+});
+it("moves focus from a removed library Retry to the Cards from radio", async () => {
+  vi.mocked(getTraderTradeList).mockImplementation(async (_id, options) => {
+    if (options?.q !== undefined) throw new Error("library offline");
+    return theirsInventory();
+  });
+  await mount();
+  const retry = button("Retry");
+  retry.focus();
+  const next = held<ReturnType<typeof theirsInventory>>();
+  vi.mocked(getTraderTradeList).mockReturnValue(next.promise);
+  try {
+    await click(retry);
+    expect(document.activeElement).toBe(button("Their Trade List"));
+  } finally {
+    await act(async () => next.resolve(theirsInventory()));
+  }
+});
+
+it("does not take focus back after the collector blurs to the page", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await mount();
+    await cashEdit();
+    increase().focus();
+    increase().blur();
+    await act(async () => vi.runOnlyPendingTimers());
+    const post = held<TradeView>();
+    vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+    await click(send());
+    current = replacement;
+    await act(async () => post.reject(new TradesError(409, "OFFER_CHANGED")));
+    expect(document.activeElement).toBe(document.body);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("does not take focus from a control outside the builder", async () => {
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  try {
+    await mount();
+    await cashEdit();
+    increase().focus();
+    outside.focus();
+    const post = held<TradeView>();
+    vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+    await click(send());
+    current = replacement;
+    await act(async () => post.reject(new TradesError(409, "OFFER_CHANGED")));
+    expect(document.activeElement).toBe(outside);
+  } finally {
+    outside.remove();
+  }
+});
+it("keeps the record when a window blur leaves focus on the control", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await mount();
+    await cashEdit();
+    increase().focus();
+    increase().dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    await act(async () => vi.runOnlyPendingTimers());
+    const post = held<TradeView>();
+    vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+    await click(send());
+    current = replacement;
+    await act(async () => post.reject(new TradesError(409, "OFFER_CHANGED")));
+    expect(document.activeElement).toBe(decrease());
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(["changed", "refused", "current"] as const)(
+  "keeps a Details dialog's focus through %s and restores or transfers it",
+  async (outcome) => {
+    const proto = HTMLDialogElement.prototype,
+      show = Object.getOwnPropertyDescriptor(proto, "showModal"),
+      close = Object.getOwnPropertyDescriptor(proto, "close");
+    Object.defineProperty(proto, "showModal", {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+      },
+    });
+    Object.defineProperty(proto, "close", {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.removeAttribute("open");
+      },
+    });
+    const rects = vi
+      .spyOn(HTMLElement.prototype, "getClientRects")
+      .mockImplementation(() =>
+        Object.assign([new DOMRect(0, 0, 1, 1)], {
+          item: () => new DOMRect(0, 0, 1, 1),
+        })
+      );
+    try {
+      const response = held<Response>(),
+        post = held<TradeView>();
+      if (outcome !== "current") {
+        await mount();
+        await cashEdit();
+        vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+        await click(send());
+      } else {
+        vi.stubGlobal("fetch", vi.fn().mockReturnValue(response.promise));
+        await mountNewFocus();
+        await click(button("Send Trade Proposal"));
+      }
+      const details = button("Details for Iono (PAL 185)");
+      details.focus();
+      await click(details);
+      const dialog = host.querySelector<HTMLDialogElement>("dialog[open]")!;
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      if (outcome !== "current") {
+        current = replacement;
+        await act(async () =>
+          post.reject(
+            new TradesError(
+              outcome === "changed" ? 409 : 422,
+              outcome === "changed" ? "OFFER_CHANGED" : "TOO_MANY_LINES"
+            )
+          )
+        );
+        expect(dialog.contains(document.activeElement)).toBe(true);
+        await act(async () =>
+          document.activeElement!.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+          )
+        );
+        expect(document.activeElement).toBe(details);
+      } else {
+        await act(async () =>
+          response.resolve(
+            new Response(
+              JSON.stringify({
+                outcome: "already_applied",
+                view: "current",
+                label: "Current Trade",
+                trade: original,
+              }),
+              { status: 201, headers: { "content-type": "application/json" } }
+            )
+          )
+        );
+        expect(document.activeElement).toBe(host.querySelector("h1"));
+      }
+    } finally {
+      rects.mockRestore();
+      if (show) Object.defineProperty(proto, "showModal", show);
+      else Reflect.deleteProperty(proto, "showModal");
+      if (close) Object.defineProperty(proto, "close", close);
+      else Reflect.deleteProperty(proto, "close");
+    }
+  }
+);
+
+it.each([
+  ["changed", "The offer changed. Your draft is kept."],
+  ["gone", "This Trade no longer accepts an offer change. Your draft is kept."],
+  [
+    "read_failed",
+    "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending.",
+  ],
+])(
+  "announces %s when a live stepper owns focus outside review",
+  async (phase, notice) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await mount();
+      await cashEdit();
+      const post = held<TradeView>();
+      vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+      await click(send());
+      decrease().focus();
+      if (phase === "changed") current = replacement;
+      if (phase === "read_failed")
+        vi.mocked(getTrade).mockRejectedValueOnce(new TypeError("offline"));
+      await act(async () =>
+        post.reject(
+          new TradesError(
+            phase === "gone" ? 404 : 409,
+            phase === "gone" ? "TRADE_NOT_FOUND" : "OFFER_CHANGED"
+          )
+        )
+      );
+      await act(async () => vi.advanceTimersByTime(60));
+      expect(
+        [...host.querySelectorAll('[role="status"]')]
+          .filter((e) => !e.closest('[aria-label="Current offer to review"]'))
+          .some((e) => e.textContent === notice)
+      ).toBe(true);
+      expect(document.activeElement).toBe(decrease());
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+);
+it("does not take outside focus when an explicit take-out commits", async () => {
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  try {
+    await mount();
+    outside.focus();
+    await click(decrease());
+    expect(document.activeElement).toBe(outside);
+  } finally {
+    outside.remove();
+  }
 });

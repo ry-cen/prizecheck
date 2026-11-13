@@ -852,6 +852,158 @@ async function reloadWithoutWarning(page: Page) {
   }
 }
 
+/** Real backward Tab actions, bounded by the controls preceding the stepper; this is navigation, not a retry loop. */
+async function reachReviewBackwards(
+  page: Page,
+  decrease: Locator,
+  region: Locator
+) {
+  const main = page.locator("main:visible");
+  const row = decrease.locator("xpath=ancestor::li[1]");
+  const order = (element: Element) =>
+    Array.from(
+      element
+        .closest("main")!
+        .querySelectorAll("button,a[href],input,select,textarea,[tabindex]")
+    ).indexOf(element);
+  let previous = await decrease.evaluate(order);
+  const stops = previous;
+  for (let step = 0; step < stops; step++) {
+    await page.keyboard.press("Shift+Tab");
+    const focused = page.locator(":focus");
+    await expect(main.locator(":focus")).toHaveCount(1);
+    await expect(focused).toBeVisible();
+    await expect(focused).toBeEnabled();
+    await expect(
+      row.locator(":focus").or(region.locator(":focus"))
+    ).toHaveCount(1);
+    const index = await focused.evaluate(order);
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(index).toBeLessThan(previous);
+    previous = index;
+    if ((await region.locator("button:focus").count()) === 1) return;
+  }
+  throw new Error(
+    "Review control was not reached before backward navigation exhausted the builder controls."
+  );
+}
+
+type SendOutcome =
+  | "changed"
+  | "review-failed"
+  | "refused"
+  | "failure"
+  | "unknown"
+  | "gone"
+  | "current"
+  | "unavailable"
+  | "success";
+async function holdSend(
+  page: Page,
+  counter: boolean,
+  address: string,
+  outcome: SendOutcome,
+  other: Page
+): Promise<() => Promise<void>> {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let arrive!: () => void;
+  const arrived = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  let released = false;
+  const thread = new URL(address).pathname.split("/")[2];
+  if (outcome === "review-failed")
+    await page.route(`${ORIGIN}/api/trades/${thread}`, (route) =>
+      released ? route.abort("failed") : route.fallback()
+    );
+  await page.route(
+    counter ? /\/api\/trades\/[^/]+\/offer$/ : `${ORIGIN}/api/trades`,
+    async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      arrive();
+      await held;
+      if (outcome === "changed" || outcome === "success")
+        await route.continue();
+      else if (outcome === "unknown") await route.abort("failed");
+      else if (outcome === "current") {
+        const packet = route.request().postDataJSON();
+        const trade = await api(page, "POST", "/api/trades", {
+          ...packet,
+          idempotency_key: randomUUID(),
+        });
+        await route.fulfill({
+          status: 201,
+          json: {
+            outcome: "already_applied",
+            view: "current",
+            label: "Current Trade",
+            trade,
+          },
+        });
+      } else
+        await route.fulfill({
+          status:
+            outcome === "review-failed" || outcome === "unavailable"
+              ? 409
+              : outcome === "gone"
+                ? 404
+                : outcome === "failure"
+                  ? 503
+                  : 422,
+          json: {
+            detail:
+              outcome === "unavailable"
+                ? {
+                    code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+                    outcome: "already_applied",
+                    view: "unavailable",
+                  }
+                : {
+                    code:
+                      outcome === "review-failed"
+                        ? "OFFER_CHANGED"
+                        : outcome === "gone"
+                          ? "TRADE_NOT_FOUND"
+                          : "TOO_MANY_LINES",
+                  },
+          },
+        });
+    }
+  );
+
+  return async () => {
+    try {
+      await arrived;
+      if (outcome === "changed") {
+        const { live_offer: live } = await api(
+          other,
+          "GET",
+          `/api/trades/${thread}`
+        );
+        await api(other, "POST", `/api/trades/${thread}/offer`, {
+          offer_id: live.offer_id,
+          revision: live.revision,
+          you_give: live.you_give.map(
+            (card: { edition_id: string; copies: string }) => ({
+              edition_id: card.edition_id,
+              quantity: String(Number(card.copies) + 1),
+            })
+          ),
+          you_get: [],
+          cash: null,
+          idempotency_key: randomUUID(),
+        });
+      }
+    } finally {
+      released = true;
+      release();
+    }
+  };
+}
+
 for (const viewport of [
   { width: 1280, height: 800 },
   { width: 375, height: 812 },
@@ -1013,6 +1165,155 @@ for (const viewport of [
         }
       }
 
+      const continuityCases = counter
+        ? ([
+            { control: "Increase", outcome: "changed" },
+            { control: "Increase", outcome: "refused" },
+            { control: "Decrease", outcome: "changed" },
+            { control: "cash", outcome: "changed" },
+            { control: "Increase", outcome: "success" },
+            { control: "blank-area blur", outcome: "changed" },
+            { control: "outside focus", outcome: "changed" },
+          ] as const)
+        : ([
+            { control: "tile", outcome: "current" },
+            { control: "Increase", outcome: "unavailable" },
+            { control: "Decrease", outcome: "refused" },
+            { control: "cash", outcome: "unknown" },
+          ] as const);
+      for (const { control, outcome } of continuityCases) {
+        const name =
+          control === "blank-area blur"
+            ? `${builder}: blank-area blur is not taken back`
+            : control === "outside focus"
+              ? `${builder}: outside focus is kept`
+              : `${builder}: focused ${control} stays live after ${outcome}`;
+        test(name, async ({ page, collectors }) => {
+          const { address, other } = await discardBuilder(
+            page,
+            collectors,
+            counter
+          );
+          await editDiscardCards(page, counter);
+          if (control === "cash") {
+            await page
+              .getByRole("radio", { name: "You pay", exact: true })
+              .click();
+            await page
+              .getByRole("textbox", { name: "Amount in US dollars" })
+              .fill("1.00");
+          }
+          const settle = await holdSend(page, counter, address, outcome, other);
+          const send = page.getByRole("button", {
+            name: counter ? "Send Counter" : "Send Trade Proposal",
+            exact: true,
+          });
+          const decrease = page.getByRole("button", {
+            name: "Decrease Arven (SVI 166) you get",
+          });
+          const outside = page
+            .getByRole("navigation", { name: "Main views" })
+            .getByRole("button", { name: /^Trades(?:,|$)/ });
+          let target: Locator;
+          try {
+            await send.click();
+            if (control === "tile") {
+              await show(page, "Cards");
+              target = tile(
+                page.getByRole("list", { name: "Ash K's Trade List" }),
+                "get",
+                ARVEN
+              );
+            } else if (control === "cash")
+              target = page.getByRole("textbox", {
+                name: "Amount in US dollars",
+              });
+            else if (control === "Decrease") target = decrease;
+            else
+              target = page.getByRole("button", {
+                name: "Increase Arven (SVI 166) you get",
+              });
+            await target.focus();
+            if (control === "outside focus") await outside.focus();
+            if (control === "blank-area blur") {
+              const main = page.locator("main:visible");
+              await main.evaluate((element) =>
+                element.scrollIntoView({ block: "end" })
+              );
+              const box = await main.boundingBox();
+              const x = box!.x + 4,
+                y = Math.min(box!.y + box!.height - 4, viewport.height - 100);
+              expect(
+                await page.evaluate(
+                  ({ x, y }) => document.elementFromPoint(x, y)?.tagName,
+                  { x, y }
+                )
+              ).toBe("MAIN");
+              await page.mouse.click(x, y);
+              await expect
+                .poll(() =>
+                  page.evaluate(() => document.activeElement?.tagName)
+                )
+                .toBe("BODY");
+            }
+          } finally {
+            await settle();
+          }
+          if (outcome === "success") {
+            await expect(page).toHaveURL(
+              new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`)
+            );
+            await expect(heading(page)).toBeFocused();
+          } else if (outcome === "current" || outcome === "unavailable")
+            await expect(heading(page)).toBeFocused();
+          else if (control === "blank-area blur") {
+            await expect(
+              page.getByRole("button", {
+                name: "I reviewed the current offer",
+                exact: true,
+              })
+            ).toBeVisible();
+            await expect
+              .poll(() => page.evaluate(() => document.activeElement?.tagName))
+              .toBe("BODY");
+          } else if (control === "outside focus") {
+            await expect(
+              page.getByRole("button", {
+                name: "I reviewed the current offer",
+                exact: true,
+              })
+            ).toBeVisible();
+            await expect(outside).toBeFocused();
+          } else if (control === "Increase") {
+            await expect(decrease).toBeFocused();
+            if (outcome === "changed") {
+              const region = page.getByRole("region", {
+                name: "Current offer to review",
+              });
+              await expect(
+                region.getByRole("button", {
+                  name: "I reviewed the current offer",
+                  exact: true,
+                })
+              ).toBeVisible();
+              await expect(
+                page.locator('main:visible > p[role="status"]')
+              ).toHaveText("The offer changed. Your draft is kept.");
+              await expect(decrease).toBeFocused(); // Completing checking never takes focus on its own.
+              await reachReviewBackwards(page, decrease, region);
+            }
+          } else {
+            await expect(target!).toBeFocused();
+            if (control === "cash")
+              await expect(target!).not.toHaveAttribute("readonly", "");
+          }
+          if (control !== "blank-area blur" && control !== "outside focus")
+            await expect
+              .poll(() => page.evaluate(() => document.activeElement?.tagName))
+              .not.toBe("BODY");
+        });
+      }
+
       const settlementOutcomes = counter
         ? ([
             "changed",
@@ -1044,100 +1345,12 @@ for (const viewport of [
             name: counter ? "Send Counter" : "Send Trade Proposal",
             exact: true,
           });
-          let release!: () => void;
-          const held = new Promise<void>((resolve) => {
-            release = resolve;
-          });
-          let arrive!: () => void;
-          const arrived = new Promise<void>((resolve) => {
-            arrive = resolve;
-          });
-          let released = false;
-          const thread = new URL(address).pathname.split("/")[2];
-          if (outcome === "review-failed")
-            await page.route(`${ORIGIN}/api/trades/${thread}`, (route) =>
-              released ? route.abort("failed") : route.fallback()
-            );
-          await page.route(
-            counter ? /\/api\/trades\/[^/]+\/offer$/ : `${ORIGIN}/api/trades`,
-            async (route) => {
-              if (route.request().method() !== "POST") return route.fallback();
-              arrive();
-              await held;
-              if (outcome === "changed") await route.continue();
-              else if (outcome === "unknown") await route.abort("failed");
-              else if (outcome === "current") {
-                const packet = route.request().postDataJSON();
-                const trade = await api(page, "POST", "/api/trades", {
-                  ...packet,
-                  idempotency_key: randomUUID(),
-                });
-                await route.fulfill({
-                  status: 201,
-                  json: {
-                    outcome: "already_applied",
-                    view: "current",
-                    label: "Current Trade",
-                    trade,
-                  },
-                });
-              } else
-                await route.fulfill({
-                  status:
-                    outcome === "review-failed" || outcome === "unavailable"
-                      ? 409
-                      : outcome === "gone"
-                        ? 404
-                        : outcome === "failure"
-                          ? 503
-                          : 422,
-                  json: {
-                    detail:
-                      outcome === "unavailable"
-                        ? {
-                            code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
-                            outcome: "already_applied",
-                            view: "unavailable",
-                          }
-                        : {
-                            code:
-                              outcome === "review-failed"
-                                ? "OFFER_CHANGED"
-                                : outcome === "gone"
-                                  ? "TRADE_NOT_FOUND"
-                                  : "TOO_MANY_LINES",
-                          },
-                  },
-                });
-            }
-          );
+          const settle = await holdSend(page, counter, address, outcome, other);
           try {
             await send.click();
-            await arrived;
             await expect(send).toBeFocused();
-            if (outcome === "changed") {
-              const { live_offer: live } = await api(
-                other,
-                "GET",
-                `/api/trades/${thread}`
-              );
-              await api(other, "POST", `/api/trades/${thread}/offer`, {
-                offer_id: live.offer_id,
-                revision: live.revision,
-                you_give: live.you_give.map(
-                  (card: { edition_id: string; copies: string }) => ({
-                    edition_id: card.edition_id,
-                    quantity: String(Number(card.copies) + 1),
-                  })
-                ),
-                you_get: [],
-                cash: null,
-                idempotency_key: randomUUID(),
-              });
-            }
           } finally {
-            released = true;
-            release();
+            await settle();
           }
           if (outcome !== "current" && outcome !== "unavailable")
             await expect(send).not.toHaveAttribute("aria-disabled", "true");
@@ -1168,18 +1381,11 @@ for (const viewport of [
           else if (outcome === "current" || outcome === "unavailable")
             await expect(heading(page)).toBeFocused();
           else if (outcome === "refused" && counter) {
-            // Inventory/version recovery may still be active. Focus must remain on Send, the refusal notice, or its live review/retry surface.
+            // Only enabled Send or the persistent refusal notice may own settlement focus.
             await expect(
               send
                 .and(page.locator(":focus:not(:disabled)"))
                 .or(page.locator('p[role="alert"]:focus'))
-                .or(
-                  page
-                    .getByRole("region", { name: "Current offer to review" })
-                    .locator(
-                      '[role="status"]:focus, button:focus:not(:disabled)'
-                    )
-                )
             ).toHaveCount(1);
           } else {
             await expect(send).toBeEnabled();
