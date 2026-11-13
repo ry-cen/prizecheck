@@ -445,8 +445,8 @@ async function story(
   await expect(findLink).toBeVisible();
   await expect(listLink).toHaveCount(0);
   page.off("dialog", accept);
-  // Chromium may skip the warning, but any dialog that did show is the browser's own.
-  expect(seen.every((type) => type === "beforeunload")).toBe(true);
+  // Real clicks above provide Chromium sticky activation.
+  expect(seen).toEqual(["beforeunload"]);
 
   // 8: nothing is asked when no card was added.
   await tradesTab(page).click();
@@ -629,7 +629,7 @@ async function replayComposer(
 }
 
 for (const outcome of ["current", "unavailable"] as const) {
-  test(`an already-applied ${outcome} send settles the mounted draft after double-click and an in-flight edit`, async ({
+  test(`an already-applied ${outcome} send settles the mounted draft after double-click and refuses an in-flight edit`, async ({
     page,
     collectors,
   }) => {
@@ -675,10 +675,15 @@ for (const outcome of ["current", "unavailable"] as const) {
         button.click();
       });
       await expect.poll(() => keys.length).toBe(1);
-      await page.getByRole("radio", { name: "You pay", exact: true }).click();
       await page
-        .getByRole("textbox", { name: "Amount in US dollars" })
-        .fill("5.00");
+        .getByRole("radio", { name: "You pay", exact: true })
+        .click({ force: true });
+      await expect(
+        page.getByRole("radio", { name: "No cash", exact: true })
+      ).toBeChecked();
+      await expect(
+        page.getByRole("textbox", { name: "Amount in US dollars" })
+      ).toHaveCount(0);
     } finally {
       release();
     }
@@ -765,3 +770,902 @@ test("an unknown initial-send outcome keeps its key and a known nonterminal refu
   expect(keys).toHaveLength(3);
   expect(keys[2]).not.toBe(keys[1]);
 });
+
+/** Small independent journeys for semantic draft loss; the long builder story above owns layout. */
+async function discardBuilder(
+  page: Page,
+  collectors: Parameters<typeof story>[1],
+  counter: boolean,
+  options: { mine?: boolean } = {}
+) {
+  const ids = seedCatalog();
+  const ash = await collectors.signIn();
+  const handle = await nameCollector(ash.page, "Ash K");
+  const shelf = await forTradeBinder(ash.page, "Ash Shelf");
+  await hold(ash.page, shelf, ids["SVI 166"], 3);
+  await noArtwork(page);
+  await signInAsOwner(page, "/collection");
+  await nameCollector(page, "Misty W");
+  if (options.mine) {
+    const own = await forTradeBinder(page, "Misty Shelf");
+    await hold(page, own, ids["PAL 172"], 1);
+  }
+  await befriend(page, ash.page);
+  let previous = `/friends/${handle}/trade-list`;
+  if (counter) {
+    const trade = await api(ash.page, "POST", "/api/trades", {
+      recipient_trader_id: await traderIdOf(page),
+      you_give: [{ edition_id: ids["SVI 166"], quantity: "1" }],
+      you_get: [],
+      idempotency_key: randomUUID(),
+    });
+    previous = `/trades/${trade.thread_id}`;
+  }
+  await page.goto(`${ORIGIN}${previous}`);
+  await page
+    .getByRole("button", {
+      name: counter ? "Counter" : "Propose trade to Ash K",
+      exact: true,
+    })
+    .click();
+  await expect(heading(page)).toHaveText(
+    counter ? "Counter to Ash K" : "Trade Proposal to Ash K"
+  );
+  return {
+    address: page.url(),
+    previous: `${ORIGIN}${previous}`,
+    dialog: page.getByRole("dialog", { name: /Discard this/ }),
+    other: ash.page,
+  };
+}
+
+async function editDiscardCards(page: Page, counter: boolean) {
+  if (!counter) {
+    await show(page, "Cards");
+    await tile(
+      page.getByRole("list", { name: "Ash K's Trade List" }),
+      "get",
+      ARVEN
+    ).click();
+  }
+  await show(page, "Proposal");
+  if (counter)
+    await page
+      .getByRole("button", { name: "Increase Arven (SVI 166) you get" })
+      .click();
+}
+
+async function reloadWithoutWarning(page: Page) {
+  const seen: string[] = [];
+  const accept = (dialog: Dialog) => {
+    seen.push(dialog.type());
+    void dialog.accept();
+  };
+  page.on("dialog", accept);
+  try {
+    await page.reload();
+    await expect(heading(page)).not.toHaveText("Counter");
+    await expect(
+      page.getByRole("button", {
+        name: /Send (Counter|Trade Proposal)/,
+        includeHidden: true,
+      })
+    ).toBeAttached();
+    expect(seen).toEqual([]);
+  } finally {
+    page.off("dialog", accept);
+  }
+}
+
+/** Real backward Tab actions, bounded by the controls preceding the stepper; this is navigation, not a retry loop. */
+async function reachReviewBackwards(
+  page: Page,
+  decrease: Locator,
+  region: Locator
+) {
+  const main = page.locator("main:visible");
+  const row = decrease.locator("xpath=ancestor::li[1]");
+  const order = (element: Element) =>
+    Array.from(
+      element
+        .closest("main")!
+        .querySelectorAll("button,a[href],input,select,textarea,[tabindex]")
+    ).indexOf(element);
+  let previous = await decrease.evaluate(order);
+  const stops = previous;
+  for (let step = 0; step < stops; step++) {
+    await page.keyboard.press("Shift+Tab");
+    const focused = page.locator(":focus");
+    await expect(main.locator(":focus")).toHaveCount(1);
+    await expect(focused).toBeVisible();
+    await expect(focused).toBeEnabled();
+    await expect(
+      row.locator(":focus").or(region.locator(":focus"))
+    ).toHaveCount(1);
+    const index = await focused.evaluate(order);
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(index).toBeLessThan(previous);
+    previous = index;
+    if ((await region.locator("button:focus").count()) === 1) return;
+  }
+  throw new Error(
+    "Review control was not reached before backward navigation exhausted the builder controls."
+  );
+}
+
+type SendOutcome =
+  | "changed"
+  | "review-failed"
+  | "refused"
+  | "failure"
+  | "unknown"
+  | "gone"
+  | "current"
+  | "unavailable"
+  | "success";
+async function holdSend(
+  page: Page,
+  counter: boolean,
+  address: string,
+  outcome: SendOutcome,
+  other: Page
+): Promise<() => Promise<void>> {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let arrive!: () => void;
+  const arrived = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  let released = false;
+  const thread = new URL(address).pathname.split("/")[2];
+  if (outcome === "review-failed")
+    await page.route(`${ORIGIN}/api/trades/${thread}`, (route) =>
+      released ? route.abort("failed") : route.fallback()
+    );
+  await page.route(
+    counter ? /\/api\/trades\/[^/]+\/offer$/ : `${ORIGIN}/api/trades`,
+    async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      arrive();
+      await held;
+      if (outcome === "changed" || outcome === "success")
+        await route.continue();
+      else if (outcome === "unknown") await route.abort("failed");
+      else if (outcome === "current") {
+        const packet = route.request().postDataJSON();
+        const trade = await api(page, "POST", "/api/trades", {
+          ...packet,
+          idempotency_key: randomUUID(),
+        });
+        await route.fulfill({
+          status: 201,
+          json: {
+            outcome: "already_applied",
+            view: "current",
+            label: "Current Trade",
+            trade,
+          },
+        });
+      } else
+        await route.fulfill({
+          status:
+            outcome === "review-failed" || outcome === "unavailable"
+              ? 409
+              : outcome === "gone"
+                ? 404
+                : outcome === "failure"
+                  ? 503
+                  : 422,
+          json: {
+            detail:
+              outcome === "unavailable"
+                ? {
+                    code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+                    outcome: "already_applied",
+                    view: "unavailable",
+                  }
+                : {
+                    code:
+                      outcome === "review-failed"
+                        ? "OFFER_CHANGED"
+                        : outcome === "gone"
+                          ? "TRADE_NOT_FOUND"
+                          : "TOO_MANY_LINES",
+                  },
+          },
+        });
+    }
+  );
+
+  return async () => {
+    try {
+      await arrived;
+      if (outcome === "changed") {
+        const { live_offer: live } = await api(
+          other,
+          "GET",
+          `/api/trades/${thread}`
+        );
+        await api(other, "POST", `/api/trades/${thread}/offer`, {
+          offer_id: live.offer_id,
+          revision: live.revision,
+          you_give: live.you_give.map(
+            (card: { edition_id: string; copies: string }) => ({
+              edition_id: card.edition_id,
+              quantity: String(Number(card.copies) + 1),
+            })
+          ),
+          you_get: [],
+          cash: null,
+          idempotency_key: randomUUID(),
+        });
+      }
+    } finally {
+      released = true;
+      release();
+    }
+  };
+}
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`draft discard at ${viewport.width}px`, () => {
+    test.use({ viewport });
+    for (const counter of [false, true]) {
+      const builder = counter ? "Counter" : "new proposal";
+      test(`${builder}: real reload dismissal keeps edits and acceptance discards them`, async ({
+        page,
+        collectors,
+      }) => {
+        const { address } = await discardBuilder(page, collectors, counter);
+        await editDiscardCards(page, counter);
+        const warning = page.waitForEvent("dialog");
+        // A dismissed Chromium reload may not settle its navigation promise. The dialog and retained UI are the evidence.
+        void page.reload().catch(() => {});
+        const native = await warning;
+        expect(native.type()).toBe("beforeunload");
+        await native.dismiss();
+        await expect(page).toHaveURL(address);
+        await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+          counter ? "2" : "1"
+        );
+        const accepted = page.waitForEvent("dialog");
+        const reload = page.reload();
+        const prompt = await accepted;
+        expect(prompt.type()).toBe("beforeunload");
+        await prompt.accept();
+        await reload;
+        await show(page, "Proposal");
+        if (counter)
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            "1"
+          );
+        else await expect(lists(page).get).toHaveText("Nothing yet");
+      });
+
+      test(`${builder}: cash counts, reverting does not, and removing opening cards counts`, async ({
+        page,
+        collectors,
+      }) => {
+        const { address, dialog } = await discardBuilder(
+          page,
+          collectors,
+          counter
+        );
+        await show(page, "Proposal");
+        await page.getByRole("radio", { name: "You pay", exact: true }).click();
+        const amount = page.getByRole("textbox", {
+          name: "Amount in US dollars",
+        });
+        await amount.fill("5.00");
+        const warning = page.waitForEvent("dialog");
+        void page.reload().catch(() => {});
+        const native = await warning;
+        expect(native.type()).toBe("beforeunload");
+        await native.dismiss();
+        await expect(amount).toHaveValue("5.00");
+        await page.locator("main:visible").getByRole("link").first().click();
+        await expect(
+          dialog.getByRole("button", { name: "Keep editing", exact: true })
+        ).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(page).toHaveURL(address);
+        await page.getByRole("radio", { name: "No cash", exact: true }).click();
+        await editDiscardCards(page, counter);
+        await page
+          .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+          .click();
+        await reloadWithoutWarning(page);
+        if (counter) {
+          await show(page, "Proposal");
+          await page
+            .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+            .click();
+          await expect(lists(page).get).toHaveText("Nothing yet");
+          await page
+            .getByRole("navigation", { name: "Main views" })
+            .getByRole("button", { name: "Collection", exact: true })
+            .click();
+          await expect(dialog).toBeVisible();
+          await dialog
+            .getByRole("button", { name: "Keep editing", exact: true })
+            .click();
+          const removedWarning = page.waitForEvent("dialog");
+          void page.reload().catch(() => {});
+          const removed = await removedWarning;
+          expect(removed.type()).toBe("beforeunload");
+          await removed.dismiss();
+          await expect(lists(page).get).toHaveText("Nothing yet");
+        } else {
+          await page
+            .getByRole("navigation", { name: "Main views" })
+            .getByRole("button", { name: "Collection", exact: true })
+            .click();
+          await expect(page).toHaveURL(`${ORIGIN}/collection`);
+          await expect(dialog).toHaveCount(0);
+        }
+      });
+
+      for (const direction of ["link", "Back", "Forward"] as const) {
+        for (const answer of ["Escape", "Keep editing", "Discard"] as const) {
+          test(`${builder}: ${direction} with ${answer} keeps focus or reaches its target`, async ({
+            page,
+            collectors,
+          }) => {
+            const { address, previous, dialog } = await discardBuilder(
+              page,
+              collectors,
+              counter
+            );
+            if (direction === "Forward") {
+              await page
+                .getByRole("navigation", { name: "Main views" })
+                .getByRole("button", { name: "Collection", exact: true })
+                .click();
+              await expect(page).toHaveURL(`${ORIGIN}/collection`);
+              await page.goBack();
+              await expect(page).toHaveURL(address);
+            }
+            await editDiscardCards(page, counter);
+            const link = page.locator("main:visible").getByRole("link").first();
+            const target =
+              direction === "Forward"
+                ? `${ORIGIN}/collection`
+                : direction === "Back"
+                  ? previous
+                  : new URL((await link.getAttribute("href"))!, ORIGIN).href;
+            const opener =
+              direction === "link"
+                ? link
+                : page.getByRole("button", {
+                    name: "Increase Arven (SVI 166) you get",
+                  });
+            await opener.focus();
+            if (direction === "link") await link.click();
+            else if (direction === "Back") void page.goBack().catch(() => {});
+            else void page.goForward().catch(() => {});
+            await expect(dialog).toBeVisible();
+            await expect(
+              dialog.getByRole("button", { name: "Keep editing", exact: true })
+            ).toBeFocused();
+            if (answer === "Escape") await page.keyboard.press("Escape");
+            else
+              await dialog
+                .getByRole("button", { name: answer, exact: true })
+                .click();
+            await expect(dialog).toHaveCount(0);
+            if (answer === "Discard") await expect(page).toHaveURL(target);
+            else {
+              await expect(page).toHaveURL(address);
+              await expect(
+                group(page, "Arven (SVI 166) you get")
+              ).toContainText(counter ? "2" : "1");
+              await expect(opener).toBeFocused();
+            }
+          });
+        }
+      }
+
+      if (counter)
+        for (const resolved of [false, true])
+          test(`Counter: Details from My Trade List returns focus after an unchanged refusal removes its opener (${resolved ? "read finished" : "read held"})`, async ({
+            page,
+            collectors,
+          }) => {
+            const { address, other } = await discardBuilder(
+              page,
+              collectors,
+              true,
+              { mine: true }
+            );
+            await editDiscardCards(page, true);
+            let holdReads = false;
+            let release!: () => void;
+            const reads = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            await page.route(`${ORIGIN}/api/trades/list`, async (route) => {
+              if (holdReads) await reads;
+              await route.fallback();
+            });
+            const settle = await holdSend(
+              page,
+              true,
+              address,
+              "refused",
+              other
+            );
+            try {
+              await page
+                .getByRole("button", { name: "Send Counter", exact: true })
+                .click();
+              await show(page, "Cards");
+              const radio = page.getByRole("radio", {
+                name: "My Trade List",
+                exact: true,
+              });
+              await radio.click();
+              const details = page.getByRole("button", {
+                name: "Details for Boss's Orders (PAL 172)",
+                exact: true,
+              });
+              await details.click();
+              const opener = await details.elementHandle();
+              await expect(page.locator("dialog[open] :focus")).toHaveCount(1);
+              holdReads = true;
+              await settle();
+              await expect(details).toHaveCount(0);
+              await expect(page.locator("dialog[open] :focus")).toHaveCount(1);
+              if (resolved) {
+                release();
+                await expect(details).toHaveCount(1);
+                expect(
+                  await details.evaluate(
+                    (element, old) => element !== old,
+                    opener
+                  )
+                ).toBe(true);
+              }
+              await page.keyboard.press("Escape");
+              await expect(page.locator("dialog[open]")).toHaveCount(0);
+              const target = resolved ? details : radio;
+              await expect(target).toBeFocused();
+              await expect(page.locator("body:focus")).toHaveCount(0);
+              release();
+              await expect(details).toHaveCount(1);
+              await expect(target).toBeFocused();
+            } finally {
+              release();
+            }
+          });
+
+      const continuityCases = counter
+        ? ([
+            { control: "Increase", outcome: "changed" },
+            { control: "Increase", outcome: "refused" },
+            { control: "Decrease", outcome: "changed" },
+            { control: "cash", outcome: "changed" },
+            { control: "Increase", outcome: "success" },
+            { control: "blank-area blur", outcome: "changed" },
+            { control: "outside focus", outcome: "changed" },
+          ] as const)
+        : ([
+            { control: "tile", outcome: "current" },
+            { control: "Increase", outcome: "unavailable" },
+            { control: "Decrease", outcome: "refused" },
+            { control: "cash", outcome: "unknown" },
+          ] as const);
+      for (const { control, outcome } of continuityCases) {
+        const name =
+          control === "blank-area blur"
+            ? `${builder}: blank-area blur is not taken back`
+            : control === "outside focus"
+              ? `${builder}: outside focus is kept`
+              : `${builder}: focused ${control} stays live after ${outcome}`;
+        test(name, async ({ page, collectors }) => {
+          const { address, other } = await discardBuilder(
+            page,
+            collectors,
+            counter
+          );
+          await editDiscardCards(page, counter);
+          if (control === "cash") {
+            await page
+              .getByRole("radio", { name: "You pay", exact: true })
+              .click();
+            await page
+              .getByRole("textbox", { name: "Amount in US dollars" })
+              .fill("1.00");
+          }
+          const settle = await holdSend(page, counter, address, outcome, other);
+          const send = page.getByRole("button", {
+            name: counter ? "Send Counter" : "Send Trade Proposal",
+            exact: true,
+          });
+          const decrease = page.getByRole("button", {
+            name: "Decrease Arven (SVI 166) you get",
+          });
+          const outside = page
+            .getByRole("navigation", { name: "Main views" })
+            .getByRole("button", { name: /^Trades(?:,|$)/ });
+          let target: Locator;
+          try {
+            await send.click();
+            if (control === "tile") {
+              await show(page, "Cards");
+              target = tile(
+                page.getByRole("list", { name: "Ash K's Trade List" }),
+                "get",
+                ARVEN
+              );
+            } else if (control === "cash")
+              target = page.getByRole("textbox", {
+                name: "Amount in US dollars",
+              });
+            else if (control === "Decrease") target = decrease;
+            else
+              target = page.getByRole("button", {
+                name: "Increase Arven (SVI 166) you get",
+              });
+            await target.focus();
+            if (control === "outside focus") await outside.focus();
+            if (control === "blank-area blur") {
+              const main = page.locator("main:visible");
+              await main.evaluate((element) =>
+                element.scrollIntoView({ block: "end" })
+              );
+              const box = await main.boundingBox();
+              const x = box!.x + 4,
+                y = Math.min(box!.y + box!.height - 4, viewport.height - 100);
+              expect(
+                await page.evaluate(
+                  ({ x, y }) => document.elementFromPoint(x, y)?.tagName,
+                  { x, y }
+                )
+              ).toBe("MAIN");
+              await page.mouse.click(x, y);
+              await expect
+                .poll(() =>
+                  page.evaluate(() => document.activeElement?.tagName)
+                )
+                .toBe("BODY");
+            }
+          } finally {
+            await settle();
+          }
+          if (outcome === "success") {
+            await expect(page).toHaveURL(
+              new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`)
+            );
+            await expect(heading(page)).toBeFocused();
+          } else if (outcome === "current" || outcome === "unavailable")
+            await expect(heading(page)).toBeFocused();
+          else if (control === "blank-area blur") {
+            await expect(
+              page.getByRole("button", {
+                name: "I reviewed the current offer",
+                exact: true,
+              })
+            ).toBeVisible();
+            await expect
+              .poll(() => page.evaluate(() => document.activeElement?.tagName))
+              .toBe("BODY");
+          } else if (control === "outside focus") {
+            await expect(
+              page.getByRole("button", {
+                name: "I reviewed the current offer",
+                exact: true,
+              })
+            ).toBeVisible();
+            await expect(outside).toBeFocused();
+          } else if (control === "Increase") {
+            await expect(decrease).toBeFocused();
+            if (outcome === "changed") {
+              const region = page.getByRole("region", {
+                name: "Current offer to review",
+              });
+              await expect(
+                region.getByRole("button", {
+                  name: "I reviewed the current offer",
+                  exact: true,
+                })
+              ).toBeVisible();
+              await expect(
+                page.locator('main:visible > p[role="status"]')
+              ).toHaveText("The offer changed. Your draft is kept.");
+              await expect(decrease).toBeFocused(); // Completing checking never takes focus on its own.
+              await reachReviewBackwards(page, decrease, region);
+            }
+          } else {
+            await expect(target!).toBeFocused();
+            if (control === "cash")
+              await expect(target!).not.toHaveAttribute("readonly", "");
+          }
+          if (control !== "blank-area blur" && control !== "outside focus")
+            await expect
+              .poll(() => page.evaluate(() => document.activeElement?.tagName))
+              .not.toBe("BODY");
+        });
+      }
+
+      const settlementOutcomes = counter
+        ? ([
+            "changed",
+            "review-failed",
+            "refused",
+            "failure",
+            "unknown",
+            "gone",
+          ] as const)
+        : ([
+            "refused",
+            "failure",
+            "unknown",
+            "current",
+            "unavailable",
+          ] as const);
+      for (const outcome of settlementOutcomes) {
+        test(`${builder}: focused Send settles safely after ${outcome}`, async ({
+          page,
+          collectors,
+        }) => {
+          const { address, other } = await discardBuilder(
+            page,
+            collectors,
+            counter
+          );
+          await editDiscardCards(page, counter);
+          const send = page.getByRole("button", {
+            name: counter ? "Send Counter" : "Send Trade Proposal",
+            exact: true,
+          });
+          const settle = await holdSend(page, counter, address, outcome, other);
+          try {
+            await send.click();
+            await expect(send).toBeFocused();
+          } finally {
+            await settle();
+          }
+          if (outcome !== "current" && outcome !== "unavailable")
+            await expect(send).not.toHaveAttribute("aria-disabled", "true");
+          if (outcome === "changed") {
+            const review = page.getByRole("button", {
+              name: "I reviewed the current offer",
+              exact: true,
+            });
+            await expect(review).toBeFocused();
+            await review.click();
+            await expect(page.getByRole("alert")).toBeFocused();
+            await expect(page.getByRole("alert")).toContainText(
+              "Current offer reviewed"
+            );
+          } else if (outcome === "review-failed")
+            await expect(
+              page.getByRole("button", {
+                name: "Retry current offer",
+                exact: true,
+              })
+            ).toBeFocused();
+          else if (outcome === "gone")
+            await expect(
+              page
+                .getByRole("region", { name: "Current offer to review" })
+                .getByRole("status")
+            ).toBeFocused();
+          else if (outcome === "current" || outcome === "unavailable")
+            await expect(heading(page)).toBeFocused();
+          else if (outcome === "refused" && counter) {
+            // Only enabled Send or the persistent refusal notice may own settlement focus.
+            await expect(
+              send
+                .and(page.locator(":focus:not(:disabled)"))
+                .or(page.locator('p[role="alert"]:focus'))
+            ).toHaveCount(1);
+          } else {
+            await expect(send).toBeEnabled();
+            await expect(send).toBeFocused();
+          }
+        });
+      }
+
+      for (const outcome of ["refused", "unknown"] as const) {
+        test(`${builder}: ${outcome} send keeps focused cash read-only then resumes editing and warnings`, async ({
+          page,
+          collectors,
+        }) => {
+          const { address, dialog } = await discardBuilder(
+            page,
+            collectors,
+            counter
+          );
+          await editDiscardCards(page, counter);
+          await page
+            .getByRole("radio", { name: "You pay", exact: true })
+            .click();
+          const amount = page.getByRole("textbox", {
+            name: "Amount in US dollars",
+          });
+          await amount.fill("2.00");
+          let release!: () => void;
+          const held = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          let arrive!: () => void;
+          const arrived = new Promise<void>((resolve) => {
+            arrive = resolve;
+          });
+          await page.route(
+            counter ? /\/api\/trades\/[^/]+\/offer$/ : `${ORIGIN}/api/trades`,
+            async (route) => {
+              if (route.request().method() !== "POST") return route.fallback();
+              arrive();
+              await held;
+              if (outcome === "unknown") await route.abort("failed");
+              else
+                await route.fulfill({
+                  status: 422,
+                  json: { detail: { code: "TOO_MANY_LINES" } },
+                });
+            }
+          );
+          try {
+            await amount.focus();
+            // Start the command without moving the existing keyboard focus.
+            await page
+              .getByRole("button", {
+                name: counter ? "Send Counter" : "Send Trade Proposal",
+                exact: true,
+              })
+              .evaluate((button) => button.click());
+            await arrived;
+            await expect(amount).toBeFocused();
+            await expect(amount).toHaveAttribute("readonly", "");
+            await expect(amount).toHaveCSS("opacity", "0.45");
+            await expect(amount).toHaveCSS("cursor", "default");
+            await page.keyboard.type("5");
+            await expect(amount).toHaveValue("2.00");
+          } finally {
+            release();
+          }
+          await expect(page).toHaveURL(address);
+          await expect(amount).not.toHaveAttribute("readonly", "");
+          await expect(amount).toBeFocused();
+          await amount.fill("5.00");
+          await page
+            .getByRole("button", { name: "Increase Arven (SVI 166) you get" })
+            .click();
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            counter ? "3" : "2"
+          );
+          const warning = page.waitForEvent("dialog");
+          void page.reload().catch(() => {});
+          const prompt = await warning;
+          expect(prompt.type()).toBe("beforeunload");
+          await prompt.dismiss();
+          await expect(amount).toHaveValue("5.00");
+          await page.locator("main:visible").getByRole("link").first().click();
+          await expect(dialog).toBeVisible();
+          await dialog
+            .getByRole("button", { name: "Keep editing", exact: true })
+            .click();
+          await expect(page).toHaveURL(address);
+        });
+      }
+
+      test(`${builder}: draft edits freeze during a send without losing focus and successful sends do not warn`, async ({
+        page,
+        collectors,
+      }) => {
+        const { address } = await discardBuilder(page, collectors, counter);
+        await editDiscardCards(page, counter);
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let arrived!: () => void;
+        const sending = new Promise<void>((resolve) => {
+          arrived = resolve;
+        });
+        await page.route(
+          counter ? /\/api\/trades\/[^/]+\/offer$/ : `${ORIGIN}/api/trades`,
+          async (route) => {
+            if (route.request().method() !== "POST") return route.fallback();
+            arrived();
+            await held;
+            await route.continue();
+          }
+        );
+        try {
+          const send = page.getByRole("button", {
+            name: counter ? "Send Counter" : "Send Trade Proposal",
+            exact: true,
+          });
+          await send.click();
+          await sending;
+          await expect(send).toBeFocused();
+          const stepper = page.getByRole("button", {
+            name: "Decrease Arven (SVI 166) you get",
+          });
+          await expect(stepper).toHaveCSS("opacity", "0.45");
+          await expect(stepper).toHaveCSS("cursor", "default");
+          const frozenBackground = await stepper.evaluate(
+            (element) => getComputedStyle(element).backgroundColor
+          );
+          await stepper.hover();
+          await expect(stepper).toHaveCSS("background-color", frozenBackground);
+          const payer = page.getByRole("radio", {
+            name: "You pay",
+            exact: true,
+          });
+          await expect(payer).toBeDisabled();
+          await expect(payer).toHaveCSS("opacity", "0.45");
+          await expect(payer).toHaveCSS("cursor", "default");
+          const payerText = payer.locator("span").first();
+          const frozenText = await payerText.evaluate(
+            (element) => getComputedStyle(element).color
+          );
+          await payer.hover();
+          await expect(payerText).toHaveCSS("color", frozenText);
+          if (!counter)
+            await expect(
+              page.getByRole("textbox", { name: "Message (optional)" })
+            ).toHaveCSS("opacity", "0.45");
+          // Forced activation also checks the handler boundary, beyond the accessible disabled state.
+          await payer.click({ force: true });
+          await expect(
+            page.getByRole("radio", { name: "No cash", exact: true })
+          ).toBeChecked();
+          await expect(
+            page.getByRole("textbox", { name: "Amount in US dollars" })
+          ).toHaveCount(0);
+          await page
+            .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
+            .click({ force: true });
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            counter ? "2" : "1"
+          );
+          await show(page, "Cards");
+          const frozenTile = tile(
+            page.getByRole("list", { name: "Ash K's Trade List" }),
+            "get",
+            ARVEN
+          );
+          await expect(frozenTile).toHaveCSS("opacity", "0.45");
+          await expect(frozenTile).toHaveCSS("cursor", "default");
+          await frozenTile.click({ force: true });
+          await show(page, "Proposal");
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            counter ? "2" : "1"
+          );
+          // A synthetic event checks the in-flight rule without aborting the real pending request.
+          expect(
+            await page.evaluate(() => {
+              const event = new Event("beforeunload", { cancelable: true });
+              window.dispatchEvent(event);
+              return event.defaultPrevented;
+            })
+          ).toBe(false);
+        } finally {
+          release();
+        }
+        await expect(page).not.toHaveURL(address);
+        const seen: string[] = [];
+        const accept = (dialog: Dialog) => {
+          seen.push(dialog.type());
+          void dialog.accept();
+        };
+        page.on("dialog", accept);
+        await page.reload();
+        await expect(heading(page)).not.toHaveText(
+          /^(Counter|Trade Proposal) to/
+        );
+        expect(seen).toEqual([]);
+        page.off("dialog", accept);
+      });
+    }
+  });
+}

@@ -5,15 +5,22 @@ import {
   OfferInventoryChanged,
 } from "./offerInventory";
 import { OfferReview, offerChanges } from "./offerReview";
-import { offerCaps, offerControls, reviewRequired } from "./offerLifecycle";
+import {
+  offerCaps,
+  offerControls,
+  reviewRequired,
+  type OfferLifecycle,
+} from "./offerLifecycle";
 import { offerVersion } from "./offerInventory";
 import { offerLibrary, offerCopyMap } from "./offerCopies";
 import { ProposedOfferChanges } from "./ProposedOfferChanges";
 import { useMessagePrefill } from "./messagePrefill";
 import { ArrowRight, ChevronLeft } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -101,6 +108,99 @@ import {
 import { TRADER_LIST_TITLE } from "./traderMessages";
 import { sideValueText, useTradeValue } from "./useTradeValue";
 
+/** Compare content only: row order and empty representations do not make an unsent edit. */
+export function proposalDraftChanged(
+  opening: Proposal,
+  openingCash: CashDraft,
+  draft: Proposal,
+  cash: CashDraft
+): boolean {
+  const key = (cards: Proposal, money: CashDraft) =>
+    termsKey(
+      {
+        get: cards.get.filter((line) => line.quantity > 0),
+        give: cards.give.filter((line) => line.quantity > 0),
+      },
+      money.payer !== "none" &&
+        /^(?:(?:0+|0{1,3}(?:,000)+)(?:\.0{0,2})?|\.0{1,2})$/.test(
+          money.amount.replace(/\s/g, "").replace(/^\$/, "")
+        )
+        ? NO_CASH
+        : money
+    );
+  return key(opening, openingCash) !== key(draft, cash);
+}
+
+type FocusSlot =
+  | { kind: "send" }
+  | { kind: "stepper"; row: string; index: number }
+  | { kind: "printing"; side: ProposalSide }
+  | { kind: "library"; label?: string }
+  | { kind: "review" }
+  | { kind: "other" };
+
+type FocusRecord = { element: HTMLElement; slot: FocusSlot };
+type TrackedFocus = FocusRecord & { origin?: FocusRecord };
+
+/** No layout reads: a closed dialog or hidden ancestor also makes a control unavailable to focus. */
+function focusLive(
+  element: Element | null | undefined
+): element is HTMLElement {
+  return (
+    element instanceof HTMLElement &&
+    element.isConnected &&
+    !element.matches(":disabled") &&
+    element.closest("[hidden], dialog:not([open])") === null
+  );
+}
+function firstLive(
+  ...candidates: (HTMLElement | null | undefined)[]
+): HTMLElement | null {
+  return candidates.find(focusLive) ?? null;
+}
+function focusSlot(
+  element: HTMLElement,
+  places: {
+    send: HTMLElement | null;
+    library: HTMLElement | null;
+    review: HTMLElement | null;
+  }
+): FocusSlot {
+  if (element === places.send) return { kind: "send" };
+  const row = element.closest<HTMLElement>("[data-focus-row]");
+  if (row)
+    return {
+      kind: "stepper",
+      row: row.dataset.focusRow!,
+      index: [...row.querySelectorAll<HTMLElement>("button")].indexOf(element),
+    };
+  const side =
+    element.closest<HTMLElement>("[data-focus-side]")?.dataset.focusSide;
+  if (side === "get" || side === "give") return { kind: "printing", side };
+  if (places.library?.contains(element)) {
+    const label = element.getAttribute("aria-label");
+    return {
+      kind: "library",
+      label: label?.startsWith("Details for ") ? label : undefined,
+    };
+  }
+  if (places.review?.contains(element)) return { kind: "review" };
+  return { kind: "other" };
+}
+function reviewNoticeText(lifecycle: OfferLifecycle): string {
+  return lifecycle.phase === "gone"
+    ? "This Trade no longer accepts an offer change. Your draft is kept."
+    : lifecycle.phase === "read_failed"
+      ? lifecycle.failure === "version"
+        ? "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
+        : "Available copies couldn't be loaded. Your draft is kept."
+      : lifecycle.phase === "loading"
+        ? "Checking available copies…"
+        : lifecycle.phase === "checking"
+          ? "Checking the current offer. Your draft is kept."
+          : "The offer changed. Your draft is kept.";
+}
+
 type Party = { trader_id: string; display_name: string };
 
 type Theirs =
@@ -125,6 +225,10 @@ const FRAME =
 const BACK =
   "inline-flex h-control items-center gap-1 self-start rounded-control px-2 text-control font-medium text-text-muted no-underline hover:bg-surface-raised hover:text-text phone:h-control-phone";
 
+// Match the kit's native disabled appearance without removing a focused control from the tab order.
+const FROZEN_CONTROLS =
+  "aria-disabled:[&_button]:opacity-45 aria-disabled:[&_button]:cursor-default! aria-disabled:[&_button]:bg-surface-raised! aria-disabled:[&_button]:text-text-muted! aria-disabled:[&_button]:border-border-strong! aria-disabled:[&_button_span]:text-text-muted! aria-disabled:[&_input]:opacity-45 aria-disabled:[&_input]:cursor-default aria-disabled:[&_textarea]:opacity-45 aria-disabled:[&_textarea]:cursor-default";
+
 /**
  * A proposal builder (Trading #284, #299), at /trades/new/<trader id> for a Friend or any collector in reach, laid out like the Deck builder. The proposal is
  * the wide left column: **You get** and **You give**, each line with a stepper up to the copies the library offered,
@@ -134,8 +238,8 @@ const BACK =
  * The proposal starts empty, with one copy in You get from Ask to trade, or with the visible match cards from Find
  * trades. It lives only in this page: nothing is kept, so leaving ends it. Once the collector has changed it, leaving through the shell, a link,
  * the back link or the browser's Back and Forward asks "Discard this proposal to <name>?" (the router's leave guard),
- * and a reload or close shows the browser's own warning. Nothing is asked for a proposal that holds no cards, for one
- * left as it opened, when the collector didn't load, or after a successful send. A card can't be on both sides; a
+ * and a reload or close shows the browser's own warning. Nothing is asked for a draft left as it opened, when the
+ * collector didn't load, or after a successful send. A card can't be on both sides; a
  * refused send keeps the proposal and says which card and how many are on the Trade List now. The back link returns
  * to the Trade List page the builder was opened from, and to Find trades otherwise.
  *
@@ -239,9 +343,14 @@ export function ProposalBuilderPage({
   const sent = useRef(false);
   const terminalRef = useRef<TerminalSend | null>(null);
   const [terminal, setTerminal] = useState<TerminalSend | null>(null);
-  const edited = useRef(false);
-  const latest = useRef(proposal);
-  latest.current = proposal;
+  const opening = useRef({ proposal, cash });
+  const changed = useRef(false);
+  changed.current = proposalDraftChanged(
+    opening.current.proposal,
+    opening.current.cash,
+    proposal,
+    cash
+  );
   // The guard reads these: it is made once. A collector who is gone (a 404 after load) can't be sent to, so nothing asks.
   const reachable = useRef(false);
   reachable.current = party !== null && theirs.kind !== "missing";
@@ -259,6 +368,84 @@ export function ProposalBuilderPage({
   }, []);
   const returnTo = useRef<HTMLElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
+  const reviewRegionRef = useRef<HTMLElement>(null);
+  const reviewNoticeRef = useRef<HTMLParagraphElement>(null);
+  const sendMessageRef = useRef<HTMLParagraphElement>(null);
+  const reasonRef = useRef<HTMLParagraphElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
+  const libraryRef = useRef<HTMLDivElement>(null);
+  const lastFocus = useRef<TrackedFocus | null>(null);
+  const repairFocus = useRef<(removed: ProposalSide | null) => void>(() => {});
+  const rootObserver = useRef<MutationObserver | null>(null);
+  const observeRoot = useCallback((node: HTMLElement | null) => {
+    rootRef.current = node;
+    rootObserver.current?.disconnect();
+    if (!node) return;
+    // Child components (Details, row popups) commit without the builder, so run the same repair.
+    rootObserver.current ??= new MutationObserver(() =>
+      repairFocus.current(null)
+    );
+    rootObserver.current.observe(node, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["disabled", "hidden", "open"],
+    });
+  }, []);
+  const blurTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (
+        !(target instanceof HTMLElement) ||
+        !rootRef.current?.contains(target)
+      ) {
+        lastFocus.current = null;
+        return;
+      }
+      const dialog = target.closest("dialog");
+      const previous = lastFocus.current;
+      const origin = !dialog
+        ? undefined
+        : previous?.element.closest("dialog") === dialog
+          ? previous.origin
+          : previous && !previous.element.closest("dialog")
+            ? { element: previous.element, slot: previous.slot }
+            : undefined;
+      lastFocus.current = {
+        element: target,
+        slot: focusSlot(target, {
+          send: sendButtonRef.current,
+          library: libraryRef.current,
+          review: reviewRegionRef.current,
+        }),
+        origin,
+      };
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const left = lastFocus.current?.element;
+      if (event.target !== left) return;
+      window.clearTimeout(blurTimer.current);
+      blurTimer.current = window.setTimeout(() => {
+        // Decide after the commit: pre-removal blur still sees a live element in Chromium.
+        if (
+          lastFocus.current?.element === left &&
+          focusLive(left) &&
+          document.activeElement !== left
+        )
+          lastFocus.current = null;
+      }, 0);
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      rootObserver.current?.disconnect();
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("focusout", onFocusOut, true);
+      window.clearTimeout(blurTimer.current);
+    };
+  }, []);
   const sideHeading = {
     get: useRef<HTMLHeadingElement>(null),
     give: useRef<HTMLHeadingElement>(null),
@@ -489,18 +676,26 @@ export function ProposalBuilderPage({
 
   // Any change makes a new send key: a send is the same only when the proposal is.
   function change(next: (p: Proposal) => Proposal) {
-    if (terminalRef.current || lifecycle?.phase === "sending") return;
+    if (
+      terminalRef.current ||
+      sending.current ||
+      lifecycle?.phase === "sending"
+    )
+      return;
     offerReview?.dispatch({ type: "draft_edited" });
-    edited.current = true;
     setProposal(next);
     key.current = null;
   }
 
   // A cash change is an edit like a card: it makes a new send key.
   function editCash(next: CashDraft) {
-    if (terminalRef.current || lifecycle?.phase === "sending") return;
+    if (
+      terminalRef.current ||
+      sending.current ||
+      lifecycle?.phase === "sending"
+    )
+      return;
     offerReview?.dispatch({ type: "draft_edited" });
-    edited.current = true;
     key.current = null;
     setCash(next);
   }
@@ -508,17 +703,38 @@ export function ProposalBuilderPage({
   // The same words twice are announced twice: the line is cleared first, then set a moment later.
   const announceTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(announceTimer.current), []);
-  function say(text: string, owner: "cards" | "proposal" = "cards") {
+  function say(
+    text: string,
+    owner: "cards" | "proposal" = "cards",
+    stillNeeded?: () => boolean
+  ) {
     window.clearTimeout(announceTimer.current);
     setAnnouncement({ text: "", owner });
-    announceTimer.current = window.setTimeout(
-      () => setAnnouncement({ text, owner }),
-      60
-    );
+    announceTimer.current = window.setTimeout(() => {
+      if (!stillNeeded || stillNeeded()) setAnnouncement({ text, owner });
+    }, 60);
   }
 
+  const announcedPhase = useRef(lifecycle?.phase);
+  useEffect(() => {
+    const phase = lifecycle?.phase;
+    if (
+      phase !== announcedPhase.current &&
+      lifecycle &&
+      ["changed", "gone", "read_failed"].includes(lifecycle.phase) &&
+      !reviewRegionRef.current?.contains(document.activeElement)
+    )
+      // A phase can enter before busy clears and the guard moves Send into review. Avoid duplicating that focus announcement.
+      say(
+        reviewNoticeText(lifecycle),
+        "proposal",
+        () => !reviewRegionRef.current?.contains(document.activeElement)
+      );
+    announcedPhase.current = phase;
+  }, [lifecycle?.phase, lifecycle?.failure]);
+
   function add(side: ProposalSide, libraryCard: LibraryCard) {
-    if (!capsReady || lifecycle?.phase === "sending") return;
+    if (!capsReady || sending.current || lifecycle?.phase === "sending") return;
     const card = toProposalCard(libraryCard.card);
     const label = tradeCardName(card);
     const n = quantityIn(proposal, side, card.edition_id);
@@ -538,13 +754,6 @@ export function ProposalBuilderPage({
       say(`${label}: ${n + 1} in ${SIDE_LABEL[side]}`);
     }
   }
-
-  // A line taken out moves focus to its side's heading, since the stepper left with it.
-  useEffect(() => {
-    const side = refocus.current;
-    refocus.current = null;
-    if (side) sideHeading[side].current?.focus();
-  }, [proposal]);
 
   function inventoryFailed(cause: unknown, expected: TradeView | undefined) {
     if (
@@ -611,6 +820,116 @@ export function ProposalBuilderPage({
     }
   }
 
+  function finishSending() {
+    sending.current = false;
+    if (mounted.current) setBusy(false);
+  }
+
+  function focusTarget(slot: FocusSlot): HTMLElement | null {
+    if (terminal) return firstLive(headingRef.current);
+    const actionRecovery =
+      lifecycle && ["changed", "gone", "read_failed"].includes(lifecycle.phase)
+        ? [
+            reviewRegionRef.current?.querySelector<HTMLElement>(
+              "button:not(:disabled)"
+            ),
+            reviewNoticeRef.current,
+          ]
+        : [];
+    const message = sendMessageRef.current?.textContent?.trim()
+      ? sendMessageRef.current
+      : null;
+    switch (slot.kind) {
+      case "send":
+        return firstLive(
+          ...actionRecovery,
+          message,
+          reasonRef.current,
+          headingRef.current
+        );
+      case "stepper": {
+        const row = [
+          ...(rootRef.current?.querySelectorAll<HTMLElement>(
+            "[data-focus-row]"
+          ) ?? []),
+        ].find((row) => row.dataset.focusRow === slot.row);
+        const side = slot.row.split(":")[0] as ProposalSide;
+        return firstLive(
+          row?.querySelectorAll<HTMLElement>("button")[1 - slot.index],
+          sideHeading[side].current,
+          headingRef.current
+        );
+      }
+      case "printing":
+        return firstLive(
+          rootRef.current?.querySelector<HTMLElement>(
+            `[data-focus-side="${slot.side}"] button:not(:disabled)`
+          ),
+          sideHeading[slot.side].current,
+          headingRef.current
+        );
+      case "library":
+        return firstLive(
+          [
+            ...(libraryRef.current?.querySelectorAll<HTMLElement>(
+              "button[aria-label]"
+            ) ?? []),
+          ].find((button) => button.getAttribute("aria-label") === slot.label),
+          libraryRef.current?.querySelector<HTMLElement>(
+            '[role="radiogroup"] [role="radio"][aria-checked="true"]'
+          ),
+          headingRef.current
+        );
+      case "review":
+        return firstLive(
+          ...actionRecovery,
+          reviewNoticeRef.current,
+          message,
+          sendButtonRef.current,
+          reasonRef.current,
+          headingRef.current
+        );
+      default:
+        return firstLive(
+          ...actionRecovery,
+          message,
+          sendButtonRef.current,
+          reasonRef.current,
+          headingRef.current
+        );
+    }
+  }
+
+  // Repair only unowned focus after a control dies. Take-out has no exception: a live owner always keeps focus.
+  useLayoutEffect(() => {
+    repairFocus.current = (removed) => {
+      const lost = lastFocus.current;
+      const active = document.activeElement;
+      if (active && active !== document.body && focusLive(active)) {
+        if (lost && !focusLive(lost.element)) lastFocus.current = null;
+        return;
+      }
+      if (removed) return void sideHeading[removed].current?.focus();
+      const dialog = lost?.element.closest("dialog");
+      if (!lost || focusLive(lost.element)) return;
+      lastFocus.current = null;
+      if (sent.current && !terminalRef.current) return;
+      const { origin } = lost;
+      const target =
+        dialog && origin
+          ? focusLive(origin.element)
+            ? origin.element
+            : focusTarget(origin.slot)
+          : focusTarget(lost.slot);
+      target?.focus();
+    };
+  });
+  useLayoutEffect(() => {
+    const removed = refocus.current;
+    refocus.current = null;
+    repairFocus.current(removed);
+  });
+
   async function send() {
     if (
       terminalRef.current ||
@@ -639,12 +958,11 @@ export function ProposalBuilderPage({
       try {
         await sendCounter(current, name, cashBody);
       } finally {
-        sending.current = false;
-        setBusy(false);
+        finishSending();
       }
       return;
     }
-    // Capture this submission even if an edit clears the ref while it is in flight.
+    // Capture the submission key for this frozen draft.
     const submittedKey = key.current ?? crypto.randomUUID();
     if (terminalRef.current) return;
     key.current = submittedKey;
@@ -688,8 +1006,7 @@ export function ProposalBuilderPage({
       if (mounted.current)
         setMessage(sendTradeMessage(cause, name, current.give, current.get));
     } finally {
-      sending.current = false;
-      if (mounted.current) setBusy(false);
+      finishSending();
     }
   }
 
@@ -701,8 +1018,7 @@ export function ProposalBuilderPage({
         !sending.current &&
         reachable.current &&
         !offerReview?.unavailable &&
-        edited.current &&
-        proposalCopies(latest.current) > 0,
+        changed.current,
       ask: (leave) => {
         const active = document.activeElement;
         // Focus inside a dialog (the account sheet, the inbox, the Friends drawer) can't be returned to once it
@@ -721,15 +1037,11 @@ export function ProposalBuilderPage({
   useLeaveGuard(guard);
 
   // The browser's own warning on reload or close, while something the collector changed is unsent.
-  const dirty =
-    !terminal &&
-    reachable.current &&
-    !gone &&
-    edited.current &&
-    proposalCopies(proposal) > 0;
+  const dirty = !terminal && reachable.current && !gone && changed.current;
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
+      if (sent.current || sending.current || terminalRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -779,8 +1091,8 @@ export function ProposalBuilderPage({
     );
     if (terminal.kind === "unavailable")
       return (
-        <main className={FRAME}>
-          <PageHeader title="Trade Proposal" />
+        <main ref={observeRoot} className={FRAME}>
+          <PageHeader title="Trade Proposal" headingRef={headingRef} />
           <p role="status" className="m-0 text-body text-text">
             Your proposal was already sent. This Trade isn't available to view.
             Return to Trades to check your items.
@@ -791,8 +1103,8 @@ export function ProposalBuilderPage({
     const trade = terminal.trade;
     const target = tradePath(trade.thread_id);
     return (
-      <main className={FRAME}>
-        <PageHeader title={terminal.label} />
+      <main ref={observeRoot} className={FRAME}>
+        <PageHeader title={terminal.label} headingRef={headingRef} />
         <p role="status" className="m-0 text-body text-text">
           Your proposal was already sent. These are the current terms.
         </p>
@@ -895,6 +1207,7 @@ export function ProposalBuilderPage({
         proposal[side].length > 0
       )}
       onChange={(line, quantity) => {
+        if (sending.current) return;
         say(
           `${tradeCardName(line)}: ${quantity} in ${SIDE_LABEL[side]}`,
           "proposal"
@@ -905,7 +1218,16 @@ export function ProposalBuilderPage({
     />
   );
   const proposalPane = (
-    <fieldset disabled={lifecycle?.phase === "sending"} className="contents">
+    <fieldset
+      aria-disabled={busy || undefined}
+      className={`contents ${FROZEN_CONTROLS}`}
+      onClickCapture={(event) => {
+        // Keep controls focusable while the submitted draft is frozen. Handler guards also protect late events.
+        if (!sending.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
       <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
         {lifecycle &&
           (reviewNeeded ||
@@ -913,20 +1235,11 @@ export function ProposalBuilderPage({
             lifecycle.phase === "loading") && (
             <section
               aria-label="Current offer to review"
+              ref={reviewRegionRef}
               className="flex flex-col gap-2 rounded-panel border border-border p-3"
             >
-              <p role="status">
-                {lifecycle.phase === "gone"
-                  ? "This Trade no longer accepts an offer change. Your draft is kept."
-                  : lifecycle.phase === "read_failed"
-                    ? lifecycle.failure === "version"
-                      ? "The current offer couldn't be loaded. Your draft is kept. Retry the check before sending."
-                      : "Available copies couldn't be loaded. Your draft is kept."
-                    : lifecycle.phase === "loading"
-                      ? "Checking available copies…"
-                      : lifecycle.phase === "checking"
-                        ? "Checking the current offer. Your draft is kept."
-                        : "The offer changed. Your draft is kept."}
+              <p role="status" tabIndex={-1} ref={reviewNoticeRef}>
+                {reviewNoticeText(lifecycle)}
               </p>
               {lifecycle.candidate ? (
                 <>
@@ -987,29 +1300,39 @@ export function ProposalBuilderPage({
           )}
         {sideSection("get")}
         {fromMatch && match.kind === "ready" && (
-          <MatchPrintingChoices
-            side="get"
-            row={match.row}
-            proposal={proposal}
-            onChoose={(groupId, editionId) =>
-              change((p) =>
-                chooseMatchedPrinting(p, "get", match.row, groupId, editionId)
-              )
-            }
-          />
+          <div className="contents" data-focus-side="get">
+            <MatchPrintingChoices
+              side="get"
+              row={match.row}
+              proposal={proposal}
+              onChoose={(groupId, editionId) =>
+                change((p) =>
+                  chooseMatchedPrinting(p, "get", match.row, groupId, editionId)
+                )
+              }
+            />
+          </div>
         )}
         {sideSection("give")}
         {fromMatch && match.kind === "ready" && (
-          <MatchPrintingChoices
-            side="give"
-            row={match.row}
-            proposal={proposal}
-            onChoose={(groupId, editionId) =>
-              change((p) =>
-                chooseMatchedPrinting(p, "give", match.row, groupId, editionId)
-              )
-            }
-          />
+          <div className="contents" data-focus-side="give">
+            <MatchPrintingChoices
+              side="give"
+              row={match.row}
+              proposal={proposal}
+              onChoose={(groupId, editionId) =>
+                change((p) =>
+                  chooseMatchedPrinting(
+                    p,
+                    "give",
+                    match.row,
+                    groupId,
+                    editionId
+                  )
+                )
+              }
+            />
+          </div>
         )}
         <section
           aria-labelledby={cashHeadingId}
@@ -1039,6 +1362,7 @@ export function ProposalBuilderPage({
               placeholder="0.00"
               autoComplete="off"
               maxLength={14}
+              readOnly={busy}
               value={cash.amount}
               onChange={(event) =>
                 editCash({ ...cash, amount: event.currentTarget.value })
@@ -1059,15 +1383,17 @@ export function ProposalBuilderPage({
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="primary"
+            ref={sendButtonRef}
             className="disabled:opacity-45"
             disabled={
-              empty ||
-              gone ||
-              unchanged ||
-              reviewNeeded ||
-              (controls !== null && !controls.send) ||
-              (!replaying && (!capsReady || overCap)) ||
-              terminal !== null
+              !busy &&
+              (empty ||
+                gone ||
+                unchanged ||
+                reviewNeeded ||
+                (controls !== null && !controls.send) ||
+                (!replaying && (!capsReady || overCap)) ||
+                terminal !== null)
             }
             aria-disabled={busy || undefined}
             aria-describedby={reason ? reasonId : undefined}
@@ -1080,7 +1406,12 @@ export function ProposalBuilderPage({
               : "Send Trade Proposal"}
           </Button>
           {reason && (
-            <p id={reasonId} className="m-0 text-meta text-text-muted">
+            <p
+              id={reasonId}
+              tabIndex={-1}
+              ref={reasonRef}
+              className="m-0 text-meta text-text-muted"
+            >
               {reason}
             </p>
           )}
@@ -1090,14 +1421,25 @@ export function ProposalBuilderPage({
             label="Message (optional)"
             value={initialMessage}
             maxLength={4000}
-            disabled={busy || terminal !== null || key.current !== null}
+            readOnly={busy || terminal !== null || key.current !== null}
             onChange={(event) => {
+              if (
+                sending.current ||
+                terminalRef.current ||
+                key.current !== null
+              )
+                return;
               setInitialMessage(event.target.value);
             }}
           />
         )}
 
-        <p role="alert" className="m-0 text-meta text-danger empty:hidden">
+        <p
+          role="alert"
+          tabIndex={-1}
+          ref={sendMessageRef}
+          className="m-0 text-meta text-danger empty:hidden"
+        >
           {message}
         </p>
       </section>
@@ -1106,33 +1448,42 @@ export function ProposalBuilderPage({
   const libraryAnnounces =
     announcement.owner === "cards" && (!phone || pane === "cards");
   const library = (
-    <ProposalLibrary
-      headingId={libraryId}
-      additionsBlocked={!capsReady || lifecycle?.phase === "sending"}
-      announcement={libraryAnnounces ? announcement.text : null}
-      ownScroll={!phone}
-      friendName={name}
-      theirs={libraryTheirs}
-      mine={libraryMine}
-      match={libraryMatch}
-      onTheirSearch={setTheirQ}
-      onShowMore={() => void showMore()}
-      onRetry={(which) => {
-        if (which === "theirs") {
-          setAttempt((n) => n + 1);
-          offerReview?.beginInventory("get");
-        } else if (which === "mine") {
-          setMineAttempt((n) => n + 1);
-          offerReview?.beginInventory("give");
-        } else setMatchAttempt((n) => n + 1);
-      }}
-      proposal={displayedProposal}
-      onAdd={add}
-    />
+    <div
+      ref={libraryRef}
+      className={
+        busy
+          ? "contents [&_button[aria-disabled=true]]:opacity-45 [&_button[aria-disabled=true]]:cursor-default!"
+          : "contents"
+      }
+    >
+      <ProposalLibrary
+        headingId={libraryId}
+        additionsBlocked={!capsReady || busy || lifecycle?.phase === "sending"}
+        announcement={libraryAnnounces ? announcement.text : null}
+        ownScroll={!phone}
+        friendName={name}
+        theirs={libraryTheirs}
+        mine={libraryMine}
+        match={libraryMatch}
+        onTheirSearch={setTheirQ}
+        onShowMore={() => void showMore()}
+        onRetry={(which) => {
+          if (which === "theirs") {
+            setAttempt((n) => n + 1);
+            offerReview?.beginInventory("get");
+          } else if (which === "mine") {
+            setMineAttempt((n) => n + 1);
+            offerReview?.beginInventory("give");
+          } else setMatchAttempt((n) => n + 1);
+        }}
+        proposal={displayedProposal}
+        onAdd={add}
+      />
+    </div>
   );
 
   return (
-    <main className={FRAME}>
+    <main ref={observeRoot} className={FRAME}>
       {back}
       <PageHeader title={`${frameTitle} to ${name}`} headingRef={headingRef} />
       {phone ? (
@@ -1188,10 +1539,14 @@ export function ProposalBuilderPage({
           <p className="m-0 text-body">
             {counter
               ? `Your changes aren't kept. ${name}'s Trade Proposal stays as it was.`
-              : "The cards you added aren't kept."}
+              : "Your changes aren't kept."}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="secondary" onClick={() => setAsking(null)}>
+            <Button
+              data-autofocus
+              variant="secondary"
+              onClick={() => setAsking(null)}
+            >
               Keep editing
             </Button>
             <Button
@@ -1260,14 +1615,19 @@ function ProposalSideSection({
                 key={line.edition_id}
                 card={line}
                 quantity={
-                  <Stepper
-                    label={`${tradeCardName(line)} ${side === "get" ? "you get" : "you give"}`}
-                    value={line.quantity}
-                    min={0}
-                    max={loadingCaps ? line.quantity : cap}
-                    announceValue={false}
-                    onChange={(value) => onChange(line, value)}
-                  />
+                  <span
+                    className="contents"
+                    data-focus-row={`${side}:${line.edition_id}`}
+                  >
+                    <Stepper
+                      label={`${tradeCardName(line)} ${side === "get" ? "you get" : "you give"}`}
+                      value={line.quantity}
+                      min={0}
+                      max={loadingCaps ? line.quantity : cap}
+                      announceValue={false}
+                      onChange={(value) => onChange(line, value)}
+                    />
+                  </span>
                 }
                 context={
                   <span className="text-meta text-text-subtle tabular-nums">
