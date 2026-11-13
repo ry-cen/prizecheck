@@ -9,14 +9,47 @@ import errno
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import time
 
-from app.public_records import FilePublicRecords, HttpPublicRecords, OperationConflict, quote_key, result_key
+from app import public_records as _records
+from app.public_records import FilePublicRecords, HttpPublicRecords, OperationConflict
 from app.public_projection import ProjectionUnavailable
 
 REF = 'c' * 48
 STORE_OPTIONS = ('max_entries', 'max_bytes', 'operation_ttl', 'generation_retention', 'tombstone_ttl')
+
+# Test-only key families for the store conformance tests. No live family is evictable (ADR 0019 retired the quote
+# payloads), but the store still evicts payloads it holds as evictable, so the tests register their own families
+# here, in every process that imports this fixture (the relay and fault-writer children too). The prefixes are
+# test-only (each as long as the retired prefix it stands for: quote, result, fence, lease), so the retired
+# families stay unregistered and stored sizes match the earlier tests.
+TEST_FAMILIES = (
+    ('test_payload', re.compile(r'qtest:([0-9a-f]{48}):([1-9][0-9]{0,18})'), True),
+    ('test_marker', re.compile(r'rstest:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
+    ('test_fence', re.compile(r'ftest:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
+    ('test_scope', re.compile(r'stest:([A-Za-z0-9_.:-]{1,200})'), False),
+)
+if not any(family[0] == 'test_payload' for family in _records._FAMILIES):
+    _records._FAMILIES = _records._FAMILIES + TEST_FAMILIES
+
+
+def payload_key(ref, revision):
+    """An evictable test payload."""
+    return f'qtest:{ref}:{revision}'
+
+
+def marker_key(ref, revision):
+    return f'rstest:{ref}:{revision}'
+
+
+def fence_key(ref, revision):
+    return f'ftest:{ref}:{revision}'
+
+
+def scope_key(scope):
+    return f'stest:{scope}'
 
 
 def backend_from_config(config):
@@ -197,10 +230,10 @@ def fault_writer(config, phase, reached):
     if config['adapter'] == 'filesystem':
         _pause_at_pointer(phase, reached)
     store = store_from_config(config)
-    keys = [result_key(REF, 1), quote_key(REF, 1)]
+    keys = [marker_key(REF, 1), payload_key(REF, 1)]
     old = store.read_records(keys, deadline=time.monotonic() + 3)
     store.compare_and_swap({key: record.version for key, record in old.records.items()},
-        {result_key(REF, 1): {'state': 'absent'}, quote_key(REF, 1): None},
+        {marker_key(REF, 1): {'state': 'absent'}, payload_key(REF, 1): None},
         deadline=time.monotonic() + 30, operation_id='terminal-absence')
 
 

@@ -18,7 +18,7 @@ from app.games.pokemon.trading.trade_inventory import SendTradeProposal, trade_s
 from app.location_tree import VOID_DIGEST
 from app.social.threads import normalize_text
 from test_catalog_references import migrate
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_holdings import call
 from test_operation_counts import writer  # noqa: F401
 from test_thread_migration import MIGRATION, old, apply, mapped  # noqa: F401

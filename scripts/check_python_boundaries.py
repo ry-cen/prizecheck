@@ -332,41 +332,6 @@ def rule_tsv_readers(tree, data, rules):
     return sorted(found), compare(found, data['readers'])
 
 
-def rule_price_client(tree, data, rules):
-    failures = missing_module(tree, data['module'])
-    if failures:
-        return [], failures
-    module = tree.parse(data['module'])
-    nodes = list(ast.walk(module))
-    origins = [node.value for node in nodes if isinstance(node, ast.Constant) and isinstance(node.value, str)
-               and node.value.startswith(('http:', 'https:'))]
-    clients = [node for node in nodes if isinstance(node, ast.Call) and ast.unparse(node.func) == data['client']]
-    loads = [node for node in nodes if isinstance(node, ast.Call) and ast.unparse(node.func) == data['loads']]
-    functions = [node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == data['function']]
-    failures = []
-    if origins != data['origins']:
-        failures.append(f'origin literals are {origins}, not {data["origins"]}')
-    settings = {}
-    if len(clients) != 1:
-        failures.append(f'{len(clients)} {data["client"]}(...) calls, not exactly one')
-    else:
-        settings = {keyword.arg: ast.unparse(keyword.value) for keyword in clients[0].keywords}
-        for key, value in data['client_keywords'].items():
-            if settings.get(key) != value:
-                failures.append(f'{data["client"]} keyword {key} is {settings.get(key)}, not {value}')
-    if not loads:
-        failures.append(f'no {data["loads"]} call')
-    for call in loads:
-        if data['loads_keyword'] not in {keyword.arg for keyword in call.keywords}:
-            failures.append(f'{data["loads"]} on line {call.lineno} passes no {data["loads_keyword"]}')
-    arguments = [arg.arg for arg in functions[0].args.args] if functions else None
-    if arguments != data['function_arguments']:
-        failures.append(f'{data["function"]} takes {arguments}, not {data["function_arguments"]}')
-    found = [f'origins {origins}', f'{data["client"]} keywords {settings}', f'{len(loads)} {data["loads"]} calls',
-             f'{data["function"]}{arguments}']
-    return found, failures
-
-
 def rule_host(tree, data, rules):
     found = {name for name, text in tree.text.items() if data['host'] in text.lower()}
     return sorted(found), compare(found, data['allowed'], exact=False)
@@ -418,7 +383,6 @@ ARCHITECTURE_RULES = {
     'format-rules-beside-evaluator': rule_beside,
     'import-aliases-importers': rule_importers,
     'import-aliases-tsv-readers': rule_tsv_readers,
-    'price-source-client': rule_price_client,
     'tcgcsv-host': rule_host,
     'social-inventory-readers': rule_social_inventory,
     'social-allowed-imports': rule_social_imports,

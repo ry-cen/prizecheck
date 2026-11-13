@@ -14,7 +14,7 @@ import psycopg
 from app.main import app, connect  # noqa: F401
 from app.social import friends as friends_module
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_holdings import call, client
 
 ROOT = Path(__file__).resolve().parents[2]

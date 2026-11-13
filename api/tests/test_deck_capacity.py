@@ -16,7 +16,6 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher
 from app.games.pokemon.catalog import public_catalog
 from app.games.pokemon.prices.catalog_targets import LIVE, activate_rule
 from app.public_projection import FilePublicProjection
@@ -42,13 +41,6 @@ def store(tmp_path, monkeypatch):
     public_record_store().initialize(deadline=time.monotonic() + 5)
     return public_record_store()
 
-
-@pytest.fixture(autouse=True)
-def launches(monkeypatch):
-    """No runner is ever started: every row is seeded fresh, so admission has nothing to launch."""
-    calls = []
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
-    return calls
 
 
 def capacity_world(count, owner):

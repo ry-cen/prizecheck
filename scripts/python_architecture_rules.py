@@ -233,17 +233,6 @@ RULES = {
     'import-aliases-tsv-readers': {
         'pattern': re.compile(r"""['"]import_aliases\.tsv['"]"""),
         'readers': {'api/app/games/pokemon/imports/import_aliases.py'}},
-    # The TCGdex price client: one origin literal, a client that follows no redirect and reads no proxy environment, every
-    # json.loads keeps floats as text, and fetch takes the card and a may_retry callable.
-    'price-source-client': {
-        'module': 'app.games.pokemon.prices.price_source',
-        'origins': ['https://api.tcgdex.net'],
-        'client': 'httpx.Client',
-        'client_keywords': {'follow_redirects': 'False', 'trust_env': 'False'},
-        'loads': 'json.loads',
-        'loads_keyword': 'parse_float',
-        'function': 'fetch',
-        'function_arguments': ['card', 'may_retry']},
     # Only the price import talks to the TCGCSV host. A subset: the module may also stop naming it.
     'tcgcsv-host': {'host': 'tcgcsv.com', 'allowed': {'app.games.pokemon.prices.price_import'}},
     # In the social area only friend_copies (the choke point) and hidden_locations (the rule it calls) may read inventory.

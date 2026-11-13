@@ -67,7 +67,7 @@ from app.games.pokemon.prices import prices  # noqa: E402
 from app.core.inventory.bounded_work import Lane, Late  # noqa: E402
 from app.core.prices.price_reads import price_reads_enabled  # noqa: E402
 from app.games.pokemon.prices.catalog_targets import MATCHING  # noqa: E402
-from app.public_records import public_record_store, quote_key, result_key  # noqa: E402
+from app.public_records import public_record_store  # noqa: E402
 from test_catalog import reset_catalog  # noqa: E402
 from test_catalog_metadata import Records, furret  # noqa: E402
 from test_catalog_reconciliation import run  # noqa: E402
@@ -244,7 +244,7 @@ def test_each_edition_gets_its_own_price_and_every_other_state_is_labelled_not_z
     assert response.json()["withheld"] is False
     one = rows[str(normal["id"])]
     assert (one["status"], one["amount"], one["display_amount"], one["stale"], one["age"]) == ("quote", "0.25", "$0.25", False, "known")
-    assert one["refresh"] is None and one["refresh_failed_at"] is None
+    assert "refresh" not in one and "refresh_failed_at" not in one
     two = rows[str(reverse["id"])]
     assert (two["amount"], two["age"], two["stale"]) == ("0.43", "known", True)
     three = rows[str(plain["id"])]
@@ -408,23 +408,20 @@ def test_price_reads_off_answers_no_price_for_every_row_without_a_query(store, m
     assert price_reads_enabled() is True and prices_of(post(ids(normal["id"])))[str(normal["id"])]["amount"] == "0.43"
 
 
-def test_no_price_route_reads_or_writes_the_record_store_or_calls_price_refresh(store, monkeypatch):
-    from app import price_refresh, public_records
+def test_no_price_route_reads_or_writes_the_record_store(store, monkeypatch):
+    from app import public_records
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
     seed(store, normal)
     seed(store, reverse, "0.43", checked=ago(timedelta(hours=30)))
 
     def forbidden(*args, **kwargs):
-        raise AssertionError("a price read touched the record store or the refresh path")
-    for name in ("public_record_store", "quote_states"):
-        monkeypatch.setattr(public_records, name, forbidden)
-    for name in ("evaluate_and_admit", "Row"):
-        monkeypatch.setattr(price_refresh, name, forbidden)
+        raise AssertionError("a price read touched the record store")
+    monkeypatch.setattr(public_records, "public_record_store", forbidden)
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    assert {row["status"] for row in rows.values()} == {"quote"} and {row["refresh"] for row in rows.values()} == {None}
+    assert {row["status"] for row in rows.values()} == {"quote"}
     assert prices.stored_edition_quotes([normal["id"], reverse["id"]])[normal["id"]].amount == "0.43"
-    assert not hasattr(prices, "public_record_store") and not hasattr(prices, "price_refresh")
+    assert not hasattr(prices, "public_record_store")
 
 
 def test_stored_edition_quotes_answer_from_the_same_rows_and_none_when_postgres_cannot(store, monkeypatch):
@@ -470,18 +467,12 @@ def test_a_postgres_failure_withholds_the_row_as_validation_unavailable(store, m
     assert response.json()["withheld"] is True
 
 
-def test_a_catalog_pull_writes_no_quote_result_or_fence_record(store):
+def test_a_catalog_pull_seeds_no_price(store):
     from app.games.pokemon.catalog import catalog
-    from app.public_records import fence_key
     world()
     assert not hasattr(catalog, "seed_from_import") and not hasattr(catalog, "price_views") and not hasattr(catalog, "price_view")
     assert not hasattr(catalog.TCGdexSource(), "price_views")
     run(Records(card(1), furret(id="meta-2", localId="2")))
-    with connect() as conn:
-        rows = conn.execute("SELECT public_ref,mapping_revision FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id").fetchall()
-    assert rows
-    keys = [make(row["public_ref"], row["mapping_revision"]) for row in rows for make in (quote_key, result_key, fence_key)]
-    assert {record.value for record in store.read_records(keys, deadline=time.monotonic() + 5).records.values()} == {None}
 
 
 # ------------------------------------------------------------------ the trusted budget
@@ -659,4 +650,4 @@ def test_cache_control_and_pragma_headers_change_nothing(store):
     raw = json.dumps(ids(normal["id"]), separators=(",", ":")).encode()
     headers = {**headers_for(raw), "cache-control": "no-cache, max-age=0", "pragma": "no-cache", "x-refresh": "1"}
     row = client.post(PATH, content=raw, headers=headers).json()["prices"][0]
-    assert row["refresh"] is None and row["amount"] == "0.43"
+    assert "refresh" not in row and row["amount"] == "0.43"

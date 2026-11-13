@@ -28,7 +28,7 @@ from app.main import connect  # noqa: F401
 from app.social import trades
 from app.social.trades import TradeFacts, TradeView
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import hold
 from test_for_trade_locations import mark as mark_for_trade
 from test_friend_copies import collector, node, ok, place

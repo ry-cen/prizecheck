@@ -2,7 +2,7 @@
 import pytest
 
 from app.main import connect
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_friend_copies import collector, ok
 from test_holdings import call
 from test_threads import message, thread, timeline

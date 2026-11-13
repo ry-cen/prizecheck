@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 
 from app.main import connect  # noqa: F401
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import EPOCH, counting, created, deck, hold, iono_world, line, need, new_owner
 from test_holdings import add, call
 from test_prices import seed, world
@@ -321,12 +321,11 @@ def test_the_read_is_bounded_by_deck_list_lines_not_the_collection(store, monkey
     assert {**after, "owner_revision": None} == {**before, "owner_revision": None}
 
 
-def test_the_read_is_not_a_price_access(store, launches):
+def test_the_read_is_not_a_price_access(store):
     owner, _, gardevoir, _ = iono_world(store)
     want_list(owner)
     want_list(owner, gardevoir)
     # It reads no quote and admits no refresh: the cost of the same scope is #210's price access (ADR 0006).
-    assert launches == []
 
 
 def test_lines_of_one_card_read_collector_numbers_the_way_catalog_search_compares_them():

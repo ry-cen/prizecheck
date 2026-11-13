@@ -7,7 +7,7 @@ from uuid import uuid4
 from app.games.pokemon.inventory import borrowed_gallery
 from app.main import connect
 from test_catalog_targets import isolated_rules  # noqa: F401
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_collection_listing_golden import hand_over, world
 from test_friend_copies import befriend, collector, node, ok
 from test_handover import handover

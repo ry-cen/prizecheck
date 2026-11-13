@@ -21,7 +21,7 @@ from app.main import app, connect  # noqa: F401
 from app.social import counts
 from test_catalog_references import migrate
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture, as test_friend_copies uses)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures, as test_friend_copies uses)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures, as test_friend_copies uses)
 from test_decks import create
 from test_deck_counting import hold, line
 from test_friend_copies import befriend, collection, collector

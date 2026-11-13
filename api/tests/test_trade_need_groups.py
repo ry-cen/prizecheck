@@ -5,7 +5,7 @@ import pytest
 from app.social import trade_matches
 from stranger_fixtures import trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_deck_counting import deck, hold, line
 from test_friend_copies import befriend, collector, ok
 from test_holdings import call

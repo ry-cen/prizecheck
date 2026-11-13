@@ -10,8 +10,8 @@ Equal prices go to the Edition earlier in catalog order. The response says which
 does not record it, and a later price change never touches the line. The stored idempotent response keeps the rule so a
 retry replays the same answer.
 
-Adding a card is not a price access (ADR 0006): the read never admits a refresh, waits for a runner or writes anything to
-the record store. No connection or lock is held while the store is read.
+Adding a card reads the stored prices only (``prices.stored_edition_quotes``, ADR 0019) and writes nothing to the record
+store.
 """
 from uuid import UUID
 

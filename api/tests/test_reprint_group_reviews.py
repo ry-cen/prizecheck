@@ -25,7 +25,7 @@ from test_deck_lists import add_line, detail
 from test_decks import create
 from test_holdings import add, call, client
 from test_publications import command
-from test_published_cost import launches, store  # noqa: F401  (autouse: a records store, no price launches)
+from test_published_cost import store  # noqa: F401  (autouse: a records store)
 from test_reprint_groups import CANDY_ME, CANDY_SM, CANDY_SM_GUARDIANS, CANDY_SV, CANDY_SWSH, RESEARCH, RESEARCH_SV, \
     SM_CANDY, Withdrawing, candy
 

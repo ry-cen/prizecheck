@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from app.main import connect  # noqa: F401
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, detail, hold, line, new_owner
 from test_deck_import import sql
 from test_holdings import call
@@ -76,7 +76,7 @@ def world():
     return e, owner, {"binder": binder, "attic": attic, "charizard": charizard, "gardevoir": gardevoir}
 
 
-def test_the_decks_own_copies_come_first_and_the_answer_carries_the_revision_the_current_list_and_the_batch(launches):
+def test_the_decks_own_copies_come_first_and_the_answer_carries_the_revision_the_current_list_and_the_batch():
     e, owner, at = world()
     before = detail(owner, at["gardevoir"])["deck_list"]
     body = review(owner, PASTE, at["gardevoir"])
@@ -97,7 +97,6 @@ def test_the_decks_own_copies_come_first_and_the_answer_carries_the_revision_the
     assert [(row["edition_id"], row["quantity"]) for row in replace["changes"]] == [
         *((row["edition_id"], row["quantity"]) for row in body["deck_list"]), (e["D15"], "0")]
     assert lines(body["deck_list"]) == {e["185R"]: "2", e["254"]: "2", e["NB"]: "1", e["P5"]: "2", e["PM5"]: "2"}
-    assert launches == []
     # Without a deck_id the review is a new Deck's, with no replace.
     assert review(owner, PASTE, None)["replace"] is None
 

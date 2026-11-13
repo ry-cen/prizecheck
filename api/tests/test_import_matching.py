@@ -12,7 +12,6 @@ from uuid import uuid4
 import pytest
 
 from app.main import app  # noqa: F401
-from app import price_launcher
 from app.public_records import public_record_store
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -34,13 +33,6 @@ def store(tmp_path, monkeypatch):
     public_record_store().initialize(deadline=time.monotonic() + 5)
     return public_record_store()
 
-
-@pytest.fixture(autouse=True)
-def launches(monkeypatch):
-    """Records any runner launch; reviewing a list must never cause one."""
-    calls = []
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
-    return calls
 
 
 # One Printing for each alias row and rule, plus the cards the Basic Energy and name tests need.
@@ -308,7 +300,7 @@ def test_the_prefill_is_a_report_the_missing_cards_queue_accepts():
 # ------------------------------------------------------------------ whole lists
 
 
-def test_the_tcg_live_and_limitless_lists_resolve_with_only_the_expected_lines_changed(launches):
+def test_the_tcg_live_and_limitless_lists_resolve_with_only_the_expected_lines_changed():
     reset_catalog()
     run(Records(*LIST_CARDS))
     owner = str(uuid4())
@@ -317,4 +309,3 @@ def test_the_tcg_live_and_limitless_lists_resolve_with_only_the_expected_lines_c
         assert [(line["line"], line["status"]) for line in body["lines"]] == LIST_EXPECTED[key], key
         assert body["totals"]["to_resolve"] == 0, key
         assert sum(int(entry["quantity"]) for entry in body["deck_list"]) == 60, key
-    assert launches == []

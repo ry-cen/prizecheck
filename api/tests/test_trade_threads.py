@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 
 from test_catalog_targets import isolated_rules  # noqa: F401
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from app.main import connect
 from app.social.trades import end_trades_between
 from app.social.owners import lock_owners

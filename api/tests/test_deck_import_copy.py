@@ -18,7 +18,6 @@ from uuid import uuid4
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher
 from app.public_projection import FilePublicProjection
 from app.public_records import public_record_store
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse)
@@ -47,13 +46,6 @@ def store(tmp_path, monkeypatch):
     public_record_store().initialize(deadline=time.monotonic() + 5)
     return public_record_store()
 
-
-@pytest.fixture(autouse=True)
-def launches(monkeypatch):
-    """Records any runner launch; reviewing a copy must never cause one."""
-    calls = []
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
-    return calls
 
 
 def publish(quantities, title="Iono Toolbox", target="standard", publisher=None):
@@ -99,7 +91,7 @@ def printing_of(source_id):
 # ------------------------------------------------------------------ resolving each row
 
 
-def test_each_row_resolves_by_its_edition_then_its_printing_else_not_found(launches):
+def test_each_row_resolves_by_its_edition_then_its_printing_else_not_found():
     seed_import_owned_catalog()
     nest_n, nest_r = edition("sv01-181", "normal"), edition("sv01-181", "reverse")
     iono_n, iono_r = edition("sv02-185", "normal"), edition("sv02-185", "reverse")
@@ -140,7 +132,6 @@ def test_each_row_resolves_by_its_edition_then_its_printing_else_not_found(launc
     # allocation chooses as for any line (no quote: catalog order, Normal first).
     assert parts(by_card(review(owner, token, "exact"))[("SVI", "181")]) == [(nest_r, "2", "new", "published")]
     assert parts(by_card(review(owner, token, "owned"))[("SVI", "181")]) == [(nest_n, "2", "new", "catalog_order")]
-    assert launches == []
 
 
 def test_a_row_published_without_references_is_not_found():

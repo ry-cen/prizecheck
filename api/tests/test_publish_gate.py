@@ -21,7 +21,7 @@ from test_catalog_reconciliation import run
 from test_deck_format_checks import CARDS, deck_with
 from test_deck_lists import change_line
 from test_holdings import call, client
-from test_published_cost import launches, rewrite_snapshot, store  # noqa: F401  (autouse: a projection and records store)
+from test_published_cost import rewrite_snapshot, store  # noqa: F401  (autouse: a projection and records store)
 from test_publications import stored_decks
 from test_target_format import LEGAL_IN_STANDARD, codes, set_target
 

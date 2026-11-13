@@ -6,7 +6,7 @@ import pytest
 
 from app.social import loans
 from test_catalog_targets import isolated_rules  # noqa: F401
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_friend_copies import ok
 from test_handover import borrowed, code
 from test_holdings import call

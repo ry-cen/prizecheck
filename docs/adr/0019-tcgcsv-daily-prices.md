@@ -1,6 +1,8 @@
 # Price every card from one daily TCGCSV snapshot stored in PostgreSQL
 
-**Status:** proposed 2026-10-27 (planning decision, not yet implemented). Supersedes these parts of other ADRs:
+**Status:** proposed 2026-10-27 (planning decision). The code for the "Retired" list below is implemented by
+[#356](https://github.com/ry-cen/prizecheck/issues/356); deleting the retired records from a store is a separate step the
+owner runs (`scripts/purge_price_records.py`). Supersedes these parts of other ADRs:
 
 - **[ADR 0006](0006-access-triggered-price-refresh.md):** its refresh policy is superseded (the one-hour, 24-hour and
   three-second age bands, admission, waiting for a fetch, and coalesced in-flight work). Two of its rules still apply: no

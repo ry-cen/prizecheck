@@ -1,6 +1,6 @@
 # Price runner liveness is proven by a file lock, not by clocks or PIDs
 
-**Status:** accepted; implemented in ticket 08-B; production validation pending. Superseded by [ADR 0019](0019-tcgcsv-daily-prices.md) once the price runner is removed.
+**Status:** superseded by [ADR 0019](0019-tcgcsv-daily-prices.md). Prices come from one daily TCGCSV import, and the price runner, its launcher and the runner lock directory are removed from the code ([#356](https://github.com/ry-cen/prizecheck/issues/356)). Kept as the record of how the runner was built (ticket 08-B).
 
 Price refresh (tickets 07 and 08) runs at most two detached runner processes, started on demand like the catalog import in [ADR 0003](0003-on-demand-catalog-imports.md). A runner holds a lease in the shared record store (`lease:price:runner:<n>`) and source permits in the scheduler. The question is when it is safe to take those away from a runner that has stopped renewing.
 

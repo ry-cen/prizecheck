@@ -28,7 +28,7 @@ from app.social import trades
 import test_holdings
 from test_batch_add import undo, undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, detail as deck_detail, hold, line
 from test_for_trade_locations import deck_in, hide, mark
 from test_friend_copies import befriend, collector, copies, node, ok, place

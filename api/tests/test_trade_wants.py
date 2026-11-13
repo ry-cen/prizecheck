@@ -21,7 +21,7 @@ import psycopg
 from app.main import connect  # noqa: F401
 from app.card_accepts import accepts
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import buy_missing, counting, deck, detail, hold, line, new_owner
 from test_friend_copies import befriend, collector, copies, ok
 from test_handover import _asleep, _sleeping

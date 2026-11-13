@@ -11,7 +11,7 @@ from app.main import app, connect
 from app.social.threads import (EventView, ThreadParty, decode_cursor, encode_cursor, event_data,
                                 normalize_text, touch_threads, write_event)
 from test_api_contract import route_table
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_friend_copies import collector, ok
 from test_holdings import call
 

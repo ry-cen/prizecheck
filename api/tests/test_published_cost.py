@@ -17,7 +17,6 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher
 from app.games.pokemon.publications import public_deck
 from app.games.pokemon.publications import published_cost
 from app.core.inventory.bounded_work import Lane, Late
@@ -41,13 +40,6 @@ def store(tmp_path, monkeypatch):
     public_record_store().initialize(deadline=time.monotonic() + 5)
     return public_record_store()
 
-
-@pytest.fixture(autouse=True)
-def launches(monkeypatch):
-    """Kept for the many test modules that import it (nothing admits a refresh now, so it stays empty); P9 removes it."""
-    calls = []
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
-    return calls
 
 
 def path_of(token, version):

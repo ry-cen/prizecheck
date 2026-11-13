@@ -20,8 +20,8 @@ from app.public_projection import ProjectionUnavailable
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse: clears rule activations)
 from test_prices import client, world
 from test_publications import command, legacy_snapshot, stored_decks
-from test_published_cost import (USER, body_of, generation, launches, publish, quarantine,  # noqa: F401
-                                 rewrite_snapshot, store)  # store and launches are autouse
+from test_published_cost import (USER, body_of, generation, publish, quarantine,  # noqa: F401
+                                 rewrite_snapshot, store)  # store is autouse
 
 BASE = "https://www.tcgplayer.com/massentry?productline=Pokemon&c="
 SEPARATOR = "%7C%7C"

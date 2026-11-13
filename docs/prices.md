@@ -1,70 +1,92 @@
-# Cached exact-Edition prices
+# Exact-Edition prices
 
-Ticket 06 shows cached USD TCGplayer market quotes (supplied through TCGdex) for one exact reviewed Edition, or an honest unavailable state. The route never writes PostgreSQL, never fetches a source in-request, and writes nothing at all for rows checked under one hour ago. Older rows are admitted for background refresh by ticket 07 (coordination records only; see `docs/price-refresh.md`). There is no refresh or force route.
+Prices are TCGplayer market prices for one exact reviewed Edition, imported once a day from TCGCSV and stored in
+PostgreSQL ([ADR 0019](adr/0019-tcgcsv-daily-prices.md)). No read fetches a source, waits for one, or writes anything.
+There is no refresh or force route, and no collector screen shows a price's age, source or check time (AGENTS.md).
 
-**Launch gate.** Pricing stays closed for production. The launch checklist still requires exact physical Edition and quote-variant evidence and an activated matching rule before any price is enabled, and nothing writes quotes until ticket 08. Until then every production Edition reads as unavailable or "No cached price yet". Quotes are written by the price runner and, for Editions verified at import time, by the catalog import itself (ADR 0013). Tests seed `quote:` and `result:` records through the store.
+## Import
 
-**Matching rule versions.** TCGdex repeats a card's whole TCGplayer block (one entry per finish) inside every variant. Matching rule v1 refuses any block with more than one product. v2 reads only the entry the reviewed finish table names for the Edition's descriptor and then applies every v1 check to it; the price fetch (`tcgdex_record.select_quote`) likewise reads only the published variant's entry. Live TCGdex variants also list their `thirdParty` IDs, which reach the Edition descriptor; v1 and v2 read that key as an extra facet, so those Editions named no finish. v3 sets `thirdParty` aside before reading the finish and otherwise applies v2; the lookup's `thirdParty.tcgplayer` is still checked against the selected product. TCGdex also often keeps the TCGplayer block on the card instead of inside each variant: a variant with no block of its own borrows the card's block (`tcgdex_record.priced_variant`, decided by `MatchingRulesV3.borrowed_block` so v3's digest covers it), for both matching and the price fetch, only when it is a plain finish the reviewed finish table covers, the block has a product for that finish, and no sibling variant reads as the same finish once `thirdParty` is set aside. Stamped, subtype and special-foil variants, finishes the block does not list, and such contending siblings borrow nothing. The import applies this whichever matching rule is active; it changes the candidate a v1 or v2 activation reads as well, which is acceptable because a release applies only its newest matching version. Activation re-evaluates unverified Editions, and also gives a matching-rule Edition verified without a quote variant the one the new rule names, when its accepted candidate is unchanged and the rule confirms the same product (`catalog_targets.complete_quote_variant`). Its state, product and basis stay as they are; its `matching_activation_id` becomes the activation that named the variant. Deploying a release applies its newest matching version ([ADR 0021](adr/0021-deploy-applies-newest-catalog-rules.md)): a batched, resumable rollout re-evaluates unverified Editions and completes quote variants. Before it evaluates a batch, it gives candidates stored before the import kept the card-level TCGplayer ID (`mapping_candidate.card_tcgplayer`, read by v5 and later) that key, rebuilt from the stored `source_record.thirdParty` by the import's own function (`catalog_targets.card_tcgplayer_candidate`); this is enrichment and moves no mapping revision.
+`scripts/price_import_job.py` (`app.games.pokemon.prices.price_import`) runs as a step of the daily catalog refresh
+(`prizecheck-deploy.sh catalog-refresh`). It reads TCGCSV's `last-updated.txt`, the Pokémon group list, and each group's
+products and prices; it upserts each group in one transaction into `tcgplayer_product` and `tcgplayer_price`, never
+deletes, and records one `price_import` row. A group that cannot be read completely is left as it was, so a failed day
+leaves every stored price in place. Only this module talks to tcgcsv.com. Exit codes and options are in the script's
+header: 0 imported, unchanged or locked out by another run; 1 database unreachable; 2 failed; 3 partial. After a good
+import it rebinds and publishes (below).
 
-## What a price means
+## Binding
 
-A quote is valid for an Edition only when all of these hold:
+`app.games.pokemon.prices.price_binding.rebind` binds each verified Edition to one TCGplayer product subtype in
+`edition_price_binding`. The product is the reviewed mapping (`catalog_edition_metadata.product_id` while `verified`,
+ADR 0007); the subtype is derived by `sub_type_for` from the Edition's descriptor. A binding records the mapping revision
+it was made for. An Edition the rules cannot bind gets a binding `reason` (`no_product_rows`, `uncovered_variant`,
+`ambiguous`, `shared_price`, `unspecified_variant`) and no price. `rebind` is always a full pass and holds advisory lock
+914713, the same lock the public publish takes. Metadata review and catalog rule activation rebind when they change a
+mapping.
 
-- PostgreSQL says the Edition is `verified` and publishes a `quote_lookup` (`{source:'tcgdex', card, variant}`). `edition_targets` sets it only when the source variant block's product matched the reviewed product.
-- The keys are read under PostgreSQL's `mapping_revision` for that Edition (`quote:<public_ref>:<rev>`, `result:<public_ref>:<rev>`). Other revisions are never read. A revision is opaque and never reused.
-- The payload's `card` and `variant` equal `quote_lookup` exactly, otherwise the row fails closed (`lookup_mismatch`).
-- The amount matches `^(0|[1-9]\d{0,11})(\.\d{1,6})?$`, is held as a `Decimal`, and the payload says `USD` from `tcgdex`. A JSON float, exponent, sign, `NaN`, whitespace or a 13th digit fails only that row (`invalid_quote`). A validated zero amount is a real zero price and shows `$0.00`; missing, evicted or unknown data is never shown as zero.
-- PostgreSQL is authoritative for state. The store's `quarantine:` record is never read. A PostgreSQL quarantine hides a price before any outbox delivery.
-- `catalog_edition_metadata.quote_candidate` (the stored import snapshot) is never read as a price. A catalog import seeds the cache from the response it fetched instead, through the same selection and validation as the runner ([ADR 0013](adr/0013-import-pricing-seeds-the-price-cache.md); "Import seeding" in `docs/price-refresh.md`).
+**Matching rule versions.** TCGdex repeats a card's whole TCGplayer block (one entry per finish) inside every variant. Matching rule v1 refuses any block with more than one product. v2 reads only the entry the reviewed finish table names for the Edition's descriptor and then applies every v1 check to it. Live TCGdex variants also list their `thirdParty` IDs, which reach the Edition descriptor; v1 and v2 read that key as an extra facet, so those Editions named no finish. v3 sets `thirdParty` aside before reading the finish and otherwise applies v2; the lookup's `thirdParty.tcgplayer` is still checked against the selected product. TCGdex also often keeps the TCGplayer block on the card instead of inside each variant: a variant with no block of its own borrows the card's block (`tcgdex_record.priced_variant`, decided by `MatchingRulesV3.borrowed_block` so v3's digest covers it), only when it is a plain finish the reviewed finish table covers, the block has a product for that finish, and no sibling variant reads as the same finish once `thirdParty` is set aside. Stamped, subtype and special-foil variants, finishes the block does not list, and such contending siblings borrow nothing. The import applies this whichever matching rule is active; it changes the candidate a v1 or v2 activation reads as well, which is acceptable because a release applies only its newest matching version. Activation re-evaluates unverified Editions, and also gives a matching-rule Edition verified without a quote variant the one the new rule names, when its accepted candidate is unchanged and the rule confirms the same product (`catalog_targets.complete_quote_variant`). Its state, product and basis stay as they are; its `matching_activation_id` becomes the activation that named the variant. Deploying a release applies its newest matching version ([ADR 0021](adr/0021-deploy-applies-newest-catalog-rules.md)): a batched, resumable rollout re-evaluates unverified Editions and completes quote variants. Before it evaluates a batch, it gives candidates stored before the import kept the card-level TCGplayer ID (`mapping_candidate.card_tcgplayer`, read by v5 and later) that key, rebuilt from the stored `source_record.thirdParty` by the import's own function (`catalog_targets.card_tcgplayer_candidate`); this is enrichment and moves no mapping revision.
+
+## Private reads
+
+`app.games.pokemon.prices.prices.private_edition_quotes(edition_ids, budget)` reads every requested Edition in one
+REPEATABLE READ transaction (`PRICE_QUERY`): the Edition, its reviewed metadata, its binding (only when the binding's
+product and mapping revision match the verified mapping) and the imported price row. Only the market price is ever shown
+(`chosen_amount`); there is no fallback to mid or low, and a null or non-positive market price is no price. A stale
+binding therefore leaves an Edition unpriced and never prices it from the wrong product. The read never touches the
+record store. `stored_edition_quotes` answers from the same query for write paths (below).
+
+## Public price records
+
+`app.games.pokemon.prices.public_prices.publish` makes the public record store hold `price:<edition_ref>` =
+`{mapping_revision, product_id, amount}` for every priced Edition, and nothing else (no date, subtype or source). It is a
+full pass under advisory lock 914713, writes only differences in compare-and-swap batches of at most 128 keys, and
+re-reads and retries a lost batch (four rounds). The registry table `public_price_ref` stays a superset of the store, so a
+crash leaves extra registry rows and never an orphan record. Published Deck cost and Discover read these records; they
+never read PostgreSQL. A `quarantine:edition` record delivered through the catalog outbox unprices a row even while its
+`price:` record remains.
+
+## Failure and PRICE_READS
+
+- A partial import commits successful groups and keeps the previous rows for failed groups. A wholly failed import leaves stored prices unchanged. Owner controls show each import's outcome and warn when
+  the newest good import, or TCGCSV's own update time, is over 48 hours old.
+- A publish failure is recorded on the import run (`public_error`) and shown to the owner; the previous `price:` records
+  stay.
+- `PRICE_READS` (`app.core.prices.price_reads`) is the kill switch. Unset, empty or `on` reads normally; any other value
+  (such as `off`) answers every private row `unavailable`/`no_price` without a query, and the public routes read no
+  `price:` record. It is read at call time.
 
 ## Statuses
 
-`status` is `quote`, `unavailable`, `failed` or `pending`. `reason` explains every non-quote row.
+`status` is `quote`, `unavailable` or `failed`. `reason` explains every non-quote row.
 
-| status      | reason                               | meaning                                                                                                           |
-| ----------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| unavailable | `not_found`                          | no such Edition                                                                                                   |
-| unavailable | `unspecified_variant`                | Unspecified Variant: finish not established                                                                       |
-| unavailable | `unverified` / `quarantined`         | not matched, or matching under review                                                                             |
-| unavailable | `no_quote_variant`                   | verified but no price variant is published                                                                        |
-| unavailable | `not_cached`                         | no result marker, an evicted payload, or no key for the current revision                                          |
-| unavailable | `confirmed_absent`                   | the writer confirmed the provider has no quote; never resurrected                                                 |
-| pending     | none                                 | a refresh is in flight; any stored quote is hidden                                                                |
-| failed      | `lookup_mismatch`, `invalid_quote`   | the cached record failed validation, or its result/quote record was malformed (that row only)                     |
-| failed      | `store_unavailable`                  | the store is down                                                                                                 |
-| failed      | `deadline`, `validation_unavailable` | the budget ran out, or final PostgreSQL validation could not finish. The quote is withheld and `withheld` is true |
+| status      | reason                               | meaning                                                                                          |
+| ----------- | ------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| unavailable | `not_found`                          | no such Edition, or (public) a legacy or unproven snapshot row                                   |
+| unavailable | `unspecified_variant`                | Unspecified Variant: finish not established                                                      |
+| unavailable | `unverified` / `quarantined`         | not matched, or matching under review                                                            |
+| unavailable | `no_price`                           | verified, but no usable binding or market price (or `PRICE_READS` is off)                        |
+| failed      | `store_unavailable`                  | public routes only: the record store could not be read                                           |
+| failed      | `deadline`, `validation_unavailable` | the budget ran out, or PostgreSQL could not answer. The quote is withheld and `withheld` is true |
 
 Display and age:
 
-- `amount` is the exact decimal text. `display_amount` is the only rounded form: half-up to cents with thousands separators (`$0.44`). Any positive amount below one cent shows `<$0.01`, and half-up never rounds a sub-cent amount up to a cent. Rounding happens only in `format_usd`, never in the client.
-- `provider_updated_at` comes from the quote payload and `checked_at` from the `result` marker. They are separate: a successful unchanged check never renews provider age.
-- `age` is `known` or `unknown`. A missing, garbled, timezone-less or future (more than 5 minutes ahead) provider time is `unknown`, and `stale` is then null. `stale` is true only when the provider age is strictly over 48 hours.
-
-## Record contract for ticket 08
-
-```
-quote:<ref>:<rev>  = {attempt, amount: "0.43", currency: "USD", source: "tcgdex",
-                      card, variant, provider_updated_at: ISO-8601 with offset | null}
-result:<ref>:<rev> = {state: "quote", attempt, checked_at, last_failure_at?}
-                   | {state: "absent", checked_at, expires_at}
-                   | {state: "pending", ...}
-```
-
-- `attempt` in the marker and payload must match (`quote_states` treats a mismatch or a missing payload as unknown).
-- `amount` is always a string. `checked_at` lives only in `result`.
-- 07/08 obligation: the fetched block's productId must equal the published `product_id`, and `card`/`variant` must be the Edition's `quote_lookup`.
-- A catalog import writes the same records for a successful check (ADR 0013): `checked_at` is when the import received the card, never the seeding time, and it never writes `absent`.
+- `amount` is the exact decimal text and matches `^(0|[1-9]\d{0,11})(\.\d{1,6})?$` (`quote_contract.parse_amount`).
+  `display_amount` is the only rounded form: half-up to cents with thousands separators (`$0.44`); a positive amount below
+  one cent shows `<$0.01`. Rounding happens only in `format_usd`, never in the client.
+- `provider_updated_at` is TCGCSV's `source_updated_at` for the row and `checked_at` its `seen_at`. `age` is `known` when
+  the provider time is set, and `stale` is true only when it is strictly over 48 hours old. These fields stay in the API
+  for Deck cost's counts; collector screens do not render them.
 
 ## HTTP
 
-`POST /api/prices/editions` with `{"edition_ids": [uuid...]}` (1 to 64, de-duplicated in order, extra fields forbidden). It returns `{prices: [{edition_id, status, reason, amount, display_amount, currency, provider_updated_at, checked_at, age, stale}], withheld}` with `cache-control: no-store`.
+`POST /api/prices/editions` with `{"edition_ids": [uuid...]}` (1 to 64, de-duplicated in order, extra fields forbidden). It returns `{prices: [{edition_id, status, reason, amount, display_amount, currency, provider_updated_at, checked_at, age, stale}], withheld}` with `cache-control: no-store`; `withheld` is true when any row is `deadline` or `validation_unavailable`.
 
 - `force`, `source_url`, `target` and any unknown field give 422. There is no refresh or force route.
 - A body over 16 KiB (measured in bytes) gives 413, in the gateway and in the API.
 - A missing or forged budget gives 401. A gateway abort gives 504 `{detail:{code:'PRICE_DEADLINE'}}`.
-- The route is synchronous on purpose: the HTTP record-store adapter refuses to run on an event loop.
+- The route is synchronous: its PostgreSQL read runs on a bounded worker lane (below).
 
-## Budget (shared by tickets 07, 08, 09, 12)
+## Budget
 
 The gateway takes a monotonic receipt time before it reads the body or looks up the session, and gives budgeted routes three seconds from there (it aborts at 2.9 s so the 504 is written by 3.0 s). The session lookup on a budgeted route runs on its own pool (four connections, with 3 s statement, lock and acquire timeouts; `auth/src/auth.ts`), so a lookup the gateway abandons at the deadline ends in PostgreSQL and never holds a connection that sign-in or another route needs. It signs what is left:
 
@@ -83,11 +105,11 @@ The existing `x-internal-*` identity message is unchanged. Client-supplied `x-in
 
 Read order in `private_edition_quotes(edition_ids, budget)`:
 
-1. If the wait window is already spent, withhold everything (`deadline`) without touching PostgreSQL or the store.
-2. One REPEATABLE READ transaction with `statement_timeout`/`lock_timeout` from the budget reads `catalog_edition.public_ref`, the descriptor and `edition_targets`, then commits. No connection or lock is held during store I/O.
-3. `quote_states` reads verified Editions that have a `quote_lookup`, under the PostgreSQL revision, with `deadline=wait_until`. Failure after `wait_until` is `deadline`, otherwise `store_unavailable`.
-4. Final validation re-reads `edition_targets` inside the reserve. A row whose state, revision or lookup changed is relabelled from the fresh state (or `not_cached` when only the revision moved). If PostgreSQL cannot answer, the quotes are withheld (`validation_unavailable`).
-5. If the monotonic clock is past `hard`, every row becomes `deadline`.
+1. With `PRICE_READS` off, every row is `no_price` without a query.
+2. If the wait window is already spent, withhold everything (`deadline`) without touching PostgreSQL.
+3. One REPEATABLE READ transaction with `statement_timeout`/`lock_timeout` from the budget reads every row. A failure is
+   `deadline` once the wait window has passed, otherwise `validation_unavailable`.
+4. If the monotonic clock is past `hard`, every row becomes `deadline`.
 
 PostgreSQL work runs in a worker thread that the request waits on with its own clock, because libpq raises any connect timeout below two seconds to two. An abandoned worker ends on its own statement and lock timeouts. The lane helper is `app.core.inventory.bounded_work`. The worker threads come from a lane of at most 16 per API process (`prices.POSTGRES_LANE`), and a read that finds every slot taken past its own deadline answers `deadline`.
 
@@ -108,21 +130,6 @@ For any `/api/` response whose `content-disposition` starts with `attachment`, t
 - Both `.txt` downloads keep the required `owner_revision` (409 `INVENTORY_CHANGED`) and take an optional `deck_list_revision` (409 `DECK_LIST_CHANGED` on a mismatch); `tcgplayer.txt` takes the same `scope` as its view.
 - The Mass Entry view also names `want_list_counting` and `settings_revision`. Changing the setting moves neither revision above, so `tcgplayer.txt` takes an optional `settings_revision` too: with `scope=not_owned`, a mismatch is 409 `SETTINGS_CHANGED`. `deck_list` ignores it.
 
-## Refresh label (ticket 07)
-
-`refresh` is an optional field beside `status`/`reason` (null when nothing was done), with `refresh_failed_at` (ISO time of the last failed attempt, only with `failed`). It never changes `status`, `reason`, `amount` or `checked_at`; the cached view is always returned (no 429/503).
-
-| refresh      | meaning                                                                                               |
-| ------------ | ----------------------------------------------------------------------------------------------------- |
-| `background` | checked 1 h to under 24 h ago: returned now, a refresh is queued or already in flight                 |
-| `refreshed`  | the row needed a refresh first (24 h or older, unknown, pending): the runner finished while it waited |
-| `timeout`    | waited until the wait window (2.5 s from receipt) ended; the cached view is unchanged                 |
-| `busy`       | not admitted: a cap, the ledger, no runner could be launched, or the store was busy                   |
-| `backoff`    | not admitted: the Edition or the source is in backoff                                                 |
-| `failed`     | the job left the queue without a result (see `refresh_failed_at`)                                     |
-
-Age bands use `result.checked_at` and the module wall clock: under 1 h nothing happens; 1 h to under 24 h returns the cached view and admits in the background; 24 h or older, a missing, garbled or future (> 5 min) `checked_at`, and unknown/invalid/pending rows are admitted and the response waits for them. Joining a job already in flight never extends its 60 s lifetime and never re-queues it. Reloading never forces anything. Admission is `app.price_refresh.evaluate_and_admit`. The Deck cost route (09) calls it once per access over all Deck rows; the Published Deck cost route (12) does the same for the frozen rows of a Published Deck.
-
 ## Deck cost (ticket 09)
 
 `GET /api/decks/{deck_id}/cost` (`app.games.pokemon.decks.cost`) answers Estimated Deck Cost and Pricing Coverage for every copy of one private Deck. It is budgeted like the Edition route (same gateway signing, same three seconds from receipt) and takes no body and no options; query parameters and cache headers change nothing.
@@ -130,20 +137,20 @@ Age bands use `result.checked_at` and the module wall clock: under 1 h nothing h
 One access:
 
 1. Captures the complete Deck, its Holdings and its Deck List with each line's ownership states, with `deck_list_capture.capture_deck_list` under the budget (`statement_timeout`/`lock_timeout` from `pg_timeout_ms()`, run under `_bounded`). The capture locks the owner row like every inventory reader of record and commits before any store I/O, so no inventory lock or connection is held while prices are read or awaited.
-2. Calls `private_edition_quotes` **once** with every distinct Edition the Deck holds or lists. That one call reads every cache row (in 128-key store batches), calls `evaluate_and_admit` once (at most 32 new jobs; the other rows are labelled and still counted), waits at most once until `wait_until`, and validates once. The Deck is never split into 64-id requests.
+2. Calls `private_edition_quotes` **once** with every distinct Edition the Deck holds or lists: one PostgreSQL read. The Deck is never split into 64-id requests.
 3. Folds the views with the captured quantities. Quantities are Python integers and amounts are integer micro-dollars, so the subtotal is exact for any bigint quantity; the only rounding is the final display (half-up to cents, `<$0.01` for a positive sub-cent subtotal).
 
 Answer (`DeckCost`, `cache-control: no-store`; every count is a base-10 string):
 
 | status       | when                                                                                                                                       | fields                                                                                                               |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `empty`      | the Deck holds no copies (no store read, no admission)                                                                                     | `amount: "0"`, `display_amount: "$0.00"`, all counts `"0"`                                                           |
+| `empty`      | the Deck holds no copies (no price read)                                                                                                   | `amount: "0"`, `display_amount: "$0.00"`, all counts `"0"`                                                           |
 | `priced`     | every row was evaluated and at least one copy has a valid quote                                                                            | `amount`, `display_amount`, `priced_copies`, `total_copies`, `stale_copies`, `unknown_age_copies`, `fallback_copies` |
 | `no_quotes`  | every row was evaluated and no copy has a valid quote                                                                                      | counts with `priced_copies: "0"`; no amount                                                                          |
 | `incomplete` | a row failed with `deadline`, `store_unavailable` or `validation_unavailable`, or the capture failed (`inventory_unavailable`, `deadline`) | `reason` and `total_copies` (null when the capture itself failed); no amount and no coverage                         |
 
-- Only `status: quote` rows count. Confirmed absence, quarantine, unverified, Unspecified Variant, `not_cached`, invalid and pending rows are evaluated but unpriced, so an absent or invalidated quote never enters the subtotal.
-- `stale_copies` and `unknown_age_copies` count priced copies by provider age (strictly over 48 h, or unknown). `fallback_copies` counts priced copies (`status: quote`) whose refresh label is `timeout`, `busy`, `backoff` or `failed`: they are shown from the labelled cache. Copies with no cached quote are unpriced and are not counted here.
+- Only `status: quote` rows count. Quarantined, unverified, Unspecified Variant and `no_price` rows are evaluated but unpriced, so an unknown price never enters the subtotal as zero.
+- `stale_copies` and `unknown_age_copies` count priced copies by provider age (strictly over 48 h, or unknown). `fallback_copies` is always `"0"`: no read refreshes any more, and the field stays for the clients.
 - `owner_revision` is the captured inventory revision. The client discards an answer for any other revision; a newer one makes the page reload its checks and ask again.
 - A Deck owned by someone else is 404 once the capture runs; an exhausted budget or a failed capture answers `incomplete` without checking ownership.
 
@@ -156,7 +163,7 @@ The answer also carries `deck_list_revision`, `deck_list_cost` and `cost_to_comp
 - The answer names `want_list_counting` and `settings_revision` (both null when nothing was captured). The setting moves neither `owner_revision` nor `deck_list_revision`, so the deck builder also discards an answer for another settings revision.
 - Each is a `DeckCostFigures` object: `status, reason, total_copies, priced_copies, stale_copies, unknown_age_copies, fallback_copies, amount, display_amount, currency`, with the statuses, counts, labels and arithmetic of the table above (`deck_cost.summarize`). An unknown price is never $0: an unpriced not-owned copy leaves the cost to complete `no_quotes` or partly covered.
 - `cost_to_complete` is `empty` (`$0.00`, every count `"0"`) when no copy needs buying, a real zero. `deck_list_cost` is `empty` when the Deck List has no lines.
-- The three figures share the one quote read, admission and wait, and each is folded from its own rows only: a failed row makes incomplete only the figures that contain it.
+- The three figures share the one price read, and each is folded from its own rows only: a failed row makes incomplete only the figures that contain it.
 - When nothing was captured (an exhausted budget or a failed capture), both objects are `incomplete` with the top-level reason and no total, and `deck_list_revision` is null.
 - `deck_list_revision` is the captured Deck List revision. A Deck List edit does not move `owner_revision`, so a client showing the new figures discards an answer for another Deck List revision too.
 
@@ -169,7 +176,7 @@ The client (`web/src/DeckCost.tsx`) asks once per Deck and inventory revision, g
 One access:
 
 1. One Want List capture (`want_list.capture_want_list`) under the budget's statement and lock timeouts, run under `_bounded`. It holds the owner row lock and commits before any store I/O.
-2. One `private_edition_quotes` call over every distinct Edition the scope still needs (need > 0): one read, one `evaluate_and_admit`, at most one wait and one validation. Editions the Collection already covers are not read. Nothing to get means no store read and no admission.
+2. One `private_edition_quotes` call over every distinct Edition the scope still needs (need > 0): one PostgreSQL read. Editions the Collection already covers are not read. Nothing to get means no price read.
 3. Each figure is `deck_cost.summarize` over its own copies (`DeckCostFigures`, with the statuses, counts and labels of Deck cost): `total` (the combined total, or the scoped Deck's needs), each section's `cost`, each section line's `cost` with `price_each` (the per-copy display price of a priced Edition, else null), and each combined row's `cost`. An unpriced copy is never $0, and a failed row makes only the figures containing it `incomplete`.
 
 The answer names `want_list_counting`, `settings_revision`, `owner_revision` and `deck_lists_digest`, exactly as `GET /api/want-list` does (each section also carries its `deck_list_revision`). `deck_lists_digest` covers every Deck's id and Deck List revision, whatever the scope, because a Deck List edit moves neither other revision and an older Deck's list changes a newer Deck's need under Every Deck built at once. The client shows a cost only for the Want List answer with the same scope and those four values; when nothing was captured (an exhausted budget or a failed capture), all four are null, `total` is `incomplete` with the reason, and `sections` and `combined` are empty.
@@ -204,29 +211,27 @@ Every error body is `{"detail": {"code": ...}}` with `cache-control: no-store` a
 
 Answer (`PublishedDeckCost`): `version, digest, status, reason, total_copies, priced_copies, amount, display_amount, currency, editions`. `status`, `reason`, `total_copies`, `priced_copies`, `amount`, `display_amount` and the labels are those of the private Deck cost, but the public route leaves out its two price-age counts (`stale_copies`, `unknown_age_copies`) and its count of copies shown from the labelled cache (`fallback_copies`): no price age is sent. `deck_cost.summarize` is the one fold behind both routes (an empty snapshot is `$0.00` with every count `"0"`; `no_quotes` is `0/N`; `incomplete` carries a reason and no coverage).
 
-`editions` (app redesign #183) lists each frozen Edition's own price for the Published Deck page: one `{edition_ref, amount}` per distinct public Edition reference, in snapshot order, where `amount` is the exact per-copy amount of a priced row (`status: quote`, stale quotes included) and null otherwise. It comes from the same views as the totals, so it adds no store read and no admission, and it carries no price age. Legacy rows have no reference and no entry. A withheld or `incomplete` answer has `editions: []`.
+`editions` (app redesign #183) lists each frozen Edition's own price for the Published Deck page: one `{edition_ref, amount}` per distinct public Edition reference, in snapshot order, where `amount` is the exact per-copy amount of a priced row (`status: quote`, stale quotes included) and null otherwise. It comes from the same views as the totals, so it adds no store read, and it carries no price age. Legacy rows have no reference and no entry. A withheld or `incomplete` answer has `editions: []`.
 
 The pipeline for one access:
 
 1. Read the snapshot (`public_deck.read_active`): the manifest only, bounded by the request's own clock (the projection adapter's five-second timeout never applies). Compute the digest.
-2. `public_catalog.marketplace_states` over the distinct Edition references that can be proven, then one `price_refresh.evaluate_and_admit` over every price-eligible row (caller `anon:<digest>`, so the anonymous ledger applies), then at most one wait.
-3. Inside the 0.5 s reserve: re-read eligibility (`marketplace_states` again; a row whose state, revision, lookup or Printing changed is unpriced) and revalidate the snapshot (token, version, digest). Only then is the answer built.
+2. `public_catalog.marketplace_states` over the distinct Edition references that can be proven: the `catalog:edition`, `quarantine:edition` and `price:` records, read together at one generation inside the final reserve. There is no admission and no wait; a row without a valid `price:` record is `no_price`.
+3. Revalidate the snapshot (token, version, digest). Only then is the answer built.
 
 Withheld answers. If the entry deadline, the final-check deadline or the final manifest read fails, the answer is `incomplete` with `reason` (`deadline`, or `validation_unavailable`) and `digest`, `total_copies` and every count null: nothing unvalidated is returned. A store read failure with the snapshot revalidated is `incomplete` with the frozen `total_copies` and the digest, as for the private route.
 
 The digest is `sha256(json.dumps(record['snapshot'], sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))` over the stored snapshot. It is computed per request, never stored (no migration), never a request input, and checked server-side only: the server refuses a digest change within one request (409). The client guards by version: it discards an answer for another version, and a 409 or 404 makes the page read its snapshot again and price the new version.
 
-Reference proof. A row is price-eligible only if its `edition_ref` and `printing_ref` are both present, the store's `catalog:edition:<edition_ref>` record names the same `printing_ref`, and the Edition is verified, has a `quote_lookup` and passes the public catalog checks. Otherwise it is unpriced and still counts in `total_copies`. Legacy rows (no `edition_ref`) are unproven: readable, unpriced and counted in the total; no lookup by set, number or name is attempted, and a republish is the only way to capture references. A row whose reference resolves to another Printing, or is unknown to the public catalog, is treated the same way. Rows repeating one reference have their quantities summed; if they disagree on `printing_ref`, the Edition is unproven. A malformed frozen quantity makes the whole snapshot invalid (503 at entry, `validation_unavailable` at the final check); a row is never dropped silently.
+Reference proof. A row is price-eligible only if its `edition_ref` and `printing_ref` are both present, the store's `catalog:edition:<edition_ref>` record names the same `printing_ref`, and the Edition has a verified product and a `price:` record matching its product and mapping revision, and passes the public catalog checks. Otherwise it is unpriced and still counts in `total_copies`. Legacy rows (no `edition_ref`) are unproven: readable, unpriced and counted in the total; no lookup by set, number or name is attempted, and a republish is the only way to capture references. A row whose reference resolves to another Printing, or is unknown to the public catalog, is treated the same way. Rows repeating one reference have their quantities summed; if they disagree on `printing_ref`, the Edition is unproven. A malformed frozen quantity makes the whole snapshot invalid (503 at entry, `validation_unavailable` at the final check); a row is never dropped silently.
 
 Eligibility comes from the store's `catalog:edition` and `quarantine:edition` records, never from PostgreSQL. A quarantine committed in PostgreSQL hides private prices at once but reaches Published Deck pages only after outbox delivery (`catalog_outbox_pending` shows the lag).
 
-Isolation. The route never touches a session, the gateway's auth database, the API's PostgreSQL or private inventory, and it writes no record: a per-Deck quote or total is never stored, and the record-store generation is unchanged by a cost access over fresh quotes. The tests prove it: `api/tests/test_published_cost.py` patches `psycopg.connect` to raise and sets an unreachable `DATABASE_URL` for every public call, and `auth/tests/published-cost.test.ts` runs an isolated gateway and API whose database URLs are counting listeners (absent, forged and valid cookies cause zero connections to either, with controls showing the counters are live).
-
-Launch gate. Published Deck prices are behind the same physical Edition and quote-variant evidence gate as every other price. This ticket activates no rule and claims no deployed acceptance; the launch checklist stays open.
+Isolation. The route never touches a session, the gateway's auth database, the API's PostgreSQL or private inventory, and it writes no record: a per-Deck quote or total is never stored, and the record-store generation is unchanged by a cost access. The tests prove it: `api/tests/test_published_cost.py` patches `psycopg.connect` to raise and sets an unreachable `DATABASE_URL` for every public call, and `auth/tests/published-cost.test.ts` runs an isolated gateway and API whose database URLs are counting listeners (absent, forged and valid cookies cause zero connections to either, with controls showing the counters are live).
 
 ## Stored reads on write paths (Deck Lists 06)
 
-`prices.stored_edition_quotes` reads what the cache holds now, for a write that chooses by price but displays none: adding a card to a Deck List by its Card Printing (`POST /api/decks/{deck_id}/deck-list/printings`, `app.games.pokemon.decks.printing`). It labels and validates rows exactly as the Edition route does, but it never admits a refresh, waits for a runner or writes a record, whatever a row's check age: ADR 0006 counts only displayed prices and complete Deck costs as accesses. The route carries no gateway budget. The read bounds its own PostgreSQL and store work to `STORED_READ_SECONDS` (1 s) and runs before the command takes the owner lock, so no inventory lock is held while the store is read. It returns `None` when the reviewed state or the store could not be read; the command then answers 503 `PRICES_UNAVAILABLE` and writes nothing.
+`prices.stored_edition_quotes` reads what PostgreSQL holds now, for a write that chooses by price but displays none: adding a card to a Deck List by its Card Printing (`POST /api/decks/{deck_id}/deck-list/printings`, `app.games.pokemon.decks.printing`). It labels rows exactly as the Edition route does and writes nothing. The route carries no gateway budget. The read bounds its own PostgreSQL work to `STORED_READ_SECONDS` (1 s) and runs before the command takes the owner lock, so no inventory lock is held while it reads. It returns `None` when PostgreSQL could not answer; the command then answers 503 `PRICES_UNAVAILABLE` and writes nothing.
 
 Every `status: quote` row is a price, whatever its provider or check age; everything else is unpriced. The command chooses the lowest amount (exact decimal comparison; ties go to catalog order, `descriptor_key, id`), or the first Edition in catalog order when none is priced, and says which in `chosen_by` (`cheapest_price` or `catalog_order`). The line stores only the Edition.
 
@@ -238,5 +243,5 @@ Every `status: quote` row is a price, whatever its provider or check age; everyt
 
 - API thread-pool queueing before the handler is not counted; the gateway abort is the hard gate.
 - Clock skew between hosts is assumed negligible; headers carry remaining milliseconds.
-- A malformed `result:`/`quote:` record fails only its own row (`invalid_quote`); a store outage still fails the read (`store_unavailable`).
+- On the public routes, a malformed `price:` record leaves only its own row unpriced; a store outage fails the read (`store_unavailable`).
 - Prices are read when a slot first comes near the viewport. An open page does not poll, and a slot that never comes near is never asked for.

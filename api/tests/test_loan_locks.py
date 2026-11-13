@@ -20,7 +20,7 @@ from app import loan_inventory, loan_picks
 from app.main import connect  # noqa: F401
 from app.social import loans
 from test_catalog_targets import isolated_rules  # noqa: F401
-from test_deck_cost import launches, store  # noqa: F401
+from test_deck_cost import store  # noqa: F401
 from test_deck_counting import hold
 from test_friend_copies import collector, befriend, ok, place
 from test_holdings import call

@@ -15,10 +15,9 @@ import time
 from uuid import UUID, uuid4
 
 from app.main import connect  # noqa: F401
-from app import quote_contract
-from app.public_records import result_key
+from app.public_records import price_key
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixture)
 from test_deck_counting import counting, deck, hold, line, new_owner
 from test_deck_import import sql
 from test_deck_list_printing import furret_world
@@ -268,12 +267,12 @@ def test_basic_energy_of_one_type_counts_as_one_group_under_use_cards_i_own_only
 # ------------------------------------------------------------------ totals, prices and the capture
 
 
-def test_totals_count_owned_copies_and_the_stored_cost_of_the_rest_without_a_price_access(store, launches):
+def test_totals_count_owned_copies_and_the_stored_cost_of_the_rest_without_a_price_access(store):
     owner, unsorted = new_owner()
     printing, (first, second), by_id = furret_world(owner)
     seed(store, by_id[first], "0.50")
     seed(store, by_id[second], "0.10")
-    keys = [result_key(by_id[each]["public_ref"], by_id[each]["mapping_revision"]) for each in (first, second)]
+    keys = [price_key(by_id[each]["public_ref"]) for each in (first, second)]
     generation = store.read_records(keys, deadline=time.monotonic() + 5).generation
     hold(owner, unsorted, first, 1)
     body = review(owner, "3 Furret DAA 1\n")
@@ -281,9 +280,6 @@ def test_totals_count_owned_copies_and_the_stored_cost_of_the_rest_without_a_pri
     shown = body["totals"]
     assert (shown["owned"], shown["to_get"], shown["to_get_priced"], shown["to_get_amount"], shown["to_get_display"]) == (
         "1", "2", "2", "0.2", "$0.20")
-    assert launches == []
-    key = quote_contract.scheduler_key()
-    assert store.read_records([key], deadline=time.monotonic() + 5).records[key].value is None
     assert store.read_records(keys, deadline=time.monotonic() + 5).generation == generation
 
 

@@ -1,8 +1,8 @@
 """Shared test isolation.
 
-Delivery state lives in PostgreSQL (the dirty-target outbox) while most tests give each test its
-own records store. Rows left delivered by an earlier test would claim records a fresh store
-never received, so every test starts and ends with an empty outbox.
+Catalog delivery and pending Invite Link writes live in PostgreSQL while most tests give each test its
+own records store. An earlier test must not leave a backlog for a later test to drain into that fresh store.
+Every test starts and ends with empty catalog and invite outboxes; retries within a test keep their queued writes.
 
 Under pytest-xdist each worker has its own database, projection directory, runner lock directory,
 catalog fixture directory and mail file. scripts/verify_resources.py writes them to
@@ -99,10 +99,11 @@ def _empty_outbox():
     import psycopg
     from psycopg.errors import UndefinedTable
     with psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as conn:
-        try:
-            conn.execute('DELETE FROM catalog_public_outbox')
-        except UndefinedTable:
-            pass  # A test database that is not migrated yet.
+        for statement in ('DELETE FROM catalog_public_outbox', 'DELETE FROM invite_projection_outbox'):
+            try:
+                conn.execute(statement)
+            except UndefinedTable:
+                pass  # A test database that is not migrated yet.
 
 
 @pytest.fixture(autouse=True)

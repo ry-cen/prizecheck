@@ -12,7 +12,6 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher, quote_contract
 from app.games.pokemon.prices import prices
 from app.public_records import public_record_store
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
@@ -33,13 +32,6 @@ def store(tmp_path, monkeypatch):
     return public_record_store()
 
 
-@pytest.fixture(autouse=True)
-def launches(monkeypatch):
-    """Records any runner launch (other files import this fixture): pricing never starts one."""
-    calls = []
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
-    return calls
-
 
 def path_of(deck):
     return f"/api/decks/{deck}/cost"
@@ -54,11 +46,6 @@ def body_of(response):
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     return response.json()
-
-
-def scheduler(store):
-    key = quote_contract.scheduler_key()
-    return store.read_records([key], deadline=time.monotonic() + 5).records[key].value
 
 
 def deck_with(quantities, user=USER):
@@ -396,7 +383,7 @@ def test_the_route_is_private_signed_and_budgeted(store, monkeypatch):
     assert client.get(other, headers=headers_for(b"", method="GET", path=path, user=USER)).status_code == 401  # bound to its path
 
 
-def test_no_request_field_forces_a_refresh(store, launches):
+def test_no_request_field_forces_a_refresh(store):
     normal = world()["normal"]
     seed(store, normal, checked=ago(timedelta(minutes=30)))
     deck = deck_with({normal["id"]: 1})
@@ -404,7 +391,6 @@ def test_no_request_field_forces_a_refresh(store, launches):
     headers = {**headers_for(b"", method="GET", path=path, user=USER), "cache-control": "no-cache", "pragma": "no-cache"}
     response = client.get(path + "?force=1&refresh=1&max_age=0", headers=headers)
     assert body_of(response)["priced_copies"] == "1"
-    assert launches == []
 
 
 # ------------------------------------------------------------------ Deck List cost and cost to complete (Deck Lists 08)

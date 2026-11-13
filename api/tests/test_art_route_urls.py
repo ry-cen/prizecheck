@@ -22,7 +22,6 @@ from app.public_records import catalog_printing_key
 from fastapi.testclient import TestClient
 from test_catalog import headers
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches  # noqa: F401  (an autouse fixture)
 from test_deck_counting import hold, line
 from test_decks import create
 from test_deck_lists import detail

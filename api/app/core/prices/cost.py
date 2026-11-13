@@ -19,7 +19,6 @@ from app.settings import WantListCounting
 CostStatus = Literal['priced', 'empty', 'no_quotes', 'incomplete']
 IncompleteReason = Literal['deadline', 'store_unavailable', 'validation_unavailable', 'inventory_unavailable']
 _INCOMPLETE = ('deadline', 'store_unavailable', 'validation_unavailable')
-_FALLBACK = ('timeout', 'busy', 'backoff', 'failed')
 _MICRO = 10**6
 
 
@@ -46,7 +45,7 @@ class DeckCost(BaseModel):
     priced_copies: str | None = None         # The coverage numerator; None unless every row was evaluated.
     stale_copies: str | None = None          # Priced copies whose provider quote is over 48 hours old.
     unknown_age_copies: str | None = None    # Priced copies whose provider quote time is unknown.
-    fallback_copies: str | None = None       # Priced copies whose refresh did not finish: shown from the labelled cache.
+    fallback_copies: str | None = None       # Always "0" now that no read refreshes (ADR 0019); kept for the clients.
     amount: str | None = None                # Exact decimal subtotal of the priced copies.
     display_amount: str | None = None        # The only rounded form.
     currency: Literal['USD'] = 'USD'
@@ -94,21 +93,19 @@ def summarize(quantities: dict, views: dict) -> dict:
     failed = [view.reason for view in views.values() if view.status == 'failed' and view.reason in _INCOMPLETE]
     if failed:
         return {'status': 'incomplete', 'reason': 'deadline' if 'deadline' in failed else failed[0], **base}
-    priced = stale = unknown = fallback = micros = 0
+    priced = stale = unknown = micros = 0
     for key, quantity in quantities.items():
         view = views[key]
         if view.status != 'quote':
             continue
         priced += quantity
-        if view.refresh in _FALLBACK:
-            fallback += quantity
         micros += _micros(view.amount) * quantity
         if view.age == 'unknown':
             unknown += quantity
         elif view.stale:
             stale += quantity
     counts = {'priced_copies': str(priced), 'stale_copies': str(stale), 'unknown_age_copies': str(unknown),
-              'fallback_copies': str(fallback)}
+              'fallback_copies': '0'}
     if priced == 0:
         return {'status': 'no_quotes', **base, **counts}
     return {'status': 'priced', 'amount': _exact(micros), 'display_amount': _display(micros), **base, **counts}

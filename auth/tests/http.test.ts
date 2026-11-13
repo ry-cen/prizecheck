@@ -262,13 +262,10 @@ describe("live Better Auth boundary", () => {
             "--no-access-log",
           ],
           {
-            // Only the publish gate fixture: none of the price or catalog fixtures the same directory carries.
+            // Only the publish gate fixture: not the catalog fixture the same directory carries.
             ...Object.fromEntries(
               Object.entries(environment).filter(
-                ([key]) =>
-                  !key.startsWith("PRICE_FIXTURE_") &&
-                  key !== "PRICE_RUNNER_LOCK_DIR" &&
-                  key !== "CATALOG_PROCESS_FIXTURE_DIR"
+                ([key]) => key !== "CATALOG_PROCESS_FIXTURE_DIR"
               )
             ),
             PYTHONPATH:
@@ -369,16 +366,16 @@ describe("live Better Auth boundary", () => {
           "-c",
           `import time
 from app.public_projection import public_record_store
-from app.public_records import catalog_edition_key, quote_key, result_key
+from app.public_records import catalog_edition_key
 store = public_record_store()
 store.initialize(deadline=time.monotonic() + 5)
 ref = '${edition.edition_ref}'
-keys = [catalog_edition_key(ref), quote_key(ref, 1), result_key(ref, 1)]
+keys = [catalog_edition_key(ref)]
 rows = store.read_records(keys, deadline=time.monotonic() + 5).records
 assert store.compare_and_swap({k: rows[k].version for k in keys}, {
   keys[0]: {'edition_ref': ref, 'printing_ref': '${edition.printing_ref}', 'descriptor': {'label': 'Unspecified Variant'}, 'revision': 1,
-    'marketplace': {'state': 'unverified', 'reason': 'unspecified_variant', 'mapping_revision': 0, 'product_id': None, 'quote_lookup': None}},
-  keys[1]: {'attempt': 1, 'amount': '1.00'}, keys[2]: {'state': 'quote', 'attempt': 1}}, deadline=time.monotonic() + 5)`,
+    'marketplace': {'state': 'unverified', 'reason': 'unspecified_variant', 'mapping_revision': 0, 'product_id': None, 'quote_lookup': None}}},
+  deadline=time.monotonic() + 5)`,
         ],
         { cwd: process.cwd(), env: { ...environment, PYTHONPATH: "api" } }
       );
@@ -388,7 +385,7 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
         await read(valid, "/api/public/discovery")
       ).json();
       expect(afterPage.revision).toBe(firstPage.revision);
-      // Equal only because the record written is `unverified`: a verified Edition's cached quote would change a
+      // Equal only because the record written is `unverified`: a verified Edition's price record would change a
       // listed deck's cost, and Discover reads the cost from the store.
       expect(afterPage).toEqual(firstPage);
       const next = await read(

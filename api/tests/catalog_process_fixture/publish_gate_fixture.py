@@ -94,11 +94,11 @@ def install():
 def install_on_import():
     """Wrap the gate when ``app.publications`` is first imported, if ``PUBLISH_GATE_EXEMPT_DIR`` or
     ``CATALOG_PROCESS_FIXTURE_DIR`` is set (sitecustomize, in the browser stacks' and the auth suite's API processes). Importing nothing early keeps every other process started with this
-    directory on PYTHONPATH (price runners, scripts) unchanged."""
+    directory on PYTHONPATH (scripts) unchanged."""
     if not _root():
         return
     import sys
-    from price_fixture import _PatchOnImport
+    from patch_on_import import _PatchOnImport
     sys.meta_path.insert(0, _PatchOnImport({'app.games.pokemon.publications.publications': _wrap, 'app.games.pokemon.publications.discovery': _wrap_discovery}, {}))
 
 

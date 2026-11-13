@@ -15,7 +15,7 @@ from app.main import connect  # noqa: F401
 from app.social import counts, friend_reads
 from app.social.friend_copies import FriendCopies, friend_copies
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import deck, hold, line
 from test_holdings import call
 from test_location_tree import change, make, tree

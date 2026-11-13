@@ -2,10 +2,9 @@
 cost to complete it (Deck Lists 08).
 
 One access is one consistent capture of the Deck's Holdings and Deck List (``deck_list_capture.capture_deck_list``,
-committed and unlocked before any store I/O), then one ``prices.private_edition_quotes`` call over every distinct
-Edition the Deck holds or lists. That call reads every cache row (in 128-key store batches), calls
-``price_refresh.evaluate_and_admit`` exactly once for the whole Deck, waits at most once, and validates once, all inside
-the one gateway budget of this request. The Deck is never split into 64-Edition requests and never priced per Edition.
+committed and unlocked before the price read), then one ``prices.private_edition_quotes`` call over every distinct
+Edition the Deck holds or lists: one PostgreSQL read of the stored prices (ADR 0019), inside the one gateway budget of
+this request. The Deck is never split into 64-Edition requests and never priced per Edition.
 
 Three figures share those views. The top-level fields are the Estimated Deck Cost of the Deck's Holdings, unchanged
 for today's client. ``deck_list_cost`` covers every Deck List line and ``cost_to_complete`` only the copies each line

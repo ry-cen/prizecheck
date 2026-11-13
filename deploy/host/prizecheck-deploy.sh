@@ -311,7 +311,7 @@ validate_config() {
   REGISTRY="$(env_value PRIZECHECK_REGISTRY)"; REGISTRY="${REGISTRY:-ghcr.io/ry-cen}"
   [[ -d "$DATA_DIR" ]] || die "Data directory $DATA_DIR is missing (storage not mounted?)"
   local sub
-  for sub in postgres public price-runners mail art; do
+  for sub in postgres public mail art; do
     [[ -d "$DATA_DIR/$sub" ]] || die "Missing $DATA_DIR/$sub; run '$SCRIPT_PATH setup'"
   done
 }
@@ -782,8 +782,8 @@ with psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=5) as conn:
     applied = {r[0] for r in conn.execute('SELECT name FROM schema_migration')}
 sys.exit(0 if files <= applied else 1)
 PY
-  # Modules only the detached catalog import and price runner load; /api/health never imports them.
-  compose exec -T api python -c 'import app.games.pokemon.catalog.catalog, app.catalog_import, app.games.pokemon.prices.price_source, app.price_runner' \
+  # Modules only the detached catalog import and the price import job load; /api/health never imports them.
+  compose exec -T api python -c 'import app.games.pokemon.catalog.catalog, app.catalog_import, app.games.pokemon.prices.price_import, app.games.pokemon.catalog.rule_rollout' \
     || { log "Smoke: API background-job modules fail to import"; return 1; }
   for service in "${APP_SERVICES[@]}"; do
     image="$(docker inspect --format '{{.Config.Image}}' "$(compose ps -q "$service")" 2>/dev/null || true)"
@@ -997,10 +997,10 @@ cmd_setup() {
   read_environment
   DATA_DIR="$(env_value PRIZECHECK_DATA_DIR)"
   [[ -n "$DATA_DIR" ]] || die "Set PRIZECHECK_DATA_DIR in $ENV_FILE"
-  mkdir -p "$DATA_DIR"/{postgres,public,price-runners,mail,art} "$STATE_DIR" "$BACKUP_DIR"
-  chown "$API_UID:$API_UID" "$DATA_DIR/public" "$DATA_DIR/price-runners" "$DATA_DIR/art"
+  mkdir -p "$DATA_DIR"/{postgres,public,mail,art} "$STATE_DIR" "$BACKUP_DIR"
+  chown "$API_UID:$API_UID" "$DATA_DIR/public" "$DATA_DIR/art"
   chown "$AUTH_UID:$AUTH_UID" "$DATA_DIR/mail"
-  chmod 700 "$DATA_DIR/public" "$DATA_DIR/price-runners" "$DATA_DIR/mail" "$DATA_DIR/art" "$STATE_DIR" "$BACKUP_DIR"
+  chmod 700 "$DATA_DIR/public" "$DATA_DIR/mail" "$DATA_DIR/art" "$STATE_DIR" "$BACKUP_DIR"
   # The readiness proof goes in signup/; signup-active/ holds the validated copy the gateway reads (no secrets in either).
   mkdir -p "$SIGNUP_DIR" "$SNAPSHOT_DIR"
   chown 0:0 "$SIGNUP_DIR" "$SNAPSHOT_DIR"

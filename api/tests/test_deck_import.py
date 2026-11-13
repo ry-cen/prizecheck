@@ -14,9 +14,8 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher
 from app.games.pokemon.prices import prices
-from app.public_records import public_record_store, result_key
+from app.public_records import price_key, public_record_store
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run
@@ -27,7 +26,6 @@ from test_deck_list_printing import catalog, furret_world
 from test_holdings import call, client
 from test_prices import ago, seed
 from deck_import_fixtures import EXPECTED, FIXTURES, printed, seed_import_catalog
-from app import quote_contract
 
 REVIEW = "/api/decks/import/review"
 IMPORT = "/api/decks/import"
@@ -40,18 +38,6 @@ def store(tmp_path, monkeypatch):
     public_record_store().initialize(deadline=time.monotonic() + 5)
     return public_record_store()
 
-
-@pytest.fixture(autouse=True)
-def launches(monkeypatch):
-    """Records any runner launch; reviewing a list must never cause one."""
-    calls = []
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
-    return calls
-
-
-def scheduler(store):
-    key = quote_contract.scheduler_key()
-    return store.read_records([key], deadline=time.monotonic() + 5).records[key].value
 
 
 def review(owner, text, fixes=(), expect=200):
@@ -91,7 +77,7 @@ def reading(body):
 # ------------------------------------------------------------------ the parser, through the review route
 
 
-def test_the_nine_research_fixtures_read_by_section_quantity_and_status(launches):
+def test_the_nine_research_fixtures_read_by_section_quantity_and_status():
     seed_import_catalog()
     owner = str(uuid4())
     for key, text in FIXTURES.items():
@@ -107,7 +93,6 @@ def test_the_nine_research_fixtures_read_by_section_quantity_and_status(launches
             1 for row in expected["cards"] if row[3] in ("ambiguous", "not_found", "unreadable")), key
         assert sum(int(e["quantity"]) for e in body["deck_list"]) == sum(
             int(row[2]) for row in expected["cards"] if row[3] in ("matched", "by_name", "energy")), key
-    assert launches == []
 
 
 def test_line_endings_a_bom_and_invisible_spaces_read_like_the_plain_text():
@@ -252,12 +237,12 @@ def test_a_printing_with_no_active_edition_or_withdrawn_is_not_found():
 # ------------------------------------------------------------------ which Edition new copies get
 
 
-def test_new_copies_get_the_cheapest_stored_quote_and_no_runner_is_launched(store, launches):
+def test_new_copies_get_the_cheapest_stored_quote_and_no_runner_is_launched(store):
     owner = str(uuid4())
     printing, (first, second), by_id = furret_world(owner)
     seed(store, by_id[first], "0.50")
     seed(store, by_id[second], "0.10", checked=ago(timedelta(hours=25)))
-    keys = [result_key(by_id[edition]["public_ref"], by_id[edition]["mapping_revision"]) for edition in (first, second)]
+    keys = [price_key(by_id[edition]["public_ref"]) for edition in (first, second)]
     generation = store.read_records(keys, deadline=time.monotonic() + 5).generation
     body = review(owner, "2 Furret DAA 1\n")
     [line] = body["lines"]
@@ -266,8 +251,6 @@ def test_new_copies_get_the_cheapest_stored_quote_and_no_runner_is_launched(stor
         {"edition_id": second, "quantity": "2", "source": "new", "chosen_by": "cheapest_price", "places": []}]
     assert [e["edition_id"] for e in line["editions"]] == [first, second]
     assert [e["display_price"] for e in line["editions"]] == ["$0.50", "$0.10"]
-    assert launches == []
-    assert scheduler(store) is None
     assert store.read_records(keys, deadline=time.monotonic() + 5).generation == generation
 
 

@@ -43,13 +43,12 @@ Containers find each other by service name (`db`, `api`, `auth`). The browser ta
 
 Persistent data lives on the host under `PRIZECHECK_DATA_DIR`:
 
-| Directory        | Contents                                                                | Owner (uid) |
-| ---------------- | ----------------------------------------------------------------------- | ----------- |
-| `postgres/`      | PostgreSQL cluster                                                      | postgres    |
-| `public/`        | Public projection and shared records store (published decks, discovery) | 10001       |
-| `price-runners/` | Price-runner lock files and host id                                     | 10001       |
-| `mail/`          | `codes.jsonl`, the sign-in codes while `MAIL_MODE=file`                 | 1000        |
-| `art/`           | Card art stored on first request (ADR 0020); regenerable                | 10001       |
+| Directory   | Contents                                                                | Owner (uid) |
+| ----------- | ----------------------------------------------------------------------- | ----------- |
+| `postgres/` | PostgreSQL cluster                                                      | postgres    |
+| `public/`   | Public projection and shared records store (published decks, discovery) | 10001       |
+| `mail/`     | `codes.jsonl`, the sign-in codes while `MAIL_MODE=file`                 | 1000        |
+| `art/`      | Card art stored on first request (ADR 0020); regenerable                | 10001       |
 
 `art/` holds the card pictures the API fetched from TCGdex on first request and serves from `/api/art`. It is regenerable, so `backup` leaves it out on purpose; deleting it only costs refetches. After copying an updated `prizecheck-deploy.sh` to the host, run `prizecheck-deploy.sh setup` once: it creates `art/`, and deploys refuse to run without it.
 
@@ -59,7 +58,7 @@ Deploy state lives under `PRIZECHECK_HOME` (`state/current`, `state/previous`, `
 
 - **Sign-in codes go to a file, not to email.** No email provider has been selected yet (see [signup readiness](signup-readiness.md)), and the gateway refuses console and file mail under `NODE_ENV=production`. So dev runs with `NODE_ENV=development` and `MAIL_MODE=file`. Codes are written with mode 0600 to `mail/codes.jsonl` and never to container logs; read them with `prizecheck-deploy.sh sign-in-code`. `SIGNUP_MODE` is fixed to `owner-only`. Production must use `MAIL_MODE=http` with `NODE_ENV=production`.
 - **Deploys with pending migrations cause downtime.** The deploy script stops the old release before migrating, so the old application never serves against a half-migrated schema (see the migration 026 notes in [release](operations/release.md)). Deploys without pending migrations replace containers with only a few seconds' interruption.
-- **A deploy interrupts running imports.** Catalog imports and price runners are child processes of the `api` container, so recreating it ends them. Avoid deploying during a full catalog pull. A failed or interrupted pull keeps the previous successful catalog; check **Owner controls** after the deploy and start the pull again. Price-runner locks and the host id persist in `price-runners/`, so the next launch can prove the old runner has ended and reclaim its slot.
+- **A deploy interrupts running imports.** Catalog imports are child processes of the `api` container, so recreating it ends them. Avoid deploying during a full catalog pull. A failed or interrupted pull keeps the previous successful catalog; check **Owner controls** after the deploy and start the pull again.
 - **Migrations are never reversed.** Rollback starts the previous images against the current schema. The repository expects each migration to stay compatible with the previous release ([release](operations/release.md) has an opt-in check), but this pipeline doesn't run that check, and no check can cover every data state. To return to an older schema, restore a pre-migration dump (see [Restoring the database](#restoring-the-database)).
 - **One rate-limit bucket.** `TRUSTED_PROXY_IPS` is empty, so the gateway ignores forwarding headers and sees every browser as the `web` container. The per-IP limits (code sends, public reads) are shared by everyone using dev. That's fine for a single owner.
 - **No URLs in logs.** Published-deck URLs are capability links. nginx and uvicorn access logs are off, and nginx logs only its own critical failures. Container logs rotate at 3 × 10 MB per service.
@@ -279,7 +278,7 @@ bash /srv/prizecheck-dev/bin/prizecheck-deploy.sh setup
 
 `setup` stops with an error if the env file (step 6) is missing. Otherwise it:
 
-- creates `data/` (PostgreSQL, the public projection store, price runners, mail, card art), `state/`, `backups/`, `signup/` and `signup-active/`, with the owners the containers need. `data/art/` holds the card pictures the API fetched from TCGdex on first request (ADR 0020); it is regenerable, so `backup` leaves it out on purpose, and deploys refuse to run without it;
+- creates `data/` (PostgreSQL, the public projection store, mail, card art), `state/`, `backups/`, `signup/` and `signup-active/`, with the owners the containers need. `data/art/` holds the card pictures the API fetched from TCGdex on first request (ADR 0020); it is regenerable, so `backup` leaves it out on purpose, and deploys refuse to run without it;
 - installs and enables the backup and catalog-refresh systemd timers (below);
 - ends with the readiness report, which `setup` also runs for you. Run it alone with `bash /srv/prizecheck-dev/bin/prizecheck-deploy.sh readiness`.
 
@@ -523,10 +522,10 @@ The release gate and launch checks in [release](operations/release.md) and [depl
 
 ## Moving dev to a new host
 
-Use a cold copy of the whole install, not a logical backup alone: this preserves the PostgreSQL cluster, public store, `price-runners/` host id and locks, `state/` release pointers, backups, `signup/`, `signup-active/` and `prizecheck.env`. Use the same PostgreSQL major version and a compatible architecture for the physical cluster. If changing architecture, plan a logical restore separately.
+Use a cold copy of the whole install, not a logical backup alone: this preserves the PostgreSQL cluster, public store, `state/` release pointers, backups, `signup/`, `signup-active/` and `prizecheck.env`. Use the same PostgreSQL major version and a compatible architecture for the physical cluster. If changing architecture, plan a logical restore separately.
 
 1. Set the repository variable `DEV_DEPLOY_ENABLED=false`. Wait for any in-flight deploy to finish. On the old host disable schedules: stop and disable `prizecheck-backup.timer` and `prizecheck-catalog-refresh.timer` on systemd; on Unraid disable both User Scripts entries. Stop running service jobs or wait for them to finish. Inspect `docker ps` for this Compose project's one-off tools, scanner-index, backup and catalog-refresh containers; wait for them to finish or stop them explicitly. No process may still write the install or data directories.
-2. On the old host, run the following as root. Keep the old host stopped for the rest of the migration and afterwards; never run both copies with the same price-runner identity.
+2. On the old host, run the following as root. Keep the old host stopped for the rest of the migration and afterwards.
 
    ```bash
    bash "$PRIZECHECK_HOME/bin/prizecheck-deploy.sh" compose down

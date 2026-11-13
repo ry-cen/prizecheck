@@ -23,8 +23,8 @@ from test_catalog_targets import isolated_rules  # noqa: F401  (autouse: clears 
 from test_deck_live_export import decide_live
 from test_prices import client, world
 from test_publications import command, legacy_snapshot, stored_decks
-from test_published_cost import (USER, body_of, generation, launches, publish, quarantine,  # noqa: F401
-                                 rewrite_snapshot, store)  # store and launches are autouse
+from test_published_cost import (USER, body_of, generation, publish, quarantine,  # noqa: F401
+                                 rewrite_snapshot, store)  # store is autouse
 
 IDENTITIES = {"normal": {"name": "Furret", "set_code": "DAA", "number": "136"},
               "unspecified": {"name": "Furret", "set_code": "DAA", "number": "2"}}

@@ -219,10 +219,10 @@ def test_backfill_script_publishes_existing_data_and_refuses_an_uninitialized_st
     assert read(key)[key].value['printing_ref'] == row['printing_ref']
 
 
-def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_cursor_unchanged():
+def test_catalog_and_price_record_writes_leave_snapshots_discovery_revision_and_cursor_unchanged():
     from app.core.publications.discovery import cursor_encode
     from app.games.pokemon.catalog.public_catalog import backfill
-    from app.public_records import quote_key, result_key
+    from app.public_records import price_key
     from test_discovery import visibility
     from test_holdings import client
     owner, _, _, _, edition, _ = fixture()
@@ -237,12 +237,12 @@ def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_
     cursor = cursor_encode('', None, page['revision'], [json.loads(before_bytes)['decks'][token]['snapshot']['published_at'], token])
     with connect() as conn:
         row = conn.execute("SELECT e.public_ref AS edition_ref FROM catalog_edition e WHERE e.id=%s", (edition,)).fetchone()
-    # Catalog records, a quote payload and its current-result marker all go to the shared store.
+    # Catalog records and a public price record all go to the shared store.
     assert backfill().written >= 2
-    quote, result = quote_key(row['edition_ref'], 1), result_key(row['edition_ref'], 1)
-    versions = {key: record.version for key, record in read(quote, result).items()}
+    price = price_key(row['edition_ref'])
+    versions = {key: record.version for key, record in read(price).items()}
     assert public_record_store().compare_and_swap(
-        versions, {quote: {'attempt': 1, 'amount': '1.00'}, result: {'state': 'quote', 'attempt': 1}}, deadline=deadline())
+        versions, {price: {'mapping_revision': 1, 'product_id': 1, 'amount': '1.00'}}, deadline=deadline())
     assert projection.read_bytes() == before_bytes
     assert client.get(f'/api/public/decks/{token}').content == published.content
     assert client.get('/api/public/discovery').json() == page

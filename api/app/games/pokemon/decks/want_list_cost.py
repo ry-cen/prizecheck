@@ -4,11 +4,10 @@
 combined total, each Deck's section and each of their lines, and each combined row, every figure with Pricing Coverage.
 It is a separate request so the page draws before prices arrive.
 
-It is a price access under the access-triggered refresh rule (ADR 0006), budgeted like Deck cost (``deck_cost``): one
-capture (``want_list.capture_want_list`` under ``prices._bounded``, committed and unlocked before any store I/O), then one
-``prices.private_edition_quotes`` call over every distinct Edition the scope still needs. That call reads every cache
-row, admits refresh once (``price_refresh.evaluate_and_admit``), waits at most once and validates once, inside the one
-gateway budget of this request. Editions the Collection already covers are not read: only what is bought is priced.
+It is budgeted like Deck cost (``deck_cost``): one capture (``want_list.capture_want_list`` under ``prices._bounded``,
+committed and unlocked before the price read), then one ``prices.private_edition_quotes`` call over every distinct
+Edition the scope still needs: one PostgreSQL read of the stored prices (ADR 0019), inside the one gateway budget of this
+request. Editions the Collection already covers are not read: only what is bought is priced.
 
 Every figure is ``core.prices.cost.summarize`` over its own copies, so the arithmetic, the statuses and the labels are Deck
 cost's: an unpriced copy is never $0, and a row that could not be read in time makes only the figures containing it

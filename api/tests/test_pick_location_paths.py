@@ -6,7 +6,7 @@ Through signed HTTP against PostgreSQL."""
 from uuid import uuid4
 
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import deck, hold
 from test_deck_lists import put_line
 from test_deck_pick_list import pick_list, rows

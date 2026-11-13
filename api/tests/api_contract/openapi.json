@@ -12894,13 +12894,8 @@
          "unverified",
          "quarantined",
          "unspecified_variant",
-         "no_quote_variant",
-         "not_cached",
-         "confirmed_absent",
-         "lookup_mismatch",
-         "invalid_quote",
-         "store_unavailable",
          "deadline",
+         "store_unavailable",
          "validation_unavailable"
         ],
         "type": "string"
@@ -12910,36 +12905,6 @@
        }
       ],
       "title": "Reason"
-     },
-     "refresh": {
-      "anyOf": [
-       {
-        "enum": [
-         "background",
-         "refreshed",
-         "timeout",
-         "busy",
-         "backoff",
-         "failed"
-        ],
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Refresh"
-     },
-     "refresh_failed_at": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Refresh Failed At"
      },
      "stale": {
       "anyOf": [
