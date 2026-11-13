@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useId,
   useRef,
   useState,
@@ -93,6 +94,8 @@ type Props = {
    * moved by itself, and shows the Undo toast. It resolves to that toast's Undo, which the Add row offers beside its
    * own line while the popup covers the toast (null: none). */
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
+  /** Catalog keeps a failure reachable when its Add row closed during the request. */
+  onAddFailed?: (message: string) => void;
   renderAddFeedback?: AddFeedbackRenderer;
   /** A metadata report was sent: My metadata reports reads again. */
   onReported: () => void;
@@ -145,6 +148,7 @@ export function CatalogCardPopup({
   onLocation,
   alsoOffer,
   onAdded,
+  onAddFailed,
   onReported,
   renderAddFeedback,
   returnFocus,
@@ -420,6 +424,7 @@ export function CatalogCardPopup({
                 setWhereVersion((value) => value + 1);
                 return undo;
               }}
+              onAddFailed={onAddFailed}
               renderAddFeedback={renderAddFeedback}
               onUndone={() => {
                 reload();
@@ -649,6 +654,7 @@ function AddRows({
   location: locationId,
   onLocation,
   onAdded,
+  onAddFailed,
   onUndone,
   renderAddFeedback,
 }: {
@@ -660,6 +666,8 @@ function AddRows({
   location: string | null;
   onLocation: (id: string) => void;
   onAdded: (added: AddedCards) => Promise<InlineUndo | null>;
+  /** Catalog keeps a failure reachable when its Add row closed during the request. */
+  onAddFailed?: (message: string) => void;
   /** The Add row's Undo took the copies out again. */
   onUndone: () => void;
   renderAddFeedback?: AddFeedbackRenderer;
@@ -669,6 +677,16 @@ function AddRows({
   // The toast's Undo for the last add, offered here while the popup covers the toast.
   const [undo, setUndo] = useState<InlineUndo | null>(null);
   const [undoing, setUndoing] = useState(false);
+  useLayoutEffect(() => {
+    if (!renderAddFeedback) return undo?.claimInline?.();
+  }, [undo, renderAddFeedback]);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useShownToastId();
   const leaves =
     alsoOffer && !places.leaves.some((leaf) => leaf.id === alsoOffer.id)
@@ -704,6 +722,7 @@ function AddRows({
   const [shownFor, setShownFor] = useState(edition.id);
   if (shownFor !== edition.id) {
     setShownFor(edition.id);
+    setUndoing(false);
     setDone("");
     setUndo(null);
     setNote(
@@ -762,8 +781,12 @@ function AddRows({
         undoId: outcome.undoId,
         from: "popup",
       });
-      if (shown.current === sent.id) setUndo(() => offered);
+      if (mounted.current && shown.current === sent.id) setUndo(() => offered);
     } else {
+      if (onAddFailed && (!mounted.current || shown.current !== sent.id)) {
+        onAddFailed(addFailed(outcome.code, outcome.retry));
+        return;
+      }
       setNote({
         editionId: sent.id,
         words: words(sent),
@@ -777,7 +800,9 @@ function AddRows({
   async function undoAdd() {
     if (!undo || undoing) return;
     setUndoing(true);
+    const sent = shown.current;
     const result = await undo();
+    if (!mounted.current || shown.current !== sent) return;
     setUndoing(false);
     setUndo(() => result.next);
     if (result.message) setDone(result.message);
@@ -792,7 +817,7 @@ function AddRows({
         Add
       </h3>
       <div role="group" aria-label="Add to Collection" className={ROW}>
-        <span className={ROW_LABEL}>Collection</span>
+        <span className={ROW_LABEL}>Location</span>
         <div className="min-w-0 flex-1 basis-40">
           <Select
             label="Location"

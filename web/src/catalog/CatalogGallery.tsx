@@ -459,10 +459,14 @@ export function CatalogGallery({
       );
       const message = batchAddedText(result.copies, result.path);
       const live = alive.current.mounted && alive.current.active;
+      if (live && latest.current.undoToast && result.from === "popup")
+        retireClear();
       const token = live
         ? claimNotice({ kind: "add", message, undo: null })
         : null;
-      if (live) ownToast.current = queueToast.show({ message });
+      // Catalog popup adds have one notice owner, including when the popup closed during the request.
+      if (live && !(latest.current.undoToast && result.from === "popup"))
+        ownToast.current = queueToast.show({ message });
       const external = latest.current.onAdded?.(result);
       const undo = latest.current.undoToast
         ? latest.current.addToast(result)
@@ -918,6 +922,13 @@ export function CatalogGallery({
         pendingFor={pendingFor}
         location={popupLocation}
         onLocation={setPopupLocation}
+        onAddFailed={
+          undoToast
+            ? (message) => {
+                queueToast.show({ message });
+              }
+            : undefined
+        }
         alsoOffer={adding ? target : null}
         onAdded={added}
         renderAddFeedback={undoToast ? undefined : renderAddFeedback}

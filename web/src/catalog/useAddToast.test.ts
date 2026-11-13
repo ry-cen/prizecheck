@@ -387,3 +387,82 @@ test("U1 a replaced Add toast's held Undo action sends nothing", async () => {
   expect(applyUndo).not.toHaveBeenCalled();
   shown.mockRestore();
 });
+
+test("Catalog inline ownership withholds only the action and releases the same notice", async () => {
+  const undo = await offer();
+  const version = kit.getVersion();
+  let release!: () => void;
+  await act(async () => {
+    release = undo.claimInline!();
+  });
+  expect(host.querySelector('button:not([aria-label="Dismiss"])')).toBeNull();
+  expect(undo.isAvailable()).toBe(true);
+  expect(kit.getVersion()).toBe(version);
+  await act(async () => release());
+  expect(host.querySelector("button")?.textContent).toBe("Undo");
+  expect(kit.getVersion()).toBe(version);
+});
+
+test.each(["replacement", "dismissal"])(
+  "release after %s never resurrects a notice",
+  async (kind) => {
+    const undo = await offer();
+    let release!: () => void;
+    await act(async () => {
+      release = undo.claimInline!();
+    });
+    await act(async () => {
+      if (kind === "replacement") kit.show({ message: "Queue cleared." });
+      else kit.dismiss();
+    });
+    const version = kit.getVersion();
+    await act(async () => release());
+    expect(undo.isAvailable()).toBe(false);
+    expect(host.querySelector('button:not([aria-label="Dismiss"])')).toBeNull();
+    expect(kit.getVersion()).toBe(version);
+  }
+);
+
+test("owned retry and success never move focus, including release during outstanding Undo", async () => {
+  const focusTarget = document.createElement("button");
+  document.body.append(focusTarget);
+  focusTarget.focus();
+  const undo = await offer();
+  let release!: () => void;
+  await act(async () => {
+    release = undo.claimInline!();
+  });
+  vi.mocked(applyUndo).mockRejectedValueOnce(new TypeError("lost"));
+  let failure!: Awaited<ReturnType<InlineUndo>>;
+  await act(async () => {
+    failure = await undo();
+  });
+  expect(document.activeElement).toBe(focusTarget);
+  await act(async () => {
+    release();
+    release = failure.next!.claimInline!();
+  });
+  expect(host.querySelector('button:not([aria-label="Dismiss"])')).toBeNull();
+  let finish!: (value: typeof removed) => void;
+  vi.mocked(applyUndo).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  let pending!: ReturnType<InlineUndo>;
+  await act(async () => {
+    pending = failure.next!();
+  });
+  await act(async () => release());
+  expect(host.querySelector('button[aria-disabled="true"]')).not.toBeNull();
+  await act(async () => {
+    finish(removed);
+    await pending;
+  });
+  expect(document.activeElement).toBe(focusTarget);
+  expect(host.querySelector('button:not([aria-label="Dismiss"])')).toBeNull();
+  expect(vi.mocked(applyUndo).mock.calls[0]).toEqual(
+    vi.mocked(applyUndo).mock.calls[1]
+  );
+  focusTarget.remove();
+});

@@ -1164,3 +1164,37 @@ for (const stick of ["page", "dialog"] as const) {
     });
   }
 }
+
+test("Catalog popup completion shows one success notice even when its Undo read settles after close", async () => {
+  let kit!: ReturnType<typeof useToast>;
+  function Owner() {
+    kit = useToast();
+    return h(CatalogGallery, {
+      active: true,
+      adding: false,
+      fixedTarget: null,
+      undoToast: true,
+      stick: "page",
+    });
+  }
+  await act(async () => root.render(h(ToastProvider, null, h(Owner))));
+  const shown = vi.spyOn(kit, "show");
+  let finish!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+  vi.mocked(listUndo).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  try {
+    await addFromPopup();
+    await act(async () => button("Close popup")!.click());
+    await act(async () =>
+      finish([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>)
+    );
+    expect(
+      shown.mock.calls.filter(([input]) => input.message.startsWith("Added"))
+    ).toHaveLength(1);
+  } finally {
+    shown.mockRestore();
+  }
+});
