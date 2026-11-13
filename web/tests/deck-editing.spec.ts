@@ -654,6 +654,79 @@ test.describe("on a desktop", () => {
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 2 });
   });
 
+  for (const view of ["Spread", "Stacked"] as const) {
+    test(`${view} hover controls edit copies without opening the sheet and work by keyboard`, async ({
+      page,
+    }) => {
+      promoteCatalog();
+      await signIn(page);
+      const built = await buildDeck(page, { "edit-1": 2 });
+      await page.goto(`${ORIGIN}/decks/${built.deckId}`);
+      await page.getByRole("radio", { name: view, exact: true }).click();
+      const cards = deckList(page).getByRole("button", {
+        name: /^Charmander, Alpha Set/,
+      });
+      const remove = deckList(page).getByRole("button", {
+        name: "Remove one Charmander",
+      });
+      const add = deckList(page).getByRole("button", {
+        name: "Add one Charmander",
+      });
+      await expect(add).toHaveCount(1);
+      await expect(remove).toHaveCount(1);
+      // Any copy reveals the one pair anchored on the line's first card.
+      await cards.last().hover();
+      await expect(add.locator("..")).toHaveCSS("opacity", "1");
+      // Starting on either control must never initiate the card-to-library drag.
+      for (const control of [remove, add]) {
+        await cards.last().hover();
+        const start = (await control.boundingBox())!;
+        const end = (await library(page).boundingBox())!;
+        await page.mouse.move(
+          start.x + start.width / 2,
+          start.y + start.height / 2
+        );
+        await page.mouse.down();
+        await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, {
+          steps: 8,
+        });
+        await expect(page.locator("[data-drag-badge]")).toHaveCount(0);
+        await page.mouse.up();
+      }
+      await add.click();
+      await expect.poll(() => listed(built)).toEqual({ "edit-1": 3 });
+      await expect(deckList(page)).toContainText("3/60");
+      await expect(
+        page.getByRole("dialog", { name: "Charmander", exact: true })
+      ).toHaveCount(0);
+      await remove.click();
+      await expect.poll(() => listed(built)).toEqual({ "edit-1": 2 });
+      await expect(deckList(page)).toContainText("2/60");
+
+      await page.mouse.move(0, 0);
+      await cards.last().focus();
+      await page.keyboard.press("Tab");
+      await expect(remove).toBeFocused();
+      await expect(remove.locator("..")).toHaveCSS("opacity", "1");
+      await page.keyboard.press("Tab");
+      await expect(add).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => listed(built)).toEqual({ "edit-1": 3 });
+      await expect(
+        page.getByRole("dialog", { name: "Charmander", exact: true })
+      ).toHaveCount(0);
+      await remove.click();
+      await expect.poll(() => listed(built)).toEqual({ "edit-1": 2 });
+      await remove.click();
+      await expect.poll(() => listed(built)).toEqual({ "edit-1": 1 });
+      await remove.click();
+      await expect.poll(() => listed(built)).toEqual({});
+      await expect(deckList(page)).toContainText(
+        "No cards on this Deck List yet."
+      );
+    });
+  }
+
   test("a List row adds and removes one copy with its buttons", async ({
     page,
   }) => {

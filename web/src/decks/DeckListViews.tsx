@@ -7,6 +7,7 @@ import {
   type PointerEvent,
 } from "react";
 import { Minus, Plus } from "lucide-react";
+import { Icon } from "../ui/Icon";
 import { Button } from "../ui/Button";
 import { CopyArt, CopyTile } from "../ui/CopyTile";
 import { useEditionPriceRow } from "../EditionPrice";
@@ -43,7 +44,7 @@ export type OpenSheet = (
 export type LineEditing = {
   onRemove: (line: DeckLine, control: HTMLElement) => void;
   onDragStart: (line: DeckLine, event: PointerEvent<HTMLElement>) => void;
-  /** A List row's −1 or +1: one copy off or on. `control` is the button pressed. */
+  /** A line's −1 or +1: one copy off or on. `control` is the button pressed. */
   onStep: (line: DeckLine, delta: bigint, control: HTMLElement) => void;
 };
 
@@ -178,7 +179,7 @@ export function DeckListBody({
                 return (
                   <li
                     key={line.line.edition_id}
-                    className={`relative flex flex-wrap gap-1 rounded-card border${
+                    className={`group/line relative flex flex-wrap gap-1 rounded-card border${
                       issue ? " border-danger-border" : " border-transparent"
                     }`}
                   >
@@ -212,6 +213,7 @@ export function DeckListBody({
                         editing={editing}
                       />
                     )}
+                    {editing && <CardLineSteps line={line} editing={editing} />}
                   </li>
                 );
               })}
@@ -220,6 +222,37 @@ export function DeckListBody({
         </section>
       ))}
     </div>
+  );
+}
+
+/** One pair per line, anchored over its first card even when another Spread copy is hovered.
+ * The top edge strip leaves the card centre available for opening and dragging.
+ * Opacity keeps the pair in keyboard order after the cards; focus-within reveals it before a Tab reaches it. */
+function CardLineSteps({
+  line,
+  editing,
+}: {
+  line: DeckLine;
+  editing: LineEditing;
+}) {
+  return (
+    <span className="pointer-events-none absolute left-1 top-1 z-1 flex gap-1 rounded-control bg-surface-raised p-1 opacity-0 group-hover/line:pointer-events-auto group-hover/line:opacity-100 group-focus-within/line:pointer-events-auto group-focus-within/line:opacity-100 phone:hidden [@media(hover:none)]:hidden">
+      {([-1n, 1n] as const).map((delta) => (
+        <button
+          key={delta.toString()}
+          type="button"
+          aria-label={`${delta < 0n ? "Remove" : "Add"} one ${line.line.name}`}
+          className="m-0 inline-flex size-quick cursor-pointer items-center justify-center rounded-control border border-border-strong bg-surface-raised p-0 text-text hover:border-control-outline hover:bg-surface-selected"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            editing.onStep(line, delta, event.currentTarget);
+          }}
+        >
+          <Icon icon={delta < 0n ? Minus : Plus} />
+        </button>
+      ))}
+    </span>
   );
 }
 
