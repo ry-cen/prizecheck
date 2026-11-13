@@ -1,3 +1,4 @@
+import type { Route } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "./support/collectors";
 import { signInAsOwner } from "./support/sign-in";
@@ -43,19 +44,30 @@ for (const viewport of [
         const requested = new Promise<void>((resolve) => {
           arrived = resolve;
         });
-        await active.route(`${ORIGIN}/api/decks/${deck}`, async (route) => {
-          arrived();
-          if (outcome === "failed")
-            await route.fulfill({
-              status: 503,
-              contentType: "application/json",
-              body: "{}",
-            });
-          else {
-            await gate;
-            await route.continue();
+        const deckUrl = `${ORIGIN}/api/decks/${deck}`;
+        let handling: Promise<void> | undefined;
+        const holdRead = async (route: Route) => {
+          // Only the first full Deck GET after the edit belongs to this gate.
+          if (route.request().method() !== "GET" || handling) {
+            await route.fallback();
+            return;
           }
-        });
+          handling = (async () => {
+            if (outcome === "failed")
+              await route.fulfill({
+                status: 503,
+                contentType: "application/json",
+                body: "{}",
+              });
+            else {
+              await gate;
+              await route.continue();
+            }
+          })();
+          arrived();
+          await handling;
+        };
+        await active.route(deckUrl, holdRead);
         try {
           await active.getByRole("button", { name: /^Remove one / }).click();
           await requested;
@@ -69,9 +81,11 @@ for (const viewport of [
           await expect(summary).not.toContainText("more copy:");
         } finally {
           release();
+          // Removing interception while continue is pending can auto-handle the paused request.
+          await handling;
+          await active.unroute(deckUrl, holdRead);
         }
         if (outcome === "delayed") {
-          await active.unroute(`${ORIGIN}/api/decks/${deck}`);
           await expect(summary).toContainText("Not owned1");
           await expect(summary).not.toContainText("more copy:");
         }
