@@ -63,6 +63,8 @@ export type MoveBorrowed = { loan_id: string; edition_id: string; from_location_
 export type PendingLender = { lender: string; lender_id: string | null; state: "requested" | "accepted"; copies: string };
 export type PendingLine = { edition_id: string; requested: string; accepted: string; lenders: PendingLender[] };
 export type PendingLoans = { deck_id: string; lines: PendingLine[] };
+export type WaitingLine = { lender: string; lender_id: string | null; edition_id: string; deck_id: string | null; state: "requested" | "accepted"; copies: string };
+export type WaitingLoans = { lines: WaitingLine[] };
 export type ReturnedLine = { edition_id: string; quantity: string };
 export type StartReturn = { account_id?: string | null; loan_id: string; revision: number; idempotency_key: string; all?: boolean; lines?: ReturnedLine[] };
 export type WriteOffLine = { edition_id: string; quantity: string };
@@ -261,6 +263,9 @@ export const moveBorrowed = (body: MoveBorrowed) => request<BorrowedCopies>('/ap
 // What one of your Decks is waiting on from Friends: copies asked for and copies promised but not yet received.
 export const getPendingLoans = (deck: string, signal?: AbortSignal) =>
   request<PendingLoans>(`/api/loans/pending${query({ deck })}`, 'GET', undefined, signal);
+// Everything you're still waiting on from Friends, for any of your Decks or none: copies asked for and copies promised but not yet received.
+export const getWaitingLoans = (signal?: AbortSignal) =>
+  request<WaitingLoans>('/api/loans/waiting', 'GET', undefined, signal);
 // Returns (#255): either side starts one (its confirmation), and the other side confirms it.
 export const startReturn = (id: string, body: StartReturn) =>
   request<LoanView>(`/api/loans/${at(id)}/returns`, 'POST', body);

@@ -15,7 +15,7 @@ import { signInAsOwner } from "./support/sign-in";
 
 // League journey: Ask on a page about one Deck (the Want List scoped to it) starts the Friend's Borrow Request draft
 // For that Deck, through the existing deck_id. A draft already started keeps its own For Deck, a different Deck or
-// none; the unscoped All Decks Want List starts one with no Deck; the choice survives a reload, stays editable, and the
+// none; a chip under a Deck's section on All Decks starts it For that Deck; the choice survives a reload, stays editable, and the
 // sent request carries it. The deck builder's panel is in deck-want-list-panel-friends.spec.ts. Brock lends a spare
 // Iono PAL 185 and a Boss's Orders; Misty a spare Iono PAL 185 and a Boss's Orders (the Swap catalog,
 // api/tests/want_list_swap_fixtures.py). The Friends sign in first, so the test's own page signs in afterwards.
@@ -140,12 +140,12 @@ test("Ask on a Deck's Want List starts the draft For that Deck and never changes
     `You're borrowing · For ${lugiaName}`
   );
 
-  // On All Decks no one Deck is the page's: a new draft has no Deck.
+  // On All Decks the chip sits under Charizard's section, so the new draft is For Charizard.
   brockDraft = await review(page, "Brock S");
   await brockDraft.getByRole("button", { name: "Discard" }).click();
   await expect(tray(page)).toHaveCount(0);
   await page.goto(`${ORIGIN}/decks/want-list`);
   await chip(page, charizardName, "Iono", "Brock S").click();
   brockDraft = await review(page, "Brock S");
-  await expect(brockDraft.getByLabel("For Deck")).toHaveValue("");
+  await expect(brockDraft.getByLabel("For Deck")).toHaveValue(charizard);
 });

@@ -33,6 +33,7 @@ def test_static_inventory_reads_precede_thread_detail_routes():
         ('/api/trades/list', '/api/trades/{trade_id}'),
         ('/api/loans/lent-out', '/api/loans/{loan_id}'),
         ('/api/loans/pending', '/api/loans/{loan_id}'),
+        ('/api/loans/waiting', '/api/loans/{loan_id}'),
         ('/api/loans/borrowed', '/api/loans/{loan_id}'),
     ):
         def index(path):

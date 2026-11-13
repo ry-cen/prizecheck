@@ -9,6 +9,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -36,6 +37,7 @@ import { TextField } from "../ui/TextField";
 import { useLift, useToast } from "../ui/Toast";
 import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
 import { cardCount, lineEdition, sendMessage, today } from "./loanText";
+import { earlierFor, earlierText, useEarlierRequests } from "./earlierRequests";
 
 /** The Friend a draft goes to. */
 export type DraftFriend = {
@@ -207,6 +209,13 @@ export function copyCard(copy: FriendCopy, imageUrl: string | null): DraftCard {
   };
 }
 
+/** The cap a line is stored with. `cap` is what the page offers after your own pending requests, `limit` is what the
+ * Friend could really lend. Your own requests may stop a stepper going up but never leave a line over its cap: only the
+ * Friend's availability can. */
+export function lineCap(cap: number, quantity: number, limit: number): number {
+  return Math.max(cap, Math.min(quantity, limit));
+}
+
 /** What a Friend could lend of a copy, as a number: its spare and in-a-Deck copies. */
 export function copyCap(copy: { spare: string; in_deck: string }): number {
   return Number(copy.spare) + Number(copy.in_deck);
@@ -215,8 +224,9 @@ export function copyCap(copy: { spare: string; in_deck: string }): number {
 /**
  * Draft Borrow Requests (social network #252, the Friends' cards verdict): client-only, one per Friend, kept in this
  * tab's sessionStorage under the account id. **Ask** anywhere (a Want List chip or panel, the card popup, a Friend's
- * Collection) adds to that Friend's draft; Ask on a page about one Deck (the Want List scoped to it, the deck builder's
- * Ways to get missing cards) starts a new draft For that Deck, and never changes one already started. The tray lists
+ * Collection) adds to that Friend's draft; Ask on a page about one Deck (the Want List scoped to it, a Deck's section on
+ * All Decks, the deck builder's Ways to get missing cards) starts a new draft For that Deck, and a Get from Friends Ask
+ * on All Decks starts it For the card's one Deck, otherwise No Deck. Neither changes a draft already started. The tray lists
  * the drafts with **Review**, which opens the composer: a stepper per line capped at what the Friend could lend, **For
  * Deck** (or none: Unsorted), an optional **Return by** and **Send Borrow Request**. On a phone the tray is one bar
  * above the tab bar; with several drafts its **Review** lists them first. When the composer closes and the control that
@@ -632,6 +642,8 @@ function BorrowComposer({
   // A sent request is a Loan changed outside the Loans tab: a Deck's pending requests read again.
   const noteLoansChanged = useNoteLoansChanged();
   const [decks, setDecks] = useState<DecksLoad>({ kind: "loading" });
+  const earlier = useEarlierRequests();
+  const warnId = useId();
   const [attempt, setAttempt] = useState(0);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -667,6 +679,18 @@ function BorrowComposer({
     setMessage("");
     onChange((current) => (current ? update(current) : null));
   }
+  // Where an earlier request went: its Deck's name, Unsorted, or nothing when the Deck's name isn't known.
+  const place = (deckId: string | null) =>
+    deckId === null
+      ? "Unsorted"
+      : decks.kind === "ready"
+        ? (decks.decks.find((deck) => deck.id === deckId)?.name ?? null)
+        : null;
+  const before = (editionId: string) =>
+    draft.replaces
+      ? []
+      : earlierFor(earlier.lines, draft.friend.collector_id, editionId);
+  const again = draft.lines.some((line) => before(line.edition_id).length > 0);
   const cardName = (editionId: string) =>
     draft.lines.find((line) => line.edition_id === editionId)?.name ?? "a card";
 
@@ -806,6 +830,14 @@ function BorrowComposer({
                       {edition}
                       {line.lendable && ` · ${line.lendable}`}
                     </p>
+                    {before(line.edition_id).map((ask, index) => (
+                      <p
+                        key={index}
+                        className="m-0 text-meta text-warning wrap-anywhere"
+                      >
+                        {earlierText(ask, place(ask.deck_id))}
+                      </p>
+                    ))}
                   </div>
                   <div className="flex items-center gap-1 phone:col-start-2">
                     <Stepper
@@ -863,6 +895,19 @@ function BorrowComposer({
               <option value={draft.deckId}>The Deck you chose</option>
             )}
           </Select>
+          {earlier.state === "failed" && !draft.replaces && (
+            <p className="m-0 text-meta text-text-muted">
+              Couldn't check what you've already asked {name} for.{" "}
+              <button
+                type="button"
+                aria-label="Retry checking earlier requests"
+                onClick={earlier.retry}
+                className="cursor-pointer border-0 bg-transparent p-0 font-sans text-meta text-accent-strong underline"
+              >
+                Retry
+              </button>
+            </p>
+          )}
           {decks.kind === "failed" && (
             <p className="m-0 text-meta text-text-muted">
               Your Decks couldn't be loaded.{" "}
@@ -900,6 +945,12 @@ function BorrowComposer({
           />
         )}
 
+        {again && (
+          <p id={warnId} className="m-0 text-meta text-warning">
+            Some of these cards are already asked for. Sending asks {name}{" "}
+            again.
+          </p>
+        )}
         <p role="alert" className="m-0 text-meta text-danger empty:hidden">
           {message}
         </p>
@@ -962,6 +1013,7 @@ function BorrowComposer({
           )}
           <Button
             variant="primary"
+            aria-describedby={again ? warnId : undefined}
             disabled={
               !current || !quantitiesValid || frozen || !!draft.replaces
             }
@@ -980,6 +1032,7 @@ function useDraftCap(
   friend: DraftFriend,
   card: DraftCard,
   cap: number,
+  limit: number,
   lendable: string,
   deckId: string | null,
   current: boolean
@@ -996,22 +1049,18 @@ function useDraftCap(
     const line = draft.lines.find(
       (item) => item.edition_id === card.edition_id
     );
+    if (!line) return;
+    const quantity = limit > 0 ? Math.min(line.quantity, limit) : line.quantity;
+    // Coverage (your own requests) may stop the stepper going up, never make the line unsendable; only the Friend's
+    // availability lowers it, and none left blocks sending but keeps the line for explicit removal.
+    const nextCap = lineCap(cap, quantity, limit);
     if (
-      line &&
-      (line.cap !== cap ||
-        (cap > 0 && line.quantity > cap) ||
-        line.lendable !== lendable)
+      line.cap !== nextCap ||
+      line.quantity !== quantity ||
+      line.lendable !== lendable
     )
-      drafts.set(
-        friend,
-        card,
-        // A zero cap blocks sending but keeps the collector's draft for explicit removal.
-        cap > 0 ? Math.min(line.quantity, cap) : line.quantity,
-        cap,
-        lendable,
-        deckId
-      );
-  }, [drafts, friend, card, cap, lendable, deckId, current]);
+      drafts.set(friend, card, quantity, nextCap, lendable, deckId);
+  }, [drafts, friend, card, cap, limit, lendable, deckId, current]);
 }
 
 /**
@@ -1022,6 +1071,7 @@ export function AskControl({
   friend,
   card,
   cap,
+  limit = cap,
   lendable,
   text = "Ask",
   deckId = null,
@@ -1035,13 +1085,15 @@ export function AskControl({
   friend: DraftFriend;
   card: DraftCard;
   cap: number;
+  /** What the Friend could really lend; `cap` less your own pending requests. Defaults to `cap`. */
+  limit?: number;
   lendable: string;
   text?: "Ask" | "Ask to borrow";
-  /** The Deck the page is about, For Deck when this starts the Friend's draft; null for none. */
+  /** The Deck this starts the Friend's draft For (a page about one Deck, or a section's Deck on All Decks); null for none. */
   deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
-  useDraftCap(friend, card, cap, lendable, deckId, current);
+  useDraftCap(friend, card, cap, limit, lendable, deckId, current);
   const ask = useRef<HTMLButtonElement>(null);
   const group = useRef<HTMLSpanElement>(null);
   const quantity = drafts?.quantity(friend.collector_id, card.edition_id) ?? 0;
@@ -1097,7 +1149,14 @@ export function AskControl({
         max={current ? cap : quantity}
         onChange={(next) => {
           pressed.current = true;
-          drafts.set(friend, card, next, cap, lendable, deckId);
+          drafts.set(
+            friend,
+            card,
+            next,
+            lineCap(cap, next, limit),
+            lendable,
+            deckId
+          );
         }}
       />
     </span>
@@ -1112,6 +1171,7 @@ export function AskChip({
   friend,
   card,
   cap,
+  limit = cap,
   lendable,
   text,
   deckId = null,
@@ -1125,13 +1185,15 @@ export function AskChip({
   friend: DraftFriend;
   card: DraftCard;
   cap: number;
+  /** What the Friend could really lend; `cap` less your own pending requests. Defaults to `cap`. */
+  limit?: number;
   lendable: string;
   text: string;
-  /** The Deck the page is about, For Deck when this starts the Friend's draft; null for none. */
+  /** The Deck this starts the Friend's draft For (a page about one Deck, or a section's Deck on All Decks); null for none. */
   deckId?: string | null;
 }) {
   const drafts = useBorrowDrafts();
-  useDraftCap(friend, card, cap, lendable, deckId, current);
+  useDraftCap(friend, card, cap, limit, lendable, deckId, current);
   const quantity = drafts?.quantity(friend.collector_id, card.edition_id) ?? 0;
   const asked = quantity > 0;
   if (cap < 1 && !asked) return null;

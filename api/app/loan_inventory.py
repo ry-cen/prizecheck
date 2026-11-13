@@ -20,6 +20,8 @@ Holdings is here, under ``/api/loans``, and never answers one side's Locations o
 **Pending for a Deck** (``GET /api/loans/pending?deck=``): the borrower's own read of what one of their Decks is
 waiting on from Friends, per card, beside the Want List and never inside it (``pending_for_deck``). Copies
 asked for and copies promised but not yet received are information only; nothing the Want List counts changes.
+``GET /api/loans/waiting`` is the borrower-wide form: any Deck or Unsorted, used for the All Decks Want List and the
+Borrow Request composer's earlier-request notes.
 
 **The Loan Pick List** takes copies in the Deck Pick List's order (``deck_pick_list.suggest``): loose storage, largest
 Holding first, then other Decks' copies beyond their own lines, then copies Decks hold for their own lines; copies
@@ -354,6 +356,22 @@ class PendingLine(BaseModel):
 class PendingLoans(BaseModel):
     deck_id: UUID
     lines: list[PendingLine]        # Edition order; only cards with something asked for or on its way.
+
+
+class WaitingLine(BaseModel):
+    """One line of one of the borrower's open Loans, any Deck or none: copies asked for (``requested``, nobody has
+    answered) or promised and not yet received (``accepted``). ``deck_id``: the borrower's own Deck the cards go to,
+    None for Unsorted (none chosen, or the Deck was deleted). Information only."""
+    lender: str
+    lender_id: str | None   # Null once the lender's account is deleted; the saved name stays.
+    edition_id: UUID
+    deck_id: UUID | None
+    state: Literal['requested', 'accepted']
+    copies: str
+
+
+class WaitingLoans(BaseModel):
+    lines: list[WaitingLine]   # Deck order (Unsorted last), then Edition; accepted first, then requested, oldest first.
 
 
 def copies_count(raw: str) -> int:
@@ -713,6 +731,37 @@ def pending_loans(deck: UUID, user_id: str = Depends(verified_user)):
         edition_id=edition, requested=total(found, 'requested'), accepted=total(found, 'accepted'),
         lenders=[PendingLender(lender=row['lender_name'], lender_id=row['lender_id'], state=row['state'], copies=str(row['copies']))
                  for row in found]) for edition, found in lines.items()])
+
+
+# Everything the borrower is waiting on, any Deck or none, per Loan line: the borrower-wide form of PENDING_FOR_DECK, not
+# filtered by Deck List. A deleted Deck's FK leaves deck_id NULL, which reads as Unsorted.
+WAITING_FOR_BORROWER = """SELECT o.deck_id, l.edition_id, o.state, o.lender_name, o.lender_id,
+       CASE WHEN o.state = 'requested' THEN l.requested ELSE l.promised - l.written_off END AS copies
+  FROM loan o JOIN loan_line l ON l.loan_id = o.id
+  WHERE o.borrower_id = %(user)s AND o.borrower_handover_at IS NULL
+    AND ((o.state = 'requested' AND l.requested > 0) OR (o.state = 'accepted' AND l.promised > l.written_off))
+  ORDER BY o.deck_id NULLS LAST, l.edition_id, o.state = 'requested', o.created_at, o.id"""
+
+
+def waiting_for_borrower(conn, borrower_id: str) -> list[dict]:
+    """The borrower's open Loan lines waiting on Friends, any Deck or Unsorted (``deck_id`` None): rows of ``deck_id``,
+    ``edition_id``, ``state`` ('requested' or 'accepted'), ``lender_id``, ``lender_name`` and ``copies``, one per Loan
+    and Edition, Unsorted last, accepted before requested, oldest Loan first. Counts as ``pending_for_deck`` does, for
+    every Deck and without the Deck List filter, and ignores the friendship in the same way. One statement, no lock,
+    information only: no count, total, cost or export reads it, and it never moves a revision."""
+    return conn.execute(WAITING_FOR_BORROWER, {'user': borrower_id}).fetchall()
+
+
+@router.get('/waiting', response_model=WaitingLoans)
+def waiting_loans(user_id: str = Depends(verified_user)):
+    """Everything the borrower is still waiting on from Friends, for any of their Decks or none: the copies asked for in
+    Borrow Requests nobody has answered and the copies promised and not yet received, with each lender's Display Name.
+    The All Decks Want List and the Borrow Request composer read it; ``GET /api/loans/pending`` stays the per-Deck read."""
+    with connect() as conn, conn.transaction():
+        rows = waiting_for_borrower(conn, user_id)
+    return WaitingLoans(lines=[WaitingLine(
+        lender=row['lender_name'], lender_id=row['lender_id'], edition_id=row['edition_id'], deck_id=row['deck_id'],
+        state=row['state'], copies=str(row['copies'])) for row in rows])
 
 
 def borrowed_copies(conn, user_id: str) -> BorrowedCopies:

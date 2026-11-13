@@ -46,7 +46,7 @@ test.beforeAll(async ({ catalog: seeded }) => {
 });
 
 // What a Deck is waiting on from Friends (GET /api/loans/pending, design docs/planning/social-network/
-// want-list-pending-loans.md): under each needed line, the copies asked for and the copies a Friend agreed to lend,
+// want-list-pending-loans.md; All Decks reads the borrower-wide GET /api/loans/waiting): under each needed line, the copies asked for and the copies a Friend agreed to lend,
 // beside the counts and never taken off them. It is read apart from the Want List and again on window focus, the page
 // becoming visible, the inbox pulse moving, Loans changing outside the Loans tab and a request this tab sent. It is not
 // live: Loan commands move the thread pulse; a Deck List change on another device waits for focus.
@@ -369,7 +369,7 @@ test("a failed refresh keeps the last answer and says it may be out of date", as
   await expect(lines).toContainText("Asked Misty W for 1");
 });
 
-test("each Deck shows only its own requests, All Decks shows none and the lender never sees them", async ({
+test("each Deck shows only its own requests, on its own Want List and on All Decks, and the lender never sees them", async ({
   page,
   collectors,
 }) => {
@@ -387,9 +387,15 @@ test("each Deck shows only its own requests, All Decks shows none and the lender
   await expect(needs(page, otherName)).toContainText("Asked Misty W for 2");
   await expect(needs(page, otherName)).not.toContainText("for 1");
 
+  const waiting = page.waitForResponse((response) =>
+    response.url().includes("/api/loans/waiting")
+  );
   await page.goto(`${ORIGIN}/decks/want-list`);
-  await expect(needs(page, deckName)).toBeVisible();
-  await expect(page.getByRole("main")).not.toContainText("Asked Misty W");
+  await waiting;
+  await expect(needs(page, deckName)).toContainText("Asked Misty W for 1");
+  await expect(needs(page, deckName)).not.toContainText("for 2");
+  await expect(needs(page, otherName)).toContainText("Asked Misty W for 2");
+  await expect(needs(page, otherName)).not.toContainText("for 1");
 
   // Misty's own Deck listing the same card reads nothing of Ash's requests.
   const mistyName = `Misty deck ${randomUUID().slice(0, 6)}`;

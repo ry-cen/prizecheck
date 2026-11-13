@@ -1351,6 +1351,13 @@
   [
    "GET"
   ],
+  "/api/loans/waiting",
+  "waiting_loans"
+ ],
+ [
+  [
+   "GET"
+  ],
   "/api/loans/borrowed",
   "list_borrowed"
  ],

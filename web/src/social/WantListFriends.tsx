@@ -71,7 +71,8 @@ export function FriendChips({
  *
  * Borrow Requests (#252) pass `action` for each Friend's row (Ask to borrow, then a stepper) and `asked`, the copies of a card
  * the drafts ask for, which the panel's heading shows as "3 of 4 asked". An offered Edition also has Trade for it,
- * using the existing Friend matches and Ask to trade handoff.
+ * using the existing Friend matches and Ask to trade handoff. On All Decks, `note` names what is already asked for and
+ * a card's Ask starts its draft For the card's one Deck, otherwise No Deck; a draft already started keeps its For Deck.
  */
 export function GetFromFriends({
   rows,
@@ -81,6 +82,7 @@ export function GetFromFriends({
   pending,
   action,
   asked,
+  note,
 }: {
   rows: CombinedRow[];
   byCard: Map<string, FriendCopy[]>;
@@ -92,6 +94,8 @@ export function GetFromFriends({
   action?: (row: CombinedRow, copy: FriendCopy) => ReactNode;
   /** Copies of the row's card the Borrow Request drafts ask Friends for. */
   asked?: (row: CombinedRow, copies: FriendCopy[]) => number;
+  /** A line under "You need …" (what is already asked for), or "" for none. */
+  note?: (row: CombinedRow) => string;
 }) {
   const offers = useTradeOffers(byCard);
   if (rows.length === 0)
@@ -121,6 +125,7 @@ export function GetFromFriends({
           deckName={deckName}
           action={action}
           asked={asked}
+          note={note}
           offers={offers}
         />
       ))}
@@ -141,6 +146,7 @@ function CardPanel({
   deckName,
   action,
   asked,
+  note,
   offers,
 }: {
   row: CombinedRow;
@@ -149,11 +155,13 @@ function CardPanel({
   deckName: (id: string) => string;
   action?: (row: CombinedRow, copy: FriendCopy) => ReactNode;
   asked?: (row: CombinedRow, copies: FriendCopy[]) => number;
+  note?: (row: CombinedRow) => string;
 }) {
   const headingId = useId();
   const askedCopies = asked?.(row, copies) ?? 0;
   const editionId = useId();
   const decks = row.decks.map((deck) => deckName(deck.deck_id)).join(" · ");
+  const pendingNote = note?.(row) ?? "";
   return (
     <section
       aria-labelledby={`${headingId} ${editionId}`}
@@ -181,6 +189,11 @@ function CardPanel({
           <p className="m-0 text-meta text-text-muted wrap-anywhere">
             You need {row.need} · {decks}
           </p>
+          {pendingNote && (
+            <p className="m-0 text-meta text-text-muted wrap-anywhere">
+              {pendingNote}
+            </p>
+          )}
         </div>
         {asked && (
           <span>
