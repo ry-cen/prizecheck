@@ -775,7 +775,8 @@ test("an unknown initial-send outcome keeps its key and a known nonterminal refu
 async function discardBuilder(
   page: Page,
   collectors: Parameters<typeof story>[1],
-  counter: boolean
+  counter: boolean,
+  options: { mine?: boolean } = {}
 ) {
   const ids = seedCatalog();
   const ash = await collectors.signIn();
@@ -785,6 +786,10 @@ async function discardBuilder(
   await noArtwork(page);
   await signInAsOwner(page, "/collection");
   await nameCollector(page, "Misty W");
+  if (options.mine) {
+    const own = await forTradeBinder(page, "Misty Shelf");
+    await hold(page, own, ids["PAL 172"], 1);
+  }
   await befriend(page, ash.page);
   let previous = `/friends/${handle}/trade-list`;
   if (counter) {
@@ -1164,6 +1169,79 @@ for (const viewport of [
           });
         }
       }
+
+      if (counter)
+        for (const resolved of [false, true])
+          test(`Counter: Details from My Trade List returns focus after an unchanged refusal removes its opener (${resolved ? "read finished" : "read held"})`, async ({
+            page,
+            collectors,
+          }) => {
+            const { address, other } = await discardBuilder(
+              page,
+              collectors,
+              true,
+              { mine: true }
+            );
+            await editDiscardCards(page, true);
+            let holdReads = false;
+            let release!: () => void;
+            const reads = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            await page.route(`${ORIGIN}/api/trades/list`, async (route) => {
+              if (holdReads) await reads;
+              await route.fallback();
+            });
+            const settle = await holdSend(
+              page,
+              true,
+              address,
+              "refused",
+              other
+            );
+            try {
+              await page
+                .getByRole("button", { name: "Send Counter", exact: true })
+                .click();
+              await show(page, "Cards");
+              const radio = page.getByRole("radio", {
+                name: "My Trade List",
+                exact: true,
+              });
+              await radio.click();
+              const details = page.getByRole("button", {
+                name: "Details for Boss's Orders (PAL 172)",
+                exact: true,
+              });
+              await details.click();
+              const opener = await details.elementHandle();
+              await expect(page.locator("dialog[open] :focus")).toHaveCount(1);
+              holdReads = true;
+              await settle();
+              await expect(details).toHaveCount(0);
+              await expect(page.locator("dialog[open] :focus")).toHaveCount(1);
+              if (resolved) {
+                release();
+                await expect(details).toHaveCount(1);
+                expect(
+                  await details.evaluate(
+                    (element, old) => element !== old,
+                    opener
+                  )
+                ).toBe(true);
+              }
+              await page.keyboard.press("Escape");
+              await expect(page.locator("dialog[open]")).toHaveCount(0);
+              const target = resolved ? details : radio;
+              await expect(target).toBeFocused();
+              await expect(page.locator("body:focus")).toHaveCount(0);
+              release();
+              await expect(details).toHaveCount(1);
+              await expect(target).toBeFocused();
+            } finally {
+              release();
+            }
+          });
 
       const continuityCases = counter
         ? ([

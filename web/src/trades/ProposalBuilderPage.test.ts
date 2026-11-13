@@ -1752,3 +1752,194 @@ it("does not take outside focus when an explicit take-out commits", async () => 
     outside.remove();
   }
 });
+
+function dialogDom() {
+  const proto = HTMLDialogElement.prototype;
+  const show = Object.getOwnPropertyDescriptor(proto, "showModal");
+  const close = Object.getOwnPropertyDescriptor(proto, "close");
+  Object.defineProperty(proto, "showModal", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.setAttribute("open", "");
+    },
+  });
+  Object.defineProperty(proto, "close", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.removeAttribute("open");
+    },
+  });
+  const rects = vi
+    .spyOn(HTMLElement.prototype, "getClientRects")
+    .mockImplementation(() =>
+      Object.assign([new DOMRect(0, 0, 1, 1)], {
+        item: () => new DOMRect(0, 0, 1, 1),
+      })
+    );
+  return () => {
+    rects.mockRestore();
+    if (show) Object.defineProperty(proto, "showModal", show);
+    else Reflect.deleteProperty(proto, "showModal");
+    if (close) Object.defineProperty(proto, "close", close);
+    else Reflect.deleteProperty(proto, "close");
+  };
+}
+function observeDialogClose(dialog: HTMLDialogElement) {
+  let closed = false;
+  const observer = new MutationObserver((records) => {
+    if (
+      records.some((record) => record.attributeName === "open") &&
+      !dialog.hasAttribute("open")
+    )
+      closed = true;
+  });
+  observer.observe(dialog, { attributes: true, attributeFilter: ["open"] });
+  return { didClose: () => closed, stop: () => observer.disconnect() };
+}
+async function escapeDialog() {
+  await act(async () =>
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    )
+  );
+}
+const ownPopupCard = {
+  ...card,
+  edition_id: "Boss",
+  name: "Boss's Orders",
+  collector_number: "172",
+  copies: "1",
+  places: [],
+};
+it.each([false, true])(
+  "returns focus from My Trade List Details after unchanged refusal (read resolved before Escape: %s)",
+  async (resolvedBeforeEscape) => {
+    const restore = dialogDom();
+    const own = { cards: [ownPopupCard], locations: [] };
+    const reread = held<Awaited<ReturnType<typeof getTradeList>>>();
+    let closeTrace: ReturnType<typeof observeDialogClose> | undefined;
+    try {
+      vi.mocked(getTradeList).mockResolvedValue(own);
+      await mount();
+      await cashEdit();
+      await click(button("My Trade List"));
+      const post = held<TradeView>();
+      vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+      await click(send());
+      const opener = button("Details for Boss's Orders (PAL 172)");
+      opener.focus();
+      await click(opener);
+      const dialog = host.querySelector<HTMLDialogElement>("dialog[open]")!;
+      closeTrace = observeDialogClose(dialog);
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement).not.toBe(document.body);
+      vi.mocked(getTradeList).mockReturnValue(reread.promise);
+      await act(async () =>
+        post.reject(new TradesError(422, "TOO_MANY_LINES"))
+      );
+      expect(current).toBe(original);
+      expect(opener.isConnected).toBe(false);
+      expect(
+        [...host.querySelectorAll("button[aria-label]")].some(
+          (e) =>
+            e.getAttribute("aria-label") ===
+            "Details for Boss's Orders (PAL 172)"
+        )
+      ).toBe(false);
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement).not.toBe(document.body);
+      if (resolvedBeforeEscape) await act(async () => reread.resolve(own));
+      await escapeDialog();
+      expect(dialog.hasAttribute("open")).toBe(false);
+      expect(closeTrace.didClose()).toBe(true);
+      if (resolvedBeforeEscape) {
+        const fresh = button("Details for Boss's Orders (PAL 172)");
+        expect(fresh).not.toBe(opener);
+        expect(document.activeElement).toBe(fresh);
+      } else {
+        expect(document.activeElement).toBe(button("My Trade List"));
+        await act(async () => reread.resolve(own));
+        expect(document.activeElement).toBe(button("My Trade List"));
+      }
+      expect(document.activeElement).not.toBe(document.body);
+    } finally {
+      await act(async () => reread.resolve(own));
+      closeTrace?.stop();
+      restore();
+    }
+  }
+);
+
+it("returns Keep editing to the opener's row when a background change disables it while Discard is open", async () => {
+  const restore = dialogDom();
+  const read = held<TradeView>();
+  let route!: Route;
+  function Routed() {
+    route = useRoute();
+    return h(ToastProvider, {
+      children: h(ProposalBuilderPage, {
+        traderId: "misty",
+        counter: original,
+        onNavigate: route.navigate,
+      }),
+    });
+  }
+  try {
+    vi.mocked(getTraderTradeList).mockImplementation(async (_id, options) => {
+      if (options?.q !== undefined) throw new Error("library offline");
+      return theirsInventory();
+    });
+    await act(async () => root.render(h(Routed)));
+    await cashEdit();
+    vi.mocked(getTrade).mockReturnValueOnce(read.promise);
+    increase().focus();
+    await click(button("Retry"));
+    await act(async () => route.navigate("/collection"));
+    const dialog = host.querySelector<HTMLDialogElement>("dialog[open]")!;
+    expect(document.activeElement).toBe(button("Keep editing"));
+    current = replacement;
+    await act(async () => read.resolve(replacement));
+    expect(increase().disabled).toBe(true);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await click(button("Keep editing"));
+    expect(dialog.hasAttribute("open")).toBe(false);
+    expect(document.activeElement).toBe(decrease());
+    expect(document.activeElement).not.toBe(document.body);
+  } finally {
+    await act(async () => read.resolve(original));
+    restore();
+  }
+});
+
+it("restores a proposal row card popup to its card button after a held unchanged refusal", async () => {
+  const restore = dialogDom();
+  let closeTrace: ReturnType<typeof observeDialogClose> | undefined;
+  try {
+    await mount();
+    await cashEdit();
+    const post = held<TradeView>();
+    vi.mocked(counterTrade).mockReturnValueOnce(post.promise);
+    const rowButton = host.querySelector<HTMLButtonElement>(
+      "li > button[aria-labelledby]"
+    )!;
+    rowButton.focus();
+    await click(rowButton);
+    const dialog = host.querySelector<HTMLDialogElement>("dialog[open]")!;
+    closeTrace = observeDialogClose(dialog);
+    // Pending-send capture blocks opening proposal-row controls. Start the mocked command with the popup already open.
+    await click(send());
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+    await act(async () => post.reject(new TradesError(422, "TOO_MANY_LINES")));
+    expect(current).toBe(original);
+    expect(rowButton.isConnected).toBe(true);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await escapeDialog();
+    expect(dialog.hasAttribute("open")).toBe(false);
+    expect(closeTrace.didClose()).toBe(true);
+    expect(document.activeElement).toBe(rowButton);
+  } finally {
+    closeTrace?.stop();
+    restore();
+  }
+});

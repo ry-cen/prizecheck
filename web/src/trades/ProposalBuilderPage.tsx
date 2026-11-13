@@ -17,6 +17,7 @@ import { ProposedOfferChanges } from "./ProposedOfferChanges";
 import { useMessagePrefill } from "./messagePrefill";
 import { ArrowRight, ChevronLeft } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -134,9 +135,12 @@ type FocusSlot =
   | { kind: "send" }
   | { kind: "stepper"; row: string; index: number }
   | { kind: "printing"; side: ProposalSide }
-  | { kind: "library" }
+  | { kind: "library"; label?: string }
   | { kind: "review" }
   | { kind: "other" };
+
+type FocusRecord = { element: HTMLElement; slot: FocusSlot };
+type TrackedFocus = FocusRecord & { origin?: FocusRecord };
 
 /** No layout reads: a closed dialog or hidden ancestor also makes a control unavailable to focus. */
 function focusLive(
@@ -173,7 +177,13 @@ function focusSlot(
   const side =
     element.closest<HTMLElement>("[data-focus-side]")?.dataset.focusSide;
   if (side === "get" || side === "give") return { kind: "printing", side };
-  if (places.library?.contains(element)) return { kind: "library" };
+  if (places.library?.contains(element)) {
+    const label = element.getAttribute("aria-label");
+    return {
+      kind: "library",
+      label: label?.startsWith("Details for ") ? label : undefined,
+    };
+  }
   if (places.review?.contains(element)) return { kind: "review" };
   return { kind: "other" };
 }
@@ -365,24 +375,53 @@ export function ProposalBuilderPage({
   const reasonRef = useRef<HTMLParagraphElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const libraryRef = useRef<HTMLDivElement>(null);
-  const lastFocus = useRef<{ element: HTMLElement; slot: FocusSlot } | null>(
-    null
-  );
+  const lastFocus = useRef<TrackedFocus | null>(null);
+  const repairFocus = useRef<(removed: ProposalSide | null) => void>(() => {});
+  const rootObserver = useRef<MutationObserver | null>(null);
+  const observeRoot = useCallback((node: HTMLElement | null) => {
+    rootRef.current = node;
+    rootObserver.current?.disconnect();
+    if (!node) return;
+    // Child components (Details, row popups) commit without the builder, so run the same repair.
+    rootObserver.current ??= new MutationObserver(() =>
+      repairFocus.current(null)
+    );
+    rootObserver.current.observe(node, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["disabled", "hidden", "open"],
+    });
+  }, []);
   const blurTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
     const onFocusIn = (event: FocusEvent) => {
       const target = event.target;
-      lastFocus.current =
-        target instanceof HTMLElement && rootRef.current?.contains(target)
-          ? {
-              element: target,
-              slot: focusSlot(target, {
-                send: sendButtonRef.current,
-                library: libraryRef.current,
-                review: reviewRegionRef.current,
-              }),
-            }
-          : null;
+      if (
+        !(target instanceof HTMLElement) ||
+        !rootRef.current?.contains(target)
+      ) {
+        lastFocus.current = null;
+        return;
+      }
+      const dialog = target.closest("dialog");
+      const previous = lastFocus.current;
+      const origin = !dialog
+        ? undefined
+        : previous?.element.closest("dialog") === dialog
+          ? previous.origin
+          : previous && !previous.element.closest("dialog")
+            ? { element: previous.element, slot: previous.slot }
+            : undefined;
+      lastFocus.current = {
+        element: target,
+        slot: focusSlot(target, {
+          send: sendButtonRef.current,
+          library: libraryRef.current,
+          review: reviewRegionRef.current,
+        }),
+        origin,
+      };
     };
     const onFocusOut = (event: FocusEvent) => {
       const left = lastFocus.current?.element;
@@ -401,6 +440,7 @@ export function ProposalBuilderPage({
     document.addEventListener("focusin", onFocusIn, true);
     document.addEventListener("focusout", onFocusOut, true);
     return () => {
+      rootObserver.current?.disconnect();
       document.removeEventListener("focusin", onFocusIn, true);
       document.removeEventListener("focusout", onFocusOut, true);
       window.clearTimeout(blurTimer.current);
@@ -830,6 +870,11 @@ export function ProposalBuilderPage({
         );
       case "library":
         return firstLive(
+          [
+            ...(libraryRef.current?.querySelectorAll<HTMLElement>(
+              "button[aria-label]"
+            ) ?? []),
+          ].find((button) => button.getAttribute("aria-label") === slot.label),
           libraryRef.current?.querySelector<HTMLElement>(
             '[role="radiogroup"] [role="radio"][aria-checked="true"]'
           ),
@@ -857,19 +902,32 @@ export function ProposalBuilderPage({
 
   // Repair only unowned focus after a control dies. Take-out has no exception: a live owner always keeps focus.
   useLayoutEffect(() => {
+    repairFocus.current = (removed) => {
+      const lost = lastFocus.current;
+      const active = document.activeElement;
+      if (active && active !== document.body && focusLive(active)) {
+        if (lost && !focusLive(lost.element)) lastFocus.current = null;
+        return;
+      }
+      if (removed) return void sideHeading[removed].current?.focus();
+      const dialog = lost?.element.closest("dialog");
+      if (!lost || focusLive(lost.element)) return;
+      lastFocus.current = null;
+      if (sent.current && !terminalRef.current) return;
+      const { origin } = lost;
+      const target =
+        dialog && origin
+          ? focusLive(origin.element)
+            ? origin.element
+            : focusTarget(origin.slot)
+          : focusTarget(lost.slot);
+      target?.focus();
+    };
+  });
+  useLayoutEffect(() => {
     const removed = refocus.current;
     refocus.current = null;
-    const lost = lastFocus.current;
-    const active = document.activeElement;
-    if (active && active !== document.body && focusLive(active)) {
-      if (lost && !focusLive(lost.element)) lastFocus.current = null;
-      return;
-    }
-    if (removed) return void sideHeading[removed].current?.focus();
-    if (!lost || focusLive(lost.element)) return;
-    lastFocus.current = null;
-    if (sent.current && !terminalRef.current) return;
-    focusTarget(lost.slot)?.focus();
+    repairFocus.current(removed);
   });
 
   async function send() {
@@ -1033,7 +1091,7 @@ export function ProposalBuilderPage({
     );
     if (terminal.kind === "unavailable")
       return (
-        <main ref={rootRef} className={FRAME}>
+        <main ref={observeRoot} className={FRAME}>
           <PageHeader title="Trade Proposal" headingRef={headingRef} />
           <p role="status" className="m-0 text-body text-text">
             Your proposal was already sent. This Trade isn't available to view.
@@ -1045,7 +1103,7 @@ export function ProposalBuilderPage({
     const trade = terminal.trade;
     const target = tradePath(trade.thread_id);
     return (
-      <main ref={rootRef} className={FRAME}>
+      <main ref={observeRoot} className={FRAME}>
         <PageHeader title={terminal.label} headingRef={headingRef} />
         <p role="status" className="m-0 text-body text-text">
           Your proposal was already sent. These are the current terms.
@@ -1425,7 +1483,7 @@ export function ProposalBuilderPage({
   );
 
   return (
-    <main ref={rootRef} className={FRAME}>
+    <main ref={observeRoot} className={FRAME}>
       {back}
       <PageHeader title={`${frameTitle} to ${name}`} headingRef={headingRef} />
       {phone ? (
