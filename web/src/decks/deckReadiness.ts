@@ -34,3 +34,16 @@ export function deckReadiness(lines: readonly DeckLine[]): DeckReadiness {
   }
   return parts;
 }
+
+/** Explain only the extra copies to acquire; the Deck read already applies promises and counting rules. */
+export function missingCountNote(
+  notOwned: bigint,
+  toGet: string | undefined
+): string | null {
+  if (toGet === undefined) return null;
+  const extra = BigInt(toGet) - notOwned;
+  if (extra <= 0n) return null;
+  return extra === 1n
+    ? "Ways to get missing cards counts 1 more copy: a copy you own is promised in a Trade or Loan, or counted for another Deck."
+    : `Ways to get missing cards counts ${extra} more copies: some copies you own are promised in a Trade or Loan, or counted for another Deck.`;
+}

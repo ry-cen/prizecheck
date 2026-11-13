@@ -1,17 +1,19 @@
 import type { DeckLine } from "./deckListModel";
-import { deckReadiness } from "./deckReadiness";
+import { deckReadiness, missingCountNote } from "./deckReadiness";
 
 /**
  * Header row 1's readiness (finish-deck flow): where the Deck List's copies are, as four counts that add up to it — in
  * this Deck, owned elsewhere, lent out and not owned — the same split the copies are drawn in. Gather N brings the
  * copies owned elsewhere; Buy missing and the Want List say what to get under the counting setting, which can differ
  * from "not owned", so no to-get count is shown here. Owned elsewhere reserves nothing, so it is never called
- * available. Nothing renders for an empty Deck List.
+ * available. A numbered note explains any extra to-get copies from the same Deck read. Nothing renders for an empty Deck List.
  */
 export function DeckReadinessSummary({
   lines,
+  toGet,
 }: {
   lines: readonly DeckLine[];
+  toGet?: string;
 }) {
   const parts = deckReadiness(lines);
   if (parts.total === 0n) return null;
@@ -21,6 +23,7 @@ export function DeckReadinessSummary({
         Every card is in this Deck.
       </p>
     );
+  const note = missingCountNote(parts.notOwned, toGet);
   const counts = [
     { label: "In this Deck", value: parts.inDeck },
     { label: "Owned elsewhere", value: parts.elsewhere },
@@ -43,6 +46,7 @@ export function DeckReadinessSummary({
           </div>
         ))}
       </dl>
+      {note && <p className="m-0 mt-1 text-meta text-text-muted">{note}</p>}
     </div>
   );
 }
