@@ -167,6 +167,7 @@ it("asks before declining a proposal, and Keep it leaves it open", async () => {
   expect(declineTrade).not.toHaveBeenCalled();
   const sure = host.querySelector('[role="group"][aria-label="Decline"]')!;
   expect(sure.textContent).toContain("You can't undo it");
+  expect(document.activeElement).toBe(sure.querySelector("p"));
   const keep = [...sure.querySelectorAll("button")].find(
     (button) => button.textContent === "Keep it"
   )!;
@@ -274,6 +275,9 @@ it("shows the physical swap disclosure before its single confirmation control", 
   await act(async () => buttons[0].click());
   expect(confirmSwap).not.toHaveBeenCalled();
   expect(disclosure.textContent).toContain(
+    "Confirm the swap with Misty? You can't undo it."
+  );
+  expect(document.activeElement?.textContent).toBe(
     "Confirm the swap with Misty? You can't undo it."
   );
   await act(async () =>
@@ -494,7 +498,8 @@ it("asks before withdrawing, Keep it restores focus, and double confirmation sen
     "Withdraw this Trade Proposal to Misty? None of these cards stay promised."
   );
   const yes = question.querySelector("button")!;
-  expect(document.activeElement).toBe(yes);
+  // Initial focus reads the ask; the irreversible button remains the next Tab stop.
+  expect(document.activeElement).toBe(question.querySelector("p"));
   await act(async () =>
     [...question.querySelectorAll("button")]
       .find((b) => b.textContent === "Keep it")!
@@ -655,7 +660,8 @@ it.each(["decline", "withdraw", "cancel"] as const)(
     expect(escape.defaultPrevented).toBe(true);
     expect(question.getAttribute("aria-label")).toBe(label);
     expect(question.isConnected).toBe(true);
-    expect(document.activeElement).toBe(yes);
+    // Initial focus reads the ask; the irreversible button remains the next Tab stop.
+    expect(document.activeElement).toBe(question.querySelector("p"));
     await act(async () => keep.click());
     expect(question.getAttribute("aria-label")).toBe(label);
     expect(question.isConnected).toBe(true);
