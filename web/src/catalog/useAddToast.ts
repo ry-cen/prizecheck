@@ -19,6 +19,8 @@ export type AddedCards = {
   from: "bar" | "popup";
   /** The mounted Add row has already presented this result in its inline live region. */
   announcedInline?: boolean;
+  /** Whether this add's specific receiving row can still present an Undo outcome. */
+  presentsInlineUndo?: () => boolean;
 };
 
 /** The toast's Undo, pressed from inside the popup: it resolves to the toast's new message ("" when nothing was
@@ -64,7 +66,7 @@ export function useAddToast({ shown, onUndone }: Options) {
   const current = useRef<number | null>(null);
   const latestAdd = useRef(0);
   const inputs = useRef(new Map<number, ToastInput>());
-  const owned = useRef(new Set<number>());
+  const owned = useRef(new Map<number, symbol>());
   const keys = useRef(new Map<string, string>());
   const running = useRef(new Map<number, Promise<InlineUndoResult>>());
 
@@ -149,9 +151,11 @@ export function useAddToast({ shown, onUndone }: Options) {
     toastId: number,
     message: string
   ): Promise<InlineUndoResult> {
+    const receivingOwner = owned.current.get(toastId);
     const inlineAnnounces = () =>
-      owned.current.has(toastId) ||
-      (!!added.announcedInline && !!document.querySelector("dialog[open]"));
+      (receivingOwner !== undefined &&
+        owned.current.get(toastId) === receivingOwner) ||
+      added.presentsInlineUndo?.() === true;
     const inlineOwned = inlineAnnounces();
     const input: ToastInput = {
       message,
@@ -219,10 +223,12 @@ export function useAddToast({ shown, onUndone }: Options) {
       {
         isAvailable: () => kit.isShown(toastId),
         claimInline: () => {
-          owned.current.add(toastId);
+          const owner = Symbol();
+          owned.current.set(toastId, owner);
           const input = inputs.current.get(toastId);
           if (input) kit.update(toastId, { ...input, action: undefined });
           return () => {
+            if (owned.current.get(toastId) !== owner) return;
             owned.current.delete(toastId);
             const latest = inputs.current.get(toastId);
             if (latest) kit.update(toastId, latest);

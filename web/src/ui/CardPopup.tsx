@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -95,6 +96,9 @@ export function CardPopup({
       const dialog = root.current?.closest("dialog");
       if (target instanceof Element) {
         if (target !== document.body && !dialog?.contains(target)) return;
+        // A nested artwork dialog owns its own keys.
+        if (target !== document.body && target.closest("dialog") !== dialog)
+          return;
         if (target.closest(OWNS_ARROWS)) return;
       }
       event.preventDefault();
@@ -171,8 +175,11 @@ export function CardPopup({
     >
       <div ref={root} className="flex flex-col gap-4 text-body">
         <div className="flex gap-4 phone:flex-col phone:gap-3">
-          <div className="flex w-44 shrink-0 flex-col gap-2 phone:w-20 phone:self-center">
-            {art}
+          <div
+            key={cardKey}
+            className="flex w-44 shrink-0 flex-col gap-2 phone:w-60 phone:self-center"
+          >
+            {open && art}
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-4">{children}</div>
         </div>
@@ -185,7 +192,20 @@ export function CardPopup({
   );
 }
 
-/** The card's large artwork at full width of its column, or "Artwork unavailable" when there is none or it fails. */
+const PHONE_ART_QUERY = "(max-width: 760px)";
+function subscribePhoneArt(notify: () => void) {
+  if (typeof matchMedia !== "function") return () => {};
+  const query = matchMedia(PHONE_ART_QUERY);
+  query.addEventListener("change", notify);
+  return () => query.removeEventListener("change", notify);
+}
+function phoneArtSnapshot() {
+  return (
+    typeof matchMedia === "function" && matchMedia(PHONE_ART_QUERY).matches
+  );
+}
+
+/** Artwork at the column's width; on phones a loaded thumbnail opens the shared Dialog at full width. */
 export function CardArt({
   url,
   name,
@@ -197,6 +217,14 @@ export function CardArt({
   largeUrl?: string | null;
 }) {
   const art = useLargeArt(url, largeUrl);
+  const phone = useSyncExternalStore(
+    subscribePhoneArt,
+    phoneArtSnapshot,
+    () => false
+  );
+  const thumbnail = useRef<HTMLButtonElement>(null);
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   if (art.waiting)
     return (
       <div
@@ -214,13 +242,51 @@ export function CardArt({
         Artwork unavailable
       </div>
     );
-  return (
+  const image = (
     <img
       key={art.src}
       src={art.src}
       alt={`${name} card art`}
-      onError={art.onError}
+      onLoad={(event) => {
+        if (event.currentTarget.naturalWidth > 0) setLoaded(art.src);
+      }}
+      onError={() => {
+        setLoaded(null);
+        setExpanded(null);
+        art.onError();
+      }}
       className="block aspect-(--tile-aspect) w-full rounded-card object-contain"
     />
+  );
+  if (!phone) return image;
+  return (
+    <>
+      <button
+        ref={thumbnail}
+        type="button"
+        aria-label={`View larger image of ${name}`}
+        disabled={loaded !== art.src}
+        onClick={() => setExpanded(art.src)}
+        className="block min-h-tap min-w-tap w-full cursor-zoom-in rounded-card border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default"
+      >
+        {image}
+      </button>
+      {expanded === art.src && loaded === art.src && (
+        <Dialog
+          open
+          onClose={() => setExpanded(null)}
+          title={name}
+          closeLabel="Close"
+          size="wide"
+          returnFocus={thumbnail}
+        >
+          <img
+            src={art.src}
+            alt={`${name} card art`}
+            className="block w-full rounded-card"
+          />
+        </Dialog>
+      )}
+    </>
   );
 }

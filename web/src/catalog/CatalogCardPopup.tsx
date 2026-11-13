@@ -802,6 +802,11 @@ function AddRows({
         undoId: outcome.undoId,
         from: "popup",
         announcedInline: mounted.current && shown.current === sent.id,
+        presentsInlineUndo: () =>
+          mounted.current &&
+          shown.current === sent.id &&
+          request === latestAdd.current &&
+          !!addButton.current?.closest("dialog[open]"),
       });
       if (
         mounted.current &&
