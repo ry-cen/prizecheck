@@ -326,6 +326,9 @@ it("freezes draft controls while sending, then exposes the identical-key retry a
     "true"
   );
   expect(increase().matches(":disabled")).toBe(false);
+  expect(increase().closest("fieldset")?.className).toContain(
+    "aria-disabled:[&_button]:opacity-45"
+  );
   await click(increase());
   expect(
     host.querySelector('[role="group"][aria-label="Iono (PAL 185) you get"]')
@@ -1017,4 +1020,148 @@ it("focuses the Counter builder when its trade read resolves after the restore w
     stop();
     vi.useRealTimers();
   }
+});
+
+it.each([
+  "changed",
+  "changed-read-failed",
+  "refused",
+  "failure",
+  "unknown",
+  "gone",
+] as const)(
+  "settles focused Counter Send on a live control or notice: %s",
+  async (outcome) => {
+    await mount();
+    await click(increase());
+    let error: Error;
+    if (outcome.startsWith("changed")) {
+      current = replacement;
+      error = new TradesError(409, "OFFER_CHANGED");
+      if (outcome === "changed-read-failed")
+        vi.mocked(getTrade).mockRejectedValueOnce(new TypeError("offline"));
+    } else if (outcome === "gone")
+      error = new TradesError(404, "TRADE_NOT_FOUND");
+    else if (outcome === "unknown") error = new TypeError("lost response");
+    else
+      error = new TradesError(
+        outcome === "failure" ? 503 : 422,
+        "TOO_MANY_LINES"
+      );
+    vi.mocked(counterTrade).mockRejectedValueOnce(error);
+    send().focus();
+    await click(send());
+    if (outcome === "changed")
+      expect(document.activeElement).toBe(
+        button("I reviewed the current offer")
+      );
+    else if (outcome === "changed-read-failed")
+      expect(document.activeElement).toBe(button("Retry current offer"));
+    else if (outcome === "gone")
+      expect(document.activeElement?.getAttribute("role")).toBe("status");
+    else if (outcome === "refused") {
+      expect(document.activeElement).toBe(host.querySelector('[role="alert"]'));
+      expect(document.activeElement?.textContent).not.toBe("");
+    } else {
+      expect(send().disabled).toBe(false);
+      expect(document.activeElement).toBe(send());
+    }
+    expect(document.activeElement).not.toBe(document.body);
+  }
+);
+
+it.each(["refused", "failure", "unknown", "current", "unavailable"] as const)(
+  "settles focused new-proposal Send on a live control or result: %s",
+  async (outcome) => {
+    vi.mocked(peekProposalSeed).mockReturnValue({
+      give: [],
+      get: [{ ...card, copies: "3", quantity: 1 }],
+    });
+    const fetch = vi.fn();
+    if (outcome === "unknown")
+      fetch.mockRejectedValue(new TypeError("lost response"));
+    else {
+      const terminal = outcome === "current" || outcome === "unavailable";
+      const body =
+        outcome === "current"
+          ? {
+              outcome: "already_applied",
+              view: "current",
+              label: "Current Trade",
+              trade: original,
+            }
+          : {
+              detail: terminal
+                ? {
+                    code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+                    outcome: "already_applied",
+                    view: "unavailable",
+                  }
+                : { code: "TOO_MANY_LINES" },
+            };
+      fetch.mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status:
+            outcome === "current"
+              ? 201
+              : terminal
+                ? 409
+                : outcome === "failure"
+                  ? 503
+                  : 422,
+          headers: { "content-type": "application/json" },
+        })
+      );
+    }
+    vi.stubGlobal("fetch", fetch);
+    await act(async () =>
+      root.render(
+        h(ToastProvider, {
+          children: h(ProposalBuilderPage, {
+            traderId: "misty",
+            onNavigate: navigate,
+          }),
+        })
+      )
+    );
+    const submit = button("Send Trade Proposal");
+    submit.focus();
+    await click(submit);
+    if (outcome === "current" || outcome === "unavailable")
+      expect(document.activeElement).toBe(host.querySelector("h1"));
+    else {
+      expect(submit.disabled).toBe(false);
+      expect(document.activeElement).toBe(submit);
+    }
+  }
+);
+
+it("does not steal focus from another live draft control when Counter Send settles", async () => {
+  await mount();
+  await click(increase());
+  current = replacement;
+  vi.mocked(counterTrade).mockRejectedValueOnce(
+    new TradesError(409, "OFFER_CHANGED")
+  );
+  const cash = button("No cash");
+  cash.focus();
+  await click(send());
+  expect(document.activeElement).toBe(cash);
+});
+
+it("keeps the chosen recovery focus live when confirming the changed Counter removes that control", async () => {
+  await mount();
+  await click(increase());
+  current = replacement;
+  vi.mocked(counterTrade).mockRejectedValueOnce(
+    new TradesError(409, "OFFER_CHANGED")
+  );
+  send().focus();
+  await click(send());
+  expect(document.activeElement).toBe(button("I reviewed the current offer"));
+  await click(button("I reviewed the current offer"));
+  expect(document.activeElement).toBe(host.querySelector('[role="alert"]'));
+  expect(document.activeElement?.textContent).toContain(
+    "Current offer reviewed"
+  );
 });

@@ -810,6 +810,7 @@ async function discardBuilder(
     address: page.url(),
     previous: `${ORIGIN}${previous}`,
     dialog: page.getByRole("dialog", { name: /Discard this/ }),
+    other: ash.page,
   };
 }
 
@@ -1012,6 +1013,181 @@ for (const viewport of [
         }
       }
 
+      const settlementOutcomes = counter
+        ? ([
+            "changed",
+            "review-failed",
+            "refused",
+            "failure",
+            "unknown",
+            "gone",
+          ] as const)
+        : ([
+            "refused",
+            "failure",
+            "unknown",
+            "current",
+            "unavailable",
+          ] as const);
+      for (const outcome of settlementOutcomes) {
+        test(`${builder}: focused Send settles safely after ${outcome}`, async ({
+          page,
+          collectors,
+        }) => {
+          const { address, other } = await discardBuilder(
+            page,
+            collectors,
+            counter
+          );
+          await editDiscardCards(page, counter);
+          const send = page.getByRole("button", {
+            name: counter ? "Send Counter" : "Send Trade Proposal",
+            exact: true,
+          });
+          let release!: () => void;
+          const held = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          let arrive!: () => void;
+          const arrived = new Promise<void>((resolve) => {
+            arrive = resolve;
+          });
+          let released = false;
+          const thread = new URL(address).pathname.split("/")[2];
+          if (outcome === "review-failed")
+            await page.route(`${ORIGIN}/api/trades/${thread}`, (route) =>
+              released ? route.abort("failed") : route.fallback()
+            );
+          await page.route(
+            counter ? /\/api\/trades\/[^/]+\/offer$/ : `${ORIGIN}/api/trades`,
+            async (route) => {
+              if (route.request().method() !== "POST") return route.fallback();
+              arrive();
+              await held;
+              if (outcome === "changed") await route.continue();
+              else if (outcome === "unknown") await route.abort("failed");
+              else if (outcome === "current") {
+                const packet = route.request().postDataJSON();
+                const trade = await api(page, "POST", "/api/trades", {
+                  ...packet,
+                  idempotency_key: randomUUID(),
+                });
+                await route.fulfill({
+                  status: 201,
+                  json: {
+                    outcome: "already_applied",
+                    view: "current",
+                    label: "Current Trade",
+                    trade,
+                  },
+                });
+              } else
+                await route.fulfill({
+                  status:
+                    outcome === "review-failed" || outcome === "unavailable"
+                      ? 409
+                      : outcome === "gone"
+                        ? 404
+                        : outcome === "failure"
+                          ? 503
+                          : 422,
+                  json: {
+                    detail:
+                      outcome === "unavailable"
+                        ? {
+                            code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+                            outcome: "already_applied",
+                            view: "unavailable",
+                          }
+                        : {
+                            code:
+                              outcome === "review-failed"
+                                ? "OFFER_CHANGED"
+                                : outcome === "gone"
+                                  ? "TRADE_NOT_FOUND"
+                                  : "TOO_MANY_LINES",
+                          },
+                  },
+                });
+            }
+          );
+          try {
+            await send.click();
+            await arrived;
+            await expect(send).toBeFocused();
+            if (outcome === "changed") {
+              const { live_offer: live } = await api(
+                other,
+                "GET",
+                `/api/trades/${thread}`
+              );
+              await api(other, "POST", `/api/trades/${thread}/offer`, {
+                offer_id: live.offer_id,
+                revision: live.revision,
+                you_give: live.you_give.map(
+                  (card: { edition_id: string; copies: string }) => ({
+                    edition_id: card.edition_id,
+                    quantity: String(Number(card.copies) + 1),
+                  })
+                ),
+                you_get: [],
+                cash: null,
+                idempotency_key: randomUUID(),
+              });
+            }
+          } finally {
+            released = true;
+            release();
+          }
+          if (outcome !== "current" && outcome !== "unavailable")
+            await expect(send).not.toHaveAttribute("aria-disabled", "true");
+          if (outcome === "changed") {
+            const review = page.getByRole("button", {
+              name: "I reviewed the current offer",
+              exact: true,
+            });
+            await expect(review).toBeFocused();
+            await review.click();
+            await expect(page.getByRole("alert")).toBeFocused();
+            await expect(page.getByRole("alert")).toContainText(
+              "Current offer reviewed"
+            );
+          } else if (outcome === "review-failed")
+            await expect(
+              page.getByRole("button", {
+                name: "Retry current offer",
+                exact: true,
+              })
+            ).toBeFocused();
+          else if (outcome === "gone")
+            await expect(
+              page
+                .getByRole("region", { name: "Current offer to review" })
+                .getByRole("status")
+            ).toBeFocused();
+          else if (outcome === "current" || outcome === "unavailable")
+            await expect(heading(page)).toBeFocused();
+          else if (outcome === "refused" && counter) {
+            // Inventory/version recovery may still be active. Focus must remain on Send, the refusal notice, or its live review/retry surface.
+            await expect(
+              send
+                .and(page.locator(":focus:not(:disabled)"))
+                .or(page.locator('p[role="alert"]:focus'))
+                .or(
+                  page
+                    .getByRole("region", { name: "Current offer to review" })
+                    .locator(
+                      '[role="status"]:focus, button:focus:not(:disabled)'
+                    )
+                )
+            ).toHaveCount(1);
+          } else {
+            await expect(send).toBeEnabled();
+            await expect(send).toBeFocused();
+          }
+        });
+      }
+
       for (const outcome of ["refused", "unknown"] as const) {
         test(`${builder}: ${outcome} send keeps focused cash read-only then resumes editing and warnings`, async ({
           page,
@@ -1064,6 +1240,8 @@ for (const viewport of [
             await arrived;
             await expect(amount).toBeFocused();
             await expect(amount).toHaveAttribute("readonly", "");
+            await expect(amount).toHaveCSS("opacity", "0.45");
+            await expect(amount).toHaveCSS("cursor", "default");
             await page.keyboard.type("5");
             await expect(amount).toHaveValue("2.00");
           } finally {
@@ -1125,11 +1303,33 @@ for (const viewport of [
           await send.click();
           await sending;
           await expect(send).toBeFocused();
+          const stepper = page.getByRole("button", {
+            name: "Decrease Arven (SVI 166) you get",
+          });
+          await expect(stepper).toHaveCSS("opacity", "0.45");
+          await expect(stepper).toHaveCSS("cursor", "default");
+          const frozenBackground = await stepper.evaluate(
+            (element) => getComputedStyle(element).backgroundColor
+          );
+          await stepper.hover();
+          await expect(stepper).toHaveCSS("background-color", frozenBackground);
           const payer = page.getByRole("radio", {
             name: "You pay",
             exact: true,
           });
           await expect(payer).toBeDisabled();
+          await expect(payer).toHaveCSS("opacity", "0.45");
+          await expect(payer).toHaveCSS("cursor", "default");
+          const payerText = payer.locator("span").first();
+          const frozenText = await payerText.evaluate(
+            (element) => getComputedStyle(element).color
+          );
+          await payer.hover();
+          await expect(payerText).toHaveCSS("color", frozenText);
+          if (!counter)
+            await expect(
+              page.getByRole("textbox", { name: "Message (optional)" })
+            ).toHaveCSS("opacity", "0.45");
           // Forced activation also checks the handler boundary, beyond the accessible disabled state.
           await payer.click({ force: true });
           await expect(
@@ -1141,6 +1341,19 @@ for (const viewport of [
           await page
             .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
             .click({ force: true });
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            counter ? "2" : "1"
+          );
+          await show(page, "Cards");
+          const frozenTile = tile(
+            page.getByRole("list", { name: "Ash K's Trade List" }),
+            "get",
+            ARVEN
+          );
+          await expect(frozenTile).toHaveCSS("opacity", "0.45");
+          await expect(frozenTile).toHaveCSS("cursor", "default");
+          await frozenTile.click({ force: true });
+          await show(page, "Proposal");
           await expect(group(page, "Arven (SVI 166) you get")).toContainText(
             counter ? "2" : "1"
           );

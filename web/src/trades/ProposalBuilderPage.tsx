@@ -14,6 +14,7 @@ import { ArrowRight, ChevronLeft } from "lucide-react";
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -147,6 +148,10 @@ const FRAME =
   "mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4";
 const BACK =
   "inline-flex h-control items-center gap-1 self-start rounded-control px-2 text-control font-medium text-text-muted no-underline hover:bg-surface-raised hover:text-text phone:h-control-phone";
+
+// Match the kit's native disabled appearance without removing a focused control from the tab order.
+const FROZEN_CONTROLS =
+  "aria-disabled:[&_button]:opacity-45 aria-disabled:[&_button]:cursor-default! aria-disabled:[&_button]:bg-surface-raised! aria-disabled:[&_button]:text-text-muted! aria-disabled:[&_button]:border-border-strong! aria-disabled:[&_button_span]:text-text-muted! aria-disabled:[&_input]:opacity-45 aria-disabled:[&_input]:cursor-default aria-disabled:[&_textarea]:opacity-45 aria-disabled:[&_textarea]:cursor-default";
 
 /**
  * A proposal builder (Trading #284, #299), at /trades/new/<trader id> for a Friend or any collector in reach, laid out like the Deck builder. The proposal is
@@ -287,6 +292,13 @@ export function ProposalBuilderPage({
   }, []);
   const returnTo = useRef<HTMLElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
+  const reviewRegionRef = useRef<HTMLElement>(null);
+  const reviewNoticeRef = useRef<HTMLParagraphElement>(null);
+  const sendMessageRef = useRef<HTMLParagraphElement>(null);
+  const reasonRef = useRef<HTMLParagraphElement>(null);
+  const settleSendFocus = useRef(false);
+  const recoveryFocus = useRef<HTMLElement | null>(null);
   const sideHeading = {
     get: useRef<HTMLHeadingElement>(null),
     give: useRef<HTMLHeadingElement>(null),
@@ -647,6 +659,53 @@ export function ProposalBuilderPage({
     }
   }
 
+  function finishSending() {
+    settleSendFocus.current ||=
+      document.activeElement === sendButtonRef.current;
+    sending.current = false;
+    if (mounted.current) setBusy(false);
+  }
+
+  // Follow only focus this command owned, including recovery controls later removed by async reads or review.
+  useLayoutEffect(() => {
+    if (busy) return;
+    const active = document.activeElement;
+    const previous = recoveryFocus.current;
+    if (!settleSendFocus.current) {
+      if (!previous) return;
+      const live = previous.isConnected && !previous.matches(":disabled");
+      if (active === previous && live) return;
+      if (active !== previous && (active !== document.body || live)) {
+        recoveryFocus.current = null; // The collector moved elsewhere; never take that focus back.
+        return;
+      }
+    }
+    settleSendFocus.current = false;
+    if (sent.current && !terminal) {
+      recoveryFocus.current = null; // Successful navigation owns page-entry focus.
+      return;
+    }
+    const sendButton = sendButtonRef.current;
+    const recovery = reviewNeeded
+      ? reviewRegionRef.current?.querySelector<HTMLButtonElement>(
+          "button:not(:disabled)"
+        )
+      : null;
+    const message = sendMessageRef.current?.textContent?.trim()
+      ? sendMessageRef.current
+      : null;
+    const target =
+      sendButton && !sendButton.disabled
+        ? sendButton
+        : (recovery ??
+          (reviewNeeded ? reviewNoticeRef.current : null) ??
+          message ??
+          reasonRef.current ??
+          headingRef.current);
+    recoveryFocus.current = target;
+    if (target && active !== target) target.focus();
+  });
+
   async function send() {
     if (
       terminalRef.current ||
@@ -675,8 +734,7 @@ export function ProposalBuilderPage({
       try {
         await sendCounter(current, name, cashBody);
       } finally {
-        sending.current = false;
-        setBusy(false);
+        finishSending();
       }
       return;
     }
@@ -685,6 +743,9 @@ export function ProposalBuilderPage({
     if (terminalRef.current) return;
     key.current = submittedKey;
     const settle = (result: TerminalSend) => {
+      settleSendFocus.current =
+        headingRef.current?.closest("main")?.contains(document.activeElement) ??
+        false;
       sent.current = true;
       terminalRef.current = result;
       key.current = submittedKey;
@@ -724,8 +785,7 @@ export function ProposalBuilderPage({
       if (mounted.current)
         setMessage(sendTradeMessage(cause, name, current.give, current.get));
     } finally {
-      sending.current = false;
-      if (mounted.current) setBusy(false);
+      finishSending();
     }
   }
 
@@ -811,7 +871,7 @@ export function ProposalBuilderPage({
     if (terminal.kind === "unavailable")
       return (
         <main className={FRAME}>
-          <PageHeader title="Trade Proposal" />
+          <PageHeader title="Trade Proposal" headingRef={headingRef} />
           <p role="status" className="m-0 text-body text-text">
             Your proposal was already sent. This Trade isn't available to view.
             Return to Trades to check your items.
@@ -823,7 +883,7 @@ export function ProposalBuilderPage({
     const target = tradePath(trade.thread_id);
     return (
       <main className={FRAME}>
-        <PageHeader title={terminal.label} />
+        <PageHeader title={terminal.label} headingRef={headingRef} />
         <p role="status" className="m-0 text-body text-text">
           Your proposal was already sent. These are the current terms.
         </p>
@@ -939,7 +999,7 @@ export function ProposalBuilderPage({
   const proposalPane = (
     <fieldset
       aria-disabled={busy || undefined}
-      className="contents"
+      className={`contents ${FROZEN_CONTROLS}`}
       onClickCapture={(event) => {
         // Keep controls focusable while the submitted draft is frozen. Handler guards also protect late events.
         if (!sending.current) return;
@@ -954,9 +1014,10 @@ export function ProposalBuilderPage({
             lifecycle.phase === "loading") && (
             <section
               aria-label="Current offer to review"
+              ref={reviewRegionRef}
               className="flex flex-col gap-2 rounded-panel border border-border p-3"
             >
-              <p role="status">
+              <p role="status" tabIndex={-1} ref={reviewNoticeRef}>
                 {lifecycle.phase === "gone"
                   ? "This Trade no longer accepts an offer change. Your draft is kept."
                   : lifecycle.phase === "read_failed"
@@ -1101,6 +1162,7 @@ export function ProposalBuilderPage({
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="primary"
+            ref={sendButtonRef}
             className="disabled:opacity-45"
             disabled={
               !busy &&
@@ -1123,7 +1185,12 @@ export function ProposalBuilderPage({
               : "Send Trade Proposal"}
           </Button>
           {reason && (
-            <p id={reasonId} className="m-0 text-meta text-text-muted">
+            <p
+              id={reasonId}
+              tabIndex={-1}
+              ref={reasonRef}
+              className="m-0 text-meta text-text-muted"
+            >
               {reason}
             </p>
           )}
@@ -1146,7 +1213,12 @@ export function ProposalBuilderPage({
           />
         )}
 
-        <p role="alert" className="m-0 text-meta text-danger empty:hidden">
+        <p
+          role="alert"
+          tabIndex={-1}
+          ref={sendMessageRef}
+          className="m-0 text-meta text-danger empty:hidden"
+        >
           {message}
         </p>
       </section>
@@ -1155,29 +1227,37 @@ export function ProposalBuilderPage({
   const libraryAnnounces =
     announcement.owner === "cards" && (!phone || pane === "cards");
   const library = (
-    <ProposalLibrary
-      headingId={libraryId}
-      additionsBlocked={!capsReady || busy || lifecycle?.phase === "sending"}
-      announcement={libraryAnnounces ? announcement.text : null}
-      ownScroll={!phone}
-      friendName={name}
-      theirs={libraryTheirs}
-      mine={libraryMine}
-      match={libraryMatch}
-      onTheirSearch={setTheirQ}
-      onShowMore={() => void showMore()}
-      onRetry={(which) => {
-        if (which === "theirs") {
-          setAttempt((n) => n + 1);
-          offerReview?.beginInventory("get");
-        } else if (which === "mine") {
-          setMineAttempt((n) => n + 1);
-          offerReview?.beginInventory("give");
-        } else setMatchAttempt((n) => n + 1);
-      }}
-      proposal={displayedProposal}
-      onAdd={add}
-    />
+    <div
+      className={
+        busy
+          ? "contents [&_button[aria-disabled=true]]:opacity-45 [&_button[aria-disabled=true]]:cursor-default!"
+          : "contents"
+      }
+    >
+      <ProposalLibrary
+        headingId={libraryId}
+        additionsBlocked={!capsReady || busy || lifecycle?.phase === "sending"}
+        announcement={libraryAnnounces ? announcement.text : null}
+        ownScroll={!phone}
+        friendName={name}
+        theirs={libraryTheirs}
+        mine={libraryMine}
+        match={libraryMatch}
+        onTheirSearch={setTheirQ}
+        onShowMore={() => void showMore()}
+        onRetry={(which) => {
+          if (which === "theirs") {
+            setAttempt((n) => n + 1);
+            offerReview?.beginInventory("get");
+          } else if (which === "mine") {
+            setMineAttempt((n) => n + 1);
+            offerReview?.beginInventory("give");
+          } else setMatchAttempt((n) => n + 1);
+        }}
+        proposal={displayedProposal}
+        onAdd={add}
+      />
+    </div>
   );
 
   return (
