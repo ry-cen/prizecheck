@@ -537,6 +537,7 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
     .click();
   await expect(composer).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page).not.toHaveURL(/[?&](card|edition)=/);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(

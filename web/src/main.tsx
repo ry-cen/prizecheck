@@ -421,6 +421,7 @@ function App() {
             message={message}
             address={address}
             onNavigate={navigate}
+            onCloseCard={closeOverlay}
           />
         );
       case "loans":

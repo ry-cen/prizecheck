@@ -103,3 +103,35 @@ test("missing artwork has the existing unavailable text and no enlarge button", 
   expect(host.textContent).toBe("Artwork unavailable");
   expect(host.querySelector("button")).toBeNull();
 });
+test("a breakpoint flip while the image is enlarged clears it for good", async () => {
+  let matches = true;
+  const listeners = new Set<() => void>();
+  vi.stubGlobal("matchMedia", () => ({
+    get matches() {
+      return matches;
+    },
+    addEventListener: (_: string, listener: () => void) =>
+      listeners.add(listener),
+    removeEventListener: (_: string, listener: () => void) =>
+      listeners.delete(listener),
+  }));
+  await act(async () =>
+    root.render(h(CardArt, { name: "Bulbasaur", url: "/card.webp" }))
+  );
+  const button = host.querySelector(
+    'button[aria-label="View larger image of Bulbasaur"]'
+  ) as HTMLButtonElement;
+  const image = button.querySelector("img")!;
+  Object.defineProperty(image, "naturalWidth", { value: 245 });
+  await act(async () => image.dispatchEvent(new Event("load")));
+  await act(async () => button.click());
+  expect(host.querySelector("dialog[open]")).not.toBeNull();
+  const flip = async (phone: boolean) => {
+    matches = phone;
+    await act(async () => listeners.forEach((listener) => listener()));
+  };
+  await flip(false);
+  expect(host.querySelector("dialog[open]")).toBeNull();
+  await flip(true);
+  expect(host.querySelector("dialog[open]")).toBeNull();
+});
