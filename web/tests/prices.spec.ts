@@ -518,6 +518,10 @@ test("following a link does not prefetch prices for unrendered cards", async ({
 }) => {
   const ids = seed();
   await signIn(page);
+  // This stack shares its owner with earlier specs. Clear their server-side Undo offers before reloading.
+  await pool.query("DELETE FROM inventory_undo WHERE owner_id=$1", [
+    await owner(),
+  ]);
   const held = await hold(page, [ids.normal]);
   await page.reload();
   const seen: string[][] = [];
@@ -530,12 +534,18 @@ test("following a link does not prefetch prices for unrendered cards", async ({
     "Checking prices"
   );
   expect(seen.flat()).toEqual([ids.normal]);
-  // The shell's skip link is parked off screen until it has focus; it cannot be hovered. Every other link can.
-  for (const link of await page
-    .locator("a[href]:visible")
-    .filter({ hasNotText: "Skip to main content" })
-    .all())
+  // Both accessibility skip links are parked off screen until focused. Hover every other visible link.
+  // The held card tile is a button; its Deck builder link is the navigation target here.
+  const links = page.locator("a[href]:visible").filter({
+    hasNotText: /^Skip to (main content|selection actions and Undo)$/,
+  });
+  const builder = links.filter({ hasText: /^Open in the deck builder$/ });
+  await expect(builder).toHaveAttribute("href", `/decks/${held}`);
+  await expect(builder).toBeVisible();
+  for (const link of await links.all()) {
     await link.hover();
+    await expect(link.and(page.locator(":hover"))).toHaveCount(1);
+  }
   // flake-exempt wait-for-timeout (quiet): a hover must not prefetch, and a prefetch would start within this window.
   await page.waitForTimeout(500);
   expect(seen.flat()).toEqual([ids.normal]);
