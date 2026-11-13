@@ -1,9 +1,9 @@
 name: Deploy dev
 # Manual only (Actions -> Deploy dev -> Run workflow on dev): a push to dev deploys nothing. The default checks and
-# multi-arch images in GHCR tagged with the commit (build-images.yml) -> Tailscale -> forced-command SSH to the Unraid
+# multi-arch images in GHCR tagged with the commit (build-images.yml) -> Tailscale -> forced-command SSH to the dev
 # host, which pulls, backs up, migrates, starts and checks the release (deploy/host/prizecheck-deploy.sh). Production
 # (deploy-prod.yml) reuses these images when they exist and builds them the same way when they don't.
-# One-time setup: docs/deployment-unraid.md.
+# One-time setup: docs/deployment-dev.md.
 on:
   workflow_dispatch:
     inputs:
@@ -31,7 +31,7 @@ jobs:
     if: vars.DEV_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     # Above the host script's worst case (lock wait, pull, backup, migration, health waits, restore), so the job
-    # doesn't give up on a deploy that is still running on Unraid.
+    # doesn't give up on a deploy that is still running on the dev host.
     timeout-minutes: 30
     environment:
       name: dev
@@ -54,20 +54,20 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-          ping: ${{ vars.UNRAID_SSH_HOST }}
+          ping: ${{ vars.DEV_SSH_HOST }}
       - name: Configure SSH
         env:
-          SSH_KEY: ${{ secrets.UNRAID_SSH_PRIVATE_KEY }}
-          KNOWN_HOSTS: ${{ vars.UNRAID_SSH_KNOWN_HOSTS }}
+          SSH_KEY: ${{ secrets.DEV_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ vars.DEV_SSH_KNOWN_HOSTS }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/prizecheck_deploy
           chmod 600 ~/.ssh/prizecheck_deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Deploy on Unraid
+      - name: Deploy on dev host
         env:
-          HOST: ${{ vars.UNRAID_SSH_HOST }}
-          SSH_USER: ${{ vars.UNRAID_SSH_USER || 'root' }}
+          HOST: ${{ vars.DEV_SSH_HOST }}
+          SSH_USER: ${{ vars.DEV_SSH_USER || 'root' }}
           BUNDLE: ${{ steps.bundle.outputs.digest }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
@@ -98,20 +98,20 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-          ping: ${{ vars.UNRAID_SSH_HOST }}
+          ping: ${{ vars.DEV_SSH_HOST }}
       - name: Configure SSH
         env:
-          SSH_KEY: ${{ secrets.UNRAID_SSH_PRIVATE_KEY }}
-          KNOWN_HOSTS: ${{ vars.UNRAID_SSH_KNOWN_HOSTS }}
+          SSH_KEY: ${{ secrets.DEV_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ vars.DEV_SSH_KNOWN_HOSTS }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/prizecheck_deploy
           chmod 600 ~/.ssh/prizecheck_deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Roll back on Unraid
+      - name: Roll back on dev host
         env:
-          HOST: ${{ vars.UNRAID_SSH_HOST }}
-          SSH_USER: ${{ vars.UNRAID_SSH_USER || 'root' }}
+          HOST: ${{ vars.DEV_SSH_HOST }}
+          SSH_USER: ${{ vars.DEV_SSH_USER || 'root' }}
         run: |
           ssh -i ~/.ssh/prizecheck_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o ConnectTimeout=20 -o ServerAliveInterval=30 \

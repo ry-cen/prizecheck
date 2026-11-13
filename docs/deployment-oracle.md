@@ -4,7 +4,7 @@ Every push to `main` deploys PrizeCheck to an Oracle Cloud Ampere A1 instance (U
 
 Deploy dev runs only by hand, so a release commit may have no images yet. The **Deploy prod** workflow first looks for images of the exact commit with a linux/arm64 entry for every service. If a manual dev deploy already built them, it deploys those. Otherwise it builds them with the same shared build Deploy dev uses (`.github/workflows/build-images.yml`: the default checks, then native amd64 and arm64 images), then deploys. The release pull request to `main` has already run the deep integration suites.
 
-This guide is for a fresh instance. The dev environment is described in [Dev deployment on Unraid](deployment-unraid.md); production reuses its images, `compose.deploy.yml` and deploy script.
+This guide is for a fresh instance. The dev environment is described in [Dev deployment on Linux](deployment-dev.md); production reuses its images, `compose.deploy.yml` and deploy script.
 
 The guide has three parts. **Part 1** is what only you can do: the Oracle console, Tailscale, packages, the firewall, DNS and Caddy, Discord, GitHub, the env file with its secrets, and the deploy key. **Part 2** copies the host files to the instance and runs `setup`, which does everything a root script can do safely and ends with a readiness report. **Part 3** follows that report: the first release, the owner, the catalog rules and the rest.
 
@@ -27,7 +27,7 @@ push to main
                    └─ check the public site: GET <PROD_PUBLIC_URL>/api/health must return 2xx
 ```
 
-The deploy script's steps are the same as on dev (see [Dev deployment on Unraid](deployment-unraid.md#how-it-works)). What differs in production:
+The deploy script's steps are the same as on dev (see [Dev deployment on Linux](deployment-dev.md#how-it-works)). What differs in production:
 
 - `compose.prod.yml` is added to `compose.deploy.yml` whenever the env file says `PRIZECHECK_ENVIRONMENT=prod`. It forces `NODE_ENV=production`, defaults `MAIL_MODE` to `http`, and pins the edge network.
 - The script refuses a configuration the auth gateway would reject under `NODE_ENV=production`, or one that would publish the web port beyond loopback.
@@ -87,7 +87,7 @@ Don't announce the site until you have worked through those documents.
 - **Every visitor's address reaches the gateway.** The per-IP limits are real in production, unlike on dev where everyone shares one bucket.
 - **Use DNS-only.** Cloudflare's proxied ("orange cloud") records would make every visitor one of Cloudflare's addresses and defeat the per-IP limits.
 - **Caddy keeps no access log.** Published-deck URLs are capability links. The Caddyfile has no `log` directive, and its global block excludes the two loggers (`http.log.error` and `http.handlers.reverse_proxy`) that would otherwise record a failed request's URI. Step 18 checks this on your host. nginx and uvicorn access logs are off as on dev.
-- **Deploys with pending migrations cause downtime, and a deploy interrupts running imports.** Both work as described in the [Unraid guide](deployment-unraid.md#behaviour-to-know-about).
+- **Deploys with pending migrations cause downtime, and a deploy interrupts running imports.** Both work as described in the [dev host guide](deployment-dev.md#behaviour-to-know-about).
 - **Migrations are never reversed.** See [Rolling back](#rolling-back).
 - **Always Free instances can be reclaimed when idle.** Oracle may reclaim idle Always Free compute instances. Upgrading the account to Pay As You Go keeps the free shapes but is said to stop reclamation. This guide couldn't confirm that against current Oracle terms: check them before relying on it.
 - **Docker publishes bypass the host firewall.** Ports Docker publishes are reachable whatever the iptables `INPUT` rules say. That is why the deploy script refuses `PRIZECHECK_WEB_BIND` other than `127.0.0.1` in production.
@@ -440,7 +440,7 @@ In the [Tailscale admin console](https://login.tailscale.com/admin):
    }
    ```
 
-   The Oracle instance gets no grant at all as a source: nothing lets `tag:prizecheck-prod` open a connection into your tailnet, so a compromised host can't reach Unraid or your other devices. Don't keep or add a rule with `"src": ["*"]` or an allow-all rule. Tailscale's policy preview lets you check that `tag:ci-prod` reaches only `tag:prizecheck-prod` port 22. A separate tag means a run on the dev branch, which holds `tag:ci`, can't reach production.
+   The Oracle instance gets no grant at all as a source: nothing lets `tag:prizecheck-prod` open a connection into your tailnet, so a compromised host can't reach the dev host or your other devices. Don't keep or add a rule with `"src": ["*"]` or an allow-all rule. Tailscale's policy preview lets you check that `tag:ci-prod` reaches only `tag:prizecheck-prod` port 22. A separate tag means a run on the dev branch, which holds `tag:ci`, can't reach production.
 
 2. **Trust credentials** (Settings → OAuth clients): create an OAuth client with the **Auth Keys → Write** scope, limited to the tag `tag:ci-prod`. Copy the client ID and secret into GitHub (step 11). The action mints a short-lived, ephemeral node for each run.
 
@@ -862,7 +862,7 @@ The application logs fixed operational messages, not request URLs, codes or cred
 | `PUBLIC_ORIGIN must be https://host[:port] with no path in production` | Remove the path, or use https                                                                                                                                                            |
 | `Production delivers codes by mail relay, not to a file`               | `sign-in-code` isn't available in production. Sign in with Discord                                                                                                                       |
 | `Data directory ... is missing`                                        | `PRIZECHECK_DATA_DIR` is wrong or `setup` wasn't run. The deploy refuses to create data in the wrong place                                                                               |
-| `Public projection store ... missing`                                  | See [Dev deployment on Unraid](deployment-unraid.md#troubleshooting) and [public projections](public-projections.md); the commands are the same with this guide's paths                  |
+| `Public projection store ... missing`                                  | See [Dev deployment on Linux](deployment-dev.md#troubleshooting) and [public projections](public-projections.md); the commands are the same with this guide's paths                      |
 | `Migration failed`                                                     | `scripts/migrate.py` runs all pending migrations in one transaction, so nothing was committed and the previous release was restarted. Fix forward with a new commit                      |
 | `Services did not become healthy` / `Smoke: ...`                       | The log shows the last 50 lines of each service and the previous release is restored. Typical causes: a wrong `PUBLIC_ORIGIN`, an invalid `prizecheck.env` value                         |
 | The public check fails after a successful deploy                       | DNS doesn't resolve to the instance, port 80 or 443 is blocked (security list or host iptables), or Caddy has no certificate yet: `journalctl -u caddy`                                  |
@@ -886,7 +886,7 @@ To return `main` to an earlier commit as well, you would have to rewrite `main`,
 
 ### Restoring the database
 
-To restore a pre-migration dump after data damage or when an old release can't run against the new schema, follow the dev procedure in [Restoring the database](deployment-unraid.md#restoring-the-database). Use this guide's paths: set `P=/opt/prizecheck-prod/bin/prizecheck-deploy.sh`, run the commands with `sudo`, and read dumps from `/opt/prizecheck-prod/backups/`. Anything written after the dump is lost.
+To restore a pre-migration dump after data damage or when an old release can't run against the new schema, follow the dev procedure in [Restoring the database](deployment-dev.md#restoring-the-database). Use this guide's paths: set `P=/opt/prizecheck-prod/bin/prizecheck-deploy.sh`, run the commands with `sudo`, and read dumps from `/opt/prizecheck-prod/backups/`. Anything written after the dump is lost.
 
 ## Backing up persistent data
 

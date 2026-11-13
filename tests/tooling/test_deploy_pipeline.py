@@ -1,4 +1,4 @@
-"""The deployment pipeline's wiring (spec: docs/deployment-oracle.md, docs/deployment-unraid.md): one shared build
+"""The deployment pipeline's wiring (spec: docs/deployment-oracle.md, docs/deployment-dev.md): one shared build
 checks the commit, builds each architecture natively and joins them, dev deploys only by hand, production reuses a dev
 build or runs the same shared build itself, and the addresses that make
 up the client-IP chain (compose.prod.yml, deploy/docker/nginx.conf, deploy/oracle/Caddyfile) agree. Text and regex only:
@@ -255,6 +255,26 @@ class DeployPipelineTest(unittest.TestCase):
                 elif re.match(r'^\s*(- )?run: ', line):
                     self.assertNotIn('${{', line, f'{name}: {line}')
 
+    def test_dev_ssh_names_and_legacy_guide_mapping(self):
+        self.assertNotIn('UNRAID_', DEV)
+        for name in ('HOST', 'USER', 'KNOWN_HOSTS', 'PRIVATE_KEY'):
+            self.assertEqual(DEV.count(f'DEV_SSH_{name}'), 4 if name == 'HOST' else 2)
+        self.assertEqual(DEV.count("vars.DEV_SSH_USER || 'root'"), 2)
+        self.assertIn('Deploy on dev host', DEV)
+        self.assertIn('Roll back on dev host', DEV)
+        guide = (ROOT / 'docs/deployment-dev.md').read_text()
+        stub = (ROOT / 'docs/deployment-unraid.md').read_text()
+        for reference in ('step 1', 'step 2', 'step 4', 'Create the env file',
+                          'Updating the host files', 'Perform the initial deployment', 'Apply the catalog rules'):
+            self.assertIn(reference, stub)
+        for anchor in re.findall(r'deployment-dev.md#([a-z0-9-]+)', stub):
+            headings = {re.sub(r'[^a-z0-9 -]', '', h.lower()).strip().replace(' ', '-')
+                        for h in re.findall(r'(?m)^#{1,6} (.+)$', guide)}
+            self.assertIn(anchor, headings)
+        self.assertIn('from="100.64.0.0/10,fd7a:115c:a1e0::/48",restrict,command=', guide)
+        self.assertIn('## Moving dev to a new host', guide)
+        self.assertIn('tar --numeric-owner', guide)
+
     def test_digest_file_lists_match_the_host_script(self):
         units = ('deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer '
                  'deploy/host/prizecheck-backup.service deploy/host/prizecheck-backup.timer')
@@ -266,7 +286,7 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertIn(f'cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum',
                       (ROOT / 'docs/deployment-oracle.md').read_text())
         self.assertIn(f'cat compose.deploy.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum',
-                      (ROOT / 'docs/deployment-unraid.md').read_text())
+                      (ROOT / 'docs/deployment-dev.md').read_text())
         self.assertIn('"$PRIZECHECK_HOME/compose.prod.yml"', SCRIPT)
 
     def test_the_prod_edge_addresses_agree(self):
@@ -366,7 +386,7 @@ class DeployPipelineTest(unittest.TestCase):
         usage = SCRIPT[SCRIPT.index('usage() {'):SCRIPT.index('ssh_gate() {')]
         commands = set(re.findall(r'(?m)^  ([a-z][a-z-]+)\b', usage))
         self.assertIn('readiness', commands)
-        for guide in ('deployment-oracle.md', 'deployment-unraid.md'):
+        for guide in ('deployment-oracle.md', 'deployment-dev.md'):
             text = (ROOT / 'docs' / guide).read_text()
             for path in set(re.findall(r'(?<![\w/.-])((?:deploy|scripts|docs|api|compose)[\w./-]*\.(?:sh|py|md|yml|service|timer|example)|deploy/oracle/Caddyfile)\b', text)):
                 if path.startswith('docs/'):
@@ -382,7 +402,7 @@ class DeployPipelineTest(unittest.TestCase):
         # Each guide creates the bin/ directory before anything is installed or copied into it, and the deploy key (which
         # forces the installed script) is tested only after `setup` has run.
         for guide, creator in (('deployment-oracle.md', r'(?m)^sudo install -d -m 0755 /opt/prizecheck-prod /opt/prizecheck-prod/bin\b'),
-                               ('deployment-unraid.md', r"(?m)^ssh root@unraid 'mkdir -p /mnt/cache/appdata/prizecheck-dev/bin'")):
+                               ('deployment-dev.md', r"(?m)^ssh root@ryan-dev-vm 'mkdir -p /srv/prizecheck-dev/bin'")):
             text = (ROOT / 'docs' / guide).read_text()
             created = re.search(creator, text)
             self.assertIsNotNone(created, guide)
@@ -393,7 +413,7 @@ class DeployPipelineTest(unittest.TestCase):
         oracle = (ROOT / 'docs/deployment-oracle.md').read_text()
         self.assertLess(oracle.index('prizecheck-deploy.sh setup\n'), oracle.index('ssh -i prizecheck-prod-deploy root@100.x.y.z status'))
         # The three-part layout, and none of the hand-written pieces it replaces.
-        for guide in ('deployment-oracle.md', 'deployment-unraid.md'):
+        for guide in ('deployment-oracle.md', 'deployment-dev.md'):
             text = (ROOT / 'docs' / guide).read_text()
             parts = re.findall(r'(?m)^## (Part [123])\.', text)
             self.assertEqual(parts, ['Part 1', 'Part 2', 'Part 3'], guide)
