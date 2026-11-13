@@ -549,3 +549,53 @@ test("a newer add immediately invalidates an older inline offer while its lookup
   });
   expect(older.isAvailable()).toBe(false);
 });
+
+test.each([false, true])(
+  "a replaced Undo completion leaves the new toast intact (failure: %s)",
+  async (fails) => {
+    const first = await offer();
+    let releaseClaim!: () => void;
+    await act(async () => {
+      releaseClaim = first.claimInline!();
+    });
+    let finish!: (value: typeof removed) => void;
+    let fail!: (cause: Error) => void;
+    vi.mocked(applyUndo).mockReturnValueOnce(
+      new Promise((resolve, reject) => {
+        finish = resolve;
+        fail = reject;
+      })
+    );
+    let pending!: ReturnType<InlineUndo>;
+    await act(async () => {
+      pending = first();
+    });
+    vi.mocked(listUndo).mockResolvedValueOnce([{ id: "second" }] as Awaited<
+      ReturnType<typeof listUndo>
+    >);
+    let second!: InlineUndo | null;
+    await act(async () => {
+      second = await notify({ ...added, undoId: "second" });
+    });
+    let secondClaim!: () => void;
+    await act(async () => {
+      secondClaim = second!.claimInline!();
+    });
+    const notice = host.querySelector("p");
+    await act(async () => {
+      if (fails) fail(new TypeError("lost"));
+      else finish(removed);
+    });
+    expect((await pending).next).toBeNull();
+    expect(onUndone).toHaveBeenCalledTimes(fails ? 0 : 1);
+    await act(async () => releaseClaim());
+    expect(host.querySelector("p")).toBe(notice);
+    expect(host.querySelector("button")?.textContent).not.toBe("Undo");
+    await act(async () => secondClaim());
+    expect(
+      [...host.querySelectorAll("button")].filter(
+        (b) => b.textContent === "Undo"
+      )
+    ).toHaveLength(1);
+  }
+);

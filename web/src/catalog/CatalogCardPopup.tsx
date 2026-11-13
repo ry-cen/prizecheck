@@ -738,6 +738,7 @@ function AddRows({
   // completed is not forgotten: the Edition picked now says so if it holds one, else the note names the other one.
   const [shownFor, setShownFor] = useState(edition.id);
   if (shownFor !== edition.id) {
+    ++latestAdd.current;
     setShownFor(edition.id);
     setUndoing(false);
     setDone("");
@@ -758,6 +759,7 @@ function AddRows({
     const request = ++latestAdd.current;
     onAddStarted?.();
     setBusy(true);
+    setUndoing(false);
     setDone("");
     setUndo(null);
     setNote(null);
@@ -824,13 +826,14 @@ function AddRows({
   async function undoAdd() {
     if (!undo || undoing) return;
     setUndoing(true);
-    const sent = shown.current;
+    const request = latestAdd.current;
     const result = await undo();
-    if (!mounted.current || shown.current !== sent) return;
+    // Data effects outlive presentation ownership, including close/reopen.
+    if (result.undone) onUndone();
+    if (!mounted.current || request !== latestAdd.current) return;
     setUndoing(false);
     setUndo(() => result.next);
     if (result.message) setDone(result.message);
-    if (result.undone) onUndone();
     // Undo goes once it is used: focus moves on to Add, beside it.
     if (!result.next) addButton.current?.focus();
   }

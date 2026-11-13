@@ -994,3 +994,95 @@ for (const viewport of [
     }
   });
 }
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`stale Undo on the same Edition ${viewport.width}`, () => {
+    test.use({ viewport });
+    for (const fails of [false, true]) {
+      test(`a newer Add keeps its inline Undo after the older ${fails ? "failure" : "success"}`, async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        const opener = tile(page, "Switch, MEG 130").first();
+        await opener.click();
+        const card = page.getByRole("dialog");
+        const add = card.getByRole("button", { name: "Add 1", exact: true });
+        const undo = card.getByRole("button", { name: "Undo", exact: true });
+        const allUndo = page.getByRole("button", {
+          name: "Undo",
+          exact: true,
+          includeHidden: true,
+        });
+        await add.click();
+        await expect(undo).toBeEnabled();
+        let release!: () => void, arrived!: () => void;
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const started = new Promise<void>((resolve) => {
+          arrived = resolve;
+        });
+        await page.route(
+          "**/api/moves/undo/*",
+          async (route) => {
+            if (route.request().method() !== "POST") return route.continue();
+            const response = fails ? null : await route.fetch();
+            arrived();
+            await held;
+            if (response) await route.fulfill({ response });
+            else
+              await route.fulfill({ status: 500, json: { detail: "failed" } });
+          },
+          { times: 1 }
+        );
+        await undo.click();
+        await started;
+        await add.click();
+        await expect(undo).toBeEnabled();
+        await expect(allUndo).toHaveCount(1);
+        const current = (
+          await page.request
+            .get(`${ORIGIN}/api/moves/undo`)
+            .then((r) => r.json())
+        )[0].id;
+        const focus = card.getByRole("combobox", { name: "Location" });
+        await focus.focus();
+        const delivered = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            response.url().includes("/api/moves/undo/")
+        );
+        release();
+        await (await delivered).finished();
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve())
+            )
+        );
+        await expect(focus).toBeFocused();
+        await expect(card.getByText("Added 1 copy to Unsorted.")).toBeVisible();
+        await expect(undo).toBeEnabled();
+        await expect(allUndo).toHaveCount(1);
+        const sent = page.waitForRequest(
+          (request) =>
+            request.method() === "POST" &&
+            request.url().endsWith(`/api/moves/undo/${current}`)
+        );
+        await undo.click();
+        await sent;
+        await expect(
+          card.getByText("Undo removed 1 card from Unsorted.")
+        ).toBeVisible();
+        await expect(allUndo).toHaveCount(0);
+        await expect(add).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(opener).toBeFocused();
+      });
+    }
+  });
+}

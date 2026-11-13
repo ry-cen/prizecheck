@@ -4,7 +4,7 @@ import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, test, vi } from "vitest";
 import { CatalogCardPopup } from "./CatalogCardPopup";
-import { useAddToast } from "./useAddToast";
+import { useAddToast, type InlineUndo } from "./useAddToast";
 import { addToCollection, type AddOutcome } from "./cardActions";
 import { applyUndo, listUndo } from "../inventoryUndo";
 import { useToast, ToastProvider } from "../ui/Toast";
@@ -19,7 +19,7 @@ vi.mock("../inventoryUndo", () => ({ applyUndo: vi.fn(), listUndo: vi.fn() }));
 vi.mock("../EditionPrice", () => ({ EditionPrice: () => null }));
 vi.mock("./useCardDetails", () => ({
   useCardDetails: () => ({
-    reload: vi.fn(),
+    reload,
     details: {
       state: "ready",
       browse: "ok",
@@ -116,6 +116,8 @@ const result: AddOutcome = {
   ownerRevision: 1,
   undoId: "first",
 };
+const onUndone = vi.fn();
+const reload = vi.hoisted(() => vi.fn());
 const removed = {
   copy_count: "1",
   source_count: 0,
@@ -128,7 +130,8 @@ async function journey(
     button: (text: string) => HTMLButtonElement;
     render: (printing: string | null) => Promise<void>;
     host: HTMLElement;
-  }) => Promise<void>
+  }) => Promise<void>,
+  staleNext = false
 ) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.mocked(addToCollection).mockResolvedValue(result);
@@ -141,7 +144,7 @@ async function journey(
   const root = createRoot(host);
   function Probe({ printing }: { printing: string | null }) {
     const kit = useToast();
-    const notify = useAddToast({ shown: true, onUndone: vi.fn() });
+    const notify = useAddToast({ shown: true, onUndone });
     return h(CatalogCardPopup, {
       request: printing
         ? { printingId: printing, editionId: "e", row: null, report: null }
@@ -156,7 +159,17 @@ async function journey(
       location: null,
       onLocation: vi.fn(),
       alsoOffer: null,
-      onAdded: notify,
+      onAdded: async (added) => {
+        const action = await notify(added);
+        if (!staleNext || !action) return action;
+        return Object.assign(
+          async () => ({ ...(await action()), next: action }),
+          {
+            isAvailable: action.isAvailable,
+            claimInline: action.claimInline,
+          }
+        ) satisfies InlineUndo;
+      },
       onAddFailed: (message: string) => {
         kit.show({ message });
       },
@@ -176,7 +189,7 @@ async function journey(
   } finally {
     await act(async () => root.unmount());
     host.remove();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     vi.unstubAllGlobals();
   }
 }
@@ -509,3 +522,148 @@ test.each(["older-first", "newer-first"])(
     });
   }
 );
+
+// The first Undo can settle at any point in the next Add's lifecycle.
+test.each(
+  ["request", "lookup", "confirmed", "failed", "undoing"].flatMap((stage) =>
+    ["same", "reopen", "roundtrip"].flatMap((reopen) =>
+      [false, true].map((fails) => ({ stage, reopen, fails }))
+    )
+  )
+)(
+  "stale Undo cannot own the row: $stage reopen=$reopen fails=$fails",
+  async ({ stage, reopen, fails }) => {
+    await journey(async ({ host, button, render }) => {
+      await act(async () => button("Add 1").click());
+      let resolveA!: (value: typeof removed) => void;
+      let rejectA!: (cause: Error) => void;
+      vi.mocked(applyUndo).mockReturnValueOnce(
+        new Promise((resolve, reject) => {
+          resolveA = resolve;
+          rejectA = reject;
+        })
+      );
+      await act(async () => button("Undo").click());
+      if (reopen === "roundtrip") {
+        for (const index of [1, 0])
+          await act(async () => {
+            [...host.querySelectorAll("button[aria-pressed]")][
+              index
+            ].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          });
+      }
+      if (reopen === "reopen") {
+        await render(null);
+        await render("p");
+      }
+      let finishAdd!: (value: AddOutcome) => void;
+      let finishLookup!: (value: Awaited<ReturnType<typeof listUndo>>) => void;
+      vi.mocked(addToCollection).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishAdd = resolve;
+        })
+      );
+      vi.mocked(listUndo).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishLookup = resolve;
+        })
+      );
+      await act(async () => button("Add 1").click());
+      const second = {
+        ...result,
+        undoId: "second",
+        copies: 2,
+        items: [{ editionId: "e", quantity: 2 }],
+      };
+      if (stage !== "request") {
+        await act(async () =>
+          finishAdd(
+            stage === "failed"
+              ? {
+                  ok: false,
+                  code: "EDITION_UNAVAILABLE",
+                  editionId: "e",
+                  retry: false,
+                }
+              : second
+          )
+        );
+      }
+      if (["confirmed", "undoing"].includes(stage)) {
+        await act(async () =>
+          finishLookup([{ id: "second" }] as Awaited<
+            ReturnType<typeof listUndo>
+          >)
+        );
+        expect(button("Undo").getAttribute("aria-disabled")).toBeNull();
+      }
+      let finishB!: (value: typeof removed) => void;
+      if (stage === "undoing") {
+        vi.mocked(applyUndo).mockReturnValueOnce(
+          new Promise((resolve) => {
+            finishB = resolve;
+          })
+        );
+        await act(async () => button("Undo").click());
+      }
+      const focus = host.querySelector<HTMLSelectElement>("select")!;
+      focus.focus();
+      const refreshed = reload.mock.calls.length;
+      const before = host.querySelector('[role="dialog"]')!.textContent;
+      await act(async () =>
+        fails ? rejectA(new TypeError("lost")) : resolveA(removed)
+      );
+      expect(onUndone).toHaveBeenCalledTimes(fails ? 0 : 1);
+      expect(reload.mock.calls.length).toBe(refreshed + (fails ? 0 : 1));
+      expect(document.activeElement).toBe(focus);
+      expect(host.querySelector('[role="dialog"]')!.textContent).toBe(before);
+      if (stage === "undoing") {
+        expect(button("Undo").getAttribute("aria-disabled")).toBe("true");
+        await act(async () => finishB(removed));
+        expect(undoCount(host)).toBe(0);
+      } else if (stage === "confirmed") {
+        expect(undoCount(host)).toBe(1);
+        expect(host.querySelector("#app-toasts button")?.textContent).not.toBe(
+          "Undo"
+        );
+        await act(async () => button("Undo").click());
+        expect(vi.mocked(applyUndo).mock.calls.at(-1)?.[0]).toBe("second");
+      } else if (stage !== "failed") {
+        if (stage === "request") await act(async () => finishAdd(second));
+        await act(async () =>
+          finishLookup([{ id: "second" }] as Awaited<
+            ReturnType<typeof listUndo>
+          >)
+        );
+        expect(undoCount(host)).toBe(1);
+        expect(button("Undo").getAttribute("aria-disabled")).toBeNull();
+      } else {
+        // B failed: A's still-valid retry belongs only to its existing toast.
+        expect(undoCount(host)).toBe(fails ? 1 : 0);
+      }
+    });
+  }
+);
+
+test("the row ignores a stale result even when it carries a retry", async () => {
+  await journey(async ({ host, button }) => {
+    await act(async () => button("Add 1").click());
+    let fail!: (cause: Error) => void;
+    vi.mocked(applyUndo).mockReturnValueOnce(
+      new Promise((_, reject) => {
+        fail = reject;
+      })
+    );
+    await act(async () => button("Undo").click());
+    await act(async () => button("Add 1").click());
+    const focus = host.querySelector<HTMLSelectElement>("select")!;
+    focus.focus();
+    await act(async () => fail(new TypeError("lost")));
+    expect(document.activeElement).toBe(focus);
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(
+      "Added 1 copy to Unsorted."
+    );
+    expect(undoCount(host)).toBe(1);
+    expect(button("Undo").getAttribute("aria-disabled")).toBeNull();
+  }, true);
+});
