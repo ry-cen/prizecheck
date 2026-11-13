@@ -24,6 +24,8 @@ export type ToastAction = {
 
 export type ToastInput = {
   message: string;
+  /** False when an inline live region already announces this feedback. The toast and its actions remain available. */
+  announce?: boolean;
   /** Optional route lifetime for plain informational feedback. Other toasts (especially Undo) stay persistent. */
   route?: string;
   /** One action on the thing the message names, for example Undo. */
@@ -171,7 +173,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         ref={host}
         id="app-toasts"
         aria-label="Notifications"
-        aria-live="polite"
+        aria-live={visible?.announce === false ? "off" : "polite"}
         style={{ "--toast-lift": `${lift}px` } as CSSProperties}
         className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--space-6)+var(--toast-lift))] z-(--layer-toast) flex justify-center px-4 font-sans phone:bottom-[calc(var(--layout-tabbar-height)+var(--space-2)+var(--toast-lift))] phone:px-2"
       >

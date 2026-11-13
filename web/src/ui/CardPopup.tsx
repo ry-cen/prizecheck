@@ -170,8 +170,8 @@ export function CardPopup({
       }
     >
       <div ref={root} className="flex flex-col gap-4 text-body">
-        <div className="flex gap-4 phone:gap-3">
-          <div className="flex w-44 shrink-0 flex-col gap-2 phone:w-28">
+        <div className="flex gap-4 phone:flex-col phone:gap-3">
+          <div className="flex w-44 shrink-0 flex-col gap-2 phone:w-20 phone:self-center">
             {art}
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-4">{children}</div>

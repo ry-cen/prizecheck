@@ -17,6 +17,8 @@ export type AddedCards = {
   undoId: string;
   /** Add N cards in Add mode's bar, or the card popup's Add N. */
   from: "bar" | "popup";
+  /** The mounted Add row has already presented this result in its inline live region. */
+  announcedInline?: boolean;
 };
 
 /** The toast's Undo, pressed from inside the popup: it resolves to the toast's new message ("" when nothing was
@@ -85,10 +87,12 @@ export function useAddToast({ shown, onUndone }: Options) {
       message: string,
       added: AddedCards | null,
       focus: boolean,
-      undoable = !!added
+      undoable = !!added,
+      announce = true
     ) => {
       const input: ToastInput = {
         message,
+        announce,
         action:
           added && undoable
             ? {
@@ -145,9 +149,13 @@ export function useAddToast({ shown, onUndone }: Options) {
     toastId: number,
     message: string
   ): Promise<InlineUndoResult> {
-    const inlineOwned = owned.current.has(toastId);
+    const inlineAnnounces = () =>
+      owned.current.has(toastId) ||
+      (!!added.announcedInline && !!document.querySelector("dialog[open]"));
+    const inlineOwned = inlineAnnounces();
     const input: ToastInput = {
       message,
+      announce: !inlineOwned,
       action: { label: "Undo", onAction: () => {}, busy: true, keepOpen: true },
       onDismiss: () => dismiss(added, toastId, false),
     };
@@ -163,7 +171,8 @@ export function useAddToast({ shown, onUndone }: Options) {
       keys.current.delete(added.undoId);
       const outcome = addUndoneText(result.copy_count, added.path);
       // Always report the actual outcome to the popup, while leaving a replacement toast alone.
-      if (kit.isShown(toastId)) show(outcome, null, !inlineOwned);
+      if (kit.isShown(toastId))
+        show(outcome, null, !inlineOwned, false, !inlineAnnounces());
       live.current(added, result.owner_revision);
       return {
         message: outcome,
@@ -180,7 +189,13 @@ export function useAddToast({ shown, onUndone }: Options) {
       );
       let next: InlineUndo | null = null;
       if (kit.isShown(toastId)) {
-        const id = show(outcome, added, !inlineOwned, retry);
+        const id = show(
+          outcome,
+          added,
+          !inlineOwned,
+          retry,
+          !inlineAnnounces()
+        );
         if (retry) next = inline(id, added, outcome);
       }
       return { message: outcome, next, undone: false };
@@ -233,7 +248,9 @@ export function useAddToast({ shown, onUndone }: Options) {
         batchAddedText(added.copies, added.path),
         added,
         added.from === "bar",
-        undoable
+        undoable,
+        // Closing during the Undo lookup must not repeat feedback the Add row already presented.
+        !added.announcedInline
       );
       const id = current.current;
       return undoable && id !== null

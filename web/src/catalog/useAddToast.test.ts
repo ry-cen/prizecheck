@@ -599,3 +599,25 @@ test.each([false, true])(
     ).toHaveLength(1);
   }
 );
+
+test("a result already announced inline stays silent through a delayed Undo lookup and handoff", async () => {
+  let release!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+  vi.mocked(listUndo).mockReturnValueOnce(
+    new Promise((resolve) => {
+      release = resolve;
+    })
+  );
+  let request!: Promise<InlineUndo | null>;
+  await act(async () => {
+    request = notify({ ...added, announcedInline: true });
+  });
+  await act(async () => {
+    release([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>);
+    await request;
+  });
+  expect(host.querySelector("#app-toasts")?.getAttribute("aria-live")).toBe(
+    "off"
+  );
+  expect(host.textContent).toContain("Added 2 cards");
+  expect(host.querySelector("button")?.textContent).toBe("Undo");
+});
