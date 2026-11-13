@@ -475,7 +475,14 @@ export function CatalogGallery({
           host
             .querySelector<HTMLButtonElement>('[aria-label="Dismiss"]')
             ?.focus();
-          queueToast.update(id, { message: "" });
+          queueToast.update(id, {
+            message: QUEUE_CLEARED,
+            onDismiss: () => {
+              // Dismiss removes this focused control before the lookup settles.
+              // Give focus a live home, without reclaiming a later user move.
+              if (host.contains(document.activeElement)) search();
+            },
+          });
         } else retireClear();
       }
       const token = live

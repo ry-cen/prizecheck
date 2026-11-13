@@ -834,7 +834,14 @@ for (const stick of ["page", "dialog"] as const) {
       })
     );
     await addFromPopup();
-    expect(host.textContent).not.toContain("Queue cleared.");
+    if (stick === "page") {
+      const notifications = host.querySelector('[aria-label="Notifications"]')!;
+      expect(notifications.textContent).toContain("Queue cleared.");
+      expect(button("Undo", notifications)).toBeUndefined();
+      expect(notifications.querySelector('[aria-label="Dismiss"]')).toBe(
+        document.activeElement
+      );
+    } else expect(host.textContent).not.toContain("Queue cleared.");
     expect(host.querySelector('[data-recovery-action="bar"]')).toBeNull();
     await act(async () =>
       resolve([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>)

@@ -7,14 +7,25 @@ import { ToastProvider, useToast } from "../ui/Toast";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 const json = (value: unknown) => new Response(JSON.stringify(value));
 
-test.each(["clear", "opener", "modal", "move", "newer"])(
+test.each([
+  "clear",
+  "opener",
+  "modal",
+  "move",
+  "newer",
+  "reject",
+  "pending",
+  "dismiss",
+])(
   "real Gallery delayed popup Add respects %s focus during Undo lookup",
   async (scenario) => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -159,7 +170,11 @@ test.each(["clear", "opener", "modal", "move", "newer"])(
       await act(async () => button("Add 1").click());
       if (scenario !== "modal")
         await act(async () => button("Close card details").click());
-      if (["clear", "move", "newer"].includes(scenario)) {
+      if (
+        ["clear", "move", "newer", "reject", "pending", "dismiss"].includes(
+          scenario
+        )
+      ) {
         await act(async () =>
           host
             .querySelector<HTMLButtonElement>('[aria-label^="One more"]')!
@@ -172,7 +187,11 @@ test.each(["clear", "opener", "modal", "move", "newer"])(
       )?.[0].action?.onAction;
       if (scenario === "modal") button("Add 1").focus();
       if (scenario === "opener") expect(document.activeElement).toBe(opener);
-      if (["clear", "move", "newer"].includes(scenario))
+      if (
+        ["clear", "move", "newer", "reject", "pending", "dismiss"].includes(
+          scenario
+        )
+      )
         expect(document.activeElement).toBe(
           button("Undo", host.querySelector("#app-toasts")!)
         );
@@ -197,6 +216,17 @@ test.each(["clear", "opener", "modal", "move", "newer"])(
         await act(async () => stale());
         expect(host.querySelector('[aria-label="Cards to add"]')).toBeNull();
       }
+      if (stale) {
+        const notifications = host.querySelector("#app-toasts")!;
+        expect(notifications.querySelector("p")!.textContent).toBe(
+          "Queue cleared."
+        );
+        expect(button("Undo", notifications)).toBeUndefined();
+        expect(button("Dismiss", notifications)).toBe(document.activeElement);
+      }
+      // Intentionally leave the network promise pending: meaningful content and
+      // no retired recovery must hold without depending on eventual settlement.
+      if (scenario === "pending") return;
       const search = host.querySelector<HTMLInputElement>(
         'input[type="search"]'
       )!;
@@ -205,8 +235,21 @@ test.each(["clear", "opener", "modal", "move", "newer"])(
         await act(async () => {
           kit.show({ message: "Newer", focus: true });
         });
+      if (scenario === "dismiss") {
+        await act(async () =>
+          button("Dismiss", host.querySelector("#app-toasts")!).click()
+        );
+        expect(document.activeElement).toBe(search);
+        expect(document.activeElement).not.toBe(document.body);
+        expect(host.querySelector("#app-toasts")!.textContent).toBe("");
+      }
       const kept = document.activeElement;
-      await act(async () => lookup.resolve(json([{ id: "B", action: "add" }])));
+      if (scenario === "reject")
+        await act(async () => lookup.reject(new TypeError("offline")));
+      else
+        await act(async () =>
+          lookup.resolve(json([{ id: "B", action: "add" }]))
+        );
       if (scenario === "clear") {
         const notifications = host.querySelector("#app-toasts")!;
         expect(notifications.contains(document.activeElement)).toBe(true);
@@ -216,10 +259,21 @@ test.each(["clear", "opener", "modal", "move", "newer"])(
             ([url]) => String(url) === "/api/moves/undo/B"
           )
         ).toHaveLength(1);
+      } else if (scenario === "reject") {
+        const notifications = host.querySelector("#app-toasts")!;
+        expect(notifications.contains(document.activeElement)).toBe(true);
+        expect(notifications.textContent).toContain("Added 1 card");
+        expect(button("Undo", notifications)).toBeUndefined();
       } else expect(document.activeElement).toBe(kept);
       expect(
         shown.mock.calls.filter(([n]) => n.message.startsWith("Added"))
       ).toHaveLength(scenario === "newer" ? 0 : 1);
+      if (scenario === "newer") {
+        expect(host.querySelector("#app-toasts")!.textContent).toBe("Newer");
+        expect(
+          button("Undo", host.querySelector("#app-toasts")!)
+        ).toBeUndefined();
+      }
       if (scenario === "modal") {
         expect(
           host.querySelector("dialog[open]")!.contains(document.activeElement)
