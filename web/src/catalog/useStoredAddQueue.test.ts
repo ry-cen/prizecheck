@@ -1176,3 +1176,114 @@ test("clear does not offer recovery or replay an uncertain submission", async ()
   expect(queue.uncertain).toBe(true);
   await close();
 });
+
+test("S7 clearUndo works when destructured", async () => {
+  const close = await mount();
+  await act(async () => queue.setQueue((q) => bump(q, edition, 1)));
+  const { clearUndo } = queue;
+  let restore: (() => boolean) | null = null;
+  await act(async () => {
+    restore = clearUndo();
+  });
+  await act(async () => {
+    expect(restore!()).toBe(true);
+  });
+  await close();
+});
+test("S6 restore after unmount is refused", async () => {
+  const close = await mount();
+  await act(async () => queue.setQueue((q) => bump(q, edition, 1)));
+  let restore: (() => boolean) | null = null;
+  await act(async () => {
+    restore = queue.clearUndo();
+  });
+  await close();
+  expect(restore!()).toBe(false);
+});
+test("S5 Clear without Undo stays empty after remount", async () => {
+  let close = await mount();
+  await act(async () => queue.setQueue((q) => bump(q, edition, 1)));
+  await act(async () => queue.clearUndo());
+  await close();
+  close = await mount();
+  expect(queue.queue.size).toBe(0);
+  await close();
+});
+test.each(["pending", "open", "marker", "lost", "lostEarlier"])(
+  "S4 %s Clear retains existing abandonment semantics",
+  async (kind) => {
+    if (kind === "marker")
+      sessionStorage.setItem(
+        "prizecheck:add-queue:a:page",
+        JSON.stringify({ items: [], target: null, uncertain: true })
+      );
+    const close = await mount();
+    await act(async () => {
+      queue.setQueue((q) => bump(q, edition, 1));
+      if (kind === "pending")
+        queue.submitting([{ editionId: "one", quantity: 1 }], {
+          key: "key",
+          locationId: "box",
+          path: "Box",
+          items: [{ editionId: "one", quantity: 1 }],
+        });
+      if (kind === "open" || kind === "lost" || kind === "lostEarlier")
+        queue.submitting([{ editionId: "one", quantity: 1 }]);
+      if (kind === "lost" || kind === "lostEarlier")
+        queue.settle(no("REPLAY_OUTCOME_UNAVAILABLE"));
+      if (kind === "lostEarlier") {
+        queue.setQueue(() => new Map());
+        queue.setQueue((q) => bump(q, edition, 1));
+      }
+      expect(queue.clearUndo()).toBeNull();
+    });
+    expect(queue.queue.size).toBe(0);
+    expect(queue.pending.current).toBeNull();
+    if (kind !== "open") expect(queue.uncertain).toBe(true);
+    await close();
+  }
+);
+
+test("S1 Clear restores editions, finishes, counts and the stored destination exactly", async () => {
+  const normal = { ...edition, descriptor: { type: "normal" } },
+    foil = { ...second, descriptor: { type: "reverse_holo" } };
+  vi.mocked(browseEditions).mockResolvedValue({
+    available: true,
+    catalog_revision: 1,
+    owner_revision: 1,
+    last_success: null,
+    search: {
+      mode: "all",
+      text: "",
+      set_id: null,
+      set_name: null,
+      set_code: null,
+      number: null,
+    },
+    printings: 2,
+    matches: 2,
+    editions: [normal, foil],
+    next_cursor: null,
+  });
+  let close = await mount();
+  await act(async () => {
+    queue.setQueue((q) => bump(bump(bump(q, normal, 1), normal, 1), foil, 1));
+    queue.setChosen("box");
+  });
+  const before = [...queue.queue];
+  const stored = sessionStorage.getItem("prizecheck:add-queue:a:page");
+  let restore: (() => boolean) | null = null;
+  await act(async () => {
+    restore = queue.clearUndo();
+  });
+  await act(async () => {
+    expect(restore!()).toBe(true);
+  });
+  expect([...queue.queue]).toEqual(before);
+  expect(sessionStorage.getItem("prizecheck:add-queue:a:page")).toBe(stored);
+  await close();
+  close = await mount();
+  expect([...queue.queue]).toEqual(before);
+  expect(queue.chosen).toBe("box");
+  await close();
+});

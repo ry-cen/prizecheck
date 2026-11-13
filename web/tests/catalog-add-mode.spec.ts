@@ -1523,3 +1523,200 @@ for (const viewport of [
     });
   }
 }
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  for (const context of ["page", "dialog"] as const) {
+    test.describe(`token recovery ${context} ${viewport.width}`, () => {
+      test.use({ viewport, hasTouch: viewport.width === 375 });
+      async function openContext(page: Page) {
+        seedPopup();
+        await signIn(page);
+        if (context === "dialog") {
+          const location = await createLocation(page, "Recovery box");
+          await page.goto(
+            `${ORIGIN}/collection?location=${encodeURIComponent(location)}`
+          );
+          await page
+            .getByRole("button", { name: "Add cards", exact: true })
+            .click();
+          return page.getByRole("dialog", {
+            name: "Add cards to Recovery box",
+          });
+        }
+        await mode(page, "Add to a Location").click();
+        return page.locator("main:visible");
+      }
+      const clearUndo = (page: Page, scope: Locator) =>
+        context === "dialog"
+          ? scope.locator('[data-recovery-action="bar"]')
+          : undo(page);
+      async function reopen(page: Page) {
+        if (context === "dialog") {
+          await page
+            .getByRole("button", { name: "Add cards", exact: true })
+            .click();
+        } else await mode(page, "Add to a Location").click();
+      }
+      test("PW1/PW5 two rows restore with focus and survive reload", async ({
+        page,
+      }) => {
+        const scope = await openContext(page),
+          bar = addBar(scope);
+        await more(scope, BULBASAUR).click();
+        await more(scope, CANDY).click();
+        if (viewport.width === 375) {
+          for (const row of await queued(scope).all()) {
+            await expect
+              .poll(() =>
+                row.evaluate(
+                  (el) =>
+                    el.getBoundingClientRect().width /
+                    el.parentElement!.getBoundingClientRect().width
+                )
+              )
+              .toBeGreaterThanOrEqual(0.9);
+            await expect
+              .poll(() =>
+                row.evaluate((el) => {
+                  const range = document.createRange();
+                  range.selectNodeContents(el);
+                  const style = getComputedStyle(el);
+                  let lineHeight = parseFloat(style.lineHeight);
+                  if (!Number.isFinite(lineHeight)) {
+                    // Resolve CSS normal from one rendered line with identical inherited typography.
+                    const clone = el.cloneNode(true) as HTMLElement;
+                    Object.assign(clone.style, {
+                      position: "absolute",
+                      visibility: "hidden",
+                      width: "max-content",
+                      whiteSpace: "nowrap",
+                      height: "auto",
+                    });
+                    el.parentElement!.append(clone);
+                    lineHeight =
+                      clone.getBoundingClientRect().height -
+                      parseFloat(style.paddingTop) -
+                      parseFloat(style.paddingBottom) -
+                      parseFloat(style.borderTopWidth) -
+                      parseFloat(style.borderBottomWidth);
+                    clone.remove();
+                  }
+                  return range.getBoundingClientRect().height / lineHeight;
+                })
+              )
+              .toBeLessThanOrEqual(2);
+          }
+          await expectTouchTarget(
+            bar.getByRole("button", { name: "Clear queue", exact: true })
+          );
+          await expectTouchTarget(
+            bar.getByRole("button", { name: "Add 2 cards", exact: true })
+          );
+          await expect
+            .poll(() =>
+              page.evaluate(
+                () => document.documentElement.scrollWidth <= innerWidth
+              )
+            )
+            .toBe(true);
+        }
+        await expect(bar.locator("[data-queue-add]")).toBeEnabled();
+        await bar
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        await expect(clearUndo(page, scope)).toBeFocused();
+        if (viewport.width === 375)
+          await expectTouchTarget(clearUndo(page, scope));
+        await clearUndo(page, scope).click();
+        await expect(bar.locator("[data-queue-add]")).toBeFocused();
+        await expect(queued(scope)).toHaveText([
+          `1× ${BULBASAUR}`,
+          `1× ${CANDY}`,
+        ]);
+        await page.reload();
+        await reopen(page);
+        await expect(queued(scope)).toHaveText([
+          `1× ${BULBASAUR}`,
+          `1× ${CANDY}`,
+        ]);
+      });
+      test("PW2 Clear without Undo stays empty after reload", async ({
+        page,
+      }) => {
+        const scope = await openContext(page);
+        await more(scope, BULBASAUR).click();
+        await addBar(scope)
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        await page.reload();
+        await reopen(page);
+        await expect(queued(scope)).toHaveCount(0);
+        await expect(clearUndo(page, scope)).toHaveCount(0);
+      });
+      test("PW3 a queue edit retires Clear", async ({ page }) => {
+        const scope = await openContext(page);
+        await more(scope, BULBASAUR).click();
+        await addBar(scope)
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        await more(scope, CANDY).click();
+        await expect(clearUndo(page, scope)).toHaveCount(0);
+        await expect(undo(page)).toHaveCount(0);
+        await expect(queued(scope)).toHaveText([`1× ${CANDY}`]);
+      });
+      test("PW4 delayed popup Add success transfers Clear focus to a live control", async ({
+        page,
+      }) => {
+        const scope = await openContext(page);
+        let release!: () => void, arrived!: () => void;
+        const gate = new Promise<void>((done) => {
+          release = done;
+        });
+        const waiting = new Promise<void>((done) => {
+          arrived = done;
+        });
+        await page.route("**/api/holdings/batch", async (route) => {
+          arrived();
+          await gate;
+          await route.continue();
+        });
+        await tile(scope, "Bulbasaur, MEG 001, Mega Evolution, Normal").click();
+        await addRow(page)
+          .getByRole("button", { name: "Add 1", exact: true })
+          .click();
+        await waiting;
+        await page.keyboard.press("Escape");
+        await more(scope, CANDY).click();
+        await addBar(scope)
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        await expect(clearUndo(page, scope)).toBeFocused();
+        release();
+        await expect(toast(page)).toHaveText(/Added 1 card/);
+        if (context === "dialog")
+          await expect(
+            scope.getByRole("searchbox", { name: "Search the catalog" })
+          ).toBeFocused();
+        else
+          await expect
+            .poll(() =>
+              page
+                .locator("#app-toasts")
+                .evaluate((el) => el.contains(document.activeElement))
+            )
+            .toBe(true);
+        if (context === "dialog")
+          await expect(clearUndo(page, scope)).toHaveCount(0);
+        await expect
+          .poll(() =>
+            page.evaluate(() => document.activeElement === document.body)
+          )
+          .toBe(false);
+        await page.unroute("**/api/holdings/batch");
+      });
+    });
+  }
+}

@@ -372,3 +372,18 @@ test("a delayed Add notice leaves newer Clear recovery untouched", async () => {
   expect(result).toBeNull();
   expect(host.textContent).toContain("Queue cleared.");
 });
+
+test("U1 a replaced Add toast's held Undo action sends nothing", async () => {
+  const shown = vi.spyOn(kit, "show");
+  await offer();
+  const held = [...shown.mock.calls]
+    .reverse()
+    .find(([input]) => input.action)?.[0].action!.onAction!;
+  expect(held).toBeTypeOf("function");
+  await act(async () => {
+    kit.show({ message: "Other" });
+  });
+  await act(async () => held());
+  expect(applyUndo).not.toHaveBeenCalled();
+  shown.mockRestore();
+});

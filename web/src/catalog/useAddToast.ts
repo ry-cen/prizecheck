@@ -89,7 +89,9 @@ export function useAddToast({ shown, onUndone }: Options) {
             ? {
                 label: "Undo",
                 keepOpen: true,
-                onAction: () => void undo(added, id, message),
+                onAction: () => {
+                  if (kit.isShown(id)) void undo(added, id, message);
+                },
               }
             : undefined,
         focus,
