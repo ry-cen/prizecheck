@@ -1,4 +1,4 @@
-import type { Route } from "@playwright/test";
+import type { Response, Route } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { test, expect } from "./support/collectors";
 import { signInAsOwner } from "./support/sign-in";
@@ -30,11 +30,42 @@ for (const viewport of [
         const active = owner.page;
         const deck = await createDeck(active, `Unowned ${randomUUID()}`);
         await setLine(active, deck, ids["SVE 5"], 2);
+        const deckUrl = `${ORIGIN}/api/decks/${deck}`;
+        const initialDeckResponse = active.waitForResponse(
+          (response) =>
+            response.url() === deckUrl && response.request().method() === "GET"
+        );
+        const initialCostResponse = active.waitForResponse(
+          (response) =>
+            response.url() === `${deckUrl}/cost` &&
+            response.request().method() === "GET"
+        );
         await active.goto(`${ORIGIN}/decks/${deck}`);
+        const [deckResponse, costResponse] = await Promise.all([
+          initialDeckResponse,
+          initialCostResponse,
+        ]);
+        expect(deckResponse.ok()).toBe(true);
+        expect(costResponse.ok()).toBe(true);
+        const [initialDeck, initialCost] = await Promise.all([
+          deckResponse.json(),
+          costResponse.json(),
+        ]);
+        expect(initialCost.deck_list_revision).toBe(
+          initialDeck.deck_list.revision
+        );
+        expect(initialCost.owner_revision).toBe(initialDeck.owner_revision);
+        expect(initialCost.settings_revision).toBe(
+          initialDeck.settings_revision
+        );
         const summary = active.getByRole("group", {
           name: "Where this Deck's cards are",
         });
         await expect(summary).toContainText("Not owned2");
+        // The matching cost response must also have reached React before editing: an older in-flight
+        // cost can otherwise observe the edit and trigger a competing full Deck read.
+        const costLine = summary.locator("..").locator(":scope > p");
+        await expect(costLine).toContainText(/deck|Deck/);
         await active.getByRole("radio", { name: "List", exact: true }).click();
         let release!: () => void;
         let arrived!: () => void;
@@ -44,7 +75,6 @@ for (const viewport of [
         const requested = new Promise<void>((resolve) => {
           arrived = resolve;
         });
-        const deckUrl = `${ORIGIN}/api/decks/${deck}`;
         let handling: Promise<void> | undefined;
         const holdRead = async (route: Route) => {
           // Only the first full Deck GET after the edit belongs to this gate.
@@ -68,8 +98,21 @@ for (const viewport of [
           await handling;
         };
         await active.route(deckUrl, holdRead);
+        let editedRevision: number | undefined;
+        let refreshed: Promise<Response> | undefined;
         try {
+          const editResponse = active.waitForResponse(
+            (response) =>
+              response.url() === `${deckUrl}/deck-list/changes` &&
+              response.request().method() === "POST"
+          );
           await active.getByRole("button", { name: /^Remove one / }).click();
+          const edit = await editResponse;
+          expect(edit.ok()).toBe(true);
+          editedRevision = (await edit.json()).deck_list.revision;
+          expect(editedRevision).toBeGreaterThan(
+            initialDeck.deck_list.revision
+          );
           await requested;
           await expect(summary).toContainText("Not owned1");
           if (outcome === "failed")
@@ -79,6 +122,12 @@ for (const viewport of [
                 .filter({ hasText: "This Deck couldn't be loaded" })
             ).toBeVisible();
           await expect(summary).not.toContainText("more copy:");
+          if (outcome === "delayed")
+            refreshed = active.waitForResponse(
+              (response) =>
+                response.url() === deckUrl &&
+                response.request().method() === "GET"
+            );
         } finally {
           release();
           // Removing interception while continue is pending can auto-handle the paused request.
@@ -86,6 +135,11 @@ for (const viewport of [
           await active.unroute(deckUrl, holdRead);
         }
         if (outcome === "delayed") {
+          const response = await refreshed!;
+          expect(response.ok()).toBe(true);
+          expect((await response.json()).deck_list.revision).toBe(
+            editedRevision
+          );
           await expect(summary).toContainText("Not owned1");
           await expect(summary).not.toContainText("more copy:");
         }
