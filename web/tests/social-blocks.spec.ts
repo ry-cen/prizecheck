@@ -376,6 +376,11 @@ async function tradeStory(
     .getByRole("region", { name: "Confirm swap with Ash K" })
     .getByRole("button", { name: "Confirm swap" })
     .click();
+  await misty
+    .getByRole("region", { name: "Confirm swap with Ash K" })
+    .getByRole("group", { name: "Confirm swap", exact: true })
+    .getByRole("button", { name: "Confirm swap", exact: true })
+    .click();
   await expect(main.getByRole("heading", { level: 1 })).toHaveText(
     "Swapped with Ash K"
   );

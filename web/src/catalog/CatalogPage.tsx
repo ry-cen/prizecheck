@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { catalogHref, parseCatalogView, type CatalogView } from "./catalogUrl";
+import { AddQueueAccount, hasStoredAddQueue } from "./useStoredAddQueue";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import { MyMetadataReports } from "../MetadataReport";
-import {
-  clearMetadataReportLink,
-  readMetadataReportLink,
-} from "../metadataReportLink";
+import { readMetadataReportLink } from "../metadataReportLink";
 import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -17,6 +16,11 @@ import { MODES, type CatalogMode } from "./catalogText";
 type Props = {
   /** False while the shell keeps the page mounted but hidden. */
   active: boolean;
+  address: string;
+  onNavigate: (
+    address: string,
+    options?: { replace?: boolean; preserveScroll?: boolean }
+  ) => void;
   /** The app's last service message. */
   message: string;
 };
@@ -29,8 +33,28 @@ type Props = {
  * page" predates infinite scroll). The page stays mounted while the collector is elsewhere, so the mode, search,
  * filters, queue, loaded rows and scroll are kept.
  */
-export function CatalogPage({ active, message }: Props) {
-  const [mode, setMode] = useState<CatalogMode>("browse");
+export function CatalogPage({ active, message, address, onNavigate }: Props) {
+  const account = useContext(AddQueueAccount);
+  const owner = useRef(account);
+  const lastAddress = useRef(address);
+  // Observe every account transition even while hidden (including A → B → A).
+  // A hidden page's kept mode belongs to its old account. A newly supplied
+  // active address still takes precedence, including an explicit mode.
+  const staleActiveMode =
+    owner.current !== account && active && lastAddress.current === address;
+  if (owner.current !== account) {
+    owner.current = account;
+    lastAddress.current = "/catalog";
+  }
+  if (active && !staleActiveMode) lastAddress.current = address;
+  const view = parseCatalogView(lastAddress.current);
+  const mode =
+    view.mode ?? (hasStoredAddQueue(account, "page") ? "add" : "browse");
+  const changeView = (next: CatalogView) => {
+    if (active)
+      onNavigate(catalogHref(next), { replace: true, preserveScroll: true });
+  };
+  const setMode = (mode: CatalogMode) => changeView({ ...view, mode });
   const [link, setLink] = useState<CardRequest | null>(null);
   const [reportsKey, setReportsKey] = useState(0);
   const [reportsOpen, setReportsOpen] = useState(false);
@@ -38,12 +62,13 @@ export function CatalogPage({ active, message }: Props) {
   const linkOpened = useCallback(() => setLink(null), []);
   const reported = useCallback(() => setReportsKey((value) => value + 1), []);
 
-  // The inspector's metadata report link (/catalog?printing=…&edition=…) opens the Printing's details with the
-  // report form preset, whenever the page is shown with it; the link then leaves the address.
+  // Consume one-use report parameters from the supplied address before making
+  // any URL replacement. The shell must see the consumed address too, otherwise
+  // its remembered Catalog tab would reopen the report on the next visit.
   useEffect(() => {
     if (!active) return;
-    const report = readMetadataReportLink();
-    clearMetadataReportLink();
+    const next = new URL(lastAddress.current, window.location.origin);
+    const report = readMetadataReportLink(next.href);
     if (report)
       setLink({
         printingId: report.printingId,
@@ -51,7 +76,19 @@ export function CatalogPage({ active, message }: Props) {
         row: null,
         report: { kind: "metadata", editionId: report.editionId },
       });
-  }, [active]);
+    const hasReportParams =
+      next.searchParams.has("printing") || next.searchParams.has("edition");
+    next.searchParams.delete("printing");
+    next.searchParams.delete("edition");
+    const normaliseMode =
+      staleActiveMode || (view.mode === null && mode === "add");
+    if (normaliseMode) next.searchParams.set("mode", mode);
+    if (hasReportParams || normaliseMode)
+      onNavigate(next.pathname + next.search + next.hash, {
+        replace: true,
+        preserveScroll: true,
+      });
+  }, [active, account, address]);
 
   return (
     <main className="mx-auto box-border flex w-full max-w-7xl min-w-0 flex-col gap-4 px-7 py-7 phone:px-4 phone:py-5">
@@ -84,6 +121,8 @@ export function CatalogPage({ active, message }: Props) {
       />
       <CatalogGallery
         active={active}
+        view={view}
+        onViewChange={changeView}
         adding={mode === "add"}
         fixedTarget={null}
         undoToast

@@ -20,7 +20,7 @@ type Props = {
 /**
  * Collection's Add cards (#175, spec "Collection"): Catalog's gallery in Add mode over Collection, in a wide Dialog
  * that fills the screen on a phone. It replaces the old Add cards dialog and its form, so the app has one card search.
- * The search box takes focus. Each opening starts afresh: an empty search and an empty queue. Collection shows the
+ * The search box takes focus. Each opening starts with an empty search and restores any unsubmitted queue. Collection shows the
  * Undo toast for what it adds.
  */
 export function AddCardsGallery({

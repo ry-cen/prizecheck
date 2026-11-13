@@ -105,7 +105,7 @@ export function AddBar({
             {recent.map((item, index) => (
               <li
                 key={item.edition.edition_id}
-                className={`box-border min-w-0 max-w-full truncate rounded-round border border-border-strong bg-surface px-2 py-0.5 text-meta tabular-nums${index < recent.length - SHOWN_PHONE ? " phone:hidden" : ""}`}
+                className={`box-border min-w-0 max-w-full whitespace-normal break-words rounded-round border border-border-strong bg-surface px-2 py-0.5 text-meta tabular-nums${index < recent.length - SHOWN_PHONE ? " phone:hidden" : ""}`}
               >
                 {item.count}× {editionWords(item.edition)}
               </li>
@@ -126,7 +126,7 @@ export function AddBar({
           className={`ml-auto flex shrink-0 items-center gap-2${total === 0 ? " phone:hidden" : ""}`}
         >
           <Button disabled={total === 0} onClick={onClear}>
-            Clear
+            Clear queue
           </Button>
           <Button
             variant="primary"

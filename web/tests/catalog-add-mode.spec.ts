@@ -911,3 +911,394 @@ for (const viewport of [
     });
   });
 }
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`queue reload at ${viewport.width}`, () => {
+    test.use({ viewport });
+    for (const hidden of [false, true]) {
+      test(`resolves an unknown set before browsing (hidden=${hidden})`, async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        let release!: () => void;
+        const held = new Promise<void>((done) => {
+          release = done;
+        });
+        let sawLookup!: () => void;
+        const lookup = new Promise<void>((done) => {
+          sawLookup = done;
+        });
+        await page.route("**/api/catalog/sets", async (route) => {
+          sawLookup();
+          await held;
+          await route.continue();
+        });
+        const requestedSets: string[] = [];
+        page.on("request", (request) => {
+          const url = new URL(request.url());
+          if (url.pathname === "/api/catalog/editions")
+            requestedSets.push(url.searchParams.get("set_id") ?? "");
+        });
+        try {
+          await page.goto(`${ORIGIN}/catalog?set=unknown`);
+          await lookup;
+          const tabs = page
+            .getByRole("navigation", { name: "Main views" })
+            .filter({ visible: true });
+          if (hidden)
+            await tabs
+              .getByRole("button", { name: "Collection", exact: true })
+              .click();
+          const validated = page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === "/api/catalog/sets"
+          );
+          const resolvedBrowse = page.waitForResponse((response) => {
+            const url = new URL(response.url());
+            return (
+              url.pathname === "/api/catalog/editions" &&
+              !url.searchParams.get("set_id")
+            );
+          });
+          release();
+          await validated;
+          await resolvedBrowse;
+          if (hidden)
+            await tabs
+              .getByRole("button", { name: "Catalog", exact: true })
+              .click();
+          await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+          await expect(
+            page.getByRole("region", { name: "Catalog results" })
+          ).toBeVisible();
+          expect(requestedSets).not.toContain("unknown");
+        } finally {
+          release();
+        }
+      });
+    }
+    test("opens a metadata report link with a kept Add queue", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      page.on("dialog", (dialog) => void dialog.accept());
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      const response = await page.request.get(`${ORIGIN}/api/catalog/editions`);
+      const edition = (await response.json()).editions[0];
+      await page.goto(
+        `${ORIGIN}/catalog?${new URLSearchParams({ printing: edition.printing_id, edition: edition.edition_id })}`
+      );
+      await expect(
+        page.getByRole("region", { name: "Report card metadata" })
+      ).toBeVisible();
+      await expect(page).toHaveURL(`${ORIGIN}/catalog?mode=add`);
+    });
+    test("keeps search and filters in reloadable shared URLs", async ({
+      page,
+      context,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      await page
+        .getByRole("searchbox", { name: "Search the catalog" })
+        .fill("Bulbasaur");
+      const filtered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/catalog/editions" &&
+          url.searchParams.get("q") === "Bulbasaur" &&
+          url.searchParams.get("format") === "standard"
+        );
+      });
+      await page.getByRole("button", { name: "Standard", exact: true }).click();
+      const answer = await (await filtered).json();
+      const ids = answer.editions.map(
+        (edition: { edition_id: string }) => edition.edition_id
+      );
+      const rows = (target: Page) =>
+        target
+          .getByRole("region", { name: "Catalog results" })
+          .locator("[data-edition-id]");
+      await expect(rows(page)).toHaveCount(ids.length);
+      await expect(page).toHaveURL(/q=Bulbasaur&format=standard/);
+      const url = page.url();
+      await mode(page, "Add to a Location").click();
+      const keptUrl = page.url();
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .filter({ visible: true })
+        .getByRole("button", { name: "Collection", exact: true })
+        .click();
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .filter({ visible: true })
+        .getByRole("button", { name: "Catalog", exact: true })
+        .click();
+      await expect(page).toHaveURL(keptUrl);
+      await expect(
+        page.getByRole("searchbox", { name: "Search the catalog" })
+      ).toHaveValue("Bulbasaur");
+      await expect(mode(page, "Add to a Location")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+
+      await page.reload();
+      await expect(
+        page.getByRole("searchbox", { name: "Search the catalog" })
+      ).toHaveValue("Bulbasaur");
+      await expect(
+        page.getByRole("button", { name: "Standard", exact: true })
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(rows(page)).toHaveCount(ids.length);
+      const shared = await context.newPage();
+      await shared.goto(url);
+      await expect(
+        shared.getByRole("searchbox", { name: "Search the catalog" })
+      ).toHaveValue("Bulbasaur");
+      await expect(
+        shared.getByRole("button", { name: "Standard", exact: true })
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(rows(shared)).toHaveCount(ids.length);
+      for (const id of ids)
+        await expect(
+          shared
+            .getByRole("region", { name: "Catalog results" })
+            .locator(`[data-edition-id="${id}"]`)
+        ).toBeVisible();
+      await shared.close();
+    });
+    test("a bare catalog restores a kept queue unless Browse is explicit", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      page.on("dialog", (dialog) => void dialog.accept());
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      await page.goto(`${ORIGIN}/catalog`);
+      await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`]);
+      await page.goto(`${ORIGIN}/catalog?mode=browse`);
+      await expect(mode(page, "Browse")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+    });
+    test("restores unsubmitted cards, clears explicitly, and adds restored copies once", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      page.on("dialog", (dialog) => void dialog.accept());
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      await more(page, BULBASAUR).click();
+      await page.reload();
+      await expect(mode(page, "Add to a Location")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+      await expect(queued(page)).toHaveText([`2× ${BULBASAUR}`]);
+      await addBar(page)
+        .getByRole("button", { name: "Clear queue", exact: true })
+        .click();
+      await page.reload();
+      await expect(mode(page, "Add to a Location")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+      await expect(queued(page)).toHaveCount(0);
+      await more(page, BULBASAUR).click();
+      await page.reload();
+      await expect(mode(page, "Add to a Location")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+      await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`]);
+      await addBar(page)
+        .getByRole("button", { name: "Add 1 card", exact: true })
+        .click();
+      await expect(queued(page)).toHaveCount(0);
+      expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
+      await page.reload();
+      await expect(mode(page, "Add to a Location")).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+      await expect(queued(page)).toHaveCount(0);
+      expect(await held(page, await unsortedId(page))).toEqual(["1 Bulbasaur"]);
+    });
+    test("B1 a refused add keeps its cards across a reload", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      page.on("dialog", (dialog) => void dialog.accept());
+      await page.route("**/api/holdings/batch", (route) =>
+        route.fulfill({
+          status: 422,
+          json: { detail: { code: "QUANTITY_OVERFLOW" } },
+        })
+      );
+      await mode(page, "Add to a Location").click();
+      await more(page, BULBASAUR).click();
+      await addBar(page)
+        .getByRole("button", { name: "Add 1 card", exact: true })
+        .click();
+      await expect(addBar(page).getByRole("alert")).toContainText("can't hold");
+      await page.reload();
+      await mode(page, "Add to a Location").click();
+      await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`]);
+      await expect(
+        page.getByText(
+          "Your earlier add may have finished. Check your collection before adding again.",
+          { exact: true }
+        )
+      ).toHaveCount(0);
+      expect(await held(page, await unsortedId(page))).toEqual([]);
+    });
+    for (const committed of [false, true]) {
+      test(`reload ${committed ? "after commit" : "before commit"} restores the queue and replays the pending Add exactly once`, async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        page.on("dialog", (dialog) => void dialog.accept());
+        await mode(page, "Add to a Location").click();
+        let entered!: () => void;
+        const started = new Promise<void>((resolve) => (entered = resolve));
+        let release!: () => void;
+        const blocked = new Promise<void>((resolve) => (release = resolve));
+        const requests: unknown[] = [];
+        const keys: string[] = [];
+        await page.route("**/api/holdings/batch", async (route) => {
+          const body = route.request().postDataJSON();
+          requests.push(body);
+          keys.push(body.idempotency_key);
+          if (requests.length > 1) {
+            await route.continue();
+            return;
+          }
+          if (committed) {
+            const response = await route.fetch();
+            expect(response.ok()).toBe(true);
+          }
+          entered();
+          await blocked;
+          await route.abort();
+        });
+        await more(page, BULBASAUR).click();
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await started;
+        try {
+          await page.reload();
+        } finally {
+          release();
+        }
+        await expect(mode(page, "Add to a Location")).toHaveAttribute(
+          "aria-checked",
+          "true"
+        );
+        await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`]);
+        await expect(addBar(page)).toContainText(MAY_HAVE_COMPLETED);
+        await expect(
+          page.getByText(
+            "Your earlier add may have finished. Check your collection before adding again.",
+            { exact: true }
+          )
+        ).toHaveCount(0);
+        const unsorted = await unsortedId(page);
+        expect(await held(page, unsorted)).toEqual(
+          committed ? ["1 Bulbasaur"] : []
+        );
+
+        // The restored command must replay the original key, Location and exact items.
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await expect(queued(page)).toHaveCount(0);
+        expect(requests).toHaveLength(2);
+        expect(requests[1]).toEqual(requests[0]);
+        expect(await held(page, unsorted)).toEqual(["1 Bulbasaur"]);
+        await page.reload();
+        await expect(queued(page)).toHaveCount(0);
+        expect(await held(page, unsorted)).toEqual(["1 Bulbasaur"]);
+
+        // A later queue remains independent of the settled command, including across reload.
+        await more(page, CANDY).click();
+        await page.reload();
+        await expect(queued(page)).toHaveText([`1× ${CANDY}`]);
+        expect(await held(page, unsorted)).toEqual(["1 Bulbasaur"]);
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await expect(queued(page)).toHaveCount(0);
+        expect(keys).toHaveLength(3);
+        expect(keys[2]).not.toBe(keys[0]);
+        expect(await held(page, unsorted)).toEqual([
+          "1 Bulbasaur",
+          "1 Rare Candy",
+        ]);
+      });
+      test(`discarding an uncertain Add ${committed ? "after commit" : "before commit"} preserves a dismissible warning and permits a fresh queue`, async ({
+        page,
+      }) => {
+        seedPopup();
+        await signIn(page);
+        page.on("dialog", (dialog) => void dialog.accept());
+        await mode(page, "Add to a Location").click();
+        const keys = await scriptBatch(page, [committed ? "lost" : "dropped"]);
+        await more(page, BULBASAUR).click();
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await expect(addBar(page)).toContainText(MAY_HAVE_COMPLETED);
+        await page.reload();
+        await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`]);
+        await addBar(page)
+          .getByRole("button", { name: "Clear queue", exact: true })
+          .click();
+        const warning = page.getByText(
+          "Your earlier add may have finished. Check your collection before adding again.",
+          { exact: true }
+        );
+        await expect(warning).toBeVisible();
+        await page.reload();
+        await expect(warning).toBeVisible();
+        await expect(queued(page)).toHaveCount(0);
+        const unsorted = await unsortedId(page);
+        expect(await held(page, unsorted)).toEqual(
+          committed ? ["1 Bulbasaur"] : []
+        );
+        await page
+          .getByRole("button", { name: "Dismiss", exact: true })
+          .click();
+        await expect(warning).toHaveCount(0);
+        await more(page, CANDY).click();
+        await page.reload();
+        await expect(queued(page)).toHaveText([`1× ${CANDY}`]);
+        await expect(warning).toHaveCount(0);
+        expect(await held(page, unsorted)).toEqual(
+          committed ? ["1 Bulbasaur"] : []
+        );
+        await addBar(page)
+          .getByRole("button", { name: "Add 1 card", exact: true })
+          .click();
+        await expect(queued(page)).toHaveCount(0);
+        expect(keys).toHaveLength(2);
+        expect(keys[1]).not.toBe(keys[0]);
+        expect(await held(page, unsorted)).toEqual(
+          committed ? ["1 Bulbasaur", "1 Rare Candy"] : ["1 Rare Candy"]
+        );
+      });
+    }
+  });
+}

@@ -27,6 +27,9 @@ import { variantLabel } from "./ui/variantLabel";
 const text = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
 /** The card a review is about: the Printing as recorded, else the incoming record's name. */
 function cardName(review: CatalogReviewView) {
   return review.current_name ?? text(review.candidate.name) ?? "Unnamed card";
@@ -57,7 +60,74 @@ function row(review: CatalogReviewView): QueueRow {
 }
 
 /** The incoming change beside the Printing as recorded, field by field. */
-function IncomingChange({ review }: { review: CatalogReviewView }) {
+function IncomingChange({
+  review,
+  editions,
+}: {
+  review: CatalogReviewView;
+  editions: ReviewEditionView[];
+}) {
+  if (review.kind === "source_match") {
+    const manuals = Array.isArray(review.candidate.manual_printings)
+      ? review.candidate.manual_printings.filter(record)
+      : [];
+    return (
+      <>
+        {manuals.map((raw, index) => {
+          const manual = raw;
+          const fields = [
+            ["Name", "name"],
+            ["Set name", "set_name"],
+            ["Collector number", "collector_number"],
+          ];
+          return (
+            <ScrollTable
+              key={index}
+              label={
+                manuals.length === 1
+                  ? "Manual Printing"
+                  : `Manual Printing ${index + 1}`
+              }
+            >
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Manual Printing</th>
+                  <th>Incoming</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fields.map(([label, key]) => (
+                  <tr key={key}>
+                    <td>
+                      {label}{" "}
+                      {text(manual[key]) !== text(review.candidate[key]) && (
+                        <Differs />
+                      )}
+                    </td>
+                    <td>{text(manual[key]) ?? "—"}</td>
+                    <td>{text(review.candidate[key]) ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </ScrollTable>
+          );
+        })}
+      </>
+    );
+  }
+  const descriptors = Array.isArray(review.candidate.descriptors)
+    ? review.candidate.descriptors.filter(record)
+    : [];
+  const metadata = review.candidate.metadata as
+    { unknown_fields?: { variants?: unknown[] } } | undefined;
+  const unknownVariants = metadata?.unknown_fields?.variants;
+  const unclassified =
+    Array.isArray(unknownVariants) &&
+    unknownVariants.some(
+      (value) =>
+        value && typeof value === "object" && Object.keys(value).length > 0
+    );
   const fields: [string, string | null | undefined, unknown][] = [
     ["Name", review.current_name, review.candidate.name],
     ["Set ID", review.current_set_id, review.candidate.set_id],
@@ -73,29 +143,57 @@ function IncomingChange({ review }: { review: CatalogReviewView }) {
   );
   if (!shown.length) return null;
   return (
-    <ScrollTable label="Incoming change">
-      <thead>
-        <tr>
-          <th scope="col">Field</th>
-          <th scope="col">Recorded</th>
-          <th scope="col">Incoming</th>
-        </tr>
-      </thead>
-      <tbody>
-        {shown.map(([field, recorded, incoming]) => (
-          <tr key={field}>
-            <td>
-              {field}{" "}
-              {recorded && text(incoming) && recorded !== text(incoming) && (
-                <Differs />
-              )}
-            </td>
-            <td>{recorded ?? "—"}</td>
-            <td>{text(incoming) ?? "—"}</td>
+    <>
+      <ScrollTable label="Incoming change">
+        <thead>
+          <tr>
+            <th scope="col">Field</th>
+            <th scope="col">Recorded</th>
+            <th scope="col">Incoming</th>
           </tr>
-        ))}
-      </tbody>
-    </ScrollTable>
+        </thead>
+        <tbody>
+          {shown.map(([field, recorded, incoming]) => (
+            <tr key={field}>
+              <td>
+                {field}{" "}
+                {recorded && text(incoming) && recorded !== text(incoming) && (
+                  <Differs />
+                )}
+              </td>
+              <td>{recorded ?? "—"}</td>
+              <td>{text(incoming) ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </ScrollTable>
+      {review.kind === "variant_ambiguity" && (
+        <>
+          <ScrollTable label="Variants">
+            <thead>
+              <tr>
+                <th>Recorded</th>
+                <th>Incoming</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  {editions.map((e) => variantLabel(e.descriptor)).join(", ") ||
+                    "—"}
+                </td>
+                <td>
+                  {descriptors.map((d) => variantLabel(d)).join(", ") || "—"}
+                </td>
+              </tr>
+            </tbody>
+          </ScrollTable>
+          {unclassified && (
+            <p>The incoming record has unclassified variant fields.</p>
+          )}
+        </>
+      )}
+    </>
   );
 }
 
@@ -122,12 +220,7 @@ function ReviewDecision({
       )
     : [];
   const manualDetails = Array.isArray(review.candidate.manual_printings)
-    ? (review.candidate.manual_printings as {
-        id: string;
-        name: string;
-        set_name: string;
-        collector_number: string;
-      }[])
+    ? review.candidate.manual_printings.filter(record)
     : [];
   const [manual, setManual] = useState(candidates[0] ?? "");
   const [editions, setEditions] = useState<ReviewEditionView[]>([]);
@@ -206,7 +299,7 @@ function ReviewDecision({
       focusRef={reasonField}
     >
       <p className="m-0">{review.detail}</p>
-      <IncomingChange review={review} />
+      <IncomingChange review={review} editions={editions} />
       <div className={FIELDS}>
         <TextArea
           ref={reasonField}
@@ -259,7 +352,7 @@ function ReviewDecision({
               return (
                 <option key={id} value={id}>
                   {detail
-                    ? `${detail.name} · ${detail.set_name} #${detail.collector_number}`
+                    ? `${text(detail.name) ?? "—"} · ${text(detail.set_name) ?? "—"} #${text(detail.collector_number) ?? "—"}`
                     : id}
                 </option>
               );

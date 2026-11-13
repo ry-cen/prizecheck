@@ -7,6 +7,7 @@ import {
 import { EditionPrice } from "../EditionPrice";
 import type { HoldingView } from "../holdings_generated";
 import { metadataReportHref } from "../metadataReportLink";
+import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { useLargeArt } from "../ui/largeArt";
 import { ScrollArea } from "../ui/ScrollArea";
@@ -293,12 +294,22 @@ export function Inspector({ card, ...rest }: InspectorProps) {
 type SheetProps = Omit<DetailsProps, "sheet"> & {
   onClose: () => void;
   notice?: string;
+  onMove: (opener: HTMLButtonElement) => void;
+  onRemove: (opener: HTMLButtonElement) => void;
+  actionsDisabled?: boolean;
 };
 
 /** The mobile details sheet: the kit Dialog, a bottom sheet on a phone (#164). Escape, Close or a tap on
  * the dimmed page closes it, Tab stays inside, and focus returns to the tile or button that opened it.
  * The card's name is the sheet's title. */
-export function DetailsSheet({ onClose, notice, ...rest }: SheetProps) {
+export function DetailsSheet({
+  onClose,
+  notice,
+  onMove,
+  onRemove,
+  actionsDisabled,
+  ...rest
+}: SheetProps) {
   return (
     <Dialog
       open
@@ -307,6 +318,22 @@ export function DetailsSheet({ onClose, notice, ...rest }: SheetProps) {
       closeLabel="Close details"
     >
       {notice && <p role="status">{notice}</p>}
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Button
+          disabled={actionsDisabled}
+          onClick={(event) => onMove(event.currentTarget)}
+        >
+          Move…
+        </Button>
+        {!rest.card.holding.borrowed && (
+          <Button
+            disabled={actionsDisabled}
+            onClick={(event) => onRemove(event.currentTarget)}
+          >
+            Remove…
+          </Button>
+        )}
+      </div>
       <CardDetails sheet {...rest} />
     </Dialog>
   );

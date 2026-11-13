@@ -4,7 +4,7 @@ import { ThreadMenu } from "./ThreadMenu";
 import { MESSAGE_LENGTH_TEXT, threadMessageError } from "./threadMessage";
 import { mergeTimeline } from "./timelineHistory";
 import { timelineText } from "./threadText";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   getThreadDetail,
   getTrader,
@@ -36,6 +36,19 @@ function ThreadTimelineContent({
   onChanged?: () => void;
   revision?: string;
 }) {
+  const hintId = useId();
+  const [finePointer, setFinePointer] = useState(false);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia("(pointer: fine)");
+    const update = () => setFinePointer(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  const shortcut = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+    ? "⌘+Enter to send"
+    : "Ctrl+Enter to send";
   const [log, setLog] = useState<Timeline | null>(null),
     [failed, setFailed] = useState(false),
     [attempt, setAttempt] = useState(0);
@@ -206,6 +219,7 @@ function ThreadTimelineContent({
   }
   function pressSend() {
     if (
+      (!body.trim() && !pending.current) ||
       posting.current ||
       held.current ||
       permissionFailed ||
@@ -332,6 +346,18 @@ function ThreadTimelineContent({
           <TextArea
             ref={editor}
             label={`Message ${name}`}
+            aria-describedby={finePointer ? hintId : undefined}
+            onKeyDown={(event) => {
+              if (
+                event.key !== "Enter" ||
+                !(event.ctrlKey || event.metaKey) ||
+                event.nativeEvent.isComposing ||
+                event.repeat
+              )
+                return;
+              event.preventDefault();
+              pressSend();
+            }}
             value={body}
             disabled={busy || pending.current !== null}
             readOnly={holding}
@@ -340,6 +366,11 @@ function ThreadTimelineContent({
                 setBody(event.target.value);
             }}
           />
+          {finePointer && (
+            <p id={hintId} className="m-0 text-meta text-text-muted">
+              {shortcut}
+            </p>
+          )}
           <Button
             type="submit"
             disabled={

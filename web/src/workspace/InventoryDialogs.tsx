@@ -64,6 +64,7 @@ type MoveProps = {
   error: string;
   onConfirm: (destinationId: string) => void;
   onCancel: (forced?: boolean) => void;
+  returnFocus?: React.RefObject<HTMLElement | null>;
 };
 
 /** Every Storage Leaf and Deck in tree order (natural A–Z, depth first). */
@@ -96,6 +97,7 @@ export function MoveDialog({
   error,
   onConfirm,
   onCancel,
+  returnFocus,
 }: MoveProps) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
@@ -186,6 +188,7 @@ export function MoveDialog({
     <KitLayer>
       <Dialog
         open
+        returnFocus={returnFocus}
         onClose={() => {
           if (!busy) onCancel();
         }}
@@ -282,6 +285,7 @@ type RemovalProps = {
   error: string;
   onConfirm: () => void;
   onCancel: (forced?: boolean) => void;
+  returnFocus?: React.RefObject<HTMLElement | null>;
 };
 
 /** Actions → Inventory Removal: confirms each Card Edition, quantity and source Location, in the kit
@@ -294,12 +298,14 @@ export function RemovalDialog({
   error,
   onConfirm,
   onCancel,
+  returnFocus,
 }: RemovalProps) {
   const groups = useMemo(() => groupRemovalRows(rows), [rows]);
   return (
     <KitLayer>
       <Dialog
         open
+        returnFocus={returnFocus}
         onClose={() => {
           if (!busy) onCancel();
         }}

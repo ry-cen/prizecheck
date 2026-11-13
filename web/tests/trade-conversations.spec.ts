@@ -79,7 +79,15 @@ async function story(
   await expectPageChecks(page, `an item with empty chat at ${width}`);
   if (isPhone(page)) await expectTouchTarget(sendButton(page));
   await composer(page).fill("Hi Misty!\nStill have that Iono?");
-  await sendButton(page).click();
+  if (!isPhone(page)) {
+    await expect(composer(page)).toHaveAccessibleDescription(
+      /(?:Ctrl|⌘)\+Enter to send/
+    );
+    await composer(page).press("Control+Enter");
+  } else {
+    await expect(page.getByText(/(?:Ctrl|⌘)\+Enter to send/)).toHaveCount(0);
+    await sendButton(page).click();
+  }
   await expect(timeline(page)).toContainText(
     "Hi Misty!\nStill have that Iono?"
   );

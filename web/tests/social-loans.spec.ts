@@ -19,7 +19,7 @@ import { signInAsOwner } from "./support/sign-in";
 import { expectTouchTarget } from "./support/touch-target";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-const PHONE = { width: 390, height: 844 };
+const PHONE = { width: 375, height: 812 };
 const DESKTOP = { width: 1280, height: 800 };
 
 type Editions = Record<"PAL 185" | "PAL 254" | "PAL 172", string>;
@@ -288,6 +288,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await view(page).click();
   await expect(page).toHaveURL(/\/loans\/[0-9a-f-]+$/);
   await expect(title(page)).toHaveText("You asked Misty W for 3 cards");
+  await expect(title(page)).toBeFocused();
   await expect(
     page.getByRole("list", { name: "Cards", exact: true })
   ).not.toContainText("Your Decks count on");
@@ -337,6 +338,12 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expectPageChecks(lender, "the Loans tab");
   await needsYou.getByRole("link").click();
   await expect(title(lender)).toHaveText("Ash K wants to borrow 3 cards");
+  await expect(title(lender)).toBeFocused();
+  await lender.goBack();
+  await lender.setViewportSize(PHONE);
+  await expect(needsYou.getByRole("link")).toBeFocused();
+  await needsYou.getByRole("link").click();
+  await expect(title(lender)).toBeFocused();
   await expect(lender.getByRole("main")).not.toContainText(deckName);
   await expect(facts(lender)).toHaveCount(1);
   await expect(facts(lender)).not.toContainText("For ");

@@ -355,6 +355,7 @@ export function Workspace({
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
+    active,
     userId,
     selection,
     holdings: gallery.holdings,
@@ -364,6 +365,30 @@ export function Workspace({
     reloadGallery: gallery.reload,
     reloadTree: loadTree,
   });
+  // A sheet shortcut temporarily selects exactly its tile. Cancellation restores the selection;
+  // success follows the existing action flow (clear selection and close the details sheet).
+  const sheetAction = useRef<(() => void) | null>(null);
+  const sheetActionOpener = useRef<HTMLButtonElement | null>(null);
+  function openSheetAction(kind: "move" | "remove", opener: HTMLButtonElement) {
+    if (!selection.details || actions.busy || actions.dialog) return;
+    if (kind === "remove" && selection.details.holding.borrowed) return;
+    sheetActionOpener.current = opener;
+    sheetAction.current = selection.selectForAction(selection.details);
+    if (kind === "move") actions.openMove();
+    else actions.openRemoval();
+  }
+  function cancelInventoryDialog(forced = false) {
+    if (actions.busy && !forced) return;
+    actions.closeDialog(forced);
+    const restore = sheetAction.current;
+    sheetAction.current = null;
+    restore?.();
+  }
+  useEffect(() => {
+    if (actions.dialog || !sheetAction.current) return;
+    sheetAction.current = null;
+    selection.closeDetails();
+  }, [actions.dialog, selection.closeDetails]);
   // Lend to a Friend… (#258) closing: its Dialog gives focus back to Actions, but an offer that went out cleared the
   // selection, and Actions with it, so the workspace heading takes focus then rather than the page.
   const lendingOpen = active && lending !== null;
@@ -691,6 +716,8 @@ export function Workspace({
   // Ticket 107's toast on the kit's toast host (#165). It shows only while Collection is the shown page;
   // kit dialogs, the Filters & display drawer among them, make it inert themselves (#166).
   const undoToast = useUndoToast({
+    hostNotice: actions.hostNotice,
+    onSuperseded: actions.superseded,
     toast: actions.toast,
     busy: actions.busy,
     shown: active,
@@ -710,7 +737,7 @@ export function Workspace({
     target?.focus();
   }
   const dockHasControls =
-    actions.toast !== null || selection.summary.copies > 0;
+    active && (undoToast.shown || selection.summary.copies > 0);
 
   return (
     // Collection's own root (#166 retired the workspace CSS root and the old .legacy wrapper): the kit's body type
@@ -894,7 +921,7 @@ export function Workspace({
             // Ticket 114: hidden above the viewport until focused, like the shell's skip link.
             <a
               className="fixed top-2 left-2 z-(--layer-modal) box-border inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 py-2 text-body font-semibold text-text no-underline focus:translate-y-0"
-              href="#ws-dock"
+              href={selection.summary.copies > 0 ? "#ws-dock" : "#app-toasts"}
               onClick={(event) => {
                 event.preventDefault();
                 focusDock();
@@ -1090,6 +1117,9 @@ export function Workspace({
         <DetailsSheet
           card={selection.details}
           notice={cardNotice}
+          onMove={(opener) => openSheetAction("move", opener)}
+          onRemove={(opener) => openSheetAction("remove", opener)}
+          actionsDisabled={actions.busy}
           locationPath={locationPath}
           ownerRevision={gallery.ownerRevision}
           ownedTotals={ownedTotals}
@@ -1107,7 +1137,8 @@ export function Workspace({
           progress={actions.progress}
           error={actions.dialogError}
           onConfirm={actions.confirmMove}
-          onCancel={actions.closeDialog}
+          onCancel={cancelInventoryDialog}
+          returnFocus={sheetAction.current ? sheetActionOpener : undefined}
         />
       )}
       {active && actions.dialog === "remove" && (
@@ -1118,7 +1149,8 @@ export function Workspace({
           progress={actions.progress}
           error={actions.dialogError}
           onConfirm={actions.confirmRemoval}
-          onCancel={actions.closeDialog}
+          onCancel={cancelInventoryDialog}
+          returnFocus={sheetAction.current ? sheetActionOpener : undefined}
         />
       )}
       <DragBadge badge={drag.badge} />

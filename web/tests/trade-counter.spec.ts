@@ -244,6 +244,19 @@ async function story(
   ).toBeVisible();
   await expect(answers.getByRole("button", { name: "Decline" })).toBeVisible();
   await expectPageChecks(ash.page, `a proposal Ash can counter at ${width}`);
+  const decline = answers.getByRole("button", { name: "Decline", exact: true });
+  await decline.click();
+  await expect(
+    answers.getByRole("group", { name: "Decline", exact: true })
+  ).toBeVisible();
+  await ash.page.keyboard.press("Escape");
+  await expect(
+    answers.getByRole("group", { name: "Decline", exact: true })
+  ).toHaveCount(0);
+  await expect(decline).toBeFocused();
+  await expect(heading(ash.page)).toHaveText(
+    "Misty W sent you a Trade Proposal"
+  );
 
   // 4: the Counter builder is prefilled, and leaving it unchanged asks nothing.
   const counterButton = () =>

@@ -16,7 +16,7 @@ from app.public_projection import FilePublicProjection, ProjectionUnavailable, p
 from app.public_records import FilePublicRecords, _clear_cache, catalog_edition_key, catalog_printing_key, quarantine_key
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
-from test_catalog_targets import activate, card, isolated_rules, metadata, run  # noqa: F401  (isolated_rules is autouse)
+from test_catalog_targets import activate, card, isolated_rules, metadata, run as import_records  # noqa: F401  (isolated_rules is autouse)
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +38,41 @@ def changed_product(number=1):
     record = card(number)
     record['variants_detailed'][0]['pricing']['tcgplayer']['normal']['productId'] = 999
     return record
+
+
+def run(source):
+    """Import changed products through the manual quarantine route, preserving the import's delivery/race points.
+
+    ADR 0025 accepts a changed rule mapping while its matching rule is active. These outbox tests need
+    a contradiction instead: temporarily deactivate the rule, then restore the same activation after import.
+    """
+    changed = [record['id'] for record in source.records.values()
+               if record['variants_detailed'][0]['pricing']['tcgplayer']['normal']['productId'] == 999]
+    if not changed:
+        return import_records(source)
+    with connect() as conn:
+        activation = conn.execute('SELECT activation_id FROM catalog_rule_state WHERE kind=%s', (MATCHING,)).fetchone()
+        targets = [row['edition_id'] for row in conn.execute("""SELECT m.edition_id FROM catalog_edition_metadata m
+          JOIN catalog_edition e ON e.id=m.edition_id JOIN catalog_printing p ON p.id=e.printing_id
+          WHERE p.source_id=ANY(%s) AND e.descriptor->>'type'='normal'
+          AND m.mapping_state='verified' AND m.product_id<>999""", (changed,))]
+        conn.execute('UPDATE catalog_rule_state SET activation_id=NULL WHERE kind=%s', (MATCHING,))
+
+    def assert_quarantined():
+        with connect() as conn:
+            rows = conn.execute('SELECT mapping_state,mapping_reason FROM catalog_edition_metadata WHERE edition_id=ANY(%s)',
+                                (targets,)).fetchall()
+        assert len(rows) == len(targets)
+        assert all((row['mapping_state'], row['mapping_reason']) == ('quarantined', 'candidate_changed') for row in rows)
+
+    try:
+        result = import_records(source)
+        assert_quarantined()
+    finally:
+        with connect() as conn:
+            conn.execute('UPDATE catalog_rule_state SET activation_id=%s WHERE kind=%s', (activation['activation_id'], MATCHING))
+    assert_quarantined()
+    return result
 
 
 def stage():

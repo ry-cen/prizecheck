@@ -459,6 +459,10 @@ async function story(
       await page.goto(trade);
       await page.getByRole("button", { name: "More for this Trade" }).click();
       await page.getByRole("menuitem", { name: "Withdraw" }).click();
+      await page
+        .getByRole("group", { name: "Withdraw", exact: true })
+        .getByRole("button", { name: "Withdraw", exact: true })
+        .click();
       await expect(page.getByRole("group", { name: "Withdraw" })).toHaveCount(
         0
       );

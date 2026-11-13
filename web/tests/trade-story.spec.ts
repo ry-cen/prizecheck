@@ -288,6 +288,7 @@ async function story(
       .getByRole("button", { name: /^Ask Ash K to trade Arven \(SVI 166\)$/ })
       .click();
     await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
+    await expect(heading(page)).toBeFocused();
     await show(page, "Cards");
     await expect(
       page.getByRole("radio", { name: "Their Trade List" })
@@ -336,6 +337,7 @@ async function story(
     // S5. The unambiguous groups prefill the row; remove that draft to test a cash-only proposal refusal.
     await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
     await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
+    await expect(heading(page)).toBeFocused();
     await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
     await show(page, "Proposal");
     await expect(
@@ -438,6 +440,7 @@ async function story(
     );
     await waitingOn(ash.page).click();
     await expect(ash.page).toHaveURL(proposalAddress);
+    await expect(heading(ash.page)).toBeFocused();
     await expect(heading(ash.page)).toHaveText(
       "Misty W would pay $15.00 for 2 cards"
     );
@@ -466,6 +469,7 @@ async function story(
     await ashMain.getByRole("button", { name: "Counter", exact: true }).click();
     await expect(ash.page).toHaveURL(`${proposalAddress}/counter`);
     await expect(heading(ash.page)).toHaveText("Counter to Misty W");
+    await expect(heading(ash.page)).toBeFocused();
     await show(ash.page, "Proposal");
     await expect(
       ash.page.getByRole("radio", { name: "Misty W pays" })
@@ -501,6 +505,7 @@ async function story(
     await expect(toast(ash.page)).toContainText("Counter sent to Misty W");
     await expect(ash.page).toHaveURL(tradeAddress);
     await expect(ash.page).toHaveURL(proposalAddress);
+    await expect(heading(ash.page)).toBeFocused();
     const counterAddress = ash.page.url();
     const counterOffer = await tradeView(ash.page, proposedOffer.thread_id);
     expect(counterOffer.thread_id).toBe(proposedOffer.thread_id);
@@ -592,6 +597,10 @@ async function story(
       `the Confirm swap dialog with a destination and a Deck switch at ${width}`
     );
     await ashDialog.getByRole("button", { name: "Confirm swap" }).click();
+    await ashDialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(toast(ash.page)).toContainText(
       `Swapped. 1 card is in ${ashPlace} Box. ${ashPlace} Deck now uses Iono (PAL 185).`
     );
@@ -633,6 +642,10 @@ async function story(
       `the Confirm swap dialog with a Deck destination at ${width}`
     );
     await dialog.getByRole("button", { name: "Confirm swap" }).click();
+    await dialog
+      .getByRole("group", { name: "Confirm swap", exact: true })
+      .getByRole("button", { name: "Confirm swap", exact: true })
+      .click();
     await expect(toast(page)).toContainText(
       `Swapped. 2 cards are in ${mistyPlace} Deck.`
     );

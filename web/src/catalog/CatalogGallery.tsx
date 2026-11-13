@@ -1,3 +1,6 @@
+import type { CatalogView } from "./catalogUrl";
+import { getCatalogSets } from "../catalog_browse_generated";
+import { useStoredAddQueue } from "./useStoredAddQueue";
 import { useFirstReadSettled } from "../shell/keptRead";
 import {
   useCallback,
@@ -25,21 +28,14 @@ import { variantLabel } from "../ui/variantLabel";
 import { TILE_PRICE } from "../workspace/Gallery";
 import { useDebouncedValue } from "../workspace/useDebouncedValue";
 import { AddBar } from "./AddBar";
-import {
-  bump,
-  EMPTY_QUEUE,
-  editionWords,
-  hasRoom,
-  minus,
-  queueItems,
-  without,
-  type AddQueue,
-} from "./addQueue";
+import { bump, editionWords, hasRoom, queueItems } from "./addQueue";
 import { addCards, type AddCommand } from "./cardActions";
 import { CatalogCardPopup, type CardRequest } from "./CatalogCardPopup";
 import { CatalogFilters } from "./CatalogFilters";
 import {
+  ADD_UNKNOWN,
   batchFailed,
+  BROWSE_FAILED,
   batchAddedText,
   CATALOG_UNAVAILABLE,
   earlierBatchFinished,
@@ -59,6 +55,8 @@ const SCROLL_AHEAD = "0px 0px 800px 0px";
 type Props = {
   /** False while hidden: the Catalog page kept mounted on another tab, or Collection's Add cards closed. */
   active: boolean;
+  view?: CatalogView;
+  onViewChange?: (view: CatalogView) => void;
   /** Add mode (#175): the bar, and a quick + on every tile that becomes a −/N/+ stepper. */
   adding: boolean;
   /** Collection's Add cards from a Location: the Location to add to, shown rather than chosen. Null: the bar's
@@ -98,6 +96,8 @@ type Props = {
  */
 export function CatalogGallery({
   active,
+  view,
+  onViewChange,
   adding,
   fixedTarget,
   undoToast,
@@ -110,19 +110,101 @@ export function CatalogGallery({
   onLinkOpened,
   onReported,
 }: Props) {
-  const [text, setText] = useState("");
+  const [localText, setLocalText] = useState("");
+  const [localFormat, setLocalFormat] = useState<BrowseFormat | null>(null);
+  const [localKind, setLocalKind] = useState<BrowseKind | null>(null);
+  const [set, storeSet] = useState<CatalogSet | null>(null);
+  const [resolvedSet, setResolvedSet] = useState<{
+    id: string;
+    found: CatalogSet | null;
+  } | null>(null);
+  const [failedSet, setFailedSet] = useState<string | null>(null);
+  const [setAttempt, retrySet] = useState(0);
+  const [localOwned, setLocalOwned] = useState(false);
+  const text = view?.q ?? localText;
+  const format = view ? view.format : localFormat;
+  const kind = view ? view.kind : localKind;
+  const owned = view?.owned ?? localOwned;
+  const setId = view ? view.setId : (set?.set_id ?? null);
+  const setText = (q: string) =>
+    view && onViewChange ? onViewChange({ ...view, q }) : setLocalText(q);
+  const setFormat = (format: BrowseFormat | null) =>
+    view && onViewChange
+      ? onViewChange({ ...view, format })
+      : setLocalFormat(format);
+  const setKind = (kind: BrowseKind | null) =>
+    view && onViewChange ? onViewChange({ ...view, kind }) : setLocalKind(kind);
+  const setOwned = (owned: boolean) =>
+    view && onViewChange
+      ? onViewChange({ ...view, owned })
+      : setLocalOwned(owned);
+  const setSet = (set: CatalogSet | null) => {
+    storeSet(set);
+    if (view && set) setResolvedSet({ id: set.set_id, found: set });
+    if (view && onViewChange)
+      onViewChange({ ...view, setId: set?.set_id ?? null });
+  };
+  const setResolved = !view || !setId || resolvedSet?.id === setId;
+  const browseSetId =
+    view && setId
+      ? resolvedSet?.id === setId
+        ? (resolvedSet.found?.set_id ?? null)
+        : null
+      : setId;
+  const viewOwner = useRef({ view, onViewChange });
+  viewOwner.current = { view, onViewChange };
+  useEffect(() => {
+    if (!view) return;
+    if (!setId) {
+      storeSet(null);
+      return;
+    }
+    let live = true;
+    setFailedSet(null);
+    void getCatalogSets()
+      .then((list) => {
+        if (!live) return;
+        if (!list.available) {
+          setFailedSet(setId);
+          return;
+        }
+        const found = list.sets.find((set) => set.set_id === setId) ?? null;
+        storeSet(found);
+        setResolvedSet({ id: setId!, found });
+      })
+      .catch(() => {
+        if (live) setFailedSet(setId);
+      });
+    return () => {
+      live = false;
+    };
+  }, [setId, !!view, setAttempt]);
+  // A validation may finish while the kept page is hidden. Keep its result and
+  // replay URL normalisation on activation instead of discarding it there.
+  useEffect(() => {
+    const current = viewOwner.current;
+    if (
+      active &&
+      setId &&
+      resolvedSet?.id === setId &&
+      !resolvedSet.found &&
+      current.view?.setId === setId
+    )
+      current.onViewChange?.({ ...current.view, setId: null });
+  }, [active, setId, resolvedSet, view]);
   const q = useDebouncedValue(text.trim(), SEARCH_DELAY_MS);
-  const [format, setFormat] = useState<BrowseFormat | null>(null);
-  const [kind, setKind] = useState<BrowseKind | null>(null);
-  const [set, setSet] = useState<CatalogSet | null>(null);
-  const [owned, setOwned] = useState(false);
   const query = useMemo(
-    () => ({ q, format, kind, set_id: set?.set_id ?? null, owned }),
-    [q, format, kind, set, owned]
+    () => ({ q, format, kind, set_id: browseSetId, owned }),
+    [q, format, kind, browseSetId, owned]
   );
   const tiles = useRef<HTMLUListElement>(null);
-  const browse = useCatalogBrowse(query, active, tiles);
+  const browse = useCatalogBrowse(query, active, tiles, setResolved);
   const { loadMore, noteAdded } = browse;
+  const setLookupFailed = !setResolved && failedSet === setId;
+  const searchError = setLookupFailed ? BROWSE_FAILED : browse.error;
+  const retrySearch = setLookupFailed
+    ? () => retrySet((attempt) => attempt + 1)
+    : browse.retry;
   const [card, setCard] = useState<CardRequest | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   // The popup's place among the loaded tiles, found by Edition: the list can be replaced under it (a restart).
@@ -140,16 +222,28 @@ export function CatalogGallery({
 
   // Add mode: where the copies go, the queue, and the last Add N cards.
   const places = usePlaces(active && adding && !fixedTarget);
-  const [chosen, setChosen] = useState<string | null>(null);
-  // The bar's choice while it still exists, else Unsorted (the Location every collector has), else the first.
+  // AddCardsGallery mounts this gallery for each opening. Capture that opening's destination:
+  // a later fallback to the picker keeps its queue, while opening another Location gets its own.
+  const [queueScope] = useState(() =>
+    stick === "dialog" ? `dialog:${fixedTarget?.id ?? "picker"}` : "page"
+  );
+  const stored = useStoredAddQueue(queueScope);
+  const { queue, setQueue, chosen, setChosen } = stored;
+  // Keep an uncertain command at its original Location, even if that Location is gone.
+  // Otherwise use the chosen Location, Unsorted, or the first available leaf.
   const picked =
     places.leaves.find((leaf) => leaf.id === chosen) ??
+    (stored.pending.current && chosen === stored.pending.current.locationId
+      ? {
+          id: stored.pending.current.locationId,
+          label: stored.pending.current.path,
+        }
+      : null) ??
     places.leaves.find((leaf) => leaf.label === "Unsorted") ??
     places.leaves[0] ??
     null;
   const target = fixedTarget ?? picked;
-  const [queue, setQueue] = useState<AddQueue>(EMPTY_QUEUE);
-  // The queue lives only on this page: the browser's own warning on reload or close while cards wait in it.
+  // Closing the tab still loses its sessionStorage, so keep the browser warning.
   const queued = queue.size > 0;
   useEffect(() => {
     if (!queued) return;
@@ -163,7 +257,7 @@ export function CatalogGallery({
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [failure, setFailure] = useState("");
-  const pendingAdd = useRef<AddCommand | null>(null);
+  const pendingAdd = stored.pending;
   // What the last Add found: an earlier add that may have completed was settled (#196), or "".
   const [settledAdd, setSettledAdd] = useState<{
     copies: number | string;
@@ -395,29 +489,43 @@ export function CatalogGallery({
   }, [targetId]);
 
   function queueChange(edition: BrowseEdition, by: 1 | -1) {
-    if (busyRef.current) return;
+    if (busyRef.current || !stored.ready) return;
     setFailure("");
     setSettledAdd(null);
+    if (target) setChosen(target.id);
     setQueue((current) => bump(current, edition, by));
   }
 
   async function addAll() {
-    if (busyRef.current || !target || queue.size === 0) return;
+    if (
+      busyRef.current ||
+      !stored.ready ||
+      stored.blocked ||
+      !target ||
+      queue.size === 0
+    )
+      return;
     busyRef.current = true;
     setBusy(true);
     setFailure("");
     setSettledAdd(null);
     const items = queueItems(queue);
-    const outcome = await addCards(target.id, target.label, items, pendingAdd);
+    const outcome = await addCards(
+      target.id,
+      target.label,
+      items,
+      pendingAdd,
+      stored.submitting
+    );
+    stored.settle(outcome);
     busyRef.current = false;
     setBusy(false);
     if (outcome.ok) {
       // A batch that may have completed earlier is settled first (#196): only its copies leave the queue, and the rest
       // stay for the collector to review before the next press.
       if (outcome.settledEarlier) {
-        setQueue((current) => minus(current, outcome.items));
         setSettledAdd({ copies: outcome.copies, path: outcome.path });
-      } else setQueue(EMPTY_QUEUE);
+      }
       added({
         locationId: outcome.locationId,
         path: outcome.path,
@@ -439,24 +547,37 @@ export function CatalogGallery({
         refused ? editionWords(refused) : null
       )
     );
-    // A card no longer available can't be added: it leaves the queue, so the rest can go.
-    if (outcome.code === "EDITION_UNAVAILABLE" && outcome.editionId)
-      setQueue((current) => without(current, outcome.editionId!));
     if (outcome.code === "LOCATION_NOT_FOUND") {
       places.reload();
       onTargetGone?.();
     }
   }
 
-  useFirstReadSettled(browse.first !== null || !!browse.error);
+  useFirstReadSettled(browse.first !== null || !!searchError);
   const first = browse.first;
   const unavailable = first !== null && !first.available;
   return (
     <div ref={galleryRoot} className="flex min-w-0 flex-col gap-4">
+      {stored.restoreFailed && (
+        <div role="alert" className="flex flex-wrap items-center gap-2">
+          <p className="m-0 text-meta">{stored.notice}</p>
+          <Button onClick={stored.clear}>Discard queue</Button>
+        </div>
+      )}
+      {stored.uncertain && (
+        <div role="status" className="flex flex-wrap items-center gap-2">
+          <p className="m-0 text-meta">{ADD_UNKNOWN}</p>
+          <Button onClick={stored.dismiss}>Dismiss</Button>
+        </div>
+      )}
       {adding && (
         <AddBar
           fixed={fixedTarget}
-          options={places.leaves}
+          options={
+            picked && !places.leaves.some((leaf) => leaf.id === picked.id)
+              ? [picked, ...places.leaves]
+              : places.leaves
+          }
           targetId={picked?.id ?? null}
           onTarget={setChosen}
           optionsText={
@@ -467,15 +588,25 @@ export function CatalogGallery({
                 : "Loading Locations…"
           }
           queue={queue}
-          ready={target !== null}
+          ready={target !== null && stored.ready && !stored.blocked}
           busy={busy}
-          failure={failure}
+          failure={
+            failure ||
+            (stored.blocked
+              ? batchFailed("REPLAY_OUTCOME_UNAVAILABLE", false, null)
+              : !busy && pendingAdd.current
+                ? batchFailed("", true, null)
+                : "")
+          }
           settled={settled}
-          note={hasRoom(queue) ? "" : QUEUE_FULL}
+          note={
+            (!stored.restoreFailed && stored.notice) ||
+            (hasRoom(queue) ? "" : QUEUE_FULL)
+          }
           onClear={() => {
             setFailure("");
             setSettledAdd(null);
-            setQueue(EMPTY_QUEUE);
+            stored.clear();
           }}
           onAdd={() => void addAll()}
           stick={stick}
@@ -492,7 +623,11 @@ export function CatalogGallery({
           onChange={(event) => setText(event.target.value)}
         />
         <p id={hintId} className="m-0 text-meta text-text-muted">
-          {searchHint(first?.search ?? null)}
+          {searchHint(
+            searchError || browse.loading || text.trim() !== q
+              ? null
+              : (first?.search ?? null)
+          )}
         </p>
       </div>
       <CatalogFilters
@@ -500,7 +635,9 @@ export function CatalogGallery({
         onFormat={setFormat}
         kind={kind}
         onKind={setKind}
-        set={set}
+        set={
+          view ? (resolvedSet?.id === setId ? resolvedSet.found : null) : set
+        }
         onSet={setSet}
         owned={owned}
         onOwned={setOwned}
@@ -523,21 +660,21 @@ export function CatalogGallery({
           {/* No Printing count here: the results line under it already says how many cards match. */}
           {unavailable
             ? CATALOG_UNAVAILABLE
-            : !first && browse.loading
+            : !first && browse.loading && !setLookupFailed
               ? "Loading the catalog…"
               : ""}
         </p>
       </div>
-      {browse.error && !browse.errorMore && (
+      {searchError && !browse.errorMore && (
         <div
           role="alert"
           className="flex flex-wrap items-center gap-3 text-body text-danger"
         >
-          <p className="m-0">{browse.error}</p>
-          <Button onClick={browse.retry}>Retry</Button>
+          <p className="m-0">{searchError}</p>
+          <Button onClick={retrySearch}>Retry</Button>
         </div>
       )}
-      {first?.available && (
+      {first?.available && (!searchError || browse.errorMore) && (
         <section aria-label="Catalog results" className="flex flex-col gap-3">
           <p className="m-0 text-meta text-text-subtle">
             {browse.editions.length === 0
@@ -694,10 +831,9 @@ function CatalogTile({
   );
 }
 
-// 26 px on desktop; 36 px on a phone, where a square pseudo-element widens the tap area to 44 px (a rounded one would
-// leave its corners out of the tap area).
+// Preserve the compact desktop control; phone controls have a full 44 px hit area.
 const QUICK =
-  "relative m-0 box-border inline-flex size-quick shrink-0 cursor-pointer items-center justify-center rounded-round border-0 p-0 font-sans disabled:cursor-default disabled:opacity-45 phone:size-quick-phone phone:before:absolute phone:before:-inset-1";
+  "relative m-0 box-border inline-flex size-quick shrink-0 cursor-pointer items-center justify-center rounded-round border-0 p-0 font-sans disabled:cursor-default disabled:opacity-45 phone:size-11";
 
 /**
  * A tile's quick add (#175): a + over the art's lower right corner that becomes − N + once the card is queued. It is

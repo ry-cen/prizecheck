@@ -149,6 +149,25 @@ test.describe("public header", () => {
             if (!focused || focused === document.body) return null;
             if (header.contains(focused)) return null;
             const box = focused.getBoundingClientRect();
+            // Like the signed-in shell (issue-495-reachability.spec.ts:330), the top skip link
+            // overlays the header. It must still be wholly visible and above everything beneath it.
+            if (
+              focused.matches('a[href="#main-content"]') &&
+              focused.textContent?.trim() === "Skip to main content"
+            ) {
+              const inside =
+                box.top >= 0 &&
+                box.left >= 0 &&
+                box.bottom <= innerHeight &&
+                box.right <= innerWidth;
+              const topmost = document.elementFromPoint(
+                box.x + box.width / 2,
+                box.y + box.height / 2
+              );
+              return inside && topmost !== null && focused.contains(topmost)
+                ? null
+                : "Skip to main content is clipped or covered";
+            }
             const edge = header.getBoundingClientRect().bottom;
             const shown =
               box.top >= edge - 0.5 && box.bottom <= window.innerHeight + 0.5;

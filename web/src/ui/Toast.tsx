@@ -37,6 +37,8 @@ export type ToastInput = {
 };
 
 type ToastApi = {
+  /** Monotonic show version, including notifications not yet rendered or already dismissed. */
+  getVersion: () => number;
   /** Shows the toast, replacing the one on screen, and returns its id. */
   show: (toast: ToastInput) => number;
   /** Changes the toast with this id in place, without moving focus. Does nothing once it was replaced. */
@@ -110,6 +112,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const firstButton = () =>
       host.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
     return {
+      getVersion: () => next.current,
       show: (input) => {
         const id = ++next.current;
         const focus =
@@ -166,6 +169,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </LiftContext.Provider>
       <section
         ref={host}
+        id="app-toasts"
         aria-label="Notifications"
         aria-live="polite"
         style={{ "--toast-lift": `${lift}px` } as CSSProperties}

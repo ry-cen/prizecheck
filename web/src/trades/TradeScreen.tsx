@@ -91,17 +91,17 @@ const RELOAD = new Set([
 ]);
 
 /** A step the screen runs; its idempotency key is kept under this name until it settles. */
-type StepName = Asking | "withdraw" | "accept" | "use_suggested" | "confirm";
+type StepName = Asking | "accept" | "use_suggested" | "confirm";
 
 /** A place the confirm dialog offers for the cards the reader gets: one of their Storage Leaves or Decks, by full
  * path, a Deck marked " (Deck)". */
 type SwapPlace = { id: string; path: string; label: string };
 
-/** Cancel and Decline ask once inline; Withdraw acts directly. */
-type Asking = "cancel" | "decline";
+/** Cancel, Decline and Withdraw ask once inline. */
+type Asking = "cancel" | "decline" | "withdraw";
 
 /** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
- * it asks, its opener after Keep it (Decline, or ⋯ for Cancel Trade), and the heading after a step or a
+ * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Trade), and the heading after a step or a
  * refusal that reads the Trade again. */
 type FocusNext = "ask" | "menu" | "decline" | "heading";
 
@@ -114,6 +114,11 @@ const ASK: Record<
       `Decline this Trade Proposal from ${other}? You can't undo it.`,
     yes: "Decline",
   },
+  withdraw: {
+    question: (other) =>
+      `Withdraw this Trade Proposal to ${other}? None of these cards stay promised.`,
+    yes: "Withdraw",
+  },
   cancel: {
     question: (other) =>
       `Cancel this Trade with ${other}? None of these cards stay promised.`,
@@ -122,7 +127,7 @@ const ASK: Record<
 };
 
 /** What each step's toast says once it went through. Confirm swap's names where the cards went (swapDoneMessage). */
-const DONE: Record<Asking | "withdraw" | "accept" | "use_suggested", string> = {
+const DONE: Record<Asking | "accept" | "use_suggested", string> = {
   accept: "Accepted. Swap the cards in person, then confirm.",
   use_suggested: "Picks updated",
   decline: "Declined",
@@ -131,7 +136,7 @@ const DONE: Record<Asking | "withdraw" | "accept" | "use_suggested", string> = {
 };
 
 /** The live item offer, its actions and inline physical-swap consent, beside its chat on wide screens.
- * Withdraw acts directly; Decline and Cancel ask once inline. Unknown commands retain their exact consent and key.
+ * Withdraw, Decline and Cancel ask once inline. Unknown commands retain their exact consent and key.
  * Picks, destinations and selected Deck switches come only from the reader's own inventory. */
 export function TradeScreen({
   tradeId,
@@ -168,6 +173,19 @@ export function TradeScreen({
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState<Asking | null>(null);
   // Inline physical-swap consent and the destination for incoming copies ("" for Unsorted).
+  const [swapAsked, setSwapAsked] = useState(false);
+  const swapYes = useRef<HTMLButtonElement>(null);
+  const swapPosting = useRef(false);
+  const swapReturnFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (swapReturnFocus.current && !swapAsked) {
+      swapReturnFocus.current = false;
+      confirmButton.current?.focus();
+    }
+  });
+  useLayoutEffect(() => {
+    if (swapAsked) swapYes.current?.focus();
+  }, [swapAsked]);
   const [confirming, setConfirming] = useState(false);
   const [destination, setDestination] = useState("");
   const [dialogMessage, setDialogMessage] = useState("");
@@ -239,6 +257,7 @@ export function TradeScreen({
           reloading.current = false;
           focusNext.current = "heading";
           setAsking(null);
+          setSwapAsked(false);
           setConfirming(false);
         }
         if (openedFromInbox(tradeId) || focusInitialHeading.current) {
@@ -396,7 +415,12 @@ export function TradeScreen({
     >
       {back}
       <div className="[&>div]:mb-0 [&>div]:flex-nowrap [&>div]:items-start [&_h1]:min-w-0 [&_h1]:flex-1 phone:[&>div>div]:basis-auto">
-        <PageHeader title={title} actions={actions} headingRef={heading} />
+        <PageHeader
+          loading={load.kind === "loading"}
+          title={title}
+          actions={actions}
+          headingRef={heading}
+        />
       </div>
       {children}
       {dialog}
@@ -480,6 +504,7 @@ export function TradeScreen({
       const nextSide = await getTradeSide(trade.thread_id).catch(() => side);
       focusNext.current = "heading";
       setAsking(null);
+      setSwapAsked(false);
       setConfirming(false);
       setLoad({ kind: "ready", trade: next, side: nextSide });
       if (announce) announce(next, done(next));
@@ -510,6 +535,7 @@ export function TradeScreen({
         if (code === "DECK_SWITCH_CHANGED") switches.reload();
       } else setMessage(text);
     } finally {
+      if (action === "confirm") swapPosting.current = false;
       setBusy(false);
     }
   }
@@ -542,13 +568,14 @@ export function TradeScreen({
       ? snapshot.sent.some((item) => sameSwitch(item, offer))
       : switches.ticked(offer);
   function runConfirm() {
-    if (busy) return;
+    if (busy || swapPosting.current) return;
     if (!snapshot && gets && switches.state !== "ready") return;
     if (!snapshot)
       held.current = {
         offers: switches.offers,
         sent: switches.offers.filter(switches.ticked),
       };
+    swapPosting.current = true;
     const sent = (snapshot ?? held.current)?.sent ?? [];
     const answered: { current: ConfirmedSwap | null } = { current: null };
     void step(
@@ -631,7 +658,7 @@ export function TradeScreen({
         ]
       : []),
     ...(trade.actions.includes("withdraw")
-      ? [{ label: "Withdraw", onSelect: () => run.withdraw() }]
+      ? [{ label: "Withdraw", onSelect: () => ask("withdraw") }]
       : []),
     ...(trade.actions.includes("cancel")
       ? [{ label: "Cancel Trade", onSelect: () => ask("cancel") }]
@@ -786,6 +813,14 @@ export function TradeScreen({
         <div
           role="group"
           aria-label={ASK[asking].yes}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (busy) return;
+            focusNext.current = asking === "decline" ? "decline" : "menu";
+            setAsking(null);
+          }}
           className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
         >
           <p className="m-0 min-w-0 flex-1 text-body">
@@ -800,7 +835,9 @@ export function TradeScreen({
             {ASK[asking].yes}
           </Button>
           <Button
+            aria-disabled={busy || undefined}
             onClick={() => {
+              if (busy) return;
               focusNext.current = asking === "decline" ? "decline" : "menu";
               setAsking(null);
             }}
@@ -919,7 +956,46 @@ export function TradeScreen({
           <p role="alert" className="m-0 text-meta text-danger empty:hidden">
             {dialogMessage}
           </p>
-          <div className="flex flex-wrap justify-end gap-2">
+          {swapAsked && (
+            <div
+              role="group"
+              aria-label="Confirm swap"
+              className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (busy || swapPosting.current) return;
+                swapReturnFocus.current = true;
+                setSwapAsked(false);
+              }}
+            >
+              <p className="m-0 min-w-0 flex-1 text-body">
+                Confirm the swap with {name}? You can't undo it.
+              </p>
+              <Button
+                ref={swapYes}
+                variant="primary"
+                aria-disabled={busy || undefined}
+                onClick={runConfirm}
+              >
+                Confirm swap
+              </Button>
+              <Button
+                aria-disabled={busy || undefined}
+                onClick={() => {
+                  if (busy || swapPosting.current) return;
+                  swapReturnFocus.current = true;
+                  setSwapAsked(false);
+                }}
+              >
+                Not yet
+              </Button>
+            </div>
+          )}
+          <div
+            className={`${swapAsked ? "hidden" : "flex"} flex-wrap justify-end gap-2`}
+          >
             <Button
               ref={confirmButton}
               variant="primary"
@@ -928,7 +1004,11 @@ export function TradeScreen({
                 (!snapshot && gets && switches.state !== "ready") ||
                 undefined
               }
-              onClick={runConfirm}
+              onClick={() => {
+                if (busy || (!snapshot && gets && switches.state !== "ready"))
+                  return;
+                setSwapAsked(true);
+              }}
             >
               Confirm swap
             </Button>

@@ -2,21 +2,43 @@
 import { act, createElement as h, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { AddQueueAccount } from "./useStoredAddQueue";
+import { useCatalogBrowse } from "./useCatalogBrowse";
 import { CatalogGallery } from "./CatalogGallery";
 import type { CatalogCardPopup } from "./CatalogCardPopup";
 import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
 import { applyUndo, listUndo } from "../inventoryUndo";
 import { ToastProvider } from "../ui/Toast";
+import { getCatalogSets } from "../catalog_browse_generated";
+import { parseCatalogView } from "./catalogUrl";
 import type { BrowseEdition } from "../catalog_browse_generated";
 
+vi.mock("../catalog_browse_generated", async (original) => ({
+  ...(await original<typeof import("../catalog_browse_generated")>()),
+  getCatalogSets: vi.fn(async () => ({
+    available: true,
+    catalog_revision: 1,
+    sets: [],
+  })),
+}));
 vi.mock("../inventoryUndo", () => ({ applyUndo: vi.fn(), listUndo: vi.fn() }));
 vi.mock("../shell/keptRead", () => ({ useFirstReadSettled: () => {} }));
 vi.mock("./CatalogFilters", () => ({ CatalogFilters: () => null }));
-vi.mock("./AddBar", () => ({ AddBar: () => null }));
+vi.mock("./AddBar", () => ({
+  AddBar: (props: { queue: ReadonlyMap<string, unknown>; onAdd: () => void }) =>
+    h(
+      "div",
+      null,
+      h("output", { "data-queue": true }, props.queue.size),
+      h("button", { onClick: props.onAdd }, "Add queued")
+    ),
+}));
 vi.mock("./usePlaces", () => ({
   usePlaces: () => ({ leaves: [], state: "ready" }),
 }));
-vi.mock("./useCatalogBrowse", () => ({ useCatalogBrowse: () => browse }));
+vi.mock("./useCatalogBrowse", () => ({
+  useCatalogBrowse: vi.fn(() => browse),
+}));
 vi.mock("./CatalogCardPopup", () => ({
   // Keep Gallery's real close/step callbacks. The popup's local feedback resets on a card step, as AddRows does.
   CatalogCardPopup: (props: Parameters<typeof CatalogCardPopup>[0]) => {
@@ -227,4 +249,432 @@ test("a retry after step and close keeps the original Undo idempotency key", asy
   expect(vi.mocked(applyUndo).mock.calls[0]).toEqual(
     vi.mocked(applyUndo).mock.calls[1]
   );
+});
+
+test("dialog queue survives its fixed Location falling back to the picker", async () => {
+  async function render(fixedTarget: { id: string; label: string } | null) {
+    await act(async () =>
+      root.render(
+        h(
+          ToastProvider,
+          null,
+          h(
+            AddQueueAccount.Provider,
+            { value: "fallback-owner" },
+            h(CatalogGallery, {
+              active: true,
+              adding: true,
+              fixedTarget,
+              undoToast: false,
+              stick: "dialog",
+            })
+          )
+        )
+      )
+    );
+  }
+  await render({ id: "box", label: "Box" });
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('button[aria-label^="One more first"]')!
+      .click()
+  );
+  expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+  await render(null);
+  expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+});
+test("failed restoration exposes a discard action even with no rendered queue", async () => {
+  sessionStorage.setItem(
+    "prizecheck:add-queue:failed-owner:page",
+    JSON.stringify({
+      items: [{ editionId: "first", printingId: "first", quantity: 1 }],
+      target: null,
+      uncertain: false,
+    })
+  );
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockRejectedValue(Error("offline"));
+  try {
+    await act(async () =>
+      root.render(
+        h(
+          ToastProvider,
+          null,
+          h(
+            AddQueueAccount.Provider,
+            { value: "failed-owner" },
+            h(CatalogGallery, {
+              active: true,
+              adding: true,
+              fixedTarget: null,
+              undoToast: false,
+              stick: "page",
+            })
+          )
+        )
+      )
+    );
+    const discard = button("Discard queue");
+    expect(discard).toBeDefined();
+    expect(discard!.disabled).toBe(false);
+    await act(async () => discard!.click());
+    expect(
+      sessionStorage.getItem("prizecheck:add-queue:failed-owner:page")
+    ).toBe(null);
+    expect(host.textContent).not.toContain("Couldn't restore");
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="One more first"]'
+        )!
+        .click()
+    );
+    expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+  } finally {
+    fetch.mockRestore();
+  }
+});
+
+test.each([
+  { destination: "a", expected: "1" },
+  { destination: "b", expected: "0" },
+])(
+  "closing A then opening $destination restores only that Location's queue",
+  async ({ destination, expected }) => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const data = String(input).includes("location-tree")
+          ? { locations: [{ id: "a", kind: "storage_leaf" }] }
+          : { available: true, editions, next_cursor: null };
+        return new Response(JSON.stringify(data), { status: 200 });
+      });
+    async function opening(id: string | null) {
+      await act(async () =>
+        root.render(
+          h(
+            ToastProvider,
+            null,
+            h(
+              AddQueueAccount.Provider,
+              { value: "opening-owner" },
+              id === null
+                ? null
+                : h(CatalogGallery, {
+                    active: true,
+                    adding: true,
+                    fixedTarget: { id, label: id },
+                    undoToast: false,
+                    stick: "dialog",
+                  })
+            )
+          )
+        )
+      );
+    }
+    try {
+      await opening("a");
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label^="One more first"]'
+          )!
+          .click()
+      );
+      expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+      await opening(null);
+      await opening(destination);
+      expect(host.querySelector("[data-queue]")?.textContent).toBe(expected);
+      await opening(null);
+      await opening("a");
+      expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+    } finally {
+      fetch.mockRestore();
+    }
+  }
+);
+
+test.each([
+  ["G1", "QUANTITY_OVERFLOW", false],
+  ["G2", "EDITION_UNAVAILABLE", true],
+] as const)(
+  "%s refused add preserves remaining cards across remount (%s)",
+  async (_id, code, two) => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("holdings/batch"))
+          return new Response(
+            JSON.stringify({ detail: { code, edition_id: "first" } }),
+            { status: 422 }
+          );
+        if (url.includes("location-tree"))
+          return new Response(
+            JSON.stringify({
+              locations: [{ id: "box", kind: "storage_leaf" }],
+              owner_revision: 1,
+              lent_copies: "0",
+              borrowed_copies: "0",
+            })
+          );
+        return new Response(
+          JSON.stringify({ available: true, editions, next_cursor: null })
+        );
+      });
+    async function render() {
+      await act(async () =>
+        root.render(
+          h(
+            ToastProvider,
+            null,
+            h(
+              AddQueueAccount.Provider,
+              { value: "refusal-owner" },
+              h(CatalogGallery, {
+                active: true,
+                adding: true,
+                fixedTarget: { id: "box", label: "Box" },
+                undoToast: false,
+                stick: "dialog",
+              })
+            )
+          )
+        )
+      );
+    }
+    try {
+      await render();
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label^="One more first"]'
+          )!
+          .click()
+      );
+      if (two)
+        await act(async () =>
+          host
+            .querySelector<HTMLButtonElement>(
+              'button[aria-label^="One more second"]'
+            )!
+            .click()
+        );
+      await act(async () => button("Add queued")!.click());
+      expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+      await act(async () => root.render(null));
+      await render();
+      expect(host.querySelector("[data-queue]")?.textContent).toBe("1");
+    } finally {
+      fetch.mockRestore();
+    }
+  }
+);
+
+test("unknown set becomes Any set once the catalog set list is known", async () => {
+  const onViewChange = vi.fn();
+  await act(async () =>
+    root.render(
+      h(
+        ToastProvider,
+        null,
+        h(CatalogGallery, {
+          active: true,
+          adding: false,
+          fixedTarget: null,
+          undoToast: false,
+          stick: "page",
+          view: parseCatalogView("/catalog?set=unknown"),
+          onViewChange,
+        })
+      )
+    )
+  );
+  expect(getCatalogSets).toHaveBeenCalled();
+  expect(onViewChange).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null })
+  );
+});
+
+test.each([false, true])(
+  "delayed unknown set never browses unresolved and normalises after activation (hidden=%s)",
+  async (hidden) => {
+    let resolve!: (list: Awaited<ReturnType<typeof getCatalogSets>>) => void;
+    vi.mocked(getCatalogSets).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    const onViewChange = vi.fn();
+    const render = async (active: boolean) =>
+      act(async () =>
+        root.render(
+          h(
+            ToastProvider,
+            null,
+            h(CatalogGallery, {
+              active,
+              adding: false,
+              fixedTarget: null,
+              undoToast: false,
+              stick: "page",
+              view: parseCatalogView("/catalog?set=unknown"),
+              onViewChange,
+            })
+          )
+        )
+      );
+    await render(true);
+    const last = vi.mocked(useCatalogBrowse).mock.calls.at(-1)!;
+    expect(last[3]).toBe(false);
+    if (hidden) await render(false);
+    await act(async () =>
+      resolve({ available: true, catalog_revision: 1, sets: [] })
+    );
+    if (hidden) {
+      expect(onViewChange).not.toHaveBeenCalled();
+      await render(true);
+    }
+    expect(onViewChange).toHaveBeenCalledWith(
+      expect.objectContaining({ setId: null })
+    );
+    const final = vi.mocked(useCatalogBrowse).mock.calls.at(-1)!;
+    expect(final[0]).toMatchObject({ set_id: null });
+    expect(final[3]).toBe(true);
+  }
+);
+
+test("unknown set resolved while hidden is replayed on activation", async () => {
+  let resolve!: (list: Awaited<ReturnType<typeof getCatalogSets>>) => void;
+  vi.mocked(getCatalogSets).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  const applied = vi.fn();
+  let active = true;
+  const onViewChange = (view: unknown) => {
+    if (active) applied(view);
+  };
+  const render = async () =>
+    act(async () =>
+      root.render(
+        h(
+          ToastProvider,
+          null,
+          h(CatalogGallery, {
+            active,
+            adding: false,
+            fixedTarget: null,
+            undoToast: false,
+            stick: "page",
+            view: parseCatalogView("/catalog?set=unknown"),
+            onViewChange,
+          })
+        )
+      )
+    );
+  await render();
+  active = false;
+  await render();
+  await act(async () =>
+    resolve({ available: true, catalog_revision: 1, sets: [] })
+  );
+  active = true;
+  await render();
+  expect(applied).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null })
+  );
+});
+
+test("set-list lookup failure can be retried without browsing an unresolved filter", async () => {
+  vi.mocked(getCatalogSets).mockRejectedValueOnce(new Error("offline"));
+  const onViewChange = vi.fn();
+  await act(async () =>
+    root.render(
+      h(
+        ToastProvider,
+        null,
+        h(CatalogGallery, {
+          active: true,
+          adding: false,
+          fixedTarget: null,
+          undoToast: false,
+          stick: "page",
+          view: parseCatalogView("/catalog?set=unknown"),
+          onViewChange,
+        })
+      )
+    )
+  );
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    "Catalog search is temporarily unavailable."
+  );
+  expect(vi.mocked(useCatalogBrowse).mock.calls.at(-1)![3]).toBe(false);
+  await act(async () => button("Retry")!.click());
+  expect(onViewChange).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null })
+  );
+});
+
+test("pending set normalisation keeps a concurrently normalised Add mode", async () => {
+  const onViewChange = vi.fn();
+  const render = async (address: string) =>
+    act(async () =>
+      root.render(
+        h(
+          ToastProvider,
+          null,
+          h(CatalogGallery, {
+            active: true,
+            adding: true,
+            fixedTarget: null,
+            undoToast: false,
+            stick: "page",
+            view: parseCatalogView(address),
+            onViewChange,
+          })
+        )
+      )
+    );
+  await render("/catalog?set=unknown");
+  onViewChange.mockClear();
+  await render("/catalog?set=unknown&mode=add");
+  expect(onViewChange).toHaveBeenCalledWith(
+    expect.objectContaining({ setId: null, mode: "add" })
+  );
+});
+
+test("a failed search hides the previous empty result and its query description", async () => {
+  vi.mocked(useCatalogBrowse).mockReturnValue({
+    ...browse,
+    first: {
+      ...browse.first,
+      search: { mode: "name", text: "no-card-review-xyz" },
+    },
+    editions: [],
+    error: "Catalog search is temporarily unavailable. Please retry.",
+  } as unknown as ReturnType<typeof useCatalogBrowse>);
+  await act(async () =>
+    root.render(
+      h(
+        ToastProvider,
+        null,
+        h(CatalogGallery, {
+          active: true,
+          adding: false,
+          fixedTarget: null,
+          undoToast: false,
+          stick: "page",
+          view: parseCatalogView("/catalog?q=Pikachu"),
+        })
+      )
+    )
+  );
+  expect(host.textContent).toContain(
+    "Catalog search is temporarily unavailable"
+  );
+  expect(host.textContent).not.toContain("No cards match this search.");
+  expect(host.textContent).not.toContain("no-card-review-xyz");
 });

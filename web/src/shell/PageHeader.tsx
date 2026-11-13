@@ -2,6 +2,8 @@ import type { ReactNode, Ref } from "react";
 
 type Props = {
   title: string;
+  /** The title stands in while the page's data loads; page-entry focus waits for the real one (restorePageFocus). */
+  loading?: boolean;
   /** The h1, for a page that moves focus to it (it then takes focus by script only: tabIndex -1). */
   headingRef?: Ref<HTMLHeadingElement>;
   /** The page's actions, on the right (under the title, left-aligned, on a phone): Add cards, Publish and the like. */
@@ -16,6 +18,7 @@ type Props = {
  * right. Pages on the kit use it; old pages keep their own heading until their redesign ticket. */
 export function PageHeader({
   title,
+  loading,
   actions,
   headingRef,
   titleAction,
@@ -24,6 +27,7 @@ export function PageHeader({
   const heading = (
     <h1
       ref={headingRef}
+      data-page-heading={loading ? "loading" : undefined}
       tabIndex={headingRef ? -1 : undefined}
       className={titleEditor ? "sr-only" : "m-0 text-display font-semibold"}
     >

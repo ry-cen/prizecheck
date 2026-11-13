@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
@@ -103,6 +104,31 @@ promote({'card-1': 'Pikachu'})`,
     await expect(
       publicPage.getByRole("heading", { name: "Friends & rivals", exact: true })
     ).toBeVisible();
+    for (const viewport of [
+      { width: 1280, height: 800 },
+      { width: 375, height: 812 },
+    ]) {
+      await publicPage.setViewportSize(viewport);
+      await publicPage.reload();
+      const heading = publicPage.getByRole("heading", {
+        name: "Friends & rivals",
+        exact: true,
+      });
+      await expect(heading).toBeVisible();
+      await publicPage.keyboard.press("Tab");
+      await expect(
+        publicPage.getByRole("link", { name: "Skip to main content" })
+      ).toBeFocused();
+      await publicPage.keyboard.press("Enter");
+      await expect(heading).toBeFocused();
+      expect(
+        (
+          await new AxeBuilder({ page: publicPage })
+            .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+            .analyze()
+        ).violations
+      ).toEqual([]);
+    }
     await expect(publicPage.getByRole("main")).toContainText("59 cards");
     await expect(publicPage.getByRole("main")).not.toContainText(privateName);
     await expect(publicPage.getByLabel("Email")).toHaveCount(0);

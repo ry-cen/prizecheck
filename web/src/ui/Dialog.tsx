@@ -54,6 +54,25 @@ const WIDE =
 const CARD =
   "inset-0 m-auto h-fit max-h-[min(860px,calc(100dvh-var(--space-8)-var(--space-8)))] w-[min(760px,calc(100vw-var(--space-6)-var(--space-6)))] max-w-none rounded-dialog border border-border-strong phone:inset-x-0 phone:top-[100dvh] phone:bottom-auto phone:m-0 phone:-translate-y-full phone:max-h-[92dvh] phone:w-full phone:rounded-b-none phone:border-x-0 phone:border-b-0";
 
+// Modal siblings can close in either order (Back or a breakpoint can remove the lower sheet).
+// Capture the original overflow once, and restore it only after the last modal releases its lock.
+const scrollLocks = new Map<HTMLElement, { count: number; overflow: string }>();
+function lockScroll(body: HTMLElement) {
+  let lock = scrollLocks.get(body);
+  if (!lock) {
+    lock = { count: 0, overflow: body.style.overflow };
+    scrollLocks.set(body, lock);
+  }
+  lock.count += 1;
+  body.style.overflow = "hidden";
+  return () => {
+    if (--lock.count === 0) {
+      body.style.overflow = lock.overflow;
+      scrollLocks.delete(body);
+    }
+  };
+}
+
 /**
  * The kit's one dialog, on the native <dialog> element (ADR 0012). It opens with showModal(), so the
  * rest of the page is inert and the scrim is the ::backdrop. It moves focus to its first control, or to
@@ -96,10 +115,9 @@ export function Dialog({
       dialog;
     first.focus();
     // The page behind a modal doesn't scroll.
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockScroll(dialog.ownerDocument.body);
     return () => {
-      document.body.style.overflow = overflow;
+      unlockScroll();
       if (dialog.open) dialog.close();
       if (returnTo?.isConnected && returnTo.getClientRects().length)
         returnTo.focus({ preventScroll: true });

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { act, createElement as h } from "react";
+import { act, createElement as h, useLayoutEffect, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   SocialError,
   getTrade,
+  getFriendTradeList,
   getTraderMatch,
   getTraderTradeList,
   type TradeView,
@@ -12,11 +13,19 @@ import {
 import { TradesError, counterTrade, getTradeList } from "../trades_generated";
 import { ToastProvider } from "../ui/Toast";
 import { peekProposalSeed } from "./openProposal";
+import {
+  createPageEntryFocus,
+  restorePageFocus,
+} from "../shell/restorePageFocus";
+import { RESTORE_WINDOW_MS } from "../shell/restorePageScroll";
+import { useRoute, type Route } from "../shell/useRoute";
+import { ProposalRedirect } from "./ProposalRedirect";
 import { CounterPage } from "./CounterPage";
 import { ProposalBuilderPage } from "./ProposalBuilderPage";
 vi.mock("../social_generated", async (original) => ({
   ...(await original<typeof import("../social_generated")>()),
   getTrade: vi.fn(),
+  getFriendTradeList: vi.fn(),
   getTraderMatch: vi.fn(),
   getTraderTradeList: vi.fn(),
 }));
@@ -839,4 +848,167 @@ it("keeps the Reverse Holo re-add actionable after removing its last selected co
     button("Decrease Arven (SVI 166, Reverse Holo) you get").disabled
   ).toBe(false);
   expect(counterTrade).not.toHaveBeenCalled();
+});
+
+for (const interacted of [false, true])
+  it(`keeps Counter entry focus through loading to the real builder (interaction: ${interacted})`, async () => {
+    let resolve!: (trade: TradeView) => void;
+    vi.mocked(getTrade).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    await mount(true);
+    const loading = host.querySelector("h1")!;
+    expect(loading.textContent).toBe("Counter");
+    const stop = restorePageFocus(host, createPageEntryFocus());
+    try {
+      expect(loading.getAttribute("data-page-heading")).toBe("loading");
+      expect(document.activeElement).toBe(document.body);
+      if (interacted) window.dispatchEvent(new Event("pointerdown"));
+      await act(async () => resolve(original));
+      const final = host.querySelector("h1")!;
+      expect(final.textContent).toBe("Counter to Misty");
+      expect(final).not.toBe(loading);
+      expect(document.activeElement).toBe(interacted ? document.body : final);
+    } finally {
+      stop();
+    }
+  });
+
+it("keeps entry focus when the real proposal builder finishes its initial party read", async () => {
+  let resolve!: (value: Awaited<ReturnType<typeof getTraderTradeList>>) => void;
+  vi.mocked(getTraderTradeList).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      })
+  );
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(ProposalBuilderPage, {
+          traderId: "misty",
+          onNavigate: navigate,
+        }),
+      })
+    )
+  );
+  const loading = host.querySelector("h1")!;
+  expect(loading.textContent).toBe("Trade Proposal");
+  const stop = restorePageFocus(host, createPageEntryFocus());
+  try {
+    expect(loading.getAttribute("data-page-heading")).toBe("loading");
+    expect(document.activeElement).toBe(document.body);
+    await act(async () =>
+      resolve({
+        trader_id: "misty",
+        display_name: "Misty",
+        band: null,
+        completed_trades: 0,
+        cards: [],
+        next_page: null,
+      })
+    );
+    const ready = host.querySelector("h1")!;
+    expect(ready.textContent).toBe("Trade Proposal to Misty");
+    expect(ready).toBe(loading);
+    expect(ready.hasAttribute("data-page-heading")).toBe(false);
+    expect(document.activeElement).toBe(ready);
+  } finally {
+    stop();
+  }
+});
+
+for (const interacted of [false, true])
+  it(`carries entry focus from the real Handle redirect to the real proposal builder (interaction: ${interacted})`, async () => {
+    window.history.replaceState(null, "", "/catalog");
+    let resolve!: (
+      page: Awaited<ReturnType<typeof getFriendTradeList>>
+    ) => void;
+    vi.mocked(getFriendTradeList).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    let route!: Route;
+    function View() {
+      route = useRoute();
+      const container = useRef<HTMLDivElement>(null);
+      useLayoutEffect(
+        () => restorePageFocus(container.current, route.focusFor()),
+        [route.entry, route.path]
+      );
+      return h(ToastProvider, {
+        children: h(
+          "div",
+          { ref: container },
+          route.path === "/trades/new/misty_handle"
+            ? h(ProposalRedirect, {
+                handle: "misty_handle",
+                onNavigate: route.navigate,
+              })
+            : route.path === "/trades/new/misty"
+              ? h(ProposalBuilderPage, {
+                  traderId: "misty",
+                  onNavigate: route.navigate,
+                })
+              : null
+        ),
+      });
+    }
+    const control = document.createElement("button");
+    document.body.append(control);
+    try {
+      await act(async () => root.render(h(View)));
+      await act(async () => route.navigate("/trades/new/misty_handle"));
+      const redirect = host.querySelector("h1")!;
+      expect(redirect.textContent).toBe("Trade Proposal");
+      expect(redirect.getAttribute("data-page-heading")).toBe("loading");
+      expect(document.activeElement).toBe(document.body);
+      if (interacted) control.focus();
+      await act(async () =>
+        resolve({
+          handle: "misty_handle",
+          collector_id: "misty-collector",
+          completed_trades: 0,
+          trader_id: "misty",
+          display_name: "Misty",
+          cards: [],
+          next_page: null,
+        })
+      );
+      const final = host.querySelector("h1")!;
+      expect(route.path).toBe("/trades/new/misty");
+      expect(final.textContent).toBe("Trade Proposal to Misty");
+      expect(final).not.toBe(redirect);
+      expect(document.activeElement).toBe(interacted ? control : final);
+    } finally {
+      control.remove();
+    }
+  });
+
+it("focuses the Counter builder when its trade read resolves after the restore window", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  let resolve!: (trade: TradeView) => void;
+  vi.mocked(getTrade).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      })
+  );
+  await mount(true);
+  const stop = restorePageFocus(host, createPageEntryFocus());
+  try {
+    vi.advanceTimersByTime(RESTORE_WINDOW_MS + 1000);
+    await act(async () => resolve(original));
+    const final = host.querySelector("h1")!;
+    expect(final.textContent).toBe("Counter to Misty");
+    expect(document.activeElement).toBe(final);
+  } finally {
+    stop();
+    vi.useRealTimers();
+  }
 });

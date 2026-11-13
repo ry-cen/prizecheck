@@ -7,14 +7,23 @@ export function restorePageScroll(
   container: HTMLElement | null | undefined,
   target: number
 ): () => void {
-  // Anchoring late content can move the page again after scrollTo first reaches the target.
-  // Keep the saved position authoritative only within the existing restore window.
+  // Suppress anchoring while restoration owns the page, including late content above the viewport.
   const root = document.documentElement;
+  const body = document.body;
+  const previousBodyAnchor = body?.style.getPropertyValue("overflow-anchor");
+  const previousBodyAnchorPriority =
+    body?.style.getPropertyPriority("overflow-anchor");
   const previousAnchor = root.style.getPropertyValue("overflow-anchor");
   const previousAnchorPriority =
     root.style.getPropertyPriority("overflow-anchor");
-  if (target !== 0)
+  if (target !== 0) {
     root.style.setProperty("overflow-anchor", "none", previousAnchorPriority);
+    body?.style.setProperty(
+      "overflow-anchor",
+      "none",
+      previousBodyAnchorPriority
+    );
+  }
   let stopped = false;
   let frame = 0;
   let observer: ResizeObserver | undefined;
@@ -23,10 +32,10 @@ export function restorePageScroll(
   let left = window.scrollY;
   let attempted = false;
   // Geometry may grow again before a queued scroll event or retry sees the clamp.
-  const observedEnds = new Set<number>();
+  const ends = new Set<number>();
   function observeEnd() {
     const end = Math.max(0, root.scrollHeight - root.clientHeight);
-    if (end < target) observedEnds.add(end);
+    if (end < target) ends.add(end);
   }
   const stop = () => {
     if (stopped) return;
@@ -36,6 +45,11 @@ export function restorePageScroll(
       previousAnchor,
       previousAnchorPriority
     );
+    body?.style.setProperty(
+      "overflow-anchor",
+      previousBodyAnchor ?? "",
+      previousBodyAnchorPriority
+    );
     observer?.disconnect();
     cancelAnimationFrame(frame);
     clearInterval(poll);
@@ -43,25 +57,23 @@ export function restorePageScroll(
     window.removeEventListener("keydown", stop);
     window.removeEventListener("wheel", stop);
     window.removeEventListener("touchstart", stop);
-    window.removeEventListener("scroll", foreign);
+    window.removeEventListener("scroll", reconcile);
   };
-  // Scrollbar drags, find-in-page and assistive scrolling fire no input event, so a scroll we did not cause counts
-  // as the collector's unless it is the browser clamping to the page's end while content is still arriving, or
-  // scroll anchoring carrying the view from where we left it up to the saved position. A scroll past the saved
-  // position, or any other move, releases the restoration.
-  function foreign() {
+  function isClamp(at: number) {
+    return (
+      at < left &&
+      at < target &&
+      [...ends].some((end) => at >= end - 1 && at <= end)
+    );
+  }
+  // Ownership continues only for our write's echo or an observed shrink clamp; every other movement releases it.
+  // A collector's scroll landing exactly on an observed short end before the next tick is indistinguishable
+  // from a clamp, and is accepted by design.
+  function reconcile() {
     observeEnd();
     const at = window.scrollY;
     if (at === left) return;
-    // A shrink and growth with no rendering/observer delivery or other sample in between
-    // leaves no clamp evidence; release an unexplained move just like an app scroll.
-    const clamped =
-      at < target &&
-      [...observedEnds].some((end) => at >= end - 1 && at <= end);
-    const toward =
-      Math.sign(at - left) === Math.sign(target - left) &&
-      Math.abs(at - left) <= Math.abs(target - left);
-    if (clamped || toward) left = at;
+    if (isClamp(at)) left = at;
     else stop();
   }
   const restore = () => {
@@ -69,14 +81,13 @@ export function restorePageScroll(
     if (stopped) return;
     observeEnd();
     // Scroll events are queued: a poll or resize callback may see a newer position first.
-    if (attempted) foreign();
+    if (attempted) reconcile();
     if (stopped) return;
     attempted = true;
     if (window.scrollY !== target) {
       window.scrollTo(0, target);
-      observedEnds.clear();
-      observeEnd();
     }
+    ends.clear();
     left = window.scrollY;
     if (target === 0 && left === target) stop();
   };
@@ -101,6 +112,6 @@ export function restorePageScroll(
   window.addEventListener("keydown", stop, { once: true });
   window.addEventListener("wheel", stop, { once: true });
   window.addEventListener("touchstart", stop, { once: true });
-  window.addEventListener("scroll", foreign, { passive: true });
+  window.addEventListener("scroll", reconcile, { passive: true });
   return stop;
 }

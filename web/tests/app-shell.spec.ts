@@ -645,7 +645,7 @@ test.describe("phone", () => {
       const sheet = page.getByRole("dialog", { name: "Account" });
       await expect(sheet).toBeVisible();
       await expect(
-        sheet.getByRole("button", { name: "Close account" })
+        sheet.getByRole("button", { name: "Close account menu" })
       ).toBeFocused();
       // A bottom sheet: full width, along the bottom edge.
       const box = (await sheet.boundingBox())!;
@@ -662,7 +662,7 @@ test.describe("phone", () => {
       await expectPageChecks(page, "Account sheet");
       // Focus stays in the sheet, and the close button returns it to the avatar.
       const signOut = sheet.getByRole("button", { name: "Sign out" });
-      const close = sheet.getByRole("button", { name: "Close account" });
+      const close = sheet.getByRole("button", { name: "Close account menu" });
       await signOut.focus();
       await page.keyboard.press("Tab");
       await expect(close).toBeFocused();

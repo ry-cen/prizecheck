@@ -17,6 +17,7 @@ import httpx
 import psycopg
 from psycopg.rows import dict_row
 
+from .review_settlement import AUTO_STATUSES, reopen_review, settle_source_reviews
 from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
 from .catalog_run_states import (LEASE_INTERVAL_SQL, OUTCOME_FAILED, OUTCOME_SUCCEEDED, PHASE_COMPLETE,
@@ -647,12 +648,14 @@ def _promote(conn, run_id: UUID, first, records, normalized, set_details, raw, b
             item["fingerprint"] = review_fingerprint(candidate, records[source_id], existing, source_reviews, previous_records)
             same_reviews = {review["kind"]: review for review in source_reviews if review["source_fingerprint"] == item["fingerprint"]}
             # A decided review for this exact source value is settled: it no longer contradicts the Printing.
-            decided = {kind for kind, review in same_reviews.items() if review["status"] != "pending"}
+            decided = {kind for kind, review in same_reviews.items() if review["status"] not in ("pending", *AUTO_STATUSES)}
             reference_changed = name_changed = False
 
             identity_flags = set()
+            raised = set()
 
             def queue_review(kind, detail, evidence, printing_id):
+                raised.add(kind)
                 if kind in IDENTITY_REVIEW_KINDS:
                     identity_flags.add(kind)
                 # Decided reviews keep their provenance. A pending review gains
@@ -663,7 +666,11 @@ def _promote(conn, run_id: UUID, first, records, normalized, set_details, raw, b
                     conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate)
                       VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
                       (printing_id, source_id, kind, item["fingerprint"], detail, json.dumps(evidence)))
-                elif prior["status"] == "pending" and ("metadata" not in prior["candidate"] or
+                else:
+                    if prior["status"] in AUTO_STATUSES:
+                        reopen_review(conn, prior)
+                        prior["status"] = "pending"
+                if prior is not None and prior["status"] == "pending" and ("metadata" not in prior["candidate"] or
                                                        review_physical(prior["candidate"]) != review_physical(evidence)):
                     conn.execute("UPDATE catalog_review SET candidate=%s WHERE id=%s AND status='pending'",
                                  (json.dumps(evidence), prior["id"]))
@@ -699,6 +706,7 @@ def _promote(conn, run_id: UUID, first, records, normalized, set_details, raw, b
             if item["ambiguous"]:
                 queue_review('variant_ambiguity', 'Variant flags require review', candidate,
                              existing["printing_id"] if existing else None)
+            settle_source_reviews(conn, source_reviews, item["fingerprint"], raised)
             identity_id = existing["identity_id"] if existing else conn.execute(
               IDENTITY_UPSERT, (item["identity_key"], item["identity_key"])).fetchone()["id"]
             printing_id = existing["printing_id"] if existing else get_or_insert(conn,

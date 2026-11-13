@@ -62,7 +62,7 @@ export function ProposalRedirect({
         <Icon icon={ChevronLeft} />
         Find trades
       </a>
-      <PageHeader title="Trade Proposal" />
+      <PageHeader title="Trade Proposal" loading={load === "loading"} />
       {load === "missing" ? (
         <p className="m-0 text-body text-text-muted">
           This collector isn't one of your Friends.

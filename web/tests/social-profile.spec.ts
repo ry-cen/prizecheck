@@ -309,3 +309,27 @@ test("on a phone the header avatar opens Settings, Sign-ins, Card reports, Owner
     page.getByRole("link", { name: "Continue with Google" })
   ).toBeVisible();
 });
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test(`invalid Display Name stays focused and described at ${viewport.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await signIn(page);
+    const section = privacy(page);
+    const name = section.getByRole("textbox", { name: "Display Name" });
+    await name.fill("");
+    await section.getByRole("button", { name: "Save name" }).click();
+    await expect(name).toBeFocused();
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    await expect(name).toHaveAccessibleDescription(
+      /Enter a name of 1 to 40 characters/
+    );
+    await name.fill("Sam");
+    await expect(name).not.toHaveAttribute("aria-invalid", "true");
+    await expect(section.getByRole("alert")).toHaveCount(0);
+  });
+}

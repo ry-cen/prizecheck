@@ -30,9 +30,16 @@ if ${quarantine ? "True" : "False"}:
     with connect() as conn, conn.transaction():
         conn.execute("INSERT INTO inventory_owner(user_id) VALUES ('seed-maintainer') ON CONFLICT DO NOTHING")
         activate_rule(conn, MATCHING, 1, 'seed-maintainer', 'https://example.org/rule', 'Reviewed against the target')
+    with connect() as conn:
+        conn.execute("UPDATE catalog_rule_state SET activation_id=NULL WHERE kind=%s", (MATCHING,))
     changed = card(1)
     changed['variants_detailed'][0]['pricing']['tcgplayer']['normal']['productId'] = 999
-    run(Records(changed))`,
+    run(Records(changed))
+    from test_catalog_targets import metadata
+    assert (metadata()[1]['normal']['mapping_state'], metadata()[1]['normal']['mapping_reason']) == ('quarantined', 'candidate_changed')
+    with connect() as conn, conn.transaction():
+        activate_rule(conn, MATCHING, 1, 'seed-maintainer', 'https://example.org/rule', 'Reviewed against the target')
+    assert (metadata()[1]['normal']['mapping_state'], metadata()[1]['normal']['mapping_reason']) == ('quarantined', 'candidate_changed')`,
     ],
     { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );
@@ -485,7 +492,7 @@ with connect() as conn, conn.transaction():
   );
 }
 
-/** Activates the shipped matching rule, then moves the normal Edition's source product so it quarantines. */
+/** Moves the normal Edition's product with no matching rule active, then restores the rule (ADR 0025). */
 function quarantineNormalEdition() {
   execFileSync(
     ".venv/bin/python",
@@ -499,9 +506,16 @@ from app.catalog_targets import MATCHING, activate_rule
 with connect() as conn, conn.transaction():
     conn.execute("INSERT INTO inventory_owner(user_id) VALUES ('seed-maintainer') ON CONFLICT DO NOTHING")
     activate_rule(conn, MATCHING, 1, 'seed-maintainer', 'https://example.org/rule', 'Reviewed against the target')
+with connect() as conn:
+    conn.execute("UPDATE catalog_rule_state SET activation_id=NULL WHERE kind=%s", (MATCHING,))
 changed = card(1)
 changed['variants_detailed'][0]['pricing']['tcgplayer']['normal']['productId'] = 999
-run(Records(changed))`,
+run(Records(changed))
+from test_catalog_targets import metadata
+assert (metadata()[1]['normal']['mapping_state'], metadata()[1]['normal']['mapping_reason']) == ('quarantined', 'candidate_changed')
+with connect() as conn, conn.transaction():
+    activate_rule(conn, MATCHING, 1, 'seed-maintainer', 'https://example.org/rule', 'Reviewed against the target')
+assert (metadata()[1]['normal']['mapping_state'], metadata()[1]['normal']['mapping_reason']) == ('quarantined', 'candidate_changed')`,
     ],
     { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );

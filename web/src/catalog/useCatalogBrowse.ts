@@ -71,7 +71,9 @@ export function useCatalogBrowse(
   active: boolean,
   /** The gallery's own list (its `<li>`s carry `data-edition-id`): where keyboard focus is kept across a restart. The
    * Catalog page stays mounted while hidden and Collection renders a second gallery, so no document-wide query. */
-  list?: RefObject<HTMLElement | null>
+  list?: RefObject<HTMLElement | null>,
+  /** False until a URL set filter has been resolved against the set list. */
+  enabled = true
 ): CatalogBrowse {
   const [first, setFirst] = useState<BrowsePage | null>(null);
   const [editions, setEditions] = useState<BrowseEdition[]>([]);
@@ -91,6 +93,8 @@ export function useCatalogBrowse(
   const key = JSON.stringify(query);
   const current = useRef(query);
   current.current = query;
+  const permitted = useRef(enabled);
+  permitted.current = enabled;
   const shownRows = useRef(0);
   shownRows.current = editions.length;
   const firstRef = useRef<BrowsePage | null>(null);
@@ -127,14 +131,21 @@ export function useCatalogBrowse(
     walkCursor.current = null;
     setNextCursor(null);
     setLoading(true);
+    if (!permitted.current) {
+      setFirst(null);
+      setEditions([]);
+      setError(null);
+      return;
+    }
+    const request = current.current;
     try {
-      const page = await browseEditions(current.current);
+      const page = await browseEditions(request);
       if (mine !== latest.current) return;
       let rows = page.editions;
       let cursor = page.next_cursor;
       try {
         while (cursor && rows.length < Math.min(depth, RESTART_DEPTH)) {
-          const more = await browseEditions(current.current, cursor);
+          const more = await browseEditions(request, cursor);
           if (mine !== latest.current) return;
           rows = [...rows, ...more.editions];
           cursor = more.next_cursor;
@@ -163,12 +174,13 @@ export function useCatalogBrowse(
 
   useEffect(() => {
     void load();
-  }, [key, load]);
+  }, [key, enabled, load]);
 
   // One page request at a time: the sentinel and the last tile's focus can both ask before a render.
   const inFlight = useRef(false);
   const loadMore = useCallback(async () => {
     if (
+      !permitted.current ||
       !nextCursor ||
       nextCursor !== walkCursor.current ||
       inFlight.current ||
@@ -248,7 +260,7 @@ export function useCatalogBrowse(
   useEffect(() => {
     const returning = active && !shown.current;
     shown.current = active;
-    if (!returning || !first) return;
+    if (!returning || !first || !permitted.current) return;
     let cancelled = false;
     Promise.all([getCollectionRevision(), getCatalogStatus()])
       .then(([owner, catalog]) => {

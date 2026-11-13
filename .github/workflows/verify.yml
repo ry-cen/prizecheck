@@ -56,55 +56,71 @@ jobs:
   # that run at once, each on its own runner with its own database server and stacks: three shards of api/tests, the
   # auth leg (guardrails, the build and vitest, run once for every leg) and ten shards of the Playwright specs
   # (scripts/verify.py --shard). On one hosted runner the fast tier took about 32 minutes, 22 of them in Playwright
-  # (October 2026); a leg takes about 5. inputs.integration is empty on pull_request and workflow_call, so these jobs
-  # run there only for a pull request to main.
+  # (October 2026). Across 14 sharded runs, browser-8 took 10.6–15.8 minutes (5 capped runs), browser-7
+  # 9.6–14.2, and the other browser legs 4.1–10.8, including 1.5–2 minutes of setup. Browser legs get
+  # 25 minutes to finish whole-file shards; api/auth keep 15. The caps remain hang guards, not timing targets.
+  # inputs.integration is empty on pull_request and workflow_call, so these jobs run there only for a pull request to main.
   integration-legs:
     if: ${{ inputs.integration == 'sharded' || (github.event_name == 'pull_request' && github.base_ref == 'main') }}
     name: ${{ matrix.leg }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       # Every leg runs to the end, so one leg's failure doesn't hide another's.
       fail-fast: false
       matrix:
         include:
           - leg: api-1
+            timeout: 15
             args: --suite api --fast --shard 1/3
           - leg: api-2
+            timeout: 15
             args: --suite api --fast --shard 2/3
           - leg: api-3
+            timeout: 15
             args: --suite api --fast --shard 3/3
           - leg: auth
+            timeout: 15
             args: --suite auth --fast
             browsers: true
           - leg: browser-1
+            timeout: 25
             args: --suite browser --fast --shard 1/10
             browsers: true
           - leg: browser-2
+            timeout: 25
             args: --suite browser --fast --shard 2/10
             browsers: true
           - leg: browser-3
+            timeout: 25
             args: --suite browser --fast --shard 3/10
             browsers: true
           - leg: browser-4
+            timeout: 25
             args: --suite browser --fast --shard 4/10
             browsers: true
           - leg: browser-5
+            timeout: 25
             args: --suite browser --fast --shard 5/10
             browsers: true
           - leg: browser-6
+            timeout: 25
             args: --suite browser --fast --shard 6/10
             browsers: true
           - leg: browser-7
+            timeout: 25
             args: --suite browser --fast --shard 7/10
             browsers: true
           - leg: browser-8
+            timeout: 25
             args: --suite browser --fast --shard 8/10
             browsers: true
           - leg: browser-9
+            timeout: 25
             args: --suite browser --fast --shard 9/10
             browsers: true
           - leg: browser-10
+            timeout: 25
             args: --suite browser --fast --shard 10/10
             browsers: true
     services:

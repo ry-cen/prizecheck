@@ -139,6 +139,17 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertEqual(len(re.findall(r'(?m)^          - leg: ', legs)), 14)
         self.assertIn('run: npm run verify\n', job_body('integration-full'))
 
+    def test_each_integration_leg_has_its_own_job_timeout(self):
+        job = job_body('integration-legs')
+        self.assertIn('    timeout-minutes: ${{ matrix.timeout }}\n', job)
+        entries = re.findall(r'(?ms)^          - leg: ([^\n]+)\n(.*?)(?=^          - leg:|^    services:)', job)
+        expected = {**{f'api-{n}': 15 for n in range(1, 4)}, 'auth': 15,
+                    **{f'browser-{n}': 25 for n in range(1, 11)}}
+        self.assertEqual({name for name, _ in entries}, set(expected))
+        for name, entry in entries:
+            with self.subTest(leg=name):
+                self.assertEqual(int(one(r'(?m)^            timeout: (\d+)$', entry)), expected[name])
+
     def test_the_operations_choice_runs_only_the_operations_suite_on_its_own_job(self):
         job = job_body('integration-operations')
         self.assertIn("    if: ${{ inputs.integration == 'operations' }}", job)

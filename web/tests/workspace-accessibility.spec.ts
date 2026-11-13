@@ -305,7 +305,17 @@ test.describe("desktop", () => {
     await bar(page).getByRole("button", { name: "Inventory Removal…" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expectAccessible(page, "Removal dialog");
-    await page.keyboard.press("Escape");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /^Remove \d+ cop/ })
+      .click();
+    await expect(
+      page.getByRole("region", { name: "Selection", exact: true })
+    ).toHaveCount(0);
+    expect(
+      (await new AxeBuilder({ page }).withRules(["skip-link"]).analyze())
+        .violations
+    ).toEqual([]);
 
     // Add cards (#175): Catalog's gallery in Add mode, with a card queued.
     await page.getByRole("button", { name: "Add cards", exact: true }).click();
@@ -932,3 +942,41 @@ collectorTest(
     expect(avatar!.x + avatar!.width).toBeLessThanOrEqual(widths.innerWidth);
   }
 );
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test(`removal leaves no broken skip link at ${viewport.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    promoteCatalog({ "card-1": "Removal Abra" });
+    await signIn(page);
+    const leaf = await createLocation(page, `Removal ${randomUUID()}`, null);
+    await addCopies(page, leaf, await editionOf("card-1"), 1);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(1);
+    if (viewport.width === 375)
+      await page.getByRole("button", { name: "Select", exact: true }).click();
+    await tiles(page).first().click();
+    await bar(page)
+      .getByRole("button", { name: "Actions", exact: true })
+      .click();
+    await bar(page)
+      .getByRole("button", { name: "Inventory Removal…", exact: true })
+      .click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Remove 1 copy", exact: true })
+      .click();
+    await expect(bar(page)).toHaveCount(0);
+    await expect(
+      toast(page).filter({ hasText: "Removed 1 copy" })
+    ).toBeVisible();
+    expect(
+      (await new AxeBuilder({ page }).withRules(["skip-link"]).analyze())
+        .violations
+    ).toEqual([]);
+  });
+}
