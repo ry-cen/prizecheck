@@ -997,7 +997,10 @@ for (const viewport of [
       await expect(
         page.getByRole("region", { name: "Report card metadata" })
       ).toBeVisible();
-      await expect(page).toHaveURL(`${ORIGIN}/catalog?mode=add`);
+      // The report link becomes the card's address (`card` and `edition`); `printing` is gone.
+      await expect(page).toHaveURL(
+        `${ORIGIN}/catalog?mode=add&card=${edition.printing_id}&edition=${edition.edition_id}`
+      );
     });
     test("keeps search and filters in reloadable shared URLs", async ({
       page,
