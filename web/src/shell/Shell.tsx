@@ -1,3 +1,4 @@
+import { isPlainClick } from "./appLink";
 import { AddQueueAccount } from "../catalog/useStoredAddQueue";
 import { restorePageFocus, type PageFocus } from "./restorePageFocus";
 import { restorePageScroll } from "./restorePageScroll";
@@ -67,7 +68,7 @@ const ICONS: Record<PageId, LucideIcon> = {
 };
 
 type Props = {
-  /** The page to show. App has already sent addresses that are no page to Collection. */
+  /** The page to show; unknown addresses use the not-found other slot. */
   page: PageId;
   path: string;
   entry: string;
@@ -80,6 +81,7 @@ type Props = {
   owner: boolean;
   /** The signed-in account id: Borrow Request drafts (#252) are kept per account. */
   userId: string;
+  hrefFor: (page: PageId) => string;
   onNavigate: (page: PageId) => void;
   /** Opens one Loan (/loans/<id>, #252), from the toast after a Borrow Request is sent and from the inbox (#259). */
   onOpenLoan: (id: string) => void;
@@ -149,6 +151,7 @@ function ShellFrame({
   image = null,
   owner,
   onNavigate,
+  hrefFor,
   onSignOut,
   scrollFor,
   focusFor,
@@ -354,13 +357,17 @@ function ShellFrame({
               className="flex items-center gap-1 compact:gap-0.5"
             >
               {DESKTOP_TABS.map((id) => (
-                <button
+                <a
                   key={id}
-                  type="button"
+                  href={hrefFor(id)}
                   aria-current={showing === id ? "page" : undefined}
                   aria-label={tabName(id)}
-                  onClick={() => go(id)}
-                  className="inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text compact:gap-1.5 compact:px-1.5 aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
+                  onClick={(event) => {
+                    if (!isPlainClick(event)) return;
+                    event.preventDefault();
+                    go(id);
+                  }}
+                  className="no-underline inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text compact:gap-1.5 compact:px-1.5 aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
                 >
                   {pageDef(id).label}
                   {tabCount(id) > 0 && (
@@ -371,7 +378,7 @@ function ShellFrame({
                       {tabCount(id)}
                     </span>
                   )}
-                </button>
+                </a>
               ))}
             </nav>
             <div className="ml-auto flex items-center gap-2 compact:gap-1.5">
@@ -446,20 +453,24 @@ function ShellFrame({
             className="fixed inset-x-0 bottom-0 z-(--layer-sticky) hidden h-tabbar border-t border-border bg-surface phone:flex"
           >
             {PHONE_TABS.map((id) => (
-              <button
+              <a
                 key={id}
-                type="button"
+                href={hrefFor(id)}
                 aria-current={showing === id ? "page" : undefined}
                 aria-label={tabName(id)}
-                onClick={() => go(id)}
-                className={TAB_BAR_BUTTON}
+                onClick={(event) => {
+                  if (!isPlainClick(event)) return;
+                  event.preventDefault();
+                  go(id);
+                }}
+                className={`${TAB_BAR_BUTTON} no-underline`}
               >
                 <span className="relative inline-flex px-2">
                   <Icon icon={ICONS[id]} size={20} />
                   <Badge count={tabCount(id)} />
                 </span>
                 {pageDef(id).label}
-              </button>
+              </a>
             ))}
           </nav>
         </div>

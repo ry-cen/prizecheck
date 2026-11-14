@@ -191,7 +191,7 @@ test.describe("desktop", () => {
     const nav = sidebarNav(page);
     await button(nav, shelf).click();
 
-    const row = button(nav, "Binder 1");
+    const row = nav.getByRole("link", { name: "Binder 1", exact: true });
     const g = gear(nav, binder);
     await page.mouse.move(0, 0);
     await expect(g).toHaveCSS("opacity", "0");
@@ -242,7 +242,7 @@ test.describe("desktop", () => {
     // Open the leaf, then move focus and the pointer away: its gear stays available.
     await row.click();
     await page.mouse.move(0, 0);
-    await button(nav, "All owned").focus();
+    await nav.getByRole("link", { name: "All owned", exact: true }).focus();
     await expect(row).toHaveAttribute("aria-current", "page");
     await expect(g).toHaveCSS("opacity", "1");
     await expect(row).toHaveCSS("padding-right", "68px");
@@ -250,10 +250,10 @@ test.describe("desktop", () => {
     await expect(gear(nav, shelf)).toHaveCSS("opacity", "0");
 
     // An open Deck reserves space for its sole tool, with no Add child.
-    const deckRow = button(nav, deckName);
+    const deckRow = nav.getByRole("link", { name: deckName, exact: true });
     await deckRow.click();
     await page.mouse.move(0, 0);
-    await button(nav, "All owned").focus();
+    await nav.getByRole("link", { name: "All owned", exact: true }).focus();
     await expect(deckRow).toHaveAttribute("aria-current", "page");
     await expect(deckRow).toHaveCSS("padding-right", "36px");
     await expect(gear(nav, deckName)).toHaveCSS("opacity", "1");
@@ -305,7 +305,7 @@ test.describe("desktop", () => {
     await page.reload();
     const nav = sidebarNav(page);
     await button(nav, shelf).click();
-    await button(nav, "Binder 1").click();
+    await nav.getByRole("link", { name: "Binder 1", exact: true }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       "Binder 1"
     );
@@ -337,7 +337,9 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       "Binder 1a"
     );
-    await expect(button(nav, "Binder 1a")).toBeVisible();
+    await expect(
+      nav.getByRole("link", { name: "Binder 1a", exact: true })
+    ).toBeVisible();
     expect((await client.node(binder1))!.name).toBe("Binder 1a");
 
     await button(dialog, `Move ${renamed}`).click();
@@ -467,7 +469,7 @@ test.describe("desktop", () => {
     const storageId = await client.create("Storage", null);
     await page.reload();
     const nav = sidebarNav(page);
-    await button(nav, "Storage").click();
+    await nav.getByRole("link", { name: "Storage", exact: true }).click();
     await gear(nav, "Storage").click();
     const storage = settingsOf(page, "Storage");
     const trade = checkbox(storage, "Mark Storage For trade");
@@ -513,7 +515,7 @@ test.describe("desktop", () => {
     }
 
     const pagePath = `${shelf} / Binder 10 / Page 1`;
-    await button(nav, "Page 1").click();
+    await nav.getByRole("link", { name: "Page 1", exact: true }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Page 1");
     await gear(nav, pagePath).click();
     const dialog = settingsOf(page, pagePath);
@@ -531,13 +533,13 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       "Binder 10"
     );
-    const parentRow = button(nav, "Binder 10");
+    const parentRow = nav.getByRole("link", { name: "Binder 10", exact: true });
     await expect(parentRow).toHaveAttribute("aria-current", "page");
     await expect(parentRow).toBeFocused();
     expect(await client.node(page1)).toBeUndefined();
 
     // A Location at the top level goes back to All owned.
-    await button(nav, spare).click();
+    await nav.getByRole("link", { name: spare, exact: true }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(spare);
     await gear(nav, spare).click();
     const spareDialog = settingsOf(page, spare);
@@ -548,7 +550,9 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       "All owned"
     );
-    await expect(button(nav, "All owned")).toBeFocused();
+    await expect(
+      nav.getByRole("link", { name: "All owned", exact: true })
+    ).toBeFocused();
     expect(await client.node(spareId)).toBeUndefined();
   });
 
@@ -588,7 +592,9 @@ test.describe("desktop", () => {
     await expect(dialog.getByRole("alert")).toContainText(
       "nothing was changed"
     );
-    await expect(button(nav, "Binder 1 elsewhere")).toBeVisible();
+    await expect(
+      nav.getByRole("link", { name: "Binder 1 elsewhere", exact: true })
+    ).toBeVisible();
     expect((await client.node(binder1))!.name).toBe("Binder 1 elsewhere");
   });
 

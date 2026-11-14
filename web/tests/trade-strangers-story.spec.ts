@@ -55,7 +55,7 @@ const send = (page: Page) =>
 const tradesTab = (page: Page) =>
   page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: /^Trades/ });
+    .getByRole("link", { name: /^Trades/ });
 const noArtwork = (page: Page) =>
   page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => route.abort());
 

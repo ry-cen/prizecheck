@@ -551,7 +551,7 @@ test.describe("For trade tag", () => {
       .getByRole("complementary", { name: "Sidebar" })
       .getByRole("navigation", { name: "Locations" });
     await sidebar
-      .getByRole("button", { name: "For trade binder", exact: true })
+      .getByRole("link", { name: "For trade binder", exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       "For trade binder"

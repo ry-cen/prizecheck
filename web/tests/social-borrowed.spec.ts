@@ -218,7 +218,7 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   await expect(tiles.nth(0)).not.toHaveAccessibleName(/borrowed from/);
   await expect(tiles.nth(1)).toHaveAccessibleName(/borrowed from Jordan Reyes/);
   await expect(tiles.nth(2)).toHaveAccessibleName(/borrowed from Jordan Reyes/);
-  await sidebar.getByRole("button", { name: boxName, exact: true }).click();
+  await sidebar.getByRole("link", { name: boxName, exact: true }).click();
   await expect(tiles).toHaveCount(2);
   await expect(main).toContainText("1 copy · 1 edition · 1 borrowed");
   await expect(
@@ -253,14 +253,14 @@ test("Location galleries mark borrowed copies, append them in All owned and move
     page.getByRole("button", { name: "Undo", exact: true })
   ).toHaveCount(0);
   await expect(tiles).toHaveCount(0);
-  await sidebar.getByRole("button", { name: "Unsorted", exact: true }).click();
+  await sidebar.getByRole("link", { name: "Unsorted", exact: true }).click();
   await expect(tiles).toHaveCount(2);
   // The gallery implements pointer dragging, not native HTML drag and drop.
   const from = await main
     .getByRole("button", { name: /Iono,.*borrowed from Jordan Reyes/ })
     .boundingBox();
   const to = await sidebar
-    .getByRole("button", { name: boxName, exact: true })
+    .getByRole("link", { name: boxName, exact: true })
     .boundingBox();
   expect(from).not.toBeNull();
   expect(to).not.toBeNull();
@@ -273,7 +273,7 @@ test("Location galleries mark borrowed copies, append them in All owned and move
   await expect(
     page.getByText(`Moved 1 copy to ${boxName}.`, { exact: true })
   ).toBeVisible();
-  await sidebar.getByRole("button", { name: boxName, exact: true }).click();
+  await sidebar.getByRole("link", { name: boxName, exact: true }).click();
   await expect(tiles).toHaveCount(1);
   await expect(tiles.first()).toHaveAccessibleName(
     /borrowed from Jordan Reyes/

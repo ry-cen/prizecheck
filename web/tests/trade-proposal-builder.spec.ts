@@ -147,7 +147,7 @@ const results = (page: Page) =>
 const tradesTab = (page: Page) =>
   page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Trades", exact: true });
+    .getByRole("link", { name: "Trades", exact: true });
 const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 
@@ -1030,6 +1030,44 @@ for (const viewport of [
     test.use({ viewport });
     for (const counter of [false, true]) {
       const builder = counter ? "Counter" : "new proposal";
+      if (viewport.width === 1280) {
+        test(`${builder}: a modified click on a tab opens it in a new tab without asking`, async ({
+          page,
+          collectors,
+          context,
+        }) => {
+          const { address, dialog } = await discardBuilder(
+            page,
+            collectors,
+            counter
+          );
+          await editDiscardCards(page, counter);
+          const collection = page
+            .getByRole("navigation", { name: "Main views" })
+            .getByRole("link", { name: "Collection", exact: true });
+          const href = await collection.getAttribute("href");
+          const opened = context.waitForEvent("page");
+          await collection.click({ modifiers: ["ControlOrMeta"] });
+          const other = await opened;
+          await other.bringToFront();
+          await expect(other).toHaveURL(`${ORIGIN}${href}`);
+          await expect(page).toHaveURL(address);
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            counter ? "2" : "1"
+          );
+          await expect(dialog).toHaveCount(0);
+          await other.close();
+          await page.bringToFront();
+          await collection.focus();
+          await collection.press("Enter");
+          await expect(dialog).toBeVisible();
+          await dialog
+            .getByRole("button", { name: "Keep editing", exact: true })
+            .click();
+          await expect(collection).toBeFocused();
+          await expect(page).toHaveURL(address);
+        });
+      }
       test(`${builder}: real reload dismissal keeps edits and acceptance discards them`, async ({
         page,
         collectors,
@@ -1101,7 +1139,7 @@ for (const viewport of [
           await expect(lists(page).get).toHaveText("Nothing yet");
           await page
             .getByRole("navigation", { name: "Main views" })
-            .getByRole("button", { name: "Collection", exact: true })
+            .getByRole("link", { name: "Collection", exact: true })
             .click();
           await expect(dialog).toBeVisible();
           await dialog
@@ -1116,7 +1154,7 @@ for (const viewport of [
         } else {
           await page
             .getByRole("navigation", { name: "Main views" })
-            .getByRole("button", { name: "Collection", exact: true })
+            .getByRole("link", { name: "Collection", exact: true })
             .click();
           await expect(page).toHaveURL(`${ORIGIN}/collection`);
           await expect(dialog).toHaveCount(0);
@@ -1137,7 +1175,7 @@ for (const viewport of [
             if (direction === "Forward") {
               await page
                 .getByRole("navigation", { name: "Main views" })
-                .getByRole("button", { name: "Collection", exact: true })
+                .getByRole("link", { name: "Collection", exact: true })
                 .click();
               await expect(page).toHaveURL(`${ORIGIN}/collection`);
               await page.goBack();
@@ -1304,7 +1342,7 @@ for (const viewport of [
           });
           const outside = page
             .getByRole("navigation", { name: "Main views" })
-            .getByRole("button", { name: /^Trades(?:,|$)/ });
+            .getByRole("link", { name: /^Trades(?:,|$)/ });
           let target: Locator;
           try {
             await send.click();

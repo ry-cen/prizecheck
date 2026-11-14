@@ -303,7 +303,7 @@ test.describe("desktop", () => {
     await expect(
       page
         .getByRole("navigation", { name: "Main views" })
-        .getByRole("button", { name: "Collection" })
+        .getByRole("link", { name: "Collection" })
     ).toHaveAttribute("aria-current", "page");
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page).toHaveURL(/\/collection$/);

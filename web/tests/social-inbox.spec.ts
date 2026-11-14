@@ -35,11 +35,11 @@ const bell = (on: Page) => on.getByRole("button", { name: /^Inbox/ });
 const loansTab = (on: Page) =>
   on
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: /^Loans/ });
+    .getByRole("link", { name: /^Loans/ });
 const tradesTab = (on: Page) =>
   on
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: /^Trades/ });
+    .getByRole("link", { name: /^Trades/ });
 const drawer = (on: Page) => on.getByRole("dialog", { name: "Inbox" });
 const title = (on: Page) => on.getByRole("heading", { level: 1 });
 const HOUR = 3_600_000;

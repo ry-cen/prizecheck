@@ -288,7 +288,7 @@ test.describe("at 1280×800", () => {
     await expect(corrections(page)).toBeVisible();
     await nav.getByRole("button", { name: world.shelf, exact: true }).click();
     await expect(
-      nav.getByRole("button", { name: "Binder", exact: true })
+      nav.getByRole("link", { name: "Binder", exact: true })
     ).toBeVisible();
     await expectPageChecks(page, "All owned with the tree open (1280)");
 
@@ -302,7 +302,7 @@ test.describe("at 1280×800", () => {
     await expectPageChecks(page, "filter panel, Names and Prices (1280)");
 
     // A Storage Leaf, and Add cards over it.
-    await nav.getByRole("button", { name: "Binder", exact: true }).click();
+    await nav.getByRole("link", { name: "Binder", exact: true }).click();
     await expect(heading(page)).toHaveText("Binder");
     await checkAddCards(page, world.binder, "1280");
 
@@ -316,7 +316,7 @@ test.describe("at 1280×800", () => {
     await checkSettings(page, nav, world, "1280");
 
     // The Deck heading, its Export menu and an export panel.
-    await nav.getByRole("button", { name: world.deck, exact: true }).click();
+    await nav.getByRole("link", { name: world.deck, exact: true }).click();
     await expect(heading(page)).toHaveText(world.deck);
     await checkDeckHeading(page, "1280");
 
@@ -350,7 +350,7 @@ test.describe("at 375×812", () => {
     await expect(drawer).toBeVisible();
     await nav.getByRole("button", { name: world.shelf, exact: true }).click();
     await expect(
-      nav.getByRole("button", { name: "Binder", exact: true })
+      nav.getByRole("link", { name: "Binder", exact: true })
     ).toBeVisible();
     await expectPageChecks(page, "Locations drawer (375)");
 
@@ -378,13 +378,13 @@ test.describe("at 375×812", () => {
 
     // The Deck heading, its Export menu and an export panel.
     await opener.click();
-    await nav.getByRole("button", { name: world.deck, exact: true }).click();
+    await nav.getByRole("link", { name: world.deck, exact: true }).click();
     await expect(heading(page)).toHaveText(world.deck);
     await checkDeckHeading(page, "375");
 
     // A Storage Leaf, and Add cards over it. The folder is still open from before.
     await opener.click();
-    await nav.getByRole("button", { name: "Binder", exact: true }).click();
+    await nav.getByRole("link", { name: "Binder", exact: true }).click();
     await expect(heading(page)).toHaveText("Binder");
     await checkAddCards(page, world.binder, "375");
 

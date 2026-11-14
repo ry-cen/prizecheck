@@ -358,7 +358,9 @@ async function sidebarMarks(
   let tree = await openTree();
   const rowOf = (name: string) => button(tree, name);
   await button(tree, "Storage").click();
-  await expect(rowOf("Binder 1")).toBeVisible();
+  await expect(
+    tree.getByRole("link", { name: "Binder 1", exact: true })
+  ).toBeVisible();
   // Nothing is marked yet.
   await expect(tree.getByTestId("for-trade-mark")).toHaveCount(0);
 
@@ -372,26 +374,38 @@ async function sidebarMarks(
   await expect(rowOf("Storage").getByTestId("for-trade-mark")).toHaveText(
     "For trade"
   );
-  await expect(rowOf("Binder 1").getByTestId("for-trade-mark")).toHaveText(
-    "For trade"
-  );
-  await expect(rowOf("Lugia Deck").getByTestId("for-trade-mark")).toHaveCount(
-    0
-  );
-  await expect(rowOf("Shelf").getByTestId("for-trade-mark")).toHaveCount(0);
+  await expect(
+    tree
+      .getByRole("link", { name: "Binder 1", exact: true })
+      .getByTestId("for-trade-mark")
+  ).toHaveText("For trade");
+  await expect(
+    tree
+      .getByRole("link", { name: "Lugia Deck", exact: true })
+      .getByTestId("for-trade-mark")
+  ).toHaveCount(0);
+  await expect(
+    tree
+      .getByRole("link", { name: "Shelf", exact: true })
+      .getByTestId("for-trade-mark")
+  ).toHaveCount(0);
   // Hidden and For trade shows both marks on the one row; names are unchanged and the marks are descriptions.
   await expect(rowOf("Storage").getByTestId("hidden-mark")).toBeVisible();
   await expect(rowOf("Storage")).toHaveAccessibleDescription(
     "Hidden from Friends For trade"
   );
-  await expect(rowOf("Binder 1")).toHaveAccessibleDescription(
+  await expect(
+    tree.getByRole("link", { name: "Binder 1", exact: true })
+  ).toHaveAccessibleDescription(
     "Hidden because Storage is hidden For trade because Storage is."
   );
   // The Deck is hidden with its box but gets no For trade description.
-  await expect(rowOf("Lugia Deck")).toHaveAccessibleDescription(
-    "Hidden because Storage is hidden"
-  );
-  await expect(rowOf("Shelf")).not.toHaveAttribute("aria-describedby");
+  await expect(
+    tree.getByRole("link", { name: "Lugia Deck", exact: true })
+  ).toHaveAccessibleDescription("Hidden because Storage is hidden");
+  await expect(
+    tree.getByRole("link", { name: "Shelf", exact: true })
+  ).not.toHaveAttribute("aria-describedby");
 
   // Un-marking in the Location's settings clears the marks without a reload.
   let settings = await openSettings("Storage");
@@ -468,7 +482,7 @@ test.describe("sidebar marks, mobile", () => {
     await setFlag(page, long, "for-trade");
     await page.reload();
     const tree = await openDrawer();
-    const longRow = tree.getByRole("button", { name: /^A long Location/ });
+    const longRow = tree.getByRole("link", { name: /^A long Location/ });
     await expect(longRow.getByTestId("hidden-mark")).toBeVisible();
     await expect(longRow.getByTestId("for-trade-mark")).toBeVisible();
     const box = await longRow.boundingBox();
