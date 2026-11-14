@@ -424,7 +424,6 @@ it("S2-08: keeps compact phone terms together and every consent fact before the 
     "Leaves your Collection: 1 Iono (PAL 185)",
     "Arrives in Unsorted: 1 Arven (SVI 166)",
     "Only confirm after the physical swap",
-    "selected Deck switches",
     "The swap can't be undone.",
     "Your destination, picks and Deck switches are private.",
   ]) {
@@ -440,6 +439,10 @@ it("S2-08: keeps compact phone terms together and every consent fact before the 
   expect(
     disclosure.querySelector("select")?.getAttribute("disabled")
   ).toBeNull();
+  expect(disclosure.textContent).toContain(
+    "Only confirm after the physical swap. The swap can't be undone."
+  );
+  expect(disclosure.textContent).not.toContain("Deck switches you ticked");
   expect(confirmSwap).not.toHaveBeenCalled();
 });
 
@@ -670,3 +673,111 @@ it.each(["decline", "withdraw", "cancel"] as const)(
     expect(question.isConnected).toBe(false);
   }
 );
+
+it("keeps the Friend handle link free of leading whitespace", async () => {
+  vi.mocked(getTrade).mockResolvedValue({
+    ...trade,
+    state: "closed",
+    closed_reason: "declined",
+    closed_by: "you",
+    actions: [],
+    other: { ...trade.other, friend: true, handle: "misty" },
+  });
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  const link = host.querySelector('a[href="/friends/misty"]')!;
+  expect(link.textContent).toBe("@misty");
+  expect(link.parentElement?.textContent).toBe("Trade with Misty @misty");
+});
+it("names ticked Deck switches only when they are shown", async () => {
+  const card = {
+    edition_id: "iono",
+    name: "Iono",
+    set_code: "PAL",
+    set_name: "Paldea Evolved",
+    collector_number: "185",
+    descriptor: { finish: "normal" },
+    image_url: null,
+    copies: "1",
+  };
+  vi.mocked(getTrade).mockResolvedValue({
+    ...trade,
+    state: "accepted",
+    you_give: [card],
+    you_get: [
+      {
+        ...card,
+        edition_id: "arven",
+        name: "Arven",
+        set_code: "SVI",
+        collector_number: "166",
+      },
+    ],
+    actions: ["confirm_swap"],
+  });
+  vi.mocked(getTradeSide).mockResolvedValue({
+    trade_id: "old-round",
+    picks: [],
+    suggested: [],
+    deck_switches: [
+      {
+        deck_id: "deck",
+        deck_name: "My Deck",
+        from_edition_id: "iono",
+        to_edition_id: "arven",
+        count: "1",
+        from_card: card,
+        to_card: { ...card, edition_id: "arven", name: "Arven" },
+      },
+    ],
+  });
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  const give = host.querySelector('ul[aria-label="You give"]')!,
+    get = host.querySelector('ul[aria-label="You get"]')!;
+  const terms = give.parentElement!.parentElement!;
+  expect(terms.contains(get)).toBe(true);
+  expect(terms.classList.contains("phone:grid-cols-2")).toBe(true);
+  expect(give.textContent).toContain("×1");
+  expect(get.textContent).toContain("×1");
+  const disclosure = host.querySelector(
+      '[aria-label="Confirm swap with Misty"]'
+    )!,
+    confirm = [...disclosure.querySelectorAll("button")].find(
+      (b) => b.textContent === "Confirm swap"
+    )!;
+  expect(
+    [...host.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Confirm swap"
+    )
+  ).toHaveLength(1);
+  expect(disclosure.textContent).toContain(
+    "The Deck switches you ticked happen when you confirm."
+  );
+  const checkbox = disclosure.querySelector(
+    'input[type="checkbox"]'
+  ) as HTMLInputElement;
+  await act(async () => checkbox.click());
+  expect(disclosure.textContent).not.toContain("Deck switches you ticked");
+  expect(disclosure.textContent).toContain(
+    "Only confirm after the physical swap. The swap can't be undone."
+  );
+});

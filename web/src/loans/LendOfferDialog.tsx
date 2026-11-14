@@ -92,6 +92,7 @@ export function LendOfferDialog({
   const [friendId, setFriendId] = useState("");
   const [returnBy, setReturnBy] = useState("");
   const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<Sent | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -130,6 +131,7 @@ export function LendOfferDialog({
     setFriendId("");
     setReturnBy("");
     setMessage("");
+    setNotice("");
     setSent(null);
     setRetrying(false);
   }, [open]);
@@ -162,6 +164,7 @@ export function LendOfferDialog({
   }
 
   function outcome(o: FlowOutcome, own: boolean) {
+    setNotice("");
     if (o.kind === "done" || o.kind === "voided") {
       onLoansChanged();
       noteLoansChanged();
@@ -172,6 +175,9 @@ export function LendOfferDialog({
         friend: friendName,
       });
       onSent();
+    } else if (o.kind === "done") {
+      setMessage("");
+      setNotice(resultText(o) ?? "");
     } else if ((o.kind === "pending" || o.kind === "voided") && o.refusal) {
       setMessage(
         offerMessage(
@@ -201,6 +207,7 @@ export function LendOfferDialog({
     } satisfies Omit<SendLendOffer, "account_id" | "idempotency_key">;
     setBusy(true);
     setMessage("");
+    setNotice("");
     const o = await durable.send({
       kind: "lend_offer",
       scope: "lend_offer",
@@ -318,6 +325,12 @@ export function LendOfferDialog({
           />
           <p role="alert" className="m-0 text-meta text-danger empty:hidden">
             {message}
+          </p>
+          <p
+            role="status"
+            className="m-0 text-meta text-text-muted empty:hidden"
+          >
+            {notice}
           </p>
           {retained && (
             <PendingLoanRequest

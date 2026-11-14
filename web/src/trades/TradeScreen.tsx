@@ -567,6 +567,12 @@ export function TradeScreen({
     snapshot
       ? snapshot.sent.some((item) => sameSwitch(item, offer))
       : switches.ticked(offer);
+  const switchesShown =
+    gets &&
+    (snapshot
+      ? shownOffers.length > 0
+      : switches.state === "ready" && shownOffers.length > 0);
+  const switchesTicked = switchesShown && shownOffers.some(shownTicked);
   function runConfirm() {
     if (busy || swapPosting.current) return;
     if (!snapshot && gets && switches.state !== "ready") return;
@@ -737,6 +743,7 @@ export function TradeScreen({
           {needsParty && (
             <span className="font-semibold">Trade with {name}</span>
           )}
+          {needsParty && " "}
           {trade.other.friend && trade.other.handle && (
             <a
               className="inline-flex min-h-tap items-center text-text-muted"
@@ -756,7 +763,7 @@ export function TradeScreen({
                 );
               }}
             >
-              {needsParty && " "}@{trade.other.handle}
+              @{trade.other.handle}
             </a>
           )}
         </p>
@@ -917,22 +924,19 @@ export function TradeScreen({
               )}
             </div>
           )}
-          {gets &&
-            (snapshot
-              ? shownOffers.length > 0
-              : switches.state === "ready" && shownOffers.length > 0) && (
-              <DeckSwitchOffers
-                offers={shownOffers}
-                ticked={shownTicked}
-                disabled={busy || keys.current.has("confirm")}
-                onToggle={(offer) => {
-                  // Another set of switches is another command: a retry with the old key would be refused.
-                  forgetConfirm();
-                  setDialogMessage("");
-                  switches.toggle(offer);
-                }}
-              />
-            )}
+          {switchesShown && (
+            <DeckSwitchOffers
+              offers={shownOffers}
+              ticked={shownTicked}
+              disabled={busy || keys.current.has("confirm")}
+              onToggle={(offer) => {
+                // Another set of switches is another command: a retry with the old key would be refused.
+                forgetConfirm();
+                setDialogMessage("");
+                switches.toggle(offer);
+              }}
+            />
+          )}
           {gets && !snapshot && switches.state === "failed" && (
             <div className="flex flex-wrap items-center gap-2">
               <p className="m-0 text-meta text-text-muted">
@@ -950,8 +954,11 @@ export function TradeScreen({
               : "No cards arrive in your Collection."}
           </p>
           <p className="m-0 text-body phone:text-meta">
-            Only confirm after the physical swap. The selected Deck switches
-            apply. The swap can't be undone.
+            Only confirm after the physical swap.{" "}
+            {switchesTicked
+              ? "The Deck switches you ticked happen when you confirm. "
+              : ""}
+            The swap can't be undone.
           </p>
           <p className="m-0 text-meta text-text-muted">
             Your destination, picks and Deck switches are private.

@@ -217,7 +217,8 @@ export function MoveDialog({
                 </ul>
               ) : (
                 <p className="m-0 p-2 text-meta text-text-muted">
-                  No Storage Leaf or Deck matches “{query.trim()}”.
+                  No Location or Deck that can hold cards matches “
+                  {query.trim()}”.
                 </p>
               )
             ) : (
@@ -245,7 +246,9 @@ export function MoveDialog({
                 </p>
               </>
             ) : (
-              <p className="m-0">Choose a Storage Leaf or Deck.</p>
+              <p className="m-0">
+                Choose a Location that can hold cards, or a Deck.
+              </p>
             )}
           </div>
           <Feedback progress={progress} error={error} />
