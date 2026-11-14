@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { BorrowedMoveError } from "../collection_generated";
 import { MoveError } from "../moves_generated";
 import {
+  undoOfferText,
   borrowedUnknownFailure,
   describeBorrowedFailure,
   describeFailure,
@@ -147,3 +148,29 @@ for (const status of [404, 405])
     expect(partial.text).not.toContain("Nothing moved");
     expect(partial.retrySame).toBe(false);
   });
+
+test.each([
+  ["add", null, "b", 0, "last", "add to Binders / Blue"],
+  ["add", null, "gone", 0, "last", "add"],
+  ["move", "a", "b", 1, "last", "move from Box to Binders / Blue"],
+  ["move", null, "b", 3, "last", "move from 3 locations to Binders / Blue"],
+  ["move", "gone", "b", 1, "last", "move to Binders / Blue"],
+  ["remove", "a", null, 1, "last", "Inventory Removal from Box"],
+  ["remove", null, null, 2, "last", "Inventory Removal from 2 locations"],
+  ["remove", "gone", null, 1, "last", "Inventory Removal"],
+  ["add", null, "a", 0, "earlier", "add to Box"],
+] as const)(
+  "names what an offered Undo would undo: %s %s %s %s %s",
+  (action, source_id, destination_id, source_count, which, text) => {
+    const name = (id: string) =>
+      (({ a: "Box", b: "Binders / Blue" }) as Record<string, string>)[id] ??
+      null;
+    expect(
+      undoOfferText(
+        { action, source_id, destination_id, source_count },
+        name,
+        which
+      )
+    ).toBe(`You can still undo your ${which} ${text}.`);
+  }
+);
