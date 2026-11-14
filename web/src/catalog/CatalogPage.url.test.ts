@@ -406,3 +406,35 @@ test("a view change with a card open keeps the card in the address", async () =>
     await page.done();
   }
 });
+
+test("a printing alone is deleted and opens nothing", async () => {
+  const page = await mountAt(`/catalog?q=Abra&printing=${P}`);
+  try {
+    expect(page.onNavigate).toHaveBeenCalledWith("/catalog?q=Abra", {
+      replace: true,
+      preserveScroll: true,
+      overlay: true,
+    });
+    expect(
+      page.host.querySelector("output")?.getAttribute("data-printing")
+    ).toBeNull();
+  } finally {
+    await page.done();
+  }
+});
+
+test("a valid printing with a malformed edition opens the card on its default Edition", async () => {
+  const page = await mountAt(`/catalog?printing=${P}&edition=nope`);
+  try {
+    expect(page.onNavigate).toHaveBeenCalledWith(`/catalog?card=${P}`, {
+      replace: true,
+      preserveScroll: true,
+      overlay: true,
+    });
+    expect(
+      page.host.querySelector("output")?.getAttribute("data-printing")
+    ).toBeNull();
+  } finally {
+    await page.done();
+  }
+});

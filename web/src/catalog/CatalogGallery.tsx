@@ -535,9 +535,19 @@ export function CatalogGallery({
   const shown = useRef<CatalogCard | null>(null);
   const show = useCallback((edition: BrowseEdition) => {
     if (route.current.routed) {
-      setAnchor(edition.edition_id);
+      const target = {
+        printingId: edition.printing_id,
+        editionId: edition.edition_id,
+      };
+      // The address says where stepping starts once it lands (the sync effect). When the target is what it already
+      // names, nothing lands, so move on here; a refused write never moves it.
+      if (
+        shown.current?.printingId === target.printingId &&
+        shown.current.editionId === target.editionId
+      )
+        setAnchor(target.editionId);
       route.current.onCardRoute?.(
-        { printingId: edition.printing_id, editionId: edition.edition_id },
+        target,
         route.current.routeCard ? "replace" : "open"
       );
       return;

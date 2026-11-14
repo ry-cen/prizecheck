@@ -392,13 +392,14 @@ test.describe("phone enlarged image", () => {
     expect(await page.evaluate(() => document.body.style.overflow)).not.toBe(
       "hidden"
     );
-    await tile(page, NORMAL).tap();
+    // Forward straight after: the card reopens without the enlarged image.
+    await page.goForward();
     await expect(card).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
     await page.goBack();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-
-    // Forward reopens the card without the enlarged image.
-    await page.goForward();
+    // The tiles are clickable again.
+    await tile(page, NORMAL).tap();
     await expect(card).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(1);
 
