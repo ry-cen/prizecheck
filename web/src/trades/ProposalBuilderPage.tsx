@@ -1538,8 +1538,8 @@ export function ProposalBuilderPage({
         <div className="flex flex-col gap-4">
           <p className="m-0 text-body">
             {counter
-              ? `Your changes aren't kept. ${name}'s Trade Proposal stays as it was.`
-              : "Your changes aren't kept."}
+              ? `Your unsent changes will be discarded. ${name}'s Trade Proposal stays as it was.`
+              : "Your unsent changes will be discarded."}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
