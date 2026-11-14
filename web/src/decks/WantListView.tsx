@@ -57,7 +57,7 @@ import {
   WillAcceptRadios,
 } from "./TradeWantsPanel";
 import { useTradeWants, type TradeWantsApi } from "./useTradeWants";
-import { borrowOffer, pendingText } from "./pendingLoans";
+import { borrowOffer, pendingText, rowCoverage } from "./pendingLoans";
 import type { PendingApi } from "./useBorrowMatches";
 
 type Props = {
@@ -322,22 +322,53 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           deckName={deckName}
           scoped={scoped}
           pending={pending}
+          note={
+            shownScope
+              ? undefined
+              : (row) =>
+                  pendingText(
+                    rowCoverage(
+                      row.decks,
+                      row.edition_id,
+                      friendRequests.forDeck
+                    )
+                  )
+          }
           action={(row, copy) => {
             const lines =
               friendRequests.state.kind === "ready"
                 ? friendRequests.state.lines
                 : undefined;
+            // All Decks: the card's coverage pools every Deck that needs it (each up to its own need).
+            const coverage = shownScope
+              ? lines?.get(row.edition_id)
+              : rowCoverage(row.decks, row.edition_id, friendRequests.forDeck);
+            const offered = shownScope
+              ? lines?.get(copy.edition_id)
+              : copy.edition_id === row.edition_id
+                ? coverage
+                : rowCoverage(
+                    row.decks,
+                    copy.edition_id,
+                    friendRequests.forDeck
+                  );
             const offer = borrowOffer(
               Number(row.need),
               copy,
-              lines?.get(row.edition_id),
-              lines?.get(copy.edition_id)
+              coverage,
+              offered
             );
-            const known =
-              !pending &&
-              (!shownScope ||
-                (friendRequests.state.kind === "ready" &&
-                  !friendRequests.state.stale));
+            const known = shownScope
+              ? !pending &&
+                friendRequests.state.kind === "ready" &&
+                !friendRequests.state.stale
+              : !pending && friendRequests.ready;
+            // The card's own Deck when exactly one needs it, else No Deck for the collector to choose.
+            const deckId = shownScope
+              ? shownScope
+              : row.decks.length === 1
+                ? row.decks[0].deck_id
+                : null;
             return (
               <AskControl
                 text="Ask to borrow"
@@ -347,10 +378,11 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
                   copy.edition_id === row.edition_id ? row.image_url : null
                 )}
                 cap={offer.cap}
+                limit={offer.limit}
                 current={known}
                 initialQuantity={offer.quantity}
                 lendable={lendableText(copy)}
-                deckId={shownScope}
+                deckId={deckId}
               />
             );
           }}
@@ -383,6 +415,13 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
             />
           )}
           <div className="col-start-1 row-start-1 flex min-w-0 flex-col gap-4 phone:row-start-2">
+            {!shownScope && hasFriends && friendRequests.notice && (
+              <PendingReadNotice
+                notice={friendRequests.notice}
+                retry={friendRequests.retry}
+                panel
+              />
+            )}
             {list.sections.map((section) => (
               <DeckSection
                 key={section.deck_id}
@@ -392,8 +431,8 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
                 swap={swap}
                 byCard={byCard}
                 trade={trade}
-                borrowFor={shownScope}
                 pending={friendRequests}
+                pendingNotice={!!shownScope}
                 borrowReady={friends.kind === "ready" && !friends.pending}
               />
             ))}
@@ -417,8 +456,8 @@ function DeckSection({
   swap,
   byCard,
   trade,
-  borrowFor,
   pending,
+  pendingNotice,
   borrowReady,
 }: {
   section: WantListSection;
@@ -429,10 +468,10 @@ function DeckSection({
   byCard: Map<string, FriendCopy[]>;
   /** The collector's Will accept choices (#275). */
   trade: TradeWantsApi;
-  /** The Deck a new Borrow Request draft is For, or null (NeededLines). */
-  borrowFor: string | null;
-  /** What the scoped Deck is waiting on from Friends. */
+  /** What each Deck is waiting on from Friends. */
   pending: PendingApi;
+  /** Whether this section shows the page read's failed or stale notice itself (a scoped Deck); All Decks shows one. */
+  pendingNotice: boolean;
   borrowReady: boolean;
 }) {
   const idBase = useId();
@@ -481,8 +520,9 @@ function DeckSection({
             swap={swap}
             byCard={byCard}
             trade={trade}
-            borrowFor={borrowFor}
+            borrowFor={section.deck_id}
             pending={pending}
+            pendingNotice={pendingNotice}
             borrowReady={borrowReady}
           />
         </>
@@ -494,8 +534,7 @@ function DeckSection({
 /**
  * A section's lines that still need copies (#209), each with its Will accept select (#275), Swap hint (#211) and Friend
  * chips with Ask (#251). The Want List's Deck sections and the deck builder's Ways to get missing cards panel draw them.
- * A chip that starts a Friend's Borrow Request draft makes it For `borrowFor`: the section's Deck where the page is
- * about that one Deck, and none on All Decks.
+ * A chip counts `borrowFor`, the section's Deck, as its card's one Deck toward the draft's For Deck, on All Decks too.
  */
 export function NeededLines({
   layout = "rows",
@@ -506,6 +545,7 @@ export function NeededLines({
   trade,
   borrowFor,
   pending,
+  pendingNotice = true,
   borrowReady = true,
 }: {
   layout?: "rows" | "tiles";
@@ -518,32 +558,19 @@ export function NeededLines({
   trade: TradeWantsApi;
   /** The Deck a new Borrow Request draft is For, or null for none. */
   borrowFor: string | null;
-  /** What this Deck is waiting on from Friends, when it is the Deck in scope: shown beside each line's counts and
-   * never taken off them. */
+  /** What this Deck is waiting on from Friends: shown beside each line's counts and never taken off them. */
   pending?: PendingApi;
+  /** Show the read's failed or stale notice here; All Decks shows one for the page instead. */
+  pendingNotice?: boolean;
   borrowReady?: boolean;
 }) {
-  const waiting =
-    pending &&
-    pending.state.kind !== "idle" &&
-    pending.state.deckId === section.deck_id
-      ? pending.state
-      : null;
+  const state = pending?.forDeck(section.deck_id);
+  const waiting = state && state.kind !== "idle" ? state : null;
   return (
     <>
-      {waiting &&
-        (waiting.kind === "failed" ||
-          (waiting.kind === "ready" && waiting.stale)) && (
-          <p
-            role="status"
-            className="m-0 flex flex-wrap items-center gap-2 border-t border-border px-4 py-2 text-meta text-text-muted"
-          >
-            {waiting.kind === "failed"
-              ? "Requests to Friends couldn't be loaded."
-              : "Requests to Friends may be out of date."}
-            <Button onClick={pending!.retry}>Retry</Button>
-          </p>
-        )}
+      {pendingNotice && pending?.notice && (
+        <PendingReadNotice notice={pending.notice} retry={pending.retry} />
+      )}
       <ul
         aria-label={`What ${section.name} needs`}
         className={
@@ -617,6 +644,7 @@ export function NeededLines({
                     current={known}
                     initialQuantity={offer.quantity}
                     more={!!pendingLine}
+                    limit={offer.limit}
                     lendable={lendableText(copy)}
                     text={text}
                     deckId={borrowFor}
@@ -628,6 +656,29 @@ export function NeededLines({
         ))}
       </ul>
     </>
+  );
+}
+
+/** The one notice for a failed or stale requests read, with Retry. */
+function PendingReadNotice({
+  notice,
+  retry,
+  panel = false,
+}: {
+  notice: "failed" | "stale";
+  retry: () => void;
+  panel?: boolean;
+}) {
+  return (
+    <p
+      role="status"
+      className={`m-0 flex flex-wrap items-center gap-2 px-4 py-2 text-meta text-text-muted ${panel ? "rounded-panel border border-border bg-surface" : "border-t border-border"}`}
+    >
+      {notice === "failed"
+        ? "Requests to Friends couldn't be loaded."
+        : "Requests to Friends may be out of date."}
+      <Button onClick={retry}>Retry</Button>
+    </p>
   );
 }
 

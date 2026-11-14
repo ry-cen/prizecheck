@@ -253,3 +253,10 @@ Regressions:
     want_list, want_list_cost and want_list_mass_entry, 114 passed.
 - Browser run `20261031T003625Z-3f78a4d7`: `deck-pending-loans.spec.ts`, `--browser-workers 1 --shard 1/1`, 7 passed.
 - Prettier is clean apart from the git-ignored `.impeccable/hook.cache.json`, which is not part of this change.
+
+## Revision (2026-11-13, owner: warn and allow)
+
+- The All Decks Want List and the Borrow Request composer read `GET /api/loans/waiting`, the borrower-wide form: any Deck or Unsorted, not filtered by Deck List.
+- A chip under a Deck's section starts its draft For that Deck; Get from Friends starts it For the card's one Deck, otherwise No Deck.
+- The composer warns about earlier open Loans from the same Friend for the same Edition and does not block sending.
+- The per-Deck endpoint (`GET /api/loans/pending?deck=`) is unchanged.

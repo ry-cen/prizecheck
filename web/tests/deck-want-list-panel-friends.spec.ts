@@ -124,4 +124,26 @@ test("a Friend chip in the deck builder's panel asks the Friend through the Borr
     .getByLabel("For Deck")
     .selectOption({ label: "No Deck (they go to Unsorted)" });
   await expect(composer.getByLabel("For Deck")).toHaveValue("");
+
+  // Owner decision (2026-11-13): a manual No Deck is kept when a later card joins the draft.
+  await composer.getByRole("button", { name: "Keep draft" }).click();
+  await hold(brock.page, await unsorted(brock.page), ids["PAL 172"], 1);
+  await setLine(page, deck, ids["PAL 172"], 1);
+  await page.goto(`${ORIGIN}/decks/${deck}`);
+  await page.getByRole("button", { name: "Ways to get missing cards" }).click();
+  await page
+    .getByRole("region", { name: "Ways to get missing cards" })
+    .getByRole("list", { name: "Friends who can lend Boss's Orders" })
+    .getByRole("button", { name: /^Borrow from Brock S/ })
+    .click();
+  await page
+    .getByRole("region", { name: "Borrow Request drafts" })
+    .getByRole("button", { name: "Review Borrow Request to Brock S" })
+    .click();
+  await expect(composer.getByLabel("For Deck")).toHaveValue("");
+  await expect(
+    composer
+      .getByRole("list", { name: "Cards to borrow" })
+      .getByRole("listitem")
+  ).toHaveCount(2);
 });

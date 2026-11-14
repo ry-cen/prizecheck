@@ -10,11 +10,12 @@ import {
 import type { FriendCopy } from "../social_generated";
 import { AskChip, AskControl } from "../loans/BorrowDrafts";
 import { NeededLines, WantListView } from "./WantListView";
-import { useBorrowMatches } from "./useBorrowMatches";
+import { pendingApi, useBorrowMatches } from "./useBorrowMatches";
 import type { PendingState } from "./pendingLoans";
 import type { TradeWantsApi } from "./useTradeWants";
 
-vi.mock("./useBorrowMatches", () => ({
+vi.mock("./useBorrowMatches", async (original) => ({
+  ...(await original<typeof import("./useBorrowMatches")>()),
   useBorrowMatches: vi.fn(() => answer),
 }));
 vi.mock("../want_list_generated", async (original) => ({
@@ -158,7 +159,7 @@ function response(
       pending,
       byCard: new Map([["A", [copy]]]),
     },
-    pending: { state, retry: vi.fn() },
+    pending: pendingApi(state, vi.fn()),
   };
 }
 let answer: ReturnType<typeof useBorrowMatches>;
@@ -275,7 +276,7 @@ it.each([
           borrowFor: deck,
           byCard: new Map([["A", [copy]]]),
           borrowReady: !test.pending,
-          pending: { state: test.state(), retry: vi.fn() },
+          pending: pendingApi(test.state(), vi.fn()),
         })
       )
     );
@@ -304,7 +305,7 @@ it("keeps the Get from Friends introduction mounted while the same Deck refreshe
   try {
     answer = {
       friends: { kind: "none" },
-      pending: { state: { kind: "loading", deckId: deck }, retry: vi.fn() },
+      pending: pendingApi({ kind: "loading", deckId: deck }, vi.fn()),
     };
     await act(async () => render());
     expect(introduction()).toBeUndefined();
@@ -327,4 +328,187 @@ it("keeps the Get from Friends introduction mounted while the same Deck refreshe
   } finally {
     await act(async () => root.unmount());
   }
+});
+
+// All Decks: the list has no Deck in scope, and each section carries its own share of the borrower-wide read.
+const second = "00000000-0000-4000-8000-000000000002";
+const allDecks: WantList = {
+  ...list,
+  deck_id: null,
+  decks: [
+    { id: deck, name: "Charizard" },
+    { id: second, name: "Gardevoir" },
+  ],
+  sections: [section, { ...section, deck_id: second, name: "Gardevoir" }],
+  combined: [
+    {
+      ...line,
+      need: "6",
+      decks: [
+        { deck_id: deck, need: "3" },
+        { deck_id: second, need: "3" },
+      ],
+    },
+  ],
+};
+function allDecksAnswer(
+  forDeck: (id: string) => PendingState,
+  overrides: Partial<ReturnType<typeof pendingApi>> = {}
+): ReturnType<typeof useBorrowMatches> {
+  return {
+    ...response(false),
+    pending: {
+      ...pendingApi({ kind: "idle" }, vi.fn()),
+      forDeck,
+      ready: true,
+      ...overrides,
+    },
+  };
+}
+const requestedOne = new Map([
+  [
+    "A",
+    {
+      edition_id: "A",
+      requested: "1",
+      accepted: "0",
+      lenders: [
+        {
+          lender_id: "misty",
+          lender: "Misty",
+          state: "requested" as const,
+          copies: "1",
+        },
+      ],
+    },
+  ],
+]);
+async function renderAllDecks(
+  then?: (host: HTMLElement) => Promise<void>,
+  shown: WantList = allDecks
+) {
+  vi.mocked(getWantList).mockResolvedValue(shown);
+  window.history.replaceState(null, "", "/decks/want-list");
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(h(WantListView, { onOpenDeck: vi.fn(), onNavigate: vi.fn() }))
+    );
+    await then?.(host);
+  } finally {
+    await act(async () => root.unmount());
+  }
+}
+
+it("All Decks gives each section's chips its own Deck and its own requests", async () => {
+  answer = allDecksAnswer((id) => ({
+    kind: "ready",
+    deckId: id,
+    stale: false,
+    lines: id === deck ? requestedOne : new Map(),
+  }));
+  await renderAllDecks(async (host) => {
+    const calls = vi.mocked(AskChip).mock.calls.map(([props]) => props);
+    expect(calls.map((props) => props.deckId)).toEqual([deck, second]);
+    expect(calls.map((props) => props.more)).toEqual([true, false]);
+    expect(calls.map((props) => props.current)).toEqual([true, true]);
+    expect(host.textContent!.match(/Asked Misty for 1/g)).toHaveLength(1);
+  });
+});
+
+it("All Decks shows one notice for a failed waiting read, not one per section", async () => {
+  answer = allDecksAnswer((id) => ({ kind: "failed", deckId: id }), {
+    notice: "failed",
+    ready: false,
+  });
+  await renderAllDecks(async (host) => {
+    expect(
+      host.textContent!.match(/Requests to Friends couldn't be loaded\./g)
+    ).toHaveLength(1);
+    expect(vi.mocked(AskChip).mock.calls.at(-1)![0].current).toBe(false);
+  });
+});
+
+it("Get from Friends on All Decks starts a one-Deck card's draft For that Deck", async () => {
+  answer = allDecksAnswer((id) => ({
+    kind: "ready",
+    deckId: id,
+    stale: false,
+    lines: new Map(),
+  }));
+  await renderAllDecks(
+    async (host) => {
+      await act(async () => friendsView(host).click());
+      expect(vi.mocked(AskControl).mock.calls.at(-1)![0].deckId).toBe(deck);
+    },
+    {
+      ...allDecks,
+      combined: [
+        { ...allDecks.combined[0], decks: [{ deck_id: deck, need: "3" }] },
+      ],
+    }
+  );
+});
+
+it("Get from Friends on All Decks starts a card several Decks need with No Deck", async () => {
+  answer = allDecksAnswer((id) => ({
+    kind: "ready",
+    deckId: id,
+    stale: false,
+    lines: new Map(),
+  }));
+  await renderAllDecks(async (host) => {
+    await act(async () => friendsView(host).click());
+    expect(vi.mocked(AskControl).mock.calls.at(-1)![0].deckId).toBeNull();
+  });
+});
+
+it("Get from Friends on All Decks offers only the remainder and shows the pending note", async () => {
+  const oneDeck: WantList = {
+    ...allDecks,
+    combined: [
+      {
+        ...allDecks.combined[0],
+        need: "3",
+        decks: [{ deck_id: deck, need: "3" }],
+      },
+    ],
+  };
+  answer = allDecksAnswer((id) => ({
+    kind: "ready",
+    deckId: id,
+    stale: false,
+    lines: id === deck ? requestedOne : new Map(),
+  }));
+  await renderAllDecks(async (host) => {
+    await act(async () => friendsView(host).click());
+    const props = vi.mocked(AskControl).mock.calls.at(-1)![0];
+    expect(props.cap).toBe(2);
+    expect(props.limit).toBe(3);
+    expect(host.textContent).toContain("Asked Misty for 1");
+  }, oneDeck);
+  answer = allDecksAnswer((id) => ({
+    kind: "ready",
+    deckId: id,
+    stale: false,
+    lines:
+      id === deck
+        ? new Map([["A", { ...requestedOne.get("A")!, requested: "3" }]])
+        : new Map(),
+  }));
+  await renderAllDecks(async (host) => {
+    await act(async () => friendsView(host).click());
+    expect(vi.mocked(AskControl).mock.calls.at(-1)![0].cap).toBe(0);
+  }, oneDeck);
+});
+
+it("Get from Friends on All Decks waits for the waiting read", async () => {
+  answer = allDecksAnswer((id) => ({ kind: "loading", deckId: id }), {
+    ready: false,
+  });
+  await renderAllDecks(async (host) => {
+    await act(async () => friendsView(host).click());
+    expect(vi.mocked(AskControl).mock.calls.at(-1)![0].current).toBe(false);
+  });
 });

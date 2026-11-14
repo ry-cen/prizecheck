@@ -15,7 +15,7 @@ import { signInAsOwner } from "./support/sign-in";
 
 // League journey: Ask on a page about one Deck (the Want List scoped to it) starts the Friend's Borrow Request draft
 // For that Deck, through the existing deck_id. A draft already started keeps its own For Deck, a different Deck or
-// none; the unscoped All Decks Want List starts one with no Deck; the choice survives a reload, stays editable, and the
+// none; a chip under a Deck's section on All Decks starts it For that Deck; the choice survives a reload, stays editable, and the
 // sent request carries it. The deck builder's panel is in deck-want-list-panel-friends.spec.ts. Brock lends a spare
 // Iono PAL 185 and a Boss's Orders; Misty a spare Iono PAL 185 and a Boss's Orders (the Swap catalog,
 // api/tests/want_list_swap_fixtures.py). The Friends sign in first, so the test's own page signs in afterwards.
@@ -118,7 +118,8 @@ test("Ask on a Deck's Want List starts the draft For that Deck and never changes
   await expect(mistyDraft.getByLabel("For Deck")).toHaveValue(lugia);
   await keep(page, "Misty W");
 
-  // Asking Misty from Charizard's Want List adds the card but leaves her draft For Lugia.
+  // Owner decision (2026-11-13): For Deck follows every card until the collector chooses. A card from Charizard's
+  // Want List joins the Lugia draft, so the draft has no one Deck. Choosing Lugia on purpose is then kept.
   await page.goto(`${ORIGIN}/decks/want-list?deck=${charizard}`);
   await chip(page, charizardName, "Boss's Orders", "Misty W").click();
   mistyDraft = await review(page, "Misty W");
@@ -127,9 +128,11 @@ test("Ask on a Deck's Want List starts the draft For that Deck and never changes
       .getByRole("list", { name: "Cards to borrow" })
       .getByRole("listitem")
   ).toHaveCount(2);
+  await expect(mistyDraft.getByLabel("For Deck")).toHaveValue("");
+  await mistyDraft.getByLabel("For Deck").selectOption(lugia);
   await expect(mistyDraft.getByLabel("For Deck")).toHaveValue(lugia);
 
-  // Sending it is unchanged: the toast confirms, and the Loan is For Lugia.
+  // Sending it is unchanged: the toast confirms, and the Loan is For the Deck the collector chose.
   await mistyDraft.getByRole("button", { name: "Send Borrow Request" }).click();
   await expect(mistyDraft).toBeHidden();
   const notifications = page.getByRole("region", { name: "Notifications" });
@@ -140,12 +143,12 @@ test("Ask on a Deck's Want List starts the draft For that Deck and never changes
     `You're borrowing · For ${lugiaName}`
   );
 
-  // On All Decks no one Deck is the page's: a new draft has no Deck.
+  // On All Decks the chip sits under Charizard's section, so the new draft is For Charizard.
   brockDraft = await review(page, "Brock S");
   await brockDraft.getByRole("button", { name: "Discard" }).click();
   await expect(tray(page)).toHaveCount(0);
   await page.goto(`${ORIGIN}/decks/want-list`);
   await chip(page, charizardName, "Iono", "Brock S").click();
   brockDraft = await review(page, "Brock S");
-  await expect(brockDraft.getByLabel("For Deck")).toHaveValue("");
+  await expect(brockDraft.getByLabel("For Deck")).toHaveValue(charizard);
 });

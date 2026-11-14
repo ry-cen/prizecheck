@@ -19525,6 +19525,81 @@
     "title": "VoidCommandKey",
     "type": "object"
    },
+   "WaitingLine": {
+    "description": "One line of one of the borrower's open Loans, any Deck or none: copies asked for (``requested``, nobody has\nanswered) or promised and not yet received (``accepted``). ``deck_id``: the borrower's own Deck the cards go to,\nNone for Unsorted (none chosen, or the Deck was deleted). Information only.",
+    "properties": {
+     "copies": {
+      "title": "Copies",
+      "type": "string"
+     },
+     "deck_id": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Deck Id"
+     },
+     "edition_id": {
+      "format": "uuid",
+      "title": "Edition Id",
+      "type": "string"
+     },
+     "lender": {
+      "title": "Lender",
+      "type": "string"
+     },
+     "lender_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lender Id"
+     },
+     "state": {
+      "enum": [
+       "requested",
+       "accepted"
+      ],
+      "title": "State",
+      "type": "string"
+     }
+    },
+    "required": [
+     "lender",
+     "lender_id",
+     "edition_id",
+     "deck_id",
+     "state",
+     "copies"
+    ],
+    "title": "WaitingLine",
+    "type": "object"
+   },
+   "WaitingLoans": {
+    "properties": {
+     "lines": {
+      "items": {
+       "$ref": "#/components/schemas/WaitingLine"
+      },
+      "title": "Lines",
+      "type": "array"
+     }
+    },
+    "required": [
+     "lines"
+    ],
+    "title": "WaitingLoans",
+    "type": "object"
+   },
    "WantList": {
     "properties": {
      "combined": {
@@ -30881,6 +30956,88 @@
     "summary": "Resolve Loan",
     "tags": [
      "social"
+    ]
+   }
+  },
+  "/api/loans/waiting": {
+   "get": {
+    "description": "Everything the borrower is still waiting on from Friends, for any of their Decks or none: the copies asked for in\nBorrow Requests nobody has answered and the copies promised and not yet received, with each lender's Display Name.\nThe All Decks Want List and the Borrow Request composer read it; ``GET /api/loans/pending`` stays the per-Deck read.",
+    "operationId": "waiting_loans_api_loans_waiting_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-internal-user",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-User"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-time",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Time"
+      }
+     },
+     {
+      "in": "header",
+      "name": "x-internal-signature",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Internal-Signature"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WaitingLoans"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Waiting Loans",
+    "tags": [
+     "loans"
     ]
    }
   },

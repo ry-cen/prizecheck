@@ -12,7 +12,7 @@ NAMES = ("TradeResolution", "LoanResolution", 'OfferSummary', 'SummaryCard', 'Su
          "PendingReturn", "LoanView",
           "VoidCommandKey", "CommandKeyOutcome", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
          "PromiseLimit", "LoanPickPlace", "LoanDeck", "DeckUse", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
-         "BorrowedCopies", "MoveBorrowed", "PendingLender", "PendingLine", "PendingLoans", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
+         "BorrowedCopies", "MoveBorrowed", "PendingLender", "PendingLine", "PendingLoans", "WaitingLine", "WaitingLoans", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
          "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
          "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
          "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView",  "TradeStep",
@@ -151,6 +151,9 @@ export const moveBorrowed = (body: MoveBorrowed) => request<BorrowedCopies>('/ap
 // What one of your Decks is waiting on from Friends: copies asked for and copies promised but not yet received.
 export const getPendingLoans = (deck: string, signal?: AbortSignal) =>
   request<PendingLoans>(`/api/loans/pending${query({ deck })}`, 'GET', undefined, signal);
+// Everything you're still waiting on from Friends, for any of your Decks or none: copies asked for and copies promised but not yet received.
+export const getWaitingLoans = (signal?: AbortSignal) =>
+  request<WaitingLoans>('/api/loans/waiting', 'GET', undefined, signal);
 // Returns (#255): either side starts one (its confirmation), and the other side confirms it.
 export const startReturn = (id: string, body: StartReturn) =>
   request<LoanView>(`/api/loans/${at(id)}/returns`, 'POST', body);

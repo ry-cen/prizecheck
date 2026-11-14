@@ -6,6 +6,8 @@ promised, by an accepted Borrow Request or a Lend Offer taken for this Deck, tha
 (``accepted``, ``promised - written_off``), each with the lender's Display Name. It is information only: the Want List,
 its revisions and the owner revision never move for it. Only the borrower reads it, for one of their own Decks.
 
+``GET /api/loans/waiting`` is the borrower-wide form: every open line, any Deck or Unsorted, not filtered by the Deck List.
+
 Misty W. lends to Ash K. (``test_loans.pair``); Brock S. is a second lender. Iono PAL 185 and Arven SVI 166 come from
 the Swap catalog.
 """
@@ -287,3 +289,176 @@ def test_lender_id_is_required_even_when_the_account_was_deleted():
     from app.loan_inventory import PendingLender
     assert 'lender_id' in PendingLender.model_json_schema()['required']
     assert PendingLender(lender='Former Friend', lender_id=None, state='accepted', copies='1').lender_id is None
+
+
+# The borrower-wide read (``GET /api/loans/waiting``): any Deck or Unsorted, not filtered by the Deck List.
+
+def waiting_lines(user):
+    """[(deck_id, edition_id, lender, state, copies)] from ``GET /api/loans/waiting``, in the answer's order."""
+    return [(row['deck_id'], row['edition_id'], row['lender'], row['state'], row['copies'])
+            for row in ok(call('GET', '/api/loans/waiting', user))['lines']]
+
+
+def test_waiting_lists_every_open_request_with_its_deck_or_unsorted(store):
+    _, iono, ash, misty, charizard = lending()
+    before, revision = want_list(ash, charizard), revision_of(ash)
+    sent(ash, misty, [(iono, 1)])
+    sent(ash, misty, [(iono, 3)], deck_id=charizard)
+    lines = waiting_lines(ash)
+    assert sorted(lines, key=lambda row: row[0] is None) == lines
+    assert lines == [(charizard, iono, 'Misty W.', 'requested', '3'), (None, iono, 'Misty W.', 'requested', '1')]
+    body = ok(call('GET', '/api/loans/waiting', ash))
+    assert set(body) == {'lines'}
+    assert all(set(row) == {'lender', 'lender_id', 'edition_id', 'deck_id', 'state', 'copies'} for row in body['lines'])
+    assert body['lines'][0]['lender_id'] == misty
+    assert want_list(ash, charizard) == before and revision_of(ash) == revision
+
+
+def test_waiting_follows_accept_write_off_receipt_and_take_back(store):
+    _, iono, ash, misty, charizard = lending(copies=6, deck_line=6)
+    loan = sent(ash, misty, [(iono, 3)], deck_id=charizard)
+    ok(accept(misty, view(misty, loan), [(iono, 1)]))
+    assert waiting_lines(ash) == [(charizard, iono, 'Misty W.', 'accepted', '1')]
+    other = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 3)], deck_id=charizard)), [(iono, 3)]))
+    ok(handover(misty, other))
+    ok(write_off(misty, other, [(iono, 1)]))
+    assert sorted(waiting_lines(ash)) == sorted([(charizard, iono, 'Misty W.', 'accepted', '1'),
+                                                 (charizard, iono, 'Misty W.', 'accepted', '2')])
+    ok(handover(ash, view(ash, other)))
+    assert waiting_lines(ash) == [(charizard, iono, 'Misty W.', 'accepted', '1')]
+    third = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 2)], deck_id=charizard)), [(iono, 2)]))
+    ok(handover(ash, third))
+    assert len(waiting_lines(ash)) == 1
+    ok(take_back(ash, third))
+    assert len(waiting_lines(ash)) == 2
+
+
+def test_waiting_drops_declined_withdrawn_and_cancelled_requests(store):
+    _, iono, ash, misty, charizard = lending()
+    ok(step(misty, view(misty, sent(ash, misty, [(iono, 1)], deck_id=charizard)), 'decline'))
+    ok(step(ash, view(ash, sent(ash, misty, [(iono, 1)])), 'withdraw'))
+    cancelled = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 1)], deck_id=charizard)), [(iono, 1)]))
+    ok(step(ash, view(ash, cancelled), 'cancel'))
+    assert waiting_lines(ash) == []
+
+
+def test_waiting_shows_a_deleted_decks_request_as_unsorted_and_names_cards_the_deck_list_doesnt(store):
+    ids, iono, ash, misty, charizard = lending()
+    arven = ids['SVI 166']
+    hold(misty, node(misty, 'Binder')['id'], arven, 1)
+    sent(ash, misty, [(arven, 1)], deck_id=charizard)
+    assert pending(ash, charizard).json()['lines'] == []
+    assert waiting_lines(ash) == [(charizard, arven, 'Misty W.', 'requested', '1')]
+    named_deck = node(ash, charizard)
+    ok(call('DELETE', f'/api/decks/{charizard}', ash, {'name': named_deck['name'], 'version': named_deck['version'],
+                                                      'idempotency_key': str(uuid4())}))
+    assert waiting_lines(ash) == [(None, arven, 'Misty W.', 'requested', '1')]
+
+
+def test_waiting_counts_a_lend_offer_only_once_taken_for_a_deck_or_unsorted(store):
+    _, iono, ash, misty, charizard = lending()
+    binder = node(misty, 'Binder')['id']
+    first = ok(offer(misty, ash, [(binder, iono, 1)]), 201)
+    assert waiting_lines(ash) == []
+    ok(take(ash, first, [(iono, 1)], deck_id=charizard))
+    second = ok(offer(misty, ash, [(binder, iono, 1)]), 201)
+    ok(take(ash, second, [(iono, 1)]))
+    assert waiting_lines(ash) == [(charizard, iono, 'Misty W.', 'accepted', '1'),
+                                  (None, iono, 'Misty W.', 'accepted', '1')]
+
+
+def test_only_the_borrower_reads_waiting(store):
+    _, iono, ash, misty, charizard = lending()
+    sent(ash, misty, [(iono, 1)], deck_id=charizard)
+    sent(ash, misty, [(iono, 1)])
+    stranger, _ = collector()
+    assert waiting_lines(misty) == [] and waiting_lines(stranger) == []
+    assert len(waiting_lines(ash)) == 2
+
+
+def test_waiting_needs_a_signed_in_collector():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    assert TestClient(app).get('/api/loans/waiting').status_code == 401
+
+
+def test_waiting_line_ids_are_required_and_nullable():
+    from app.loan_inventory import WaitingLine
+    required = WaitingLine.model_json_schema()['required']
+    assert 'lender_id' in required and 'deck_id' in required
+    line = WaitingLine(lender='Former Friend', lender_id=None, edition_id=uuid4(), deck_id=None, state='accepted',
+                       copies='1')
+    assert line.lender_id is None and line.deck_id is None
+
+
+def test_waiting_after_ending_the_friendship_or_a_block_keeps_only_what_the_lender_handed_over(store):
+    _, iono, ash, misty, charizard = lending(copies=6, deck_line=6)
+    sent(ash, misty, [(iono, 1)], deck_id=charizard)
+    sent(ash, misty, [(iono, 1)])
+    untouched = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 1)], deck_id=charizard)), [(iono, 1)]))
+    on_its_way = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 2)])), [(iono, 2)]))
+    ok(handover(misty, on_its_way))
+    ok(remove(misty, ash))
+    assert view(ash, untouched)['state'] == 'closed'
+    assert waiting_lines(ash) == [(None, iono, 'Misty W.', 'accepted', '2')]
+    brock, _ = collector()
+    named(brock, 'Brock S.')
+    befriend(ash, brock)
+    hold(brock, place(brock, 'Box'), iono, 3)
+    kept = ok(accept(brock, view(brock, sent(ash, brock, [(iono, 2)], deck_id=charizard)), [(iono, 2)]))
+    sent(ash, brock, [(iono, 1)])
+    ok(handover(brock, kept))
+    block(ash, brock)
+    assert waiting_lines(ash) == [(charizard, iono, 'Brock S.', 'accepted', '2'),
+                                  (None, iono, 'Misty W.', 'accepted', '2')]
+
+
+def test_waiting_shows_an_edited_and_resent_request_once(store):
+    from test_loan_threads import terms
+    _, iono, ash, misty, charizard = lending()
+    earlier = sent(ash, misty, [(iono, 1)], deck_id=charizard)
+    ok(terms(ash, earlier, iono, 2, deck_id=charizard))
+    assert waiting_lines(ash) == [(charizard, iono, 'Misty W.', 'requested', '2')]
+
+
+def test_waiting_is_one_statement_and_takes_no_owner_lock(store, monkeypatch):
+    from app import loan_inventory
+    ids, iono, ash, misty, charizard = lending(copies=6, deck_line=6)
+    arven = ids['SVI 166']
+    hold(misty, node(misty, 'Binder')['id'], arven, 2)
+    line(ash, charizard, arven, 2)
+    real = loan_inventory.connect
+    statements: list[str] = []
+
+    class Counting:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def __enter__(self):
+            self.inner = self.conn.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.conn.__exit__(*args)
+
+        def transaction(self):
+            return self.inner.transaction()
+
+        def execute(self, query, *args, **kwargs):
+            statements.append(str(query))
+            return self.inner.execute(query, *args, **kwargs)
+
+    def count():
+        statements.clear()
+        monkeypatch.setattr(loan_inventory, 'connect', lambda: Counting(real()))
+        ok(call('GET', '/api/loans/waiting', ash))
+        monkeypatch.setattr(loan_inventory, 'connect', real)
+        return list(statements)
+
+    few = count()
+    for _ in range(3):
+        sent(ash, misty, [(iono, 1), (arven, 1)], deck_id=charizard)
+    ok(accept(misty, view(misty, sent(ash, misty, [(iono, 2)])), [(iono, 2)]))
+    many = count()
+    assert len(few) == len(many) == 1
+    assert 'FOR UPDATE' not in many[0] and 'FOR SHARE' not in many[0] and 'price' not in many[0].lower()
