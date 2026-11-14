@@ -307,10 +307,15 @@ export function Workspace({
     active,
   });
   const previousMobile = useRef(mobile);
+  const pendingInspectorResync = useRef(false);
   useEffect(() => {
-    const returningToDesktop = previousMobile.current && !mobile;
+    if (mobile) pendingInspectorResync.current = false;
+    else if (previousMobile.current) pendingInspectorResync.current = true;
     previousMobile.current = mobile;
-    if (!active || !returningToDesktop || !selection.inspected) return;
+    // Collection stays mounted across tabs. Keep a hidden desktop transition pending until it is shown.
+    if (!active || !pendingInspectorResync.current) return;
+    pendingInspectorResync.current = false;
+    if (!selection.inspected) return;
     const card = selection.inspected;
     const next = collectionHref(view, query, card.holding.key, card.ordinal);
     if (next === address) return;
