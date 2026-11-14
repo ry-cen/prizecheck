@@ -101,7 +101,7 @@ const mainTab = (page: Page, name: string) =>
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("Catalog is an Edition gallery with a smart search, one filter row and the status line", async ({
+  test("Catalog opens on an Edition gallery, newest set first, with unowned Editions darkened and one status line", async ({
     page,
   }) => {
     seedGallery();
@@ -137,6 +137,14 @@ test.describe("desktop", () => {
       { timeout: 15_000 }
     );
     await expectPageChecks(page, "Catalog");
+  });
+
+  test("Catalog loads the next page near the end of the gallery, says when all cards are shown, and keeps its rows across a tab switch", async ({
+    page,
+  }) => {
+    seedGallery();
+    await signIn(page);
+    await expect(results(page)).toContainText("Showing 60 of 70 cards");
 
     // Infinite scroll: nearing the end of the gallery loads the next page, and the end says so.
     await expect(results(page)).not.toContainText("cards shown");
@@ -149,6 +157,14 @@ test.describe("desktop", () => {
     await expect(page).toHaveURL(/\/collection$/);
     await mainTab(page, "Catalog").click();
     await expect(tiles(page)).toHaveCount(70);
+  });
+
+  test("Catalog smart search reads a set and number, or the words anywhere in a name, and says which ran", async ({
+    page,
+  }) => {
+    seedGallery();
+    await signIn(page);
+    await expect(results(page)).toContainText("Showing 60 of 70 cards");
 
     // Smart search: a known set ID and a number, otherwise the words anywhere in a name (accents and
     // punctuation don't count), or close spellings when no name has them.
@@ -172,6 +188,15 @@ test.describe("desktop", () => {
       "Name: cards whose name contains “ubat”."
     );
     await expect(results(page)).toContainText("Showing 60 of 61 cards");
+  });
+
+  test("Catalog smart search ignores accents, falls back to close spellings and says when nothing matches", async ({
+    page,
+  }) => {
+    seedGallery();
+    await signIn(page);
+    await expect(results(page)).toContainText("Showing 60 of 70 cards");
+
     await search(page).fill("fixture pokemon");
     await expect(tiles(page)).toHaveCount(1);
     await expect(tileButton(page, 0)).toHaveAccessibleName(/^Fixture Pokémon,/);
@@ -183,6 +208,14 @@ test.describe("desktop", () => {
     await search(page).fill("nothing like this");
     await expect(results(page)).toContainText("No cards match this search.");
     await search(page).fill("");
+    await expect(results(page)).toContainText("Showing 60 of 70 cards");
+  });
+
+  test("Catalog format and type chips hide only what doesn't match, and an unknown-legality card stays with a question mark", async ({
+    page,
+  }) => {
+    seedGallery();
+    await signIn(page);
     await expect(results(page)).toContainText("Showing 60 of 70 cards");
 
     // A format chip hides only cards that aren't legal; an unknown card stays, with a "?".
@@ -213,6 +246,14 @@ test.describe("desktop", () => {
     await expect(tile(page, "Switch,")).toHaveCount(0);
     await chip(page, "Item").click();
     await expect(chip(page, "Item")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("Catalog set picker lists the sets, narrows to one in collector number order, and Owned only shows the owned badge", async ({
+    page,
+  }) => {
+    seedGallery();
+    await signIn(page);
+    await expect(results(page)).toContainText("Showing 60 of 70 cards");
 
     // The set picker, styled as a chip, lists the catalog's sets.
     await chip(page, "Any set").click();
