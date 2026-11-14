@@ -313,26 +313,26 @@ for (const width of [320, 375, 390, 960, 1024, 1280, 1440, 1920]) {
     };
     await expectIdentityFits();
     const ask = friends.getByRole("button", {
-      name: "Ask to borrow Iono from Misty W",
+      name: "Ask to borrow Iono from Misty W (PAL 185)",
       exact: true,
     });
     if (width <= 760) await expectTouchTarget(ask);
     await ask.click();
     await expect(panel).toContainText("2 of 2 asked");
     const copies = friends.getByRole("group", {
-      name: "Copies of Iono to ask Misty W for",
+      name: "Copies of Iono to ask Misty W for (PAL 185)",
       exact: true,
     });
     await expect(copies.locator("output")).toHaveText("2");
     await expect(
       copies.getByRole("button", {
-        name: "Increase Copies of Iono to ask Misty W for",
+        name: "Increase Copies of Iono to ask Misty W for (PAL 185)",
         exact: true,
       })
     ).toBeVisible();
     await expect(
       copies.getByRole("button", {
-        name: "Decrease Copies of Iono to ask Misty W for",
+        name: "Decrease Copies of Iono to ask Misty W for (PAL 185)",
         exact: true,
       })
     ).toBeVisible();

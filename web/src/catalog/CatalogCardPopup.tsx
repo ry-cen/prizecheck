@@ -344,9 +344,11 @@ export function CatalogCardPopup({
           <Button onClick={reload}>Retry</Button>
         </div>
       ) : !ready ? (
-        <p role="status" className="m-0 text-body text-text-muted">
-          Loading card details…
-        </p>
+        open ? (
+          <p role="status" className="m-0 text-body text-text-muted">
+            Loading card details…
+          </p>
+        ) : null
       ) : (
         <>
           <div className="flex flex-col gap-1">

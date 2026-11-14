@@ -422,6 +422,7 @@ export function Workspace({
   // success follows the existing action flow (clear selection and close the details sheet).
   const sheetAction = useRef<(() => void) | null>(null);
   const sheetActionOpener = useRef<HTMLButtonElement | null>(null);
+  const [sheetActionDone, setSheetActionDone] = useState(false);
   function openSheetAction(kind: "move" | "remove", opener: HTMLButtonElement) {
     if (!selection.details || actions.busy || actions.dialog) return;
     if (kind === "remove" && selection.details.holding.borrowed) return;
@@ -440,8 +441,16 @@ export function Workspace({
   useEffect(() => {
     if (actions.dialog || !sheetAction.current) return;
     sheetAction.current = null;
+    // Completion must schedule a commit even if the reload already removed the routed details.
+    setSheetActionDone(true);
     selection.closeDetails();
   }, [actions.dialog, selection.closeDetails]);
+  useLayoutEffect(() => {
+    if (!sheetActionDone || selection.details) return;
+    setSheetActionDone(false);
+    if (active) focusWorkspaceHeading();
+  }, [sheetActionDone, selection.details, active]);
+
   // Lend to a Friend… (#258) closing: its Dialog gives focus back to Actions, but an offer that went out cleared the
   // selection, and Actions with it, so the workspace heading takes focus then rather than the page.
   const lendingOpen = active && lending !== null;
