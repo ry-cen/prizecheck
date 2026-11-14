@@ -195,6 +195,7 @@ export function LoanScreen({
   const [decks, setDecks] = useState<DeckIndexEntry[] | "failed" | null>(null);
   const [deckId, setDeckId] = useState("");
   const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [editingTerms, setEditingTerms] = useState(false);
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
@@ -554,7 +555,8 @@ export function LoanScreen({
     focusNext.current = "ask";
     setAsking(step);
   }
-  async function durableOutcome(o: FlowOutcome) {
+  async function durableOutcome(o: FlowOutcome, source: "send" | "recovery") {
+    setNotice("");
     if (o.kind === "done" || o.kind === "voided") {
       refreshInbox();
       onLoanChanged();
@@ -572,12 +574,14 @@ export function LoanScreen({
         closeModes();
         setLoad({ kind: "ready", loan: fresh, side: freshSide });
         setPromised(promiseStart(fresh, freshSide));
-        setMessage(resultText(o) ?? "");
+        setMessage("");
+        setNotice(source === "recovery" ? (resultText(o) ?? "") : "");
       } catch {
         if (guard.live(tok)) setLoad({ kind: "failed" });
       }
     } else if ((o.kind === "voided" || o.kind === "pending") && o.refusal) {
       const cause = refusalError(o.refusal);
+      setNotice("");
       setMessage(
         cause instanceof SocialError && cause.code === "ACCOUNT_CHANGED"
           ? signInAs(accountName)
@@ -590,12 +594,14 @@ export function LoanScreen({
         reloading.current = true;
         setAttempt((n) => n + 1);
       }
-    } else
+    } else {
+      setNotice("");
       setMessage(
         o.kind === "wrong_account"
           ? signInAs(accountName)
           : (resultText(o) ?? "")
       );
+    }
     if (o.kind === "voided" && refreshAfterCommand.current) {
       refreshAfterCommand.current = false;
       reloading.current = true;
@@ -622,6 +628,7 @@ export function LoanScreen({
     } satisfies Omit<StartReturn | WriteOff, "account_id" | "idempotency_key">;
     setBusy(true);
     setMessage("");
+    setNotice("");
     const o = await durable.send({
       kind,
       scope: kind + ":" + loan.loan_id,
@@ -629,7 +636,7 @@ export function LoanScreen({
       fields,
     });
     if (!guard.live(tok)) return;
-    if (o) await durableOutcome(o);
+    if (o) await durableOutcome(o, "send");
     if (guard.live(tok)) setBusy(false);
   }
   /** Runs one step: the answer replaces the Loan, and its own side is read again. */
@@ -653,6 +660,7 @@ export function LoanScreen({
     authority.retain(command);
     setBusy(true);
     setMessage("");
+    setNotice("");
     const key = command.key;
     keys.current.set(name, key);
     const release = () => {
@@ -682,6 +690,7 @@ export function LoanScreen({
       return "applied";
     } catch (cause) {
       if (!outcomeUnknown(cause)) release();
+      setNotice("");
       setMessage(
         cause instanceof SocialError && cause.code === "ACCOUNT_CHANGED"
           ? signInAs(accountName)
@@ -1323,6 +1332,9 @@ export function LoanScreen({
       <p role="alert" className="m-0 text-meta text-danger empty:hidden">
         {message}
       </p>
+      <p role="status" className="m-0 text-meta text-text-muted empty:hidden">
+        {notice}
+      </p>
     </>
   );
 
@@ -1441,7 +1453,7 @@ export function LoanScreen({
         key={view.operationId}
         view={view}
         onOutcome={(o) => {
-          void durableOutcome(o);
+          void durableOutcome(o, "recovery");
         }}
       />
     ))

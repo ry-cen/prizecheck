@@ -1,6 +1,7 @@
 import { TradingAvailability } from "./TradingAvailability";
 import {
   agreementText,
+  cashText,
   currentCardsText,
   itemState,
   loanOutcome,
@@ -176,7 +177,11 @@ export function ThreadList({
                   ? loanOutcome(row.closed_reason ?? null)
                   : itemState(row)}
               </span>
-              <span>{agreementText(row)}</span>
+              {row.kind === "loan" ? (
+                <span>{agreementText(row)}</span>
+              ) : cashText(row) ? (
+                <span>{cashText(row)}</span>
+              ) : null}
               <span>{currentCardsText(row)}</span>
               {row.latest?.message && (
                 <span className="line-clamp-2 text-meta text-text-muted whitespace-pre-wrap wrap-anywhere">

@@ -238,13 +238,17 @@ function SetPicker({
           data-autofocus=""
         />
         {failed ? (
-          <p role="alert" className="m-0 text-body text-danger">
-            Sets are unavailable. Please retry.
-          </p>
+          open ? (
+            <p role="alert" className="m-0 text-body text-danger">
+              Sets are unavailable. Please retry.
+            </p>
+          ) : null
         ) : !sets ? (
-          <p role="status" className="m-0 text-body text-text-muted">
-            Loading sets…
-          </p>
+          open ? (
+            <p role="status" className="m-0 text-body text-text-muted">
+              Loading sets…
+            </p>
+          ) : null
         ) : (
           <ul
             aria-label="Sets"
