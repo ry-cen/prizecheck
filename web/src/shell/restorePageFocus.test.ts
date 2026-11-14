@@ -353,3 +353,28 @@ it("a focusin elsewhere after the first attempt still cancels", async () => {
   expect(document.activeElement).toBe(other);
   stop();
 });
+
+it("Back restores a closing dialog's persistent opener after arrival focuses the heading", () => {
+  const shell = document.createElement("div");
+  const opener = document.createElement("button");
+  opener.textContent = "Friends";
+  const modal = document.createElement("dialog");
+  modal.setAttribute("open", "");
+  const inside = document.createElement("button");
+  inside.textContent = "Open Friend's Collection";
+  modal.append(inside);
+  const page = document.createElement("main");
+  shell.append(opener, modal, page);
+  document.body.append(shell);
+  inside.focus();
+  const saved = saveFocus();
+  const request = createPageEntryFocus();
+  modal.remove();
+  opener.focus();
+  page.innerHTML = "<h1>Friend</h1>";
+  restorePageFocus(page, request)();
+  expect(document.activeElement).toBe(page.querySelector("h1"));
+  page.replaceChildren();
+  restorePageFocus(page, saved)();
+  expect(document.activeElement).toBe(opener);
+});
