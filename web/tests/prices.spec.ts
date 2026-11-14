@@ -99,7 +99,7 @@ const heldTile = (panel: ReturnType<Page["getByRole"]>, start: RegExp) =>
  * Catalog is an Edition gallery (#173): Furret's three Editions are three tiles, each with its compact price. */
 async function search(page: Page) {
   await page.reload();
-  await page.getByRole("button", { name: "Catalog", exact: true }).click();
+  await page.getByRole("link", { name: "Catalog", exact: true }).click();
   await page
     .getByRole("searchbox", { name: "Search the catalog" })
     .fill("Furret");
@@ -306,7 +306,7 @@ test("a Deck's Holdings and All owned price each tile's exact Edition, including
   // Edition's price, including the last tiles, which mount only once the gallery reaches them.
   await page
     .getByRole("navigation", { name: "Locations" })
-    .getByRole("button", { name: "All owned", exact: true })
+    .getByRole("link", { name: "All owned", exact: true })
     .click();
   await expect(
     page.getByRole("main").getByText("55 copies · 55 editions", { exact: true })

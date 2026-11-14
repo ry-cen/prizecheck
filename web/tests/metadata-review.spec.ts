@@ -174,7 +174,7 @@ test.describe("collector report and approval", () => {
     ).rows[0].n;
 
     await page.reload();
-    await page.getByRole("button", { name: "Catalog", exact: true }).click();
+    await page.getByRole("link", { name: "Catalog", exact: true }).click();
     // A Catalog tile opens the card popup (#174): pick the Edition, then the footer's "Report: this Edition".
     await page
       .getByRole("searchbox", { name: "Search the catalog" })
@@ -312,7 +312,7 @@ test.describe("collector report and approval", () => {
     // The collector now sees the outcome on their report.
     await setMaintainer(false);
     await page.reload();
-    await page.getByRole("button", { name: "Catalog", exact: true }).click();
+    await page.getByRole("link", { name: "Catalog", exact: true }).click();
     await page.getByRole("button", { name: "My metadata reports" }).click();
     await expect(
       page.getByRole("region", { name: "My metadata reports" })
@@ -663,7 +663,7 @@ test("a request for information round-trips through the collector back to the ma
   // The collector sees the request and answers it.
   await setMaintainer(false);
   await page.reload();
-  await page.getByRole("button", { name: "Catalog", exact: true }).click();
+  await page.getByRole("link", { name: "Catalog", exact: true }).click();
   await page.getByRole("button", { name: "My metadata reports" }).click();
   const mine = page.getByRole("region", { name: "My metadata reports" });
   await expect(mine).toContainText("needs info");

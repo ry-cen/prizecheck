@@ -62,7 +62,7 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
   try {
     await pool.query("DELETE FROM auth_send_event");
     await signInAsOwner(page, "/collection");
-    await page.getByRole("button", { name: "Decks", exact: true }).click();
+    await page.getByRole("link", { name: "Decks", exact: true }).click();
     const suffix = randomUUID().slice(0, 8);
     const privateName = `Hidden ${suffix}`;
     const title = `Public & friends ${suffix}`;

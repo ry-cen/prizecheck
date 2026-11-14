@@ -743,6 +743,7 @@ export function Workspace({
         view={galleryView}
         expanded={expanded}
         onToggle={toggleFolder}
+        hrefFor={(next) => collectionHref(next, query)}
         onChoose={choose}
         idPrefix={idPrefix}
         onAddChild={openCreate}

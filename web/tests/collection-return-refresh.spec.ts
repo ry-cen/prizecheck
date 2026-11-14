@@ -118,7 +118,7 @@ const bar = (page: Page) => page.getByRole("region", { name: "Selection" });
 const mainViews = (page: Page) =>
   page.getByRole("navigation", { name: "Main views" });
 const tab = (page: Page, name: string) =>
-  mainViews(page).getByRole("button", { name, exact: true });
+  mainViews(page).getByRole("link", { name, exact: true });
 const STALE = "Your collection has changed since this view loaded.";
 const banner = (page: Page) =>
   page.getByRole("status").filter({ hasText: STALE });

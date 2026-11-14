@@ -1,3 +1,4 @@
+import { isPlainClick } from "../shell/appLink";
 import {
   useEffect,
   useId,
@@ -443,6 +444,7 @@ export function DeckBuilderPage({
     <a
       href="/decks"
       onClick={(event) => {
+        if (!isPlainClick(event)) return;
         event.preventDefault();
         onAllDecks();
       }}

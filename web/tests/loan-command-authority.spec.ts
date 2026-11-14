@@ -34,7 +34,7 @@ for (const transport of ["lost", "delayed"] as const) {
       if (direction === "Forward") {
         await page
           .getByRole("navigation", { name: "Main views" })
-          .getByRole("button", { name: /^Collection/ })
+          .getByRole("link", { name: /^Collection/ })
           .click();
         await page.goBack();
         await expect(page).toHaveURL(`${ORIGIN}/loans/${loan.thread_id}`);

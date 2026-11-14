@@ -71,11 +71,15 @@ async function seedShelf(page: Page): Promise<string> {
 }
 
 /** The named rows appear top to bottom in the given order. */
-async function expectVerticalOrder(scope: Locator, names: string[]) {
+async function expectVerticalOrder(
+  scope: Locator,
+  rows: { name: string; role: "button" | "link" }[]
+) {
+  const names = rows.map(({ name }) => name);
   const tops: number[] = [];
-  for (const name of names) {
+  for (const { name, role } of rows) {
     const box = await scope
-      .getByRole("button", { name, exact: true })
+      .getByRole(role, { name, exact: true })
       .boundingBox();
     expect(box, name).not.toBeNull();
     tops.push(box!.y);
@@ -86,7 +90,12 @@ async function expectVerticalOrder(scope: Locator, names: string[]) {
     );
 }
 
-const naturalOrder = ["Binder 1", "binder 2", "Binder 10", "Box"];
+const naturalOrder: { name: string; role: "button" | "link" }[] = [
+  { name: "Binder 1", role: "link" },
+  { name: "binder 2", role: "link" },
+  { name: "Binder 10", role: "button" },
+  { name: "Box", role: "link" },
+];
 
 test("desktop workspace shows the Location tree in natural order and opens Storage Leaves", async ({
   page,
@@ -136,7 +145,7 @@ test("desktop workspace shows the Location tree in natural order and opens Stora
   await expectVerticalOrder(shelfList, naturalOrder);
 
   // Choosing a Storage Leaf updates the heading.
-  const binder2 = shelfList.getByRole("button", {
+  const binder2 = shelfList.getByRole("link", {
     name: "binder 2",
     exact: true,
   });
@@ -149,7 +158,7 @@ test("desktop workspace shows the Location tree in natural order and opens Stora
     name: "Binder 10",
     exact: true,
   });
-  const page1 = shelfList.getByRole("button", { name: "Page 1", exact: true });
+  const page1 = shelfList.getByRole("link", { name: "Page 1", exact: true });
   await expect(binder10).toHaveAttribute("aria-expanded", "false");
   await expect(page1).toHaveCount(0);
   await binder10.click();
@@ -163,18 +172,18 @@ test("desktop workspace shows the Location tree in natural order and opens Stora
   await shelfRow.click();
   await expect(shelfList).toHaveCount(0);
 
-  await nav.getByRole("button", { name: "All owned", exact: true }).click();
+  await nav.getByRole("link", { name: "All owned", exact: true }).click();
   await expect(heading).toHaveText("All owned");
 
   // Collection is the inventory page: the shell's Main views opens the other pages and returns here, and /locations opens it.
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Decks", exact: true })
+    .getByRole("link", { name: "Decks", exact: true })
     .click();
   await expect(page).toHaveURL(/\/decks$/);
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await expect(page).toHaveURL(/\/collection$/);
   await expect(heading).toHaveText("All owned");
@@ -228,7 +237,7 @@ test.describe("mobile", () => {
     await expectVerticalOrder(shelfList, naturalOrder);
 
     // Choosing a Storage Leaf closes the drawer, updates the heading and returns focus.
-    await shelfList.getByRole("button", { name: "Box", exact: true }).click();
+    await shelfList.getByRole("link", { name: "Box", exact: true }).click();
     await expect(drawer).toBeHidden();
     await expect(heading).toHaveText("Box");
     await expect(opener).toBeFocused();
