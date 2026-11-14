@@ -339,6 +339,7 @@ export function BorrowedDialog({
       </ul>
     );
 
+  if (!open) body = null;
   return (
     <Dialog
       open={open}
@@ -348,7 +349,7 @@ export function BorrowedDialog({
       returnFocus={returnFocus}
     >
       <div ref={surface} className="flex flex-col gap-3">
-        {message && (
+        {open && message && (
           <p
             ref={alert}
             role="alert"
@@ -366,7 +367,7 @@ export function BorrowedDialog({
             onRetry={() => {}}
           />
         )}
-        {blocker && !busy && (
+        {open && blocker && !busy && (
           <PendingLoanNotice view={blocker} autoFocus onOutcome={outcome} />
         )}
       </div>

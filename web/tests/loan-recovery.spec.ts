@@ -124,6 +124,7 @@ test("a lost Borrow Request answer is sent again once", async ({
   await expect(
     page.getByRole("region", { name: "Notifications" })
   ).toContainText("It was sent.");
+
   const loans = await loanItems(lender);
   expect(loans).toHaveLength(1);
 });
@@ -187,6 +188,20 @@ test("a Lend Offer confirmed from a reopened notice refreshes the Collection", a
   );
   await form.getByRole("button", { name: "Send it again" }).click();
   await expect(form).toContainText("It was sent.");
+  {
+    const sent = form
+      .getByRole("status")
+      .filter({ hasText: "It was sent." })
+      .last();
+    await expect(sent).toBeVisible();
+    await expect(sent).not.toHaveClass(/\btext-(danger|warning)\b/);
+    expect(await sent.evaluate((e) => !!e.closest('[role="alert"]'))).toBe(
+      false
+    );
+    expect(await sent.evaluate((e) => getComputedStyle(e).color)).not.toBe(
+      await dangerColour(page)
+    );
+  }
   await tree;
   await form.getByRole("button", { name: "Close Lend to a Friend" }).click();
   const cards = page.getByRole("region", { name: "Cards", exact: true });
@@ -238,6 +253,21 @@ test("a lost start return is checked after a reload, not started twice", async (
   expect(sends).toHaveLength(1);
   await page.getByRole("button", { name: "Send it again" }).click();
   await expect(page.getByRole("main")).toContainText("It was sent.");
+  {
+    const sent = page
+      .getByRole("main")
+      .getByRole("status")
+      .filter({ hasText: "It was sent." })
+      .last();
+    await expect(sent).toBeVisible();
+    await expect(sent).not.toHaveClass(/\btext-(danger|warning)\b/);
+    expect(await sent.evaluate((e) => !!e.closest('[role="alert"]'))).toBe(
+      false
+    );
+    expect(await sent.evaluate((e) => getComputedStyle(e).color)).not.toBe(
+      await dangerColour(page)
+    );
+  }
   expect(sends).toHaveLength(2);
   expect(sends[1]).toBe(sends[0]);
   const loan = await loanView(page, id);
@@ -299,6 +329,21 @@ test("a lost write-off is confirmed with Check again", async ({
   ).toBeVisible();
   await lender.getByRole("button", { name: "Check again" }).click();
   await expect(lender.getByRole("main")).toContainText("It was sent.");
+  {
+    const sent = lender
+      .getByRole("main")
+      .getByRole("status")
+      .filter({ hasText: "It was sent." })
+      .last();
+    await expect(sent).toBeVisible();
+    await expect(sent).not.toHaveClass(/\btext-(danger|warning)\b/);
+    expect(await sent.evaluate((e) => !!e.closest('[role="alert"]'))).toBe(
+      false
+    );
+    expect(await sent.evaluate((e) => getComputedStyle(e).color)).not.toBe(
+      await dangerColour(lender)
+    );
+  }
   expect(sends).toHaveLength(2);
   expect(sends[1]).toBe(sends[0]);
   const loan = await loanView(lender, id);
@@ -816,3 +861,14 @@ test("a legacy replaces draft cannot be sent", async ({ page, collectors }) => {
   ).toHaveCount(0);
   expect(sends).toEqual([]);
 });
+
+async function dangerColour(page: Page) {
+  return page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.className = "text-danger";
+    document.querySelector("main")!.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  });
+}
