@@ -66,8 +66,8 @@ for (const viewport of [
       });
       await page.goto(`${ORIGIN}/trades`);
       const nav = page.getByRole("navigation", { name: "Main views" });
-      const trades = nav.getByRole("button", { name: /^Trades/ });
-      const loans = nav.getByRole("button", { name: /^Loans/ });
+      const trades = nav.getByRole("link", { name: /^Trades/ });
+      const loans = nav.getByRole("link", { name: /^Loans/ });
       await expect(trades).toHaveAccessibleName(
         "Trades, 2 need you: 1 waiting on you, 1 with new messages"
       );

@@ -114,7 +114,7 @@ test("idle sign-in warms populated roots and their first opens never show loadin
     document.body.style.minHeight = "4000px";
     window.scrollTo(0, 400);
     const button = document.querySelector<HTMLButtonElement>(
-      'nav[aria-label="Main views"] button'
+      'nav[aria-label="Main views"] a'
     );
     button?.focus({ preventScroll: true });
     if (button) button.dataset.focusProbe = "";
@@ -183,7 +183,7 @@ test("idle sign-in warms populated roots and their first opens never show loadin
         .click();
     } else
       await tabs(page)
-        .getByRole("button", { name: new RegExp(`^${label}(,|$)`) })
+        .getByRole("link", { name: new RegExp(`^${label}(,|$)`) })
         .click();
     const content = main(page);
     if (label === "Decks") {
@@ -241,10 +241,10 @@ test("Decks keeps old data while a held re-read fetches an API change, and ignor
   // A fresh sign-in document warms the newly created Deck.
   await page.reload();
   await warmed(page);
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect(main(page).getByText(oldName, { exact: true })).toBeVisible();
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await createDeck(page, newName);
   let release!: () => void;
@@ -256,9 +256,7 @@ test("Decks keeps old data while a held re-read fetches an API change, and ignor
     await route.continue();
   });
   try {
-    await tabs(page)
-      .getByRole("button", { name: "Decks", exact: true })
-      .click();
+    await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
     await expect(main(page).getByText(oldName, { exact: true })).toBeVisible();
     await expect(main(page).getByText(newName, { exact: true })).toHaveCount(0);
   } finally {
@@ -267,12 +265,12 @@ test("Decks keeps old data while a held re-read fetches an API change, and ignor
   await expect(main(page).getByText(newName, { exact: true })).toBeVisible();
   await page.unroute(/\/api\/decks$/);
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await page.route(/\/api\/decks$/, (route) =>
     route.fulfill({ status: 503, body: "{}" })
   );
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect(main(page).getByText(newName, { exact: true })).toBeVisible();
   await expect(
     main(page).getByText("Decks are temporarily unavailable. Please retry.", {
@@ -289,7 +287,7 @@ test("root state survives tab switches; details unmount, Back remounts them, and
   const id = await createDeck(page, name);
   await page.reload();
   await warmed(page);
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await main(page)
     .getByRole("textbox", { name: "Deck name" })
     .fill("Unsubmitted draft");
@@ -298,20 +296,20 @@ test("root state survives tab switches; details unmount, Back remounts them, and
     window.scrollTo(0, 350);
   });
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect(
     main(page).getByRole("textbox", { name: "Deck name" })
   ).toHaveValue("Unsubmitted draft");
   expect(await page.evaluate(() => window.scrollY)).toBe(350);
   await main(page).getByRole("link", { name, exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
-  await tabs(page).getByRole("button", { name: "Loans", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Loans", exact: true }).click();
   await page.goBack();
   await expect(main(page).getByRole("heading", { level: 1 })).toHaveText(name);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect(
     main(page).getByRole("textbox", { name: "Deck name" })
   ).toHaveValue("");
@@ -347,7 +345,7 @@ test("Save-Data skips hidden warm mounts", async ({ page }) => {
       .locator("[hidden]")
       .getByRole("heading", { name: "Decks", exact: true, includeHidden: true })
   ).toHaveCount(0);
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect(main(page).getByRole("heading", { level: 1 })).toHaveText(
     "Decks"
   );
@@ -425,14 +423,14 @@ test("Loans retains its rows while a held show-time read fetches an API change",
   await page.reload();
   await warmed(page);
   await tabs(page)
-    .getByRole("button", { name: /^Loans/ })
+    .getByRole("link", { name: /^Loans/ })
     .click();
   const old = main(page)
     .getByRole("region", { name: "Pending" })
     .locator(`a[data-thread="${loan.thread_id}"]`);
   await expect(old).toBeVisible();
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await command(page, `/api/loans/${loan.thread_id}/withdraw`, {
     loan_id: loan.loan_id,
@@ -449,7 +447,7 @@ test("Loans retains its rows while a held show-time read fetches an API change",
   });
   try {
     await tabs(page)
-      .getByRole("button", { name: /^Loans/ })
+      .getByRole("link", { name: /^Loans/ })
       .click();
     await expect(old).toBeVisible();
     await expect(
@@ -502,7 +500,7 @@ test("first activation keeps the warm read in flight, and a later quiet failure 
   await started;
   try {
     await tabs(page)
-      .getByRole("button", { name: /^Loans/ })
+      .getByRole("link", { name: /^Loans/ })
       .click();
     expect(count).toBe(1);
     await expect(
@@ -513,7 +511,7 @@ test("first activation keeps the warm read in flight, and a later quiet failure 
   }
   await expect(main(page).getByText(/^No Loans yet\./)).toBeVisible();
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   const failed = page.waitForResponse(
     (response) =>
@@ -521,7 +519,7 @@ test("first activation keeps the warm read in flight, and a later quiet failure 
       response.status() === 503
   );
   await tabs(page)
-    .getByRole("button", { name: /^Loans/ })
+    .getByRole("link", { name: /^Loans/ })
     .click();
   await failed;
   await expect(main(page).getByText(/^No Loans yet\./)).toBeVisible();
@@ -557,7 +555,7 @@ test("a failed hidden read retries on first activation", async ({ page }) => {
   await warmed(page);
   expect(count).toBe(1);
   await tabs(page)
-    .getByRole("button", { name: /^Loans/ })
+    .getByRole("link", { name: /^Loans/ })
     .click();
   await expect(main(page).getByText(/^No Loans yet\./)).toBeVisible();
   expect(count).toBe(2);
@@ -586,7 +584,7 @@ test("Settings preserves unsaved form fields across tab switches", async ({
   });
   await field.fill("Unsaved collector name");
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await openSettings();
   await expect(field).toHaveValue("Unsaved collector name");
@@ -635,17 +633,17 @@ test("a late quiet read cannot restore an open item after Withdraw completes", a
   await signInAsOwner(page);
   await warmed(page);
   await tabs(page)
-    .getByRole("button", { name: /^Trades/ })
+    .getByRole("link", { name: /^Trades/ })
     .click();
   const open = main(page)
     .getByRole("list", { name: "Open Trades" })
     .locator(`a[data-thread="${row.id}"]`);
   await expect(open).toBeVisible();
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await tabs(page)
-    .getByRole("button", { name: /^Trades/ })
+    .getByRole("link", { name: /^Trades/ })
     .click();
   await reading;
   try {
@@ -737,7 +735,7 @@ for (const mode of ["failed", "held"] as const) {
             .getByText("Price to complete unavailable", { exact: true })
         ).toHaveCount(1);
       await tabs(page)
-        .getByRole("button", { name: "Decks", exact: true })
+        .getByRole("link", { name: "Decks", exact: true })
         .click();
       if (mode === "held") {
         expect(count).toBe(1);
@@ -781,13 +779,13 @@ test("costs refresh after API inventory removal and a counting-settings change, 
   await expect(
     page.locator("[hidden]").getByText("$0.00 to complete", { exact: true })
   ).toHaveCount(1);
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect(
     main(page).getByText("$0.00 to complete", { exact: true })
   ).toBeVisible({ timeout: 0 });
   expect(count).toBe(1);
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   const holdings = await api(page, "GET", `/api/holdings/${leaf}`);
   const holding = holdings.holdings.find(
@@ -808,13 +806,13 @@ test("costs refresh after API inventory removal and a counting-settings change, 
   await page.route(`**/api/decks/${id}/format-checks`, (route) =>
     ++probes === 1 ? route.fulfill({ status: 503, json: {} }) : route.continue()
   );
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect(
     main(page).getByText("$0.25 to complete (1/1 priced)", { exact: true })
   ).toBeVisible();
   expect(count).toBe(2);
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   const settings = await api(page, "GET", "/api/settings");
   await api(page, "PUT", "/api/settings/want-list-counting", {
@@ -825,18 +823,18 @@ test("costs refresh after API inventory removal and a counting-settings change, 
     revision: settings.revision,
     idempotency_key: randomUUID(),
   });
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect.poll(() => count).toBe(3);
   await expect(
     main(page).getByText("$0.25 to complete (1/1 priced)", { exact: true })
   ).toBeVisible();
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   const checked = page.waitForResponse((response) =>
     response.url().includes(`/api/decks/${id}/format-checks`)
   );
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await (await checked).finished();
   await page.evaluate(
     () =>
@@ -916,17 +914,17 @@ for (const first of ["withdraw", "page"] as const) {
     await signInAsOwner(page);
     await warmed(page);
     await tabs(page)
-      .getByRole("button", { name: /^Trades/ })
+      .getByRole("link", { name: /^Trades/ })
       .click();
     await expect(
       main(page).locator(`a[data-thread="${third.id}"]`)
     ).toBeVisible();
     expect(thirdReads).toBe(1);
     await tabs(page)
-      .getByRole("button", { name: "Collection", exact: true })
+      .getByRole("link", { name: "Collection", exact: true })
       .click();
     await tabs(page)
-      .getByRole("button", { name: /^Trades/ })
+      .getByRole("link", { name: /^Trades/ })
       .click();
     await paging;
     const open = main(page).getByRole("list", { name: "Open Trades" });
@@ -1005,7 +1003,7 @@ test("an Owner action failing after leaving cannot put its message on Catalog", 
       .click();
     await started;
     await tabs(page)
-      .getByRole("button", { name: "Catalog", exact: true })
+      .getByRole("link", { name: "Catalog", exact: true })
       .click();
     const failed = page.waitForResponse(
       (response) =>
@@ -1070,9 +1068,9 @@ test("a new activation recovers while superseded format checks are still held", 
   const results = (await Promise.all(pendingWarmCosts)).flat();
   const failure = results.find((result) => result.status === "rejected");
   if (failure) throw failure.reason;
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
@@ -1090,18 +1088,14 @@ test("a new activation recovers while superseded format checks are still held", 
     }
   );
   try {
-    await tabs(page)
-      .getByRole("button", { name: "Decks", exact: true })
-      .click();
+    await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
     await expect.poll(() => heldChecks).toBe(2);
     await tabs(page)
-      .getByRole("button", { name: "Collection", exact: true })
+      .getByRole("link", { name: "Collection", exact: true })
       .click();
     const name = `Recovered format ${randomUUID()}`;
     await createDeck(page, name);
-    await tabs(page)
-      .getByRole("button", { name: "Decks", exact: true })
-      .click();
+    await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
     // Both old route handlers are still held. Recovery must come from cancellation, not their deadlines.
     await expect(
       main(page).getByRole("link", { name, exact: true })
@@ -1141,9 +1135,7 @@ test("a timed-out format request still permits the tile's healthy cost read", as
       page.locator("[hidden]").getByText("$0.00 to complete", { exact: true })
     ).toHaveCount(1, { timeout: 7000 });
     expect(costReads).toBe(1);
-    await tabs(page)
-      .getByRole("button", { name: "Decks", exact: true })
-      .click();
+    await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
     await expect(
       main(page).getByText("$0.00 to complete", { exact: true })
     ).toBeVisible({ timeout: 0 });
@@ -1191,7 +1183,7 @@ test("slow but healthy tile reads all finish, since waiting for a worker does no
     page.locator("[hidden]").getByText(/Result unavailable/)
   ).toHaveCount(0);
   expect(costReads).toBe(3);
-  await tabs(page).getByRole("button", { name: "Decks", exact: true }).click();
+  await tabs(page).getByRole("link", { name: "Decks", exact: true }).click();
   await expect(
     main(page).getByText("$0.00 to complete", { exact: true })
   ).toHaveCount(3, { timeout: 0 });
@@ -1246,18 +1238,18 @@ test("a late first-page refresh cannot collapse items after pagination", async (
   await signInAsOwner(page);
   await warmed(page);
   await tabs(page)
-    .getByRole("button", { name: /^Trades/ })
+    .getByRole("link", { name: /^Trades/ })
     .click();
   const secondRow = main(page).locator(`a[data-thread="${second.id}"]`),
     thirdRow = main(page).locator(`a[data-thread="${third.id}"]`);
   await expect(secondRow).toBeVisible();
   await expect(thirdRow).toBeVisible();
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   try {
     await tabs(page)
-      .getByRole("button", { name: /^Trades/ })
+      .getByRole("link", { name: /^Trades/ })
       .click();
     await started;
     await expect(secondRow).toBeVisible({ timeout: 0 });
@@ -1266,10 +1258,10 @@ test("a late first-page refresh cannot collapse items after pagination", async (
     await tailStarted;
     await expect(secondRow).toBeVisible({ timeout: 0 });
     await tabs(page)
-      .getByRole("button", { name: "Collection", exact: true })
+      .getByRole("link", { name: "Collection", exact: true })
       .click();
     await tabs(page)
-      .getByRole("button", { name: /^Trades/ })
+      .getByRole("link", { name: /^Trades/ })
       .click();
     expect(firstReads).toBe(2);
     await expect(secondRow).toBeVisible({ timeout: 0 });
@@ -1346,7 +1338,7 @@ test("Settings quietly refreshes read-only lists after API changes and preserves
     exact: true,
   });
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await api(page, "POST", "/api/social/blocks", {
     collector_id: other.userId,
@@ -1403,7 +1395,7 @@ test("Settings quietly refreshes read-only lists after API changes and preserves
   await expect(field).toHaveValue("Unsaved summary draft");
   await page.unroute(listRoutes);
   await tabs(page)
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await page.route(listRoutes, (route) =>
     route.fulfill({ status: 503, json: {} })
@@ -1484,9 +1476,7 @@ test("hidden galleries do not request per-card prices or art after their warm fi
   ).not.toHaveCount(0);
   expect(prices).toEqual([]);
   expect(art).toEqual([]);
-  await tabs(page)
-    .getByRole("button", { name: "Catalog", exact: true })
-    .click();
+  await tabs(page).getByRole("link", { name: "Catalog", exact: true }).click();
   await expect.poll(() => prices.length).toBeGreaterThan(0);
   await expect.poll(() => art.length).toBeGreaterThan(0);
   await expect(main(page).locator("img").first()).toBeVisible();

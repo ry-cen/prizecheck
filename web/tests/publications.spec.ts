@@ -73,7 +73,7 @@ promote({'card-1': 'Pikachu'})`,
   try {
     await pool.query("DELETE FROM auth_send_event");
     await signInAsOwner(page, "/collection");
-    await page.getByRole("button", { name: "Decks", exact: true }).click();
+    await page.getByRole("link", { name: "Decks", exact: true }).click();
     const privateName = `Private ${randomUUID().slice(0, 8)}`;
     await page.getByLabel("Deck name").fill(privateName);
     await page

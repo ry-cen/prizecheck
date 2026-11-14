@@ -21,7 +21,7 @@ test("a page whose code fails to load offers a reload, and the rest of the app k
 
   const tabs = page.getByRole("navigation", { name: "Main views" });
   // The tab may be named "Trades, N need you", since the owner is shared across specs.
-  await tabs.getByRole("button", { name: "Trades" }).click();
+  await tabs.getByRole("link", { name: "Trades" }).click();
   await expect(page).toHaveURL(/\/trades$/);
   await expect(heading).toHaveText("This page didn't load");
   await expect(page.getByRole("main").getByRole("alert")).toContainText(
@@ -30,16 +30,16 @@ test("a page whose code fails to load offers a reload, and the rest of the app k
   await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
   await expectPageChecks(page, "page that didn't load");
 
-  await tabs.getByRole("button", { name: "Decks" }).click();
+  await tabs.getByRole("link", { name: "Decks" }).click();
   await expect(heading).toHaveText("Decks");
-  await expect(tabs.getByRole("button", { name: "Decks" })).toHaveAttribute(
+  await expect(tabs.getByRole("link", { name: "Decks" })).toHaveAttribute(
     "aria-current",
     "page"
   );
 
   // The failed import is cached, so only a reload recovers the page.
   await page.unroute(isTradesCode);
-  await tabs.getByRole("button", { name: "Trades" }).click();
+  await tabs.getByRole("link", { name: "Trades" }).click();
   await expect(heading).toHaveText("This page didn't load");
 
   await page.getByRole("button", { name: "Reload" }).click();
@@ -95,7 +95,7 @@ test.describe("on a phone", () => {
       banner.getByRole("button", { name: /^Friends/ })
     ).toBeVisible();
     await expect(
-      tabs.getByRole("button", { name: "Collection", exact: true })
+      tabs.getByRole("link", { name: "Collection", exact: true })
     ).toHaveAttribute("aria-current", "page");
     await expectPageChecks(page, "Collection that didn't load, on a phone");
 
@@ -126,7 +126,7 @@ test.describe("on a phone", () => {
     try {
       await signInAsOwner(page, "/decks");
       await expect(heading).toHaveText("Decks");
-      const collectionTab = tabs.getByRole("button", {
+      const collectionTab = tabs.getByRole("link", {
         name: "Collection",
         exact: true,
       });

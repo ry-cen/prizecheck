@@ -510,7 +510,7 @@ for (const scenario of [
     // banner is still there on return.
     const moving = await moveInProgressElsewhere(page);
     const tabs = page.locator('nav[aria-label="Main views"]:visible');
-    await tabs.getByRole("button", { name: "Catalog", exact: true }).click();
+    await tabs.getByRole("link", { name: "Catalog", exact: true }).click();
     await expect
       .poll(() =>
         page.evaluate(() =>
@@ -520,7 +520,7 @@ for (const scenario of [
         )
       )
       .toBe("");
-    await tabs.getByRole("button", { name: "Collection", exact: true }).click();
+    await tabs.getByRole("link", { name: "Collection", exact: true }).click();
     await expect(reload).toBeVisible();
     await expectPadding(true);
     await reload.click();
@@ -560,9 +560,9 @@ test("an idle return to a stale Collection refreshes it, and the banner and its 
     .evaluate((el) => el.getBoundingClientRect().height);
 
   const tabs = page.locator('nav[aria-label="Main views"]:visible');
-  await tabs.getByRole("button", { name: "Catalog", exact: true }).click();
+  await tabs.getByRole("link", { name: "Catalog", exact: true }).click();
   await expect.poll(clearance).toBe("");
-  await tabs.getByRole("button", { name: "Collection", exact: true }).click();
+  await tabs.getByRole("link", { name: "Collection", exact: true }).click();
   // Nothing selected, running or open: the return reads Collection again and the banner never comes back.
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
   await expect(page.getByRole("main")).toContainText("121 copies");

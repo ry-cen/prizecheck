@@ -408,7 +408,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expectTouchTarget(deckLinks(page));
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Loans", exact: true })
+    .getByRole("link", { name: "Loans", exact: true })
     .click();
   await expect(
     page.getByRole("region", { name: "Pending" }).getByRole("link")
@@ -549,7 +549,7 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   await page.setViewportSize(PHONE);
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await page.getByRole("button", { name: "Select", exact: true }).click();
   await page

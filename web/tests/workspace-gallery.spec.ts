@@ -280,7 +280,7 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" });
   await nav.getByRole("button", { name: shelf, exact: true }).click();
-  await nav.getByRole("button", { name: "Binder 2", exact: true }).click();
+  await nav.getByRole("link", { name: "Binder 2", exact: true }).click();
   await expect(heading).toHaveText("Binder 2");
   await expect(counts(page, "2 copies · 1 edition")).toBeVisible();
   await expect(tiles(page)).toHaveCount(2);
@@ -293,19 +293,19 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
   );
   await expect(tiles(page).nth(1)).not.toContainText("Binder 2");
 
-  await nav.getByRole("button", { name: "Binder 10", exact: true }).click();
+  await nav.getByRole("link", { name: "Binder 10", exact: true }).click();
   await expect(counts(page, "2 copies · 2 editions")).toBeVisible();
-  await nav.getByRole("button", { name: "Box", exact: true }).click();
+  await nav.getByRole("link", { name: "Box", exact: true }).click();
   await expect(counts(page, "1 copy · 1 edition")).toBeVisible();
   await expect(tiles(page)).toHaveCount(1);
-  await nav.getByRole("button", { name: "Empty", exact: true }).click();
+  await nav.getByRole("link", { name: "Empty", exact: true }).click();
   await expect(counts(page, "0 copies · 0 editions")).toBeVisible();
   await expect(
     cards(page).getByText("This Location has no cards.")
   ).toBeVisible();
   await expect(tiles(page)).toHaveCount(0);
 
-  await nav.getByRole("button", { name: "All owned", exact: true }).click();
+  await nav.getByRole("link", { name: "All owned", exact: true }).click();
   await expect(counts(page, "5 copies · 3 editions")).toBeVisible();
   await expect(tiles(page)).toHaveCount(5);
 });
@@ -512,7 +512,7 @@ test("a Location shown before opens from its cached tiles while it is read again
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" });
 
-  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await nav.getByRole("link", { name: `Tall ${s}`, exact: true }).click();
   await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
   await expect(tiles(page).first()).toHaveAccessibleName(
     `Revisit Abra, Fixture Set 1, Normal, copy 1, Tall ${s}`
@@ -520,7 +520,7 @@ test("a Location shown before opens from its cached tiles while it is read again
   const tallHeight = await gridHeight(page);
   const tallTop = await gridTop(page);
   expect(tallHeight).toBeGreaterThan(1.5 * 860);
-  await nav.getByRole("button", { name: `Short ${s}`, exact: true }).click();
+  await nav.getByRole("link", { name: `Short ${s}`, exact: true }).click();
   await expect(counts(page, "3 copies · 1 edition")).toBeVisible();
   await expect(tiles(page)).toHaveCount(3);
   const shortHeight = await gridHeight(page);
@@ -538,7 +538,7 @@ test("a Location shown before opens from its cached tiles while it is read again
       new URL(request.url()).searchParams.get("location_id") === tall
   );
   await recordGallery(page);
-  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await nav.getByRole("link", { name: `Tall ${s}`, exact: true }).click();
   await reread;
   await settle(page);
   let record = await galleryRecord(page);
@@ -580,9 +580,9 @@ test("a Location changed elsewhere since it was shown opens from its cached tile
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" });
 
-  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await nav.getByRole("link", { name: `Tall ${s}`, exact: true }).click();
   await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
-  await nav.getByRole("button", { name: `Short ${s}`, exact: true }).click();
+  await nav.getByRole("link", { name: `Short ${s}`, exact: true }).click();
   await expect(counts(page, "3 copies · 1 edition")).toBeVisible();
 
   // A copy added outside the gallery while Tall is not shown; Tall's re-read is held.
@@ -594,7 +594,7 @@ test("a Location changed elsewhere since it was shown opens from its cached tile
       new URL(request.url()).searchParams.get("location_id") === tall
   );
   await recordGallery(page);
-  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await nav.getByRole("link", { name: `Tall ${s}`, exact: true }).click();
   await reread;
   await settle(page);
   // Until the re-read is complete, the cached tiles stay, with no placeholders.
@@ -625,7 +625,7 @@ test("a Location not shown before keeps the gallery's height while its first pag
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" });
 
-  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await nav.getByRole("link", { name: `Tall ${s}`, exact: true }).click();
   await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
   const tallHeight = await gridHeight(page);
   expect(tallHeight).toBeGreaterThan(1.5 * 860);
@@ -633,7 +633,7 @@ test("a Location not shown before keeps the gallery's height while its first pag
   const topBefore = await gridTop(page);
   const release = await holdListing(page, short);
   await recordGallery(page);
-  await nav.getByRole("button", { name: `Short ${s}`, exact: true }).click();
+  await nav.getByRole("link", { name: `Short ${s}`, exact: true }).click();
   // Short was never listed, so its placeholders show; the grid keeps Tall's height meanwhile.
   await expect(
     page.getByRole("status", { name: "Loading cards" })

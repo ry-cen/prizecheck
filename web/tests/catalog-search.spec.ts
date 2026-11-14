@@ -24,7 +24,7 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
   await pool.query("DELETE FROM auth_send_event");
   try {
     await signInAsOwner(page, "/collection");
-    await page.getByRole("button", { name: "Catalog", exact: true }).click();
+    await page.getByRole("link", { name: "Catalog", exact: true }).click();
     // Catalog is an Edition gallery (#173): one smart search box, tiles of Card Editions, more tiles load as you scroll past 60.
     const search = page.getByRole("searchbox", { name: "Search the catalog" });
     const results = page.getByRole("region", { name: "Catalog results" });

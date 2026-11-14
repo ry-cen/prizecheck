@@ -141,7 +141,7 @@ const sidebarButton = (page: Page, name: string) =>
   page
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" })
-    .getByRole("button", { name, exact: true });
+    .getByRole("link", { name, exact: true });
 const cards = (page: Page) =>
   page.getByRole("region", { name: "Cards" }).getByRole("button");
 
@@ -951,7 +951,7 @@ for (const viewport of [
             .filter({ visible: true });
           if (hidden)
             await tabs
-              .getByRole("button", { name: "Collection", exact: true })
+              .getByRole("link", { name: "Collection", exact: true })
               .click();
           const validated = page.waitForResponse(
             (response) =>
@@ -969,7 +969,7 @@ for (const viewport of [
           await resolvedBrowse;
           if (hidden)
             await tabs
-              .getByRole("button", { name: "Catalog", exact: true })
+              .getByRole("link", { name: "Catalog", exact: true })
               .click();
           await expect(page).toHaveURL(`${ORIGIN}/catalog`);
           await expect(
@@ -1036,12 +1036,12 @@ for (const viewport of [
       await page
         .getByRole("navigation", { name: "Main views" })
         .filter({ visible: true })
-        .getByRole("button", { name: "Collection", exact: true })
+        .getByRole("link", { name: "Collection", exact: true })
         .click();
       await page
         .getByRole("navigation", { name: "Main views" })
         .filter({ visible: true })
-        .getByRole("button", { name: "Catalog", exact: true })
+        .getByRole("link", { name: "Catalog", exact: true })
         .click();
       await expect(page).toHaveURL(keptUrl);
       await expect(

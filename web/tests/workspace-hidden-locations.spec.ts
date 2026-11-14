@@ -141,7 +141,9 @@ test("hiding a parent marks everything inside it, and a Location inside can't be
     "Hidden because Storage is hidden"
   );
   // A visible Location keeps its path tooltip as its description.
-  await expect(button(nav, "Shelf")).not.toHaveAccessibleDescription(/Hidden/);
+  await expect(
+    nav.getByRole("link", { name: "Shelf", exact: true })
+  ).not.toHaveAccessibleDescription(/Hidden/);
 
   // A Location hidden on its own stays hidden when its parent is shown again.
   await gear(nav, "Storage").click();

@@ -87,7 +87,7 @@ async function makeDeck(
 
 /** Opens the Deck from the Decks index, then its Live export (the deck builder's Export dialog, #181). */
 async function openDeck(page: Page, name: string) {
-  await page.getByRole("button", { name: "Decks", exact: true }).click();
+  await page.getByRole("link", { name: "Decks", exact: true }).click();
   await page
     .getByRole("navigation", { name: "Deck index" })
     .getByRole("link", { name, exact: true })

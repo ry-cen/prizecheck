@@ -280,7 +280,7 @@ test.describe("desktop", () => {
     await page
       .getByRole("complementary", { name: "Sidebar" })
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name: `Dest ${s}`, exact: true })
+      .getByRole("link", { name: `Dest ${s}`, exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       `Dest ${s}`
@@ -336,7 +336,7 @@ test.describe("desktop", () => {
     page
       .getByRole("complementary", { name: "Sidebar" })
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name, exact: true });
+      .getByRole("link", { name, exact: true });
 
   test("a Location that became a folder elsewhere opens All owned after Reload instead of failing", async ({
     page,

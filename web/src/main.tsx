@@ -462,6 +462,13 @@ function App() {
         return <SettingsPage active={active} email={accountEmail} />;
     }
   }
+  const tabAddress = (id: PageId) =>
+    id === "collection"
+      ? collectionAddress.current
+      : id === "catalog"
+        ? catalogAddress.current
+        : pageDef(id).path;
+
   return (
     <OpenProposalProvider onNavigate={go}>
       <Shell
@@ -478,15 +485,9 @@ function App() {
         onOpenTrade={(id) => {
           if (tradePath(id) !== path) navigate(tradePath(id));
         }}
+        hrefFor={tabAddress}
         onNavigate={(next) => {
-          if (pageDef(next).path !== path)
-            navigate(
-              next === "collection"
-                ? collectionAddress.current
-                : next === "catalog"
-                  ? catalogAddress.current
-                  : pageDef(next).path
-            );
+          if (pageDef(next).path !== path) navigate(tabAddress(next));
         }}
         onOpenFriend={(handle) => {
           if (friendCollectionPath(handle) !== path)

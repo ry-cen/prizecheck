@@ -158,7 +158,7 @@ const center = async (locator: Locator) => {
 
 /** Opens a Location from the sidebar and checks its heading counts (what the collector sees). */
 async function expectCounts(page: Page, name: string, counts: string) {
-  await sidebar(page).getByRole("button", { name, exact: true }).click();
+  await sidebar(page).getByRole("link", { name, exact: true }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
   await expect(page.getByRole("main")).toContainText(counts);
 }
@@ -297,11 +297,11 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
     if (entryPoint === "Catalog") {
       await page
         .getByRole("navigation", { name: "Main views" })
-        .getByRole("button", { name: "Catalog", exact: true })
+        .getByRole("link", { name: "Catalog", exact: true })
         .click();
     } else {
       await sidebar(page)
-        .getByRole("button", { name: "Dismiss binder", exact: true })
+        .getByRole("link", { name: "Dismiss binder", exact: true })
         .click();
       await page
         .getByRole("button", { name: "Add cards", exact: true })
@@ -328,7 +328,7 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
     if (entryPoint === "Catalog") {
       await page
         .getByRole("navigation", { name: "Main views" })
-        .getByRole("button", { name: "Collection", exact: true })
+        .getByRole("link", { name: "Collection", exact: true })
         .click();
       await expect(toastText(page)).toHaveText(
         "The earlier Add can be undone."
@@ -339,7 +339,7 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
       // Dismiss through the Catalog notification owner after returning there.
       await page
         .getByRole("navigation", { name: "Main views" })
-        .getByRole("button", { name: "Catalog", exact: true })
+        .getByRole("link", { name: "Catalog", exact: true })
         .click();
       // Catalog takes down its toast on navigation; make another Add to exercise its Dismiss.
       await page
@@ -389,7 +389,7 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
     // Both navigation and reload must leave the dismissed Add unavailable.
     await page
       .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: "Collection", exact: true })
+      .getByRole("link", { name: "Collection", exact: true })
       .click();
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -517,7 +517,7 @@ test("a bar Add whose Undo list failed is still dismissed for good", async ({
   const leaf = await createLocation(page, "Add binder", null);
   await page.reload();
   await sidebar(page)
-    .getByRole("button", { name: "Add binder", exact: true })
+    .getByRole("link", { name: "Add binder", exact: true })
     .click();
   await page.route("**/api/moves/undo", (route) =>
     route.request().method() === "GET"
@@ -567,7 +567,7 @@ test("a bar Add whose Undo list failed is still dismissed for good", async ({
   page.off("request", countDelete);
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Catalog", exact: true })
+    .getByRole("link", { name: "Catalog", exact: true })
     .click();
   const listed = page.waitForResponse(
     (r) =>
@@ -576,7 +576,7 @@ test("a bar Add whose Undo list failed is still dismissed for good", async ({
   );
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   expect((await listed).ok()).toBeTruthy();
   await expect(page.getByText("The earlier Add can be undone.")).toHaveCount(0);
@@ -713,7 +713,7 @@ test.describe("desktop", () => {
     // Names starting "0 " sort first, so the rows are in view beside the tiles however many Locations
     // earlier specs left in this worker's database.
     const row = (name: string) =>
-      sidebar(page).getByRole("button", { name, exact: true });
+      sidebar(page).getByRole("link", { name, exact: true });
 
     // A selected tile carries the whole selection.
     await tiles(page).nth(0).click();
@@ -850,7 +850,7 @@ test.describe("desktop", () => {
       await expect(toast(page)).toHaveText(`Moved 1 copy to ${name}.`);
       await expectCounts(page, name, count);
       await sidebar(page)
-        .getByRole("button", { name: `Alpha ${s}`, exact: true })
+        .getByRole("link", { name: `Alpha ${s}`, exact: true })
         .click();
     }
     await moveFirstTileTo(`First ${s}`, "1 copy · 1 edition");
@@ -980,7 +980,7 @@ test.describe("desktop", () => {
   }) => {
     const { s, alpha, edition } = await seedAlphaAndDest(page, "Dragfail Abra");
     const row = (name: string) =>
-      sidebar(page).getByRole("button", { name, exact: true });
+      sidebar(page).getByRole("link", { name, exact: true });
     // Another tab adds a copy, so the dragged Holding's version is stale.
     await sql(
       `WITH changed AS (
@@ -1140,7 +1140,7 @@ test.describe("desktop", () => {
     page,
   }) => {
     const { s, alpha, edition } = await seedAlphaAndDest(page, "Dragzero Abra");
-    const row = sidebar(page).getByRole("button", {
+    const row = sidebar(page).getByRole("link", {
       name: `0 Dest ${s}`,
       exact: true,
     });
@@ -1179,7 +1179,7 @@ test.describe("desktop", () => {
     page,
   }) => {
     const { s, alpha, edition } = await seedAlphaAndDest(page, "Keep Abra");
-    const row = sidebar(page).getByRole("button", {
+    const row = sidebar(page).getByRole("link", {
       name: `0 Dest ${s}`,
       exact: true,
     });
@@ -1221,7 +1221,7 @@ test.describe("desktop", () => {
       commits += 1;
       return route.continue();
     });
-    const row = sidebar(page).getByRole("button", {
+    const row = sidebar(page).getByRole("link", {
       name: `0 Dest ${s}`,
       exact: true,
     });
@@ -1380,7 +1380,7 @@ test.describe("desktop", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
     // The tree has caught up (Dest is gone) before the banner is checked, so the check isn't vacuous.
     await expect(
-      sidebar(page).getByRole("button", { name: `0 Dest ${s}`, exact: true })
+      sidebar(page).getByRole("link", { name: `0 Dest ${s}`, exact: true })
     ).toHaveCount(0);
     await expect(tiles(page)).toHaveCount(2);
     await expect(
@@ -1545,13 +1545,13 @@ test.describe("desktop", () => {
 
       // The toast is Collection's: it leaves with the page and comes back with it, Undo still offered.
       const views = page.getByRole("navigation", { name: "Main views" });
-      await views.getByRole("button", { name: "Decks" }).click();
+      await views.getByRole("link", { name: "Decks" }).click();
       await expect(
         page.getByRole("heading", { level: 1, name: "Decks" })
       ).toBeVisible();
       await expect(toastText(page)).toHaveCount(0);
       await expect(bar(page)).toHaveCount(0);
-      await views.getByRole("button", { name: "Collection" }).click();
+      await views.getByRole("link", { name: "Collection" }).click();
       await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
       await expect(undo).toBeVisible();
       await expect(bar(page)).toContainText("1 copy selected");
@@ -1795,7 +1795,7 @@ test("Back closes the phone card sheet then leaves Collection, and jumps release
   await page.goto(new URL("/catalog", page.url()).href);
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await expect(tiles(page)).toHaveCount(1);
   const overflow = await page.evaluate(() => document.body.style.overflow);
@@ -1879,7 +1879,7 @@ for (const remaining of [1, 0]) {
     await page.goto(new URL("/catalog", page.url()).href);
     await page
       .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: "Collection", exact: true })
+      .getByRole("link", { name: "Collection", exact: true })
       .click();
     await expect(tiles(page)).toHaveCount(2);
     await tiles(page).nth(1).click();

@@ -103,7 +103,7 @@ async function putAll(deck: string, numbers: number[]) {
  * dialog, #181). These Decks hold every card they list, so the cards-not-owned choice would be empty. */
 async function openDeck(page: Page, name: string) {
   await page.reload();
-  await page.getByRole("button", { name: "Decks", exact: true }).click();
+  await page.getByRole("link", { name: "Decks", exact: true }).click();
   await page
     .getByRole("navigation", { name: "Deck index" })
     .getByRole("link", { name, exact: true })

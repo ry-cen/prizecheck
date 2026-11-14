@@ -606,8 +606,8 @@ test("a delayed durable POST stays fenced through Close, Escape and Back, and a 
   const form = await draft(page, lender, ids["PAL 185"]);
   await form.getByRole("button", { name: "Keep draft" }).click();
   const nav = page.getByRole("navigation", { name: "Main views" });
-  await nav.getByRole("button", { name: /^Collection/ }).click();
-  await nav.getByRole("button", { name: /^Loans/ }).click();
+  await nav.getByRole("link", { name: /^Collection/ }).click();
+  await nav.getByRole("link", { name: /^Loans/ }).click();
   await page
     .getByRole("button", { name: "Review Borrow Request to Misty W" })
     .click();
@@ -652,7 +652,7 @@ test("a delayed durable POST stays fenced through Close, Escape and Back, and a 
   );
   await form.getByRole("button", { name: "Keep draft" }).click();
   await expect(form).toHaveCount(0);
-  await nav.getByRole("button", { name: /^Collection/ }).click();
+  await nav.getByRole("link", { name: /^Collection/ }).click();
   await expect(page).toHaveURL(`${ORIGIN}/collection`);
   await page
     .getByRole("button", { name: "Review Borrow Request to Misty W" })

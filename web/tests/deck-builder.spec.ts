@@ -352,7 +352,7 @@ test.describe("on a desktop", () => {
     const built = await buildDeck(page);
     await stubPrices(page, built);
 
-    await page.getByRole("button", { name: "Decks", exact: true }).click();
+    await page.getByRole("link", { name: "Decks", exact: true }).click();
     await page
       .getByRole("navigation", { name: "Deck index" })
       .getByRole("link", { name: built.deckName, exact: true })
@@ -481,7 +481,7 @@ test.describe("on a desktop", () => {
     ).toBeVisible();
 
     // The Decks tab goes back to the index.
-    await page.getByRole("button", { name: "Decks", exact: true }).click();
+    await page.getByRole("link", { name: "Decks", exact: true }).click();
     await expect(page).toHaveURL(`${ORIGIN}/decks`);
   });
 

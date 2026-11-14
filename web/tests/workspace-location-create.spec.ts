@@ -159,7 +159,9 @@ test.describe("desktop", () => {
     await dialog.getByRole("button", { name: "Create location" }).click();
     await expect(dialog).toBeHidden();
     await expect(heading).toHaveText(name);
-    await expect(row(nav, name)).toHaveAttribute("aria-current", "page");
+    await expect(
+      nav.getByRole("link", { name: name, exact: true })
+    ).toHaveAttribute("aria-current", "page");
     await expect(plus).toBeFocused();
     const created = (await client.tree()).filter((n) => n.name === name);
     expect(created).toHaveLength(1);
@@ -223,7 +225,9 @@ test.describe("desktop", () => {
     });
 
     // Decks have no Add child control.
-    await expect(row(nav, deck)).toBeVisible();
+    await expect(
+      nav.getByRole("link", { name: deck, exact: true })
+    ).toBeVisible();
     await expect(addChild(nav, deck)).toHaveCount(0);
 
     // Hidden until the row is hovered or holds keyboard focus.
@@ -269,20 +273,22 @@ test.describe("desktop", () => {
     await expect(dialog).toBeHidden();
     await expect(heading).toHaveText(binder);
     await expect(shelfRow).toHaveAttribute("aria-expanded", "true");
-    await expect(row(shelfList, binder)).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    await expect(
+      shelfList.getByRole("link", { name: binder, exact: true })
+    ).toHaveAttribute("aria-current", "page");
 
     // The open leaf keeps both tools visible after pointer and keyboard focus leave the tree.
-    const binderRow = row(shelfList, binder);
+    const binderRow = shelfList.getByRole("link", {
+      name: binder,
+      exact: true,
+    });
     const binderAdd = addChild(nav, `${shelf} / ${binder}`);
     const binderGear = nav.getByRole("button", {
       name: `Settings for ${shelf} / ${binder}`,
       exact: true,
     });
     await page.mouse.move(0, 0);
-    await row(nav, "All owned").focus();
+    await nav.getByRole("link", { name: "All owned", exact: true }).focus();
     await expect(binderAdd).toHaveCSS("opacity", "1");
     await expect(binderGear).toHaveCSS("opacity", "1");
     await expect(binderRow).toHaveCSS("padding-right", "68px");
@@ -321,10 +327,9 @@ test.describe("desktop", () => {
       "aria-expanded",
       "true"
     );
-    await expect(row(shelfList, sleeve)).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    await expect(
+      shelfList.getByRole("link", { name: sleeve, exact: true })
+    ).toHaveAttribute("aria-current", "page");
     // Decks are never offered as a parent.
     await page
       .getByRole("complementary", { name: "Sidebar" })
@@ -375,7 +380,9 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(page1);
     await expect(row(nav, box)).toHaveAttribute("aria-expanded", "true");
     await expect(
-      row(nav.getByRole("list", { name: box, exact: true }), page1)
+      nav
+        .getByRole("list", { name: box, exact: true })
+        .getByRole("link", { name: page1, exact: true })
     ).toHaveAttribute("aria-current", "page");
 
     expect((await client.node(boxId)).kind).toBe("organization");
@@ -425,8 +432,12 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(sleeve);
     const boxList = nav.getByRole("list", { name: box, exact: true });
     await expect(row(nav, box)).toHaveAttribute("aria-expanded", "true");
-    await expect(row(boxList, sleeve)).toHaveAttribute("aria-current", "page");
-    await expect(row(boxList, "Unsorted")).toBeVisible();
+    await expect(
+      boxList.getByRole("link", { name: sleeve, exact: true })
+    ).toHaveAttribute("aria-current", "page");
+    await expect(
+      boxList.getByRole("link", { name: "Unsorted", exact: true })
+    ).toBeVisible();
 
     expect(await client.children(boxId)).toEqual([sleeve, "Unsorted"].sort());
     const tree = await client.tree();
@@ -462,7 +473,9 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       "All owned"
     );
-    await expect(row(nav, box)).not.toHaveAttribute("aria-expanded");
+    await expect(
+      nav.getByRole("link", { name: box, exact: true })
+    ).not.toHaveAttribute("aria-expanded");
     expect((await client.node(boxId)).kind).toBe("storage_leaf");
     expect(await client.children(boxId)).toEqual([]);
     expect((await client.holdings(boxId)).map((h) => h.quantity)).toEqual([
@@ -490,8 +503,8 @@ test.describe("desktop", () => {
       .first();
     // A hidden control leaves the accessibility tree, so the tools are found by their label.
     const tool = (label: string) => nav.locator(`[aria-label="${label}"]`);
-    const dest = row(nav, `0 Dest ${s}`);
-    const other = row(nav, `0 Other ${s}`);
+    const dest = nav.getByRole("link", { name: `0 Dest ${s}`, exact: true });
+    const other = nav.getByRole("link", { name: `0 Other ${s}`, exact: true });
     await expect(tile).toBeVisible();
     await expect(dest).toBeVisible();
     // Hovering a row reveals its tools when no drag is going.
@@ -606,7 +619,9 @@ test.describe("mobile", () => {
     expect(size.x).toBeGreaterThanOrEqual(shelfBox.x + shelfBox.width - 1);
     expect(Math.abs(size.y - shelfBox.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(size.height - shelfBox.height)).toBeLessThanOrEqual(1);
-    await expect(row(nav, deck)).toBeVisible();
+    await expect(
+      nav.getByRole("link", { name: deck, exact: true })
+    ).toBeVisible();
     await expect(addChild(nav, deck)).toHaveCount(0);
 
     await addShelf.tap();
@@ -627,7 +642,9 @@ test.describe("mobile", () => {
     await opener.click();
     await expect(row(nav, shelf)).toHaveAttribute("aria-expanded", "true");
     await expect(
-      row(nav.getByRole("list", { name: shelf, exact: true }), binder)
+      nav
+        .getByRole("list", { name: shelf, exact: true })
+        .getByRole("link", { name: binder, exact: true })
     ).toHaveAttribute("aria-current", "page");
   });
 });

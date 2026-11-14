@@ -136,7 +136,7 @@ async function forTradeBinder(page: Page, name: string): Promise<string> {
 const tradesTab = (page: Page) =>
   page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: /^Trades/ });
+    .getByRole("link", { name: /^Trades/ });
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });

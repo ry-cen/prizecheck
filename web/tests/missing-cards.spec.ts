@@ -19,7 +19,7 @@ promote({'fixture-1': 'Pikachu'})`,
   try {
     await signInAsOwner(page, "/collection");
     await expect(
-      page.getByRole("button", { name: "Catalog", exact: true })
+      page.getByRole("link", { name: "Catalog", exact: true })
     ).toBeVisible();
     const owner = await pool.query<{ id: string }>(
       'SELECT id FROM "user" WHERE email=$1',
@@ -35,7 +35,7 @@ promote({'fixture-1': 'Pikachu'})`,
       page.getByRole("menuitem", { name: "Owner controls" })
     ).toBeVisible();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Card reports" }).click();
+    await page.getByRole("link", { name: "Card reports" }).click();
     await page
       .getByRole("tablist", { name: "Card reports sections" })
       .getByRole("tab", { name: "Report a card", exact: true })
@@ -85,7 +85,7 @@ promote({'fixture-1': 'Pikachu'})`,
       page.getByRole("region", { name: "Notifications" })
     ).toContainText("Approved shared record: Pikachu · Jungle #99.");
     await expect(item).toHaveCount(0);
-    await page.getByRole("button", { name: "Catalog", exact: true }).click();
+    await page.getByRole("link", { name: "Catalog", exact: true }).click();
     // The approved card is in Catalog's gallery (#173); its card popup (#174) names the owner-reviewed source, and its
     // Edition carries the Owner reviewed badge.
     await page
