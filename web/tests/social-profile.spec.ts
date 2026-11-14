@@ -29,59 +29,70 @@ const privacy = (page: Page) => page.getByRole("region", { name: "Privacy" });
 const uniqueHandle = () =>
   `ash_${Array.from({ length: 12 }, () => "bcdfghjklmnpqrstvwxz"[randomInt(20)]).join("")}`;
 
-test("Settings › Privacy edits the Display Name and the Handle", async ({
-  page,
-}) => {
-  await signIn(page);
-  const section = privacy(page);
-  const name = section.getByRole("textbox", { name: "Display Name" });
-  const handle = section.getByRole("textbox", { name: "Handle" });
-  await expect(name).toHaveValue("Collector");
-  await expect(handle).toHaveValue(/^collector_[a-z0-9]{8}$/);
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test(`Settings › Privacy edits the Display Name and the Handle at ${viewport.width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await signIn(page);
+    const section = privacy(page);
+    const name = section.getByRole("textbox", { name: "Display Name" });
+    const handle = section.getByRole("textbox", { name: "Handle" });
+    await expect(name).toHaveValue("Collector");
+    await expect(handle).toHaveValue(/^collector_[a-z0-9]{8}$/);
 
-  await name.fill("Misty W");
-  await section.getByRole("button", { name: "Save name" }).click();
-  await expect(
-    page.getByRole("status").filter({ hasText: "Display Name saved." })
-  ).toBeVisible();
-  await name.fill("Admin");
-  await section.getByRole("button", { name: "Save name" }).click();
-  await expect(section.getByRole("alert")).toHaveText(
-    "That name isn't allowed. Try another."
-  );
+    await name.fill("Misty W");
+    await section.getByRole("button", { name: "Save name" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Display Name saved." })
+    ).toBeVisible();
+    await name.fill("Admin");
+    await section.getByRole("button", { name: "Save name" }).click();
+    await expect(section.getByRole("alert")).toHaveText(
+      "That name isn't allowed. Try another."
+    );
 
-  const chosen = uniqueHandle();
-  await handle.fill(chosen);
-  await section.getByRole("button", { name: "Save Handle" }).click();
-  await expect(
-    page.getByRole("status").filter({ hasText: "Handle saved." })
-  ).toBeVisible();
-  await expect(section).toContainText("You can change your Handle again on");
-  // A second change within 30 days is refused; a change of case only is not.
-  await handle.fill(uniqueHandle());
-  await section.getByRole("button", { name: "Save Handle" }).click();
-  await expect(section.getByRole("alert")).toContainText(
-    "You can change your Handle again on"
-  );
-  await handle.fill(chosen.toUpperCase());
-  const put = page.waitForResponse(
-    (r) =>
-      r.url().endsWith("/api/profile/handle") && r.request().method() === "PUT"
-  );
-  await section.getByRole("button", { name: "Save Handle" }).click();
-  expect((await put).ok()).toBe(true);
-  await expect(
-    page.getByRole("status").filter({ hasText: "Handle saved." })
-  ).toBeVisible();
-  await expect(section.getByRole("alert")).toHaveCount(0);
-  await page.reload();
-  await expect(
-    privacy(page).getByRole("textbox", { name: "Display Name" })
-  ).toHaveValue("Misty W");
-  await expect(
-    privacy(page).getByRole("textbox", { name: "Handle" })
-  ).toHaveValue(chosen.toUpperCase());
-});
+    await expect(handle).toHaveAccessibleDescription(
+      /You can change your Handle once every 30 days\./
+    );
+    const chosen = uniqueHandle();
+    await handle.fill(chosen);
+    await section.getByRole("button", { name: "Save Handle" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Handle saved." })
+    ).toBeVisible();
+    await expect(section).toContainText("You can change your Handle again on");
+    await expect(section).not.toContainText("once every 30 days");
+    // A second change within 30 days is refused; a change of case only is not.
+    await handle.fill(uniqueHandle());
+    await section.getByRole("button", { name: "Save Handle" }).click();
+    await expect(section.getByRole("alert")).toContainText(
+      "You can change your Handle again on"
+    );
+    await handle.fill(chosen.toUpperCase());
+    const put = page.waitForResponse(
+      (r) =>
+        r.url().endsWith("/api/profile/handle") &&
+        r.request().method() === "PUT"
+    );
+    await section.getByRole("button", { name: "Save Handle" }).click();
+    expect((await put).ok()).toBe(true);
+    await expect(
+      page.getByRole("status").filter({ hasText: "Handle saved." })
+    ).toBeVisible();
+    await expect(section.getByRole("alert")).toHaveCount(0);
+    await page.reload();
+    await expect(
+      privacy(page).getByRole("textbox", { name: "Display Name" })
+    ).toHaveValue("Misty W");
+    await expect(
+      privacy(page).getByRole("textbox", { name: "Handle" })
+    ).toHaveValue(chosen.toUpperCase());
+  });
+}
 
 test("the Invite Link page shows only the Display Name signed out, and a new link stops the old one", async ({
   page,

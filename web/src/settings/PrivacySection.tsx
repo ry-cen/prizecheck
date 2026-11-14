@@ -323,8 +323,9 @@ export function PrivacySection({
               >
                 Friends can find you by typing your Handle exactly. 3 to 20
                 letters, digits and underscores.
-                {profile.handle_change_available_at &&
-                  ` You can change your Handle again on ${profileDate(profile.handle_change_available_at)}.`}
+                {profile.handle_change_available_at
+                  ? ` You can change your Handle again on ${profileDate(profile.handle_change_available_at)}.`
+                  : " You can change your Handle once every 30 days."}
               </p>
               {handleNotice && (
                 <p

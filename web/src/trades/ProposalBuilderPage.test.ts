@@ -1943,3 +1943,31 @@ it("restores a proposal row card popup to its card button after a held unchanged
     restore();
   }
 });
+
+it("the leave dialog says unsent changes will be discarded", async () => {
+  const restore = dialogDom();
+  let route!: Route;
+  function Routed() {
+    route = useRoute();
+    return h(ToastProvider, {
+      children: h(ProposalBuilderPage, {
+        traderId: "misty",
+        counter: original,
+        onNavigate: route.navigate,
+      }),
+    });
+  }
+  try {
+    await act(async () => root.render(h(Routed)));
+    await cashEdit();
+    await act(async () => route.navigate("/collection"));
+    const dialog = host.querySelector<HTMLDialogElement>("dialog[open]")!;
+    const body = dialog.textContent;
+    await click(button("Keep editing"));
+    expect(body).toContain(
+      "Your unsent changes will be discarded. Misty's Trade Proposal stays as it was."
+    );
+  } finally {
+    restore();
+  }
+});
