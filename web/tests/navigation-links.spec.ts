@@ -6,6 +6,52 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./support/collectors";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
+
+// Headless shell can leave native background tabs uncommitted (even before its
+// page event). Observe the trusted DOM event after React's handler instead:
+// the browser receives the exact anchor's default action, with no app interception.
+async function expectNativeActivation(
+  page: Page,
+  href: string | null,
+  click: () => Promise<unknown>,
+  type: "click" | "auxclick" = "click"
+) {
+  await page.bringToFront();
+  const [activation] = await Promise.all([
+    page.evaluate(
+      (type) =>
+        new Promise((resolve) => {
+          document.addEventListener(
+            type,
+            (event) => {
+              const target = event.target;
+              resolve({
+                href:
+                  target instanceof Element
+                    ? target.closest("a")?.getAttribute("href")
+                    : null,
+                defaultPrevented: event.defaultPrevented,
+                trusted: event.isTrusted,
+                button: event.button,
+                controlOrMeta: event.ctrlKey || event.metaKey,
+              });
+            },
+            { once: true }
+          );
+        }),
+      type
+    ),
+    click(),
+  ]);
+  expect(href).not.toBeNull();
+  expect(activation).toEqual({
+    href,
+    defaultPrevented: false,
+    trusted: true,
+    button: type === "auxclick" ? 1 : 0,
+    controlOrMeta: type === "click",
+  });
+}
 const tabs = (page: Page) =>
   page.getByRole("navigation", { name: "Main views" });
 async function locations(page: Page, phone: boolean) {
@@ -180,9 +226,8 @@ for (const viewport of [
     });
 
     if (!phone) {
-      test("a ctrl or cmd click opens a tab or row in a new page and leaves this one", async ({
+      test("a ctrl or cmd click keeps native tab or row activation and leaves this page", async ({
         page,
-        context,
       }) => {
         const shelf = await location(page, "New tab shelf");
         await page.reload();
@@ -195,35 +240,31 @@ for (const viewport of [
           }),
         ]) {
           const href = await link.getAttribute("href");
-          const opened = context.waitForEvent("page");
-          await link.click({ modifiers: ["ControlOrMeta"] });
-          const other = await opened;
-          await other.bringToFront();
-          await expect(other).toHaveURL(`${ORIGIN}${href}`);
+          await expectNativeActivation(page, href, () =>
+            link.click({ modifiers: ["ControlOrMeta"] })
+          );
           await expect(page).toHaveURL(address);
           await expect(page.getByRole("dialog")).toHaveCount(0);
-          await other.close();
           await page.bringToFront();
         }
       });
-      test("a real middle click opens a tab natively and leaves this one", async ({
+      test("a real middle click keeps native tab activation and leaves this page", async ({
         page,
-        context,
       }) => {
         const address = page.url();
-        const opened = context.waitForEvent("page");
-        await page.click('nav[aria-label="Main views"] a[href="/catalog"]', {
-          button: "middle",
-        });
-        const other = await opened;
-        await other.bringToFront();
-        await expect(other).toHaveURL(`${ORIGIN}/catalog`);
+        await expectNativeActivation(
+          page,
+          "/catalog",
+          () =>
+            page.click('nav[aria-label="Main views"] a[href="/catalog"]', {
+              button: "middle",
+            }),
+          "auxclick"
+        );
         await expect(page).toHaveURL(address);
-        await other.close();
       });
-      test("All Decks opens in a new page on a modified click", async ({
+      test("All Decks keeps native activation on a modified click", async ({
         page,
-        context,
       }) => {
         const response = await page.request.post(`${ORIGIN}/api/decks`, {
           headers: { origin: ORIGIN },
@@ -233,15 +274,15 @@ for (const viewport of [
         const deck = (await response.json()).location;
         await page.goto(`${ORIGIN}/decks/${deck.id}`);
         const address = page.url();
-        const opened = context.waitForEvent("page");
-        await page
-          .getByRole("link", { name: "All Decks", exact: true })
-          .click({ modifiers: ["ControlOrMeta"] });
-        const other = await opened;
-        await other.bringToFront();
-        await expect(other).toHaveURL(`${ORIGIN}/decks`);
+        const allDecks = page.getByRole("link", {
+          name: "All Decks",
+          exact: true,
+        });
+        await expect(allDecks).toHaveAttribute("href", "/decks");
+        await expectNativeActivation(page, "/decks", () =>
+          allDecks.click({ modifiers: ["ControlOrMeta"] })
+        );
         await expect(page).toHaveURL(address);
-        await other.close();
       });
     }
   });
