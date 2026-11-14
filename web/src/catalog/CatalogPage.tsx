@@ -137,7 +137,8 @@ export function CatalogPage({
     if (printing !== null) {
       params.delete("printing");
       changed = true;
-      if (isCatalogId(printing)) {
+      // A `printing` alone is no link: it is only read beside an `edition`.
+      if (isCatalogId(printing) && params.has("edition")) {
         cardId = printing;
         if (!report) editionId = null;
       }
