@@ -1,10 +1,11 @@
 import { CARD, CENTRED_MAIN, PRIMARY, SECONDARY } from "./controls";
+import { DEFAULT_PATH } from "../shell/routes";
 import { DISCOVER_PATH, followLink, SIGN_IN_PATH } from "./publicRoutes";
 
 const COPY = {
   "not-found": {
     mark: "?",
-    title: "Page not found",
+    title: "This page doesn't exist",
     body: "The link may be mistyped, or the page has moved.",
   },
   unavailable: {
@@ -51,7 +52,16 @@ export function DeadEnd({ kind, signedIn, onNavigate }: Props) {
         </h1>
         <p className="m-0 text-body text-text-muted">{copy.body}</p>
         <div className="flex flex-wrap justify-center gap-2">
-          <a href={DISCOVER_PATH} onClick={follow} className={PRIMARY}>
+          {signedIn && kind === "not-found" && (
+            <a href={DEFAULT_PATH} onClick={follow} className={PRIMARY}>
+              Go to Collection
+            </a>
+          )}
+          <a
+            href={DISCOVER_PATH}
+            onClick={follow}
+            className={signedIn && kind === "not-found" ? SECONDARY : PRIMARY}
+          >
             Discover decks
           </a>
           {!signedIn && (

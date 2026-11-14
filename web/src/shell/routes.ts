@@ -134,6 +134,19 @@ export function canonicalPath(path: string): string {
     : path;
 }
 
+/** The route an address names once one trailing slash is dropped, or the address itself. `known` says whether an
+ * address is a route (a page, a public page, a Friend's page). Bare `/` and a slash that leaves no route are
+ * unchanged, so `/friends/` stays an unknown address. */
+export function withoutTrailingSlash(
+  path: string,
+  known: (path: string) => boolean
+): string {
+  if (path.length < 2 || !path.endsWith("/") || path.endsWith("//"))
+    return path;
+  const stripped = path.slice(0, -1);
+  return known(stripped) ? stripped : path;
+}
+
 export function pageAt(path: string): PageDef | undefined {
   return PAGES.find(
     (page) =>

@@ -370,11 +370,11 @@ test.describe("desktop", () => {
     await checkLoading(page, "loading");
   });
 
-  test("an unknown address shows Page not found, with Discover decks and Sign in", async ({
+  test("an unknown address shows This page doesn't exist, with Discover decks and Sign in", async ({
     page,
   }) => {
     await page.goto(`${ORIGIN}/nowhere`);
-    await expect(heading(page)).toHaveText("Page not found");
+    await expect(heading(page)).toHaveText("This page doesn't exist");
     await expect(
       page.getByText("The link may be mistyped, or the page has moved.", {
         exact: true,
@@ -395,7 +395,7 @@ test.describe("desktop", () => {
     await expect(page).toHaveURL(`${ORIGIN}/sign-in`);
     await expect(heading(page)).toHaveText("Sign in to PrizeCheck");
     await page.goBack();
-    await expect(heading(page)).toHaveText("Page not found");
+    await expect(heading(page)).toHaveText("This page doesn't exist");
     await page
       .getByRole("main")
       .getByRole("link", { name: "Discover decks" })
@@ -553,7 +553,7 @@ test.describe("phone", () => {
   }) => {
     await checkLoading(page, "loading on a phone");
     await page.goto(`${ORIGIN}/nowhere`);
-    await expect(heading(page)).toHaveText("Page not found");
+    await expect(heading(page)).toHaveText("This page doesn't exist");
     await expectPageChecks(page, "not found on a phone");
     await page.goto(`${ORIGIN}/published/${randomUUID()}`);
     await expect(heading(page)).toHaveText("This deck isn't published anymore");

@@ -335,3 +335,154 @@ for (const changed of [false, true]) {
     }
   );
 }
+
+// Desktop inspector address (S14e): the inspected card is reported once per change, desktop only.
+function inspectHarness(initial: { mobile: boolean; scope?: string }) {
+  const make = (key: string, start: number, copies: number) =>
+    ({
+      key,
+      start,
+      copies,
+      holding: { location_id: "leaf", edition_id: key, version: 1 },
+    }) as GalleryHolding;
+  const a = make("leaf:a", 0, 3);
+  const b = make("leaf:b", 3, 2);
+  let holdings = [a, b];
+  let byKey = new Map(holdings.map((row) => [row.key, row]));
+  let scope = initial.scope ?? "all";
+  const reports: Array<{ key: string; ordinal: number } | null> = [];
+  let selection!: SelectionState;
+  const root = createRoot(document.createElement("div"));
+  function Host() {
+    selection = useSelection({
+      holdings,
+      byKey,
+      status: "ready",
+      scope,
+      mobile: initial.mobile,
+      onInspect: (card) =>
+        reports.push(card && { key: card.holding.key, ordinal: card.ordinal }),
+    });
+    return null;
+  }
+  const render = () => act(() => root.render(React.createElement(Host)));
+  render();
+  const click = (
+    holding: GalleryHolding,
+    ordinal: number,
+    gesture: { toggle?: boolean; range?: boolean } = {}
+  ) =>
+    act(() =>
+      selection.activate(
+        { holding, ordinal, index: holding.start + ordinal },
+        { kind: "click", toggle: !!gesture.toggle, range: !!gesture.range }
+      )
+    );
+  return {
+    a,
+    b,
+    reports,
+    click,
+    render,
+    get selection() {
+      return selection;
+    },
+    setScope: (next: string) => {
+      scope = next;
+      render();
+    },
+    setHoldings: (next: GalleryHolding[]) => {
+      holdings = next;
+      byKey = new Map(next.map((row) => [row.key, row]));
+      render();
+    },
+    unmount: () => act(() => root.unmount()),
+  };
+}
+
+test("a desktop click reports the inspected card, and deselecting reports null", () => {
+  const h = inspectHarness({ mobile: false });
+  try {
+    expect(h.reports).toEqual([]);
+    h.click(h.a, 1);
+    expect(h.reports).toEqual([{ key: "leaf:a", ordinal: 1 }]);
+    h.click(h.a, 1);
+    expect(h.reports).toEqual([{ key: "leaf:a", ordinal: 1 }, null]);
+  } finally {
+    h.unmount();
+  }
+});
+
+test("a ctrl-click reports the last clicked card, and Escape-style clear reports null", () => {
+  const h = inspectHarness({ mobile: false });
+  try {
+    h.click(h.a, 0);
+    h.click(h.b, 1, { toggle: true });
+    expect(h.reports.at(-1)).toEqual({ key: "leaf:b", ordinal: 1 });
+    expect(h.reports).toHaveLength(2);
+    act(() => h.selection.clear());
+    expect(h.reports.at(-1)).toBeNull();
+  } finally {
+    h.unmount();
+  }
+});
+
+test("a marquee reports once, when the drag ends", () => {
+  const h = inspectHarness({ mobile: false });
+  try {
+    act(() =>
+      h.selection.marquee({ phase: "start", additive: false, spans: [] })
+    );
+    act(() =>
+      h.selection.marquee({ phase: "move", additive: false, spans: [[0, 1]] })
+    );
+    act(() =>
+      h.selection.marquee({ phase: "move", additive: false, spans: [[0, 3]] })
+    );
+    expect(h.reports).toEqual([]);
+    act(() =>
+      h.selection.marquee({ phase: "end", additive: false, spans: [[0, 3]] })
+    );
+    expect(h.reports).toHaveLength(1);
+    expect(h.reports[0]).not.toBeNull();
+  } finally {
+    h.unmount();
+  }
+});
+
+test("a phone tap and Select mode report nothing", () => {
+  const h = inspectHarness({ mobile: true });
+  try {
+    h.click(h.a, 0);
+    act(() => h.selection.setSelectMode(true));
+    h.click(h.b, 0);
+    expect(h.reports).toEqual([]);
+  } finally {
+    h.unmount();
+  }
+});
+
+test("mount and a scope change report nothing", () => {
+  const h = inspectHarness({ mobile: false });
+  try {
+    expect(h.reports).toEqual([]);
+    h.setScope("other");
+    expect(h.reports).toEqual([]);
+    h.click(h.a, 0);
+    h.setScope("third");
+    expect(h.reports).toEqual([{ key: "leaf:a", ordinal: 0 }, null]);
+  } finally {
+    h.unmount();
+  }
+});
+
+test("reconcile dropping the inspected Holding reports null", () => {
+  const h = inspectHarness({ mobile: false });
+  try {
+    h.click(h.a, 0);
+    h.setHoldings([h.b]);
+    expect(h.reports).toEqual([{ key: "leaf:a", ordinal: 0 }, null]);
+  } finally {
+    h.unmount();
+  }
+});

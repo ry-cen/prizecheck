@@ -586,3 +586,80 @@ it("releases a scroll matching document growth when restoration never clamped", 
     stop();
   }
 });
+
+it("keeps restoring while the page marks itself loading, then for the window after", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 100);
+  const page = document.createElement("main");
+  page.innerHTML = "<p data-page-loading>Loading</p>";
+  document.body.append(page);
+  const stop = restorePageScroll(page, 500);
+  vi.advanceTimersByTime(RESTORE_WINDOW_MS * 2);
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS);
+  expect(window.scrollY).toBe(500);
+  // Loading ends; the window now counts from here.
+  page.replaceChildren();
+  vi.advanceTimersByTime(RESTORE_POLL_MS);
+  view.setHeight(100);
+  vi.advanceTimersByTime(RESTORE_WINDOW_MS - RESTORE_POLL_MS * 2);
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 2);
+  expect(window.scrollY).toBe(500);
+  vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
+  const calls = view.scroll.mock.calls.length;
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 5);
+  expect(view.scroll).toHaveBeenCalledTimes(calls);
+  stop();
+  page.remove();
+});
+
+it("ignores a loading marker inside a hidden or inert subtree", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 100);
+  const page = document.createElement("main");
+  page.innerHTML =
+    '<div hidden><p data-page-loading>x</p></div><div inert><h1 data-page-heading="loading">y</h1></div>';
+  document.body.append(page);
+  const stop = restorePageScroll(page, 500);
+  vi.advanceTimersByTime(RESTORE_WINDOW_MS + RESTORE_POLL_MS * 2);
+  const calls = view.scroll.mock.calls.length;
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 5);
+  expect(view.scroll).toHaveBeenCalledTimes(calls);
+  stop();
+  page.remove();
+});
+
+for (const input of ["pointerdown", "keydown", "wheel", "touchstart"])
+  it(`a page that never stops loading still releases on ${input}`, () => {
+    vi.useFakeTimers();
+    const view = layout(0, 100);
+    const page = document.createElement("main");
+    page.innerHTML = "<p data-page-loading>Loading</p>";
+    document.body.append(page);
+    restorePageScroll(page, 500);
+    vi.advanceTimersByTime(RESTORE_WINDOW_MS * 2);
+    window.dispatchEvent(new Event(input));
+    const calls = view.scroll.mock.calls.length;
+    view.setHeight(900);
+    vi.advanceTimersByTime(RESTORE_POLL_MS * 5);
+    expect(view.scroll).toHaveBeenCalledTimes(calls);
+    page.remove();
+  });
+
+it("a page that never stops loading releases on cleanup", () => {
+  vi.useFakeTimers();
+  const view = layout(0, 100);
+  const page = document.createElement("main");
+  page.innerHTML = "<p data-page-loading>Loading</p>";
+  document.body.append(page);
+  const stop = restorePageScroll(page, 500);
+  vi.advanceTimersByTime(RESTORE_WINDOW_MS * 2);
+  stop();
+  const calls = view.scroll.mock.calls.length;
+  view.setHeight(900);
+  vi.advanceTimersByTime(RESTORE_POLL_MS * 5);
+  expect(view.scroll).toHaveBeenCalledTimes(calls);
+  page.remove();
+});

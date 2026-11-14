@@ -6,7 +6,11 @@ import {
   isViewSwitch,
   opensPage,
   pageAt,
+  withoutTrailingSlash,
 } from "./routes";
+import { publicPageAt } from "../public/publicRoutes";
+import { friendHandleAt } from "../social/friendCards";
+import { friendTradeListHandleAt } from "../trades/tradeListModel";
 
 it("classifies view switches and page entries", () => {
   for (const page of PAGES) {
@@ -74,4 +78,37 @@ it("classifies view switches and page entries", () => {
   }
   expect(isViewSwitch("/decks", "/trades/find")).toBe(false);
   expect(isViewSwitch("/decks/d1", "/decks/want-list")).toBe(false);
+});
+
+// An address that differs from a route only by one trailing slash is that route (S14e); anything else is unknown.
+const known = (path: string) =>
+  pageAt(path) !== undefined ||
+  publicPageAt(path) !== null ||
+  friendHandleAt(path) !== null ||
+  friendTradeListHandleAt(path) !== null;
+
+it("drops one trailing slash from a page, a public page and a Friend's page", () => {
+  for (const [path, stripped] of [
+    ["/collection/", "/collection"],
+    ["/decks/d1/", "/decks/d1"],
+    ["/decks/want-list/", "/decks/want-list"],
+    ["/discover/", "/discover"],
+    ["/published/token/", "/published/token"],
+    ["/friends/misty/", "/friends/misty"],
+    ["/friends/misty/trade-list/", "/friends/misty/trade-list"],
+  ])
+    expect(withoutTrailingSlash(path, known)).toBe(stripped);
+});
+
+it("leaves the bare origin, unknown addresses and a doubled slash alone", () => {
+  for (const path of [
+    "/",
+    "/friends/",
+    "/nowhere/",
+    "/collection//",
+    "/collection",
+    "/collection/extra/",
+    "/decks/a/b/",
+  ])
+    expect(withoutTrailingSlash(path, known)).toBe(path);
 });

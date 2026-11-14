@@ -264,6 +264,9 @@ export function Workspace({
   const narrowed =
     searchText.trim() !== "" || activeFilterCount(prefs.filters) > 0;
   const mobile = useMediaQuery(MOBILE_QUERY);
+  // The card keys the desktop inspector wrote to the address. A missing card whose key it wrote is the
+  // collector's own action (a Move, an Inventory Removal) and is dropped without a notice.
+  const inspectedInUrl = useRef<string | null>(null);
   const selection = useSelection({
     holdings: gallery.holdings,
     byKey: gallery.byKey,
@@ -286,10 +289,33 @@ export function Workspace({
       if (card === null) onCloseCard(next);
       else onNavigate(next, { preserveScroll: true, overlay: true });
     },
+    // The desktop inspector is a side panel: its address writes replace the entry and never add one.
+    onInspect: (card) => {
+      if (!active || mobile) return;
+      const next = collectionHref(
+        view,
+        query,
+        card?.holding.key,
+        card?.ordinal
+      );
+      if (next === address) return;
+      if (card) inspectedInUrl.current = card.holding.key;
+      onNavigate(next, { replace: true, preserveScroll: true });
+    },
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
     active,
   });
+  // Narrowing to the phone layout must not open the details sheet for a card only the desktop inspector wrote.
+  useEffect(() => {
+    if (!active || !mobile || inspectedInUrl.current === null) return;
+    if (route.card !== inspectedInUrl.current) return;
+    inspectedInUrl.current = null;
+    onNavigate(collectionHref(view, query), {
+      replace: true,
+      preserveScroll: true,
+    });
+  }, [active, mobile, route.card, view, query]);
   useEffect(() => {
     // Validate only the complete listing for the addressed Location and settled search.
     if (
@@ -303,7 +329,18 @@ export function Workspace({
     const params = new URL(address, window.location.origin).searchParams;
     const hasCopy = params.has("copy");
     const holding = route.card ? gallery.byKey.get(route.card) : undefined;
+    // Forget what the inspector wrote once the address no longer names that card.
+    if (route.card !== inspectedInUrl.current) inspectedInUrl.current = null;
     if (params.has("card") && !holding) {
+      if (!mobile && route.card && route.card === inspectedInUrl.current) {
+        // The inspected card left the listing (a Move or a removal): that is the collector's own action.
+        inspectedInUrl.current = null;
+        onNavigate(collectionHref(view, query), {
+          replace: true,
+          preserveScroll: true,
+        });
+        return;
+      }
       setCardNotice("This card is unavailable here. Showing your cards.");
       onCloseCard(collectionHref(view, query));
     } else if (
