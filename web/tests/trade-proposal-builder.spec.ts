@@ -24,6 +24,52 @@ import { expectTouchTarget } from "./support/touch-target";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
+// Headless shell can leave native background tabs uncommitted (even before its
+// page event). Observe the trusted DOM event after React's handler instead:
+// the browser receives the exact anchor's default action, with no app interception.
+async function expectNativeActivation(
+  page: Page,
+  href: string | null,
+  click: () => Promise<unknown>,
+  type: "click" | "auxclick" = "click"
+) {
+  await page.bringToFront();
+  const [activation] = await Promise.all([
+    page.evaluate(
+      (type) =>
+        new Promise((resolve) => {
+          document.addEventListener(
+            type,
+            (event) => {
+              const target = event.target;
+              resolve({
+                href:
+                  target instanceof Element
+                    ? target.closest("a")?.getAttribute("href")
+                    : null,
+                defaultPrevented: event.defaultPrevented,
+                trusted: event.isTrusted,
+                button: event.button,
+                controlOrMeta: event.ctrlKey || event.metaKey,
+              });
+            },
+            { once: true }
+          );
+        }),
+      type
+    ),
+    click(),
+  ]);
+  expect(href).not.toBeNull();
+  expect(activation).toEqual({
+    href,
+    defaultPrevented: false,
+    trusted: true,
+    button: type === "auxclick" ? 1 : 0,
+    controlOrMeta: type === "click",
+  });
+}
+
 type Editions = Record<
   | "PAL 185"
   | "PAL 254"
@@ -1031,10 +1077,9 @@ for (const viewport of [
     for (const counter of [false, true]) {
       const builder = counter ? "Counter" : "new proposal";
       if (viewport.width === 1280) {
-        test(`${builder}: a modified click on a tab opens it in a new tab without asking`, async ({
+        test(`${builder}: a modified tab click keeps native activation and edits without asking`, async ({
           page,
           collectors,
-          context,
         }) => {
           const { address, dialog } = await discardBuilder(
             page,
@@ -1046,17 +1091,15 @@ for (const viewport of [
             .getByRole("navigation", { name: "Main views" })
             .getByRole("link", { name: "Collection", exact: true });
           const href = await collection.getAttribute("href");
-          const opened = context.waitForEvent("page");
-          await collection.click({ modifiers: ["ControlOrMeta"] });
-          const other = await opened;
-          await other.bringToFront();
-          await expect(other).toHaveURL(`${ORIGIN}${href}`);
+          await expect(collection).toHaveAttribute("href", "/collection");
+          await expectNativeActivation(page, href, () =>
+            collection.click({ modifiers: ["ControlOrMeta"] })
+          );
           await expect(page).toHaveURL(address);
           await expect(group(page, "Arven (SVI 166) you get")).toContainText(
             counter ? "2" : "1"
           );
           await expect(dialog).toHaveCount(0);
-          await other.close();
           await page.bringToFront();
           await collection.focus();
           await collection.press("Enter");
