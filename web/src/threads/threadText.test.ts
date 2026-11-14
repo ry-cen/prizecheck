@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { EventView, TimelineItem } from "../social_generated";
 import {
   agreementText,
+  cashText,
   currentCardsText,
   itemState,
   loanOutcome,
@@ -23,17 +24,32 @@ const event = (kind: string, data?: EventView["data"]): TimelineItem => ({
 it.each([
   ["offered", "Proposal"],
   ["agreed", "Agreed"],
-  ["confirming", "Swap confirmations"],
   ["done", "Swapped"],
   ["closed", "Closed"],
 ])("shows Trade state %s as %s", (state, label) => {
-  expect(itemState({ state, kind: "trade" })).toBe(label);
+  expect(
+    itemState({
+      other: { display_name: "Misty", trader_id: null },
+      state,
+      kind: "trade",
+    })
+  ).toBe(label);
 });
 it("keeps Borrow and Lend intent separate from Trade proposals", () => {
-  expect(itemState({ state: "offered", kind: "loan" })).toBe("Lend offer");
-  expect(itemState({ state: "requested", kind: "loan" })).toBe(
-    "Borrow Request"
-  );
+  expect(
+    itemState({
+      other: { display_name: "Misty", trader_id: null },
+      state: "offered",
+      kind: "loan",
+    })
+  ).toBe("Lend offer");
+  expect(
+    itemState({
+      other: { display_name: "Misty", trader_id: null },
+      state: "requested",
+      kind: "loan",
+    })
+  ).toBe("Borrow Request");
 });
 it("renders replacement terms as diffs without round, card or cursor identities", () => {
   const text = timelineText(
@@ -283,4 +299,28 @@ it("describes closed Loan quantities without claiming a declined proposal was le
       summary: { you_give: "3", you_get: "0", cards: [] },
     })
   ).toBe("3 cards");
+});
+
+it.each([
+  ["confirm_swap", "Misty confirmed the swap"],
+  [null, "Waiting for Misty to confirm the swap"],
+  ["fix_picks", "Agreed"],
+])("describes confirming swap waiting=%s", (waiting, text) => {
+  expect(
+    itemState({
+      kind: "trade",
+      state: "confirming",
+      other: { display_name: "Misty", trader_id: null },
+      waiting,
+    })
+  ).toBe(text);
+});
+it.each([
+  [null, ""],
+  [{ payer: "you", cents: "500" }, "You pay $5.00"],
+  [{ payer: "them", cents: "1500" }, "They pay $15.00"],
+] as const)("shows only current cash terms %j", (cash, text) => {
+  expect(
+    cashText({ summary: { you_give: "0", you_get: "0", cards: [], cash } })
+  ).toBe(text);
 });
