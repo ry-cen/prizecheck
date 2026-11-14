@@ -72,7 +72,7 @@ async function askForInformation(id: string, reason: string) {
 const mainTab = (page: Page, name: string) =>
   page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name, exact: true });
+    .getByRole("link", { name, exact: true });
 const sections = (page: Page) =>
   page.getByRole("tablist", { name: "Card reports sections" });
 const sectionTab = (page: Page, name: string) =>

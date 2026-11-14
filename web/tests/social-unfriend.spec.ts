@@ -44,7 +44,7 @@ const inbox = (on: Page) => on.getByRole("dialog", { name: "Inbox" });
 const tradesTab = (on: Page) =>
   on
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: /^Trades/ });
+    .getByRole("link", { name: /^Trades/ });
 
 test("removing a Friend cancels the Loan nobody handed over and keeps the one handed over", async ({
   page,

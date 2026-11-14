@@ -397,7 +397,7 @@ test.describe("desktop", () => {
     // In Binder, Charmander has 1 copy, so it falls below Squirtle.
     await page
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name: binderName, exact: true })
+      .getByRole("link", { name: binderName, exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       binderName

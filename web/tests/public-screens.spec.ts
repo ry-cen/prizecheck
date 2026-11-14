@@ -452,7 +452,7 @@ test.describe("desktop", () => {
     await addCopies(page, leaf, await editionOf("card-1"), 2);
     await page.goto(`${ORIGIN}/published/${randomUUID()}`);
     await expect(heading(page)).toHaveText("This deck isn't published anymore");
-    await mainViews(page).getByRole("button", { name: "Collection" }).click();
+    await mainViews(page).getByRole("link", { name: "Collection" }).click();
     await expect(heading(page)).toHaveText("All owned");
     await page
       .getByRole("region", { name: "Cards" })
@@ -502,7 +502,7 @@ test.describe("desktop", () => {
       .click();
     await expect(page).toHaveURL(`${ORIGIN}/discover`);
     await expect(heading(page)).toHaveText("Discover decks");
-    await mainViews(page).getByRole("button", { name: "Collection" }).click();
+    await mainViews(page).getByRole("link", { name: "Collection" }).click();
     await expect(page).toHaveURL(`${ORIGIN}/collection`);
     await expect(heading(page)).toHaveText("All owned");
     // Signed in, the sign-in address opens Collection.
