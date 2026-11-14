@@ -389,9 +389,10 @@ for (const viewport of [DESKTOP, PHONE]) {
       await expect(page).toHaveURL(`${ORIGIN}/friends/${handle}`);
       const title = page.getByRole("heading", { level: 1, name: "Misty W" });
       await expect(title).toBeFocused();
-      // Back returns to the page the dialog was opened from.
+      // Back refocuses the persistent Friends opener.
       await page.goBack();
       await expect(page).toHaveURL(`${ORIGIN}/decks`);
+      await expect(friends).toBeFocused();
     });
   });
 }

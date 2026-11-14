@@ -306,6 +306,17 @@ export function Workspace({
     mobile,
     active,
   });
+  const previousMobile = useRef(mobile);
+  useEffect(() => {
+    const returningToDesktop = previousMobile.current && !mobile;
+    previousMobile.current = mobile;
+    if (!active || !returningToDesktop || !selection.inspected) return;
+    const card = selection.inspected;
+    const next = collectionHref(view, query, card.holding.key, card.ordinal);
+    if (next === address) return;
+    inspectedInUrl.current = card.holding.key;
+    onNavigate(next, { replace: true, preserveScroll: true });
+  }, [active, mobile, selection.inspected, view, query, address, onNavigate]);
   // Narrowing to the phone layout must not open the details sheet for a card only the desktop inspector wrote.
   useEffect(() => {
     if (!active || !mobile || inspectedInUrl.current === null) return;
