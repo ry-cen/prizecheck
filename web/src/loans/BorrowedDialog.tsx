@@ -367,7 +367,7 @@ export function BorrowedDialog({
             onRetry={() => {}}
           />
         )}
-        {blocker && !busy && (
+        {open && blocker && !busy && (
           <PendingLoanNotice view={blocker} autoFocus onOutcome={outcome} />
         )}
       </div>
