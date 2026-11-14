@@ -12,6 +12,10 @@ export type PageEntryFocus = {
   kind: "heading";
   state: "pending" | "completed" | "cancelled";
   opener: Element | null;
+  /** Focus a closing modal dialog left outside the page on the request's first attempt; it counts like the opener. */
+  inherited: Element | null;
+  /** Set once the first attempt has been made; a later attach never gets a fresh exemption. */
+  attempted: boolean;
 };
 
 const entryFocusCleanup = new WeakMap<PageEntryFocus, () => void>();
@@ -30,6 +34,8 @@ export function createPageEntryFocus(): PageEntryFocus {
       if (next !== "pending") entryFocusCleanup.get(request)?.();
     },
     opener: document.activeElement,
+    inherited: null,
+    attempted: false,
   };
   return request;
 }
@@ -113,10 +119,25 @@ function focusPageEntry(
       return;
     }
     const active = document.activeElement;
+    const first = !request.attempted;
+    request.attempted = true;
+    // A navigation started inside a modal dialog: the dialog's close returns focus to its opener (outside the
+    // page) in the same commit. That focus is the navigation's own leftover, not the collector's choice. Focus
+    // inside a dialog that is still open is never taken.
+    if (
+      first &&
+      active &&
+      active !== document.body &&
+      !container.contains(active) &&
+      !active.closest("dialog[open], [aria-modal='true']") &&
+      !(request.opener?.isConnected && active === request.opener)
+    )
+      request.inherited = active;
     if (
       active &&
       active !== document.body &&
-      !(request.opener?.isConnected && active === request.opener)
+      !(request.opener?.isConnected && active === request.opener) &&
+      active !== request.inherited
     ) {
       cancel();
       return;

@@ -280,10 +280,10 @@ test.describe("desktop", () => {
     await page.goto(`${ORIGIN}/?location=${leaf}`);
     await expect(heading(page)).toHaveText(`Linked ${s}`);
     await expect(page).toHaveURL(`${ORIGIN}/collection?location=${leaf}`);
-    // An address that is no page lands on Collection.
+    // An address that is no page shows This page doesn't exist and keeps the address.
     await page.goto(`${ORIGIN}/nowhere`);
-    await expect(page).toHaveURL(/\/collection$/);
-    await expect(heading(page)).toHaveText("All owned");
+    await expect(page).toHaveURL(`${ORIGIN}/nowhere`);
+    await expect(heading(page)).toHaveText("This page doesn't exist");
   });
 
   test("the tabs mark the current page and switching swaps only the page area", async ({
