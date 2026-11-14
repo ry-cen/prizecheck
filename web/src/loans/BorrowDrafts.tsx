@@ -1,3 +1,4 @@
+import { variantLabel } from "../ui/variantLabel";
 import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
 import { PendingLoanNotice } from "./PendingLoanNotice";
 import { refusalError, type FlowOutcome } from "./loanIntents";
@@ -1123,6 +1124,26 @@ function useDraftCap(
   }, [drafts, friend, card, cap, limit, lendable, deckId, current]);
 }
 
+function cardRef(card: DraftCard): string {
+  const finish = variantLabel(card.descriptor);
+  return `${card.set_code} ${card.collector_number}${finish === "Normal" ? "" : `, ${finish}`}`;
+}
+
+export function askControlLabel(
+  text: "Ask" | "Ask to borrow",
+  friend: DraftFriend,
+  card: DraftCard
+): { button: string; stepper: string } {
+  const reference = cardRef(card);
+  return {
+    button:
+      text === "Ask"
+        ? `Ask ${friend.display_name} for ${card.name} (${reference})`
+        : `Ask to borrow ${card.name} from ${friend.display_name} (${reference})`,
+    stepper: `Copies of ${card.name} to ask ${friend.display_name} for (${reference})`,
+  };
+}
+
 /**
  * **Ask** (Get from Friends) or **Ask to borrow** (the card popup, a Friend's Collection): adds one copy to the
  * Friend's draft, then turns into a stepper up to what the Friend could lend; stepping to 0 takes the line out.
@@ -1173,15 +1194,12 @@ export function AskControl({
     previous.current = quantity;
   }, [quantity]);
   if (!drafts || (cap < 1 && quantity === 0)) return null;
-  const name =
-    text === "Ask"
-      ? `Ask ${friend.display_name} for ${card.name}`
-      : `Ask to borrow ${card.name} from ${friend.display_name}`;
+  const label = askControlLabel(text, friend, card);
   if (quantity === 0)
     return (
       <Button
         ref={ask}
-        aria-label={name}
+        aria-label={label.button}
         aria-disabled={!current}
         className="aria-disabled:opacity-45"
         onClick={() => {
@@ -1203,7 +1221,7 @@ export function AskControl({
   return (
     <span ref={group} className="inline-flex">
       <Stepper
-        label={`Copies of ${card.name} to ask ${friend.display_name} for`}
+        label={label.stepper}
         value={quantity}
         min={0}
         max={current ? cap : quantity}

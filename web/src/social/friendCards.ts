@@ -52,7 +52,10 @@ export function otherEditionText(
   copy: FriendCopy,
   wanted: string | null
 ): string | null {
-  if (copy.other_printing) return `${copy.set_code} ${copy.collector_number}`;
+  if (copy.other_printing) {
+    const finish = variantLabel(copy.descriptor);
+    return `${copy.set_code} ${copy.collector_number}${finish === "Normal" ? "" : `, ${finish}`}`;
+  }
   if (wanted !== null && copy.edition_id !== wanted)
     return variantLabel(copy.descriptor);
   return null;

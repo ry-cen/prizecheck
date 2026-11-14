@@ -657,7 +657,7 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
     for (const name of ["Boss's Orders", "Iono"])
       await page
         .getByRole("button", {
-          name: `Ask to borrow ${name} from Misty W`,
+          name: `Ask to borrow ${name} from Misty W (PAL ${name === "Iono" ? "185" : "172"})`,
           exact: true,
         })
         .click();

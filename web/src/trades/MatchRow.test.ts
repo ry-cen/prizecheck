@@ -63,6 +63,19 @@ it.each([false, true])(
           })
         )
       );
+      const header = host.querySelector("h3 button")!;
+      expect(
+        document
+          .getElementById(header.getAttribute("aria-labelledby")!)
+          ?.textContent?.trim()
+      ).toBe(row.display_name);
+      const description = header
+        .getAttribute("aria-describedby")!
+        .split(" ")
+        .map((id) => document.getElementById(id)?.textContent)
+        .join(" ");
+      expect(description).toContain("@misty");
+      expect(description).toContain("Misty has 1 card you want");
       const proposals = [...host.querySelectorAll("button")].filter(
         (node) => node.textContent === "Propose trade"
       );

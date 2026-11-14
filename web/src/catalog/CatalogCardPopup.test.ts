@@ -11,36 +11,44 @@ import { useToast, ToastProvider } from "../ui/Toast";
 
 vi.mock("../ui/CardPopup", () => ({
   CardPopup: ({ children, open }: { children: ReactNode; open: boolean }) =>
-    open ? h("div", { role: "dialog" }, children) : null,
+    h("div", { role: "dialog", hidden: !open }, children),
   CardArt: () => null,
 }));
 vi.mock("./cardActions", () => ({ addToCollection: vi.fn() }));
 vi.mock("../inventoryUndo", () => ({ applyUndo: vi.fn(), listUndo: vi.fn() }));
 vi.mock("../EditionPrice", () => ({ EditionPrice: () => null }));
 vi.mock("./useCardDetails", () => ({
-  useCardDetails: () => ({
+  useCardDetails: (printing: string | null) => ({
     reload,
-    details: {
-      state: "ready",
-      browse: "ok",
-      rows: [],
-      printing: {
-        id: "p",
-        name: "Switch",
-        identity_name: "Switch",
-        source: "tcgdex",
-        editions: [],
-      },
-      editions: [
-        { id: "e", active: true, descriptor: { finish: "normal" }, owned: 0 },
-        {
-          id: "f",
-          active: true,
-          descriptor: { finish: "reverse_holo" },
-          owned: 0,
-        },
-      ],
-    },
+    details:
+      !printing || printing === "loading"
+        ? { state: "loading" }
+        : {
+            state: "ready",
+            browse: "ok",
+            rows: [],
+            printing: {
+              id: "p",
+              name: "Switch",
+              identity_name: "Switch",
+              source: "tcgdex",
+              editions: [],
+            },
+            editions: [
+              {
+                id: "e",
+                active: true,
+                descriptor: { finish: "normal" },
+                owned: 0,
+              },
+              {
+                id: "f",
+                active: true,
+                descriptor: { finish: "reverse_holo" },
+                owned: 0,
+              },
+            ],
+          },
   }),
   useCopiesWhere: () => ({ state: "ready", holdings: [] }),
 }));
@@ -724,3 +732,23 @@ test.each([
     }
   }
 );
+
+test("a closed popup renders no loading status while an open loading popup does", async () => {
+  await journey(async ({ host, render }) => {
+    await render("loading");
+    expect(host.querySelector('[role="dialog"]')?.hasAttribute("hidden")).toBe(
+      false
+    );
+    expect(
+      [...host.querySelectorAll('[role="status"]')].map(
+        (node) => node.textContent
+      )
+    ).toContain("Loading card details…");
+    await render(null);
+    expect(
+      [...host.querySelectorAll('[role="status"]')].map(
+        (node) => node.textContent
+      )
+    ).not.toContain("Loading card details…");
+  });
+});

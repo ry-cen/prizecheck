@@ -71,6 +71,9 @@ export function MatchRow({
 }) {
   const buttonId = useId();
   const panelId = useId();
+  const nameId = useId();
+  const metaId = useId();
+  const headlineId = useId();
   const [full, setFull] = useState<Full>({ kind: "idle" });
   const reading = useRef<AbortController | null>(null);
   useEffect(() => () => reading.current?.abort(), []);
@@ -115,6 +118,8 @@ export function MatchRow({
         <button
           id={buttonId}
           type="button"
+          aria-labelledby={nameId}
+          aria-describedby={`${metaId} ${headlineId}`}
           aria-expanded={open}
           aria-controls={open ? panelId : undefined}
           onClick={onToggle}
@@ -123,23 +128,28 @@ export function MatchRow({
           <Avatar name={name} size="md" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-body font-semibold wrap-anywhere">
+              <span
+                id={nameId}
+                className="text-body font-semibold wrap-anywhere"
+              >
                 {name}
               </span>
-              {handle !== null && (
-                <span className="text-meta text-text-subtle wrap-anywhere">
-                  @{handle}
-                </span>
-              )}
-              {tag && <Pill tone="ok">{tag}</Pill>}
-              {shown.open_to_cash_offers && <Pill>Open to cash offers</Pill>}
-              {traderMeta(band, shown.completed_trades) !== null && (
-                <span className="text-meta text-text-muted">
-                  {traderMeta(band, shown.completed_trades)}
-                </span>
-              )}
+              <span id={metaId} className="contents">
+                {handle !== null && (
+                  <span className="text-meta text-text-subtle wrap-anywhere">
+                    @{handle}
+                  </span>
+                )}
+                {tag && <Pill tone="ok">{tag}</Pill>}
+                {shown.open_to_cash_offers && <Pill>Open to cash offers</Pill>}
+                {traderMeta(band, shown.completed_trades) !== null && (
+                  <span className="text-meta text-text-muted">
+                    {traderMeta(band, shown.completed_trades)}
+                  </span>
+                )}
+              </span>
             </span>
-            <span className="text-meta text-text-muted">
+            <span id={headlineId} className="text-meta text-text-muted">
               {matchHeadline(shown)}
             </span>
           </span>
