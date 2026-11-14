@@ -98,7 +98,40 @@ test("Ask, Review and Send from a Deck's Want List shows the request under that 
   await expect(needs(page, deckName)).toContainText("2 of 2");
 });
 
-test("a draft already For another Deck keeps it, so its request shows there and not under the page that added a card", async ({
+test("a draft built on two Decks' pages has no one Deck until the collector chooses", async ({
+  page,
+  collectors,
+}) => {
+  test.slow();
+  const { ids, s } = await setUp(page, () =>
+    collectors.signIn({ next: "/decks" })
+  );
+  const lugiaName = `Lugia ${s}`;
+  const lugia = await createDeck(page, lugiaName);
+  await setLine(page, lugia, ids["PAL 185"], 1);
+  const charizardName = `Charizard ex ${s}`;
+  const charizard = await createDeck(page, charizardName);
+  await setLine(page, charizard, ids["PAL 185"], 1);
+  await setLine(page, charizard, ids["PAL 172"], 1);
+
+  // Owner decision (2026-11-13): For Deck follows every card, so Lugia's card plus Charizard's card is No Deck.
+  await openScoped(page, lugia);
+  await chip(page, lugiaName, "Iono").click();
+  let draft = await review(page);
+  await expect(draft.getByLabel("For Deck")).toHaveValue(lugia);
+  await draft.getByRole("button", { name: "Keep draft" }).click();
+  await openScoped(page, charizard);
+  await chip(page, charizardName, "Boss's Orders").click();
+  draft = await review(page);
+  await expect(draft.getByLabel("For Deck")).toHaveValue("");
+  await send(page);
+  // The request is For no Deck, so neither Deck page shows it.
+  await expect(needs(page, charizardName)).not.toContainText("Asked Misty W");
+  await openScoped(page, lugia);
+  await expect(needs(page, lugiaName)).not.toContainText("Asked Misty W");
+});
+
+test("a draft whose Deck the collector chose keeps it, so its request shows there and not under the page that added a card", async ({
   page,
   collectors,
 }) => {
@@ -119,6 +152,8 @@ test("a draft already For another Deck keeps it, so its request shows there and 
   await chip(page, lugiaName, "Iono").click();
   let draft = await review(page);
   await expect(draft.getByLabel("For Deck")).toHaveValue(lugia);
+  // Owner decision (2026-11-13): the collector confirms Lugia, and that pick is kept as cards join.
+  await draft.getByLabel("For Deck").selectOption(lugia);
   await draft.getByRole("button", { name: "Keep draft" }).click();
   await expect(composer(page)).toBeHidden();
 

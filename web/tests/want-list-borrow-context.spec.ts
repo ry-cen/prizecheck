@@ -66,22 +66,24 @@ async function setup(
   collectors: {
     signIn: (options?: OtherCollectorOptions) => Promise<OtherCollector>;
   },
-  held: { iono: number; boss?: number }
+  held: { iono: number; boss?: number; arven?: number }
 ) {
   const iono = catalog["PAL 185"];
   const boss = catalog["PAL 172"];
+  const arven = catalog["SVI 166"];
   const misty = await collectors.signIn({ next: "/decks" });
   await nameCollector(misty.page, "Misty W");
   const place = await unsorted(misty.page);
   await hold(misty.page, place, iono, held.iono);
   if (held.boss) await hold(misty.page, place, boss, held.boss);
+  if (held.arven) await hold(misty.page, place, arven, held.arven);
   await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
     route.abort()
   );
   await signInAsOwner(page, "/decks");
   await nameCollector(page, "Ash K");
   await befriend(page, misty.page);
-  return { iono, boss, misty: misty.page };
+  return { iono, boss, arven, misty: misty.page };
 }
 
 async function deckWith(
@@ -123,6 +125,13 @@ async function friendsView(page: Page) {
     .getByRole("radio", { name: "Get from Friends" })
     .click();
 }
+
+/** Get from Friends on All Decks: Ask to borrow one card from Misty W. */
+const askCard = (page: Page, card: string) =>
+  page
+    .getByRole("region", { name: card })
+    .getByRole("button", { name: `Ask to borrow ${card} from Misty W` })
+    .click();
 
 async function waitingLines(page: Page) {
   return (await api(page, "GET", "/api/loans/waiting")).lines as {
@@ -277,30 +286,99 @@ test.describe("desktop", () => {
     await draft.getByRole("button", { name: "Discard" }).click();
   });
 
-  test("a later card joins the draft without changing its For Deck", async ({
+  // Owner correction (Revision 4): For Deck follows every card in the draft. It used to keep the first card's guess.
+  test("a card several Decks need joins a draft and leaves it with No Deck until the collector chooses", async ({
     page,
     collectors,
   }) => {
     const { iono, boss } = await setup(page, collectors, { iono: 3, boss: 1 });
-    const a = await deckWith(page, "Charizard ex", [
+    await deckWith(page, "Charizard ex", [
       [iono, 2],
       [boss, 1],
     ]);
     await deckWith(page, "Gardevoir ex", [[iono, 1]]);
     await openAllDecks(page);
     await friendsView(page);
-    await page
-      .getByRole("region", { name: "Boss's Orders" })
-      .getByRole("button", { name: "Ask to borrow Boss's Orders from Misty W" })
-      .click();
-    await page
-      .getByRole("region", { name: "Iono" })
-      .getByRole("button", { name: "Ask to borrow Iono from Misty W" })
-      .click();
+    await askCard(page, "Boss's Orders");
+    await askCard(page, "Iono");
     const draft = await review(page);
     await expect(
       draft.getByRole("list", { name: "Cards to borrow" }).getByRole("listitem")
     ).toHaveCount(2);
+    await expect(draft.getByLabel("For Deck")).toHaveValue("");
+  });
+
+  test("two cards with the same one Deck go For that Deck, and different one Decks go For none", async ({
+    page,
+    collectors,
+  }) => {
+    const { boss, arven } = await setup(page, collectors, {
+      iono: 1,
+      boss: 1,
+      arven: 1,
+    });
+    const a = await deckWith(page, "Charizard ex", [
+      [boss, 1],
+      [arven, 1],
+    ]);
+    await deckWith(page, "Gardevoir ex", [[catalog["PAL 185"], 1]]);
+    await openAllDecks(page);
+    await friendsView(page);
+    await askCard(page, "Boss's Orders");
+    await askCard(page, "Arven");
+    let draft = await review(page);
+    await expect(draft.getByLabel("For Deck")).toHaveValue(a.id);
+    await draft.getByRole("button", { name: "Discard" }).click();
+    await page.reload();
+    await friendsView(page);
+    await askCard(page, "Iono");
+    await askCard(page, "Boss's Orders");
+    draft = await review(page);
+    await expect(draft.getByLabel("For Deck")).toHaveValue("");
+  });
+
+  test("a chosen Deck or No Deck is kept as cards change, and the default returns when the odd card goes", async ({
+    page,
+    collectors,
+  }) => {
+    const { iono, boss, arven } = await setup(page, collectors, {
+      iono: 3,
+      boss: 1,
+      arven: 1,
+    });
+    const a = await deckWith(page, "Charizard ex", [
+      [iono, 2],
+      [boss, 1],
+      [arven, 1],
+    ]);
+    const b = await deckWith(page, "Gardevoir ex", [[iono, 1]]);
+    await openAllDecks(page);
+    await friendsView(page);
+    await askCard(page, "Boss's Orders");
+    let draft = await review(page);
+    await expect(draft.getByLabel("For Deck")).toHaveValue(a.id);
+    // A manual choice of a Deck stays when a card that would otherwise make it No Deck joins, and after a reload.
+    await draft.getByLabel("For Deck").selectOption(b.id);
+    await draft.getByRole("button", { name: "Keep draft" }).click();
+    await askCard(page, "Iono");
+    await page.reload();
+    draft = await review(page);
+    await expect(draft.getByLabel("For Deck")).toHaveValue(b.id);
+    // A manual No Deck stays when another card with the same one Deck joins.
+    await draft.getByLabel("For Deck").selectOption("");
+    await draft.getByRole("button", { name: "Keep draft" }).click();
+    await friendsView(page);
+    await askCard(page, "Arven");
+    draft = await review(page);
+    await expect(draft.getByLabel("For Deck")).toHaveValue("");
+    await draft.getByRole("button", { name: "Discard" }).click();
+
+    // With no choice, taking the card several Decks need out of the draft brings the Deck back.
+    await askCard(page, "Boss's Orders");
+    await askCard(page, "Iono");
+    draft = await review(page);
+    await expect(draft.getByLabel("For Deck")).toHaveValue("");
+    await draft.getByRole("button", { name: /^Remove Iono/ }).click();
     await expect(draft.getByLabel("For Deck")).toHaveValue(a.id);
   });
 
@@ -353,7 +431,9 @@ test.describe("desktop", () => {
       .click();
     await needs(page, b.name).getByRole("button", { name: borrowFrom }).click();
     const draft = await review(page);
-    await expect(draft.getByLabel("For Deck")).toHaveValue(a.id);
+    // Boss's Orders names Charizard and Iono's chip names Gardevoir, so no one Deck: the collector chooses Charizard.
+    await expect(draft.getByLabel("For Deck")).toHaveValue("");
+    await draft.getByLabel("For Deck").selectOption(a.id);
     await expect(draft).toContainText(`Asked Misty W for 3 · ${a.name}`);
     const send = draft.getByRole("button", { name: "Send Borrow Request" });
     await expect(send).toBeEnabled();
@@ -366,6 +446,24 @@ test.describe("desktop", () => {
 
 test.describe("phone", () => {
   test.use({ viewport: { width: 375, height: 812 } });
+
+  test("a card several Decks need leaves the draft with No Deck", async ({
+    page,
+    collectors,
+  }) => {
+    const { iono, boss } = await setup(page, collectors, { iono: 3, boss: 1 });
+    await deckWith(page, "Charizard ex", [
+      [iono, 2],
+      [boss, 1],
+    ]);
+    await deckWith(page, "Gardevoir ex", [[iono, 1]]);
+    await openAllDecks(page);
+    await friendsView(page);
+    await askCard(page, "Boss's Orders");
+    await askCard(page, "Iono");
+    const draft = await review(page);
+    await expect(draft.getByLabel("For Deck")).toHaveValue("");
+  });
 
   test("the warning and Send fit the screen and the page does not scroll sideways", async ({
     page,

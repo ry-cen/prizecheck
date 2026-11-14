@@ -118,7 +118,8 @@ test("Ask on a Deck's Want List starts the draft For that Deck and never changes
   await expect(mistyDraft.getByLabel("For Deck")).toHaveValue(lugia);
   await keep(page, "Misty W");
 
-  // Asking Misty from Charizard's Want List adds the card but leaves her draft For Lugia.
+  // Owner decision (2026-11-13): For Deck follows every card until the collector chooses. A card from Charizard's
+  // Want List joins the Lugia draft, so the draft has no one Deck. Choosing Lugia on purpose is then kept.
   await page.goto(`${ORIGIN}/decks/want-list?deck=${charizard}`);
   await chip(page, charizardName, "Boss's Orders", "Misty W").click();
   mistyDraft = await review(page, "Misty W");
@@ -127,9 +128,11 @@ test("Ask on a Deck's Want List starts the draft For that Deck and never changes
       .getByRole("list", { name: "Cards to borrow" })
       .getByRole("listitem")
   ).toHaveCount(2);
+  await expect(mistyDraft.getByLabel("For Deck")).toHaveValue("");
+  await mistyDraft.getByLabel("For Deck").selectOption(lugia);
   await expect(mistyDraft.getByLabel("For Deck")).toHaveValue(lugia);
 
-  // Sending it is unchanged: the toast confirms, and the Loan is For Lugia.
+  // Sending it is unchanged: the toast confirms, and the Loan is For the Deck the collector chose.
   await mistyDraft.getByRole("button", { name: "Send Borrow Request" }).click();
   await expect(mistyDraft).toBeHidden();
   const notifications = page.getByRole("region", { name: "Notifications" });

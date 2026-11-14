@@ -63,6 +63,9 @@ export type DraftLine = DraftCard & {
   cap: number | null;
   /** "2 spare · 1 in a Deck", or "" when not known. */
   lendable: string;
+  /** The one Deck that needs this card where it was asked for (a Deck's page or section, a card only one Deck needs),
+   * or null when no one Deck does (several Decks, or a page that is about none). */
+  deck: string | null;
 };
 
 export type Draft = {
@@ -70,11 +73,29 @@ export type Draft = {
   lines: DraftLine[];
   /** The borrower's Deck the cards go to; null is Unsorted. */
   deckId: string | null;
+  /** True once the collector picked For Deck (a Deck, or No Deck): never changed automatically after that. While false,
+   * `deckId` follows the cards (`automaticDeck`). */
+  deckChosen: boolean;
   /** "YYYY-MM-DD", or "" for none. */
   returnBy: string;
   /** The unanswered request this one replaces (Edit and resend), or null. */
   replaces: string | null;
 };
+
+/** The Deck a draft with no manual choice goes For: the one Deck every card independently names, else none. */
+export function automaticDeck(lines: Pick<DraftLine, "deck">[]): string | null {
+  const first = lines[0]?.deck ?? null;
+  return first !== null && lines.every((line) => line.deck === first)
+    ? first
+    : null;
+}
+
+/** The draft with For Deck following its cards, unless the collector chose it. */
+export function withAutomaticDeck(draft: Draft): Draft {
+  if (draft.deckChosen) return draft;
+  const deckId = automaticDeck(draft.lines);
+  return deckId === draft.deckId ? draft : { ...draft, deckId };
+}
 
 type BorrowReadiness = boolean | "failed";
 
@@ -88,8 +109,9 @@ type DraftsApi = {
   ) => void;
   /** Copies of one Edition in the draft to one Friend. */
   quantity: (friendId: string, editionId: string) => number;
-  /** Sets a line: 0 takes it out, and a draft with no lines goes. `deckId` is the Deck the asking page is about: it
-   * becomes For Deck only when this starts the Friend's draft, so a draft already started keeps its own choice. */
+  /** Sets a line: 0 takes it out, and a draft with no lines goes. `deckId` is the card's one Deck where it was asked
+   * for (a Deck's page or section, a card only one Deck needs), or null. Until the collector picks For Deck, the draft
+   * is For the Deck every card names, else none, recomputed whenever its cards change; a pick is never overwritten. */
   set: (
     friend: DraftFriend,
     card: DraftCard,
@@ -136,7 +158,7 @@ function readDrafts(userId: string): Draft[] {
       window.sessionStorage.getItem(STORAGE_PREFIX + userId) ?? "[]"
     ) as unknown;
     if (!Array.isArray(value)) return [];
-    return value.filter(
+    const found = value.filter(
       (draft): draft is Draft =>
         typeof draft?.friend?.collector_id === "string" &&
         typeof draft?.friend?.display_name === "string" &&
@@ -150,6 +172,24 @@ function readDrafts(userId: string): Draft[] {
             line.quantity > 0
         )
     );
+    // A Deck is a string or none. A draft kept without the flag, or one that edits a sent request (`replaces`), keeps the
+    // Deck it has as the collector's choice; its lines' own Decks, if missing, are that Deck.
+    const text = (value: unknown) => (typeof value === "string" ? value : null);
+    return found.map((draft) => {
+      const deckId = text(draft.deckId);
+      return {
+        ...draft,
+        deckId,
+        deckChosen:
+          draft.deckChosen === true ||
+          !!draft.replaces ||
+          typeof draft.deckChosen !== "boolean",
+        lines: draft.lines.map((line) => ({
+          ...line,
+          deck: line.deck === undefined ? deckId : text(line.deck),
+        })),
+      };
+    });
   } catch {
     return [];
   }
@@ -224,9 +264,10 @@ export function copyCap(copy: { spare: string; in_deck: string }): number {
 /**
  * Draft Borrow Requests (social network #252, the Friends' cards verdict): client-only, one per Friend, kept in this
  * tab's sessionStorage under the account id. **Ask** anywhere (a Want List chip or panel, the card popup, a Friend's
- * Collection) adds to that Friend's draft; Ask on a page about one Deck (the Want List scoped to it, a Deck's section on
- * All Decks, the deck builder's Ways to get missing cards) starts a new draft For that Deck, and a Get from Friends Ask
- * on All Decks starts it For the card's one Deck, otherwise No Deck. Neither changes a draft already started. The tray lists
+ * Collection) adds to that Friend's draft; Each card carries the one Deck it was asked for (a page about one Deck, a
+ * Deck's section on All Decks, a Get from Friends card only one Deck needs), or none. Until the collector picks For
+ * Deck in the composer, the draft is For the Deck every card names, else No Deck, recomputed as cards come and go; a
+ * pick, even No Deck, is kept. The tray lists
  * the drafts with **Review**, which opens the composer: a stepper per line capped at what the Friend could lend, **For
  * Deck** (or none: Unsorted), an optional **Return by** and **Send Borrow Request**. On a phone the tray is one bar
  * above the tab bar; with several drafts its **Review** lists them first. When the composer closes and the control that
@@ -323,7 +364,8 @@ export function BorrowDraftsProvider({
             const base: Draft = draft ?? {
               friend,
               lines: [],
-              deckId: deckId ?? null,
+              deckId: null,
+              deckChosen: false,
               returnBy: "",
               replaces: null,
             };
@@ -354,6 +396,7 @@ export function BorrowDraftsProvider({
                         quantity,
                         cap,
                         lendable,
+                        deck: deckId ?? null,
                       },
                     ];
             // Only the Friend's id and names are kept, whatever object named them (a Friend copy, a Friend's page).
@@ -362,7 +405,9 @@ export function BorrowDraftsProvider({
               display_name: friend.display_name,
               handle: friend.handle,
             };
-            return lines.length ? { ...base, friend: named, lines } : null;
+            return lines.length
+              ? withAutomaticDeck({ ...base, friend: named, lines })
+              : null;
           },
           friend.display_name
         ),
@@ -727,10 +772,22 @@ function BorrowComposer({
                 ]
               : []
         );
-        return lines.length ? { ...current, lines } : null;
+        return lines.length ? withAutomaticDeck({ ...current, lines }) : null;
       });
     } else if (error?.code === "DECK_NOT_FOUND") {
-      onChange((current) => (current ? { ...current, deckId: null } : null));
+      onChange((current) =>
+        current
+          ? {
+              ...current,
+              deckId: null,
+              deckChosen: true,
+              // The Deck is gone: its lines no longer name it.
+              lines: current.lines.map((line) =>
+                line.deck === current.deckId ? { ...line, deck: null } : line
+              ),
+            }
+          : null
+      );
       setAttempt((n) => n + 1);
     }
     setMessage(sendMessage(cause, name, cardName));
@@ -865,7 +922,9 @@ function BorrowComposer({
                           const lines = current.lines.filter(
                             (item) => item.edition_id !== line.edition_id
                           );
-                          return lines.length ? { ...current, lines } : null;
+                          return lines.length
+                            ? withAutomaticDeck({ ...current, lines })
+                            : null;
                         })
                       }
                     />
@@ -881,6 +940,7 @@ function BorrowComposer({
               edit((current) => ({
                 ...current,
                 deckId: event.target.value || null,
+                deckChosen: true,
               }))
             }
           >

@@ -534,7 +534,7 @@ function DeckSection({
 /**
  * A section's lines that still need copies (#209), each with its Will accept select (#275), Swap hint (#211) and Friend
  * chips with Ask (#251). The Want List's Deck sections and the deck builder's Ways to get missing cards panel draw them.
- * A chip that starts a Friend's Borrow Request draft makes it For `borrowFor`, the section's Deck, on All Decks too.
+ * A chip counts `borrowFor`, the section's Deck, as its card's one Deck toward the draft's For Deck, on All Decks too.
  */
 export function NeededLines({
   layout = "rows",

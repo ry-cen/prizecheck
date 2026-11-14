@@ -72,7 +72,7 @@ export function FriendChips({
  * Borrow Requests (#252) pass `action` for each Friend's row (Ask to borrow, then a stepper) and `asked`, the copies of a card
  * the drafts ask for, which the panel's heading shows as "3 of 4 asked". An offered Edition also has Trade for it,
  * using the existing Friend matches and Ask to trade handoff. On All Decks, `note` names what is already asked for and
- * a card's Ask starts its draft For the card's one Deck, otherwise No Deck; a draft already started keeps its For Deck.
+ * a card's Ask counts the card's one Deck (none when several need it) toward the draft's For Deck, which a collector's own pick overrides.
  */
 export function GetFromFriends({
   rows,

@@ -26,8 +26,10 @@ import {
 import {
   AskChip,
   AskControl,
+  automaticDeck,
   BorrowDraftsProvider,
   useBorrowDrafts,
+  useBorrowReadiness,
 } from "../loans/BorrowDrafts";
 import { getDecks } from "../decks_generated";
 import { GetFromFriends } from "../social/WantListFriends";
@@ -837,7 +839,7 @@ function composerHarness() {
   );
   const host = document.createElement("div");
   document.body.append(host);
-  const root = createRoot(host);
+  let root = createRoot(host);
   const dialog = HTMLDialogElement.prototype;
   const originalShow = Object.getOwnPropertyDescriptor(dialog, "showModal");
   const originalClose = Object.getOwnPropertyDescriptor(dialog, "close");
@@ -865,7 +867,13 @@ function composerHarness() {
   });
   return {
     host,
-    root,
+    get root() {
+      return root;
+    },
+    async reload() {
+      await act(async () => root.unmount());
+      root = createRoot(host);
+    },
     button: (name: string) =>
       Array.from(host.querySelectorAll("button")).find(
         (node) => node.textContent === name
@@ -942,7 +950,18 @@ it("a card needed by two Decks never leaves Send disabled by coverage alone", as
     await act(async () => press("Y under B").click());
     await act(async () => render());
     await act(async () => view.button("Review").click());
-    expect(view.host.querySelector("select")!.value).toBe("A");
+    // X names Deck A and Y names Deck B, so no one Deck: the collector chooses A, and A's chips then reconcile.
+    const select = view.host.querySelector("select")!;
+    expect(select.value).toBe("");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLSelectElement.prototype,
+        "value"
+      )!.set!.call(select, "A");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => render());
+    expect(select.value).toBe("A");
     expect(
       view.host.querySelector(
         '[role="group"][aria-label^="Copies of Iono,"] output'
@@ -1067,6 +1086,258 @@ it("a failed All Decks waiting read blocks sends until a read succeeds", async (
     );
     expect(view.host.querySelector('dialog [role="status"]')).toBeNull();
     expect(view.button("Send Borrow Request").disabled).toBe(false);
+  } finally {
+    await view.finish();
+  }
+});
+
+it("the automatic For Deck is the one Deck every card names, else none", () => {
+  const lines = (...decks: (string | null)[]) =>
+    decks.map((deck) => ({ deck }));
+  expect(automaticDeck(lines("A"))).toBe("A");
+  expect(automaticDeck(lines("A", "A"))).toBe("A");
+  expect(automaticDeck(lines("A", "B"))).toBeNull();
+  expect(automaticDeck(lines("A", null))).toBeNull();
+  expect(automaticDeck(lines(null))).toBeNull();
+  expect(automaticDeck([])).toBeNull();
+});
+
+/** A draft to Misty driven through `set`, with the composer's For Deck select. */
+function forDeckHarness(userId = "for-deck") {
+  const view = composerHarness();
+  let drafts!: NonNullable<ReturnType<typeof useBorrowDrafts>>;
+  function Grab() {
+    drafts = useBorrowDrafts()!;
+    return null;
+  }
+  const mount = () =>
+    act(async () =>
+      view.root.render(
+        h(BorrowDraftsProvider, {
+          userId,
+          onOpenLoan: vi.fn(),
+          children: h(Grab),
+        })
+      )
+    );
+  return {
+    ...view,
+    mount,
+    ask: (id: string, deck: string | null, quantity = 1) =>
+      act(async () => drafts.set(friend, cardOf(id), quantity, 3, "", deck)),
+    draft: () => drafts.drafts[0],
+    async pick(value: string) {
+      await act(async () => view.button("Review").click());
+      const select = view.host.querySelector("select")!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          "value"
+        )!.set!.call(select, value);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    },
+  };
+}
+
+it("For Deck follows the cards until the collector chooses", async () => {
+  const view = forDeckHarness();
+  try {
+    await view.mount();
+    // Two cards with the same sole Deck; a section chip's Deck counts as the card's sole Deck.
+    await view.ask("X", "A");
+    expect([view.draft().deckId, view.draft().deckChosen]).toEqual([
+      "A",
+      false,
+    ]);
+    await view.ask("Y", "A");
+    expect(view.draft().deckId).toBe("A");
+    // A card with another sole Deck, or none, leaves no one Deck; taking it out brings the Deck back.
+    await view.ask("Z", "B");
+    expect(view.draft().deckId).toBeNull();
+    await view.ask("Z", "B", 0);
+    expect(view.draft().deckId).toBe("A");
+    await view.ask("W", null);
+    expect(view.draft().deckId).toBeNull();
+    await view.ask("W", null, 0);
+    expect(view.draft().deckId).toBe("A");
+  } finally {
+    await view.finish();
+  }
+});
+
+it("a chosen Deck, or an explicit No Deck, is kept as cards change and survives a reload", async () => {
+  const view = forDeckHarness();
+  try {
+    await view.mount();
+    await view.ask("X", "A");
+    await view.pick("B");
+    expect([view.draft().deckId, view.draft().deckChosen]).toEqual(["B", true]);
+    await view.ask("Y", "A");
+    await view.ask("Z", null);
+    expect(view.draft().deckId).toBe("B");
+    // A reload reads the draft back from the tab's storage with its choice.
+    await view.reload();
+    await view.mount();
+    expect([view.draft().deckId, view.draft().deckChosen]).toEqual(["B", true]);
+    await view.pick("");
+    expect([view.draft().deckId, view.draft().deckChosen]).toEqual([
+      null,
+      true,
+    ]);
+    // Every card now names Deck A, but No Deck was chosen on purpose.
+    await view.ask("Z", null, 0);
+    await view.ask("W", "A");
+    expect(view.draft().deckId).toBeNull();
+  } finally {
+    await view.finish();
+  }
+});
+
+const line = (id: string, deck?: string | null) => ({
+  ...cardOf(id),
+  quantity: 1,
+  cap: 3,
+  lendable: "",
+  ...(deck === undefined ? {} : { deck }),
+});
+const stored = (draft: object) =>
+  window.sessionStorage.setItem(
+    "prizecheck.borrowDrafts.for-deck",
+    JSON.stringify([
+      { friend, returnBy: "", replaces: null, deckChosen: false, ...draft },
+    ])
+  );
+
+it("a card's own Deck is fixed when its line is added, and a card with no Deck makes the draft No Deck", async () => {
+  const view = forDeckHarness();
+  try {
+    await view.mount();
+    await view.ask("X", "A");
+    await view.ask("X", "B", 2);
+    expect(view.draft().lines[0].deck).toBe("A");
+    expect(view.draft().deckId).toBe("A");
+    // The card popup and a Friend's page name no Deck.
+    await view.ask("Y", null);
+    expect(view.draft().deckId).toBeNull();
+  } finally {
+    await view.finish();
+  }
+});
+
+it("a flip between a Deck and No Deck leaves every line's quantity and cap alone", async () => {
+  const view = forDeckHarness();
+  try {
+    await view.mount();
+    await view.ask("X", "A", 2);
+    const before = view.draft().lines[0];
+    await view.ask("Y", null);
+    expect(view.draft().deckId).toBeNull();
+    expect(view.draft().lines[0]).toEqual(before);
+    await view.ask("Y", null, 0);
+    expect(view.draft().deckId).toBe("A");
+    expect(view.draft().lines).toEqual([before]);
+  } finally {
+    await view.finish();
+  }
+});
+
+it("a draft kept before the flag, or one that edits a request, keeps its Deck as the collector's choice", async () => {
+  const view = forDeckHarness();
+  try {
+    stored({ deckId: "A", deckChosen: undefined, lines: [line("X")] });
+    await view.mount();
+    expect([view.draft().deckId, view.draft().deckChosen]).toEqual(["A", true]);
+    await view.ask("Y", null);
+    expect(view.draft().deckId).toBe("A");
+    await view.reload();
+    stored({
+      deckId: "B",
+      deckChosen: false,
+      replaces: "loan",
+      lines: [line("X", "B")],
+    });
+    await view.mount();
+    expect([view.draft().deckId, view.draft().deckChosen]).toEqual(["B", true]);
+  } finally {
+    await view.finish();
+  }
+});
+
+it("discarding or stepping the last line to 0 starts the next draft with its own automatic Deck", async () => {
+  const view = forDeckHarness();
+  try {
+    await view.mount();
+    await view.ask("X", "A");
+    await view.pick("B");
+    expect(view.draft().deckChosen).toBe(true);
+    await act(async () => view.button("Discard").click());
+    expect(view.draft()).toBeUndefined();
+    await view.ask("Y", "A");
+    expect([view.draft().deckId, view.draft().deckChosen]).toEqual([
+      "A",
+      false,
+    ]);
+    await view.ask("Y", "A", 0);
+    await view.ask("Z", null);
+    expect([view.draft().deckId, view.draft().deckChosen]).toEqual([
+      null,
+      false,
+    ]);
+  } finally {
+    await view.finish();
+  }
+});
+
+it("after the Deck is gone the draft stays No Deck as cards join", async () => {
+  const view = forDeckHarness();
+  try {
+    await view.mount();
+    await view.ask("X", "A");
+    send.mockResolvedValue({
+      kind: "voided",
+      otherAccount: false,
+      refusal: { status: 404, code: "DECK_NOT_FOUND", detail: {} },
+    });
+    await act(async () => view.button("Review").click());
+    await act(async () => view.button("Send Borrow Request").click());
+    expect(view.draft().deckId).toBeNull();
+    expect(view.draft().deckChosen).toBe(true);
+    expect(view.draft().lines.map((item) => item.deck)).toEqual([null]);
+    await view.ask("Y", "A");
+    expect(view.draft().deckId).toBeNull();
+  } finally {
+    await view.finish();
+  }
+});
+
+it("a draft that flips from a Deck to No Deck stops waiting on that Deck's failed read", async () => {
+  const view = composerHarness();
+  let drafts!: NonNullable<ReturnType<typeof useBorrowDrafts>>;
+  function Gate() {
+    drafts = useBorrowDrafts()!;
+    useBorrowReadiness("A", "failed", vi.fn());
+    return null;
+  }
+  try {
+    await act(async () =>
+      view.root.render(
+        h(BorrowDraftsProvider, {
+          userId: "for-deck",
+          onOpenLoan: vi.fn(),
+          children: h(Gate),
+        })
+      )
+    );
+    await act(async () => drafts.set(friend, cardOf("X"), 1, 3, "", "A"));
+    await act(async () => view.button("Review").click());
+    expect(view.button("Send Borrow Request").disabled).toBe(true);
+    expect(
+      view.host.querySelector('dialog [role="status"]')?.textContent
+    ).toContain("Couldn't check what's available.");
+    await act(async () => drafts.set(friend, cardOf("Y"), 1, 3, "", null));
+    expect(view.button("Send Borrow Request").disabled).toBe(false);
+    expect(view.host.querySelector('dialog [role="status"]')).toBeNull();
   } finally {
     await view.finish();
   }
