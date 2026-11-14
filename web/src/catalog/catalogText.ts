@@ -129,7 +129,7 @@ export function addAllLabel(count: number): string {
   return count > 0 ? `Add ${cards(count)}` : "Add cards";
 }
 
-export const QUEUE_HINT = "Tap + on cards, then add them together.";
+export const QUEUE_HINT = "Use + on cards, then add them together.";
 export const QUEUE_FULL = `A batch holds up to ${MAX_BATCH_EDITIONS} different cards. Add these first, then queue more.`;
 
 /** The Undo toast after a batch add, and after its Undo. */
