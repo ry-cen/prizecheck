@@ -42,6 +42,8 @@ type Options = {
   active?: boolean;
   routeDetails?: { key: string; ordinal: number } | null;
   onDetails?: (card: Inspected | null) => void;
+  /** Desktop only: the inspected card changed (a click, a drag's end, a clear or a refresh dropping it). */
+  onInspect?: (card: Inspected | null) => void;
 };
 
 export type SelectionState = {
@@ -75,6 +77,7 @@ export function useSelection({
   active = true,
   routeDetails,
   onDetails,
+  onInspect,
 }: Options): SelectionState {
   const [selected, setSelected] = useState<Selection>(EMPTY_SELECTION);
   // The last clicked Holding that is still selected.
@@ -88,6 +91,11 @@ export function useSelection({
     setDetails(card);
     detailsCallback.current?.(card);
   }, []);
+  const inspectCallback = useRef(onInspect);
+  inspectCallback.current = onInspect;
+  // The last inspected card reported, as "<key>:<ordinal>", and whether a marquee drag is between start and end.
+  const reported = useRef<string | null>(null);
+  const dragging = useRef(false);
   const anchor = useRef<{ key: string; ordinal: number } | null>(null);
   const marqueeBase = useRef<Selection>(EMPTY_SELECTION);
   const shown = useRef(active);
@@ -140,7 +148,18 @@ export function useSelection({
     latest.current.focus = nextFocus;
     setSelected(next);
     setFocus(nextFocus);
+    if (!dragging.current) report();
   }, []);
+
+  // The desktop inspector writes its card to the address; a change is reported once, never a repeat.
+  function report() {
+    if (latest.current.mobile) return;
+    const card = latest.current.focus;
+    const id = card ? `${card.holding.key}:${card.ordinal}` : null;
+    if (id === reported.current) return;
+    reported.current = id;
+    inspectCallback.current?.(card);
+  }
 
   const clear = useCallback(() => {
     anchor.current = null;
@@ -191,6 +210,7 @@ export function useSelection({
   const marquee = useCallback(
     (event: MarqueeEvent) => {
       if (event.phase === "start") {
+        dragging.current = true;
         if (!event.additive) anchor.current = null;
         marqueeBase.current = event.additive
           ? latest.current.selected
@@ -200,7 +220,11 @@ export function useSelection({
         commit(
           addSpans(marqueeBase.current, latest.current.holdings, event.spans)
         );
-      } else marqueeBase.current = EMPTY_SELECTION;
+      } else {
+        marqueeBase.current = EMPTY_SELECTION;
+        dragging.current = false;
+        report();
+      }
     },
     [commit]
   );

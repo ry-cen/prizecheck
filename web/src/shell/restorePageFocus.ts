@@ -6,13 +6,22 @@ export type SavedFocus = {
   tag: string;
   href: string | null;
   name: string;
+  /** A closing dialog can return to a persistent shell control outside the page. */
+  outsidePage?: boolean;
 };
 
 export type PageEntryFocus = {
   kind: "heading";
   state: "pending" | "completed" | "cancelled";
   opener: Element | null;
+  /** Focus a closing modal dialog left outside the page on the request's first attempt; it counts like the opener. */
+  inherited: Element | null;
+  /** Set once the first attempt has been made; a later attach never gets a fresh exemption. */
+  attempted: boolean;
+  historyFocus?: SavedFocus;
 };
+
+const modalHistoryFocus = new WeakMap<Element, SavedFocus>();
 
 const entryFocusCleanup = new WeakMap<PageEntryFocus, () => void>();
 
@@ -30,6 +39,11 @@ export function createPageEntryFocus(): PageEntryFocus {
       if (next !== "pending") entryFocusCleanup.get(request)?.();
     },
     opener: document.activeElement,
+    inherited: null,
+    attempted: false,
+    historyFocus: document.activeElement
+      ? modalHistoryFocus.get(document.activeElement)
+      : undefined,
   };
   return request;
 }
@@ -51,16 +65,22 @@ const nameOf = (element: Element) => {
 export function saveFocus(): SavedFocus | null {
   const element = document.activeElement;
   if (!element || element === document.body) return null;
-  return {
+  const saved: SavedFocus = {
     element,
     tag: element.tagName,
     href: element.getAttribute("href"),
     name: nameOf(element),
   };
+  if (element.closest("dialog[open], [aria-modal='true']"))
+    modalHistoryFocus.set(element, saved);
+  return saved;
 }
 
 function find(container: HTMLElement, saved: SavedFocus): HTMLElement | null {
-  if (saved.element.isConnected && container.contains(saved.element))
+  if (
+    saved.element.isConnected &&
+    (container.contains(saved.element) || saved.outsidePage)
+  )
     return saved.element as HTMLElement;
   if (!saved.name) return null;
   const twins = [...container.querySelectorAll<HTMLElement>(saved.tag)].filter(
@@ -113,10 +133,37 @@ function focusPageEntry(
       return;
     }
     const active = document.activeElement;
+    const first = !request.attempted;
+    request.attempted = true;
+    // A navigation started inside a modal dialog: the dialog's close returns focus to its opener (outside the
+    // page) in the same commit. That focus is the navigation's own leftover, not the collector's choice. Focus
+    // inside a dialog that is still open is never taken.
+    if (
+      first &&
+      active &&
+      active !== document.body &&
+      !container.contains(active) &&
+      !active.closest("dialog[open], [aria-modal='true']") &&
+      !(request.opener?.isConnected && active === request.opener)
+    ) {
+      request.inherited = active;
+      // The dialog control saved on departure is about to disappear. Back should return to
+      // the same persistent opener the closing dialog returned focus to, before arrival focuses H1.
+      if (request.historyFocus && !request.opener?.isConnected) {
+        Object.assign(request.historyFocus, {
+          element: active,
+          tag: active.tagName,
+          href: active.getAttribute("href"),
+          name: nameOf(active),
+          outsidePage: true,
+        });
+      }
+    }
     if (
       active &&
       active !== document.body &&
-      !(request.opener?.isConnected && active === request.opener)
+      !(request.opener?.isConnected && active === request.opener) &&
+      active !== request.inherited
     ) {
       cancel();
       return;

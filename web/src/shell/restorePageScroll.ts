@@ -101,10 +101,20 @@ export function restorePageScroll(
     frame = requestAnimationFrame(restore);
   });
   if (container) observer.observe(container);
+  // A page that is still reading its data (a remounted detail page) says so with `data-page-loading` or a loading
+  // heading, so the wait does not run out before the content has arrived: the window counts from when loading
+  // ends. A visible marker only; a hidden or inert subtree is not the page being shown.
+  const loading = () =>
+    [
+      ...(container?.querySelectorAll(
+        '[data-page-loading], h1[data-page-heading="loading"]'
+      ) ?? []),
+    ].some((element) => !element.closest("[hidden],[inert]"));
   // In run 42882196433 the observer was seen to miss content growth after Back; why is unknown. A bounded retry
   // covers it.
-  const until = Date.now() + RESTORE_WINDOW_MS;
+  let until = Date.now() + RESTORE_WINDOW_MS;
   poll = setInterval(() => {
+    if (loading()) until = Date.now() + RESTORE_WINDOW_MS;
     if (Date.now() > until) stop();
     else restore();
   }, RESTORE_POLL_MS);

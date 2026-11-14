@@ -243,7 +243,7 @@ export function LocationNav({
             )}
             {forTrade && (
               <span
-                className="shrink-0 whitespace-nowrap text-meta text-text-subtle"
+                className="min-w-0 shrink-[999] truncate text-meta text-text-subtle phone:shrink-0 phone:whitespace-nowrap"
                 title={forTrade}
                 aria-hidden="true"
                 data-testid="for-trade-mark"

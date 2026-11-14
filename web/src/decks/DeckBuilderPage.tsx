@@ -279,9 +279,9 @@ export function DeckBuilderPage({
     }
   }
 
-  // A Deck opened from the index starts at the top; the shell keeps the scroll position within one page.
+  // The shell starts each new entry at the top and restores a history entry's position (waiting out the read below),
+  // so the page doesn't scroll itself.
   useLayoutEffect(() => {
-    window.scrollTo(0, 0);
     void read();
   }, []);
   useDeckListChanged(deckId, () => void read());
@@ -475,7 +475,11 @@ export function DeckBuilderPage({
             </Button>
           </>
         ) : (
-          <p role="status" className="m-0 text-body text-text-muted">
+          <p
+            role="status"
+            data-page-loading=""
+            className="m-0 text-body text-text-muted"
+          >
             Loading Deck…
           </p>
         )}

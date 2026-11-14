@@ -323,3 +323,58 @@ it("restores the Deck link when its aria-hidden price facts change after Back", 
     stop();
   }
 });
+
+it("heading focus survives focus a closing dialog returned outside the page", async () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  const request = createPageEntryFocus();
+  // The dialog's close returned focus to its opener, outside the page, with no focusin after the attach.
+  outside.focus();
+  const stop = restorePageFocus(page, request);
+  page.innerHTML = "<h1>Friend</h1>";
+  await flush();
+  expect(document.activeElement).toBe(page.firstChild);
+  stop();
+});
+
+it("a focusin elsewhere after the first attempt still cancels", async () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const outside = document.createElement("button");
+  const other = document.createElement("button");
+  document.body.append(outside, other);
+  outside.focus();
+  const stop = restorePageFocus(page, createPageEntryFocus());
+  other.focus();
+  page.innerHTML = "<h1>Friend</h1>";
+  await flush();
+  expect(document.activeElement).toBe(other);
+  stop();
+});
+
+it("Back restores a closing dialog's persistent opener after arrival focuses the heading", () => {
+  const shell = document.createElement("div");
+  const opener = document.createElement("button");
+  opener.textContent = "Friends";
+  const modal = document.createElement("dialog");
+  modal.setAttribute("open", "");
+  const inside = document.createElement("button");
+  inside.textContent = "Open Friend's Collection";
+  modal.append(inside);
+  const page = document.createElement("main");
+  shell.append(opener, modal, page);
+  document.body.append(shell);
+  inside.focus();
+  const saved = saveFocus();
+  const request = createPageEntryFocus();
+  modal.remove();
+  opener.focus();
+  page.innerHTML = "<h1>Friend</h1>";
+  restorePageFocus(page, request)();
+  expect(document.activeElement).toBe(page.querySelector("h1"));
+  page.replaceChildren();
+  restorePageFocus(page, saved)();
+  expect(document.activeElement).toBe(opener);
+});

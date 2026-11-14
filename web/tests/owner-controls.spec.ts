@@ -875,12 +875,16 @@ test.describe("desktop", () => {
     }
   });
 
-  test("an unknown owner address lands on Collection, and a non-owner sees only the heading on a sub-address", async ({
+  test("an unknown owner address shows This page doesn't exist, and a non-owner sees only the heading on a sub-address", async ({
     page,
   }) => {
     await signInAsOwner(page);
+    // The owner decided (S14e) that an unknown signed-in address says so instead of landing on Collection.
     await page.goto(`${ORIGIN}/owner/nowhere`);
-    await expect(page).toHaveURL(/\/collection$/);
+    await expect(page).toHaveURL(`${ORIGIN}/owner/nowhere`);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "This page doesn't exist"
+    );
 
     await query("DELETE FROM owner_binding");
     await page.goto(`${ORIGIN}/owner/rules`);

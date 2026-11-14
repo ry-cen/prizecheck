@@ -38,6 +38,7 @@ import {
   pageAt,
   pageDef,
   sectionAt,
+  withoutTrailingSlash,
   type PageId,
 } from "./shell/routes";
 import { useRoute } from "./shell/useRoute";
@@ -160,9 +161,8 @@ function App() {
     void refresh();
   }, []);
 
-  // Signed in, an address that is no page (or section of one) lands on Collection, except the public pages
-  // (Discover, a Published Deck), which open inside the shell (#163), and a Friend's Collection (#250), which does
-  // too. Owner controls opened by someone else shows its heading and nothing else, as before.
+  // The public pages (Discover, a Published Deck) open inside the shell (#163) signed in, and so does a Friend's
+  // Collection (#250). Owner controls opened by someone else shows its heading and nothing else, as before.
   const signedIn = session?.signedIn === true;
   const publicPage = useMemo(() => publicPageAt(path), [path]);
   const isPublic = publicPage !== null;
@@ -172,31 +172,26 @@ function App() {
   const page: PageId = def ? def.id : "collection";
   const ownerShown = useRef(false);
   ownerShown.current = signedIn && page === "owner";
+  // Signed in, the bare origin and the sign-in address open Collection. Any other address that is no page shows
+  // the not-found page inside the shell, and stays in the address bar.
+  const notFound =
+    signedIn &&
+    !isPublic &&
+    !def &&
+    friendHandle === null &&
+    friendTradeHandle === null &&
+    path !== LANDING_PATH &&
+    path !== SIGN_IN_PATH;
   useLayoutEffect(() => {
-    if (
-      signedIn &&
-      !isPublic &&
-      !def &&
-      friendHandle === null &&
-      friendTradeHandle === null
-    )
+    if (signedIn && (path === LANDING_PATH || path === SIGN_IN_PATH))
       // The bare origin keeps its query and hash on the way to Collection, as the old-address rewrite did.
       navigate(
         path === LANDING_PATH
           ? `${DEFAULT_PATH}${location.search}${location.hash}`
-          : pageDef(page).path,
+          : DEFAULT_PATH,
         { replace: true }
       );
-  }, [
-    signedIn,
-    isPublic,
-    path,
-    def,
-    friendHandle,
-    friendTradeHandle,
-    page,
-    navigate,
-  ]);
+  }, [signedIn, path, navigate]);
   // A failure code in the address belongs to the sign-in page: signed in, it is never shown, only removed. The
   // Settings page's Sign-ins section reads and removes its own.
   useEffect(() => {
@@ -545,7 +540,17 @@ function App() {
                       </PageFrame>
                     ),
                   }
-                : null
+                : notFound
+                  ? {
+                      key: path,
+                      label: "This page doesn't exist",
+                      content: (
+                        <PageFrame resetKey={path}>
+                          <DeadEnd kind="not-found" signedIn onNavigate={go} />
+                        </PageFrame>
+                      ),
+                    }
+                  : null
         }
       />
     </OpenProposalProvider>
@@ -554,20 +559,30 @@ function App() {
 
 // Old addresses (/workspace and /locations for Collection, /settings/sign-ins for Settings) are rewritten before
 // anything renders, keeping the query, so /workspace?location=<id> still opens that Location and a sign-in link
-// failure returned to /settings/sign-ins still reaches the Sign-ins section.
+// failure returned to /settings/sign-ins still reaches the Sign-ins section. An address that differs from a route
+// only by one trailing slash (/collection/, /discover/, /friends/<handle>/) is that route.
 // Keep / for signed-out visitors; the signed-in route effect opens Collection.
-if (
-  location.pathname !== LANDING_PATH &&
-  canonicalPath(location.pathname) !== location.pathname
-)
+const loadedPath = canonicalPath(
+  withoutTrailingSlash(
+    location.pathname,
+    (path) =>
+      pageAt(path) !== undefined ||
+      publicPageAt(path) !== null ||
+      friendHandleAt(path) !== null ||
+      friendTradeListHandleAt(path) !== null ||
+      path === SIGN_IN_PATH ||
+      canonicalPath(path) !== path
+  )
+);
+if (location.pathname !== LANDING_PATH && loadedPath !== location.pathname)
   history.replaceState(
     null,
     "",
-    `${canonicalPath(location.pathname)}${location.search}${location.hash}`
+    `${loadedPath}${location.search}${location.hash}`
   );
 
 // Starts the first page's code alongside the session read. The bare origin is Collection once signed in.
-preloadInitialPage(canonicalPath(location.pathname));
+preloadInitialPage(loadedPath);
 
 createRoot(document.getElementById("root")!).render(
   <>

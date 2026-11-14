@@ -358,6 +358,61 @@ test.describe("desktop", () => {
     await expect(tiles(page)).toHaveCount(1);
   });
 
+  test("desktop inspector address survives a phone round trip and reload", async ({
+    page,
+  }) => {
+    await shortCollection(page);
+    await tiles(page).first().click();
+    await expect(page).toHaveURL(/[?&]card=/);
+    const address = page.url();
+    const historyLength = await page.evaluate(() => history.length);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect(page).not.toHaveURL(/[?&]card=/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page).toHaveURL(address);
+    await expect
+      .poll(() => page.evaluate(() => history.length))
+      .toBe(historyLength);
+    await page.reload();
+    await expect(inspector(page)).toBeVisible();
+    await expect(inspector(page)).toContainText("Area Abra");
+  });
+
+  test("desktop inspector address survives a phone round trip while Collection is hidden", async ({
+    page,
+  }) => {
+    await shortCollection(page);
+    await tiles(page).first().click();
+    await expect(page).toHaveURL(/[?&]card=/);
+    const address = page.url();
+    const historyLength = await page.evaluate(() => history.length);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect(page).not.toHaveURL(/[?&]card=/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page
+      .getByRole("navigation", { name: "Main views" })
+      .getByRole("button", { name: "Catalog", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/catalog(?:\?|$)/);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page
+      .getByRole("navigation", { name: "Main views" })
+      .getByRole("button", { name: "Collection", exact: true })
+      .click();
+    await expect(page).toHaveURL(address);
+    // Only the two tab visits push entries; breakpoint resync must replace.
+    await expect
+      .poll(() => page.evaluate(() => history.length))
+      .toBe(historyLength + 2);
+    await page.reload();
+    await expect(inspector(page)).toBeVisible();
+    await expect(inspector(page)).toContainText("Area Abra");
+    await expect
+      .poll(() => page.evaluate(() => history.length))
+      .toBe(historyLength + 2);
+  });
+
   for (const pointerType of ["mouse", "pen"] as const) {
     test(`a ${pointerType} at the phone breakpoint preserves selection while held in an empty gutter`, async ({
       page,
