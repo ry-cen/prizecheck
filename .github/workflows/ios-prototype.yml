@@ -45,6 +45,7 @@ jobs:
       - name: Compile unsigned app and UI tests through Swift Package Manager
         run: |
           set -o pipefail
+          mkdir -p .scratch
           xcodebuild -project mobile/ios/App/App.xcodeproj -scheme FixtureValidation \
             -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \

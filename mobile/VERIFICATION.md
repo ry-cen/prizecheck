@@ -66,3 +66,9 @@ Local continuation checks: 13 protocol/UI tests plus one loopback HTTP contract 
 Historical CI qualification: the original head's Linux Verify and title checks were green, but its shallow checkout skipped the three historical migration tests. The prior local full tooling runs exercised those tests; do not describe every tooling test as exercised in the shallow CI checkout. The earlier optional auth aggregate failure remains recorded above and is not superseded by native validation.
 
 Native 30-minute expiry, physical-device behavior, real accounts and a real private Collection remain unexercised. No API, scanner, signing, deployment or production-auth change is part of this continuation.
+
+### First hosted native result — 41b2a206
+
+[Run 43670914443](https://github.com/ry-cen/prizecheck/actions/runs/43670914443/job/132680519949) used the standard hosted macOS/Xcode 26.3 environment and logged `CODE_SIGNING_ALLOWED = NO`. Swift Package Manager resolved the native dependencies, the app and XCTest bundle compiled/linked, and xcodebuild printed **TEST BUILD SUCCEEDED**. This establishes an actual unsigned simulator-target native build at head `41b2a206bb925415bcf44ed140333c5ff597ffd5`, not a successful workflow or UI run.
+
+The workflow step failed because `tee` opened `.scratch/ios-build.log` before the directory existed; `pipefail` correctly reported that logging failure. Simulator install/launch and all four UI scenarios were skipped, so none has native UI evidence from this run. The repair explicitly creates `.scratch` before the pipeline; it does not suppress failures, change permissions or alter the packaged app.
