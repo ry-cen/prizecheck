@@ -1,3 +1,4 @@
+import { useToast } from "../ui/Toast";
 import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
 import { PendingLoanNotice } from "./PendingLoanNotice";
 import { refusalError, type FlowOutcome } from "./loanIntents";
@@ -60,6 +61,7 @@ import { Stepper } from "../ui/Stepper";
 import { TextField } from "../ui/TextField";
 import { readDecks, useBorrowDrafts } from "./BorrowDrafts";
 import {
+  loanStepConfirmation,
   handoverConfirmText,
   returnConfirmText,
   dayAfter,
@@ -163,6 +165,7 @@ export function LoanScreen({
   onAllLoans: () => void;
   onOpenDeck: (id: string) => void;
 }) {
+  const toast = useToast();
   const drafts = useBorrowDrafts();
   const { store, blockerFor, accountName, accountId } = useLoanRecovery();
   const guard = useFlowGuard();
@@ -212,6 +215,9 @@ export function LoanScreen({
   }>();
   const retained = authority.command;
   const refreshAfterCommand = useRef(false);
+  // A refresh may have read the old Loan before waiting for its side data.
+  // Once a command settles, that refresh cannot replace the command's result.
+  const readGeneration = useRef(0);
   const commandPending = authority.pending || durable.fence.pending;
   const roundId = load.kind === "ready" ? load.loan.loan_id : null;
   const recovery = [
@@ -256,6 +262,7 @@ export function LoanScreen({
 
   useEffect(() => {
     const controller = new AbortController();
+    const generation = readGeneration.current;
     Promise.all([
       getLoan(loanId, controller.signal),
       getLoan(loanId, controller.signal).then((view) =>
@@ -263,7 +270,8 @@ export function LoanScreen({
       ),
     ]).then(
       ([loan, side]) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || generation !== readGeneration.current)
+          return;
         if (ownsCommand()) {
           refreshAfterCommand.current = true;
           return;
@@ -290,7 +298,8 @@ export function LoanScreen({
         setAnswerDate(loan.return_by ?? "");
       },
       (cause) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || generation !== readGeneration.current)
+          return;
         if (ownsCommand()) {
           refreshAfterCommand.current = true;
           return;
@@ -557,13 +566,22 @@ export function LoanScreen({
     focusNext.current = "ask";
     setAsking(step);
   }
-  async function durableOutcome(o: FlowOutcome, source: "send" | "recovery") {
+  async function durableOutcome(
+    o: FlowOutcome,
+    kind: "start_return" | "write_off"
+  ) {
     setNotice("");
     if (o.kind === "done" || o.kind === "voided") {
       refreshInbox();
       onLoanChanged();
     }
     if (o.kind === "done") {
+      readGeneration.current += 1;
+      toast.show({
+        message:
+          kind === "start_return" ? "Return recorded." : "Write-off recorded.",
+        route: `${LOANS_PATH}/${encodeURIComponent(loan.thread_id)}`,
+      });
       refreshAfterCommand.current = false;
       const tok = guard.capture();
       try {
@@ -577,7 +595,6 @@ export function LoanScreen({
         setLoad({ kind: "ready", loan: fresh, side: freshSide });
         setPromised(promiseStart(fresh, freshSide));
         setMessage("");
-        setNotice(source === "recovery" ? (resultText(o) ?? "") : "");
       } catch {
         if (guard.live(tok)) setLoad({ kind: "failed" });
       }
@@ -638,7 +655,7 @@ export function LoanScreen({
       fields,
     });
     if (!guard.live(tok)) return;
-    if (o) await durableOutcome(o, "send");
+    if (o) await durableOutcome(o, kind);
     if (guard.live(tok)) setBusy(false);
   }
   /** Runs one step: the answer replaces the Loan, and its own side is read again. */
@@ -666,6 +683,7 @@ export function LoanScreen({
     const key = command.key;
     keys.current.set(name, key);
     const release = () => {
+      readGeneration.current += 1;
       authority.settle();
       keys.current.delete(name);
       stepBodies.current.delete(key);
@@ -689,6 +707,12 @@ export function LoanScreen({
       setPromised(promiseStart(next, nextSide));
       refreshInbox();
       onLoanChanged();
+      const confirmation = loanStepConfirmation(command.name, loan);
+      if (confirmation)
+        toast.show({
+          message: confirmation,
+          route: `${LOANS_PATH}/${encodeURIComponent(loan.thread_id)}`,
+        });
       return "applied";
     } catch (cause) {
       if (!outcomeUnknown(cause)) release();
@@ -1459,7 +1483,10 @@ export function LoanScreen({
         key={view.operationId}
         view={view}
         onOutcome={(o) => {
-          void durableOutcome(o, "recovery");
+          void durableOutcome(
+            o,
+            view.kind === "write_off" ? "write_off" : "start_return"
+          );
         }}
       />
     ))

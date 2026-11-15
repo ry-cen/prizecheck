@@ -10,6 +10,7 @@ import {
   getLoanSide,
   startReturn,
   writeOff,
+  takeBackHandover,
   acceptBorrowRequest,
   changeReturnBy,
   SocialError,
@@ -20,6 +21,8 @@ import { LoanScreen as Screen } from "./LoanScreen";
 import { LoanRecoveryProvider } from "./LoanRecovery";
 import { fixture, reply } from "./testing/loanFakes";
 import { createTabContext } from "./loanIntents";
+const toast = vi.hoisted(() => ({ show: vi.fn() }));
+vi.mock("../ui/Toast", () => ({ useToast: () => toast }));
 const threadId = "00000000-0000-4000-8000-000000000099";
 let keepReadView = false;
 let packets: string[] = [];
@@ -74,6 +77,7 @@ vi.mock("../social_generated", async (original) => ({
   getLoanSide: vi.fn(),
   startReturn: vi.fn(),
   writeOff: vi.fn(),
+  takeBackHandover: vi.fn(),
   acceptBorrowRequest: vi.fn(),
   changeReturnBy: vi.fn(),
 }));
@@ -237,6 +241,7 @@ for (const role of ["lender", "borrower"] as const) {
         expect(startReturn).not.toHaveBeenCalled();
         await act(async () => all.click());
         if (lost) {
+          expect(toast.show).not.toHaveBeenCalled();
           const retry = [...host.querySelectorAll("button")].find(
             (b) => b.textContent === "Send it again"
           )!;
@@ -248,11 +253,11 @@ for (const role of ["lender", "borrower"] as const) {
         expect(
           host.querySelector('[role="alert"]')?.textContent?.trim() ?? ""
         ).toBe("");
-        if (lost)
-          expect(host.querySelector('[role="status"]')?.textContent).toContain(
-            "It was sent."
-          );
-        else expect(host.textContent).not.toContain("It was sent.");
+        expect(toast.show).toHaveBeenCalledExactlyOnceWith({
+          message: "Return recorded.",
+          route: `/loans/${threadId}`,
+        });
+        expect(host.textContent).not.toContain("It was sent.");
         expect(startReturn).toHaveBeenCalledTimes(lost ? 2 : 1);
         expect(JSON.parse(packets[0]).account_id).toBe("A");
         if (lost) expect(packets[1]).toBe(packets[0]);
@@ -1409,4 +1414,95 @@ it("ACCOUNT_CHANGED on Terms says who to sign in as and the Terms body carries t
       )
     ).toEqual([]);
   }, true);
+});
+
+it("a refresh started before take-back cannot restore an obsolete handover confirmation", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(10, 10, 30, 30)
+  );
+  const confirmed: LoanView = {
+    ...loan,
+    thread_id: threadId,
+    role: "lender",
+    state: "accepted",
+    closed_reason: null,
+    closed_by: null,
+    you_confirmed_handover: true,
+    actions: ["take_back"],
+    revision: 4,
+  };
+  const undone: LoanView = {
+    ...confirmed,
+    you_confirmed_handover: false,
+    actions: ["confirm_handover"],
+    revision: 5,
+  };
+  let finishRead!: (value: LoanView) => void;
+  const oldRead = new Promise<LoanView>((resolve) => {
+    finishRead = resolve;
+  });
+  vi.mocked(getLoan)
+    .mockReset()
+    .mockResolvedValueOnce(confirmed)
+    .mockResolvedValueOnce(confirmed)
+    .mockReturnValueOnce(oldRead)
+    .mockReturnValueOnce(oldRead)
+    .mockResolvedValue(undone);
+  vi.mocked(getLoanSide).mockResolvedValue({
+    loan_id: "round",
+    deck: null,
+    can_promise: [],
+    picks: [],
+    suggested: [],
+  });
+  vi.mocked(takeBackHandover).mockResolvedValue(undone);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const button = (text: string) =>
+    [...host.querySelectorAll("button")].find((b) => b.textContent === text);
+  try {
+    await act(async () =>
+      root.render(
+        h(LoanScreen, {
+          loanId: threadId,
+          onCanonicalLoan: vi.fn(),
+          onLoanChanged: vi.fn(),
+          onAllLoans: vi.fn(),
+          onOpenDeck: vi.fn(),
+        })
+      )
+    );
+    await act(async () => button("Chat moderation completed")!.click());
+    expect(getLoan).toHaveBeenCalledTimes(4);
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>('[aria-label="More for this Loan"]')!
+        .click()
+    );
+    await act(async () =>
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+        .find((item) => item.textContent === "Take back my confirmation")!
+        .click()
+    );
+    expect(takeBackHandover).toHaveBeenCalledOnce();
+    expect(button("Mark as handed over")).toBeDefined();
+    await act(async () => finishRead(confirmed));
+    expect(button("Mark as handed over")).toBeDefined();
+    expect(host.textContent).not.toContain("Waiting for Misty to confirm");
+    expect(toast.show).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  }
 });
