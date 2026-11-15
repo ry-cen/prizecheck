@@ -16,20 +16,35 @@ import {
   type CollectionReader,
   type HoldingRow,
 } from "./collection";
+import { Menu } from "../../ui/Menu";
+import { useToast } from "../../ui/Toast";
+import { CollectionWriteDialog } from "./CollectionWrites";
+import type { CollectionWriter, WriteResult, UndoRecord } from "./collection";
 import { useRead } from "./read";
 export function CollectionView({
   reader,
+  writer,
+  revision = 1,
+  onConfirmed,
   active,
   query,
   onQuery,
   onCatalog,
 }: {
   reader: CollectionReader;
+  writer?: CollectionWriter;
+  revision?: number;
+  onConfirmed?: (
+    result: WriteResult,
+    message: string,
+    undo?: UndoRecord
+  ) => void;
   active: boolean;
   query: CollectionQuery;
   onQuery: (q: CollectionQuery, replace?: boolean) => void;
   onCatalog: () => void;
 }) {
+  const [action, setAction] = useState<"move" | "remove" | null>(null);
   const phone = useMediaQuery(MOBILE_QUERY);
   const [drawer, setDrawer] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -40,9 +55,10 @@ export function CollectionView({
   const opener = useRef<HTMLButtonElement>(null);
   const selectedOpener = useRef<HTMLElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
-  const key = collectionKey(reader.owner, query);
+  const viewKey = collectionKey(reader.owner, query);
+  const key = JSON.stringify([viewKey, revision]);
   const trees = useRead(
-    JSON.stringify(["riftbound", "locations", reader.owner]),
+    JSON.stringify(["riftbound", "locations", reader.owner, revision]),
     useCallback((s) => reader.locations(s), [reader]),
     active
   );
@@ -54,10 +70,17 @@ export function CollectionView({
     ),
     active
   );
-  const pageOutOfRange = !!listing.value && query.page > listing.value.pages;
+  const pageOutOfRange =
+    !!listing.value && query.page > Math.max(1, listing.value.pages);
   useEffect(() => {
-    if (active && listing.value && query.page > listing.value.pages)
+    if (
+      active &&
+      listing.value &&
+      query.page > Math.max(1, listing.value.pages)
+    ) {
+      skipHeadingFocus.current = true;
       onQuery({ ...query, page: Math.max(1, listing.value.pages) }, true);
+    }
   }, [active, listing.value, query, onQuery]);
   const inspector = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -70,6 +93,7 @@ export function CollectionView({
       "holdings",
       reader.owner,
       selected?.edition.id,
+      revision,
     ]),
     useCallback(
       (s) => reader.holdings(selected?.edition.id ?? "", s),
@@ -85,10 +109,10 @@ export function CollectionView({
       );
   }, [active, index, query.location]);
   const skipHeadingFocus = useRef(false);
-  const lastKey = useRef(key);
+  const lastKey = useRef(viewKey);
   useEffect(() => {
-    if (key !== lastKey.current) {
-      lastKey.current = key;
+    if (viewKey !== lastKey.current) {
+      lastKey.current = viewKey;
       setSelection(null);
       if (
         active &&
@@ -98,13 +122,17 @@ export function CollectionView({
         heading.current?.focus();
       skipHeadingFocus.current = false;
     }
-  }, [key, active]);
+  }, [viewKey, active]);
   useEffect(() => {
     if (!active) {
       setSelection(null);
       setDrawer(false);
+      setAction(null);
     }
   }, [active]);
+  useEffect(() => {
+    setAction(null);
+  }, [viewKey]);
   function choose(location: string) {
     skipHeadingFocus.current =
       phone && (location !== query.location || query.page !== 1);
@@ -144,7 +172,10 @@ export function CollectionView({
       <p>
         {selected.edition.set.code} · {selected.edition.number}
       </p>
-      <p>Variant {selected.edition.finish}</p>
+      <p>
+        <span className="text-text-muted">Variant</span>{" "}
+        <span className="font-medium">{selected.edition.finish}</span>
+      </p>
       <p>
         {[selected.edition.domain, selected.edition.type]
           .filter(Boolean)
@@ -310,7 +341,11 @@ export function CollectionView({
                   viewportRef={inspector}
                   viewportClassName="overscroll-contain"
                 >
-                  {details ?? <p>Select a card to see its details.</p>}
+                  {details ?? (
+                    <div className="flex aspect-(--tile-aspect) items-center justify-center rounded-card border border-dashed border-border p-4 text-meta text-text-muted">
+                      Select a card to see its details.
+                    </div>
+                  )}
                 </ScrollArea>
               </aside>
             )}
@@ -327,13 +362,46 @@ export function CollectionView({
         {nav(true)}
       </Dialog>
       <Dialog
-        open={!!selected && phone}
+        open={!!selected && phone && !action}
         title={selected?.edition.name ?? "Card details"}
         onClose={() => setSelection(null)}
         returnFocus={selectedOpener}
       >
         {details}
+        {writer && (
+          <div className="mt-4 flex gap-2">
+            <Button onClick={() => setAction("move")}>Move…</Button>
+            <Button onClick={() => setAction("remove")}>Remove…</Button>
+          </div>
+        )}
       </Dialog>
+      {selected && writer && !action && (
+        <SelectionActions
+          onMove={() => setAction("move")}
+          onRemove={() => setAction("remove")}
+          onClear={() => setSelection(null)}
+        />
+      )}
+      {active && selected && writer && action && (
+        <CollectionWriteDialog
+          key={`${viewKey}:${action}`}
+          writer={writer}
+          reader={reader}
+          mode={action}
+          row={selected}
+          edition={selected.edition}
+          returnFocus={heading}
+          onClose={() => {
+            setAction(null);
+            setSelection(null);
+          }}
+          onConfirmed={(result, message, undo) => {
+            onConfirmed?.(result, message, undo);
+            setSelection(null);
+            heading.current?.focus();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -367,6 +435,41 @@ function Art({ row }: { row: HoldingRow }) {
       className="flex aspect-(--tile-aspect) items-center justify-center rounded-card bg-surface-raised text-meta"
     >
       Artwork unavailable
+    </div>
+  );
+}
+
+function SelectionActions({
+  onMove,
+  onRemove,
+  onClear,
+}: {
+  onMove: () => void;
+  onRemove: () => void;
+  onClear: () => void;
+}) {
+  const toast = useToast();
+  useEffect(() => {
+    toast.setLift("selection", 64);
+    return () => toast.setLift("selection", 0);
+  }, [toast]);
+  return (
+    <div
+      aria-label="Selected copies"
+      className="fixed inset-x-0 bottom-0 z-(--layer-sticky) flex min-h-16 items-center justify-center gap-4 border-t border-border bg-surface p-2 phone:bottom-(--layout-tabbar-height)"
+    >
+      <span>1 copy selected</span>
+      <Button onClick={onClear}>Clear selection</Button>
+      <Menu
+        label="Actions"
+        trigger="Actions"
+        triggerClassName="inline-flex min-h-tap items-center rounded-control border border-border bg-surface-raised px-3 text-control text-text"
+        side="above"
+        items={[
+          { label: "Move…", onSelect: onMove },
+          { label: "Remove…", onSelect: onRemove },
+        ]}
+      />
     </div>
   );
 }

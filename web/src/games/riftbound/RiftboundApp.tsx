@@ -18,27 +18,45 @@ import {
 import { parseView, viewHash, type View } from "./navigation";
 import { CollectionView } from "./CollectionView";
 import { emptyCollectionQuery, type CollectionReader } from "./collection";
+import { ToastProvider } from "../../ui/Toast";
+import {
+  CollectionWriteDialog,
+  useCollectionFeedback,
+} from "./CollectionWrites";
+import type { CollectionWriter } from "./collection";
 import { useRead } from "./read";
 
 export function RiftboundApp(props: {
   reader: CatalogReader;
   collection?: CollectionReader;
+  writer?: CollectionWriter;
 }) {
   return (
-    <RiftboundComposition
-      key={props.collection?.owner ?? "catalog"}
-      {...props}
-    />
+    <ToastProvider key={props.collection?.owner ?? "catalog"}>
+      <RiftboundComposition
+        key={props.collection?.owner ?? "catalog"}
+        {...props}
+      />
+    </ToastProvider>
   );
 }
 function RiftboundComposition({
   reader,
   collection,
+  writer,
 }: {
   reader: CatalogReader;
   collection?: CollectionReader;
+  writer?: CollectionWriter;
 }) {
   const [view, setView] = useState(() => parseView(location.hash));
+  const [revision, setRevision] = useState(1);
+  const [adding, setAdding] = useState<string | null>(null);
+  const feedback = useCollectionFeedback(writer, viewHash(view), setRevision);
+  const addOpener = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    setAdding(null);
+  }, [view]);
   const [picking, setPicking] = useState(false);
   const picker = useRef<HTMLButtonElement>(null);
   const catalogHeading = useRef<HTMLHeadingElement>(null);
@@ -382,6 +400,9 @@ function RiftboundComposition({
         <CollectionView
           key={collection.owner}
           reader={collection}
+          writer={writer}
+          revision={revision}
+          onConfirmed={feedback}
           active={!view.home && view.section === "collection"}
           query={view.collection ?? emptyCollectionQuery}
           onQuery={(query, replace) =>
@@ -467,7 +488,7 @@ function RiftboundComposition({
         )}
       </Dialog>
       <CardPopup
-        open={active && !!view.edition}
+        open={active && !!view.edition && !adding && !pendingDismissal.current}
         title={edition?.name ?? "Card details"}
         onClose={close}
         returnFocus={opener}
@@ -477,6 +498,13 @@ function RiftboundComposition({
         canNext={index >= 0 && index < rows.length - 1}
         onPrevious={() => step(rows[index - 1].id)}
         onNext={() => step(rows[index + 1].id)}
+        footer={
+          writer && edition ? (
+            <Button ref={addOpener} onClick={() => setAdding(viewHash(view))}>
+              Add to Collection
+            </Button>
+          ) : undefined
+        }
         art={edition ? <Art key={edition.id} edition={edition} /> : null}
       >
         {detail.failed ? (
@@ -497,6 +525,25 @@ function RiftboundComposition({
           </div>
         )}
       </CardPopup>
+      {writer &&
+        collection &&
+        edition &&
+        active &&
+        adding === viewHash(view) && (
+          <CollectionWriteDialog
+            key={adding}
+            mode="add"
+            writer={writer}
+            reader={collection}
+            edition={edition}
+            onClose={() => setAdding(null)}
+            onConfirmed={(result, message, undo) => {
+              feedback(result, message, undo);
+              close();
+            }}
+            returnFocus={opener}
+          />
+        )}
     </div>
   );
 }

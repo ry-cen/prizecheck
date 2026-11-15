@@ -90,3 +90,57 @@ export function plural(
 ): string {
   return `${count} ${count === 1 ? singular : multiple}`;
 }
+
+/** Provisional game-owned command seam; #534 owns the unverified Riftbound HTTP shapes. */
+export type WriteOptions = { signal: AbortSignal; idempotencyKey: string };
+export type SelectionItem = {
+  editionId: string;
+  sourceId: string;
+  quantity: number;
+  expectedVersion: number;
+};
+export type UndoRecord = {
+  id: string;
+  action: "move" | "remove";
+  expiresAt: string;
+};
+export type WriteResult = { ownerRevision: number };
+export type SelectionResult = WriteResult & { undo: UndoRecord };
+export type AddResult = WriteResult & {
+  locationId: string;
+  editionId: string;
+  quantity: number;
+  version: number;
+};
+export interface CollectionWriter {
+  readonly owner: string;
+  add(
+    input: { editionId: string; locationId: string; quantity: number },
+    options: WriteOptions
+  ): Promise<AddResult>;
+  move(
+    input: { items: SelectionItem[]; destinationId: string },
+    options: WriteOptions
+  ): Promise<SelectionResult>;
+  remove(
+    input: { items: SelectionItem[] },
+    options: WriteOptions
+  ): Promise<SelectionResult>;
+  undoList(options: WriteOptions): Promise<UndoRecord[]>;
+  undo(id: string, options: WriteOptions): Promise<WriteResult>;
+  dismissUndo(id: string, options: WriteOptions): Promise<WriteResult>;
+}
+export type CollectionErrorCode =
+  | "STALE_HOLDING"
+  | "INSUFFICIENT_QUANTITY"
+  | "SAME_LOCATION"
+  | "UNDO_NOT_NEWEST"
+  | "UNDO_EXPIRED"
+  | "UNDO_NOT_FOUND"
+  | "UNDO_INCOMPATIBLE"
+  | "IDEMPOTENCY_KEY_REUSED";
+export class CollectionError extends Error {
+  constructor(readonly code: CollectionErrorCode) {
+    super(code);
+  }
+}
