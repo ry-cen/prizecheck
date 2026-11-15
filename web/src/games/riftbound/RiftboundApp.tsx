@@ -25,6 +25,14 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
   const catalogHeading = useRef<HTMLHeadingElement>(null);
   const homeHeading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const stepped = useRef(false);
+  const tiles = useRef<HTMLUListElement>(null);
+
+  useEffect(() => {
+    if (view.edition || !stepped.current) return;
+    stepped.current = false;
+    if (opener.current?.isConnected) opener.current.focus();
+  }, [view.edition]);
 
   useEffect(() => {
     const update = () => setView(parseView(location.hash));
@@ -35,10 +43,10 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
       window.removeEventListener("hashchange", update);
     };
   }, []);
-  function navigate(next: View, replace = false) {
+  function navigate(next: View, replace = false, detail = false) {
     if (viewHash(next) === viewHash(view)) return;
     history[replace ? "replaceState" : "pushState"](
-      { game: reader.scope },
+      { game: reader.scope, ...(detail ? { detail: true } : {}) },
       "",
       viewHash(next)
     );
@@ -76,11 +84,29 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
   }
   function open(id: string, element?: HTMLElement) {
     if (element) opener.current = element;
-    navigate({ ...view, edition: id });
+    navigate({ ...view, edition: id }, false, true);
+  }
+  function step(id: string) {
+    const tile = tiles.current?.querySelector<HTMLElement>(
+      `[data-edition-id="${CSS.escape(id)}"] button`
+    );
+    if (tile) opener.current = tile;
+    stepped.current = true;
+    navigate(
+      { ...view, edition: id },
+      true,
+      history.state?.game === reader.scope && history.state?.detail === true
+    );
   }
   function close() {
-    // Local dismissal replaces only the detail entry. Browser Back/Forward entries remain ordinary history.
-    navigate({ ...view, edition: "" }, true);
+    if (
+      history.state?.game === reader.scope &&
+      history.state?.detail === true
+    ) {
+      history.back();
+    } else {
+      navigate({ ...view, edition: "" }, true);
+    }
   }
   const edition = detail.value;
   return (
@@ -115,7 +141,6 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
             icon={BookOpen}
             variant="quiet"
             aria-current={active ? "page" : undefined}
-            aria-pressed={active}
             onClick={() => navigate({ ...view, home: false })}
           >
             Catalog
@@ -216,9 +241,16 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
                 {listing.value.total} Editions · Page {view.query.page} of{" "}
                 {listing.value.pages}
               </p>
-              <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-medium),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0">
+              <ul
+                ref={tiles}
+                className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-medium),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0"
+              >
                 {rows.map((e) => (
-                  <li key={`riftbound:edition:${e.id}`} className="min-w-0">
+                  <li
+                    key={`riftbound:edition:${e.id}`}
+                    data-edition-id={e.id}
+                    className="min-w-0"
+                  >
                     <button
                       type="button"
                       className={`${ROOT} w-full`}
@@ -330,8 +362,8 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
         position={index >= 0 ? { index, total: rows.length } : null}
         canPrevious={index > 0}
         canNext={index >= 0 && index < rows.length - 1}
-        onPrevious={() => open(rows[index - 1].id)}
-        onNext={() => open(rows[index + 1].id)}
+        onPrevious={() => step(rows[index - 1].id)}
+        onNext={() => step(rows[index + 1].id)}
         art={edition ? <Art key={edition.id} edition={edition} /> : null}
       >
         {detail.failed ? (

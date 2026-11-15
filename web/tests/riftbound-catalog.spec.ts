@@ -42,11 +42,46 @@ for (const width of [1280, 390]) {
       name: "Ember Scout, FL 001, Foil",
       exact: true,
     });
+    // Keep a distinct list entry behind the searched page for dismissal history checks.
+    await page.getByRole("button", { name: "PrizeCheck", exact: true }).click();
+    const homeHash = new URL(page.url()).hash;
+    await page.getByRole("button", { name: "Browse Catalog" }).click();
     await foil.focus();
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Foil", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(foil).toBeFocused();
+    await page.goBack();
+    await expect(page).toHaveURL((url) => url.hash === homeHash);
+    await expect(dialog).not.toBeVisible();
+    await page.goForward();
+    await expect(search).toHaveValue("001");
+    const standard = page.getByRole("button", {
+      name: "Ember Scout, FL 001, Standard",
+      exact: true,
+    });
+    await standard.click();
+    await expect(dialog.getByText("Standard", { exact: true })).toBeVisible();
+    await dialog
+      .getByRole("button", { name: "Next card", exact: true })
+      .click();
+    await expect(dialog.getByText("Foil", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(foil).toBeFocused();
+    await page.goBack();
+    await expect(page).toHaveURL((url) => url.hash === homeHash);
+    await expect(dialog).not.toBeVisible();
+    await page.goForward();
+    await standard.click();
+    await expect(dialog.getByText("Standard", { exact: true })).toBeVisible();
+    await dialog
+      .getByRole("button", { name: "Next card", exact: true })
+      .click();
+    await expect(dialog.getByText("Foil", { exact: true })).toBeVisible();
+    await page.goBack();
     await expect(dialog).not.toBeVisible();
     await expect(foil).toBeFocused();
     await foil.click();
@@ -58,6 +93,7 @@ for (const width of [1280, 390]) {
     await page.goForward();
     await expect(dialog.getByText("Foil", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Close card details" }).click();
+    await expect(dialog).not.toBeVisible();
     await page.getByRole("button", { name: "PrizeCheck", exact: true }).click();
     await page.getByRole("link", { name: "Skip to content" }).focus();
     await page.keyboard.press("Enter");
