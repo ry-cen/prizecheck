@@ -1,3 +1,9 @@
+import {
+  locationParents,
+  reviewedLocationParent,
+  validLocationDestination,
+  LOCATION_REVIEW_MESSAGE,
+} from "./locationDestinations";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
@@ -119,36 +125,39 @@ export function LocationWriteDialog({
     node &&
     !(node.copyCount ?? 0) &&
     !nodes.some((n) => n.parent_id === node.id);
-  const branch = new Set(id ? [id] : []);
-  let size = -1;
-  while (size !== branch.size) {
-    size = branch.size;
-    for (const n of nodes)
-      if (n.parent_id && branch.has(n.parent_id)) branch.add(n.id);
-  }
-  const height = node
-    ? Math.max(
-        ...nodes
-          .filter((n) => branch.has(n.id))
-          .map((n) => n.depth - node.depth + 1)
-      )
-    : 1;
-  const parents = nodes.filter(
-    (n) =>
-      n.kind !== "deck" &&
-      !(n.name === "Unsorted" && n.parent_id === null) &&
-      !branch.has(n.id) &&
-      (create || n.id !== node?.parent_id) &&
-      n.depth + height <= 12
-  );
+  const parents = locationParents(nodes, id, create);
   const stale =
     error instanceof CollectionError && staleLocationCodes.has(error.code);
-  const unchanged =
-    !create &&
-    (step === "rename"
-      ? name.trim() === node?.name
-      : step === "move" && (parentId || null) === node?.parent_id);
-  const confirmedName = confirmName.trim() === node?.name;
+  function validInput(currentNodes: LocationNode[]) {
+    const current = currentNodes.find((n) => n.id === id);
+    if (!create && !current) return false;
+    if (create || step === "move")
+      return validLocationDestination(
+        currentNodes,
+        id,
+        create,
+        parentId,
+        conversion
+      );
+    if (step === "rename") return name.trim() !== current?.name;
+    return (
+      step === "delete" &&
+      confirmName.trim() === current?.name &&
+      !(current?.copyCount ?? 0) &&
+      !currentNodes.some((n) => n.parent_id === id)
+    );
+  }
+  function reviewTree(updated: LocationNode[]) {
+    setNodes(updated);
+    attempt.current = null;
+    if (create || step === "move") {
+      const next = reviewedLocationParent(updated, id, create, parentId);
+      setParent(next);
+      return next === parentId && validInput(updated);
+    }
+    return validInput(updated);
+  }
+
   function begin(next: typeof step) {
     attempt.current = null;
     setError(undefined);
@@ -159,14 +168,7 @@ export function LocationWriteDialog({
   }
   async function submit(reload = false) {
     const run = lifetime.current;
-    if (
-      !run?.alive ||
-      lock.current ||
-      unchanged ||
-      (step === "move" && parentId === "__choose__") ||
-      (step === "delete" && (!empty || !confirmedName))
-    )
-      return;
+    if (!run?.alive || lock.current || !validInput(nodes)) return;
     lock.current = true;
     setBusy(true);
     try {
@@ -174,8 +176,7 @@ export function LocationWriteDialog({
       if (reload) {
         currentNodes = await reader.locations(run.controller.signal);
         if (!run.alive) return;
-        setNodes(currentNodes);
-        attempt.current = null;
+        if (!reviewTree(currentNodes)) return;
       }
       const current = currentNodes.find((n) => n.id === id);
       const destination = currentNodes.find((n) => n.id === parentId);
@@ -186,7 +187,12 @@ export function LocationWriteDialog({
             name,
             parentId: parentId || null,
             ...(parentId ? { parentVersion: destination?.version } : {}),
-            ...(stocked && conversion
+            ...(currentNodes.some(
+              (n) =>
+                n.id === parentId &&
+                n.kind === "storage_leaf" &&
+                (n.copyCount ?? 0) > 0
+            ) && conversion
               ? { conversion: "move_holdings_to_child" as const }
               : {}),
           };
@@ -254,8 +260,7 @@ export function LocationWriteDialog({
           try {
             const updated = await reader.locations(run.controller.signal);
             if (!run.alive) return;
-            setNodes(updated);
-            attempt.current = null;
+            reviewTree(updated);
           } catch {
             /* Keep the original refusal; Reload and retry can reload again. */
           }
@@ -295,12 +300,7 @@ export function LocationWriteDialog({
       ) : !create && !node ? (
         <div className="flex flex-col gap-2">
           {error !== undefined && (
-            <p role="alert">{locationError(error, name)}</p>
-          )}
-          {stale && (
-            <Button disabled={busy} onClick={() => void submit(true)}>
-              Reload and retry
-            </Button>
+            <p role="alert">That Location no longer exists.</p>
           )}
           {nodes
             .filter((n) => !(n.name === "Unsorted" && n.parent_id === null))
@@ -380,11 +380,9 @@ export function LocationWriteDialog({
                 setError(undefined);
               }}
             >
-              {!create && (
-                <option value="__choose__" disabled>
-                  Choose a parent
-                </option>
-              )}
+              <option value="__choose__" disabled>
+                Choose a parent
+              </option>
               {(create || node?.parent_id !== null) && (
                 <option value="">Top level</option>
               )}
@@ -432,33 +430,31 @@ export function LocationWriteDialog({
           )}
           {error !== undefined && (
             <p role="alert" className="m-0">
-              {locationError(
-                error,
-                node?.name ?? name,
-                create,
-                step === "move",
-                parent ? index.path(parent.id) : "Top level"
-              )}
+              {stale
+                ? LOCATION_REVIEW_MESSAGE
+                : locationError(
+                    error,
+                    node?.name ?? name,
+                    create,
+                    step === "move",
+                    parent ? index.path(parent.id) : "Top level"
+                  )}
             </p>
           )}
           <div className="flex flex-wrap justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
             {stale ? (
-              <Button disabled={busy} onClick={() => void submit(true)}>
+              <Button
+                disabled={busy || !validInput(nodes)}
+                onClick={() => void submit(true)}
+              >
                 Reload and retry
               </Button>
             ) : (
               <Button
                 type="submit"
                 variant={step === "delete" ? "danger" : "primary"}
-                disabled={
-                  busy ||
-                  (create && stocked && !conversion) ||
-                  (step === "delete" && !empty) ||
-                  (step === "move" && (stocked || parentId === "__choose__")) ||
-                  unchanged ||
-                  (step === "delete" && !confirmedName)
-                }
+                disabled={busy || !validInput(nodes)}
               >
                 {busy
                   ? "Saving…"

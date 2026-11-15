@@ -19,6 +19,18 @@ export type FixtureStore = {
   rows: HoldingRow[];
   revision: number;
 };
+export type LocationFixtureChange =
+  | { kind: "stock" | "delete"; id: string }
+  | { kind: "cycle"; id: string; parentId: string };
+const pendingLocationChanges = new Map<string, LocationFixtureChange>();
+/** Test-only concurrent-edit hook, consumed immediately before the next Location command. */
+export function queueLocationFixtureChange(
+  owner: "a" | "b",
+  change: LocationFixtureChange,
+  scenario: CollectionScenario = "normal"
+) {
+  pendingLocationChanges.set(storeKey(owner, scenario), change);
+}
 const stores = new Map<string, FixtureStore>();
 const storeKey = (owner: string, scenario: CollectionScenario) =>
   JSON.stringify([owner, scenario]);
@@ -182,6 +194,7 @@ export function collectionFixtureStore(
 }
 export function resetCollectionFixtures() {
   stores.clear();
+  pendingLocationChanges.clear();
   writers.clear();
 }
 
@@ -304,6 +317,44 @@ export function collectionFixtureWriter(
       );
       if (target) target.version++;
       throw new CollectionError("STALE_LOCATION");
+    }
+    const concurrent = action.endsWith("Location")
+      ? pendingLocationChanges.get(key)
+      : undefined;
+    if (concurrent) {
+      pendingLocationChanges.delete(key);
+      if (concurrent.kind === "stock")
+        store.rows.push({
+          edition: editions[0],
+          locationId: concurrent.id,
+          quantity: 1,
+          version: store.revision,
+        });
+      else if (concurrent.kind === "cycle") {
+        const node = store.locations.find((n) => n.id === concurrent.id)!;
+        node.parent_id = concurrent.parentId;
+        store.locations.find((n) => n.id === concurrent.parentId)!.kind =
+          "organization";
+        for (const descendant of store.locations) {
+          let above = descendant.parent_id;
+          descendant.depth = 1;
+          while (above) {
+            descendant.depth++;
+            above = store.locations.find((n) => n.id === above)!.parent_id;
+          }
+        }
+      } else {
+        const removed = new Set([concurrent.id]);
+        let count = -1;
+        while (count !== removed.size) {
+          count = removed.size;
+          for (const node of store.locations)
+            if (node.parent_id && removed.has(node.parent_id))
+              removed.add(node.id);
+        }
+        store.locations = store.locations.filter((n) => !removed.has(n.id));
+        store.rows = store.rows.filter((r) => !removed.has(r.locationId));
+      }
     }
     const result = apply();
     replay.set(requestKey, {
