@@ -16,7 +16,7 @@ npm run local:exclusive -- npm run ios:sync
 
 The native project lives in `mobile/ios`. `npm run ios:sync` rebuilds packaged assets and syncs plugins. Generated web assets and Capacitor JSON are ignored; commit the native scaffold and Swift package manifest. No signing team or credentials are configured.
 
-## Local fixture walkthrough (future simulator host)
+## Local fixture walkthrough (simulator host)
 
 Run `npm run ios:fixture` on the simulator's host. It binds **127.0.0.1:4319 only**. The app launches this page using the operating system's browser (`AppLauncher`), not embedded provider sign-in. The page offers success, cancellation and error outcomes, with no credential fields. A return link uses `prizecheck-prototype://auth/return`. `App.appUrlOpen` handles a running app; `App.getLaunchUrl` handles a cold start.
 

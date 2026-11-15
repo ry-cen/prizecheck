@@ -48,12 +48,13 @@ The initial Capacitor add attempt from `mobile/` failed because it is not an npm
 
 ## Unproven / never run
 
-- Native Xcode compilation, simulator interaction and physical iPhone sign-in: not run. Linux generation/sync and jsdom tests are not device evidence.
+- Physical iPhone sign-in: not run. Linux generation/sync, jsdom tests and simulator runs are not device evidence. Unsigned native compilation and simulator UI later ran on hosted macOS; see [the exact-head result](#passing-hosted-native-result--32765b76).
+- Native 30-minute session expiry: not exercised on the simulator or a device. Expiry has jsdom/unit evidence only.
 - Real-account authentication or a real Collection in the native shell: not implemented or tested. Only sample data is shown. A production gateway-mediated handoff and secure credential-storage design remain a separate decision.
 - API tests, operations suite, full application gate and scanner real-model execution: not run for this slice. No API tests were changed.
 - GitHub CI and independent review are separate acceptance evidence; local results do not approve this implementation.
 
-See [README](README.md) for the proposed unsigned hosted macOS simulator build and its exact next action. No macOS workflow or runner/account permissions were added.
+This list was first written before any macOS work. The continuation below added the PR #671-only simulator workflow; no runner or account permissions were changed.
 
 ## Simulator validation continuation
 
@@ -72,3 +73,16 @@ Native 30-minute expiry, physical-device behavior, real accounts and a real priv
 [Run 43670914443](https://github.com/ry-cen/prizecheck/actions/runs/43670914443/job/132680519949) used the standard hosted macOS/Xcode 26.3 environment and logged `CODE_SIGNING_ALLOWED = NO`. Swift Package Manager resolved the native dependencies, the app and XCTest bundle compiled/linked, and xcodebuild printed **TEST BUILD SUCCEEDED**. This establishes an actual unsigned simulator-target native build at head `41b2a206bb925415bcf44ed140333c5ff597ffd5`, not a successful workflow or UI run.
 
 The workflow step failed because `tee` opened `.scratch/ios-build.log` before the directory existed; `pipefail` correctly reported that logging failure. Simulator install/launch and all four UI scenarios were skipped, so none has native UI evidence from this run. The repair explicitly creates `.scratch` before the pipeline; it does not suppress failures, change permissions or alter the packaged app.
+
+### Passing hosted native result — 32765b76
+
+[Run 43671627449](https://github.com/ry-cen/prizecheck/actions/runs/43671627449/job/132682728586) at head `32765b762a627c017b5bab6d361b2ff8a00874f9` used macOS 15.7.9 with Xcode 26.3. The unsigned build (`CODE_SIGNING_ALLOWED=NO`) printed **TEST BUILD SUCCEEDED**. `simctl` then installed and launched the app on an iPhone 17 simulator running iOS 26.2, and XCTest reported **4 passed, 0 failed, 0 skipped**:
+
+- warm Safari return, then relaunch recovery, sign-out and a signed-out relaunch
+- cold return after the app was terminated
+- browser cancellation and error
+- app cancellation after a native resume
+
+The fixture listener was confirmed at 127.0.0.1:4319 on the same host. Linux Verify for the same PR head (its merge ref with dev `1bac5801`) passed 2,971 web unit tests and the HTTP contract test. Its shallow checkout skipped three historical migration tooling tests, which do run locally.
+
+This is simulator evidence with sample data only. It does not cover native 30-minute expiry, a physical iPhone, real accounts or a real Collection.
