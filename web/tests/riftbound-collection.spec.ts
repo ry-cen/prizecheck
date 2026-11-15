@@ -77,10 +77,20 @@ for (const width of [1280, 375]) {
       await expect(
         page.getByRole("button", { name: "Locations", exact: true })
       ).toBeFocused();
+    if (width === 375) {
+      const address = page.url();
+      await page
+        .getByRole("button", { name: "Locations", exact: true })
+        .click();
+      await tree
+        .getByRole("button", { name: "Blue binder", exact: true })
+        .click();
+      await expect(page).toHaveURL(address);
+    }
     await page.goBack();
     await expect(
       page.getByRole("heading", { name: "All owned", exact: true })
-    ).toBeVisible();
+    ).toBeFocused();
     await page.goForward();
     await expect(
       page.getByRole("heading", { name: "Blue binder", exact: true })
@@ -91,6 +101,19 @@ for (const width of [1280, 375]) {
     const tile = results.getByRole("button").first();
     await tile.focus();
     await page.keyboard.press("Enter");
+    await expect(results.locator('li button[aria-pressed="true"]')).toHaveCount(
+      1
+    );
+    if (width === 1280) {
+      await tile.click();
+      await expect(
+        results.locator('li button[aria-pressed="true"]')
+      ).toHaveCount(0);
+      await tile.click();
+      await expect(
+        results.locator('li button[aria-pressed="true"]')
+      ).toHaveCount(1);
+    }
     const details =
       width === 375
         ? page.getByRole("dialog", { name: "Ember Scout" })
@@ -143,7 +166,27 @@ for (const width of [1280, 375]) {
       await expect(
         details.getByText("Binders / Blue binder · 2", { exact: true })
       ).toBeInViewport();
+      const columns = await results
+        .locator("ul")
+        .evaluate(
+          (el) => getComputedStyle(el).gridTemplateColumns.split(" ").length
+        );
+      expect(columns).toBe(5);
+      await expect(search).toHaveAttribute("placeholder", "Search your cards…");
+      expect((await search.boundingBox())!.width).toBeLessThanOrEqual(420);
+      await expect(
+        details.getByText("Variant Standard", { exact: true })
+      ).toBeVisible();
       await shot("desktop-all-owned-inspector");
+      const lower = results.locator("li button").last();
+      await lower.scrollIntoViewIfNeeded();
+      await lower.click();
+      const inspectorHeading = details.getByRole("heading");
+      await expect(inspectorHeading).toBeInViewport();
+      const bounds = await inspectorHeading.boundingBox();
+      expect(bounds!.y).toBeGreaterThanOrEqual(64);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(800);
+      await shot("desktop-sticky-inspector");
     }
     expect(
       await page.evaluate(() =>
@@ -251,5 +294,34 @@ for (const width of [1280, 375]) {
         name: /Ember Scout|Forgotten Sentinel|Shore Guardian/,
       })
     ).toHaveCount(0);
+  });
+}
+
+for (const [owner, pageNumber, expectedPage, tiles] of [
+  ["b", 2, 1, 2],
+  ["a", 9, 2, 12],
+] as const) {
+  test(`clamps owner ${owner} Collection page ${pageNumber}`, async ({
+    page,
+  }) => {
+    await page.goto(
+      `${entry}?owner=${owner}${hash}&collectionPage=${pageNumber}`
+    );
+    await expect(
+      page
+        .getByRole("region", { name: "Collection results" })
+        .getByRole("listitem")
+    ).toHaveCount(tiles);
+    await expect(page).toHaveURL(
+      (url) =>
+        new URLSearchParams(url.hash.slice(11)).get("collectionPage") ===
+        String(expectedPage)
+    );
+    await expect(
+      page.getByText("No cards in this Location.", { exact: true })
+    ).toHaveCount(0);
+    await expect(
+      page.getByText(`Page ${expectedPage} of ${expectedPage}`, { exact: true })
+    ).toBeVisible();
   });
 }

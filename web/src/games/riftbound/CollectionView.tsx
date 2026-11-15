@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../../shell/PageHeader";
 import { Button } from "../../ui/Button";
+import { ScrollArea } from "../../ui/ScrollArea";
 import { SearchField } from "../../ui/SearchField";
 import { Dialog } from "../../ui/Dialog";
 import { CopyTile } from "../../ui/CopyTile";
@@ -10,6 +11,7 @@ import { MOBILE_QUERY, useMediaQuery } from "../../workspace/media";
 import {
   collectionKey,
   expandCopies,
+  plural,
   type CollectionQuery,
   type CollectionReader,
   type HoldingRow,
@@ -32,8 +34,8 @@ export function CollectionView({
   const [drawer, setDrawer] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<{
-    key: string;
-    row: HoldingRow;
+    viewKey: string;
+    row: HoldingRow & { key: string };
   } | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const selectedOpener = useRef<HTMLElement | null>(null);
@@ -41,16 +43,27 @@ export function CollectionView({
   const key = collectionKey(reader.owner, query);
   const trees = useRead(
     JSON.stringify(["riftbound", "locations", reader.owner]),
-    useCallback((s) => reader.locations(s), [reader])
+    useCallback((s) => reader.locations(s), [reader]),
+    active
   );
   const listing = useRead(
     key,
     useCallback(
       (s) => reader.list(query, s),
       [reader, query.location, query.search, query.page]
-    )
+    ),
+    active
   );
-  const selected = active && selection?.key === key ? selection.row : null;
+  const pageOutOfRange = !!listing.value && query.page > listing.value.pages;
+  useEffect(() => {
+    if (active && listing.value && query.page > listing.value.pages)
+      onQuery({ ...query, page: Math.max(1, listing.value.pages) }, true);
+  }, [active, listing.value, query, onQuery]);
+  const inspector = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (inspector.current) inspector.current.scrollTop = 0;
+  }, [selection?.row.key]);
+  const selected = active && selection?.viewKey === key ? selection.row : null;
   const holdings = useRead(
     JSON.stringify([
       "riftbound",
@@ -93,7 +106,8 @@ export function CollectionView({
     }
   }, [active]);
   function choose(location: string) {
-    skipHeadingFocus.current = phone;
+    skipHeadingFocus.current =
+      phone && (location !== query.location || query.page !== 1);
     setSelection(null);
     onQuery({ ...query, location, page: 1 });
     setDrawer(false);
@@ -124,16 +138,19 @@ export function CollectionView({
   const details = selected && (
     <div className="flex min-w-0 flex-col gap-2 [&_p]:m-0 [&_p]:text-meta">
       <Art key={selected.edition.id} row={selected} />
-      <h2 className="m-0 text-heading">{selected.edition.name}</h2>
+      <h2 className="m-0 text-heading font-semibold">
+        {selected.edition.name}
+      </h2>
       <p>
         {selected.edition.set.code} · {selected.edition.number}
       </p>
-      <p>{selected.edition.finish}</p>
+      <p>Variant {selected.edition.finish}</p>
       <p>
         {[selected.edition.domain, selected.edition.type]
           .filter(Boolean)
           .join(" · ")}
       </p>
+      <div role="separator" className="my-2 border-t border-border" />
       {holdings.failed ? (
         <Failure retry={holdings.retry}>Locations couldn't be loaded.</Failure>
       ) : !holdings.value ? (
@@ -162,34 +179,38 @@ export function CollectionView({
           data-collection-content
           className="min-w-0 flex-1 p-7 phone:p-4 phone:[&_h1]:text-heading"
         >
-          <div className="hidden phone:block">
+          <div className="mb-4 hidden phone:block">
             <Button ref={opener} onClick={() => setDrawer(true)}>
               Locations
             </Button>
           </div>
-          <PageHeader
-            headingRef={heading}
-            title={
-              query.location === "all"
-                ? "All owned"
-                : (index.byId.get(query.location)?.name ?? "Location")
-            }
-          />
-          {listing.value && (
-            <p className="text-meta text-text-muted">
-              {listing.value.totals.copies} copies ·{" "}
-              {listing.value.totals.editions} Editions
-            </p>
-          )}
-          <SearchField
-            label="Search your cards"
-            placeholder="Search by name or collector number"
-            value={query.search}
-            onChange={(e) => {
-              setSelection(null);
-              onQuery({ ...query, search: e.target.value, page: 1 }, true);
-            }}
-          />
+          <div className="mb-5 flex items-baseline gap-4 phone:flex-wrap phone:gap-y-2 [&>div]:mb-0">
+            <PageHeader
+              headingRef={heading}
+              title={
+                query.location === "all"
+                  ? "All owned"
+                  : (index.byId.get(query.location)?.name ?? "Location")
+              }
+            />
+            {listing.value && (
+              <p className="m-0 text-meta text-text-subtle tabular-nums">
+                {plural(listing.value.totals.copies, "copy", "copies")} ·{" "}
+                {plural(listing.value.totals.editions, "edition", "editions")}
+              </p>
+            )}
+          </div>
+          <div className="max-w-[420px]">
+            <SearchField
+              label="Search your cards"
+              placeholder="Search your cards…"
+              value={query.search}
+              onChange={(e) => {
+                setSelection(null);
+                onQuery({ ...query, search: e.target.value, page: 1 }, true);
+              }}
+            />
+          </div>
           <div className="mt-5 flex min-w-0 items-start gap-7">
             <section aria-label="Collection results" className="min-w-0 flex-1">
               {listing.failed ? (
@@ -201,7 +222,7 @@ export function CollectionView({
                 >
                   Cards couldn't be loaded.
                 </Failure>
-              ) : !listing.value ? (
+              ) : !listing.value || pageOutOfRange ? (
                 <p role="status">Loading Collection…</p>
               ) : listing.value.collectionEmpty ? (
                 <div role="status">
@@ -227,7 +248,7 @@ export function CollectionView({
                 </div>
               ) : (
                 <>
-                  <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-medium),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0">
+                  <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-small),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0">
                     {expandCopies(listing.value.rows).map((row) => (
                       <li key={row.key} className="min-w-0">
                         <CopyTile
@@ -242,13 +263,14 @@ export function CollectionView({
                           imageUrl={row.edition.art}
                           names={false}
                           caption={index.byId.get(row.locationId)?.name}
-                          selected={
-                            selected?.edition.id === row.edition.id &&
-                            selected?.locationId === row.locationId
-                          }
+                          selected={selected?.key === row.key}
                           onClick={(e) => {
                             selectedOpener.current = e.currentTarget;
-                            setSelection({ key, row });
+                            setSelection(
+                              selected?.key === row.key
+                                ? null
+                                : { viewKey: key, row }
+                            );
                           }}
                         />
                       </li>
@@ -279,8 +301,17 @@ export function CollectionView({
               )}
             </section>
             {!phone && (
-              <aside aria-label="Card details" className="w-72 shrink-0">
-                {details ?? <p>Select a card to see its details.</p>}
+              <aside
+                aria-label="Card details"
+                className="sticky top-[calc(var(--layout-header-height)+var(--space-4))] w-72 shrink-0"
+              >
+                <ScrollArea
+                  className="max-h-[calc(100dvh-var(--layout-header-height)-2*var(--space-4))]"
+                  viewportRef={inspector}
+                  viewportClassName="overscroll-contain"
+                >
+                  {details ?? <p>Select a card to see its details.</p>}
+                </ScrollArea>
               </aside>
             )}
           </div>

@@ -7,10 +7,12 @@ import {
   emptyCollectionQuery,
   expandCopies,
   pageHoldings,
+  plural,
 } from "./collection";
 import { collectionFixtureReader } from "./local/collectionFixtures";
 import { editions } from "./local/fixtures";
 import { parseView, viewHash } from "./navigation";
+import { CollectionView } from "./CollectionView";
 import { RiftboundApp } from "./RiftboundApp";
 import { fixtureReader } from "./local/fixtures";
 import { useRead } from "./read";
@@ -20,6 +22,12 @@ async function flush<T>(pending: Promise<T>) {
   return pending;
 }
 describe("fixture Collection", () => {
+  it("pluralizes copy and edition totals locally", () => {
+    expect(plural(1, "copy", "copies")).toBe("1 copy");
+    expect(plural(2, "copy", "copies")).toBe("2 copies");
+    expect(plural(1, "edition", "editions")).toBe("1 edition");
+    expect(plural(2, "edition", "editions")).toBe("2 editions");
+  });
   it("pages copy ranges without changing Holding quantities", () => {
     const before = {
       edition: editions[0],
@@ -192,11 +200,108 @@ describe("fixture Collection", () => {
       vi.unstubAllGlobals();
     }
   });
-  it("remounts the composition when the owner reader changes", async () => {
+  it.each([1, 2])(
+    "rekeys reads and selection when the owner changes on page %s",
+    async (pageNumber) => {
+      vi.useFakeTimers();
+      const dom = new JSDOM('<div id="root"></div>', {
+        url: `http://localhost/#riftbound:section=collection&collectionPage=${pageNumber}`,
+      });
+      Object.defineProperty(dom.window, "matchMedia", {
+        value: () => ({
+          matches: false,
+          addEventListener() {},
+          removeEventListener() {},
+        }),
+      });
+      for (const [name, value] of Object.entries({
+        window: dom.window,
+        document: dom.window.document,
+        location: dom.window.location,
+        history: dom.window.history,
+        HTMLElement: dom.window.HTMLElement,
+        IS_REACT_ACT_ENVIRONMENT: true,
+      }))
+        vi.stubGlobal(name, value);
+      const root = createRoot(document.getElementById("root")!);
+      const reader = fixtureReader();
+      try {
+        await act(async () =>
+          root.render(
+            createElement(RiftboundApp, {
+              reader,
+              collection: collectionFixtureReader("a"),
+            })
+          )
+        );
+        await act(async () => {
+          await vi.runAllTimersAsync();
+        });
+        const tile = document.querySelector<HTMLButtonElement>(
+          'section[aria-label="Collection results"] li button'
+        )!;
+        expect(tile.getAttribute("aria-label")).toContain(
+          pageNumber === 1 ? "Ember Scout" : "Shore Guardian"
+        );
+        await act(async () => tile.click());
+        expect(
+          document.querySelectorAll('li button[aria-pressed="true"]')
+        ).toHaveLength(1);
+        await act(async () =>
+          root.render(
+            createElement(RiftboundApp, {
+              reader,
+              collection: collectionFixtureReader("b"),
+            })
+          )
+        );
+        expect(document.body.textContent).not.toContain("Ember Scout");
+        await act(async () => {
+          await vi.runAllTimersAsync();
+        });
+        expect(document.body.textContent).not.toContain(
+          "No cards in this Location."
+        );
+        // A smaller owner's invalid page resolves first; its replacement page is a second read.
+        expect(
+          new URLSearchParams(location.hash.slice(11)).get("collectionPage")
+        ).toBe("1");
+        await act(async () => {
+          await vi.runAllTimersAsync();
+        });
+        const labels = [
+          ...document.querySelectorAll(
+            'section[aria-label="Collection results"] li button'
+          ),
+        ].map((e) => e.getAttribute("aria-label"));
+        expect(labels).toHaveLength(2);
+        expect(
+          document.querySelector('aside[aria-label="Card details"] h2')
+        ).toBeNull();
+        expect(
+          document.querySelectorAll('li button[aria-pressed="true"]')
+        ).toHaveLength(0);
+        expect(
+          new URLSearchParams(location.hash.slice(11)).get("collectionPage")
+        ).toBe("1");
+        expect(document.body.textContent).not.toContain(
+          "No cards in this Location."
+        );
+        expect(labels.every((label) => label?.includes("Beacon Keeper"))).toBe(
+          true
+        );
+        expect(document.body.textContent).not.toContain("Ember Scout");
+      } finally {
+        await act(async () => root.unmount());
+        dom.window.close();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    }
+  );
+  it("pauses Collection reads while inactive and keeps values on return", async () => {
     vi.useFakeTimers();
-    const dom = new JSDOM('<div id="root"></div>', {
-      url: "http://localhost/#riftbound:section=collection",
-    });
+    const dom = new JSDOM('<div id="root"></div>');
     Object.defineProperty(dom.window, "matchMedia", {
       value: () => ({
         matches: false,
@@ -204,57 +309,51 @@ describe("fixture Collection", () => {
         removeEventListener() {},
       }),
     });
-    for (const [name, value] of Object.entries({
-      window: dom.window,
-      document: dom.window.document,
-      location: dom.window.location,
-      history: dom.window.history,
-      HTMLElement: dom.window.HTMLElement,
-      IS_REACT_ACT_ENVIRONMENT: true,
-    }))
-      vi.stubGlobal(name, value);
+    vi.stubGlobal("window", dom.window);
+    vi.stubGlobal("document", dom.window.document);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const root = createRoot(document.getElementById("root")!);
-    const reader = fixtureReader();
+    const reader = collectionFixtureReader("a");
+    const tree = vi.spyOn(reader, "locations");
+    const list = vi.spyOn(reader, "list");
+    const noop = () => {};
+    const render = (active: boolean) =>
+      act(async () =>
+        root.render(
+          createElement(CollectionView, {
+            reader,
+            active,
+            query: emptyCollectionQuery,
+            onQuery: noop,
+            onCatalog: noop,
+          })
+        )
+      );
     try {
-      await act(async () =>
-        root.render(
-          createElement(RiftboundApp, {
-            reader,
-            collection: collectionFixtureReader("a"),
-          })
-        )
-      );
+      await render(false);
+      expect(tree).not.toHaveBeenCalled();
+      expect(list).not.toHaveBeenCalled();
+      await render(true);
+      expect(tree).toHaveBeenCalledTimes(1);
+      expect(list).toHaveBeenCalledTimes(1);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
-      const tile = document.querySelector<HTMLButtonElement>(
-        'section[aria-label="Collection results"] li button'
-      )!;
-      expect(tile.getAttribute("aria-label")).toContain("Ember Scout");
-      await act(async () => tile.click());
-      expect(document.body.textContent).toContain("Ember Scout");
-      await act(async () =>
-        root.render(
-          createElement(RiftboundApp, {
-            reader,
-            collection: collectionFixtureReader("b"),
-          })
-        )
-      );
-      expect(document.body.textContent).not.toContain("Ember Scout");
+      expect(
+        document.querySelectorAll('section[aria-label="Collection results"] li')
+      ).toHaveLength(24);
+      await render(false);
       await act(async () => {
         await vi.runAllTimersAsync();
       });
-      const labels = [
-        ...document.querySelectorAll(
-          'section[aria-label="Collection results"] li button'
-        ),
-      ].map((e) => e.getAttribute("aria-label"));
-      expect(labels).toHaveLength(2);
-      expect(labels.every((label) => label?.includes("Beacon Keeper"))).toBe(
-        true
-      );
-      expect(document.body.textContent).not.toContain("Ember Scout");
+      expect(tree).toHaveBeenCalledTimes(1);
+      expect(list).toHaveBeenCalledTimes(1);
+      await render(true);
+      expect(
+        document.querySelectorAll('section[aria-label="Collection results"] li')
+      ).toHaveLength(24);
+      expect(tree).toHaveBeenCalledTimes(2);
+      expect(list).toHaveBeenCalledTimes(2);
     } finally {
       await act(async () => root.unmount());
       dom.window.close();
