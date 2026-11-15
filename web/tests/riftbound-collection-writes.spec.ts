@@ -506,3 +506,40 @@ for (const width of [1280, 375]) {
     expect(restored.rows[0].quantity).toBe(3);
   });
 }
+
+test("desktop pagination clears the selection pill at the bottom", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${entry}${collectionHash}`);
+  const results = page.getByRole("region", { name: "Collection results" });
+  await expect(results.getByRole("listitem")).toHaveCount(24);
+  await results.getByRole("button").first().click();
+  const pill = page.locator('[aria-label="Selected copies"]');
+  await expect(pill).toBeVisible();
+  await expect(results).toContainText("Page 1 of 2");
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight)
+  );
+  const next = results.getByRole("button", { name: "Next page", exact: true });
+  await expect(next).toBeInViewport();
+  const nextBox = await next.boundingBox();
+  const pillBox = await pill.boundingBox();
+  expect(
+    nextBox &&
+      pillBox &&
+      (nextBox.y + nextBox.height <= pillBox.y ||
+        nextBox.y >= pillBox.y + pillBox.height ||
+        nextBox.x + nextBox.width <= pillBox.x ||
+        nextBox.x >= pillBox.x + pillBox.width)
+  ).toBe(true);
+  const path = info.outputPath("desktop-pagination-selection.png");
+  await page.screenshot({ path });
+  await info.attach("Desktop pagination with selection", {
+    path,
+    contentType: "image/png",
+  });
+  await next.click();
+  await expect(results).toContainText("Page 2 of 2");
+  await expect(results.getByRole("listitem")).toHaveCount(12);
+});
