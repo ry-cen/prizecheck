@@ -392,6 +392,9 @@ function App() {
           <DeckBuilderPage
             key={deckId}
             deckId={deckId}
+            address={address}
+            onNavigate={navigate}
+            onCloseCard={closeOverlay}
             onAllDecks={() => navigate(pageDef("decks").path)}
             onReplaceList={() => navigate(replacePath(deckId))}
             onWantList={() => navigate(wantListPath(deckId))}

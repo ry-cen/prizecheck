@@ -121,7 +121,16 @@ export function useRoute(): Route {
   } | null>(null);
   const currentEntry = useRef(entry);
   const currentState = useRef(window.history.state);
-  const positions = useRef(new Map<string, number>()).current;
+  // The current entry survives a reload; the in-memory map handles visits within this document.
+  const positions = useRef(
+    new Map<string, number>(
+      typeof window.history.state?.prizecheckScroll === "number" &&
+        Number.isFinite(window.history.state.prizecheckScroll) &&
+        window.history.state.prizecheckScroll >= 0
+        ? [[entry, window.history.state.prizecheckScroll]]
+        : []
+    )
+  ).current;
   const focuses = useRef(new Map<string, SavedFocus | null>()).current;
   const update = () => {
     setPath(window.location.pathname);
@@ -141,6 +150,21 @@ export function useRoute(): Route {
   const leaving = useRef<Set<RegisteredGuard> | null>(null);
   // The pushed overlay entry whose Back is already on its way; cleared by the next popstate or navigation.
   const closing = useRef<string | null>(null);
+
+  useEffect(() => {
+    const rememberReloadPosition = () => {
+      window.history.replaceState(
+        { ...window.history.state, prizecheckScroll: window.scrollY },
+        ""
+      );
+    };
+    window.addEventListener("pagehide", rememberReloadPosition);
+    window.addEventListener("beforeunload", rememberReloadPosition);
+    return () => {
+      window.removeEventListener("pagehide", rememberReloadPosition);
+      window.removeEventListener("beforeunload", rememberReloadPosition);
+    };
+  }, []);
 
   useEffect(() => {
     const onPopState = () => {
