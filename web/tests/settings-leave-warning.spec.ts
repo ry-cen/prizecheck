@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { expect, test } from "./support/collectors";
@@ -43,6 +44,18 @@ for (const phone of [false, true]) {
       await expect(dialog).toBeVisible();
       await dialog.getByRole("button", { name: "Keep editing" }).click();
       await expect(name).toHaveValue("Ash K");
+      // A programmatic departure can start with body focused (for example after a sheet closes).
+      await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+      await expect(page.locator("body")).toBeFocused();
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("link", { name: "Collection", exact: true })
+        .evaluate((link) => (link as HTMLElement).click());
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "Keep editing" }).click();
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Settings" })
+      ).toBeFocused();
       const warning = page.waitForEvent("dialog");
       void page.reload().catch(() => {});
       const prompt = await warning;
@@ -101,5 +114,131 @@ for (const phone of [false, true]) {
       await expect(page).toHaveURL(/\/collection$/);
       expect(native).toEqual([]);
     });
+    for (const field of ["Display Name", "Handle", "Zip code"] as const) {
+      for (const editAgain of [false, true]) {
+        test(`${field}: delayed save after Discard ${editAgain ? "preserves a subsequent edit" : "returns clean"}`, async ({
+          page,
+        }) => {
+          const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+          try {
+            await startAsNewOwner(pool);
+          } finally {
+            await pool.end();
+          }
+          await signInAsOwner(page, "/settings");
+          const input = page.getByRole("textbox", { name: field, exact: true });
+          await expect(input).toBeVisible();
+          const original = await input.inputValue();
+          const tail = Array.from(
+            { length: 10 },
+            () => "bcdfghjklmnpqrstvwxz"[randomInt(20)]
+          ).join("");
+          const value =
+            field === "Display Name"
+              ? "Ash K"
+              : field === "Handle"
+                ? `ash_${tail}`
+                : "10001";
+          const newer =
+            field === "Zip code"
+              ? "10002"
+              : field === "Handle"
+                ? `ash_${tail}x`
+                : "Misty W";
+          const button = page.getByRole("button", {
+            name:
+              field === "Display Name"
+                ? "Save name"
+                : field === "Handle"
+                  ? "Save Handle"
+                  : "Save zip code",
+            exact: true,
+          });
+          const endpoint =
+            field === "Zip code"
+              ? "/api/social/discovery"
+              : field === "Handle"
+                ? "/api/profile/handle"
+                : "/api/profile/display-name";
+          let release!: () => void;
+          const released = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          let captured!: () => void;
+          const held = new Promise<void>((resolve) => {
+            captured = resolve;
+          });
+          const pattern = `**${endpoint}`;
+          await page.route(pattern, async (route) => {
+            if (route.request().method() !== "PUT") {
+              await route.continue();
+              return;
+            }
+            const response = await route.fetch();
+            expect(response.ok()).toBe(true);
+            captured();
+            await released;
+            await route.fulfill({ response });
+          });
+          const leave = () =>
+            page
+              .getByRole("navigation", { name: "Main views" })
+              .getByRole("link", { name: "Collection", exact: true })
+              .click();
+          const dialog = page.getByRole("dialog", {
+            name: "Discard these Settings changes?",
+          });
+          try {
+            await input.fill(value);
+            await button.click();
+            await held;
+            await leave();
+            await dialog
+              .getByRole("button", { name: "Discard", exact: true })
+              .click();
+            await expect(page).toHaveURL(/\/collection$/);
+            await page.goBack();
+            await expect(input).toHaveValue(original);
+            if (editAgain) await input.fill(newer);
+            const received = page.waitForResponse(
+              (response) =>
+                response.url().endsWith(endpoint) &&
+                response.request().method() === "PUT"
+            );
+            release();
+            await received;
+            await expect(
+              page.getByRole("status").filter({
+                hasText:
+                  field === "Display Name"
+                    ? "Display Name saved."
+                    : field === "Handle"
+                      ? "Handle saved."
+                      : "Zip code saved.",
+              })
+            ).toBeVisible();
+            await expect(input).toHaveValue(editAgain ? newer : value);
+            if (editAgain) await expect(button).toBeEnabled();
+            else await expect(button).toBeDisabled();
+            await leave();
+            if (editAgain) {
+              await expect(dialog).toBeVisible();
+              await dialog
+                .getByRole("button", { name: "Keep editing" })
+                .click();
+              await expect(input).toHaveValue(newer);
+              await input.fill(value);
+              await expect(button).toBeDisabled();
+              await leave();
+            }
+            await expect(page).toHaveURL(/\/collection$/);
+            await expect(dialog).toHaveCount(0);
+          } finally {
+            release();
+            await page.unroute(pattern);
+          }
+        });
+      }
+    }
   });
 }

@@ -54,7 +54,9 @@ export function SettingsPage({
       ask: (leave: () => void) => {
         const focused = document.activeElement;
         returnTo.current =
-          focused instanceof HTMLElement && !focused.closest("dialog")
+          focused instanceof HTMLElement &&
+          focused !== document.body &&
+          !focused.closest("dialog")
             ? focused
             : headingRef.current;
         setAsking({ leave });
@@ -144,8 +146,6 @@ export function SettingsPage({
                     if (!asking) return;
                     const { leave } = asking;
                     setDiscardVersion((version) => version + 1);
-                    setPrivacyDirty(false);
-                    setDiscoveryDirty(false);
                     boundary.current = false;
                     setAsking(null);
                     leave();
