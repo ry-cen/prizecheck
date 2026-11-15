@@ -52,78 +52,94 @@ describe("Riftbound local read contract", () => {
     expect(parseView("#pokemon:edition=1").edition).toBe("");
     expect(parseView("#riftbound:page=NaN").query.page).toBe(1);
   });
-  it("ignores late success and failure, including leaving and returning, even when abort is ignored", async () => {
-    const dom = new JSDOM('<div id="root"></div>');
-    vi.stubGlobal("window", dom.window);
-    vi.stubGlobal("document", dom.window.document);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    let resolveOld!: (v: string) => void;
-    let rejectOld!: (e: Error) => void;
-    const old = () =>
-      new Promise<string>((resolve, reject) => {
-        resolveOld = resolve;
-        rejectOld = reject;
-      });
-    const current = () => Promise.resolve("new");
-    const root = createRoot(document.getElementById("root")!);
-    function Probe({
-      id,
-      active,
-      load,
-    }: {
-      id: string;
-      active: boolean;
-      load: (s: AbortSignal) => Promise<string>;
-    }) {
-      const result = useRead(id, load, active);
-      return createElement(
-        "p",
-        null,
-        result.failed ? "failed" : (result.value ?? "loading")
-      );
+  it.each(["success", "failure"] as const)(
+    "ignores late %s after selection changes and leaving and returning, even when abort is ignored",
+    async (outcome) => {
+      const dom = new JSDOM('<div id="root"></div>');
+      vi.stubGlobal("window", dom.window);
+      vi.stubGlobal("document", dom.window.document);
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      let resolveOld!: (v: string) => void;
+      let rejectOld!: (e: Error) => void;
+      const old = () =>
+        new Promise<string>((resolve, reject) => {
+          resolveOld = resolve;
+          rejectOld = reject;
+        });
+      const settleOld = () =>
+        outcome === "success"
+          ? resolveOld("old")
+          : rejectOld(new Error("late"));
+      const current = () => Promise.resolve("new");
+      const root = createRoot(document.getElementById("root")!);
+      function Probe({
+        id,
+        active,
+        load,
+      }: {
+        id: string;
+        active: boolean;
+        load: (s: AbortSignal) => Promise<string>;
+      }) {
+        const result = useRead(id, load, active);
+        return createElement(
+          "p",
+          null,
+          result.failed ? "failed" : (result.value ?? "loading")
+        );
+      }
+      try {
+        await act(async () =>
+          root.render(
+            createElement(Probe, { id: "riftbound:1", active: true, load: old })
+          )
+        );
+        await act(async () =>
+          root.render(
+            createElement(Probe, {
+              id: "riftbound:2",
+              active: true,
+              load: current,
+            })
+          )
+        );
+        expect(document.body.textContent).toBe("new");
+        await act(async () => settleOld());
+        expect(document.body.textContent).toBe("new");
+        expect(document.body.textContent).not.toContain("failed");
+        await act(async () =>
+          root.render(
+            createElement(Probe, { id: "riftbound:1", active: true, load: old })
+          )
+        );
+        await act(async () =>
+          root.render(
+            createElement(Probe, {
+              id: "riftbound:1",
+              active: false,
+              load: old,
+            })
+          )
+        );
+        expect(document.body.textContent).toBe("loading");
+        await act(async () => settleOld());
+        expect(document.body.textContent).toBe("loading");
+        expect(document.body.textContent).not.toContain("failed");
+        await act(async () =>
+          root.render(
+            createElement(Probe, {
+              id: "riftbound:1",
+              active: true,
+              load: current,
+            })
+          )
+        );
+        expect(document.body.textContent).toBe("new");
+      } finally {
+        await act(async () => root.unmount());
+        dom.window.close();
+        vi.unstubAllGlobals();
+      }
     }
-    try {
-      await act(async () =>
-        root.render(
-          createElement(Probe, { id: "riftbound:1", active: true, load: old })
-        )
-      );
-      await act(async () =>
-        root.render(
-          createElement(Probe, {
-            id: "riftbound:2",
-            active: true,
-            load: current,
-          })
-        )
-      );
-      await act(async () => resolveOld("old"));
-      expect(document.body.textContent).toBe("new");
-      await act(async () =>
-        root.render(
-          createElement(Probe, { id: "riftbound:1", active: true, load: old })
-        )
-      );
-      await act(async () =>
-        root.render(
-          createElement(Probe, { id: "riftbound:1", active: false, load: old })
-        )
-      );
-      await act(async () => rejectOld(new Error("late")));
-      await act(async () =>
-        root.render(
-          createElement(Probe, {
-            id: "riftbound:1",
-            active: true,
-            load: current,
-          })
-        )
-      );
-      expect(document.body.textContent).toBe("new");
-    } finally {
-      await act(async () => root.unmount());
-      dom.window.close();
-      vi.unstubAllGlobals();
-    }
-  });
+  );
 });
