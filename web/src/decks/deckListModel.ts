@@ -242,7 +242,8 @@ const sum = (lines: readonly DeckLine[]) =>
 /** The grouping's groups in its order, with most copies first, then by name, in each. Empty groups are omitted. */
 export function groupLines(
   lines: readonly DeckLine[],
-  grouping: DeckGrouping
+  grouping: DeckGrouping,
+  order?: ReadonlyMap<string, number>
 ): LineGroup[] {
   const groups: LineGroup[] = [];
   const members = new Map<string, DeckLine[]>();
@@ -257,7 +258,14 @@ export function groupLines(
       key: kind,
       kind,
       title,
-      lines: [...group].sort(byCopies),
+      lines: [...group].sort((a, b) => {
+        const ar = order?.get(a.line.edition_id);
+        const br = order?.get(b.line.edition_id);
+        if (ar !== undefined && br !== undefined) return ar - br;
+        if (ar !== undefined) return -1;
+        if (br !== undefined) return 1;
+        return byCopies(a, b);
+      }),
       copies: sum(group),
     });
   }
@@ -266,7 +274,8 @@ export function groupLines(
 
 export function deckListModel(
   detail: DeckDetail,
-  grouping: DeckGrouping
+  grouping: DeckGrouping,
+  order?: ReadonlyMap<string, number>
 ): DeckListModel {
   const ownership = new Map(
     detail.ownership.map((entry) => [entry.edition_id, entry])
@@ -279,11 +288,25 @@ export function deckListModel(
   );
   return {
     lines,
-    groups: groupLines(lines, grouping),
+    groups: groupLines(lines, grouping, order),
     // The basic checks' total is the sum of the lines; summing them keeps N/60 current after an edit (#177), whose
     // answer carries the lines but no checks.
     total: lines.reduce((sum, line) => sum + line.quantity, 0n).toString(),
   };
+}
+
+/** Remember displayed lines, retaining ranks even when a line is removed and later restored. */
+export function extendOrder(
+  order: ReadonlyMap<string, number> | null,
+  model: DeckListModel
+): Map<string, number> {
+  const next = new Map(order);
+  for (const group of model.groups) {
+    for (const { line } of group.lines) {
+      if (!next.has(line.edition_id)) next.set(line.edition_id, next.size);
+    }
+  }
+  return next;
 }
 
 /** "Paldea Evolved · 185 · Reverse Holo": the Names line's second line. */

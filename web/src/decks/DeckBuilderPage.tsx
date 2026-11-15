@@ -29,7 +29,7 @@ import { DeckCostLine } from "./DeckCostLine";
 import { useDeckCover } from "./useDeckCover";
 import { useDeckRename } from "./DeckRename";
 import { DeckListBody, type OpenSheet } from "./DeckListViews";
-import { deckListModel, type DeckView } from "./deckListModel";
+import { deckListModel, extendOrder, type DeckView } from "./deckListModel";
 import { GatherDialog } from "./GatherDialog";
 import { FormatResultsDialog } from "./FormatResultsDialog";
 import { useDeckActions } from "./useDeckActions";
@@ -408,10 +408,22 @@ export function DeckBuilderPage({
     surplus: detail?.surplus,
     onChanged: () => void read(),
   });
+  const lineOrder = useRef<Map<string, number> | null>(null);
   const model = useMemo(
-    () => (detail ? deckListModel(detail, POKEMON_DECK_GROUPING) : null),
+    () =>
+      detail
+        ? deckListModel(
+            detail,
+            POKEMON_DECK_GROUPING,
+            lineOrder.current ?? undefined
+          )
+        : null,
     [detail]
   );
+  // Only committed, displayed lines acquire ranks; abandoned renders cannot change the order.
+  useEffect(() => {
+    if (model) lineOrder.current = extendOrder(lineOrder.current, model);
+  }, [model]);
   const gathered = useGatherToast(detail?.deck.name ?? "", () => void read());
   const targetResult = detail
     ? resultFor(detail.format_checks, detail.target_format)

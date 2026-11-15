@@ -1,7 +1,12 @@
 import { expect, test } from "vitest";
 import { POKEMON_DECK_GROUPING } from "../games/pokemon/deckGroups";
-import { deckLine, groupLines } from "./deckListModel";
-import type { DeckListLine } from "../decks_generated";
+import {
+  deckLine,
+  groupLines,
+  deckListModel,
+  extendOrder,
+} from "./deckListModel";
+import type { DeckListLine, DeckDetail } from "../decks_generated";
 
 function line(
   name: string,
@@ -45,4 +50,49 @@ test("Pokémon share a fixed group ordered by copies then name, regardless of ev
     "Charizard",
   ]);
   expect(groups[0].copies).toBe(5n);
+});
+
+const names = (groups: ReturnType<typeof groupLines>) =>
+  groups[0].lines.map((l) => l.line.name);
+test("groupLines keeps a given order: a line whose copies rose stays where it was", () => {
+  expect(
+    names(
+      groupLines(
+        [line("A", "3", "pokemon"), line("B", "4", "pokemon")],
+        POKEMON_DECK_GROUPING,
+        new Map([
+          ["A", 0],
+          ["B", 1],
+        ])
+      )
+    )
+  ).toEqual(["A", "B"]);
+});
+test("groupLines puts lines missing from the order after the ordered ones, by copies then name", () => {
+  expect(
+    names(
+      groupLines(
+        [
+          line("B", "4", "pokemon"),
+          line("A", "1", "pokemon"),
+          line("C", "4", "pokemon"),
+        ],
+        POKEMON_DECK_GROUPING,
+        new Map([["A", 0]])
+      )
+    )
+  ).toEqual(["A", "B", "C"]);
+});
+test("deckListModel without an order sorts as before", () => {
+  const detail = {
+    deck_list: {
+      lines: [line("A", "2", "pokemon").line, line("B", "3", "pokemon").line],
+    },
+    ownership: [],
+  } as unknown as DeckDetail;
+  const model = deckListModel(detail, POKEMON_DECK_GROUPING);
+  expect(names(model.groups)).toEqual(["B", "A"]);
+  const order = extendOrder(null, model);
+  expect(extendOrder(order, model)).toEqual(order);
+  expect(extendOrder(order, model)).not.toBe(order);
 });
