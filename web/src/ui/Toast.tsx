@@ -65,6 +65,13 @@ type Lifts = Partial<Record<LiftSource, number>>;
 const ToastContext = createContext<ToastApi | null>(null);
 // Apart from ToastContext, so a lift that changes never changes the toast API that effects depend on.
 const LiftContext = createContext<Lifts>({});
+const ToastClearanceContext = createContext(0);
+
+/** Measured toast height plus the bottom bars beneath it, while feedback is visible. */
+export function useToastClearance(): number {
+  return useContext(ToastClearanceContext);
+}
+
 const ShownToastContext = createContext<number | null>(null);
 
 /** Subscribe inline toast controls to replacement and dismissal without changing the stable toast API. */
@@ -106,6 +113,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const visible =
     toast && (!toast.route || toast.route === path) ? toast : null;
   const lift = Object.values(lifts).reduce((sum, px) => sum + (px ?? 0), 0);
+  const [height, setHeight] = useState(0);
   const next = useRef(0);
   const host = useRef<HTMLElement>(null);
   const shownId = useRef<number | null>(null);
@@ -156,6 +164,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         ?.focus();
   }, [visible?.id]);
 
+  useLayoutEffect(() => {
+    const element = host.current;
+    if (!visible || !element) {
+      setHeight(0);
+      return;
+    }
+    const measure = () => setHeight(element.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [visible?.id]);
+
   const press = (action: ToastAction) => {
     if (action.disabled || action.busy) return;
     if (!action.keepOpen) setToast(null);
@@ -166,7 +188,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       <LiftContext.Provider value={lifts}>
         <ShownToastContext.Provider value={visible?.id ?? null}>
-          {children}
+          <ToastClearanceContext.Provider value={visible ? height + lift : 0}>
+            {children}
+          </ToastClearanceContext.Provider>
         </ShownToastContext.Provider>
       </LiftContext.Provider>
       <section

@@ -16,6 +16,7 @@ import React, {
   useRef,
   useState,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import {
   ArrowLeftRight,
@@ -33,7 +34,7 @@ import { BorrowDraftsProvider } from "../loans/BorrowDrafts";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { takeLandingToast } from "../scanner/ui/landing";
-import { ToastProvider, useToast } from "../ui/Toast";
+import { ToastProvider, useToast, useToastClearance } from "../ui/Toast";
 import { FriendsButton, FriendsProvider } from "../social/FriendsDrawer";
 import {
   Badge,
@@ -159,6 +160,7 @@ function ShellFrame({
   other = null,
 }: Props) {
   const toast = useToast();
+  const toastClearance = useToastClearance();
   // The page's overlay scroll bar (DocumentScrollbar) clears the sticky header and the phone tab bar while the shell is up.
   useLayoutEffect(() => {
     document.documentElement.dataset.appShell = "";
@@ -333,11 +335,13 @@ function ShellFrame({
         current={showing}
         onSignOut={() => void signOut()}
       >
-        {/* Keep a touch row above the tab clearance for fixed feedback. The former price-credit
-            footer supplied that space; moving its text to Settings must not remove it. */}
+        {/* Keep the final row scrollable above phone feedback, including wrapped toasts and lifted bars. */}
         <div
           data-app-shell=""
-          className="min-h-dvh bg-bg font-sans text-text scheme-dark phone:pb-[calc(var(--layout-tabbar-height)+var(--target-touch))]"
+          style={
+            { "--toast-clearance": `${toastClearance}px` } as CSSProperties
+          }
+          className="min-h-dvh bg-bg font-sans text-text scheme-dark phone:pb-[calc(var(--layout-tabbar-height)+max(var(--target-touch),calc(var(--toast-clearance)+var(--space-2))))]"
         >
           <a
             href="#main-content"
