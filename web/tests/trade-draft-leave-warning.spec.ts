@@ -154,6 +154,45 @@ async function propose(
   return trade.thread_id as string;
 }
 
+/** A fresh pair with unambiguous one-card needs, opened only through real UI entry points. */
+async function draftPair(
+  page: Page,
+  signInOther: () => Promise<{ page: Page }>
+) {
+  const ids = seedCatalog();
+  const other = await signInOther();
+  const handle = await nameCollector(other.page, "Misty W");
+  await hold(
+    other.page,
+    await forTradeBinder(other.page, "Misty Binder"),
+    ids["PAL 185"],
+    3
+  );
+  await signInAsOwner(page, "/collection");
+  await nameCollector(page, "Ash K");
+  await hold(page, await forTradeBinder(page, "Ash Binder"), ids["SVI 166"], 3);
+  await befriend(other.page, page);
+  return { ids, other, handle };
+}
+
+function recordNativeDialogs(page: Page) {
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.type());
+    void d.dismiss();
+  });
+  return dialogs;
+}
+
+async function leaveForCollection(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Main views" })
+    .getByRole("link", { name: "Collection", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL(`${ORIGIN}/collection`);
+}
+
 for (const phone of [false, true]) {
   test.describe(phone ? "phone" : "desktop", () => {
     const options = {
@@ -164,6 +203,124 @@ for (const phone of [false, true]) {
       hasTouch: phone,
     };
     test.use(options);
+    for (const counter of [true, false]) {
+      test(`${counter ? "Counter" : "New proposal"}: reverting clears the mounted in-app guard`, async ({
+        page,
+        collectors,
+      }) => {
+        const { ids, other, handle } = await draftPair(page, () =>
+          collectors.signIn({ contextOptions: options })
+        );
+        const id = counter
+          ? await propose(
+              other.page,
+              await accountId(page),
+              [[ids["PAL 185"], 1]],
+              [[ids["SVI 166"], 1]]
+            )
+          : null;
+        await page.goto(
+          counter
+            ? `${ORIGIN}/trades/${id}`
+            : `${ORIGIN}/friends/${handle}/trade-list`
+        );
+        await page
+          .getByRole("button", {
+            name: counter ? "Counter" : "Propose trade to Misty W",
+            exact: true,
+          })
+          .click();
+        await expect(heading(page)).toHaveText(
+          counter ? "Counter to Misty W" : "Trade Proposal to Misty W"
+        );
+        await show(page, "Proposal");
+        const nativeDialogs = recordNativeDialogs(page);
+        await page.getByRole("radio", { name: "You pay", exact: true }).click();
+        // Prove the mounted guard was armed before reverting the edit.
+        await page
+          .getByRole("navigation", { name: "Main views" })
+          .getByRole("link", { name: "Collection", exact: true })
+          .click();
+        const dialog = page.getByRole("dialog", {
+          name: counter
+            ? "Discard this Counter to Misty W?"
+            : "Discard this proposal to Misty W?",
+        });
+        await expect(dialog).toBeVisible();
+        await dialog.getByRole("button", { name: "Keep editing" }).click();
+        await page.getByRole("radio", { name: "No cash", exact: true }).click();
+        await expect(
+          page.getByRole("radio", { name: "No cash", exact: true })
+        ).toBeChecked();
+        // No reload or remount between reverting and this departure.
+        await leaveForCollection(page);
+        expect(nativeDialogs).toEqual([]);
+      });
+    }
+
+    for (const departure of ["reload", "in-app"] as const) {
+      test(`New proposal: untouched nonempty match prefill leaves on ${departure} without a dialog`, async ({
+        page,
+        collectors,
+      }) => {
+        const { ids, other } = await draftPair(page, () =>
+          collectors.signIn({ contextOptions: options })
+        );
+        await api(page, "PUT", `/api/trade-wants/${ids["PAL 185"]}`, {
+          quantity: "1",
+        });
+        await api(other.page, "PUT", `/api/trade-wants/${ids["SVI 166"]}`, {
+          quantity: "1",
+        });
+        await page.goto(`${ORIGIN}/trades/find`);
+        await page
+          .getByRole("list", { name: "Matches" })
+          .getByRole("button", { name: /^Misty W/ })
+          .click();
+        await page
+          .getByRole("button", {
+            name: "Propose trade to Misty W",
+            exact: true,
+          })
+          .click();
+        await expect(heading(page)).toHaveText("Trade Proposal to Misty W");
+        await show(page, "Proposal");
+        for (const name of [
+          "Iono (PAL 185) you get",
+          "Arven (SVI 166) you give",
+        ]) {
+          await expect(
+            page
+              .getByRole("group", { name, exact: true })
+              .getByText("1", { exact: true })
+          ).toHaveText("1");
+        }
+        const nativeDialogs = recordNativeDialogs(page);
+        if (departure === "reload") {
+          await page.reload();
+          await expect(heading(page)).toHaveText("Trade Proposal to Misty W");
+          await show(page, "Proposal");
+          // The opening seed is memory-only: a document reload opens an empty draft.
+          await expect(
+            page.getByRole("group", {
+              name: "Iono (PAL 185) you get",
+              exact: true,
+            })
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("group", {
+              name: "Arven (SVI 166) you give",
+              exact: true,
+            })
+          ).toHaveCount(0);
+        } else {
+          await leaveForCollection(page);
+        }
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        expect(nativeDialogs).toEqual([]);
+      });
+    }
+
     for (const counter of [true, false]) {
       const mode = counter ? "Counter" : "New proposal";
       for (const action of [
