@@ -3,21 +3,28 @@ import React, { act } from "react";
 import { JSDOM } from "jsdom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { RETURN_URL } from "./fixtureSession";
+import { FixtureSession, RETURN_URL } from "./fixtureSession";
 
 const native = vi.hoisted(() => ({
   receive: (_event: { url: string }) => {},
+  active: (_event: { isActive: boolean }) => {},
+  launchUrl: vi.fn(async (): Promise<{ url: string } | undefined> => undefined),
   launch: vi.fn(async (_options: { url: string }) => ({ completed: true })),
 }));
 vi.mock("@capacitor/app", () => ({
   App: {
     addListener: vi.fn(
-      async (name: string, listener: typeof native.receive) => {
-        if (name === "appUrlOpen") native.receive = listener;
+      async (
+        name: string,
+        listener: (event: { url?: string; isActive?: boolean }) => void
+      ) => {
+        if (name === "appUrlOpen") native.receive = (event) => listener(event);
+        if (name === "appStateChange")
+          native.active = (event) => listener(event);
         return { remove: vi.fn() };
       }
     ),
-    getLaunchUrl: vi.fn(async () => undefined),
+    getLaunchUrl: native.launchUrl,
   },
 }));
 vi.mock("@capacitor/app-launcher", () => ({
@@ -37,6 +44,7 @@ beforeEach(async () => {
     value: storage,
     configurable: true,
   });
+  native.launchUrl.mockReset().mockResolvedValue(undefined);
   native.launch.mockReset().mockResolvedValue({ completed: true });
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   host = document.createElement("div");
@@ -91,4 +99,24 @@ it("shows retry when browser launch fails and permits explicit cancellation", as
   await click("Cancel sign-in");
   expect(host.textContent).toContain("Sign-in cancelled.");
   expect(host.textContent).not.toContain("Pikachu");
+});
+
+it("consumes a persisted browser attempt from getLaunchUrl on cold startup", async () => {
+  await act(async () => root.unmount());
+  const pending = new FixtureSession(window.localStorage);
+  const state = new URL(pending.begin()).searchParams.get("state");
+  native.launchUrl.mockResolvedValueOnce({
+    url: `${RETURN_URL}?state=${state}&result=success`,
+  });
+  root = createRoot(host);
+  await act(async () => root.render(<IosPrototype />));
+  expect(host.textContent).toContain("Pikachu");
+  expect(host.textContent).toContain("Sign out");
+});
+it("clears an expired Collection on appStateChange without advancing the polling timer", async () => {
+  await complete();
+  vi.setSystemTime(Date.now() + 30 * 60_000);
+  await act(async () => native.active({ isActive: true }));
+  expect(host.textContent).not.toContain("Pikachu");
+  expect(host.textContent).toContain("Sign in with browser");
 });

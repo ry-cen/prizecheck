@@ -54,3 +54,15 @@ The initial Capacitor add attempt from `mobile/` failed because it is not an npm
 - GitHub CI and independent review are separate acceptance evidence; local results do not approve this implementation.
 
 See [README](README.md) for the proposed unsigned hosted macOS simulator build and its exact next action. No macOS workflow or runner/account permissions were added.
+
+## Simulator validation continuation
+
+The continuation rechecked the same clean Linux worktree and PR head `2c326ed4d6d6df9a4cd3fc72a673b3c2cb912be1`; no competing iOS T3 owner was active. Repository metadata confirmed PUBLIC visibility, existing ADMIN access, Actions enabled, allowed actions and existing `workflow` OAuth scope. GitHub's standard-runner reference lists `macos-15-intel` as free for public repositories; its installed-image manifest includes Xcode 26.3, above Capacitor 8's minimum Xcode 26.0. No permissions, billing or account settings were changed.
+
+A PR #671/branch-only simulator workflow, shared XCTest scheme/target, four real UI scenarios and a loopback-only runner script were added. The script explicitly installs and launches the built app; the hosted job separates compile from UI execution, logs the exact head and toolchain, and uploads no artifacts or caches. Runtime outcomes belong to the exact-head Actions logs and PR evidence, not to these definitions.
+
+Local continuation checks: 13 protocol/UI tests plus one loopback HTTP contract test passed, as did TypeScript/generated-contract checks, shell syntax and scheme XML parsing. The two new jsdom tests cover a populated getLaunchUrl on startup and appStateChange expiry without advancing the polling timer. These are mocked callback tests, not native evidence.
+
+Historical CI qualification: the original head's Linux Verify and title checks were green, but its shallow checkout skipped the three historical migration tests. The prior local full tooling runs exercised those tests; do not describe every tooling test as exercised in the shallow CI checkout. The earlier optional auth aggregate failure remains recorded above and is not superseded by native validation.
+
+Native 30-minute expiry, physical-device behavior, real accounts and a real private Collection remain unexercised. No API, scanner, signing, deployment or production-auth change is part of this continuation.

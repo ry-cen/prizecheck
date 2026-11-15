@@ -30,20 +30,15 @@ The existing Better Auth gateway uses same-origin HttpOnly cookie sessions and f
 
 Before live-account work, review an explicit gateway-mediated native handoff: exact callback allowlist, PKCE-bound single-use short-lived exchange, authenticated browser approval, secure device credential storage, expiry/revocation, user isolation and gateway-only Collection access. Define CSRF/Origin behavior without trusting a caller-supplied user or bypassing the existing web rules. This prototype implements none of those production permissions or endpoints. The return `state` and `result` fields here are demonstration controls, not an OAuth protocol.
 
-## Unsigned simulator build proposal — not executed
+## Unsigned simulator validation
 
-The repository currently has Linux workflows only; no existing macOS runner pathway was found. The public repository could use a separately approved, manual-only GitHub-hosted `macos-15` job with `contents: read`, no secrets, no signing and no uploads/deployment. Do not add paid runners or change account permissions. Confirm hosted-runner availability and Xcode compatibility first.
+The branch now has a narrowly scoped [simulator workflow](../.github/workflows/ios-prototype.yml), restricted to public same-repository PR #671, this exact feature branch and relevant paths. It uses the standard `macos-15-intel` public runner and installed Xcode 26.3, `contents: read`, a 25-minute timeout and no artifact/cache upload. No runner/account permissions or default-branch workflows were changed. The existing credentials already had workflow rights. GitHub documents [standard public runners as free](https://docs.github.com/en/actions/reference/runners/github-hosted-runners); larger runners and storage have different billing and are not used here.
 
-Proposed commands after `npm ci` and `npm run ios:sync`:
+The job checks out and logs the exact PR head, syncs packaged assets, and runs `xcodebuild build-for-testing` with `CODE_SIGNING_ALLOWED=NO`. It then creates one simulator, explicitly installs and launches the compiled app, starts the fixture on **127.0.0.1:4319 only** on that same host, and runs the `FixtureValidation` XCTest scheme. It changes no ATS, CSP, cookie, Origin, CSRF, signing-team or host security settings. Cleanup stops the owned server and deletes the owned simulator.
 
-```sh
-xcodebuild -project mobile/ios/App/App.xcodeproj -scheme App \
-  -configuration Debug -sdk iphonesimulator \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath .scratch/ios-derived CODE_SIGNING_ALLOWED=NO build
-```
+Four XCTest scenarios attempt the real WKWebView/AppLauncher/Safari/scene-bridge paths: warm return plus relaunch recovery/sign-out, cold return after app termination, browser cancellation/error, and cancellation after native app resume. They use real UI elements with no injected JavaScript or mocked plugins. A 30-minute native expiry walkthrough is deliberately outside the job's time cap; expiry and the appStateChange expiry callback have unit evidence only. The added getLaunchUrl unit test also remains mocked evidence, separate from cold native return.
 
-Capacitor 8 uses Swift Package Manager by default; see the [official environment requirements](https://capacitorjs.com/docs/getting-started/environment-setup) and [iOS setup](https://capacitorjs.com/docs/ios). Linux generation/sync is not a native compile. Neither simulator compilation, simulator browser return, device sign-in nor physical iPhone use has been proven. The smallest build blocker is an authorized Xcode/macOS execution environment; the owner's MacBook is not required or used. A simulator build would still not establish physical-device behavior or real sign-in.
+**A workflow or test definition is not a successful native run.** Consult the exact-head run and PR evidence for compile and per-scenario outcomes. No result here establishes physical-iPhone behavior or real-account sign-in. Capacitor 8 requires [Xcode 26 or later](https://capacitorjs.com/docs/getting-started/environment-setup); if the pinned hosted toolchain/runtime is unavailable, report that blocker without installing credentials or broadening permissions.
 
 ## Verification record
 
