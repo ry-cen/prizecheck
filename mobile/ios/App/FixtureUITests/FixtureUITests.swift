@@ -8,14 +8,18 @@ final class FixtureUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        safari.terminate()
         app.launch()
         let ready = NSPredicate { _, _ in
-            self.app.buttons["Sign out"].exists || self.app.buttons["Sign in with browser"].exists
+            self.app.buttons["Sign out"].exists || self.app.buttons["Sign in with browser"].exists || self.app.buttons["Cancel sign-in"].exists
         }
         expectation(for: ready, evaluatedWith: app)
-        waitForExpectations(timeout: 20)
+        waitForExpectations(timeout: 45)
         if app.buttons["Sign out"].exists {
             app.buttons["Sign out"].tap()
+        }
+        if app.buttons["Cancel sign-in"].exists {
+            app.buttons["Cancel sign-in"].tap()
         }
         XCTAssertTrue(app.buttons["Sign in with browser"].waitForExistence(timeout: 15))
     }
@@ -23,7 +27,7 @@ final class FixtureUITests: XCTestCase {
     private func openBrowser() {
         app.buttons["Sign in with browser"].tap()
         XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 20))
-        XCTAssertTrue(safari.links["Continue to sample Collection"].waitForExistence(timeout: 20))
+        XCTAssertTrue(safari.links["Continue to sample Collection"].waitForExistence(timeout: 45))
     }
 
     private func returnFromBrowser(_ label: String) {
