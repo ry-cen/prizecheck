@@ -72,7 +72,7 @@ Contract column:
 | Catalog Add mode and add queue | partial: single Add from card detail (#672 WP2) | verified semantics, fixture store | Batch add and the add queue are not built (batch Add writes an Undo in core). |
 | Collection gallery, inspector, Locations tree (`/collection`) | partial: #672 WP1 | verified semantics, fixture store | Missing: filters and sort (D4), card size, Names and Prices toggles (no price API), multi-select and marquee. |
 | Move, Remove, Undo | partial: one copy (#672 WP2) | verified semantics, fixture store | Multi-copy and multi-source moves are not built. Commit without Undo and Put away (Deck) are left out. |
-| Location create, rename, move, delete (Collection sidebar `+` and gear) | missing → **WP3 (this slice)** | verified (`api/app/location_tree.py`), fixture store | Unsorted gets no management controls: the recorded CONTEXT/code conflict needs an owner decision. The `create_unsorted_child` conversion is left out for the same reason. |
+| Location create, rename, move, delete (Collection sidebar `+` and gear) | partial: **WP3 fixture commands** | verified (`api/app/location_tree.py`), fixture store | Unsorted opens only a neutral message through the shared row tools; the recorded CONTEXT/code conflict needs an owner decision. The `create_unsorted_child` conversion is left out for the same reason. |
 | Hidden Locations and For trade (Location settings) | missing | gated | Friends and Trading capabilities; no Riftbound social backend. |
 | Borrowed and Lent entries | missing | gated | Loans backend and social graph. |
 | Decks list, Deck editor, Library (`/decks`, `/decks/<id>`) | missing | gated / candidate fixture slice | #663. The deck shape and the section and count rules are unverified. A fixture slice needs grounding of the generic Deck List operations first (isolated check in progress). Formats, legality, readiness, prices, publishing, Gather and Buy missing are never invented. |
@@ -99,3 +99,20 @@ Contract column:
 2. If its status is shared-primitive, check that the Riftbound browser specs still pass.
 3. If its status is mirrored-locally, apply the same layout, read-order, control or state change to the named Riftbound file and update the screenshot comparison.
 4. If its status is omitted or gated, change nothing unless the gate's decision or contract has landed.
+
+
+## WP3 surfaces
+
+Reference SHA: M9 `0d22c23cea23277a1a43d86efadc60043c8ff99c` (saved PNGs, read-only). Fixture-only; real #662 acceptance remains gated on #534.
+
+| Surface | Riftbound composition | Status and omissions |
+| --- | --- | --- |
+| Sidebar tools | CollectionView.tsx; shared LocationNav | Header plus and gear, row plus and gear; hover/focus/open-row behavior shared. Header gear chooses an ordinary Location. Drag reorder omitted. |
+| Create | LocationWrites.tsx | Name and parent, Top level, organizations and leaves; single move-holdings-to-child conversion. No Deck or Unsorted parent. |
+| Settings: rename | LocationWrites.tsx | Name, sibling conflict feedback, confirmed heading refresh. Hidden and For trade omitted (social gate). |
+| Settings: move | LocationWrites.tsx | Excludes self/descendants/Decks and excessive depth; destination version checked. Stocked destination conversion omitted (nested-Unsorted gate). |
+| Settings: delete | LocationWrites.tsx | Empty-only, exact cleaned-name confirmation; deleted current view replaces history with All owned. Deck items omitted (#663). |
+| Phone drawer tools | CollectionView.tsx; LocationNav touch | Header tools and always-visible row tools, drawer retained for focus return. |
+| Unsorted gate | LocationWrites.tsx | Shared props cannot suppress individual row tools. Both open the neutral no-actions message. Nested Unsorted and its conversion remain an owner decision. |
+
+Earlier WP1/WP2 deferred Location rows are superseded by this partial WP3 coverage. No live API, authentication, storage or network behavior is claimed. See collection-slice.md for verified core semantics and contract corrections.

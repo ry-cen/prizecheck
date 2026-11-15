@@ -1,3 +1,5 @@
+import { Plus, Settings } from "lucide-react";
+import { LocationWriteDialog, type LocationAction } from "./LocationWrites";
 import {
   useCallback,
   useEffect,
@@ -54,6 +56,15 @@ export function CollectionView({
   hrefFor: (q: CollectionQuery) => string;
   onCatalog: () => void;
 }) {
+  const locationOpener = useRef<HTMLElement | null>(null);
+  const pendingLocationFocus = useRef<{
+    viewKey: string;
+    id?: string;
+    label?: string;
+  } | null>(null);
+  const [locationAction, setLocationAction] = useState<LocationAction | null>(
+    null
+  );
   const actionsRef = useRef<HTMLElement | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [action, setAction] = useState<"move" | "remove" | null>(null);
@@ -123,11 +134,35 @@ export function CollectionView({
   );
   const index = useMemo(() => indexLocations(trees.value ?? []), [trees.value]);
   useEffect(() => {
+    const pending = pendingLocationFocus.current;
+    if (!pending || !trees.value) return;
+    pendingLocationFocus.current = null;
+    if (!active || pending.viewKey !== viewKey) return;
+    const target = pending.id
+      ? document.getElementById(pending.id)
+      : [...document.querySelectorAll<HTMLElement>("button")].find(
+          (button) =>
+            button.getAttribute("aria-label") === pending.label &&
+            button.getClientRects().length > 0
+        );
+    if (target?.getClientRects().length) target.focus();
+    else heading.current?.focus();
+  }, [trees.value, active, viewKey]);
+  useEffect(() => {
     if (active)
       setExpanded(
         (previous) => new Set([...previous, ...index.ancestors(query.location)])
       );
   }, [active, index, query.location]);
+  useEffect(() => {
+    if (active && trees.value && query.location !== "all") {
+      const current = trees.value.find((n) => n.id === query.location);
+      if (!current || current.kind === "organization") {
+        onQuery({ ...query, location: "all", page: 1 }, true);
+        heading.current?.focus();
+      }
+    }
+  }, [active, trees.value, query, onQuery]);
   const skipHeadingFocus = useRef(false);
   const lastKey = useRef(viewKey);
   useEffect(() => {
@@ -148,10 +183,12 @@ export function CollectionView({
       setSelection(null);
       setDrawer(false);
       setAction(null);
+      setLocationAction(null);
     }
   }, [active]);
   useEffect(() => {
     setAction(null);
+    setLocationAction(null);
   }, [viewKey]);
   function choose(location: string) {
     skipHeadingFocus.current =
@@ -164,6 +201,39 @@ export function CollectionView({
     setDetailsOpen(false);
     setAction(next);
   }
+  function openLocation(
+    mode: LocationAction["mode"],
+    id?: string,
+    parentId?: string | null,
+    opener?: HTMLElement
+  ) {
+    locationOpener.current =
+      opener ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    setLocationAction({ mode, id, parentId, viewKey });
+  }
+  const locationTools = writer && (
+    <div className="flex items-center gap-1">
+      <Button
+        variant="quiet"
+        icon={Plus}
+        label="Create location"
+        onClick={(e) =>
+          openLocation("create", undefined, null, e.currentTarget)
+        }
+      />
+      <Button
+        variant="quiet"
+        icon={Settings}
+        label="Manage locations"
+        onClick={(e) =>
+          openLocation("manage", undefined, undefined, e.currentTarget)
+        }
+      />
+    </div>
+  );
   const nav = (touch = false) =>
     trees.failed ? (
       <Failure retry={trees.retry}>Locations couldn't be loaded.</Failure>
@@ -186,6 +256,21 @@ export function CollectionView({
         onChoose={choose}
         idPrefix={touch ? "riftbound-drawer" : "riftbound-sidebar"}
         touch={touch}
+        onAddChild={
+          writer
+            ? (id) => {
+                const n = index.byId.get(id);
+                if (n?.name === "Unsorted" && n.parent_id === null)
+                  openLocation("settings", id);
+                else openLocation("create", undefined, id);
+              }
+            : undefined
+        }
+        onOpenSettings={
+          writer
+            ? (id, opener) => openLocation("settings", id, undefined, opener)
+            : undefined
+        }
       />
     );
   const details = selected && (
@@ -228,6 +313,7 @@ export function CollectionView({
             <h2 className="m-0 text-micro font-semibold tracking-[1.7px] text-text-subtle uppercase">
               Locations
             </h2>
+            {locationTools}
           </div>
           {nav()}
         </aside>
@@ -400,8 +486,50 @@ export function CollectionView({
         onClose={() => setDrawer(false)}
         returnFocus={opener}
       >
+        <div className="mb-4 flex justify-end">{locationTools}</div>
         {nav(true)}
       </Dialog>
+      {active &&
+        writer &&
+        locationAction?.viewKey === viewKey &&
+        trees.value && (
+          <LocationWriteDialog
+            key={`${reader.owner}:${viewKey}:${locationAction.mode}:${locationAction.id ?? ""}`}
+            action={locationAction}
+            nodes={trees.value}
+            reader={reader}
+            writer={writer}
+            returnFocus={locationOpener}
+            onClose={() => setLocationAction(null)}
+            onConfirmed={(result, message) => {
+              const control = locationOpener.current;
+              pendingLocationFocus.current = {
+                viewKey,
+                id: control?.id || undefined,
+                label: control?.getAttribute("aria-label") ?? undefined,
+              };
+              if ("deletedId" in result)
+                pendingLocationFocus.current =
+                  result.deletedId === query.location
+                    ? null
+                    : { viewKey, label: "Manage locations" };
+              if (
+                ("deletedId" in result &&
+                  result.deletedId === query.location) ||
+                ("location" in result &&
+                  (result.location as { id: string }).id === query.location &&
+                  (result.location as { kind: string }).kind === "organization")
+              ) {
+                setDrawer(false);
+                onQuery({ ...query, location: "all", page: 1 }, true);
+                locationOpener.current = phone
+                  ? opener.current
+                  : heading.current;
+              }
+              onConfirmed?.(result, message);
+            }}
+          />
+        )}
       <Dialog
         open={!!selected && phone && !action && detailsOpen}
         title={selected?.edition.name ?? "Card details"}
