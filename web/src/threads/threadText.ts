@@ -203,3 +203,22 @@ export function loanOutcome(reason: LoanView["closed_reason"]): string {
     } as const
   )[reason];
 }
+
+/** A domain activity time in the collector's local time zone. */
+export function activityText(iso: string, now: Date = new Date()): string {
+  const at = new Date(iso);
+  if (
+    at.getFullYear() === now.getFullYear() &&
+    at.getMonth() === now.getMonth() &&
+    at.getDate() === now.getDate()
+  )
+    return at.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  return at.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(at.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+  });
+}

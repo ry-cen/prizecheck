@@ -48,7 +48,7 @@ for (const viewport of [DESKTOP, PHONE]) {
       [[ids["SVI 166"], 1]]
     );
     await tradeStep(friend.page, swap, "accept");
-    await tradeStep(friend.page, swap, "confirm-swap");
+    // Leave the Friend unconfirmed so this browser covers first-confirm feedback.
     const loan = await api(page, "POST", "/api/loans", {
       lender_id: await accountId(friend.page),
       lines: [{ edition_id: ids["SVI 166"], quantity: "1" }],
@@ -138,7 +138,7 @@ for (const viewport of [DESKTOP, PHONE]) {
       .getByRole("group", { name: "Confirm swap", exact: true })
       .getByRole("button", { name: "Confirm swap", exact: true })
       .click();
-    await expect(notice(page)).toContainText("Swapped.");
+    await expect(notice(page)).toContainText("You confirmed the swap.");
     expect(confirmations).toBe(1);
     await expect(notice(page)).toHaveAttribute("aria-live", "polite");
     await expect(
@@ -150,16 +150,19 @@ for (const viewport of [DESKTOP, PHONE]) {
       .click();
     await page.locator(`a[href="/loans/${loan.thread_id}"]`).click();
     await expect(page).toHaveURL(`${ORIGIN}/loans/${loan.thread_id}`);
+    await expect(notice(page)).not.toContainText("You confirmed the swap.");
     await expect(notice(page)).not.toContainText("Swapped.");
     await page
-      .getByRole("button", { name: "Yes, I have them", exact: true })
+      .getByRole("button", { name: "Yes, I have it", exact: true })
       .click();
     await expect(
       page.getByRole("button", { name: "All back", exact: true })
     ).toBeVisible();
+    await expect(notice(page)).not.toContainText("You confirmed the swap.");
     await expect(notice(page)).not.toContainText("Swapped.");
     await page.getByRole("button", { name: "All back", exact: true }).click();
     await expect(main).toContainText("Waiting for Ash K to confirm");
+    await expect(notice(page)).not.toContainText("You confirmed the swap.");
     await expect(notice(page)).not.toContainText("Swapped.");
 
     // A two-for-one with a long name keeps the full identity and Edition at 200% text.

@@ -1,5 +1,6 @@
 import { TradingAvailability } from "./TradingAvailability";
 import {
+  activityText,
   agreementText,
   cashText,
   currentCardsText,
@@ -183,6 +184,11 @@ export function ThreadList({
                 <span>{cashText(row)}</span>
               ) : null}
               <span>{currentCardsText(row)}</span>
+              {row.kind === "loan" && (
+                <span className="text-meta text-text-muted">
+                  Last activity {activityText(row.last_activity_at)}
+                </span>
+              )}
               {row.latest?.message && (
                 <span className="line-clamp-2 text-meta text-text-muted whitespace-pre-wrap wrap-anywhere">
                   {timelineText(

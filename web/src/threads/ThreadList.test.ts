@@ -577,3 +577,53 @@ for (const reason of ["returned", "written_off"] as const) {
     });
   }
 }
+
+it("adds activity context to matching Loan summaries", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const row: ThreadItem = {
+    id: "first",
+    kind: "loan",
+    other: {
+      trader_id: "friend",
+      display_name: "Misty",
+      friend: true,
+      available: true,
+    },
+    you_are: "low",
+    summary: { you_give: "0", you_get: "1", cards: [] },
+    section: "out_now",
+    state: "handed_over",
+    waiting: null,
+    needs_you: false,
+    unread: 0,
+    last_activity_at: new Date(2026, 10, 12, 12, 0).toISOString(),
+  };
+  vi.mocked(getLoans).mockResolvedValue([
+    row,
+    {
+      ...row,
+      id: "second",
+      last_activity_at: new Date(2025, 10, 12, 12, 0).toISOString(),
+    },
+  ]);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        h(ThreadList, { kind: "loan", active: true, onOpen: vi.fn() })
+      )
+    );
+    const links = [...host.querySelectorAll("a")];
+    expect(links).toHaveLength(2);
+    for (const link of links)
+      expect(link.textContent).toContain("Last activity");
+    expect(links[0].textContent).not.toBe(links[1].textContent);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});

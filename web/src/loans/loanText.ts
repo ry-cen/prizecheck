@@ -511,3 +511,22 @@ export function resultText(
       return null;
   }
 }
+
+export function handoverConfirmText(loan: LoanView): string {
+  if (loan.role === "lender") return "Mark as handed over";
+  return loan.lines.reduce(
+    (total, line) => total + Number(line.promised),
+    0
+  ) === 1
+    ? "Yes, I have it"
+    : "Yes, I have them";
+}
+export function returnConfirmText(lender: boolean, copies: number): string {
+  return lender
+    ? copies === 1
+      ? "Yes, it's back"
+      : "Yes, they're back"
+    : copies === 1
+      ? "Yes, I gave it back"
+      : "Yes, I gave them back";
+}

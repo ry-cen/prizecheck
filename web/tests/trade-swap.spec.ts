@@ -316,7 +316,7 @@ async function story(
       .getByRole("button", { name: "Confirm swap", exact: true })
       .click();
     await expect(toast(ash.page)).toContainText(
-      `Swapped. 1 card is in ${secret} Box.`
+      `You confirmed the swap. 1 card is in ${secret} Box.`
     );
     await expect(heading(ash.page)).toHaveText(
       "Waiting for Misty W to confirm the swap"
@@ -461,7 +461,7 @@ async function story(
       .getByRole("button", { name: "Confirm swap", exact: true })
       .click();
     await expect(toast(page)).toContainText(
-      "Swapped. The cards you gave left your Collection."
+      "You confirmed the swap. The cards you gave left your Collection."
     );
     await expect(heading(page)).toHaveText(
       "Waiting for Ash K to confirm the swap"

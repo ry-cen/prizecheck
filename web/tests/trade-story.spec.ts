@@ -602,7 +602,7 @@ async function story(
       .getByRole("button", { name: "Confirm swap", exact: true })
       .click();
     await expect(toast(ash.page)).toContainText(
-      `Swapped. 1 card is in ${ashPlace} Box. ${ashPlace} Deck now uses Iono (PAL 185).`
+      `You confirmed the swap. 1 card is in ${ashPlace} Box. ${ashPlace} Deck now uses Iono (PAL 185).`
     );
     await expect(heading(ash.page)).toHaveText(
       "Waiting for Misty W to confirm the swap"

@@ -114,7 +114,9 @@ async function story(
     .getByRole("group", { name: "Confirm swap", exact: true })
     .getByRole("button", { name: "Confirm swap", exact: true })
     .click();
-  await expect(toast(page)).toContainText("Swapped. 1 card is in Unsorted.");
+  await expect(toast(page)).toContainText(
+    "You confirmed the swap. 1 card is in Unsorted."
+  );
   await expect(toast(page)).not.toContainText("Deck now uses");
   await expect(
     toast(page).getByRole("button", { name: /^Undo switch/ })
@@ -134,7 +136,7 @@ async function story(
     .getByRole("button", { name: "Confirm swap", exact: true })
     .click();
   await expect(toast(page)).toContainText(
-    `Swapped. 1 card is in Unsorted. ${secret} Deck now uses Arven (SVI 166).`
+    `You confirmed the swap. 1 card is in Unsorted. ${secret} Deck now uses Arven (SVI 166).`
   );
   await expect.poll(lines).toEqual({ [arven]: "1" });
   await expectPageChecks(page, `a Deck switch toast at ${width}`);

@@ -60,6 +60,8 @@ import { Stepper } from "../ui/Stepper";
 import { TextField } from "../ui/TextField";
 import { readDecks, useBorrowDrafts } from "./BorrowDrafts";
 import {
+  handoverConfirmText,
+  returnConfirmText,
   dayAfter,
   dayText,
   lineEdition,
@@ -1187,9 +1189,13 @@ export function LoanScreen({
         >
           {finishing
             ? "Finish return"
-            : lender
-              ? "Yes, they're back"
-              : "Yes, I gave them back"}
+            : returnConfirmText(
+                lender,
+                loan.pending_return!.lines.reduce(
+                  (total, line) => total + Number(line.copies),
+                  0
+                )
+              )}
         </Button>
       </div>
     ) : handing ? (
@@ -1216,7 +1222,7 @@ export function LoanScreen({
             )
           }
         >
-          {loan.role === "lender" ? "Mark as handed over" : "Yes, I have them"}
+          {handoverConfirmText(loan)}
         </Button>
       </div>
     ) : loan.actions.includes("start_return") ? (
