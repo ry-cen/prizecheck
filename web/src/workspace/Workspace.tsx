@@ -422,11 +422,13 @@ export function Workspace({
   // success follows the existing action flow (clear selection and close the details sheet).
   const sheetAction = useRef<(() => void) | null>(null);
   const sheetActionOpener = useRef<HTMLButtonElement | null>(null);
+  const sheetActionCard = useRef<typeof selection.details>(null);
   const [sheetActionDone, setSheetActionDone] = useState(false);
   function openSheetAction(kind: "move" | "remove", opener: HTMLButtonElement) {
     if (!selection.details || actions.busy || actions.dialog) return;
     if (kind === "remove" && selection.details.holding.borrowed) return;
     sheetActionOpener.current = opener;
+    sheetActionCard.current = selection.details;
     sheetAction.current = selection.selectForAction(selection.details);
     if (kind === "move") actions.openMove();
     else actions.openRemoval();
@@ -450,6 +452,18 @@ export function Workspace({
     setSheetActionDone(false);
     if (active) focusWorkspaceHeading();
   }, [sheetActionDone, selection.details, active]);
+
+  // A reload temporarily removes the routed card. Keep its existing sheet mounted underneath
+  // its action so remounting a native dialog cannot take the top layer or focus from Move.
+  // Back and breakpoint changes still remove the sheet immediately.
+  const sheetCard =
+    selection.details ??
+    (mobile &&
+    actions.dialog &&
+    sheetAction.current &&
+    route.card === sheetActionCard.current?.holding.key
+      ? sheetActionCard.current
+      : null);
 
   // Lend to a Friend… (#258) closing: its Dialog gives focus back to Actions, but an offer that went out cleared the
   // selection, and Actions with it, so the workspace heading takes focus then rather than the page.
@@ -1176,9 +1190,9 @@ export function Workspace({
         onMoved={() => void loadTree()}
         returnFocus={mobile ? drawerOpener : undefined}
       />
-      {active && selection.details && (
+      {active && sheetCard && (
         <DetailsSheet
-          card={selection.details}
+          card={sheetCard}
           notice={cardNotice}
           onMove={(opener) => openSheetAction("move", opener)}
           onRemove={(opener) => openSheetAction("remove", opener)}
