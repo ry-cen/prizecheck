@@ -48,7 +48,7 @@ The initial Capacitor add attempt from `mobile/` failed because it is not an npm
 
 ## Unproven / never run
 
-- Physical iPhone sign-in: not run. Linux generation/sync, jsdom tests and simulator runs are not device evidence. Unsigned native compilation and simulator UI later ran on hosted macOS; see [the exact-head result](#passing-hosted-native-result--32765b76).
+- Physical iPhone sign-in: not run. Linux generation/sync, jsdom tests and simulator runs are not device evidence. Unsigned native compilation and simulator UI later ran on hosted macOS; see [the hosted results](#passing-hosted-native-result--32765b76) below.
 - Native 30-minute session expiry: not exercised on the simulator or a device. Expiry has jsdom/unit evidence only.
 - Real-account authentication or a real Collection in the native shell: not implemented or tested. Only sample data is shown. A production gateway-mediated handoff and secure credential-storage design remain a separate decision.
 - API tests, operations suite, full application gate and scanner real-model execution: not run for this slice. No API tests were changed.
@@ -86,3 +86,17 @@ The workflow step failed because `tee` opened `.scratch/ios-build.log` before th
 The fixture listener was confirmed at 127.0.0.1:4319 on the same host. Linux Verify for the same PR head (its merge ref with dev `1bac5801`) passed 2,971 web unit tests and the HTTP contract test. Its shallow checkout skipped three historical migration tooling tests, which do run locally.
 
 This is simulator evidence with sample data only. It does not cover native 30-minute expiry, a physical iPhone, real accounts or a real Collection.
+
+### Failed rerun and repair — 42e0a006, 95a644f4
+
+[Run 43698492747](https://github.com/ry-cen/prizecheck/actions/runs/43698492747/job/132764179488) at `42e0a006` failed **4 of 4** scenarios. That commit changed only documentation, so the app and tests were the same ones that passed at `32765b76`. The runner was slow: creating and booting the simulator took 4m53s, against 3m50s for the passing run. In the first test Safari came to the foreground, but the fixture link did not appear within 20 seconds. That left a pending sign-in attempt saved. On relaunch the app correctly showed only **Cancel sign-in**, which the old `setUp` did not handle, so the other three tests failed in `setUp`. The logs do not show what Safari displayed, and they do not point to Safari's first-run UI or the fixture listener. The listener was confirmed on loopback.
+
+Commit `95a644f4` changes only `FixtureUITests.swift`:
+
+- `setUp` also accepts and cancels a leftover attempt.
+- `setUp` closes Safari before launching the app.
+- The readiness wait and the first-page link wait go from 20 to 45 seconds.
+
+No scenario step or assertion changed. [Run 43700919303](https://github.com/ry-cen/prizecheck/actions/runs/43700919303) at `95a644f4` passed **4 of 4, with 0 failed and 0 skipped** on the iPhone 17 simulator (iOS 26.2), after `TEST BUILD SUCCEEDED` with `CODE_SIGNING_ALLOWED=NO`. Linux Verify for the same PR head passed 2,971 unit tests and 678 tooling tests (three historical migration tests skipped in the shallow checkout).
+
+One passing run after a repair does not prove the slow-runner flake is gone. A failing hosted run that recurs should be reported, not retried until it passes.
