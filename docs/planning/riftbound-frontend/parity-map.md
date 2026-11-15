@@ -7,11 +7,11 @@ Frozen visual reference: Pokémon M7 `ed1231d521dc1210e2ab4ca558e5b2fb9952b1d1`;
 | Desktop top nav | shell/Shell.tsx; B/desktop-collection.png | RiftboundApp.tsx | mirrored-locally | Nav order, active marker, header spacing |
 | Locations heading, All owned, tree read order | workspace/LocationNav.tsx, workspace/locationTree.ts; B/desktop-collection.png | CollectionView.tsx | shared-primitive | Tree ordering, disclosure and current state; folders disclose; leaves choose |
 | Organization-level listing | workspace/LocationNav.tsx; B/desktop-collection.png | local/collectionFixtures.ts | omitted (folders disclose only, matching Pokémon) | Revisit only if Pokémon makes organization listing reachable |
-| Page heading and copies/Edition totals | workspace/Workspace.tsx; B/desktop-collection.png | CollectionView.tsx | mirrored-locally | Heading hierarchy and meta placement |
-| Search | workspace/GalleryControls.tsx; B/desktop-collection.png | CollectionView.tsx | shared-primitive | SearchField geometry; fixture substring behavior remains explicit |
-| Copy tiles and Location captions | ui/CopyTile.tsx, workspace/Gallery.tsx; B/desktop-detail-collection-detail.png | CollectionView.tsx | shared-primitive | Tile spacing, captions, selected checks and focus ring |
+| Page heading and copies/Edition totals | workspace/Workspace.tsx; B/desktop-collection.png | CollectionView.tsx | mirrored-locally | PageHeader and lowercase pluralized totals share a baseline row; subtle tabular meta and mb-5 spacing |
+| Search | workspace/GalleryControls.tsx; B/desktop-collection.png | CollectionView.tsx | shared-primitive | 420 px search cap, “Search your cards…” placeholder; fixture substring behavior remains explicit |
+| Copy tiles and Location captions | ui/CopyTile.tsx, workspace/Gallery.tsx; B/desktop-detail-collection-detail.png | CollectionView.tsx | shared-primitive | Small tile token (5 desktop columns at 1280), captions, one-copy toggle and focus ring |
 | Copy expansion | workspace/galleryModel.ts; B/desktop-collection.png | collection.ts | mirrored-locally | Do not import galleryModel: runtime Pokémon labels; keep ranges and true quantities separate |
-| Desktop inspector | workspace/Inspector.tsx; B/desktop-detail-collection-detail.png | CollectionView.tsx | mirrored-locally | Exact Edition art, finish, domain/type and per-Location paths/quantities |
+| Desktop inspector | workspace/Inspector.tsx; B/desktop-detail-collection-detail.png | CollectionView.tsx | mirrored-locally | Sticky header offset and bounded scrolling; semibold title, Variant finish, divider, domain/type and exact per-Location quantities |
 | Phone Locations drawer | workspace/Workspace.tsx, ui/Dialog.tsx; A/j3-phone-locations-drawer.png | CollectionView.tsx | shared-primitive | Side drawer, touch rows, focus return to opener |
 | Phone details sheet | workspace/Inspector.tsx, ui/Dialog.tsx; B/phone-detail-collection-detail.png | CollectionView.tsx | shared-primitive | Sheet focus trap, Escape/close, contained art |
 | Phone Collection/tab bar | workspace/Workspace.tsx, shell/Shell.tsx; B/phone-j1-collection.png | RiftboundApp.tsx, CollectionView.tsx | mirrored-locally | Token-sized grid, tabs and bottom spacing |
@@ -19,7 +19,7 @@ Frozen visual reference: Pokémon M7 `ed1231d521dc1210e2ab4ca558e5b2fb9952b1d1`;
 | Back/Forward and query restoration | workspace/Workspace.tsx; B/desktop-collection.png | navigation.ts, RiftboundApp.tsx | mirrored-locally | Section query retention, focus and selection clearing |
 | Sort control | workspace/GalleryControls.tsx; B/desktop-collection.png | local/collectionFixtures.ts | omitted (fixed Name A–Z) | Reassess with live read contract |
 | Filters | workspace/GalleryControls.tsx; B/desktop-collection.png | CollectionView.tsx | omitted (D4 facets undecided) | Approved Riftbound facets only |
-| Card-size control | workspace/GalleryControls.tsx; B/desktop-collection.png | CollectionView.tsx | omitted (WP1 fixed tile size) | Responsive density |
+| Card-size control | workspace/GalleryControls.tsx; B/desktop-collection.png | CollectionView.tsx | omitted (WP1 fixed Small tile token) | Small defaults: five columns at 1280, three at 375; reassess responsive density |
 | Names control | workspace/GalleryControls.tsx; B/desktop-collection.png | CollectionView.tsx | omitted (WP1 art plus Location captions) | Accessible tile name and inspector facts |
 | Prices control/data | workspace/GalleryControls.tsx, EditionPrice.tsx; B/desktop-collection.png | CollectionView.tsx | omitted (no supported price API) | No provenance or price imports |
 | Multi-select, SelectionBar and Actions | workspace/SelectionBar.tsx; B/desktop-detail-collection-detail.png | CollectionView.tsx | deferred (WP2) | Single selection is deliberately local in WP1 |
