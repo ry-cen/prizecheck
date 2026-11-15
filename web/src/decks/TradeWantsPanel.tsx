@@ -65,9 +65,11 @@ export function WillAcceptSelect({
 export function WillAcceptRadios({
   line,
   api,
+  caption,
 }: {
   line: WantListLine;
   api: TradeWantsApi;
+  caption?: string;
 }) {
   const name = useId();
   if (api.state.kind !== "ready") return null;
@@ -75,17 +77,17 @@ export function WillAcceptRadios({
     api.pendingRule?.edition_id === line.edition_id
       ? api.pendingRule.rule
       : (api.state.rules.get(line.edition_id) ?? "edition");
-  return (
+  const radiogroup = (
     <div
       role="radiogroup"
       aria-label={`Will accept for ${cardText(line)}`}
       aria-disabled={api.busy || undefined}
-      className="mt-2 flex min-w-0 flex-col gap-1"
+      className={`${caption ? "" : "mt-2"} flex min-w-0 flex-col gap-1 phone:mt-0 phone:flex-row phone:flex-wrap`}
     >
       {WILL_ACCEPT_OPTIONS.map((option) => (
         <label
           key={option.value}
-          className={`flex min-h-8 min-w-0 cursor-pointer items-center gap-2 rounded-control border px-2 py-1 text-meta phone:min-h-tap ${rule === option.value ? "border-accent-border bg-surface-selected font-semibold text-accent-strong" : "border-border-strong text-text-muted"}`}
+          className={`flex min-h-8 min-w-0 cursor-pointer items-center gap-2 rounded-control border px-2 py-1 text-meta phone:min-h-tap phone:flex-[1_1_auto] ${rule === option.value ? "border-accent-border bg-surface-selected font-semibold text-accent-strong" : "border-border-strong text-text-muted"}`}
         >
           <input
             type="radio"
@@ -103,6 +105,14 @@ export function WillAcceptRadios({
         </label>
       ))}
     </div>
+  );
+  return caption ? (
+    <div className="mt-2 flex min-w-0 flex-col gap-1 phone:mt-0">
+      <p className="m-0 text-meta text-text-muted">{caption}</p>
+      {radiogroup}
+    </div>
+  ) : (
+    radiogroup
   );
 }
 

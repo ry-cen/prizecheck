@@ -187,7 +187,7 @@ export function useTotalCostSuffix(): string {
  * The summary's estimated cost and how many cards are priced (spec "The Want List page"). Unpriced cards are reported
  * on their own line and never counted as $0.
  */
-export function CostSummary() {
+export function CostSummary({ compact = false }: { compact?: boolean }) {
   const load = useContext(WantListCostContext);
   let value = "Checking prices…";
   const notes: string[] = [];
@@ -213,9 +213,14 @@ export function CostSummary() {
     }
   }
   return (
-    <p className="m-0 flex min-w-0 max-w-full flex-col" aria-live="polite">
+    <p
+      className={`m-0 flex min-w-0 max-w-full ${compact ? "flex-row flex-wrap items-baseline gap-x-2" : "flex-col"}`}
+      aria-live="polite"
+    >
       <span className="text-meta text-text-muted">Estimated cost</span>
-      <span className="text-heading font-semibold tabular-nums wrap-anywhere">
+      <span
+        className={`${compact ? "text-body" : "text-heading"} font-semibold tabular-nums wrap-anywhere`}
+      >
         {value}
       </span>
       {notes.map((note) => (

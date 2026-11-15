@@ -293,7 +293,8 @@ test.describe("on a desktop", () => {
         name: `Want List · ${names.gardevoir}`,
       })
     ).toBeVisible();
-    await expect(page.getByText(`${names.gardevoir} needs`)).toBeVisible();
+    // m6 r3: the scoped summary names the Deck in its title and labels the count Needs.
+    await expect(page.getByText("Needs", { exact: true })).toBeVisible();
     await expect(page.getByText("3 cards", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 3 })).toHaveText([
       names.gardevoir,
