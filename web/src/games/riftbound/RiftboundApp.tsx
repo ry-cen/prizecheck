@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen } from "lucide-react";
+import { BookOpen, LayoutGrid } from "lucide-react";
 import { Button } from "../../ui/Button";
 import { SearchField } from "../../ui/SearchField";
 import { Chip, PickerChip } from "../../ui/Chip";
@@ -16,9 +16,28 @@ import {
   type Query,
 } from "./catalog";
 import { parseView, viewHash, type View } from "./navigation";
+import { CollectionView } from "./CollectionView";
+import { emptyCollectionQuery, type CollectionReader } from "./collection";
 import { useRead } from "./read";
 
-export function RiftboundApp({ reader }: { reader: CatalogReader }) {
+export function RiftboundApp(props: {
+  reader: CatalogReader;
+  collection?: CollectionReader;
+}) {
+  return (
+    <RiftboundComposition
+      key={props.collection?.owner ?? "catalog"}
+      {...props}
+    />
+  );
+}
+function RiftboundComposition({
+  reader,
+  collection,
+}: {
+  reader: CatalogReader;
+  collection?: CollectionReader;
+}) {
   const [view, setView] = useState(() => parseView(location.hash));
   const [picking, setPicking] = useState(false);
   const picker = useRef<HTMLButtonElement>(null);
@@ -57,7 +76,16 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
     );
     setView(next);
   }
-  const active = !view.home;
+  const active = !view.home && view.section !== "collection";
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.style.scrollPaddingBottom;
+    root.style.scrollPaddingBottom =
+      "calc(var(--layout-tabbar-height) + var(--target-touch))";
+    return () => {
+      root.style.scrollPaddingBottom = previous;
+    };
+  }, []);
   const sets = useRead(
     "riftbound:sets",
     useCallback((signal) => reader.sets(signal), [reader]),
@@ -122,7 +150,11 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
         href="#content"
         onClick={(event) => {
           event.preventDefault();
-          (view.home ? homeHeading : catalogHeading).current?.focus();
+          if (view.section === "collection" && !view.home)
+            document
+              .querySelector<HTMLElement>("[data-collection-content] h1")
+              ?.focus();
+          else (view.home ? homeHeading : catalogHeading).current?.focus();
         }}
         className="fixed left-2 top-2 z-(--layer-modal) inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline focus:translate-y-0"
       >
@@ -148,16 +180,50 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
             icon={BookOpen}
             variant="quiet"
             aria-current={active ? "page" : undefined}
-            onClick={() => navigate({ ...view, home: false })}
+            onClick={() =>
+              navigate({
+                ...view,
+                home: false,
+                section: view.section ? "catalog" : undefined,
+              })
+            }
           >
             Catalog
           </Button>
+          {collection && (
+            <Button
+              icon={LayoutGrid}
+              variant="quiet"
+              aria-current={
+                !view.home && view.section === "collection" ? "page" : undefined
+              }
+              onClick={() =>
+                navigate({
+                  ...view,
+                  home: false,
+                  section: "collection",
+                  edition: "",
+                  collection: view.collection ?? emptyCollectionQuery,
+                })
+              }
+            >
+              Collection
+            </Button>
+          )}
         </nav>
       </header>
       {view.home && (
         <main className="px-7 py-7 phone:px-4">
           <PageHeader title="Riftbound" headingRef={homeHeading} />
-          <Button onClick={() => navigate({ ...view, home: false })}>
+          <Button
+            onClick={() =>
+              navigate({
+                ...view,
+                home: false,
+                section: view.section ? "catalog" : undefined,
+              })
+            }
+          >
             Browse Catalog
           </Button>
         </main>
@@ -312,6 +378,20 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
           )}
         </div>
       </main>
+      {collection && (
+        <CollectionView
+          key={collection.owner}
+          reader={collection}
+          active={!view.home && view.section === "collection"}
+          query={view.collection ?? emptyCollectionQuery}
+          onQuery={(query, replace) =>
+            navigate({ ...view, collection: query }, replace)
+          }
+          onCatalog={() =>
+            navigate({ ...view, section: "catalog", home: false })
+          }
+        />
+      )}
       <nav
         aria-label="Mobile navigation"
         className="fixed inset-x-0 bottom-0 z-(--layer-sticky) hidden h-tabbar border-t border-border bg-surface phone:flex"
@@ -319,11 +399,37 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
         <button
           className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent p-0 text-caption font-medium text-text-muted aria-[current=page]:text-accent-strong"
           aria-current={active ? "page" : undefined}
-          onClick={() => navigate({ ...view, home: false })}
+          onClick={() =>
+            navigate({
+              ...view,
+              home: false,
+              section: view.section ? "catalog" : undefined,
+            })
+          }
         >
           <Icon icon={BookOpen} />
           Catalog
         </button>
+        {collection && (
+          <button
+            className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent p-0 text-caption font-medium text-text-muted aria-[current=page]:text-accent-strong"
+            aria-current={
+              !view.home && view.section === "collection" ? "page" : undefined
+            }
+            onClick={() =>
+              navigate({
+                ...view,
+                home: false,
+                section: "collection",
+                edition: "",
+                collection: view.collection ?? emptyCollectionQuery,
+              })
+            }
+          >
+            <Icon icon={LayoutGrid} />
+            Collection
+          </button>
+        )}
       </nav>
       <Dialog
         open={picking && active}
