@@ -79,7 +79,7 @@ for (const width of [320, 375, 390, 960, 1280]) {
         page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)
       )
       .toBe(true);
-    await expect(iono).toContainText("×4 of 4");
+    await expect(iono).toContainText("Need 4 of 4");
     await expect(iono).toContainText("None owned");
     await expect(iono.locator("img")).toHaveCount(0);
     // CopyArt's outer wrapper and card-shaped frame must survive without an image.
@@ -161,12 +161,12 @@ test("Swap Undo survives desktop and phone resizing; Deck panel keeps its select
     .getByRole("region", { name: "Notifications" })
     .getByRole("button", { name: "Undo", exact: true });
   await expect(undo).toBeVisible();
-  await expect(list).toContainText("×3 of 3");
+  await expect(list).toContainText("Need 3 of 3");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(undo).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
   await undo.click();
-  await expect(list).toContainText("×4 of 4");
+  await expect(list).toContainText("Need 4 of 4");
   await page.goto(`${ORIGIN}/decks/${deck}`);
   await page
     .getByRole("button", { name: "Ways to get missing cards", exact: true })

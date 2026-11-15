@@ -802,7 +802,7 @@ function NeededLine({
           </p>
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
             <p className="m-0 text-heading font-semibold tabular-nums text-accent-strong">
-              ×{line.need}{" "}
+              Need {line.need}{" "}
               <span className="text-meta font-normal text-text-muted">
                 of {line.quantity}
               </span>
@@ -835,7 +835,7 @@ function NeededLine({
       </div>
       <div className="min-w-0 text-right phone:text-left">
         <p className="m-0 text-heading font-semibold tabular-nums text-accent-strong">
-          {line.need}{" "}
+          Need {line.need}{" "}
           <span className="text-meta font-normal text-text-muted">
             of {line.quantity}
           </span>

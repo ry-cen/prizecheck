@@ -330,6 +330,12 @@ test.describe("on a phone", () => {
     const deck = page.getByRole("tab", { name: "Deck 3/60" });
     await deck.tap();
     await expect(page.getByRole("radio", { name: "Stacked" })).toBeChecked();
+    await page
+      .getByRole("group", {
+        name: "Other Decks count the same spare copies",
+      })
+      .locator("summary")
+      .click();
     await expectWarning(page, built);
     const surplus = page.getByRole("region", {
       name: "Surplus, 5 cards",
