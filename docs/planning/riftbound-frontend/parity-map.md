@@ -50,3 +50,69 @@ Frozen visual reference: Pokémon M7 `ed1231d521dc1210e2ab4ca558e5b2fb9952b1d1`;
 | Inspector nits and clamp | workspace/Inspector.tsx:285 | CollectionView.tsx | Muted Variant label with separate value, dashed empty card, clamp guarded against max(1,pages), no heading-focus transfer for automatic clamp. |
 
 The earlier deferred WP2 rows above describe WP1. These rows supersede them for the supported single-copy fixture flows. Location management remains WP3; no Decks are implemented. Screenshots and actual check counts are reported with each implementation/review reply and maintained in the PR body by the planner.
+
+## Feature map: every Pokémon page against Riftbound
+
+Reference for this map: the frozen Pokémon M9 candidate `0d22c23cea23277a1a43d86efadc60043c8ff99c`, from the saved PNGs under the UI hill-climb's `score-m9-a/.scratch/hc-review/m9-a/shots/` and `score-m9-b/.scratch/hc-review/m9-b/`. M9 is unmerged and still being scored, so this map uses it only for layout, read order, controls and state patterns. No M9 code is imported or copied. Earlier rows keep their M7 reference. Each slice records its own reference SHA. Routes come from `web/src/shell/routes.ts` on dev `1bac5801`.
+
+Status values:
+- **covered**: matches Pokémon for the supported data.
+- **partial**: some flows done; the rest are listed.
+- **missing**: not started.
+- **intentional difference**: a game-specific capability difference, not unfinished work.
+
+Contract column:
+- **verified**: grounded in game-neutral core code, with citations in the slice docs.
+- **fixture-only**: a provisional fixture contract with no Riftbound route.
+- **gated**: needs an owner, backend or rules decision first.
+
+| Pokémon page or feature (route) | Riftbound status | Contract | Gate or note |
+| --- | --- | --- | --- |
+| Catalog browse, search, filters, card detail (`/catalog`) | partial: #670 | fixture-only | Facet shape D4 is undecided. Pokémon smart search and infinite loading are intentional differences for the fixture. The real read API is #661, gated on #534. |
+| Catalog Add mode and add queue | partial: single Add from card detail (#672 WP2) | verified semantics, fixture store | Batch add and the add queue are not built (batch Add writes an Undo in core). |
+| Collection gallery, inspector, Locations tree (`/collection`) | partial: #672 WP1 | verified semantics, fixture store | Missing: filters and sort (D4), card size, Names and Prices toggles (no price API), multi-select and marquee. |
+| Move, Remove, Undo | partial: one copy (#672 WP2) | verified semantics, fixture store | Multi-copy and multi-source moves are not built. Commit without Undo and Put away (Deck) are left out. |
+| Location create, rename, move, delete (Collection sidebar `+` and gear) | partial: **WP3 fixture commands** | verified (`api/app/location_tree.py`), fixture store | Unsorted opens only a neutral message through the shared row tools; the recorded CONTEXT/code conflict needs an owner decision. The `create_unsorted_child` conversion is left out for the same reason. |
+| Hidden Locations and For trade (Location settings) | missing | gated | Friends and Trading capabilities; no Riftbound social backend. |
+| Borrowed and Lent entries | missing | gated | Loans backend and social graph. |
+| Decks list, Deck editor, Library (`/decks`, `/decks/<id>`) | missing | gated / candidate fixture slice | #663. The deck shape and the section and count rules are unverified. A fixture slice needs grounding of the generic Deck List operations first (isolated check in progress). Formats, legality, readiness, prices, publishing, Gather and Buy missing are never invented. |
+| Want List, Pick List, Trade wants (`/decks/want-list`) | missing | gated | #663 requires actual backend semantics. |
+| Published Decks and Discover (public routes) | missing | gated | Publishing is excluded by #663. |
+| Deck import and export, Pokémon TCG Live export | missing | intentional difference / gated | Excluded by #662 and #663. |
+| Collection import, Scan cards (scanner) | missing | intentional difference / gated | Excluded by #662. The scanner models are Pokémon-specific. |
+| Loans (`/loans`) and Trades (`/trades`) | missing | gated | Social backend, identity (#531) and #534. |
+| Card reports (`/reports`) | missing | gated | Metadata reports need a Riftbound catalog review backend (#534). |
+| Settings, account and sign-ins (`/settings`) | missing | gated | Auth and identity decisions (#531). Fixtures make no claim of real account isolation. |
+| Owner controls (`/owner`) | missing | gated | Owner catalog review is under #534. |
+| Notifications, Inbox, Friends drawer | missing | gated | Social backend. |
+| Prices (tiles, inspector, deck costs) | missing | gated | No supported Riftbound price API. Price text is never shown by assumption. |
+
+### Shared reuse candidates (not done; each needs a narrow, reviewed shared change)
+
+- `workspace/CreateLocationDialog.tsx` calls `createLocation` from `location_generated` directly. If it took an injected `create` function, both games could share the dialog. Left alone for now because the UI hill-climb is actively changing `workspace/*`.
+- `workspace/SelectionBar.tsx`, `InventoryDialogs.tsx` and `UndoToast.tsx` carry Pokémon runtime hooks (galleryModel, useInventoryActions). Riftbound mirrors them locally. Splitting them into presentation-only parts would make one shared component possible.
+- `workspace/LocationNav.tsx` and `locationTree.ts` are already shared through explicit props.
+
+### How to propagate a Pokémon UI change
+
+1. Find both the per-surface row and the feature-level row, and read the feature's contract column.
+2. For shared-primitive surfaces, verify the shared change in Riftbound browser specs. For mirrored-locally surfaces, propagate supported layout, read order and behavior locally and refresh screenshots.
+3. For covered or partial features, update supported surfaces and list remaining gaps. Missing or deferred features require their planned slice; intentional differences and omitted surfaces require an explicit scope decision before adding capability.
+4. A fixture-only contract remains simulated even when a surface is covered. Verified semantics do not establish real routes; gated contracts and owner decisions must be resolved before propagation crosses those gates.
+
+
+## WP3 surfaces
+
+Reference SHA: M9 `0d22c23cea23277a1a43d86efadc60043c8ff99c` (saved PNGs, read-only). Fixture-only; real #662 acceptance remains gated on #534.
+
+| Surface | Riftbound composition | Status and omissions |
+| --- | --- | --- |
+| Sidebar tools | CollectionView.tsx; shared LocationNav | Header plus and gear, row plus and gear; hover/focus/open-row behavior shared. Header gear opens “Manage locations”, a flat ordinary-Location picker. Unlike Pokémon Manage locations, it omits the full tree panel with drag handles, per-row Move picker and Add child (ManageLocations.tsx:79–82). The picker title is Manage locations; selecting a row opens the Location-named Settings dialog. Drag reorder omitted. |
+| Create | LocationWrites.tsx | Name and parent, Top level, organizations and leaves; single move-holdings-to-child conversion. No Deck or Unsorted parent. |
+| Settings: rename | LocationWrites.tsx | M9 Location-name title, copies caption and labeled action rows with descriptions and right-aligned buttons. Name, sibling conflict feedback, unchanged-name guard and confirmed heading refresh. Hidden and For trade rows omitted (social gate). |
+| Settings: move | LocationWrites.tsx | Excludes self/descendants/Decks and excessive depth; destination version checked. Stocked destination conversion omitted (nested-Unsorted gate). |
+| Settings: delete | LocationWrites.tsx | Visible disabled Delete row explains nonempty Locations. Empty-only, exact cleaned-name confirmation gates submit; deleted current view replaces history with All owned. Deck items omitted (#663). |
+| Phone drawer tools | CollectionView.tsx; LocationNav touch | Header tools and always-visible row tools, drawer retained for focus return. |
+| Unsorted gate | LocationWrites.tsx | Shared props cannot suppress individual row tools. Both open a dialog titled Unsorted with “Unsorted's Locations can't be changed here.” and no actions. Nested Unsorted and its conversion remain an owner decision. |
+
+Earlier WP1/WP2 deferred Location rows are superseded by this partial WP3 coverage. No live API, authentication, storage or network behavior is claimed. See collection-slice.md for verified core semantics and contract corrections.

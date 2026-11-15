@@ -21,7 +21,7 @@ export type CollectionPage = {
 export interface CollectionReader {
   readonly scope: "riftbound";
   readonly owner: string;
-  locations(signal: AbortSignal): Promise<TreeNode[]>;
+  locations(signal: AbortSignal): Promise<LocationNode[]>;
   list(query: CollectionQuery, signal: AbortSignal): Promise<CollectionPage>;
   holdings(editionId: string, signal: AbortSignal): Promise<HoldingRow[]>;
 }
@@ -112,7 +112,39 @@ export type AddResult = WriteResult & {
   quantity: number;
   version: number;
 };
+export type LocationNode = TreeNode & { copyCount?: number };
+export type CreateLocationInput = {
+  name: string;
+  parentId: string | null;
+  parentVersion?: number;
+  conversion?: "move_holdings_to_child";
+};
+export type EditLocationInput = {
+  id: string;
+  name?: string;
+  parentId?: string | null;
+  parentVersion?: number;
+  version: number;
+};
+export type DeleteLocationInput = {
+  id: string;
+  confirmName: string;
+  version: number;
+};
+export type LocationResult = WriteResult & { location: TreeNode };
 export interface CollectionWriter {
+  createLocation(
+    input: CreateLocationInput,
+    options: WriteOptions
+  ): Promise<LocationResult>;
+  editLocation(
+    input: EditLocationInput,
+    options: WriteOptions
+  ): Promise<LocationResult>;
+  deleteLocation(
+    input: DeleteLocationInput,
+    options: WriteOptions
+  ): Promise<WriteResult & { deletedId: string }>;
   readonly owner: string;
   add(
     input: { editionId: string; locationId: string; quantity: number },
@@ -134,6 +166,20 @@ export interface CollectionWriter {
   ): Promise<WriteResult>;
 }
 export type CollectionErrorCode =
+  | "INVALID_LOCATION_NAME"
+  | "LOCATION_NAME_CONFLICT"
+  | "LOCATION_DEPTH_LIMIT"
+  | "STOCKED_LOCATION_REQUIRES_CONVERSION"
+  | "INVALID_LOCATION_CONVERSION"
+  | "LOCATION_CYCLE"
+  | "STALE_LOCATION"
+  | "LOCATION_NAME_CONFIRMATION_MISMATCH"
+  | "LOCATION_NOT_EMPTY"
+  | "LOCATION_NOT_FOUND"
+  | "INVALID_LOCATION_TREE"
+  | "DECK_CANNOT_HAVE_CHILDREN"
+  | "DECK_REQUIRES_DECK_COMMAND"
+  | "EMPTY_LOCATION_EDIT"
   | "STALE_HOLDING"
   | "INSUFFICIENT_QUANTITY"
   | "SAME_LOCATION"

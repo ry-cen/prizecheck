@@ -1,3 +1,5 @@
+import { Plus, Settings } from "lucide-react";
+import { LocationWriteDialog, type LocationAction } from "./LocationWrites";
 import {
   useCallback,
   useEffect,
@@ -51,6 +53,16 @@ export function CollectionView({
   onQuery: (q: CollectionQuery, replace?: boolean) => void;
   onCatalog: () => void;
 }) {
+  const clickedLocationTool = useRef<HTMLButtonElement | null>(null);
+  const locationOpener = useRef<HTMLElement | null>(null);
+  const pendingLocationFocus = useRef<{
+    viewKey: string;
+    id?: string;
+    label?: string;
+  } | null>(null);
+  const [locationAction, setLocationAction] = useState<LocationAction | null>(
+    null
+  );
   const actionsRef = useRef<HTMLElement | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [action, setAction] = useState<"move" | "remove" | null>(null);
@@ -120,11 +132,36 @@ export function CollectionView({
   );
   const index = useMemo(() => indexLocations(trees.value ?? []), [trees.value]);
   useEffect(() => {
+    const pending = pendingLocationFocus.current;
+    if (!pending || !trees.value) return;
+    pendingLocationFocus.current = null;
+    if (!active || pending.viewKey !== viewKey) return;
+    const target = pending.id
+      ? document.getElementById(pending.id)
+      : [...document.querySelectorAll<HTMLElement>("button")].find(
+          (button) =>
+            button.getAttribute("aria-label") === pending.label &&
+            button.getClientRects().length > 0
+        );
+    if (target?.getClientRects().length) target.focus();
+    else heading.current?.focus();
+  }, [trees.value, active, viewKey]);
+  useEffect(() => {
     if (active)
       setExpanded(
         (previous) => new Set([...previous, ...index.ancestors(query.location)])
       );
   }, [active, index, query.location]);
+  useEffect(() => {
+    if (active && trees.value && query.location !== "all") {
+      const current = trees.value.find((n) => n.id === query.location);
+      if (!current || current.kind === "organization") {
+        setDrawer(false);
+        onQuery({ ...query, location: "all", page: 1 }, true);
+        // The view-key effect focuses the heading after the drawer has closed.
+      }
+    }
+  }, [active, trees.value, query, onQuery]);
   const skipHeadingFocus = useRef(false);
   const lastKey = useRef(viewKey);
   useEffect(() => {
@@ -145,10 +182,12 @@ export function CollectionView({
       setSelection(null);
       setDrawer(false);
       setAction(null);
+      setLocationAction(null);
     }
   }, [active]);
   useEffect(() => {
     setAction(null);
+    setLocationAction(null);
   }, [viewKey]);
   function choose(location: string) {
     skipHeadingFocus.current =
@@ -161,28 +200,91 @@ export function CollectionView({
     setDetailsOpen(false);
     setAction(next);
   }
+  function openLocation(
+    mode: LocationAction["mode"],
+    id?: string,
+    parentId?: string | null,
+    opener?: HTMLElement
+  ) {
+    locationOpener.current = opener ?? clickedLocationTool.current;
+    setLocationAction({ mode, id, parentId, viewKey });
+  }
+  const locationTools = writer && (
+    <div className="flex items-center gap-1">
+      <Button
+        variant="quiet"
+        icon={Plus}
+        label="Create location"
+        onClick={(e) =>
+          openLocation("create", undefined, null, e.currentTarget)
+        }
+      />
+      <Button
+        variant="quiet"
+        icon={Settings}
+        label="Manage locations"
+        onClick={(e) =>
+          openLocation("manage", undefined, undefined, e.currentTarget)
+        }
+      />
+    </div>
+  );
   const nav = (touch = false) =>
     trees.failed ? (
       <Failure retry={trees.retry}>Locations couldn't be loaded.</Failure>
     ) : !trees.value ? (
       <p role="status">Loading Locations…</p>
     ) : (
-      <LocationNav
-        index={index}
-        view={query.location}
-        expanded={expanded}
-        onToggle={(id) => {
-          setExpanded((old) => {
-            const next = new Set(old);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-          });
+      <div
+        onClickCapture={(event) => {
+          const target = event.target;
+          clickedLocationTool.current =
+            target instanceof Element ? target.closest("button") : null;
         }}
-        onChoose={choose}
-        idPrefix={touch ? "riftbound-drawer" : "riftbound-sidebar"}
-        touch={touch}
-      />
+      >
+        <LocationNav
+          index={index}
+          view={query.location}
+          expanded={expanded}
+          onToggle={(id) => {
+            setExpanded((old) => {
+              const next = new Set(old);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            });
+          }}
+          onChoose={choose}
+          idPrefix={touch ? "riftbound-drawer" : "riftbound-sidebar"}
+          touch={touch}
+          onAddChild={
+            writer
+              ? (id) => {
+                  const n = index.byId.get(id);
+                  if (n?.name === "Unsorted" && n.parent_id === null)
+                    openLocation(
+                      "restricted",
+                      id,
+                      undefined,
+                      clickedLocationTool.current ?? undefined
+                    );
+                  else
+                    openLocation(
+                      "create",
+                      undefined,
+                      id,
+                      clickedLocationTool.current ?? undefined
+                    );
+                }
+              : undefined
+          }
+          onOpenSettings={
+            writer
+              ? (id, opener) => openLocation("settings", id, undefined, opener)
+              : undefined
+          }
+        />
+      </div>
     );
   const details = selected && (
     <div className="flex min-w-0 flex-col gap-2 [&_p]:m-0 [&_p]:text-meta">
@@ -224,6 +326,7 @@ export function CollectionView({
             <h2 className="m-0 text-micro font-semibold tracking-[1.7px] text-text-subtle uppercase">
               Locations
             </h2>
+            {locationTools}
           </div>
           {nav()}
         </aside>
@@ -396,8 +499,47 @@ export function CollectionView({
         onClose={() => setDrawer(false)}
         returnFocus={opener}
       >
+        <div className="mb-4 flex justify-end">{locationTools}</div>
         {nav(true)}
       </Dialog>
+      {active &&
+        writer &&
+        locationAction?.viewKey === viewKey &&
+        trees.value && (
+          <LocationWriteDialog
+            key={`${reader.owner}:${viewKey}:${locationAction.mode}:${locationAction.id ?? ""}`}
+            action={locationAction}
+            nodes={trees.value}
+            reader={reader}
+            writer={writer}
+            returnFocus={locationOpener}
+            onClose={() => setLocationAction(null)}
+            onConfirmed={(result, message) => {
+              const control = locationOpener.current;
+              pendingLocationFocus.current = {
+                viewKey,
+                id: control?.id || undefined,
+                label: control?.getAttribute("aria-label") ?? undefined,
+              };
+              if ("deletedId" in result)
+                pendingLocationFocus.current =
+                  result.deletedId === query.location
+                    ? null
+                    : { viewKey, label: "Manage locations" };
+              if (
+                "deletedId" in result &&
+                result.deletedId === query.location
+              ) {
+                setDrawer(false);
+                onQuery({ ...query, location: "all", page: 1 }, true);
+                locationOpener.current = phone
+                  ? opener.current
+                  : heading.current;
+              }
+              onConfirmed?.(result, message);
+            }}
+          />
+        )}
       <Dialog
         open={!!selected && phone && !action && detailsOpen}
         title={selected?.edition.name ?? "Card details"}
