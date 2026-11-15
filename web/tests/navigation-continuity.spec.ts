@@ -560,9 +560,13 @@ test.describe("For trade tag", () => {
       .locator('[data-testid="for-trade-mark"]')
       .evaluateAll((tags) =>
         tags.map((tag) => {
-          const name = tag.previousElementSibling?.matches(".truncate")
+          const name = tag.previousElementSibling?.matches(
+            "[data-location-name]"
+          )
             ? tag.previousElementSibling
-            : tag.parentElement!.querySelector<HTMLElement>(".truncate")!;
+            : tag.parentElement!.querySelector<HTMLElement>(
+                "[data-location-name]"
+              )!;
           return {
             tag: tag.getBoundingClientRect().width,
             truncated: name.scrollWidth > name.clientWidth,
@@ -577,7 +581,7 @@ test.describe("For trade tag", () => {
       .evaluate((tag) => ({
         tag: tag.getBoundingClientRect().width,
         name: tag
-          .parentElement!.querySelector(".truncate")!
+          .parentElement!.querySelector("[data-location-name]")!
           .getBoundingClientRect().width,
       }));
     expect(selected.name).toBeGreaterThan(selected.tag);

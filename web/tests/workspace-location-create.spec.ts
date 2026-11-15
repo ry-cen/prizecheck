@@ -292,12 +292,23 @@ test.describe("desktop", () => {
     await expect(binderAdd).toHaveCSS("opacity", "1");
     await expect(binderGear).toHaveCSS("opacity", "1");
     await expect(binderRow).toHaveCSS("padding-right", "68px");
-    const name = binderRow.locator("span.truncate");
+    const name = binderRow.locator("[data-location-name]");
+    await expect(name).toHaveCSS("-webkit-line-clamp", "2");
     await expect
       .poll(() =>
-        name.evaluate((element) => element.scrollWidth > element.clientWidth)
+        name.evaluate((element) => element.scrollHeight > element.clientHeight)
       )
       .toBe(true);
+    await expect
+      .poll(() =>
+        name.evaluate((element) =>
+          Math.round(
+            element.getBoundingClientRect().height /
+              parseFloat(getComputedStyle(element).lineHeight)
+          )
+        )
+      )
+      .toBe(2);
     const activeAddBox = (await binderAdd.boundingBox())!;
     const activeGearBox = (await binderGear.boundingBox())!;
     const nameBox = (await name.boundingBox())!;

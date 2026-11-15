@@ -59,7 +59,7 @@ const TOOL =
   "box-border m-0 inline-flex cursor-pointer items-center justify-center rounded-control border border-solid border-transparent p-0 font-sans text-text-muted hover:text-accent-strong";
 // Desktop: the tools overlay the row's end, inset 2 px from the end and 1 px top and bottom, so the open row's
 // border shows; hidden during a tile drag so the drop ring shows;
-// The open row always shows them and reserves room; other rows reveal them on hover or keyboard focus.
+// Rows reserve room for tools so wrapped labels never sit underneath them.
 // A device without hover always shows them, with room reserved.
 const TOOLS_SIDEBAR =
   "pointer-events-none absolute inset-y-0 right-0.5 flex items-center";
@@ -99,8 +99,8 @@ function rowClass({
     : tools === 0
       ? "pr-2"
       : tools === 1
-        ? `pr-9 ${current ? "" : "[@media(hover:hover)]:pr-2"}`
-        : `pr-17 ${current ? "" : "[@media(hover:hover)]:pr-2"}`;
+        ? "pr-9"
+        : "pr-17";
   return `${ROW} ${size} ${padding} ${look} ${outline}`;
 }
 
@@ -213,7 +213,14 @@ export function LocationNav({
             <Icon icon={open ? ChevronDown : ChevronRight} size={12} />
           )}
         </span>
-        <span className="min-w-0 truncate">{node.name}</span>
+        <span
+          data-location-name=""
+          className={
+            touch ? "min-w-0 truncate" : "min-w-0 line-clamp-2 wrap-anywhere"
+          }
+        >
+          {node.name}
+        </span>
         {hidden && (
           <span
             className="inline-flex shrink-0 text-text-subtle"

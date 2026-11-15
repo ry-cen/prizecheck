@@ -1301,6 +1301,10 @@ test.describe("desktop", () => {
     await tiles(page).nth(0).focus();
     await page.keyboard.press("Space");
     await page.keyboard.press("Tab");
+    await expect(
+      page.getByRole("link", { name: "Go to selection actions", exact: true })
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
     await page.keyboard.press("Space");
     await expect(bar(page)).toContainText("2 copies selected");
     for (

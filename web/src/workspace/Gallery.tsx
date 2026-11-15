@@ -48,6 +48,8 @@ type Props = {
   /** A control under the empty message (Collection's Import from another tracker, #226), or nothing. */
   emptyAction?: React.ReactNode;
   onRetry: () => void;
+  /** Jump from the focused selected copy to the portalled Actions button. */
+  onSelectionActions?: () => void;
   /** Ticket 105: the selection, mobile Select mode and the gestures that change them (see useSelection). */
   selected: Selection;
   selectMode: boolean;
@@ -87,6 +89,7 @@ export function Gallery({
   emptyMessage,
   emptyAction,
   onRetry,
+  onSelectionActions,
   selected,
   selectMode,
   onTile,
@@ -424,8 +427,12 @@ export function Gallery({
     []
   );
   const blurTile = useCallback(
-    (index: number) =>
-      setFocused((current) => (current?.index === index ? null : current)),
+    (index: number, next: EventTarget | null = null) => {
+      // Keep the tile pinned while its adjacent skip link has focus.
+      if (next instanceof Element && next.hasAttribute("data-selection-jump"))
+        return;
+      setFocused((current) => (current?.index === index ? null : current));
+    },
     []
   );
   const focusedTile =
@@ -465,29 +472,46 @@ export function Gallery({
     }
     const { holding } = tile.holding;
     return (
-      <Tile
-        key={`${tile.holding.key}:${tile.ordinal}`}
-        entry={tile.holding}
-        ordinal={tile.ordinal}
-        index={index}
-        selected={isTileSelected(selected, tile.holding.key, tile.ordinal)}
-        onTile={onTile}
-        onPointerDown={onTilePointerDown}
-        onFocusTile={focusTile}
-        onBlurTile={blurTile}
-        left={rect.x}
-        top={rect.y}
-        width={rect.width}
-        names={display.names}
-        prices={display.prices}
-        caption={
-          caption
-            ? (locationName(holding.location_id) ?? holding.location_name)
-            : null
-        }
-        path={holding.location_path}
-        selectMode={selectMode}
-      />
+      <React.Fragment key={`${tile.holding.key}:${tile.ordinal}`}>
+        <Tile
+          entry={tile.holding}
+          ordinal={tile.ordinal}
+          index={index}
+          selected={isTileSelected(selected, tile.holding.key, tile.ordinal)}
+          onTile={onTile}
+          onPointerDown={onTilePointerDown}
+          onFocusTile={focusTile}
+          onBlurTile={blurTile}
+          left={rect.x}
+          top={rect.y}
+          width={rect.width}
+          names={display.names}
+          prices={display.prices}
+          caption={
+            caption
+              ? (locationName(holding.location_id) ?? holding.location_name)
+              : null
+          }
+          path={holding.location_path}
+          selectMode={selectMode}
+        />
+        {onSelectionActions &&
+          focused?.index === index &&
+          isTileSelected(selected, tile.holding.key, tile.ordinal) && (
+            <a
+              data-selection-jump=""
+              href="#ws-dock"
+              className="fixed top-2 left-2 z-(--layer-modal) box-border inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 py-2 text-body font-semibold text-text no-underline focus:translate-y-0"
+              onBlur={() => blurTile(index)}
+              onClick={(event) => {
+                event.preventDefault();
+                onSelectionActions();
+              }}
+            >
+              Go to selection actions
+            </a>
+          )}
+      </React.Fragment>
     );
   };
 
@@ -615,7 +639,7 @@ type TileProps = {
   ) => void;
   /** Keyboard focus entered or left this tile (display index, Holding key). */
   onFocusTile: (index: number, key: string) => void;
-  onBlurTile: (index: number) => void;
+  onBlurTile: (index: number, next?: EventTarget | null) => void;
   left: number;
   top: number;
   width: number;
@@ -703,8 +727,8 @@ const Tile = memo(function Tile({
       onFocus={() => {
         onFocusTile(index, entry.key);
       }}
-      onBlur={() => {
-        onBlurTile(index);
+      onBlur={(event) => {
+        onBlurTile(index, event.relatedTarget);
       }}
     />
   );
