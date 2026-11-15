@@ -24,6 +24,7 @@ vi.mock("../social_generated", async (original) => ({
   readThread: vi.fn(async () => ({ read: false })),
 }));
 it.each([
+  ["UNKNOWN", "Couldn't confirm it was sent. Check your connection and retry."],
   [
     "MESSAGE_RATE_LIMITED",
     "You're sending messages quickly. Try again in a few minutes.",
@@ -33,7 +34,9 @@ it.each([
   "keeps the draft and states the actionable %s refusal",
   async (code, text) => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    vi.mocked(sendThreadMessage).mockRejectedValue(new SocialError(429, code));
+    vi.mocked(sendThreadMessage).mockRejectedValue(
+      code === "UNKNOWN" ? new TypeError("offline") : new SocialError(429, code)
+    );
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -59,6 +62,19 @@ it.each([
       expect(host.querySelector('[role="alert"]')?.textContent).toBe(text);
       expect(field.value).toBe("One more");
       expect(field.disabled).toBe(false);
+      if (code === "UNKNOWN") {
+        const command = vi.mocked(sendThreadMessage).mock.calls.at(-1)![2];
+        await act(async () =>
+          host
+            .querySelector("form")!
+            .dispatchEvent(
+              new Event("submit", { bubbles: true, cancelable: true })
+            )
+        );
+        expect(vi.mocked(sendThreadMessage).mock.calls.at(-1)![2]).toEqual(
+          command
+        );
+      }
       expect(sendThreadMessage).toHaveBeenLastCalledWith(
         "trade",
         "item",
@@ -404,3 +420,30 @@ it.each(["trade", "loan"] as const)(
     }
   }
 );
+
+it("requires both a fine pointer and hover for the shortcut hint", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const matchMedia = vi.fn((query: string) => ({
+    matches: query === "(pointer: fine)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+  vi.stubGlobal("matchMedia", matchMedia);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(h(ThreadTimeline, { kind: "trade", id: "item" }))
+    );
+    expect(matchMedia).toHaveBeenCalledWith(
+      "(pointer: fine) and (hover: hover)"
+    );
+    expect(host.textContent).not.toMatch(/Enter to send/);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  }
+});

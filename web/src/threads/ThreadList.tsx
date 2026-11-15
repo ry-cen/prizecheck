@@ -212,14 +212,14 @@ export function ThreadList({
     );
     return group === "done" ? (
       <details key={group}>
-        <summary className="min-h-tap cursor-pointer rounded-control px-3 py-3 text-control font-medium hover:bg-surface-raised">
-          Done
+        <summary className="min-h-tap cursor-pointer rounded-control px-3 py-3 text-heading font-semibold hover:bg-surface-raised">
+          <h2 className="m-0 inline text-heading font-semibold">Done</h2>
         </summary>
         {content}
       </details>
     ) : (
       <section key={group} aria-label={TITLES[group]}>
-        <h2 className="text-heading">{TITLES[group]}</h2>
+        <h2 className="text-heading font-semibold">{TITLES[group]}</h2>
         {content}
       </section>
     );
@@ -244,6 +244,20 @@ export function ThreadList({
       )}
       {!rows && !failed && <p role="status">Loading {title}…</p>}
       {rows?.length === 0 && <p>No {title} yet.</p>}
+      {kind === "loan" &&
+        rows &&
+        rows.length > 0 &&
+        rows.every((row) => !row.needs_you && row.section === "done") && (
+          <div>
+            <p>No Loans in progress.</p>
+            <a
+              href="/collection"
+              className="inline-flex min-h-tap items-center text-accent-strong"
+            >
+              Lend from your Collection
+            </a>
+          </div>
+        )}
       {GROUPS.map(section)}
     </div>
   );

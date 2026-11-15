@@ -40,7 +40,7 @@ function ThreadTimelineContent({
   const [finePointer, setFinePointer] = useState(false);
   useEffect(() => {
     if (!window.matchMedia) return;
-    const media = window.matchMedia("(pointer: fine)");
+    const media = window.matchMedia("(pointer: fine) and (hover: hover)");
     const update = () => setFinePointer(media.matches);
     update();
     media.addEventListener("change", update);
@@ -281,7 +281,10 @@ function ThreadTimelineContent({
       if (cause instanceof SocialError && cause.status < 500) {
         release();
         setMessage(threadMessageError(cause));
-      } else setMessage("The answer was lost. Retry sends the same message.");
+      } else
+        setMessage(
+          "Couldn't confirm it was sent. Check your connection and retry."
+        );
     } finally {
       posting.current = false;
       if (alive.current) {

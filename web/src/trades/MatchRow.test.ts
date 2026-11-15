@@ -63,7 +63,9 @@ it.each([false, true])(
           })
         )
       );
-      const header = host.querySelector("h3 button")!;
+      expect(host.querySelector("h3")?.textContent?.trim()).toBe("Misty");
+      expect(host.querySelector("h3 button, button h3")).toBeNull();
+      const header = host.querySelector("button[aria-expanded]")!;
       expect(
         document
           .getElementById(header.getAttribute("aria-labelledby")!)
