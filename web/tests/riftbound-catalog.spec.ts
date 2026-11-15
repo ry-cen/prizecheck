@@ -50,7 +50,20 @@ for (const width of [1280, 390]) {
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Foil", { exact: true })).toBeVisible();
-    await page.keyboard.press("Escape");
+    // Both dismissals run before the asynchronous Back traversal can settle.
+    await dialog.evaluate((element) => {
+      element.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+      element.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+    });
+    await expect(page).toHaveURL((url) => url.hash === populatedHash);
+    await expect(
+      page.getByRole("heading", { name: "Catalog", exact: true })
+    ).toBeVisible();
+    await expect(results.getByRole("listitem")).toHaveCount(2);
     await expect(dialog).not.toBeVisible();
     await expect(foil).toBeFocused();
     await page.goBack();

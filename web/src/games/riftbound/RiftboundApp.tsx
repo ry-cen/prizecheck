@@ -26,16 +26,21 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
   const homeHeading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const stepped = useRef(false);
+  const pendingDismissal = useRef(false);
   const tiles = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
+    if (!view.edition) pendingDismissal.current = false;
     if (view.edition || !stepped.current) return;
     stepped.current = false;
     if (opener.current?.isConnected) opener.current.focus();
   }, [view.edition]);
 
   useEffect(() => {
-    const update = () => setView(parseView(location.hash));
+    const update = () => {
+      pendingDismissal.current = false;
+      setView(parseView(location.hash));
+    };
     window.addEventListener("popstate", update);
     window.addEventListener("hashchange", update);
     return () => {
@@ -99,10 +104,12 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
     );
   }
   function close() {
+    if (pendingDismissal.current) return;
     if (
       history.state?.game === reader.scope &&
       history.state?.detail === true
     ) {
+      pendingDismissal.current = true;
       history.back();
     } else {
       navigate({ ...view, edition: "" }, true);
