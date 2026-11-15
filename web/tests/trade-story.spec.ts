@@ -296,10 +296,16 @@ async function story(
     await show(page, "Proposal");
     await expect(group(page, "Arven (SVI 166) you get")).toContainText("1");
     await page.goBack();
-    await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+    await expect(page).toHaveURL(
+      /\/catalog\?card=[0-9a-f-]{36}&edition=[0-9a-f-]{36}$/
+    );
+    await expect(page.getByRole("dialog", { name: "Arven" })).toBeVisible();
     await expect(
       page.getByRole("dialog", { name: "Discard this proposal to Ash K?" })
     ).toHaveCount(0);
+    await page.goBack();
+    await expect(page).not.toHaveURL(/[?&]card=/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 
     // S4. Find trades, with the two-way row.
     await page.goto(`${ORIGIN}/trades`);

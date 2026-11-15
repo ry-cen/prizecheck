@@ -476,8 +476,18 @@ async function story(
     const discard = page.getByRole("dialog", {
       name: "Discard this proposal to Brock T?",
     });
+    const backOnIono = async () => {
+      await expect(page).toHaveURL(
+        /\/catalog\?card=[0-9a-f-]{36}&edition=[0-9a-f-]{36}$/
+      );
+      await expect(page.getByRole("dialog", { name: "Iono" })).toBeVisible();
+      await expect(discard).toHaveCount(0);
+      await page.goBack();
+      await expect(page).not.toHaveURL(/[?&]card=/);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    };
     await page.goBack();
-    await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+    await backOnIono();
     await expect(discard).toHaveCount(0);
     // One more card makes leaving ask first.
     await results(page)
@@ -493,7 +503,7 @@ async function story(
     await page.goBack();
     await expect(discard).toBeVisible();
     await discard.getByRole("button", { name: "Discard", exact: true }).click();
-    await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+    await backOnIono();
 
     // A card no Friend offers has no Ask to trade.
     await results(page)
