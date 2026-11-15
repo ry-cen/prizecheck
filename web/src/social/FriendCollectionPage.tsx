@@ -309,7 +309,7 @@ export function CardImage({ url }: { url: string | null }) {
   return (
     <span
       aria-hidden="true"
-      className="block aspect-(--tile-aspect) w-full overflow-hidden rounded-card bg-surface-raised"
+      className="@container block aspect-(--tile-aspect) w-full overflow-hidden rounded-card bg-surface-raised"
     >
       {art.waiting ? null : url && art.show ? (
         <img
@@ -323,7 +323,7 @@ export function CardImage({ url }: { url: string | null }) {
           className="block size-full object-cover"
         />
       ) : (
-        <span className="box-border flex h-full items-center justify-center p-2 text-center text-caption text-text-muted">
+        <span className="box-border flex h-full items-center justify-center p-1 text-center text-[clamp(0.5rem,20cqw,0.75rem)] leading-tight wrap-anywhere text-text-muted">
           Artwork unavailable
         </span>
       )}
