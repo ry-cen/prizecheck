@@ -16,7 +16,7 @@ export function PriceCredit({ className = "" }: { className?: string }) {
         <a
           href="https://tcgcsv.com"
           rel="noopener"
-          className="text-text-subtle underline phone:inline-flex phone:min-h-tap phone:items-center"
+          className="text-text-subtle underline phone:inline-flex phone:min-h-tap phone:min-w-tap phone:items-center"
         >
           TCGCSV
         </a>
