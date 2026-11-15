@@ -987,7 +987,7 @@ export function TradeScreen({
               <p
                 ref={swapQuestion}
                 tabIndex={-1}
-                className="m-0 min-w-0 flex-1 text-body"
+                className="m-0 min-w-0 flex-1 text-body phone:basis-full"
               >
                 Confirm the swap with {name}? You can't undo it.
               </p>

@@ -114,7 +114,10 @@ export function MatchRow({
 
   return (
     <li className="overflow-hidden rounded-panel border border-border bg-surface">
-      <h3 className="m-0 text-body font-normal">
+      <div>
+        <h3 id={nameId} className="sr-only">
+          {name}
+        </h3>
         <button
           id={buttonId}
           type="button"
@@ -128,10 +131,7 @@ export function MatchRow({
           <Avatar name={name} size="md" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span
-                id={nameId}
-                className="text-body font-semibold wrap-anywhere"
-              >
+              <span className="text-body font-semibold wrap-anywhere">
                 {name}
               </span>
               <span id={metaId} className="contents">
@@ -159,7 +159,7 @@ export function MatchRow({
             className="mt-0.5 shrink-0 text-text-muted"
           />
         </button>
-      </h3>
+      </div>
       <div className="flex flex-wrap items-center gap-3 px-4 pb-3">
         <Button
           variant="primary"
