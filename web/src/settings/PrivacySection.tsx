@@ -36,10 +36,14 @@ export function inviteUrl(token: string): string {
 export function PrivacySection({
   blocked,
   children,
+  onDirtyChange,
+  discardVersion = 0,
 }: {
   /** Blocked collectors (#248), first in the section. */
   blocked?: ReactNode;
   children?: ReactNode;
+  onDirtyChange?: (dirty: boolean) => void;
+  discardVersion?: number;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   useSettingsSectionSettled("privacy", load.kind !== "loading");
@@ -64,6 +68,28 @@ export function PrivacySection({
   const handleInput = useRef<HTMLInputElement>(null);
   const handleForm = useRef<HTMLFormElement>(null);
   const currentHandle = useRef("");
+
+  const profile = load.kind === "ready" ? load.profile : null;
+  const savedProfile = useRef(profile);
+  savedProfile.current = profile;
+  const dirty =
+    !!profile &&
+    (name !== profile.display_name ||
+      handle !== profile.handle ||
+      (busy &&
+        (pending.current?.action === "display_name" ||
+          pending.current?.action === "handle")));
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    const saved = savedProfile.current;
+    if (!saved) return;
+    setName(saved.display_name);
+    currentName.current = saved.display_name;
+    setHandleText(saved.handle);
+    currentHandle.current = saved.handle;
+  }, [discardVersion]);
 
   function setHandleNotice(message: string) {
     setHandleFeedback(message ? { kind: "request", message } : null);
@@ -131,8 +157,19 @@ export function PrivacySection({
     setHandleNotice("");
     setLinkNotice("");
     setStatus("");
+    const submittedName = currentName.current;
+    const submittedHandle = currentHandle.current;
     try {
-      show(await send(key));
+      const updated = await send(key);
+      setLoad({ kind: "ready", profile: updated });
+      if (currentName.current === submittedName) {
+        setName(updated.display_name);
+        currentName.current = updated.display_name;
+      }
+      if (currentHandle.current === submittedHandle) {
+        setHandleText(updated.handle);
+        currentHandle.current = updated.handle;
+      }
       pending.current = null;
       setStatus(saved);
     } catch (cause) {
@@ -179,7 +216,6 @@ export function PrivacySection({
   }
 
   const headingId = `${base}-heading`;
-  const profile = load.kind === "ready" ? load.profile : null;
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
       <h2 id={headingId} className="m-0 text-heading font-semibold">
