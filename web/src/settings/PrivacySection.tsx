@@ -68,6 +68,11 @@ export function PrivacySection({
   const handleInput = useRef<HTMLInputElement>(null);
   const handleForm = useRef<HTMLFormElement>(null);
   const currentHandle = useRef("");
+  const nameEdits = useRef(0);
+  const handleEdits = useRef(0);
+  // A discard abandons drafts, not requests that may already have saved.
+  const discarded = useRef({ generation: discardVersion, name: 0, handle: 0 });
+  const savingGeneration = useRef(discardVersion);
 
   const profile = load.kind === "ready" ? load.profile : null;
   const savedProfile = useRef(profile);
@@ -77,12 +82,18 @@ export function PrivacySection({
     (name !== profile.display_name ||
       handle !== profile.handle ||
       (busy &&
+        savingGeneration.current === discardVersion &&
         (pending.current?.action === "display_name" ||
           pending.current?.action === "handle")));
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
   useEffect(() => {
+    discarded.current = {
+      generation: discardVersion,
+      name: nameEdits.current,
+      handle: handleEdits.current,
+    };
     const saved = savedProfile.current;
     if (!saved) return;
     setName(saved.display_name);
@@ -151,22 +162,32 @@ export function PrivacySection({
         ? previous.key
         : crypto.randomUUID();
     pending.current = { action, value, key };
+    savingGeneration.current = discardVersion;
     setBusy(true);
     // One notice at a time: a new change clears every earlier one.
     setNameNotice("");
     setHandleNotice("");
     setLinkNotice("");
     setStatus("");
-    const submittedName = currentName.current;
-    const submittedHandle = currentHandle.current;
+    const submittedNameEdits = nameEdits.current;
+    const submittedHandleEdits = handleEdits.current;
+    const generation = discardVersion;
     try {
       const updated = await send(key);
       setLoad({ kind: "ready", profile: updated });
-      if (currentName.current === submittedName) {
+      if (
+        discarded.current.generation === generation
+          ? nameEdits.current === submittedNameEdits
+          : nameEdits.current === discarded.current.name
+      ) {
         setName(updated.display_name);
         currentName.current = updated.display_name;
       }
-      if (currentHandle.current === submittedHandle) {
+      if (
+        discarded.current.generation === generation
+          ? handleEdits.current === submittedHandleEdits
+          : handleEdits.current === discarded.current.handle
+      ) {
         setHandleText(updated.handle);
         currentHandle.current = updated.handle;
       }
@@ -272,6 +293,7 @@ export function PrivacySection({
                   aria-describedby={`${base}-name-help${nameNotice ? ` ${base}-name-error` : ""}`}
                   onChange={(event) => {
                     const value = event.target.value;
+                    nameEdits.current += 1;
                     setName(value);
                     currentName.current = value;
                     if (value.trim() && [...value.trim()].length <= 40) {
@@ -340,6 +362,7 @@ export function PrivacySection({
                   aria-describedby={`${base}-handle-help${handleNotice ? ` ${base}-handle-error` : ""}`}
                   onChange={(event) => {
                     const value = event.target.value;
+                    handleEdits.current += 1;
                     setHandleText(value);
                     currentHandle.current = value;
                     if (/^[a-zA-Z0-9_]{3,20}$/.test(value.trim()))

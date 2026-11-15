@@ -58,13 +58,17 @@ export function OpenDiscoverySection({
   const savedZip = load.kind === "ready" ? (load.settings.zip ?? "") : "";
   const savedZipRef = useRef(savedZip);
   savedZipRef.current = savedZip;
-  const pendingZip = useRef(false);
+  const pendingZip = useRef<number | null>(null);
+  const edits = useRef(0);
+  const discarded = useRef({ generation: discardVersion, edits: 0 });
   const dirty =
-    load.kind === "ready" && (draft !== savedZip || pendingZip.current);
+    load.kind === "ready" &&
+    (draft !== savedZip || pendingZip.current === discardVersion);
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
   useEffect(() => {
+    discarded.current = { generation: discardVersion, edits: edits.current };
     setDraft(savedZipRef.current);
   }, [discardVersion]);
 
@@ -86,7 +90,9 @@ export function OpenDiscoverySection({
   async function save(body: SetDiscovery, done: string) {
     if (pending) return;
     const submitted = currentDraft.current;
-    pendingZip.current = body.zip !== undefined;
+    const submittedEdits = edits.current;
+    const generation = discardVersion;
+    pendingZip.current = body.zip !== undefined ? generation : null;
     setPending(true);
     setNotice("");
     setSaved("");
@@ -94,8 +100,10 @@ export function OpenDiscoverySection({
       const settings = await setDiscovery(body);
       setLoad({ kind: "ready", settings });
       if (
-        currentDraft.current === submitted &&
-        (body.zip !== undefined || submitted === savedZip)
+        discarded.current.generation === generation
+          ? edits.current === submittedEdits &&
+            (body.zip !== undefined || submitted === savedZip)
+          : edits.current === discarded.current.edits
       )
         setDraft(settings.zip ?? "");
       setSaved(done);
@@ -108,7 +116,7 @@ export function OpenDiscoverySection({
         setAttempt((n) => n + 1);
       else setNotice(discoveryMessage(cause));
     } finally {
-      pendingZip.current = false;
+      pendingZip.current = null;
       setPending(false);
     }
   }
@@ -199,7 +207,10 @@ export function OpenDiscoverySection({
             autoComplete="postal-code"
             maxLength={10}
             value={draft}
-            onChange={(event) => setDraft(event.currentTarget.value)}
+            onChange={(event) => {
+              edits.current += 1;
+              setDraft(event.currentTarget.value);
+            }}
           />
           <Button
             type="submit"
