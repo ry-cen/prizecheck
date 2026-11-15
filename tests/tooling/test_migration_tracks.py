@@ -366,6 +366,7 @@ import psycopg
 with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_migration (name text PRIMARY KEY)")
 '''
+HISTORY_ROOT = Path(os.environ.get('RELEASE_TEST_HISTORY_ROOT', ROOT))
 BEFORE_TRACKS = 'c42d6fb142811ede4db9e393b68d6b6543585571'  # dev before migration tracks: no migration_tracks.py
 BEFORE_BASELINE = '97fb02cf1e39d0f1fcf6b202f418fd3ecc70452f'  # dev with migration tracks and no core directory: the release before S10
 
@@ -378,11 +379,11 @@ def git_env():
 
 
 def have_commit(commit):
-    return subprocess.run(['git', 'cat-file', '-e', commit + '^{commit}'], cwd=ROOT, env=git_env(), capture_output=True).returncode == 0
+    return subprocess.run(['git', 'cat-file', '-e', commit + '^{commit}'], cwd=HISTORY_ROOT, env=git_env(), capture_output=True).returncode == 0
 
 
 def extract(commit, folder, *paths):
-    archive = subprocess.run(['git', 'archive', commit, *paths], cwd=ROOT, env=git_env(), capture_output=True, check=True).stdout
+    archive = subprocess.run(['git', 'archive', commit, *paths], cwd=HISTORY_ROOT, env=git_env(), capture_output=True, check=True).stdout
     subprocess.run(['tar', '-x', '-C', str(folder)], input=archive, check=True)
 
 

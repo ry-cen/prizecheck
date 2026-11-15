@@ -48,8 +48,8 @@ jobs:
         run: npm run guardrails
       - name: Compile (TypeScript, scanner models lock, generated clients, Python byte-compile)
         run: npm run check && .venv/bin/python -m compileall -q api scripts
-      - name: Build (the web bundle and its boundary)
-        run: npx vite build --config web/vite.config.ts && npm run check:bundle
+      - name: Build (web boundary and packaged iOS assets)
+        run: npx vite build --config web/vite.config.ts && npm run check:bundle && npm run build:ios
       - name: Unit tests
         run: npm run test:unit
   # Optional (integration: sharded, and every pull request to main). The fast tier of the deep suites, split into legs

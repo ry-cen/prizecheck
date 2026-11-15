@@ -42,9 +42,10 @@ def source_inventory(root):
     # use their normal index, not an inherited temporary index from commit -a/paths.
     if (root / '.git').exists():
         env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
-        probe = subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], cwd=root,
+        probe = subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=root,
                                env=env, capture_output=True, text=True)
-        if probe.returncode or probe.stdout.strip() != 'true':
+        # An empty child .git directory may make Git discover the parent worktree.
+        if probe.returncode or Path(probe.stdout.strip()).resolve() != root.resolve():
             raise AssertionError(f'Cannot probe tracked source at {root}: {probe.stderr.strip() or probe.stdout.strip()}')
         result = subprocess.run(['git', 'ls-files', '-z'], cwd=root, env=env, capture_output=True, text=True)
         if result.returncode:

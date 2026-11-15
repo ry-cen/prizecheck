@@ -11,3 +11,8 @@ web/src/scanner/fixtures/parity/
 api/tests/api_contract/
 # Captured verbatim by test_collection_listing_golden.py's base run; keep byte-identical to the capture
 api/tests/fixtures/collection_listing_golden.json
+
+# Capacitor-owned native configuration and copied/minified web assets
+mobile/ios/App/App/capacitor.config.json
+mobile/ios/App/App/config.xml
+mobile/ios/App/App/public/
