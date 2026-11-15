@@ -81,3 +81,12 @@ export function pageHoldings(
   }
   return [...page.values()];
 }
+
+/** Local copy only: shared galleryModel contains game-specific runtime labels. */
+export function plural(
+  count: number,
+  singular: string,
+  multiple: string
+): string {
+  return `${count} ${count === 1 ? singular : multiple}`;
+}
