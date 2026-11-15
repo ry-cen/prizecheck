@@ -119,9 +119,11 @@ export function WillAcceptRadios({
 export const TRADE_WANTS_HEADING = "trade-wants";
 
 export function focusTradeWants() {
-  const heading = document.getElementById(TRADE_WANTS_HEADING);
-  heading?.focus({ preventScroll: true });
-  heading?.scrollIntoView({ block: "start" });
+  const target =
+    document.getElementById("trade-wants-add") ??
+    document.getElementById(TRADE_WANTS_HEADING);
+  target?.focus({ preventScroll: true });
+  target?.scrollIntoView({ block: "center" });
 }
 
 export function tradeWantCounts(lines: readonly { quantity: string }[]) {
@@ -132,22 +134,27 @@ export function tradeWantCounts(lines: readonly { quantity: string }[]) {
 }
 
 export function TradeWantsShortcut({ api }: { api: TradeWantsApi }) {
-  if (api.state.kind !== "ready" || api.state.wants.lines.length === 0)
-    return null;
+  if (api.state.kind !== "ready") return null;
   const lines = api.state.wants.lines;
   const { copies, entries } = tradeWantCounts(lines);
   return (
     <p className="m-0 basis-full text-meta text-text-muted">
       <a
         href="#trade-wants"
-        className="inline-flex min-h-tap max-w-full items-center rounded-control text-accent-strong underline wrap-anywhere"
+        className="box-border inline-flex min-h-tap max-w-full items-center justify-center rounded-control border border-border-strong bg-surface-raised px-3 py-1 font-sans text-control font-medium text-text hover:border-control-outline phone:px-4"
         onClick={(event) => {
           event.preventDefault();
           focusTradeWants();
         }}
       >
-        Trade Wants · {copies} {copies === 1 ? "copy" : "copies"} across{" "}
-        {entries} {entries === 1 ? "entry" : "entries"}
+        {entries === 0 ? (
+          "Add a Trade Want"
+        ) : (
+          <>
+            Trade Wants · {copies} {copies === 1 ? "copy" : "copies"} across{" "}
+            {entries} {entries === 1 ? "entry" : "entries"}
+          </>
+        )}
       </a>
       <span className="block">Separate from Deck To get quantities.</span>
     </p>
@@ -247,7 +254,11 @@ export function TradeWantsPanel({ api }: { api: TradeWantsApi }) {
             </ul>
           )}
           <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3">
-            <Button onClick={() => setAdding(true)} className="phone:w-full">
+            <Button
+              id="trade-wants-add"
+              onClick={() => setAdding(true)}
+              className="phone:w-full"
+            >
               Add a card
             </Button>
             <p
