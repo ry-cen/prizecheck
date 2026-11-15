@@ -1,6 +1,7 @@
 import type { TreeNode } from "../../../location_generated";
 import type { CollectionReader, HoldingRow } from "../collection";
 import { expandCopies, pageHoldings } from "../collection";
+import { locationCommands } from "./locationCommands";
 import { editions } from "./fixtures";
 export type CollectionScenario =
   | "normal"
@@ -9,7 +10,10 @@ export type CollectionScenario =
   | "slow"
   | "write-failure"
   | "write-slow"
-  | "stale";
+  | "stale"
+  | "location-failure"
+  | "location-slow"
+  | "location-stale";
 export type FixtureStore = {
   locations: TreeNode[];
   rows: HoldingRow[];
@@ -116,7 +120,16 @@ export function collectionFixtureReader(
     scope: "riftbound",
     owner,
     locations: (signal) =>
-      read(structuredClone(store.locations), signal, "locations"),
+      read(
+        store.locations.map((n) => ({
+          ...n,
+          copyCount: store.rows
+            .filter((r) => r.locationId === n.id)
+            .reduce((sum, r) => sum + r.quantity, 0),
+        })),
+        signal,
+        "locations"
+      ),
     holdings: (id, signal) =>
       read(
         store.rows.filter((r) => r.edition.id === id),
@@ -242,7 +255,10 @@ export function collectionFixtureWriter(
           options.signal.removeEventListener("abort", abort);
           resolve();
         },
-        scenario === "write-slow" ? 1600 : 120
+        scenario === "write-slow" ||
+          (scenario === "location-slow" && action.endsWith("Location"))
+          ? 1600
+          : 120
       );
       if (options.signal.aborted) abort();
       else options.signal.addEventListener("abort", abort, { once: true });
@@ -264,7 +280,11 @@ export function collectionFixtureWriter(
         throw new CollectionError("IDEMPOTENCY_KEY_REUSED");
       return structuredClone(previous.result) as T;
     }
-    if (scenario === "write-failure" && !failed) {
+    if (
+      (scenario === "write-failure" ||
+        (scenario === "location-failure" && action.endsWith("Location"))) &&
+      !failed
+    ) {
       failed = true;
       throw new Error("Synthetic write failure");
     }
@@ -275,6 +295,10 @@ export function collectionFixtureWriter(
     ) {
       stale = true;
       throw new CollectionError("STALE_HOLDING");
+    }
+    if (scenario === "location-stale" && !stale && action === "editLocation") {
+      stale = true;
+      throw new CollectionError("STALE_LOCATION");
     }
     const result = apply();
     replay.set(requestKey, {
@@ -320,6 +344,7 @@ export function collectionFixtureWriter(
       }
   }
   const writer: CollectionWriter = {
+    ...locationCommands(store, command),
     owner,
     add: (input, options) =>
       command("add", input, options, () => {
