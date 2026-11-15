@@ -108,6 +108,22 @@ for (const width of [1280, 375]) {
       await expect(
         page.getByText("1 copy selected", { exact: true })
       ).toBeVisible();
+      const lastRow = page
+        .getByRole("complementary", { name: "Card details" })
+        .getByText("Binders / Blue binder · 2", { exact: true });
+      await expect(lastRow).toBeVisible();
+      await lastRow.scrollIntoViewIfNeeded();
+      const rowBox = await lastRow.boundingBox();
+      const pillBox = await page
+        .locator('[aria-label="Selected copies"]')
+        .boundingBox();
+      expect(
+        rowBox &&
+          pillBox &&
+          (rowBox.y + rowBox.height <= pillBox.y ||
+            rowBox.x >= pillBox.x + pillBox.width ||
+            rowBox.x + rowBox.width <= pillBox.x)
+      ).toBe(true);
       const selectionShot = info.outputPath("selection-desktop.png");
       await page.screenshot({ path: selectionShot });
       await info.attach("Selection bar", {
@@ -228,6 +244,16 @@ for (const width of [1280, 375]) {
       page.getByRole("region", { name: "Notifications" })
     ).toContainText("Moved 1 copy");
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    const moved = await inspect(page, "a", "stale");
+    expect(moved.revision).toBe(2);
+    expect(
+      moved.rows.find(
+        (r) => r.editionId === moved.rows[0].editionId && r.locationId === "1"
+      )?.quantity
+    ).toBe(2);
+    expect(
+      moved.rows.filter((r) => r.locationId === "5").map((r) => r.quantity)
+    ).toEqual([1]);
     await page.goto(`${entry}?collection=write-failure`);
     await page.evaluate(async (path) => {
       const module = await import(path);
@@ -390,5 +416,93 @@ for (const width of [1280, 375]) {
     );
     await page.keyboard.press("Enter");
     await expect(notifications).toContainText("Undone");
+  });
+}
+
+for (const width of [1280, 375]) {
+  test(`Move and Remove cancellation preserve selection and Actions focus at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 800 });
+    await page.goto(`${entry}${collectionHash}`);
+    const results = page.getByRole("region", { name: "Collection results" });
+    await results.getByRole("button").first().click();
+    if (width === 375) {
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Move…", exact: true })
+        .click();
+    } else {
+      await page.getByRole("button", { name: "Actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Move…", exact: true }).click();
+    }
+    await expect(
+      page.getByRole("dialog", { name: "Move 1 copy", exact: true })
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    const actions = page.getByRole("button", { name: "Actions", exact: true });
+    await expect(actions).toBeFocused();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(results.locator('button[aria-pressed="true"]')).toHaveCount(1);
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    const remove = page.getByRole("dialog", {
+      name: "Remove 1 copy from your Collection",
+      exact: true,
+    });
+    await expect(remove).toBeVisible();
+    await remove.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(actions).toBeFocused();
+    await expect(results.locator('button[aria-pressed="true"]')).toHaveCount(1);
+    expect((await inspect(page)).revision).toBe(1);
+    if (width === 375) {
+      const box = await page
+        .locator('[aria-label="Selected copies"]')
+        .boundingBox();
+      const tabs = await page
+        .getByRole("navigation", { name: "Mobile navigation" })
+        .boundingBox();
+      expect(box && tabs && box.y + box.height <= tabs.y).toBe(true);
+    }
+  });
+  test(`slow Undo survives Location navigation at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 800 });
+    await page.goto(`${entry}?collection=write-slow${collectionHash}`);
+    await page
+      .getByRole("region", { name: "Collection results" })
+      .getByRole("button")
+      .first()
+      .click();
+    if (width === 375)
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Remove…", exact: true })
+        .click();
+    else {
+      await page.getByRole("button", { name: "Actions", exact: true }).click();
+      await page
+        .getByRole("menuitem", { name: "Remove…", exact: true })
+        .click();
+    }
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Remove 1 copy", exact: true })
+      .click();
+    const toast = page.getByRole("region", { name: "Notifications" });
+    await expect(toast).toContainText("Removed 1 copy");
+    await toast.getByRole("button", { name: "Undo", exact: true }).click();
+    await page.evaluate(() => {
+      location.hash = "#riftbound:section=collection&location=5";
+    });
+    await expect(
+      page.getByRole("heading", { name: "Empty binder", exact: true })
+    ).toBeVisible();
+    await expect(toast).toContainText("Undone");
+    const restored = await inspect(page, "a", "write-slow");
+    expect(restored.revision).toBe(3);
+    expect(restored.rows[0].quantity).toBe(3);
   });
 }

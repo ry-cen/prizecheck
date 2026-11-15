@@ -128,7 +128,10 @@ export interface CollectionWriter {
   ): Promise<SelectionResult>;
   undoList(options: WriteOptions): Promise<UndoRecord[]>;
   undo(id: string, options: WriteOptions): Promise<WriteResult>;
-  dismissUndo(id: string, options: WriteOptions): Promise<WriteResult>;
+  dismissUndo(
+    id: string,
+    options: { signal: AbortSignal }
+  ): Promise<WriteResult>;
 }
 export type CollectionErrorCode =
   | "STALE_HOLDING"

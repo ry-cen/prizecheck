@@ -57,7 +57,9 @@ function RiftboundComposition({
   );
   const [revision, setRevision] = useState(1);
   const [adding, setAdding] = useState<string | null>(null);
-  const feedback = useCollectionFeedback(writer, viewHash(view), setRevision);
+  const feedback = useCollectionFeedback(writer, (next) =>
+    setRevision((previous) => Math.max(previous, next))
+  );
   const addOpener = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     setAdding(null);

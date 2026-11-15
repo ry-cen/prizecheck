@@ -36,10 +36,9 @@ export function writeError(error: unknown): string {
   }
   return "Your change couldn't be saved. Try again.";
 }
-/** Toast callbacks outlive their dialog. Give each operation its own cleanup guard, as in read.ts. */
+/** Undo belongs to the owner/writer, not a Location or page. Each shown operation keeps its key across retry. */
 export function useCollectionFeedback(
   writer: CollectionWriter | undefined,
-  context: string,
   refresh: (revision: number) => void
 ) {
   const toast = useToast();
@@ -54,51 +53,77 @@ export function useCollectionFeedback(
       run.current = false;
       run.controller.abort();
     };
-  }, [writer, context]);
+  }, [writer]);
   return (result: WriteResult, message: string, undo?: UndoRecord) => {
     refresh(result.ownerRevision);
     if (!undo || !writer) {
       toast.show({ message });
       return;
     }
+    const run = lifetime.current;
     const undoKey = crypto.randomUUID();
-    const dismissKey = crypto.randomUUID();
     let busy = false;
-    const operate = async (dismiss: boolean) => {
-      if (busy) return;
-      busy = true;
-      const run = lifetime.current;
-      try {
-        const options = {
-          signal: run.controller.signal,
-          idempotencyKey: dismiss ? dismissKey : undoKey,
-        };
-        const confirmed = await (dismiss
-          ? writer.dismissUndo(undo.id, options)
-          : writer.undo(undo.id, options));
-        if (!run.current) return;
-        refresh(confirmed.ownerRevision);
-        if (dismiss) toast.dismiss();
-        else toast.show({ message: "Undone" });
-      } catch (error) {
-        if (run.current) toast.show({ message: writeError(error) });
-      } finally {
-        busy = false;
-      }
-    };
-    toast.show({
-      message,
+    let toastId: number;
+    const render = (text: string) => ({
+      message: text,
       action: {
         label: "Undo",
         onAction: () => void operate(false),
         keepOpen: true,
+        busy,
       },
       secondaryAction: {
         label: "Dismiss Undo",
         onAction: () => void operate(true),
         keepOpen: true,
+        busy,
       },
     });
+    const operate = async (dismiss: boolean) => {
+      if (busy || !run.current || !toast.isShown(toastId)) return;
+      busy = true;
+      toast.update(toastId, render(message));
+      try {
+        const confirmed = await (dismiss
+          ? writer.dismissUndo(undo.id, { signal: run.controller.signal })
+          : writer.undo(undo.id, {
+              signal: run.controller.signal,
+              idempotencyKey: undoKey,
+            }));
+        if (!run.current) return;
+        refresh(confirmed.ownerRevision);
+        if (toast.isShown(toastId)) {
+          if (dismiss) toast.dismiss(toastId);
+          else toast.update(toastId, { message: "Undone" });
+        }
+      } catch (error) {
+        if (!run.current || !toast.isShown(toastId)) return;
+        if (
+          dismiss &&
+          error instanceof CollectionError &&
+          error.code === "UNDO_NOT_FOUND"
+        ) {
+          toast.dismiss(toastId);
+          return;
+        }
+        const terminal =
+          error instanceof CollectionError &&
+          [
+            "UNDO_NOT_FOUND",
+            "UNDO_EXPIRED",
+            "UNDO_NOT_NEWEST",
+            "UNDO_INCOMPATIBLE",
+          ].includes(error.code);
+        busy = false;
+        toast.update(
+          toastId,
+          terminal ? { message: writeError(error) } : render(writeError(error))
+        );
+      } finally {
+        busy = false;
+      }
+    };
+    toastId = toast.show(render(message));
   };
 }
 
@@ -127,7 +152,7 @@ export function CollectionWriteDialog({
   onConfirmed,
   returnFocus,
 }: Props) {
-  const [destination, setDestination] = useState(mode === "add" ? "1" : "");
+  const [destination, setDestination] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -141,6 +166,13 @@ export function CollectionWriteDialog({
   useEffect(() => {
     const run = { current: true, controller: new AbortController() };
     lifetime.current = run;
+    submitting.current = false;
+    attempt.current = null;
+    setBusy(false);
+    setError(undefined);
+    setDestination("");
+    setQuantity(1);
+    setVersion(row?.version ?? 1);
     return () => {
       run.current = false;
       run.controller.abort();
@@ -150,6 +182,21 @@ export function CollectionWriteDialog({
     JSON.stringify(["riftbound", "write-locations", reader.owner]),
     useCallback((s) => reader.locations(s), [reader])
   );
+  const leaves = (tree.value ?? []).filter(
+    (n) =>
+      n.kind === "storage_leaf" &&
+      n.id !== row?.locationId &&
+      !tree.value!.some((child) => child.parent_id === n.id)
+  );
+  const defaultLeaf =
+    mode === "add"
+      ? ((
+          leaves.find((n) => n.name === "Unsorted" && n.parent_id === null) ??
+          leaves[0]
+        )?.id ?? "")
+      : "";
+  const destinationId = destination || defaultLeaf;
+  const validDestination = leaves.some((n) => n.id === destinationId);
   const index = indexLocations(tree.value ?? []);
   const stale =
     error instanceof CollectionError && error.code === "STALE_HOLDING";
@@ -166,7 +213,7 @@ export function CollectionWriteDialog({
         ? "Move 1 copy"
         : "Remove 1 copy";
   async function submit(reload = false) {
-    if (submitting.current) return;
+    if (submitting.current || (mode !== "remove" && !validDestination)) return;
     submitting.current = true;
     setBusy(true);
     const run = lifetime.current;
@@ -200,19 +247,19 @@ export function CollectionWriteDialog({
       const result =
         mode === "add"
           ? await writer.add(
-              { editionId: edition.id, locationId: destination, quantity },
+              { editionId: edition.id, locationId: destinationId, quantity },
               options
             )
           : mode === "move"
-            ? await writer.move({ items, destinationId: destination }, options)
+            ? await writer.move({ items, destinationId }, options)
             : await writer.remove({ items }, options);
       if (!run.current) return;
       onConfirmed(
         result,
         mode === "add"
-          ? `Added ${plural(quantity, "copy", "copies")} to ${index.path(destination)}`
+          ? `Added ${plural(quantity, "copy", "copies")} to ${index.path(destinationId)}`
           : mode === "move"
-            ? `Moved 1 copy to ${index.path(destination)}`
+            ? `Moved 1 copy to ${index.path(destinationId)}`
             : "Removed 1 copy from your Collection",
         "undo" in result ? result.undo : undefined
       );
@@ -252,7 +299,7 @@ export function CollectionWriteDialog({
           ) : (
             <Select
               label="Location"
-              value={destination}
+              value={destinationId}
               disabled={busy || !!attempt.current}
               onChange={(event) => {
                 setDestination(event.target.value);
@@ -262,22 +309,15 @@ export function CollectionWriteDialog({
               <option value="" disabled>
                 Choose a Location
               </option>
-              {tree.value
-                .filter(
-                  (n) =>
-                    n.kind === "storage_leaf" &&
-                    n.id !== row?.locationId &&
-                    !tree.value!.some((child) => child.parent_id === n.id)
-                )
-                .map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {index.path(n.id)}
-                  </option>
-                ))}
+              {leaves.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {index.path(n.id)}
+                </option>
+              ))}
             </Select>
           ))}
-        {mode === "move" && destination && (
-          <p className="m-0">To {index.path(destination)}</p>
+        {mode === "move" && validDestination && (
+          <p className="m-0">To {index.path(destinationId)}</p>
         )}
         {mode === "add" && (
           <div>
@@ -303,7 +343,8 @@ export function CollectionWriteDialog({
               type="submit"
               variant={mode === "remove" ? "danger" : "primary"}
               disabled={
-                busy || (mode !== "remove" && (!destination || !tree.value))
+                busy ||
+                (mode !== "remove" && (!validDestination || !tree.value))
               }
             >
               {busy ? "Saving…" : confirm}

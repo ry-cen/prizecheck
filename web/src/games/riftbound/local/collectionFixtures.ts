@@ -177,7 +177,6 @@ import {
   type CollectionWriter,
   type SelectionItem,
   type UndoRecord,
-  type WriteOptions,
 } from "../collection";
 const writers = new Map<string, CollectionWriter>();
 const CORE_MAX = 2n ** 63n - 1n;
@@ -230,7 +229,7 @@ export function collectionFixtureWriter(
   async function command<T>(
     action: string,
     input: unknown,
-    options: WriteOptions,
+    options: { signal: AbortSignal; idempotencyKey?: string },
     apply: () => T
   ): Promise<T> {
     await new Promise<void>((resolve, reject) => {
@@ -248,7 +247,8 @@ export function collectionFixtureWriter(
       if (options.signal.aborted) abort();
       else options.signal.addEventListener("abort", abort, { once: true });
     });
-    if (action === "undoList") return structuredClone(apply());
+    if (action === "undoList" || action === "dismissUndo")
+      return structuredClone(apply());
     const payload = JSON.stringify([action, input], (_key, value) =>
       value && typeof value === "object" && !Array.isArray(value)
         ? Object.fromEntries(
@@ -256,7 +256,9 @@ export function collectionFixtureWriter(
           )
         : value
     );
-    const previous = replay.get(options.idempotencyKey);
+    const requestKey = options.idempotencyKey;
+    if (!requestKey) throw new Error("Idempotency key required");
+    const previous = replay.get(requestKey);
     if (previous) {
       if (previous.payload !== payload)
         throw new CollectionError("IDEMPOTENCY_KEY_REUSED");
@@ -275,7 +277,7 @@ export function collectionFixtureWriter(
       throw new CollectionError("STALE_HOLDING");
     }
     const result = apply();
-    replay.set(options.idempotencyKey, {
+    replay.set(requestKey, {
       payload,
       result: structuredClone(result),
     });
