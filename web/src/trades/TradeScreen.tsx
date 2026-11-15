@@ -1148,6 +1148,7 @@ function TradeSide({
             <TradeTermsRow
               key={card.edition_id}
               card={card}
+              fullWidthPhoneName
               quantity={
                 <p className="m-0 text-body font-semibold tabular-nums">
                   ×{card.copies}

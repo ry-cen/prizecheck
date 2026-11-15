@@ -1,6 +1,8 @@
-import { createElement } from "react";
+// @vitest-environment jsdom
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createRoot } from "react-dom/client";
 import { TradeTermsRow } from "./TradeTermsRow";
 
 describe("closed Trade artwork", () => {
@@ -39,5 +41,62 @@ describe("closed Trade artwork", () => {
       expect(markup).not.toContain("/large");
       expect(markup.match(/Your Decks need 2 copies\./g)).toHaveLength(count);
     });
+  }
+});
+
+it("shrinks only an oversized Trade name by one phone font step and restores it after widening", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let resize = () => {};
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(update: () => void) {
+        resize = update;
+      }
+      observe() {}
+      disconnect() {}
+    }
+  );
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    measureText: () => ({ width: 100 }),
+  } as unknown as CanvasRenderingContext2D);
+  let width = 80;
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
+    () => width
+  );
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(TradeTermsRow, {
+          card: {
+            edition_id: "card",
+            name: "Centiskorch",
+            set_code: "TEST",
+            set_name: "Test",
+            collector_number: "1",
+            descriptor: {},
+            image_url: null,
+          },
+          quantity: "×1",
+          fullWidthPhoneName: true,
+        })
+      )
+    );
+    const name = host.querySelector('[lang="en"]')!;
+    expect(name.classList.contains("phone:text-control")).toBe(true);
+    expect(name.classList.contains("phone:hyphens-auto")).toBe(true);
+    expect(name.classList.contains("phone:wrap-normal")).toBe(true);
+    expect(name.classList.contains("text-body")).toBe(true);
+    width = 120;
+    await act(async () => resize());
+    expect(name.classList.contains("phone:text-control")).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   }
 });

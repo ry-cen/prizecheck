@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { lineEdition } from "../loans/loanText";
 import { useArtRetry } from "../ui/artRetry";
 import { CardArt, CardPopup } from "../ui/CardPopup";
@@ -19,15 +19,48 @@ export function TradeTermsRow({
   quantity,
   context,
   details,
+  fullWidthPhoneName = false,
 }: {
   card: TermsCard;
   quantity: ReactNode;
   context?: ReactNode;
   details?: ReactNode;
+  /** Keep compact Trade terms side by side while giving their names the tile width. */
+  fullWidthPhoneName?: boolean;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
+  const nameRef = useRef<HTMLSpanElement>(null);
+  const [smallerName, setSmallerName] = useState(false);
+  useEffect(() => {
+    const name = nameRef.current;
+    if (!fullWidthPhoneName || !name || typeof ResizeObserver === "undefined")
+      return;
+    const canvas = document.createElement("canvas");
+    const measure = canvas.getContext("2d");
+    if (!measure) return;
+    let active = true;
+    const update = () => {
+      if (!active) return;
+      const style = getComputedStyle(name);
+      // Always measure at body size, so shrinking the name cannot toggle the result.
+      measure.font = `${style.fontWeight} ${style.getPropertyValue("--font-size-md")} ${style.fontFamily}`;
+      setSmallerName(
+        card.name
+          .split(/\s+/)
+          .some((word) => measure.measureText(word).width > name.clientWidth)
+      );
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(name);
+    void document.fonts?.ready.then(update);
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
+  }, [card.name, fullWidthPhoneName]);
   return (
     <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border p-3 last:border-b-0">
       <button
@@ -36,19 +69,23 @@ export function TradeTermsRow({
         aria-labelledby={`${id}-name ${id}-edition`}
         aria-describedby={`${id}-quantity${context ? ` ${id}-context` : ""}`}
         onClick={() => setOpen(true)}
-        className="grid min-h-tap min-w-0 flex-1 basis-44 grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-control border-0 bg-transparent p-0 text-left font-sans text-text focus-visible:outline-2 focus-visible:outline-accent phone:grid-cols-[3rem_minmax(0,1fr)]"
+        className={`grid min-h-tap min-w-0 flex-1 basis-44 grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-control border-0 bg-transparent p-0 text-left font-sans text-text focus-visible:outline-2 focus-visible:outline-accent ${fullWidthPhoneName ? "phone:grid-cols-[2rem_minmax(0,1fr)] phone:gap-y-1" : "phone:grid-cols-[3rem_minmax(0,1fr)]"}`}
       >
         <TradeThumbnail url={card.image_url} />
-        <span className="flex min-w-0 flex-col gap-1">
+        <span
+          className={`flex min-w-0 flex-col gap-1 ${fullWidthPhoneName ? "phone:contents" : ""}`}
+        >
           <span
             id={`${id}-name`}
-            className="text-body font-semibold wrap-anywhere"
+            ref={nameRef}
+            lang={fullWidthPhoneName ? "en" : undefined}
+            className={`text-body font-semibold wrap-anywhere ${fullWidthPhoneName ? "phone:order-3 phone:col-span-2 phone:wrap-normal phone:break-normal phone:hyphens-auto" : ""} ${fullWidthPhoneName && smallerName ? "phone:text-control" : ""}`}
           >
             {card.name}
           </span>
           <span
             id={`${id}-edition`}
-            className="text-meta text-text-muted tabular-nums wrap-anywhere"
+            className={`text-meta text-text-muted tabular-nums wrap-anywhere ${fullWidthPhoneName ? "phone:order-2" : ""}`}
           >
             {lineEdition(card)}
           </span>
