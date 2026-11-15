@@ -41,7 +41,7 @@ Frozen visual reference: Pokémon M7 `ed1231d521dc1210e2ab4ca558e5b2fb9952b1d1`;
 
 | Surface | Reference under web/src | Riftbound composition | Capability / defect handling |
 | --- | --- | --- | --- |
-| Single-copy selection bar | workspace/SelectionBar.tsx | CollectionView.tsx | Locally mirrors “1 copy selected”, Clear selection and Actions Menu (Move…/Remove…). No Pokémon runtime hooks, Loans or multi-select. |
+| Single-copy selection bar | workspace/SelectionBar.tsx | CollectionView.tsx | Locally mirrors the centred floating M7 pill: “1 copy selected · 1 edition · 1 location”, with Move…/Remove…/Clear selection inside Actions. Inspector reserves bottom space; phone pill clears tabs. No Pokémon runtime hooks, Loans or multi-select. |
 | Add dialog | catalog Add composition, ui/Stepper.tsx, ui/Dialog.tsx | CollectionWrites.tsx, RiftboundApp.tsx | Leaf path picker, Unsorted default, 1–99 Stepper, confirm Add N copies. Single Add has no Undo. |
 | Move dialog | workspace/InventoryDialogs.tsx | CollectionWrites.tsx | Leaf picker excludes source, shows paths, explicit Move 1 copy confirmation. |
 | Remove dialog | workspace/InventoryDialogs.tsx | CollectionWrites.tsx | “Remove 1 copy from your Collection”, explicit Remove 1 copy confirmation. |
@@ -49,4 +49,4 @@ Frozen visual reference: Pokémon M7 `ed1231d521dc1210e2ab4ca558e5b2fb9952b1d1`;
 | M7 defect 1 avoidance | workspace stale-action/detail composition | CollectionView.tsx | Phone details sheet closes while action dialog is mounted. Stale error stays in that sole dialog; reload reads the current version without reopening inspector/detail. |
 | Inspector nits and clamp | workspace/Inspector.tsx:285 | CollectionView.tsx | Muted Variant label with separate value, dashed empty card, clamp guarded against max(1,pages), no heading-focus transfer for automatic clamp. |
 
-The earlier deferred WP2 rows above describe WP1. These rows supersede them for the supported single-copy fixture flows. Location management remains WP3; no Decks are implemented. Screenshots and actual check counts are recorded in the WP2 handoff, not asserted by this plan.
+The earlier deferred WP2 rows above describe WP1. These rows supersede them for the supported single-copy fixture flows. Location management remains WP3; no Decks are implemented. Screenshots and actual check counts are reported with each implementation/review reply and maintained in the PR body by the planner.

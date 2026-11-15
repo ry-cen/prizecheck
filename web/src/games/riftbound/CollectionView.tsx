@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { PageHeader } from "../../shell/PageHeader";
 import { Button } from "../../ui/Button";
 import { ScrollArea } from "../../ui/ScrollArea";
@@ -44,6 +51,8 @@ export function CollectionView({
   onQuery: (q: CollectionQuery, replace?: boolean) => void;
   onCatalog: () => void;
 }) {
+  const actionsRef = useRef<HTMLElement | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(true);
   const [action, setAction] = useState<"move" | "remove" | null>(null);
   const phone = useMediaQuery(MOBILE_QUERY);
   const [drawer, setDrawer] = useState(false);
@@ -55,6 +64,7 @@ export function CollectionView({
   const opener = useRef<HTMLButtonElement>(null);
   const selectedOpener = useRef<HTMLElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const focusAfterWrite = useRef(false);
   const viewKey = collectionKey(reader.owner, query);
   const key = JSON.stringify([viewKey, revision]);
   const trees = useRead(
@@ -87,6 +97,12 @@ export function CollectionView({
     if (inspector.current) inspector.current.scrollTop = 0;
   }, [selection?.row.key]);
   const selected = active && selection?.viewKey === key ? selection.row : null;
+  useEffect(() => {
+    if (focusAfterWrite.current && !selected) {
+      focusAfterWrite.current = false;
+      heading.current?.focus();
+    }
+  }, [selected]);
   const holdings = useRead(
     JSON.stringify([
       "riftbound",
@@ -139,6 +155,10 @@ export function CollectionView({
     setSelection(null);
     onQuery({ ...query, location, page: 1 });
     setDrawer(false);
+  }
+  function beginAction(next: "move" | "remove") {
+    setDetailsOpen(false);
+    setAction(next);
   }
   const nav = (touch = false) =>
     trees.failed ? (
@@ -297,6 +317,7 @@ export function CollectionView({
                           selected={selected?.key === row.key}
                           onClick={(e) => {
                             selectedOpener.current = e.currentTarget;
+                            setDetailsOpen(true);
                             setSelection(
                               selected?.key === row.key
                                 ? null
@@ -337,7 +358,11 @@ export function CollectionView({
                 className="sticky top-[calc(var(--layout-header-height)+var(--space-4))] w-72 shrink-0"
               >
                 <ScrollArea
-                  className="max-h-[calc(100dvh-var(--layout-header-height)-2*var(--space-4))]"
+                  className={
+                    selected && writer
+                      ? "max-h-[calc(100dvh-var(--layout-header-height)-8rem)]"
+                      : "max-h-[calc(100dvh-var(--layout-header-height)-2*var(--space-4))]"
+                  }
                   viewportRef={inspector}
                   viewportClassName="overscroll-contain"
                 >
@@ -362,7 +387,7 @@ export function CollectionView({
         {nav(true)}
       </Dialog>
       <Dialog
-        open={!!selected && phone && !action}
+        open={!!selected && phone && !action && detailsOpen}
         title={selected?.edition.name ?? "Card details"}
         onClose={() => setSelection(null)}
         returnFocus={selectedOpener}
@@ -370,16 +395,21 @@ export function CollectionView({
         {details}
         {writer && (
           <div className="mt-4 flex gap-2">
-            <Button onClick={() => setAction("move")}>Move…</Button>
-            <Button onClick={() => setAction("remove")}>Remove…</Button>
+            <Button onClick={() => beginAction("move")}>Move…</Button>
+            <Button onClick={() => beginAction("remove")}>Remove…</Button>
           </div>
         )}
       </Dialog>
-      {selected && writer && !action && (
+      {selected && writer && (
         <SelectionActions
-          onMove={() => setAction("move")}
-          onRemove={() => setAction("remove")}
-          onClear={() => setSelection(null)}
+          actionsRef={actionsRef}
+          onMove={() => beginAction("move")}
+          onRemove={() => beginAction("remove")}
+          onDetails={() => setDetailsOpen(true)}
+          onClear={() => {
+            setSelection(null);
+            heading.current?.focus();
+          }}
         />
       )}
       {active && selected && writer && action && (
@@ -390,15 +420,12 @@ export function CollectionView({
           mode={action}
           row={selected}
           edition={selected.edition}
-          returnFocus={heading}
-          onClose={() => {
-            setAction(null);
-            setSelection(null);
-          }}
+          returnFocus={actionsRef}
+          onClose={() => setAction(null)}
           onConfirmed={(result, message, undo) => {
+            focusAfterWrite.current = true;
             onConfirmed?.(result, message, undo);
             setSelection(null);
-            heading.current?.focus();
           }}
         />
       )}
@@ -443,23 +470,59 @@ function SelectionActions({
   onMove,
   onRemove,
   onClear,
+  onDetails,
+  actionsRef,
 }: {
   onMove: () => void;
   onRemove: () => void;
   onClear: () => void;
+  onDetails: () => void;
+  actionsRef: React.RefObject<HTMLElement | null>;
 }) {
   const toast = useToast();
-  useEffect(() => {
-    toast.setLift("selection", 64);
-    return () => toast.setLift("selection", 0);
+  const bar = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    actionsRef.current =
+      bar.current?.querySelector<HTMLButtonElement>(
+        'button[aria-haspopup="menu"]'
+      ) ?? null;
+    return () => {
+      actionsRef.current = null;
+    };
+  }, [actionsRef]);
+  useLayoutEffect(() => {
+    const measure = () =>
+      toast.setLift(
+        "selection",
+        (bar.current?.getBoundingClientRect().height ?? 0) + 8
+      );
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    if (bar.current) observer?.observe(bar.current);
+    return () => {
+      observer?.disconnect();
+      toast.setLift("selection", 0);
+    };
   }, [toast]);
   return (
     <div
+      ref={bar}
       aria-label="Selected copies"
-      className="fixed inset-x-0 bottom-0 z-(--layer-sticky) flex min-h-16 items-center justify-center gap-4 border-t border-border bg-surface p-2 phone:bottom-(--layout-tabbar-height)"
+      className="fixed bottom-6 left-1/2 z-(--layer-sticky) has-[[aria-expanded=true]]:z-(--layer-modal) box-border flex max-w-[calc(100vw-var(--space-8))] -translate-x-1/2 flex-wrap items-center gap-4 rounded-panel border border-border-strong bg-surface-raised py-2 pl-4 pr-2 text-body text-text phone:inset-x-2 phone:bottom-[calc(var(--layout-tabbar-height)+var(--space-2))] phone:max-w-none phone:translate-x-0 phone:justify-between phone:gap-2 phone:py-1 phone:pl-3 phone:pr-1"
     >
-      <span>1 copy selected</span>
-      <Button onClick={onClear}>Clear selection</Button>
+      <p className="m-0 whitespace-nowrap tabular-nums phone:text-meta">
+        <strong className="font-semibold">1 copy selected</strong>
+        <span className="text-meta text-text-muted">
+          {" "}
+          · 1 edition · 1 location
+        </span>
+      </p>
+      <span className="hidden phone:contents">
+        <Button onClick={onDetails}>Details</Button>
+      </span>
       <Menu
         label="Actions"
         trigger="Actions"
@@ -468,6 +531,7 @@ function SelectionActions({
         items={[
           { label: "Move…", onSelect: onMove },
           { label: "Remove…", onSelect: onRemove },
+          { label: "Clear selection", onSelect: onClear },
         ]}
       />
     </div>
