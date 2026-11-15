@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   getDiscovery,
   setDiscovery,
@@ -36,7 +36,13 @@ type Load =
  * left today, the sentence for a removed or suspended account, and the GeoNames credit. It shows nothing about other
  * collectors, no radius and no distances.
  */
-export function OpenDiscoverySection() {
+export function OpenDiscoverySection({
+  onDirtyChange,
+  discardVersion = 0,
+}: {
+  onDirtyChange?: (dirty: boolean) => void;
+  discardVersion?: number;
+}) {
   const headingId = useId();
   const helpId = useId();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -46,6 +52,21 @@ export function OpenDiscoverySection() {
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
   const [saved, setSaved] = useState("");
+
+  const currentDraft = useRef(draft);
+  currentDraft.current = draft;
+  const savedZip = load.kind === "ready" ? (load.settings.zip ?? "") : "";
+  const savedZipRef = useRef(savedZip);
+  savedZipRef.current = savedZip;
+  const pendingZip = useRef(false);
+  const dirty =
+    load.kind === "ready" && (draft !== savedZip || pendingZip.current);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    setDraft(savedZipRef.current);
+  }, [discardVersion]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,13 +85,19 @@ export function OpenDiscoverySection() {
 
   async function save(body: SetDiscovery, done: string) {
     if (pending) return;
+    const submitted = currentDraft.current;
+    pendingZip.current = body.zip !== undefined;
     setPending(true);
     setNotice("");
     setSaved("");
     try {
       const settings = await setDiscovery(body);
       setLoad({ kind: "ready", settings });
-      setDraft(settings.zip ?? "");
+      if (
+        currentDraft.current === submitted &&
+        (body.zip !== undefined || submitted === savedZip)
+      )
+        setDraft(settings.zip ?? "");
       setSaved(done);
     } catch (cause) {
       if (
@@ -81,6 +108,7 @@ export function OpenDiscoverySection() {
         setAttempt((n) => n + 1);
       else setNotice(discoveryMessage(cause));
     } finally {
+      pendingZip.current = false;
       setPending(false);
     }
   }
