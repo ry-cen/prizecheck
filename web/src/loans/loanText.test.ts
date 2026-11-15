@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LoanView } from "../social_generated";
 import {
+  loanStepConfirmation,
   handoverConfirmText,
   returnConfirmText,
   lineOut,
@@ -225,5 +226,28 @@ describe("Loan confirmation labels", () => {
     (lender, copies, label) => {
       expect(returnConfirmText(lender, copies)).toBe(label);
     }
+  );
+});
+
+it("confirms the performed step in Loan terms, preserving singular receipt wording", () => {
+  const loan = {
+    kind: "borrow_request",
+    role: "borrower",
+    lines: [{ promised: "1", requested: "1" }],
+    other: { collector_id: "friend" },
+  } as LoanView;
+  expect(loanStepConfirmation("accept", loan)).toBe("Borrow Request accepted.");
+  expect(loanStepConfirmation("decline", loan)).toBe(
+    "Borrow Request declined."
+  );
+  expect(loanStepConfirmation("handover", loan)).toBe("Confirmed you have it.");
+  expect(
+    loanStepConfirmation("handover", {
+      ...loan,
+      lines: [{ ...loan.lines[0], promised: "2" }],
+    })
+  ).toBe("Confirmed you have them.");
+  expect(loanStepConfirmation("confirm_return", loan)).toBe(
+    "Return confirmed."
   );
 });

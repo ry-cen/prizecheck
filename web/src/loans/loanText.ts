@@ -530,3 +530,34 @@ export function returnConfirmText(lender: boolean, copies: number): string {
       ? "Yes, I gave it back"
       : "Yes, I gave them back";
 }
+
+/** Success copy is chosen only after the command's own response confirms it. */
+export function loanStepConfirmation(
+  name: string,
+  loan: LoanView
+): string | null {
+  const proposal = loan.kind === "lend_offer" ? "Lend Offer" : "Borrow Request";
+  switch (name) {
+    case "accept":
+      return `${proposal} accepted.`;
+    case "decline":
+      return `${proposal} declined.`;
+    case "withdraw":
+      return `${proposal} withdrawn.`;
+    case "cancel":
+      return "Loan cancelled.";
+    case "handover":
+      return loan.role === "lender"
+        ? "Marked as handed over."
+        : loanCopies(loan) === 1
+          ? "Confirmed you have it."
+          : "Confirmed you have them.";
+    case "confirm_return":
+      return loan.other.collector_id === null &&
+        loan.pending_return?.you_confirmed
+        ? "Return finished."
+        : "Return confirmed.";
+    default:
+      return null;
+  }
+}
