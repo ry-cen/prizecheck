@@ -24,7 +24,7 @@ import {
   type HoldingRow,
 } from "./collection";
 import { Menu } from "../../ui/Menu";
-import { useToast } from "../../ui/Toast";
+import { useLift, useToast } from "../../ui/Toast";
 import { CollectionWriteDialog } from "./CollectionWrites";
 import type { CollectionWriter, WriteResult, UndoRecord } from "./collection";
 import { useRead } from "./read";
@@ -55,6 +55,7 @@ export function CollectionView({
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [action, setAction] = useState<"move" | "remove" | null>(null);
   const phone = useMediaQuery(MOBILE_QUERY);
+  const selectionLift = useLift("selection");
   const [drawer, setDrawer] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<{
@@ -263,7 +264,18 @@ export function CollectionView({
             />
           </div>
           <div className="mt-5 flex min-w-0 items-start gap-7">
-            <section aria-label="Collection results" className="min-w-0 flex-1">
+            <section
+              aria-label="Collection results"
+              className="min-w-0 flex-1"
+              // The lift includes the measured pill and its gap; also reserve its bottom offset.
+              style={
+                selected && writer && !phone
+                  ? {
+                      paddingBottom: `calc(${selectionLift}px + var(--space-6))`,
+                    }
+                  : undefined
+              }
+            >
               {listing.failed ? (
                 <Failure
                   retry={() => {
