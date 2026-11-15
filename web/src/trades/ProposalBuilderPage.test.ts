@@ -1971,3 +1971,60 @@ it("the leave dialog says unsent changes will be discarded", async () => {
     restore();
   }
 });
+
+it.each(["current", "unavailable"])(
+  "does not warn for an unsent message after terminal send result %s",
+  async (outcome) => {
+    vi.mocked(peekProposalSeed).mockReturnValue({
+      give: [],
+      get: [{ ...card, copies: "3", quantity: 1 }],
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify(
+            outcome === "current"
+              ? original
+              : {
+                  detail: {
+                    code: "TRADE_SEND_ALREADY_APPLIED_UNAVAILABLE",
+                    outcome: "already_applied",
+                    view: "unavailable",
+                  },
+                }
+          ),
+          {
+            status: outcome === "current" ? 201 : 409,
+            headers: { "content-type": "application/json" },
+          }
+        )
+      )
+    );
+    await act(async () =>
+      root.render(
+        h(ToastProvider, {
+          children: h(ProposalBuilderPage, {
+            traderId: "misty",
+            onNavigate: navigate,
+          }),
+        })
+      )
+    );
+    const input = host.querySelector("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      )!.set!.call(input, "Please bring these cards");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const before = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(before);
+    expect(before.defaultPrevented).toBe(true);
+    await click(button("Send Trade Proposal"));
+    const after = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  }
+);

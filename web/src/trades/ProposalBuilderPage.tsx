@@ -343,14 +343,16 @@ export function ProposalBuilderPage({
   const sent = useRef(false);
   const terminalRef = useRef<TerminalSend | null>(null);
   const [terminal, setTerminal] = useState<TerminalSend | null>(null);
-  const opening = useRef({ proposal, cash });
+  const opening = useRef({ proposal, cash, initialMessage });
   const changed = useRef(false);
-  changed.current = proposalDraftChanged(
-    opening.current.proposal,
-    opening.current.cash,
-    proposal,
-    cash
-  );
+  changed.current =
+    proposalDraftChanged(
+      opening.current.proposal,
+      opening.current.cash,
+      proposal,
+      cash
+    ) ||
+    (!counter && initialMessage !== opening.current.initialMessage);
   // The guard reads these: it is made once. A collector who is gone (a 404 after load) can't be sent to, so nothing asks.
   const reachable = useRef(false);
   reachable.current = party !== null && theirs.kind !== "missing";
@@ -1380,6 +1382,23 @@ export function ProposalBuilderPage({
             other={name}
           />
         )}
+        {!counter && (
+          <TextArea
+            label="Message (optional)"
+            value={initialMessage}
+            maxLength={4000}
+            readOnly={busy || terminal !== null || key.current !== null}
+            onChange={(event) => {
+              if (
+                sending.current ||
+                terminalRef.current ||
+                key.current !== null
+              )
+                return;
+              setInitialMessage(event.target.value);
+            }}
+          />
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="primary"
@@ -1416,23 +1435,6 @@ export function ProposalBuilderPage({
             </p>
           )}
         </div>
-        {!counter && (
-          <TextArea
-            label="Message (optional)"
-            value={initialMessage}
-            maxLength={4000}
-            readOnly={busy || terminal !== null || key.current !== null}
-            onChange={(event) => {
-              if (
-                sending.current ||
-                terminalRef.current ||
-                key.current !== null
-              )
-                return;
-              setInitialMessage(event.target.value);
-            }}
-          />
-        )}
 
         <p
           role="alert"
