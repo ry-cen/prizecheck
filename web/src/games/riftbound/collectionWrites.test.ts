@@ -10,7 +10,12 @@ import { editions } from "./local/fixtures";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
-import { CollectionWriteDialog, writeError } from "./CollectionWrites";
+import {
+  CollectionWriteDialog,
+  useCollectionFeedback,
+  writeError,
+} from "./CollectionWrites";
+import { ToastProvider } from "../../ui/Toast";
 import { CollectionError } from "./collection";
 vi.mock("../../ui/Dialog", () => ({
   Dialog: ({ children }: { children: React.ReactNode }) =>
@@ -261,13 +266,25 @@ describe("fixture Collection commands", () => {
 });
 
 describe("write dialog lifetime and duplicate submission", () => {
-  async function mount(scenario: CollectionScenario = "normal") {
+  async function mount(
+    scenario: CollectionScenario = "normal",
+    remap = false,
+    noLeaves = false
+  ) {
     const dom = new JSDOM('<div id="root"></div>');
     vi.stubGlobal("window", dom.window);
     vi.stubGlobal("document", dom.window.document);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const root = createRoot(document.getElementById("root")!);
     const f = fixture(scenario);
+    if (remap) {
+      f.store.locations.forEach((n) => {
+        n.id = `leaf-${n.id}`;
+        if (n.parent_id) n.parent_id = `leaf-${n.parent_id}`;
+      });
+      f.store.rows.forEach((r) => (r.locationId = `leaf-${r.locationId}`));
+    }
+    if (noLeaves) f.store.locations = [];
     const confirmed = vi.fn();
     const add = vi.spyOn(f.writer, "add");
     await act(async () =>
@@ -299,6 +316,54 @@ describe("write dialog lifetime and duplicate submission", () => {
     };
     return { ...f, add, confirmed, submit, root, cleanup };
   }
+  it("derives Add's default from a top-level Unsorted with non-1 ids", async () => {
+    const f = await mount("normal", true);
+    try {
+      expect(document.querySelector("select")!.value).toBe("leaf-1");
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      expect(f.add.mock.calls[0][0].locationId).toBe("leaf-1");
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("falls back to the first leaf and disables Add if none exists", async () => {
+    const f = await mount("normal", true);
+    try {
+      f.store.locations.find((n) => n.id === "leaf-1")!.name = "Loose cards";
+      // A fresh reader identity makes the dialog load the changed tree.
+      await act(async () =>
+        f.root.render(
+          createElement(CollectionWriteDialog, {
+            mode: "add",
+            writer: f.writer,
+            reader: collectionFixtureReader("a"),
+            edition: editions[0],
+            returnFocus: { current: null },
+            onClose: vi.fn(),
+            onConfirmed: f.confirmed,
+          })
+        )
+      );
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      expect(document.querySelector("select")!.value).toBe("leaf-1");
+    } finally {
+      await f.cleanup();
+    }
+    const empty = await mount("normal", false, true);
+    try {
+      expect(
+        document.querySelector<HTMLButtonElement>('button[type="submit"]')!
+          .disabled
+      ).toBe(true);
+    } finally {
+      await empty.cleanup();
+    }
+  });
   it("guards double Enter synchronously and applies only once in the fixture store", async () => {
     const f = await mount();
     try {
@@ -375,9 +440,180 @@ describe("write dialog lifetime and duplicate submission", () => {
         });
         expect(f.confirmed).not.toHaveBeenCalled();
         if (change === "unmount") expect(document.body.textContent).toBe("");
+        else {
+          await act(async () => {
+            await vi.runAllTimersAsync();
+          });
+          expect(
+            document.querySelector<HTMLButtonElement>('button[type="submit"]')!
+              .disabled
+          ).toBe(false);
+          await act(async () => {
+            f.submit();
+            await vi.runAllTimersAsync();
+          });
+          expect(f.confirmed).toHaveBeenCalledTimes(1);
+          expect(collectionFixtureStore("b").rows[0].quantity).toBe(3);
+        }
       } finally {
         await f.cleanup();
       }
     }
   );
+});
+
+describe("Undo toast operation", () => {
+  async function mountFeedback() {
+    const dom = new JSDOM('<div id="root"></div>', {
+      url: "http://localhost/",
+    });
+    for (const [name, value] of Object.entries({
+      window: dom.window,
+      document: dom.window.document,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    }))
+      vi.stubGlobal(name, value);
+    const root = createRoot(document.getElementById("root")!);
+    const f = fixture();
+    const removed = await settle(
+      f.writer.remove({ items: [f.item()] }, options())
+    );
+    const refresh = vi.fn();
+    let feedback!: ReturnType<typeof useCollectionFeedback>;
+    function Probe() {
+      feedback = useCollectionFeedback(f.writer, refresh);
+      return null;
+    }
+    await act(async () =>
+      root.render(createElement(ToastProvider, null, createElement(Probe)))
+    );
+    await act(async () => feedback(removed, "Removed 1 copy", removed.undo));
+    const click = async (label: string) =>
+      act(async () => {
+        const button = [...document.querySelectorAll("button")].find(
+          (b) => b.textContent === label
+        )!;
+        expect(button).toBeDefined();
+        button.click();
+        await vi.runAllTimersAsync();
+      });
+    return {
+      ...f,
+      root,
+      removed,
+      feedback: (message: string) =>
+        feedback({ ownerRevision: f.store.revision }, message),
+      click,
+      cleanup: async () => {
+        await act(async () => root.unmount());
+        dom.window.close();
+        vi.unstubAllGlobals();
+      },
+    };
+  }
+  it.each(["transient", "lost response"])(
+    "keeps same-key Undo retry after %s without applying twice",
+    async (failure) => {
+      const f = await mountFeedback();
+      const original = f.writer.undo;
+      const calls: string[] = [];
+      let first = true;
+      vi.spyOn(f.writer, "undo").mockImplementation(async (id, options) => {
+        calls.push(options.idempotencyKey);
+        if (first) {
+          first = false;
+          if (failure === "lost response") await original(id, options);
+          throw new Error("Temporary failure");
+        }
+        return original(id, options);
+      });
+      try {
+        await f.click("Undo");
+        expect(document.body.textContent).toContain("couldn't be saved");
+        const revisionAfterFailure = f.store.revision;
+        await f.click("Undo");
+        expect(document.body.textContent).toContain("Undone");
+        expect(calls).toHaveLength(2);
+        expect(calls[0]).toBe(calls[1]);
+        expect(f.store.rows[0].quantity).toBe(3);
+        expect(f.store.revision).toBe(3);
+        if (failure === "lost response")
+          expect(f.store.revision).toBe(revisionAfterFailure);
+      } finally {
+        await f.cleanup();
+      }
+    }
+  );
+  it.each(["undo", "dismiss"])(
+    "preserves a newer toast after a late %s completion",
+    async (operation) => {
+      const f = await mountFeedback();
+      let complete!: () => void;
+      const done = new Promise<void>((resolve) => (complete = resolve));
+      if (operation === "undo") {
+        const original = f.writer.undo;
+        vi.spyOn(f.writer, "undo").mockImplementation(async (id, options) => {
+          await done;
+          return original(id, options);
+        });
+      } else {
+        const original = f.writer.dismissUndo;
+        vi.spyOn(f.writer, "dismissUndo").mockImplementation(
+          async (id, options) => {
+            await done;
+            return original(id, options);
+          }
+        );
+      }
+      try {
+        await f.click(operation === "undo" ? "Undo" : "Dismiss Undo");
+        await settle(
+          f.writer.add({ editionId, locationId: "1", quantity: 1 }, options())
+        );
+        await act(async () => f.feedback("Added newer copies"));
+        await act(async () => {
+          complete();
+          await vi.runAllTimersAsync();
+        });
+        expect(document.body.textContent).toContain("Added newer copies");
+        expect(document.body.textContent).not.toContain("Undone");
+      } finally {
+        await f.cleanup();
+      }
+    }
+  );
+  it("treats a missing dismissal as already dismissed, without replaying DELETE", async () => {
+    const f = await mountFeedback();
+    try {
+      await settle(
+        f.writer.dismissUndo(f.removed.undo.id, { signal: options().signal })
+      );
+      await expect(
+        settle(
+          f.writer.dismissUndo(f.removed.undo.id, { signal: options().signal })
+        )
+      ).rejects.toMatchObject({ code: "UNDO_NOT_FOUND" });
+      await f.click("Dismiss Undo");
+      expect(document.body.textContent).toBe("");
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("removes Undo only after a terminal refusal", async () => {
+    const f = await mountFeedback();
+    vi.spyOn(f.writer, "undo").mockRejectedValue(
+      new CollectionError("UNDO_EXPIRED")
+    );
+    try {
+      await f.click("Undo");
+      expect(document.body.textContent).toContain("no longer available");
+      expect(
+        [...document.querySelectorAll("button")].some(
+          (b) => b.textContent === "Undo"
+        )
+      ).toBe(false);
+    } finally {
+      await f.cleanup();
+    }
+  });
 });
