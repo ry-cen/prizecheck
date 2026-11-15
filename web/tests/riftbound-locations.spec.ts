@@ -180,6 +180,10 @@ for (const width of [1280, 375]) {
     await nav()
       .getByRole("button", { name: "Travel box", exact: true })
       .click();
+    await expect(
+      page.getByRole("region", { name: "Collection results" })
+    ).toContainText("No cards in this Location.");
+
     await openNav();
     await nav()
       .getByRole("button", { name: "Settings for Travel box", exact: true })

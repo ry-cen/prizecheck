@@ -9,6 +9,7 @@ import {
   staleLocationCodes,
 } from "./LocationWrites";
 import {
+  queueLocationFixtureChange,
   collectionFixtureReader,
   collectionFixtureStore,
   collectionFixtureWriter,
@@ -34,6 +35,7 @@ async function mount(scenario: CollectionScenario = "normal", id?: string) {
   const reader = collectionFixtureReader("a", scenario);
   const store = collectionFixtureStore("a", scenario);
   const confirmed = vi.fn();
+  const originalCreate = writer.createLocation;
   const create = vi.spyOn(writer, "createLocation");
   const render = () =>
     createElement(LocationWriteDialog, {
@@ -58,7 +60,16 @@ async function mount(scenario: CollectionScenario = "normal", id?: string) {
     vi.unstubAllGlobals();
   };
   // Submit directly: lifecycle guards also apply to invalid requests.
-  return { root, writer, create, store, confirmed, submit, cleanup };
+  return {
+    root,
+    writer,
+    originalCreate,
+    create,
+    store,
+    confirmed,
+    submit,
+    cleanup,
+  };
 }
 it("guards double submit before React disables the button", async () => {
   const f = await mount();
@@ -259,4 +270,147 @@ it("classifies all tree-change refusals for reload and retry", () => {
     "LOCATION_NOT_FOUND",
   ])
     expect(staleLocationCodes.has(code)).toBe(true);
+});
+it.each([
+  [
+    "stocked",
+    "3",
+    "5",
+    { kind: "stock", id: "5" },
+    "STOCKED_LOCATION_REQUIRES_CONVERSION",
+  ],
+  [
+    "cycle",
+    "5",
+    "2",
+    { kind: "cycle", id: "2", parentId: "5" },
+    "LOCATION_CYCLE",
+  ],
+  [
+    "missing destination",
+    "5",
+    "2",
+    { kind: "delete", id: "2" },
+    "LOCATION_NOT_FOUND",
+  ],
+] as const)(
+  "resets a %s destination after refusal and never repeats the refused write",
+  async (_reason, id, destination, change, code) => {
+    const f = await mount("normal", id);
+    const edit = vi.spyOn(f.writer, "editLocation");
+    try {
+      await act(async () => {
+        [...document.querySelectorAll("button")]
+          .find((b) => b.textContent === "Move")!
+          .click();
+      });
+      await act(async () => {
+        const select = document.querySelector("select")!;
+        select.value = destination;
+        select.dispatchEvent(new window.Event("change", { bubbles: true }));
+      });
+      queueLocationFixtureChange("a", change);
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      expect(edit).toHaveBeenCalledTimes(1);
+      await expect(edit.mock.results[0].value).rejects.toMatchObject({ code });
+      expect(document.querySelector("select")!.value).toBe("__choose__");
+      expect(document.querySelector('[role="alert"]')!.textContent).toContain(
+        "Your locations changed in another tab or window"
+      );
+      const retry = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent === "Reload and retry"
+      )!;
+      expect(retry.disabled).toBe(true);
+      await act(async () => {
+        retry.click();
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      expect(edit).toHaveBeenCalledTimes(1);
+      expect(f.confirmed).not.toHaveBeenCalled();
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+it("offers only the gone alert and picker when the edited Location disappears", async () => {
+  const f = await mount("normal", "5");
+  const edit = vi.spyOn(f.writer, "editLocation");
+  try {
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((b) => b.textContent === "Move")!
+        .click();
+    });
+    await act(async () => {
+      const select = document.querySelector("select")!;
+      select.value = "2";
+      select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    });
+    queueLocationFixtureChange("a", { kind: "delete", id: "5" });
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[role="alert"]')!.textContent).toBe(
+      "That Location no longer exists."
+    );
+    expect(document.querySelector("form")).toBe(null);
+    expect(
+      [...document.querySelectorAll("button")].some(
+        (b) => b.textContent === "Reload and retry"
+      )
+    ).toBe(false);
+    expect(
+      [...document.querySelectorAll("button")].some(
+        (b) => b.textContent === "Binders"
+      )
+    ).toBe(true);
+  } finally {
+    await f.cleanup();
+  }
+});
+it("a create parent that gains cards offers conversion without resending the refused request", async () => {
+  const f = await mount();
+  const create = f.originalCreate;
+  f.create.mockImplementation((input, options) =>
+    create({ ...input, name: "New child" }, options)
+  );
+  try {
+    await act(async () => {
+      const select = document.querySelector("select")!;
+      select.value = "5";
+      select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    });
+    queueLocationFixtureChange("a", { kind: "stock", id: "5" });
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    expect(f.create).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("select")!.value).toBe("5");
+    const radio = document.querySelector<HTMLInputElement>(
+      'input[type="radio"]'
+    )!;
+    expect(radio).not.toBe(null);
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    expect(f.create).toHaveBeenCalledTimes(1);
+    await act(async () => radio.click());
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    expect(f.create).toHaveBeenCalledTimes(2);
+    expect(f.create.mock.calls[1][0].conversion).toBe("move_holdings_to_child");
+    expect(f.confirmed).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.cleanup();
+  }
 });
