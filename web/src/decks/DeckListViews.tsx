@@ -2,6 +2,7 @@ import {
   Fragment,
   useId,
   useRef,
+  useState,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -185,26 +186,12 @@ export function DeckListBody({
                   >
                     {issue && <IssueMark />}
                     {view === "spread" && line.copies ? (
-                      line.copies.map((copy) => (
-                        <CopyTile
-                          key={copy.ordinal}
-                          className="w-20 phone:w-16"
-                          label={copyLabel(line, copy)}
-                          title={copyLabel(line, copy)}
-                          name={line.line.name}
-                          setName={line.line.set_name}
-                          collectorNumber={line.line.collector_number}
-                          variant={line.variant}
-                          imageUrl={line.line.image_url}
-                          names={false}
-                          state={copy.state}
-                          aria-describedby={issue}
-                          {...editProps(line, editing)}
-                          onClick={(event: MouseEvent<HTMLButtonElement>) =>
-                            onOpen(line, copy.ordinal, event.currentTarget)
-                          }
-                        />
-                      ))
+                      <SpreadCopies
+                        line={line}
+                        issue={issue}
+                        editing={editing}
+                        onOpen={onOpen}
+                      />
                     ) : (
                       <Pile
                         line={line}
@@ -223,6 +210,86 @@ export function DeckListBody({
       ))}
     </div>
   );
+}
+
+/** A line contributes one Tab stop; arrow keys reach its other copies. */
+function SpreadCopies({
+  line,
+  issue,
+  editing,
+  onOpen,
+}: {
+  line: DeckLine;
+  issue?: string;
+  editing?: LineEditing;
+  onOpen: OpenSheet;
+}) {
+  const copies = line.copies ?? [];
+  const [active, setActive] = useState<number | null>(null);
+  const current = copies.some((copy) => copy.ordinal === active)
+    ? active
+    : copies[0]?.ordinal;
+  const edit = editProps(line, editing);
+  const shortcuts =
+    [
+      editing ? "Delete Backspace" : "",
+      copies.length > 1
+        ? "ArrowLeft ArrowRight ArrowUp ArrowDown Home End"
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined;
+  return copies.map((copy, index) => (
+    <CopyTile
+      key={copy.ordinal}
+      className="w-20 phone:w-16"
+      label={copyLabel(line, copy)}
+      title={copyLabel(line, copy)}
+      name={line.line.name}
+      setName={line.line.set_name}
+      collectorNumber={line.line.collector_number}
+      variant={line.variant}
+      imageUrl={line.line.image_url}
+      names={false}
+      state={copy.state}
+      aria-describedby={issue}
+      {...edit}
+      data-copy-ordinal={copy.ordinal}
+      tabIndex={copy.ordinal === current ? 0 : -1}
+      onFocus={() => setActive(copy.ordinal)}
+      aria-keyshortcuts={shortcuts}
+      onKeyDown={(event) => {
+        let target: number;
+        switch (event.key) {
+          case "ArrowRight":
+          case "ArrowDown":
+            target = Math.min(index + 1, copies.length - 1);
+            break;
+          case "ArrowLeft":
+          case "ArrowUp":
+            target = Math.max(index - 1, 0);
+            break;
+          case "Home":
+            target = 0;
+            break;
+          case "End":
+            target = copies.length - 1;
+            break;
+          default:
+            edit.onKeyDown?.(event);
+            return;
+        }
+        event.preventDefault();
+        event.currentTarget
+          .closest("li")
+          ?.querySelectorAll<HTMLButtonElement>("[data-copy-ordinal]")
+          [target]?.focus();
+      }}
+      onClick={(event: MouseEvent<HTMLButtonElement>) =>
+        onOpen(line, copy.ordinal, event.currentTarget)
+      }
+    />
+  ));
 }
 
 /** One pair per line, anchored over its first card even when another Spread copy is hovered.

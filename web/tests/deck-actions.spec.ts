@@ -144,7 +144,7 @@ test.describe("on a desktop", () => {
     const row = deckIndex(page)
       .getByRole("listitem")
       .filter({ has: page.getByRole("link", { name: built.deckName }) });
-    await expect(row).toContainText("3/60 in Deck");
+    await expect(row).toContainText("3 of 60 cards in this Deck");
     await expect(row).toContainText("$12.34 to complete (57/57 priced)");
     await expect(row).toContainText("Standard · ✓ Legal");
     const empty = deckIndex(page)

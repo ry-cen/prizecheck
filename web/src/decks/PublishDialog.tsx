@@ -215,7 +215,7 @@ export function PublishDialog({
               id={`${idBase}-title-help`}
               className="m-0 text-meta text-text-muted"
             >
-              A public title is required to publish.
+              The name shown on the Published Deck. You need one to publish.
             </p>
             {blocked && (
               <p id={reasonId} className="m-0 text-meta text-warning">

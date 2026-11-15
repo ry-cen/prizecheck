@@ -30,5 +30,7 @@ it("marks the empty title for initial focus and explains the publish requirement
   const help = host.querySelector(
     `[id="${input.getAttribute("aria-describedby")}"]`
   );
-  expect(help?.textContent).toBe("A public title is required to publish.");
+  expect(help?.textContent).toBe(
+    "The name shown on the Published Deck. You need one to publish."
+  );
 });

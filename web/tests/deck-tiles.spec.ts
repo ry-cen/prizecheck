@@ -125,7 +125,7 @@ test.describe("on a desktop", () => {
     const tileA = tile(page, a.deckName);
     const tileB = tile(page, b.deckName);
     const empty = tile(page, emptyName);
-    await expect(tileA).toContainText("0/60 in Deck");
+    await expect(tileA).toContainText("0 of 60 cards in this Deck");
     await expect(tileA).toContainText("$12.34 to complete (57/57 priced)");
     await expect(tileA).toContainText("Standard · ✓ Legal");
     // The automatic cover is the line with the most copies; with no artwork its placeholder names the card.
@@ -273,7 +273,11 @@ test.describe("on a desktop", () => {
 });
 
 test.describe("on a phone", () => {
-  test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
+  test.use({
+    viewport: { width: 375, height: 812 },
+    isMobile: true,
+    hasTouch: true,
+  });
 
   test("On a phone the tiles sit two to a row with a 16 px gutter and no sideways scroll", async ({
     page,
@@ -316,6 +320,7 @@ test.describe("on a phone", () => {
       .toEqual({ sameRow: true, gutter: 16, wrapped: true });
 
     const mine = tile(page, built.deckName);
+    await expect(mine).toContainText("0 of 60 cards in this Deck");
     await expectTouchTarget(
       mine.getByRole("link", { name: built.deckName, exact: true })
     );

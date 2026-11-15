@@ -50,7 +50,7 @@ for (const viewport of [
     await expect(title).toBeFocused();
     await expect(title).toHaveValue("");
     await expect(title).toHaveAccessibleDescription(
-      /A public title is required to publish\./
+      /The name shown on the Published Deck\. You need one to publish\./
     );
     await expect(
       dialog.getByRole("button", { name: "Publish Unlisted snapshot" })

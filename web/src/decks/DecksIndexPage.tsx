@@ -53,7 +53,7 @@ const LINK =
 /**
  * The Decks index, the My Decks view of the Decks page (/decks, DecksPage) on the kit (#181): create a Deck, and every
  * Deck as a tile led by its cover card (the collector's pick in the deck builder, or else the line with the most
- * copies) with how many of its Deck List's copies it holds ("41/60 in Deck"), its cost to complete and one Target
+ * copies) with how many of its Deck List's copies it holds ("41 of 60 cards in this Deck"), its cost to complete and one Target
  * Format Pill. Each tile reads its result and its cost on its own (the Deck's format-checks and cost routes), two
  * tiles at a time. Below, **Published Decks** lists every publication, those whose Deck was
  * deleted included, with Make Listed or Unlisted and Revoke. Import a list, beside Create Deck, opens /decks/import
@@ -512,7 +512,7 @@ function DeckTile({
           <span>
             {deck.deck_list_total === "0"
               ? "Empty: plan a list"
-              : `${deck.in_deck}/${deck.deck_list_total} in Deck`}
+              : `${deck.in_deck} of ${deck.deck_list_total} cards in this Deck`}
           </span>
           <span>
             {facts.toComplete === undefined
