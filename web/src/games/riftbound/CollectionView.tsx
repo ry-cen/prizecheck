@@ -56,6 +56,7 @@ export function CollectionView({
   hrefFor: (q: CollectionQuery) => string;
   onCatalog: () => void;
 }) {
+  const clickedLocationTool = useRef<HTMLButtonElement | null>(null);
   const locationOpener = useRef<HTMLElement | null>(null);
   const pendingLocationFocus = useRef<{
     viewKey: string;
@@ -158,8 +159,9 @@ export function CollectionView({
     if (active && trees.value && query.location !== "all") {
       const current = trees.value.find((n) => n.id === query.location);
       if (!current || current.kind === "organization") {
+        setDrawer(false);
         onQuery({ ...query, location: "all", page: 1 }, true);
-        heading.current?.focus();
+        // The view-key effect focuses the heading after the drawer has closed.
       }
     }
   }, [active, trees.value, query, onQuery]);
@@ -207,11 +209,7 @@ export function CollectionView({
     parentId?: string | null,
     opener?: HTMLElement
   ) {
-    locationOpener.current =
-      opener ??
-      (document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null);
+    locationOpener.current = opener ?? clickedLocationTool.current;
     setLocationAction({ mode, id, parentId, viewKey });
   }
   const locationTools = writer && (
@@ -240,38 +238,57 @@ export function CollectionView({
     ) : !trees.value ? (
       <p role="status">Loading Locations…</p>
     ) : (
-      <LocationNav
-        index={index}
-        view={query.location}
-        expanded={expanded}
-        onToggle={(id) => {
-          setExpanded((old) => {
-            const next = new Set(old);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-          });
+      <div
+        onClickCapture={(event) => {
+          const target = event.target;
+          clickedLocationTool.current =
+            target instanceof Element ? target.closest("button") : null;
         }}
-        hrefFor={(location) => hrefFor({ ...query, location, page: 1 })}
-        onChoose={choose}
-        idPrefix={touch ? "riftbound-drawer" : "riftbound-sidebar"}
-        touch={touch}
-        onAddChild={
-          writer
-            ? (id) => {
-                const n = index.byId.get(id);
-                if (n?.name === "Unsorted" && n.parent_id === null)
-                  openLocation("settings", id);
-                else openLocation("create", undefined, id);
-              }
-            : undefined
-        }
-        onOpenSettings={
-          writer
-            ? (id, opener) => openLocation("settings", id, undefined, opener)
-            : undefined
-        }
-      />
+      >
+        <LocationNav
+          index={index}
+          view={query.location}
+          expanded={expanded}
+          onToggle={(id) => {
+            setExpanded((old) => {
+              const next = new Set(old);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            });
+          }}
+          hrefFor={(location) => hrefFor({ ...query, location, page: 1 })}
+          onChoose={choose}
+          idPrefix={touch ? "riftbound-drawer" : "riftbound-sidebar"}
+          touch={touch}
+          onAddChild={
+            writer
+              ? (id) => {
+                  const n = index.byId.get(id);
+                  if (n?.name === "Unsorted" && n.parent_id === null)
+                    openLocation(
+                      "restricted",
+                      id,
+                      undefined,
+                      clickedLocationTool.current ?? undefined
+                    );
+                  else
+                    openLocation(
+                      "create",
+                      undefined,
+                      id,
+                      clickedLocationTool.current ?? undefined
+                    );
+                }
+              : undefined
+          }
+          onOpenSettings={
+            writer
+              ? (id, opener) => openLocation("settings", id, undefined, opener)
+              : undefined
+          }
+        />
+      </div>
     );
   const details = selected && (
     <div className="flex min-w-0 flex-col gap-2 [&_p]:m-0 [&_p]:text-meta">
@@ -514,11 +531,8 @@ export function CollectionView({
                     ? null
                     : { viewKey, label: "Manage locations" };
               if (
-                ("deletedId" in result &&
-                  result.deletedId === query.location) ||
-                ("location" in result &&
-                  (result.location as { id: string }).id === query.location &&
-                  (result.location as { kind: string }).kind === "organization")
+                "deletedId" in result &&
+                result.deletedId === query.location
               ) {
                 setDrawer(false);
                 onQuery({ ...query, location: "all", page: 1 }, true);
