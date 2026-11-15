@@ -148,12 +148,14 @@
 }
 
 @media (max-width: 760px) {
+  :root[data-app-shell] {
+    scroll-padding-bottom: calc(var(--layout-tabbar-height) + var(--space-2));
+  }
   :root:has(#main-content [data-collection-page][data-phone-search-header]) {
     scroll-padding-top: calc(
       var(--collection-header-clearance, 0px) +
         var(--collection-stale-height, 0px)
     );
-    scroll-padding-bottom: var(--layout-tabbar-height);
   }
   /* Header controls already occupy the pinned area. Applying its clearance to them can make
      native input focus scroll the header's original flow position back into view. */
