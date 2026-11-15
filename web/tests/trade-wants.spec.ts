@@ -671,10 +671,14 @@ for (const width of [320, 375, 390, 1280]) {
     });
     await shortcut.focus();
     await shortcut.press("Enter");
-    await expect(heading).toBeFocused();
+    await expect(
+      panel(page).getByRole("button", { name: "Add a card", exact: true })
+    ).toBeFocused();
     await expect(heading).toBeInViewport();
     await shortcut.click();
-    await expect(heading).toBeFocused();
+    await expect(
+      panel(page).getByRole("button", { name: "Add a card", exact: true })
+    ).toBeFocused();
     await expect(heading).toBeInViewport();
     await expect(page).toHaveURL(address);
     expect(await page.evaluate(() => history.length)).toBe(historyLength);
