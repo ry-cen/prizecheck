@@ -440,7 +440,11 @@ export function CatalogCardPopup({
               <>
                 <AskControl
                   friend={copy}
-                  card={copyCard(copy, null)}
+                  card={copyCard(
+                    copy,
+                    editions.find((edition) => edition.id === copy.edition_id)
+                      ?.imageUrl ?? null
+                  )}
                   cap={copyCap(copy)}
                   lendable={lendableText(copy)}
                   text="Ask to borrow"
