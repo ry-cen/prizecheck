@@ -116,6 +116,9 @@ for (const outcome of ["delayed", "failed"] as const) {
       root!.render(
         createElement(DeckBuilderPage, {
           deckId: "deck",
+          address: "/decks/deck",
+          onNavigate: () => {},
+          onCloseCard: () => {},
           onAllDecks: () => {},
           onReplaceList: () => {},
           onWantList: () => {},

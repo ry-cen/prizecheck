@@ -1,3 +1,4 @@
+import type { Route } from "../shell/useRoute";
 import { isPlainClick } from "../shell/appLink";
 import {
   useEffect,
@@ -49,6 +50,9 @@ import { DeckWantListPanel } from "./DeckWantListPanel";
 type Props = {
   /** The Deck's id, from the address /decks/<id>. */
   deckId: string;
+  address: string;
+  onNavigate: Route["navigate"];
+  onCloseCard: Route["closeOverlay"];
   /** Back to the Decks index (/decks). */
   onAllDecks: () => void;
   /** Replace list… (/decks/<id>/replace, #215). */
@@ -98,6 +102,9 @@ const VIEWS = [
  */
 export function DeckBuilderPage({
   deckId,
+  address,
+  onNavigate,
+  onCloseCard,
   onAllDecks,
   onReplaceList,
   onWantList,
@@ -111,10 +118,16 @@ export function DeckBuilderPage({
   );
   // The phone's tab: null until the first read picks it, then whatever the collector chooses.
   const [chosenPane, setPane] = useState<Pane | null>(null);
-  const [sheet, setSheet] = useState<{
-    editionId: string;
-    ordinal: number | null;
-  } | null>(null);
+  const url = new URL(address, window.location.origin);
+  const editionId = url.searchParams.get("edition");
+  const copy = url.searchParams.get("copy");
+  const ordinal = copy === null ? null : Number(copy);
+  const cleanUrl = new URL(url);
+  cleanUrl.searchParams.delete("edition");
+  cleanUrl.searchParams.delete("copy");
+  const sheetClosedAddress = cleanUrl.pathname + cleanUrl.search;
+  const closeSheet = () => onCloseCard(sheetClosedAddress);
+  const pendingGather = useRef<string | null>(null);
   // The Pick List dialog: open with the copy sheet's card (edition), or with none from Gather N.
   const [gather, setGather] = useState<{ edition: string | null } | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -344,7 +357,7 @@ export function DeckBuilderPage({
   const swap = (line: DeckLine, row: BrowseEdition) => {
     const from = line.line.edition_id;
     refocus.current = [row.edition_id, from];
-    setSheet(null);
+    closeSheet();
     edits.edit({
       deltas: new Map([
         [from, -1n],
@@ -372,7 +385,7 @@ export function DeckBuilderPage({
     const wanted = refocus.current;
     // busyNow, not busy: React can run the previous commit's effect late, after the keypress that set `wanted` has
     // queued its edit; that render's own busy is stale and would use up `wanted` while the control is still there.
-    if (!wanted || edits.busyNow() || sheet) return;
+    if (!wanted || edits.busyNow() || editionId) return;
     refocus.current = null;
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
@@ -441,16 +454,41 @@ export function DeckBuilderPage({
   const open: OpenSheet = (line, ordinal, element) => {
     opener.current = element;
     cover.reset();
-    setSheet({ editionId: line.line.edition_id, ordinal });
+    const next = new URL(sheetClosedAddress, window.location.origin);
+    next.searchParams.set("edition", line.line.edition_id);
+    if (ordinal !== null) next.searchParams.set("copy", String(ordinal));
+    onNavigate(next.pathname + next.search, {
+      overlay: true,
+      preserveScroll: true,
+    });
   };
-  const sheetLine =
-    (sheet &&
-      model?.lines.find((line) => line.line.edition_id === sheet.editionId)) ??
-    null;
-  // A line that left the Deck List (a later read) closes its sheet, so a stale one never reopens.
+  const selectedLine = model?.lines.find(
+    (line) => line.line.edition_id === editionId
+  );
+  const validCopy =
+    copy === null ||
+    (/^[1-9][0-9]*$/.test(copy) &&
+      Number.isSafeInteger(ordinal) &&
+      selectedLine !== undefined &&
+      BigInt(copy) <= selectedLine.quantity);
+  const sheetLine = editionId && validCopy ? (selectedLine ?? null) : null;
+  // Wait for the Deck read before rejecting a direct link. Later edits also invalidate removed copies.
   useEffect(() => {
-    if (sheet && !sheetLine) setSheet(null);
-  }, [sheet, sheetLine]);
+    if (
+      load.kind === "ready" &&
+      (editionId !== null || copy !== null) &&
+      !sheetLine
+    )
+      onNavigate(sheetClosedAddress, { replace: true, preserveScroll: true });
+  }, [load.kind, editionId, copy, sheetLine, sheetClosedAddress, onNavigate]);
+  // Let the history traversal finish closing the sheet before opening the Pick List.
+  useEffect(() => {
+    if (!sheetLine && pendingGather.current) {
+      const edition = pendingGather.current;
+      pendingGather.current = null;
+      setGather({ edition });
+    }
+  }, [sheetLine]);
 
   const back = (
     <a
@@ -702,8 +740,8 @@ export function DeckBuilderPage({
       {deckActions.dialogs}
       <CopySheet
         line={sheetLine}
-        ordinal={sheet?.ordinal ?? null}
-        onClose={() => setSheet(null)}
+        ordinal={ordinal}
+        onClose={closeSheet}
         returnFocus={opener}
         editing={
           sheetLine
@@ -733,8 +771,8 @@ export function DeckBuilderPage({
         onGather={(edition) => {
           // The sheet closes and the Pick List opens on its card; closing that returns focus to the copy.
           gatherOpener.current = opener.current;
-          setSheet(null);
-          setGather({ edition });
+          pendingGather.current = edition;
+          closeSheet();
         }}
       />
       <GatherDialog
