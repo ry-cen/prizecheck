@@ -20,6 +20,7 @@ import { lendableText } from "../social/friendCards";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Icon } from "../ui/Icon";
+import { ScrollArea } from "../ui/ScrollArea";
 import { Segmented } from "../ui/Segmented";
 import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
 import {
@@ -224,78 +225,131 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
       </div>
     );
 
+  const countingRow = (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-meta text-text-muted">
+      <span>
+        Counting:{" "}
+        <strong className="font-semibold text-text">{counting.label}</strong>.
+      </span>
+      <a
+        href="/settings"
+        onClick={(event) => follow(event, () => onNavigate("/settings"))}
+        className="inline-flex min-h-control max-w-full items-center rounded-control px-2 text-accent-strong underline phone:min-h-tap"
+      >
+        Change it in Settings
+      </a>
+      <details className="min-w-0 max-w-full">
+        <summary className="min-h-control cursor-pointer rounded-control px-2 py-1 text-accent-strong phone:min-h-tap phone:py-3">
+          How it counts
+        </summary>
+        <p className="m-0 max-w-2xl pb-2 text-meta wrap-anywhere">
+          {counting.explainer}
+        </p>
+      </details>
+    </div>
+  );
+
+  const viewSwitch = hasFriends ? (
+    <Segmented
+      mode="choice"
+      label="Show the Want List as"
+      options={VIEWS}
+      value={view}
+      onChange={setView}
+    />
+  ) : null;
+
   const page = (
     <div
-      className={`flex min-w-0 flex-col gap-4 ${shownScope || shownView === "friends" ? "w-full max-w-[960px] self-center" : ""}`}
+      className={`flex min-w-0 flex-col gap-4 ${shownScope ? "phone:gap-3" : ""} ${shownScope || shownView === "friends" ? "w-full max-w-[960px] self-center" : ""}`}
       aria-busy={!current}
     >
       <section
         aria-labelledby={`${idBase}-summary`}
-        className="flex min-w-0 flex-col gap-3"
+        className={`flex min-w-0 flex-col gap-3 ${shownScope ? "phone:gap-2" : ""}`}
       >
-        <h2
-          id={`${idBase}-summary`}
-          className="m-0 text-heading font-semibold wrap-anywhere"
-        >
-          {scoped ? `Want List · ${scoped}` : "Want List"}
-        </h2>
-        <div className="flex min-w-0 flex-wrap items-start gap-x-8 gap-y-3">
-          <dl className="m-0 flex min-w-0 max-w-full flex-col">
-            <dt className="text-meta text-text-muted wrap-anywhere">
-              {scoped ? `${scoped} needs` : "To get"}
-            </dt>
-            <dd className="m-0 text-display font-semibold tabular-nums wrap-anywhere">
-              {cards(list.to_get)}
-            </dd>
-          </dl>
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-4 gap-y-2">
-            <CostSummary />
-            <WantListBuy list={list} onChanged={reload} />
-          </div>
-        </div>
-        {hasFriends && (
-          <div className="min-w-0 max-w-full self-start">
-            <Segmented
-              mode="choice"
-              label="Show the Want List as"
-              options={VIEWS}
-              value={view}
-              onChange={setView}
-            />
-          </div>
+        {shownScope ? (
+          <>
+            <h2
+              id={`${idBase}-summary`}
+              className="m-0 text-heading font-semibold wrap-anywhere"
+            >
+              {scoped ? `Want List · ${scoped}` : "Want List"}
+            </h2>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+              <dl
+                className={`m-0 flex min-w-0 max-w-full flex-col ${scoped ? "phone:flex-row phone:items-baseline phone:gap-2" : ""}`}
+              >
+                <dt className="text-meta text-text-muted wrap-anywhere">
+                  {scoped ? "Needs" : "To get"}
+                </dt>
+                <dd
+                  className={`m-0 text-display font-semibold tabular-nums wrap-anywhere ${scoped ? "phone:text-heading" : ""}`}
+                >
+                  {cards(list.to_get)}
+                </dd>
+              </dl>
+              <WantListBuy list={list} onChanged={reload} />
+            </div>
+            <CostSummary compact />
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+              {viewSwitch && (
+                <div className="min-w-0 max-w-full">{viewSwitch}</div>
+              )}
+              <a
+                href={`/decks/${encodeURIComponent(list.sections[0].deck_id)}`}
+                onClick={(event) =>
+                  follow(event, () => onOpenDeck(list.sections[0].deck_id))
+                }
+                aria-label={`Open Deck ${list.sections[0].name}`}
+                className={LINK}
+              >
+                Open Deck
+                <Icon icon={ChevronRight} />
+              </a>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2
+              id={`${idBase}-summary`}
+              className="m-0 text-heading font-semibold wrap-anywhere"
+            >
+              {scoped ? `Want List · ${scoped}` : "Want List"}
+            </h2>
+            <div className="flex min-w-0 flex-wrap items-start gap-x-8 gap-y-3">
+              <dl
+                className={`m-0 flex min-w-0 max-w-full flex-col ${scoped ? "phone:flex-row phone:items-baseline phone:gap-2" : ""}`}
+              >
+                <dt className="text-meta text-text-muted wrap-anywhere">
+                  {scoped ? "Needs" : "To get"}
+                </dt>
+                <dd
+                  className={`m-0 text-display font-semibold tabular-nums wrap-anywhere ${scoped ? "phone:text-heading" : ""}`}
+                >
+                  {cards(list.to_get)}
+                </dd>
+              </dl>
+              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-4 gap-y-2">
+                <CostSummary />
+                <WantListBuy list={list} onChanged={reload} />
+              </div>
+            </div>
+            {viewSwitch && (
+              <div className="min-w-0 max-w-full self-start">{viewSwitch}</div>
+            )}
+          </>
         )}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-meta text-text-muted">
-          <span>
-            Counting:{" "}
-            <strong className="font-semibold text-text">
-              {counting.label}
-            </strong>
-            .
-          </span>
-          <a
-            href="/settings"
-            onClick={(event) => follow(event, () => onNavigate("/settings"))}
-            className="inline-flex min-h-control max-w-full items-center rounded-control px-2 text-accent-strong underline phone:min-h-tap"
-          >
-            Change it in Settings
-          </a>
-          <details className="min-w-0 max-w-full">
-            <summary className="min-h-control cursor-pointer rounded-control px-2 py-1 text-accent-strong phone:min-h-tap phone:py-3">
-              How it counts
-            </summary>
-            <p className="m-0 max-w-2xl pb-2 text-meta wrap-anywhere">
-              {counting.explainer}
-            </p>
-          </details>
-        </div>
+        {!shownScope && countingRow}
         {!shownScope && shownView === "buy" && (
           <TradeWantsShortcut api={trade} />
         )}
       </section>
-      <div
-        role="group"
-        aria-label="Show Decks"
-        className="flex flex-wrap items-center gap-1 border-b border-border pb-3 [&>button]:max-w-full [&>button>span]:min-w-0 [&>button>span]:max-w-full"
+      <ScrollArea
+        orientation="x"
+        scroll={phone}
+        viewportProps={{ role: "group", "aria-label": "Show Decks" }}
+        viewportClassName="flex flex-wrap items-center gap-1 border-b border-border pb-3 phone:pb-2 phone:flex-nowrap [&>button]:shrink-0 [&>button]:max-w-full [&>button>span]:min-w-0 [&>button>span]:max-w-full"
       >
         <Chip selected={scope === null} onChange={() => choose(null)}>
           All Decks
@@ -311,7 +365,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
             </span>
           </Chip>
         ))}
-      </div>
+      </ScrollArea>
       <p role="status" className="m-0 text-body text-warning empty:sr-only">
         {notice}
       </p>
@@ -426,6 +480,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
               <DeckSection
                 key={section.deck_id}
                 section={section}
+                scopedView={!!shownScope}
                 deckName={deckName}
                 onOpenDeck={onOpenDeck}
                 swap={swap}
@@ -440,6 +495,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           </div>
         </div>
       )}
+      {shownScope && countingRow}
     </div>
   );
   return (
@@ -451,6 +507,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
 
 function DeckSection({
   section,
+  scopedView,
   deckName,
   onOpenDeck,
   swap,
@@ -461,6 +518,7 @@ function DeckSection({
   borrowReady,
 }: {
   section: WantListSection;
+  scopedView: boolean;
   deckName: (id: string) => string;
   onOpenDeck: (id: string) => void;
   swap: WantListSwap;
@@ -478,43 +536,54 @@ function DeckSection({
   return (
     <section
       aria-labelledby={`${idBase}-deck`}
-      className="rounded-panel border border-border bg-surface"
+      className={`rounded-panel border border-border bg-surface ${scopedView ? "[&>h3+ul]:border-t-0" : ""}`}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
-        <h3
-          id={`${idBase}-deck`}
-          className="m-0 min-w-0 flex-1 text-body font-semibold wrap-anywhere phone:basis-full"
-        >
+      {scopedView ? (
+        <h3 id={`${idBase}-deck`} className="sr-only">
           {section.name}
         </h3>
-        {section.to_get !== "0" && (
-          <span className="text-meta tabular-nums text-text-muted">
-            {cards(section.to_get)} to get
-          </span>
-        )}
-        <SectionCost deckId={section.deck_id} />
-        <a
-          href={`/decks/${encodeURIComponent(section.deck_id)}`}
-          onClick={(event) => follow(event, () => onOpenDeck(section.deck_id))}
-          aria-label={`Open Deck ${section.name}`}
-          className={LINK}
-        >
-          Open Deck
-          <Icon icon={ChevronRight} />
-        </a>
-      </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
+          <h3
+            id={`${idBase}-deck`}
+            className="m-0 min-w-0 flex-1 text-body font-semibold wrap-anywhere phone:basis-full"
+          >
+            {section.name}
+          </h3>
+          {section.to_get !== "0" && (
+            <span className="text-meta tabular-nums text-text-muted">
+              {cards(section.to_get)} to get
+            </span>
+          )}
+          <SectionCost deckId={section.deck_id} />
+          <a
+            href={`/decks/${encodeURIComponent(section.deck_id)}`}
+            onClick={(event) =>
+              follow(event, () => onOpenDeck(section.deck_id))
+            }
+            aria-label={`Open Deck ${section.name}`}
+            className={LINK}
+          >
+            Open Deck
+            <Icon icon={ChevronRight} />
+          </a>
+        </div>
+      )}
       {section.lines.length === 0 ? (
         <p className="m-0 border-t border-border px-4 py-3 text-body text-text-muted">
           <span aria-hidden="true">✓ </span>Nothing to get
         </p>
       ) : (
         <>
-          <p className="m-0 px-4 py-2 text-meta text-text-muted">
-            Choose which versions you would accept in a Swap or Trade. This does
-            not change how many cards your Deck needs.
-          </p>
+          {!scopedView && (
+            <p className="m-0 px-4 py-2 text-meta text-text-muted">
+              Choose which versions you would accept in a Swap or Trade. This
+              does not change how many cards your Deck needs.
+            </p>
+          )}
           <NeededLines
             layout="tiles"
+            acceptCaption={scopedView}
             section={section}
             deckName={deckName}
             swap={swap}
@@ -525,6 +594,12 @@ function DeckSection({
             pendingNotice={pendingNotice}
             borrowReady={borrowReady}
           />
+          {scopedView && (
+            <p className="m-0 border-t border-border px-4 py-2 text-meta text-text-muted">
+              Choose which versions you would accept in a Swap or Trade. This
+              does not change how many cards your Deck needs.
+            </p>
+          )}
         </>
       )}
     </section>
@@ -538,6 +613,7 @@ function DeckSection({
  */
 export function NeededLines({
   layout = "rows",
+  acceptCaption = false,
   section,
   deckName,
   swap,
@@ -549,6 +625,7 @@ export function NeededLines({
   borrowReady = true,
 }: {
   layout?: "rows" | "tiles";
+  acceptCaption?: boolean;
   section: WantListSection;
   deckName: (id: string) => string;
   swap: WantListSwap;
@@ -588,7 +665,13 @@ export function NeededLines({
             deckName={deckName}
             accept={
               layout === "tiles" ? (
-                <WillAcceptRadios line={line} api={trade} />
+                <WillAcceptRadios
+                  line={line}
+                  api={trade}
+                  caption={
+                    acceptCaption ? "Will accept in a Swap or Trade" : undefined
+                  }
+                />
               ) : (
                 <WillAcceptSelect line={line} api={trade} />
               )
@@ -704,7 +787,7 @@ function NeededLine({
 }) {
   if (layout === "tiles")
     return (
-      <li className="min-w-0 rounded-card border border-border p-2 phone:grid phone:grid-cols-[64px_minmax(0,1fr)] phone:items-start phone:gap-3">
+      <li className="min-w-0 rounded-card border border-border p-2 phone:grid phone:grid-cols-[64px_minmax(0,1fr)] phone:items-start phone:gap-x-3 phone:gap-y-2">
         <CopyArt
           name={line.name}
           imageUrl={line.image_url}
@@ -717,13 +800,15 @@ function NeededLine({
           <p className="m-0 text-meta text-text-muted wrap-anywhere">
             {editionText(line)}
           </p>
-          <p className="m-0 text-heading font-semibold tabular-nums text-accent-strong">
-            ×{line.need}{" "}
-            <span className="text-meta font-normal text-text-muted">
-              of {line.quantity}
-            </span>
-          </p>
-          <LineCost deckId={deckId} editionId={line.edition_id} compact />
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <p className="m-0 text-heading font-semibold tabular-nums text-accent-strong">
+              ×{line.need}{" "}
+              <span className="text-meta font-normal text-text-muted">
+                of {line.quantity}
+              </span>
+            </p>
+            <LineCost deckId={deckId} editionId={line.edition_id} compact />
+          </div>
           <p className="m-0 text-meta text-text-muted wrap-anywhere">
             {countedText(line, deckName)}
           </p>
@@ -732,8 +817,10 @@ function NeededLine({
               {pendingNote}
             </p>
           )}
-          {accept}
-          <div className="mt-2 flex min-w-0 flex-col gap-2">{children}</div>
+        </div>
+        <div className="min-w-0 phone:col-span-2">{accept}</div>
+        <div className="mt-2 flex min-w-0 flex-col gap-2 phone:col-span-2 phone:mt-0">
+          {children}
         </div>
       </li>
     );

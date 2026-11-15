@@ -512,3 +512,33 @@ it("Get from Friends on All Decks waits for the waiting read", async () => {
     expect(vi.mocked(AskControl).mock.calls.at(-1)![0].current).toBe(false);
   });
 });
+
+it("a scoped view labels the need Needs and puts Open Deck in the summary", async () => {
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(h(WantListView, { onOpenDeck: vi.fn(), onNavigate: vi.fn() }))
+    );
+    const summary = host.querySelector("section")!;
+    expect(summary.querySelector("dt")?.textContent).toBe("Needs");
+    expect(summary.querySelector("h2")?.parentElement).toBe(summary);
+    const lines = host.querySelector('ul[aria-label="What Charizard needs"]')!;
+    expect(lines.nextElementSibling?.textContent).toContain(
+      "Choose which versions you would accept"
+    );
+    expect(summary.querySelector("dd")?.textContent).toBe("3 cards");
+    expect(
+      summary
+        .querySelector('a[aria-label="Open Deck Charizard"]')
+        ?.getAttribute("href")
+    ).toBe(`/decks/${deck}`);
+    expect(host.querySelector("h3")?.className).toContain("sr-only");
+    expect(summary.textContent).not.toContain("Counting:");
+    expect(host.lastElementChild?.lastElementChild?.textContent).toContain(
+      "Counting:"
+    );
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
