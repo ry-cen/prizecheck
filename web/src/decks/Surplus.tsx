@@ -2,6 +2,7 @@ import { useId, useMemo } from "react";
 import { TriangleAlert } from "lucide-react";
 import type { CompetitionWarning, SurplusHolding } from "../decks_generated";
 import { Button } from "../ui/Button";
+import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
 import { CopyArt, CopyTile } from "../ui/CopyTile";
 import { Icon } from "../ui/Icon";
 import type { DeckLine, DeckView } from "./deckListModel";
@@ -174,6 +175,7 @@ export function CompetitionNotice({
   lines: readonly DeckLine[];
 }) {
   const titleId = useId();
+  const phone = useMediaQuery(MOBILE_QUERY);
   const notes = useMemo(
     () => competitionNotes(warnings, lines),
     [warnings, lines]
@@ -185,33 +187,33 @@ export function CompetitionNotice({
       aria-labelledby={titleId}
       className="box-border flex flex-col gap-2 rounded-panel border border-warning bg-surface p-3 text-body"
     >
-      <p
-        id={titleId}
-        className="m-0 flex items-center gap-2 font-semibold text-warning"
-      >
-        <Icon icon={TriangleAlert} size={16} className="shrink-0" />
-        Other Decks count the same spare copies
-      </p>
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">
-        {notes.map((note) => (
-          <li key={note.editionId} className="flex flex-col gap-0.5">
-            <p className="m-0 wrap-anywhere">
-              <strong className="font-semibold">{note.name}</strong>
-              {note.edition && (
-                <span className="text-text-muted"> · {note.edition}</span>
-              )}
-              : {competitionSummary(note)}
-            </p>
-            <ul className="m-0 list-disc pl-5 text-meta text-text-muted">
-              {note.decks.map((deck) => (
-                <li key={deck.deckId} className="wrap-anywhere">
-                  {competingDeckText(deck)}.
-                </li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
+      <details open={!phone}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-control font-semibold text-warning phone:min-h-tap">
+          <Icon icon={TriangleAlert} size={16} className="shrink-0" />
+          <span id={titleId}>Other Decks count the same spare copies</span>
+          <span className="text-meta font-normal">Details</span>
+        </summary>
+        <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+          {notes.map((note) => (
+            <li key={note.editionId} className="flex flex-col gap-0.5">
+              <p className="m-0 wrap-anywhere">
+                <strong className="font-semibold">{note.name}</strong>
+                {note.edition && (
+                  <span className="text-text-muted"> · {note.edition}</span>
+                )}
+                : {competitionSummary(note)}
+              </p>
+              <ul className="m-0 list-disc pl-5 text-meta text-text-muted">
+                {note.decks.map((deck) => (
+                  <li key={deck.deckId} className="wrap-anywhere">
+                    {competingDeckText(deck)}.
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }

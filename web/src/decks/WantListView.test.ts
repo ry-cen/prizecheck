@@ -542,3 +542,39 @@ it("a scoped view labels the need Needs and puts Open Deck in the summary", asyn
     await act(async () => root.unmount());
   }
 });
+
+it.each(["rows", "tiles"] as const)(
+  "%s labels missing copies as needed and keeps ownership explicit",
+  async (layout) => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    try {
+      for (const [need, held, owned, ownership] of [
+        ["4", "0", "0", "None owned"],
+        ["2", "2", "2", "Have 2 in this Deck"],
+        ["1", "3", "3", "Have 3 in this Deck"],
+      ]) {
+        await act(async () =>
+          root.render(
+            h(NeededLines, {
+              layout,
+              section: {
+                ...section,
+                lines: [{ ...line, quantity: "4", need, held, owned }],
+              },
+              deckName: () => "Charizard",
+              swap,
+              trade,
+              borrowFor: null,
+              byCard: new Map(),
+            })
+          )
+        );
+        expect(host.textContent).toContain(`Need ${need} of 4`);
+        expect(host.textContent).toContain(ownership);
+      }
+    } finally {
+      await act(async () => root.unmount());
+    }
+  }
+);
