@@ -40,7 +40,7 @@ The token repair passed all seven Riftbound browser tests in run `20261114T10550
 
 ## Verification evidence for `d3fbd80d`
 
-This section covers the first commit only. Evidence for the repair commits follows it.
+This section covers the first commit only. Evidence for the repair commits is under "Repair commits and their evidence" below.
 
 - `npm run check`: TypeScript, scanner lock and generated clients passed; repeated by `npm run build`.
 - `npm run guardrails`: 679 tooling tests passed with `TMPDIR=/tmp` under exclusive admission. The earlier six fixture/Git-discovery failures remain recorded above.
@@ -50,6 +50,21 @@ This section covers the first commit only. Evidence for the repair commits follo
 - Final heading-parity run `20261114T111418Z-77ae23a8`: both paired 1600px/390px tests passed (zero failures, flakes or skips). Gallery, detail, no-match, loading, empty and error screenshot evidence lives in the retained browser run artifacts; paired gallery/detail screenshots were manually inspected. Only the two paired tests were repeated after matching the phone heading size.
 
 The browser commands were selector-scoped local `verify:local --suite browser --shard 1/1 --browser-workers 1` runs. This uses one local shard of the explicitly selected specs; no full browser selection or paid hosted full/sharded suite ran. No separate API, auth, scanner-model, operations, deployment or live-data suite ran. These stages are unrun, not passes.
+
+## Repair commits and their evidence
+
+An Opus audit of `d3fbd80d` found three defects. Closing a card left a duplicate list entry, so the next Back did nothing. Stepping pushed one entry per card, so Back after closing could reopen an earlier card. Focus went back to the original tile after stepping. The audit also found a redundant `aria-pressed` on the desktop Catalog link. `37451159` fixed these. A review then found that two quick dismissals could both step Back, and `e2da5403` added a guard. A fresh Opus review found that the late-response hook test could not fail, and `b98ca78a` made it fail if either stale-read guard is removed. Two review nits were declined. Closing after Back, a search edit and Forward lands on the edited list, which matches browser Back. A hand-edited out-of-range page shows the no-match state; that is outside this slice.
+
+Checks at `b98ca78a158ab2ae3acb0b7081f002c687e8ce6a`:
+
+- `NODE_OPTIONS=--no-experimental-webstorage npm run test:unit`: 162 files, 2,962 tests passed.
+- `npm run build` and `npm run check:bundle`: passed.
+- Commit hooks for each repair commit: Prettier, type/client checks and 679 guardrail tests passed (`TMPDIR=/tmp`).
+- Focused browser run `20261115T095116Z-3826471c` (`verify:local --suite browser --shard 1/1 --browser-workers 1` with `riftbound-catalog.spec.ts` and `catalog-search.spec.ts`): 8 passed, 0 failed, 0 flaky, 0 skipped. This includes both paired Pokémon/Riftbound visual tests and the Pokémon Catalog search regression.
+- The double-dismissal regression failed at both widths with the guard removed (5 passed, 2 failed), and passed with it restored.
+- Two earlier attempts without `--shard 1/1` ran the harness's tooling preflight, which hit the six known `test_case_collisions` fixture failures. The specs did not run in those attempts.
+
+Independent Sol/high review approved `e2da5403` and `b98ca78a`. Fresh Opus review approved `b98ca78a`. This informal review is not a GitHub approval. The same unrun suites listed above remain unrun.
 
 ## Transient host-admission blocker
 
