@@ -95,10 +95,10 @@ Contract column:
 
 ### How to propagate a Pokémon UI change
 
-1. Find the surface's row in the tables above.
-2. If its status is shared-primitive, check that the Riftbound browser specs still pass.
-3. If its status is mirrored-locally, apply the same layout, read-order, control or state change to the named Riftbound file and update the screenshot comparison.
-4. If its status is omitted or gated, change nothing unless the gate's decision or contract has landed.
+1. Find both the per-surface row and the feature-level row, and read the feature's contract column.
+2. For shared-primitive surfaces, verify the shared change in Riftbound browser specs. For mirrored-locally surfaces, propagate supported layout, read order and behavior locally and refresh screenshots.
+3. For covered or partial features, update supported surfaces and list remaining gaps. Missing or deferred features require their planned slice; intentional differences and omitted surfaces require an explicit scope decision before adding capability.
+4. A fixture-only contract remains simulated even when a surface is covered. Verified semantics do not establish real routes; gated contracts and owner decisions must be resolved before propagation crosses those gates.
 
 
 ## WP3 surfaces
@@ -107,12 +107,12 @@ Reference SHA: M9 `0d22c23cea23277a1a43d86efadc60043c8ff99c` (saved PNGs, read-o
 
 | Surface | Riftbound composition | Status and omissions |
 | --- | --- | --- |
-| Sidebar tools | CollectionView.tsx; shared LocationNav | Header plus and gear, row plus and gear; hover/focus/open-row behavior shared. Header gear chooses an ordinary Location. Drag reorder omitted. |
+| Sidebar tools | CollectionView.tsx; shared LocationNav | Header plus and gear, row plus and gear; hover/focus/open-row behavior shared. Header gear opens “Manage locations”, a flat ordinary-Location picker. Unlike Pokémon Manage locations, it omits the full tree panel with drag handles, per-row Move picker and Add child (ManageLocations.tsx:79–82). The picker title is Manage locations; selecting a row opens the Location-named Settings dialog. Drag reorder omitted. |
 | Create | LocationWrites.tsx | Name and parent, Top level, organizations and leaves; single move-holdings-to-child conversion. No Deck or Unsorted parent. |
-| Settings: rename | LocationWrites.tsx | Name, sibling conflict feedback, confirmed heading refresh. Hidden and For trade omitted (social gate). |
+| Settings: rename | LocationWrites.tsx | M9 Location-name title, copies caption and labeled action rows with descriptions and right-aligned buttons. Name, sibling conflict feedback, unchanged-name guard and confirmed heading refresh. Hidden and For trade rows omitted (social gate). |
 | Settings: move | LocationWrites.tsx | Excludes self/descendants/Decks and excessive depth; destination version checked. Stocked destination conversion omitted (nested-Unsorted gate). |
-| Settings: delete | LocationWrites.tsx | Empty-only, exact cleaned-name confirmation; deleted current view replaces history with All owned. Deck items omitted (#663). |
+| Settings: delete | LocationWrites.tsx | Visible disabled Delete row explains nonempty Locations. Empty-only, exact cleaned-name confirmation gates submit; deleted current view replaces history with All owned. Deck items omitted (#663). |
 | Phone drawer tools | CollectionView.tsx; LocationNav touch | Header tools and always-visible row tools, drawer retained for focus return. |
-| Unsorted gate | LocationWrites.tsx | Shared props cannot suppress individual row tools. Both open the neutral no-actions message. Nested Unsorted and its conversion remain an owner decision. |
+| Unsorted gate | LocationWrites.tsx | Shared props cannot suppress individual row tools. Both open a dialog titled Unsorted with “Unsorted's Locations can't be changed here.” and no actions. Nested Unsorted and its conversion remain an owner decision. |
 
 Earlier WP1/WP2 deferred Location rows are superseded by this partial WP3 coverage. No live API, authentication, storage or network behavior is claimed. See collection-slice.md for verified core semantics and contract corrections.
