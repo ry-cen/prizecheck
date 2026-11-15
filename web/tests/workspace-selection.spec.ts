@@ -980,6 +980,10 @@ test.describe("desktop", () => {
     await page.keyboard.press("Space");
     await expect(copy(page, 1)).toHaveAttribute("aria-pressed", "true");
     await page.keyboard.press("Tab");
+    await expect(
+      page.getByRole("link", { name: "Go to selection actions", exact: true })
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(copy(page, 2)).toBeFocused();
     await page.keyboard.press("Space");
     await expect(bar(page)).toContainText("2 copies selected");

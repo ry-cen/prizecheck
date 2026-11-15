@@ -37,6 +37,7 @@ import {
 } from "./GalleryControls";
 import {
   activeFilterCount,
+  NO_FILTERS,
   plural,
   queryToParams,
   type DisplayPrefs,
@@ -903,8 +904,17 @@ export function Workspace({
             </h1>
             {gallery.totals && (
               <p className="m-0 text-meta text-text-subtle tabular-nums">
-                {plural(gallery.totals.copies, "copy", "copies")} ·{" "}
-                {plural(gallery.totals.editions, "edition", "editions")}
+                {plural(
+                  gallery.totals.copies,
+                  narrowed ? "matching copy" : "copy",
+                  narrowed ? "matching copies" : "copies"
+                )}{" "}
+                ·{" "}
+                {plural(
+                  gallery.totals.editions,
+                  narrowed ? "matching edition" : "edition",
+                  narrowed ? "matching editions" : "editions"
+                )}
                 {gallery.totals.lent > 0 &&
                   ` · ${gallery.totals.lent} lent out`}
                 {gallery.totals.borrowed > 0 &&
@@ -1017,19 +1027,29 @@ export function Workspace({
               locationName={locationName}
               emptyMessage={
                 narrowed
-                  ? "No cards match your search or filters."
+                  ? "No copies match your search or filters."
                   : galleryView === "all"
                     ? "Your Collection has no cards yet."
                     : "This Location has no cards."
               }
               emptyAction={
-                galleryView === "all" && !narrowed ? (
+                narrowed ? (
+                  <Button
+                    onClick={() => {
+                      setQuery("");
+                      setFilters(NO_FILTERS);
+                    }}
+                  >
+                    Clear search and filters
+                  </Button>
+                ) : galleryView === "all" ? (
                   <Button onClick={onImport}>
                     Import from another tracker
                   </Button>
                 ) : undefined
               }
               onRetry={gallery.reload}
+              onSelectionActions={() => actions.actionsButton.current?.focus()}
               selected={selection.selected}
               selectMode={selection.selectMode}
               onTile={selection.activate}

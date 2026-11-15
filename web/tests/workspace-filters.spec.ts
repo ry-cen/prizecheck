@@ -266,7 +266,9 @@ test.describe("desktop", () => {
     ]);
     await set.selectOption({ label: "Beta Set" });
     await expectEditions(page, ["Basic Fire Energy", "Potion", "Vaporeon"]);
-    await expect(counts(page, "7 copies · 3 editions")).toBeVisible();
+    await expect(
+      counts(page, "7 matching copies · 3 matching editions")
+    ).toBeVisible();
     await expect(filters).toHaveAccessibleName("Filters, 1 active");
     await set.selectOption("");
 
@@ -313,7 +315,7 @@ test.describe("desktop", () => {
     await category.selectOption({ label: "Trainer: any type" });
     await expect(tiles(page)).toHaveCount(0);
     await expect(
-      cards(page).getByText("No cards match your search or filters.")
+      cards(page).getByText("No copies match your search or filters.")
     ).toBeVisible();
 
     // Clear filters resets the three filters and nothing else.
@@ -422,7 +424,7 @@ test.describe("desktop", () => {
     await search.fill("zzz");
     await expect(tiles(page)).toHaveCount(0);
     await expect(
-      cards(page).getByText("No cards match your search or filters.")
+      cards(page).getByText("No copies match your search or filters.")
     ).toBeVisible();
     await search.fill("");
     await expect(tiles(page)).toHaveCount(15);
