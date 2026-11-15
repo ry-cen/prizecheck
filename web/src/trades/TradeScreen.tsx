@@ -632,9 +632,13 @@ export function TradeScreen({
           }));
         }
       },
-      () =>
+      (next) =>
         [
-          swapDoneMessage(trade, gets ? (chosen?.path ?? "Unsorted") : null),
+          swapDoneMessage(
+            trade,
+            gets ? (chosen?.path ?? "Unsorted") : null,
+            next
+          ),
           switchDoneText(sent),
         ]
           .filter(Boolean)

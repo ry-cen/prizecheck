@@ -207,12 +207,17 @@ export function tradeStaleText(
  * went, as the picker named it, or null when they got none. */
 export function swapDoneMessage(
   trade: TradeView,
-  destination: string | null
+  destination: string | null,
+  next: TradeView
 ): string {
+  const lead =
+    next.state === "closed" && next.closed_reason === "swapped"
+      ? "Swapped."
+      : "You confirmed the swap.";
   if (destination === null || trade.you_get.length === 0)
-    return "Swapped. The cards you gave left your Collection.";
+    return `${lead} The cards you gave left your Collection.`;
   const n = sideCopies(trade.you_get);
-  return `Swapped. ${n} ${n === 1 ? "card is" : "cards are"} in ${destination}.`;
+  return `${lead} ${n} ${n === 1 ? "card is" : "cards are"} in ${destination}.`;
 }
 
 /** The Confirm swap dialog's checkbox text for one Deck switch offer (Trading #279). */

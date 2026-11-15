@@ -1,7 +1,7 @@
 // Ticket #255: Returns (spec "Loan steps", "Web screens"). Misty lends Ash three Iono PAL 185 (request, accept and
 // both handover confirmations through the API, as #252's and #253's specs cover). Ash gives two back with Give cards
 // back, and Misty confirms with Yes, they're back; then Misty records the last one with Record a return, and Ash
-// confirms with Yes, I gave them back, which ends the Loan. Each line tags the copies returned and those coming back.
+// confirms with Yes, I gave it back, which ends the Loan. Each line tags the copies returned and those coming back.
 // A return Ash started once Misty's account is gone: he finishes it on his own.
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { expect, test } from "./support/collectors";
@@ -109,7 +109,7 @@ test("a return started by either side moves on once the other side confirms, and
   );
   await page.setViewportSize(PHONE);
   await expectPageChecks(page, "a return to confirm on a phone");
-  await page.getByRole("button", { name: "Yes, I gave them back" }).click();
+  await page.getByRole("button", { name: "Yes, I gave it back" }).click();
   await expect(title(page)).toHaveText("Your Loan from Misty W ended");
   await expect(iono(page)).toContainText("3 returned");
   await page.setViewportSize(DESKTOP);

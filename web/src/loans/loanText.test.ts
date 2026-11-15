@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { LoanView } from "../social_generated";
-import { lineOut, loanHeadline, loanRoleFact, waitingText } from "./loanText";
+import {
+  handoverConfirmText,
+  returnConfirmText,
+  lineOut,
+  loanHeadline,
+  loanRoleFact,
+  waitingText,
+} from "./loanText";
 
 describe("the Loan role fact", () => {
   for (const role of ["lender", "borrower"] as const) {
@@ -193,4 +200,30 @@ describe("pending-return headlines", () => {
     loan.awaiting_choice = "1";
     expect(loanHeadline(loan)).toBe("Sam wrote off 1 card you have");
   });
+});
+
+describe("Loan confirmation labels", () => {
+  it("counts promised copies across lines for handover", () => {
+    const loan = returning("borrower", false, "1");
+    loan.lines = [{ ...loan.lines[0], promised: "1" }];
+    expect(handoverConfirmText(loan)).toBe("Yes, I have it");
+    loan.lines.push({ ...loan.lines[0], edition_id: "other" });
+    expect(handoverConfirmText(loan)).toBe("Yes, I have them");
+    loan.lines = [{ ...loan.lines[0], promised: "2" }];
+    expect(handoverConfirmText(loan)).toBe("Yes, I have them");
+    expect(handoverConfirmText({ ...loan, role: "lender" })).toBe(
+      "Mark as handed over"
+    );
+  });
+  it.each([
+    [true, 1, "Yes, it's back"],
+    [true, 2, "Yes, they're back"],
+    [false, 1, "Yes, I gave it back"],
+    [false, 2, "Yes, I gave them back"],
+  ] as const)(
+    "labels lender=%s returning %s copies",
+    (lender, copies, label) => {
+      expect(returnConfirmText(lender, copies)).toBe(label);
+    }
+  );
 });

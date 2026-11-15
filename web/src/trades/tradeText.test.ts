@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { TradeView } from "../social_generated";
 import type { TradePickPlace } from "../trades_generated";
 import {
+  swapDoneMessage,
   tradeNeedsPartyLabel,
   tradePickText,
   tradeStaleText,
@@ -96,4 +98,69 @@ describe("Trade pick places", () => {
       )
     ).toBe("From Unsorted");
   });
+});
+
+const swap: TradeView = {
+  id: "offer",
+  offer_id: "offer",
+  thread_id: "thread",
+  state: "accepted",
+  closed_reason: null,
+  closed_by: null,
+  role: "recipient",
+  other: {
+    collector_id: "other",
+    handle: null,
+    display_name: "Ash",
+    open_to_cash_offers: false,
+  },
+  countered_from: null,
+  you_give: [],
+  you_get: [
+    {
+      edition_id: "iono",
+      name: "Iono",
+      copies: "1",
+      set_code: "PAL",
+      set_name: "Paldea",
+      collector_number: "185",
+      descriptor: {},
+      image_url: null,
+    },
+  ],
+  cash: null,
+  you_confirmed_swap: false,
+  they_confirmed_swap: false,
+  needs_you: true,
+  waiting: "confirm_swap",
+  section: "needs_you",
+  actions: ["confirm_swap"],
+  revision: 1,
+  created_at: "2026-11-14T00:00:00Z",
+};
+it("swapDoneMessage says You confirmed the swap while the other side still has to", () => {
+  expect(
+    swapDoneMessage(swap, "Unsorted", { ...swap, you_confirmed_swap: true })
+  ).toBe("You confirmed the swap. 1 card is in Unsorted.");
+  expect(swapDoneMessage({ ...swap, you_get: [] }, null, swap)).toBe(
+    "You confirmed the swap. The cards you gave left your Collection."
+  );
+});
+it("swapDoneMessage says Swapped once the Trade closed as swapped", () => {
+  const next: TradeView = {
+    ...swap,
+    state: "closed",
+    closed_reason: "swapped",
+  };
+  expect(swapDoneMessage(swap, "Box", next)).toBe("Swapped. 1 card is in Box.");
+  expect(
+    swapDoneMessage(
+      { ...swap, you_get: [{ ...swap.you_get[0], copies: "2" }] },
+      "Box",
+      next
+    )
+  ).toBe("Swapped. 2 cards are in Box.");
+  expect(swapDoneMessage(swap, null, next)).toBe(
+    "Swapped. The cards you gave left your Collection."
+  );
 });

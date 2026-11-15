@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { EventView, TimelineItem } from "../social_generated";
 import {
+  activityText,
   agreementText,
   cashText,
   currentCardsText,
@@ -323,4 +324,18 @@ it.each([
   expect(
     cashText({ summary: { you_give: "0", you_get: "0", cards: [], cash } })
   ).toBe(text);
+});
+
+it("formats activity in local time for today, this year and earlier years", () => {
+  const now = new Date(2026, 10, 14, 18, 0);
+  const today = new Date(2026, 10, 14, 15, 42);
+  expect(activityText(today.toISOString(), now)).toBe(
+    today.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+  );
+  expect(activityText(new Date(2026, 10, 12, 15, 42).toISOString(), now)).toBe(
+    "Nov 12"
+  );
+  expect(activityText(new Date(2025, 10, 12, 15, 42).toISOString(), now)).toBe(
+    "Nov 12, 2025"
+  );
 });
