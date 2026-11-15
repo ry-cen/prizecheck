@@ -319,8 +319,15 @@ describe("ordinary fixture Locations", () => {
       const key = options();
       const input = { id: "5", name: "Saved", version: 1 };
       await expect(settle(writer.editLocation(input, key))).rejects.toThrow();
-      await settle(writer.editLocation(input, key));
-      await settle(writer.editLocation(input, key));
+      const retry =
+        scenario === "location-stale" ? { ...input, version: 2 } : input;
+      const retryKey = scenario === "location-stale" ? options() : key;
+      if (scenario === "location-stale")
+        await expect(
+          settle(writer.editLocation(input, key))
+        ).rejects.toMatchObject({ code: "STALE_LOCATION" });
+      await settle(writer.editLocation(retry, retryKey));
+      await settle(writer.editLocation(retry, retryKey));
       expect(store.revision).toBe(2);
     }
   );

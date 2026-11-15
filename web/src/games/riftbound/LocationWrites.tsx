@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { Select } from "../../ui/Select";
+import { SettingRow } from "../../ui/SettingRow";
 import { TextField } from "../../ui/TextField";
 import { indexLocations } from "../../workspace/locationTree";
 import {
@@ -15,15 +16,20 @@ import {
 export function locationError(
   error: unknown,
   name: string,
-  create = false
+  create = false,
+  moving = false,
+  where = "That parent"
 ): string {
   const code = error instanceof CollectionError ? error.code : "";
   const messages: Record<string, string> = {
-    INVALID_LOCATION_NAME:
-      "Enter a name of 1 to 120 characters, without control characters.",
+    INVALID_LOCATION_NAME: create
+      ? "Enter a name of 1 to 120 characters."
+      : "Enter a name of 1 to 120 characters, without control characters.",
     LOCATION_NAME_CONFLICT: create
       ? "A Location with that name already exists under this parent."
-      : "A sibling already has that name.",
+      : moving
+        ? `${where} already has a Location named ${name}.`
+        : "A sibling already has that name.",
     LOCATION_DEPTH_LIMIT: "Locations can be nested at most 12 levels deep.",
     STOCKED_LOCATION_REQUIRES_CONVERSION:
       "Choose where to keep the existing cards.",
@@ -34,17 +40,25 @@ export function locationError(
     LOCATION_NAME_CONFIRMATION_MISMATCH: `Type ${name} exactly to confirm.`,
     STALE_LOCATION:
       "This Location just changed. Review the updated Locations and try again.",
-    LOCATION_NOT_FOUND:
-      "That Location no longer exists. Choose another Location.",
+    LOCATION_NOT_FOUND: create
+      ? "That parent Location no longer exists. Choose another parent."
+      : "That Location no longer exists. Choose another Location.",
     LOCATION_CYCLE: "Choose a Location outside this Location and its children.",
-    DECK_CANNOT_HAVE_CHILDREN: "A Deck can't contain Locations.",
+    DECK_CANNOT_HAVE_CHILDREN: "A Deck cannot contain Locations.",
     IDEMPOTENCY_KEY_REUSED:
       "This request couldn't be confirmed. Close and try again.",
   };
   return messages[code] ?? "Unable to save this change. Please retry.";
 }
+export const staleLocationCodes = new Set([
+  "STALE_LOCATION",
+  "STOCKED_LOCATION_REQUIRES_CONVERSION",
+  "INVALID_LOCATION_CONVERSION",
+  "LOCATION_CYCLE",
+  "LOCATION_NOT_FOUND",
+]);
 export type LocationAction = {
-  mode: "create" | "settings" | "manage";
+  mode: "create" | "settings" | "manage" | "restricted";
   id?: string;
   parentId?: string | null;
   viewKey: string;
@@ -124,21 +138,35 @@ export function LocationWriteDialog({
       n.kind !== "deck" &&
       !(n.name === "Unsorted" && n.parent_id === null) &&
       !branch.has(n.id) &&
+      (create || n.id !== node?.parent_id) &&
       n.depth + height <= 12
   );
   const stale =
-    error instanceof CollectionError && error.code === "STALE_LOCATION";
+    error instanceof CollectionError && staleLocationCodes.has(error.code);
+  const unchanged =
+    !create &&
+    (step === "rename"
+      ? name.trim() === node?.name
+      : step === "move" && (parentId || null) === node?.parent_id);
+  const confirmedName = confirmName.trim() === node?.name;
   function begin(next: typeof step) {
     attempt.current = null;
     setError(undefined);
     setStep(next);
     setName(node?.name ?? "");
-    setParent(node?.parent_id ?? "");
+    setParent(next === "move" ? "__choose__" : "");
     setConfirmName("");
   }
   async function submit(reload = false) {
     const run = lifetime.current;
-    if (!run?.alive || lock.current) return;
+    if (
+      !run?.alive ||
+      lock.current ||
+      unchanged ||
+      (step === "move" && parentId === "__choose__") ||
+      (step === "delete" && (!empty || !confirmedName))
+    )
+      return;
     lock.current = true;
     setBusy(true);
     try {
@@ -221,7 +249,21 @@ export function LocationWriteDialog({
       if (run.alive) {
         if (
           cause instanceof CollectionError &&
-          cause.code !== "STALE_LOCATION" &&
+          staleLocationCodes.has(cause.code)
+        ) {
+          try {
+            const updated = await reader.locations(run.controller.signal);
+            if (!run.alive) return;
+            setNodes(updated);
+            attempt.current = null;
+          } catch {
+            /* Keep the original refusal; Reload and retry can reload again. */
+          }
+          if (!run.alive) return;
+        }
+        if (
+          cause instanceof CollectionError &&
+          !staleLocationCodes.has(cause.code) &&
           cause.code !== "IDEMPOTENCY_KEY_REUSED"
         )
           attempt.current = null;
@@ -238,14 +280,28 @@ export function LocationWriteDialog({
   return (
     <Dialog
       open
-      title={create ? "Create location" : "Location settings"}
+      title={
+        unsorted
+          ? "Unsorted"
+          : create
+            ? "Create location"
+            : (node?.name ?? "Manage locations")
+      }
       onClose={onClose}
       returnFocus={returnFocus}
     >
       {unsorted ? (
-        <p>Unsorted can't be renamed, moved or deleted here.</p>
+        <p>Unsorted's Locations can't be changed here.</p>
       ) : !create && !node ? (
         <div className="flex flex-col gap-2">
+          {error !== undefined && (
+            <p role="alert">{locationError(error, name)}</p>
+          )}
+          {stale && (
+            <Button disabled={busy} onClick={() => void submit(true)}>
+              Reload and retry
+            </Button>
+          )}
           {nodes
             .filter((n) => !(n.name === "Unsorted" && n.parent_id === null))
             .map((n) => (
@@ -254,6 +310,9 @@ export function LocationWriteDialog({
                 onClick={() => {
                   setId(n.id);
                   setName(n.name);
+                  setStep("list");
+                  setError(undefined);
+                  attempt.current = null;
                 }}
               >
                 {index.path(n.id)}
@@ -262,15 +321,33 @@ export function LocationWriteDialog({
         </div>
       ) : !create && step === "list" ? (
         <div className="flex flex-col gap-3">
-          <p className="m-0 font-semibold">{node?.name}</p>
-          <Button onClick={() => begin("rename")}>Rename</Button>
-          <Button onClick={() => begin("move")}>Move</Button>
-          <Button onClick={() => begin("delete")}>Delete</Button>
-          {!empty && (
-            <p className="m-0 text-meta text-text-muted">
-              Only an empty Location with no children can be deleted.
-            </p>
-          )}
+          <p className="m-0 text-meta text-text-muted tabular-nums">
+            {node?.copyCount ?? 0}{" "}
+            {(node?.copyCount ?? 0) === 1 ? "copy" : "copies"}
+          </p>
+          <div>
+            <SettingRow name="Rename" note="Change this Location's name.">
+              <Button onClick={() => begin("rename")}>Rename</Button>
+            </SettingRow>
+            <SettingRow
+              name="Move"
+              note="Put it inside another Location, or at Top level."
+            >
+              <Button onClick={() => begin("move")}>Move</Button>
+            </SettingRow>
+            <SettingRow
+              name="Delete"
+              note={
+                empty
+                  ? "Remove this empty Location."
+                  : "Only an empty Location with no children can be deleted."
+              }
+            >
+              <Button disabled={!empty} onClick={() => begin("delete")}>
+                Delete
+              </Button>
+            </SettingRow>
+          </div>
         </div>
       ) : (
         <form
@@ -303,7 +380,14 @@ export function LocationWriteDialog({
                 setError(undefined);
               }}
             >
-              <option value="">Top level</option>
+              {!create && (
+                <option value="__choose__" disabled>
+                  Choose a parent
+                </option>
+              )}
+              {(create || node?.parent_id !== null) && (
+                <option value="">Top level</option>
+              )}
               {parents.map((n) => (
                 <option key={n.id} value={n.id}>
                   {index.path(n.id)}
@@ -348,7 +432,13 @@ export function LocationWriteDialog({
           )}
           {error !== undefined && (
             <p role="alert" className="m-0">
-              {locationError(error, node?.name ?? name, create)}
+              {locationError(
+                error,
+                node?.name ?? name,
+                create,
+                step === "move",
+                parent ? index.path(parent.id) : "Top level"
+              )}
             </p>
           )}
           <div className="flex flex-wrap justify-end gap-2">
@@ -365,7 +455,9 @@ export function LocationWriteDialog({
                   busy ||
                   (create && stocked && !conversion) ||
                   (step === "delete" && !empty) ||
-                  (step === "move" && stocked)
+                  (step === "move" && (stocked || parentId === "__choose__")) ||
+                  unchanged ||
+                  (step === "delete" && !confirmedName)
                 }
               >
                 {busy

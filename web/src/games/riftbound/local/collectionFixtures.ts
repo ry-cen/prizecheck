@@ -298,6 +298,11 @@ export function collectionFixtureWriter(
     }
     if (scenario === "location-stale" && !stale && action === "editLocation") {
       stale = true;
+      const edit = input as { id: string; parentId?: string | null };
+      const target = store.locations.find(
+        (n) => n.id === (edit.parentId ?? edit.id)
+      );
+      if (target) target.version++;
       throw new CollectionError("STALE_LOCATION");
     }
     const result = apply();

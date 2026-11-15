@@ -51,7 +51,7 @@ for (const width of [1280, 375]) {
       exact: true,
     });
     const settings = page.getByRole("dialog", {
-      name: "Location settings",
+      name: /^(Travel box|Journey box|Binders|Empty binder|Unsorted)$/,
       exact: true,
     });
     await openNav();
@@ -69,6 +69,19 @@ for (const width of [1280, 375]) {
         .getByRole("button", { name: "Empty binder", exact: true })
         .hover();
     await shot(phone ? "phone-drawer-tools" : "desktop-sidebar-tools");
+    const manage = nav().getByRole("button", {
+      name: "Manage locations",
+      exact: true,
+    });
+    await manage.evaluate((button) => {
+      (document.activeElement as HTMLElement)?.blur();
+      (button as HTMLButtonElement).click();
+    });
+    await expect(
+      page.getByRole("dialog", { name: "Manage locations", exact: true })
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(manage).toBeFocused();
     const create = async (name: string, parent = "") => {
       await openNav();
       await nav()
@@ -119,6 +132,21 @@ for (const width of [1280, 375]) {
         exact: true,
       })
       .click();
+    await page.keyboard.press("Escape");
+    const childOpener = nav().getByRole("button", {
+      name: "Add child location to Binders / Blue binder",
+      exact: true,
+    });
+    await childOpener.evaluate((button) => {
+      (document.activeElement as HTMLElement)?.blur();
+      (button as HTMLButtonElement).click();
+    });
+    await page.keyboard.press("Escape");
+    await expect(childOpener).toBeFocused();
+    await childOpener.evaluate((button) => {
+      (document.activeElement as HTMLElement)?.blur();
+      (button as HTMLButtonElement).click();
+    });
     await expect(dialog.getByRole("combobox", { name: "Parent" })).toHaveValue(
       "3"
     );
@@ -155,9 +183,17 @@ for (const width of [1280, 375]) {
     await openNav();
     await nav()
       .getByRole("button", { name: "Settings for Travel box", exact: true })
-      .click();
+      .evaluate((button) => {
+        (document.activeElement as HTMLElement)?.blur();
+        (button as HTMLButtonElement).click();
+      });
     await shot("settings");
     await settings.getByRole("button", { name: "Rename", exact: true }).click();
+    const beforeNoop = await inspect(page);
+    await expect(
+      settings.getByRole("button", { name: "Save name", exact: true })
+    ).toBeDisabled();
+    expect((await inspect(page)).revision).toBe(beforeNoop.revision);
     await settings.getByRole("textbox", { name: "New name" }).fill("Binders");
     await settings.getByRole("button", { name: "Save name" }).click();
     await expect(settings.getByRole("alert")).toContainText(
@@ -205,21 +241,21 @@ for (const width of [1280, 375]) {
     await nav()
       .getByRole("button", { name: "Settings for Binders", exact: true })
       .click();
-    await settings.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(
-      settings.getByRole("button", { name: "Delete location", exact: true })
+      settings.getByRole("button", { name: "Delete", exact: true })
     ).toBeDisabled();
     await expect(settings).toContainText("Only an empty Location");
-    await settings.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.keyboard.press("Escape");
     await nav()
       .getByRole("button", { name: "Settings for Unsorted", exact: true })
       .click();
     await expect(settings).toContainText(
-      "Unsorted can't be renamed, moved or deleted here."
+      "Unsorted's Locations can't be changed here."
     );
     await expect(
       settings.getByRole("button", { name: /Rename|Move|Delete/ })
     ).toHaveCount(0);
+    await shot("unsorted-restricted");
     await page.keyboard.press("Escape");
     await nav()
       .getByRole("button", {
@@ -228,7 +264,7 @@ for (const width of [1280, 375]) {
       })
       .click();
     await expect(settings).toContainText(
-      "Unsorted can't be renamed, moved or deleted here."
+      "Unsorted's Locations can't be changed here."
     );
     await page.keyboard.press("Escape");
     if (phone) await page.keyboard.press("Escape");
@@ -247,15 +283,13 @@ for (const width of [1280, 375]) {
     await settings
       .getByRole("textbox", { name: "Location name" })
       .fill("wrong");
-    await settings
-      .getByRole("button", { name: "Delete location", exact: true })
-      .click();
-    await expect(settings.getByRole("alert")).toContainText(
-      "Type Empty binder exactly"
-    );
+    await expect(
+      settings.getByRole("button", { name: "Delete location", exact: true })
+    ).toBeDisabled();
+    await expect(settings.getByRole("alert")).toHaveCount(0);
     await settings
       .getByRole("textbox", { name: "Location name" })
-      .fill("Empty binder");
+      .fill(" Empty binder ");
     await settings
       .getByRole("button", { name: "Delete location", exact: true })
       .click();
@@ -295,9 +329,29 @@ for (const width of [1280, 375]) {
         .filter({ visible: true })
         .click();
       const dialog = page.getByRole("dialog", {
-        name: "Location settings",
+        name: /^(Travel box|Journey box|Binders|Empty binder|Unsorted)$/,
         exact: true,
       });
+      if (scenario === "location-stale")
+        await page.evaluate(async (path) => {
+          const m = await import(path);
+          const writer = m.collectionFixtureWriter("a", "location-stale");
+          const edit = writer.editLocation;
+          const requests: { version: number; key: string }[] = [];
+          writer.editLocation = (
+            input: { version: number },
+            options: { idempotencyKey: string }
+          ) => {
+            requests.push({
+              version: input.version,
+              key: options.idempotencyKey,
+            });
+            return edit(input, options);
+          };
+          document.addEventListener("wp3-requests", () => {
+            document.body.dataset.locationRequests = JSON.stringify(requests);
+          });
+        }, path);
       await dialog.getByRole("button", { name: "Rename", exact: true }).click();
       await dialog
         .getByRole("textbox", { name: "New name" })
@@ -339,9 +393,118 @@ for (const width of [1280, 375]) {
           })
           .click();
         await expect(dialog).toHaveCount(0);
+        if (scenario === "location-stale") {
+          const requests = await page.evaluate(() => {
+            document.dispatchEvent(new Event("wp3-requests"));
+            return JSON.parse(document.body.dataset.locationRequests!);
+          });
+          expect(requests.map((r: { version: number }) => r.version)).toEqual([
+            1, 2,
+          ]);
+          expect(requests[0].key).not.toBe(requests[1].key);
+        }
         await expect
           .poll(async () => (await inspect(page, "a", scenario)).revision)
           .toBe(2);
       }
     });
 }
+
+for (const width of [1280, 375])
+  test(`viewed leaf conversion and move redirect at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 800 });
+    await page.goto(`${entry}#riftbound:section=collection`);
+    const phone = width === 375;
+    const drawer = page.getByRole("dialog", { name: "Locations", exact: true });
+    const open = async () => {
+      if (phone && !(await drawer.isVisible()))
+        await page
+          .getByRole("button", { name: "Locations", exact: true })
+          .click();
+    };
+    const nav = () =>
+      page
+        .getByRole("navigation", { name: "Locations", exact: true })
+        .filter({ visible: true });
+    await open();
+    await nav().getByRole("button", { name: "Binders", exact: true }).click();
+    await nav()
+      .getByRole("button", { name: "Blue binder", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Blue binder", exact: true })
+    ).toBeVisible();
+    await open();
+    await nav()
+      .getByRole("button", {
+        name: "Add child location to Binders / Blue binder",
+        exact: true,
+      })
+      .click();
+    const create = page.getByRole("dialog", {
+      name: "Create location",
+      exact: true,
+    });
+    await create
+      .getByRole("textbox", { name: "Name", exact: true })
+      .fill("Viewed pages");
+    await create.getByRole("radio").check();
+    await create
+      .getByRole("button", { name: "Create location", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "All owned", exact: true })
+    ).toBeFocused();
+    if (phone) await expect(drawer).not.toBeVisible();
+    const converted = await inspect(page);
+    const child = converted.locations.find(
+      (n: { name: string }) => n.name === "Viewed pages"
+    );
+    expect(
+      converted.rows.some(
+        (r: { locationId: string }) => r.locationId === child.id
+      )
+    ).toBe(true);
+    expect(
+      converted.rows.some((r: { locationId: string }) => r.locationId === "3")
+    ).toBe(false);
+    await open();
+    await nav()
+      .getByRole("button", { name: "Empty binder", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Empty binder", exact: true })
+    ).toBeVisible();
+    await open();
+    await nav()
+      .getByRole("button", {
+        name: "Settings for Binders / Red binder",
+        exact: true,
+      })
+      .click();
+    const settings = page.getByRole("dialog", {
+      name: "Red binder",
+      exact: true,
+    });
+    await settings.getByRole("button", { name: "Move", exact: true }).click();
+    await expect(
+      settings.getByRole("combobox").locator('option[value="2"]')
+    ).toHaveCount(0);
+    await settings.getByRole("combobox").selectOption("5");
+    await settings
+      .getByRole("button", { name: "Move location", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "All owned", exact: true })
+    ).toBeFocused();
+    if (phone) await expect(drawer).not.toBeVisible();
+    const moved = await inspect(page);
+    expect(
+      moved.locations.find((n: { id: string }) => n.id === "4").parent_id
+    ).toBe("5");
+    expect(moved.locations.find((n: { id: string }) => n.id === "5").kind).toBe(
+      "organization"
+    );
+  });
