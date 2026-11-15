@@ -246,7 +246,7 @@ test("blocked Decks list every blocker and offer no text", async ({ page }) => {
     "Alt Art Card · Trainer Gallery #TG01 · ×2"
   );
   await expect(blockers).toContainText(
-    "Furret · Seed Set #136 · ×3 · source_changed"
+    "Furret · Seed Set #136 · ×3 · This Card Printing's details have changed and need to be confirmed before Live export."
   );
   await expect(live.getByRole("button", { name: "Copy for Live" })).toHaveCount(
     0

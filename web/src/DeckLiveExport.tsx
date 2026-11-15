@@ -105,6 +105,33 @@ export function DeckLiveExport({
   );
 }
 
+// API reasons describe catalog state; collectors need only the consequence for their export.
+function liveBlockerCopy(reason: string): string {
+  switch (reason) {
+    case "rule_uncovered":
+      return "Live export isn't available for this Card Printing yet.";
+    case "no_active_rule":
+      return "Live export is temporarily unavailable for this Card Printing.";
+    case "missing_input":
+      return "This Card Printing is missing details needed for Live export.";
+    case "invalid_input":
+      return "This Card Printing's details can't be used for Live export.";
+    case "conflicting_input":
+    case "recovery_conflict":
+      return "This Card Printing's details need to be resolved before Live export.";
+    case "identity_review_pending":
+      return "This Card Printing's details need to be confirmed before Live export.";
+    case "source_changed":
+      return "This Card Printing's details have changed and need to be confirmed before Live export.";
+    case "reviewed_unsupported":
+      return "This Card Printing can't be exported to Live.";
+    case "physical_mismatch":
+      return "This Card Printing's details don't match a Live card.";
+    default:
+      return "Live export isn't available for this Card Printing.";
+  }
+}
+
 // Renders the Live export: empty Deck, the prepare button, complete text with Copy and Download, or every blocker. It never fetches.
 export function LiveExportPanel({
   checks,
@@ -169,15 +196,14 @@ export function LiveExportPanel({
       {result?.status === "blocked" && (
         <div role="region" aria-label="Live export blockers">
           <p>
-            This Deck cannot be exported yet. {result.blockers.length} card
-            {result.blockers.length === 1 ? "" : "s"} lack reviewed Live data.
-            Nothing was left out of a partial list.
+            Live export isn't available for the cards below. No export was
+            created.
           </p>
           <ul>
             {result.blockers.map((blocker, index) => (
               <li key={index}>
                 {blocker.name} · {blocker.set_name} #{blocker.collector_number}{" "}
-                · ×{blocker.quantity} · {blocker.reason}
+                · ×{blocker.quantity} · {liveBlockerCopy(blocker.reason)}
               </li>
             ))}
           </ul>
