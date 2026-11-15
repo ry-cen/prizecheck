@@ -2,7 +2,22 @@ import type { TreeNode } from "../../../location_generated";
 import type { CollectionReader, HoldingRow } from "../collection";
 import { expandCopies, pageHoldings } from "../collection";
 import { editions } from "./fixtures";
-export type CollectionScenario = "normal" | "empty" | "failure" | "slow";
+export type CollectionScenario =
+  | "normal"
+  | "empty"
+  | "failure"
+  | "slow"
+  | "write-failure"
+  | "write-slow"
+  | "stale";
+export type FixtureStore = {
+  locations: TreeNode[];
+  rows: HoldingRow[];
+  revision: number;
+};
+const stores = new Map<string, FixtureStore>();
+const storeKey = (owner: string, scenario: CollectionScenario) =>
+  JSON.stringify([owner, scenario]);
 export function collectionFixtureReader(
   owner: "a" | "b",
   scenario: CollectionScenario = "normal"
@@ -40,7 +55,7 @@ export function collectionFixtureReader(
     locationId: string,
     quantity: number
   ): HoldingRow => ({ edition, locationId, quantity, version: 1 });
-  const rows =
+  const initialRows =
     scenario === "empty"
       ? []
       : owner === "b"
@@ -62,6 +77,10 @@ export function collectionFixtureReader(
             ),
             ...editions.slice(5).map((e) => holding(e, "3", 3)),
           ];
+  const key = storeKey(owner, scenario);
+  if (!stores.has(key))
+    stores.set(key, { locations, rows: initialRows, revision: 1 });
+  const store = stores.get(key)!;
   const failed = new Set<string>();
   async function read<T>(
     value: T,
@@ -91,21 +110,22 @@ export function collectionFixtureReader(
       failed.add(operation);
       throw new Error("Synthetic failure");
     }
-    return value;
+    return structuredClone(value);
   }
   return {
     scope: "riftbound",
     owner,
-    locations: (signal) => read(locations, signal, "locations"),
+    locations: (signal) =>
+      read(structuredClone(store.locations), signal, "locations"),
     holdings: (id, signal) =>
       read(
-        rows.filter((r) => r.edition.id === id),
+        store.rows.filter((r) => r.edition.id === id),
         signal,
         "holdings"
       ),
     list: (q, signal) => {
       const search = q.search.trim().toLowerCase();
-      const matches = rows
+      const matches = store.rows
         .filter(
           (r) =>
             (q.location === "all" || q.location === r.locationId) &&
@@ -129,11 +149,309 @@ export function collectionFixtureReader(
             editions: new Set(matches.map((r) => r.edition.id)).size,
           },
           pages: Math.max(1, Math.ceil(copies.length / 24)),
-          collectionEmpty: rows.length === 0,
+          collectionEmpty: store.rows.length === 0,
         },
         signal,
         "list"
       );
     },
   };
+}
+
+/** Local fixture inspection seam for tests; never installed on window or persisted. */
+export function collectionFixtureStore(
+  owner: "a" | "b",
+  scenario: CollectionScenario = "normal"
+) {
+  if (!stores.has(storeKey(owner, scenario)))
+    collectionFixtureReader(owner, scenario);
+  return stores.get(storeKey(owner, scenario))!;
+}
+export function resetCollectionFixtures() {
+  stores.clear();
+  writers.clear();
+}
+
+import {
+  CollectionError,
+  type CollectionWriter,
+  type SelectionItem,
+  type UndoRecord,
+  type WriteOptions,
+} from "../collection";
+const writers = new Map<string, CollectionWriter>();
+const CORE_MAX = 2n ** 63n - 1n;
+/** The clock is explicit so expiry tests need no wall-clock waiting. */
+export function collectionFixtureWriter(
+  owner: "a" | "b",
+  scenario: CollectionScenario = "normal",
+  clock: () => number = Date.now
+): CollectionWriter {
+  const key = storeKey(owner, scenario);
+  const existing = writers.get(key);
+  if (existing) return existing;
+  const store = collectionFixtureStore(owner, scenario);
+  type Entry = {
+    record: UndoRecord;
+    items: SelectionItem[];
+    destinationId: string | null;
+    editions: HoldingRow["edition"][];
+  };
+  let records: Entry[] = [];
+  const replay = new Map<string, { payload: string; result: unknown }>();
+  let failed = false;
+  let stale = false;
+  const row = (location: string, edition: string) =>
+    store.rows.find(
+      (r) => r.locationId === location && r.edition.id === edition
+    );
+  const leaf = (id: string) =>
+    store.locations.some((n) => n.id === id && n.kind === "storage_leaf") &&
+    !store.locations.some((n) => n.parent_id === id);
+  function change(
+    locationId: string,
+    edition: HoldingRow["edition"],
+    delta: number
+  ) {
+    const current = row(locationId, edition.id);
+    const quantity = (current?.quantity ?? 0) + delta;
+    if (!quantity) store.rows = store.rows.filter((r) => r !== current);
+    else if (current) {
+      current.quantity = quantity;
+      current.version = store.revision;
+    } else
+      store.rows.push({
+        locationId,
+        edition,
+        quantity,
+        version: store.revision,
+      });
+  }
+  async function command<T>(
+    action: string,
+    input: unknown,
+    options: WriteOptions,
+    apply: () => T
+  ): Promise<T> {
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      };
+      const timer = setTimeout(
+        () => {
+          options.signal.removeEventListener("abort", abort);
+          resolve();
+        },
+        scenario === "write-slow" ? 1600 : 120
+      );
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener("abort", abort, { once: true });
+    });
+    if (action === "undoList") return structuredClone(apply());
+    const payload = JSON.stringify([action, input], (_key, value) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(
+            Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+          )
+        : value
+    );
+    const previous = replay.get(options.idempotencyKey);
+    if (previous) {
+      if (previous.payload !== payload)
+        throw new CollectionError("IDEMPOTENCY_KEY_REUSED");
+      return structuredClone(previous.result) as T;
+    }
+    if (scenario === "write-failure" && !failed) {
+      failed = true;
+      throw new Error("Synthetic write failure");
+    }
+    if (
+      scenario === "stale" &&
+      !stale &&
+      (action === "move" || action === "remove")
+    ) {
+      stale = true;
+      throw new CollectionError("STALE_HOLDING");
+    }
+    const result = apply();
+    replay.set(options.idempotencyKey, {
+      payload,
+      result: structuredClone(result),
+    });
+    return result;
+  }
+  function select(items: SelectionItem[], destinationId: string | null) {
+    if (
+      !items.length ||
+      new Set(items.map((i) => JSON.stringify([i.sourceId, i.editionId])))
+        .size !== items.length
+    )
+      throw new Error("Invalid selection");
+    if (items.some((i) => i.sourceId === destinationId))
+      throw new CollectionError("SAME_LOCATION");
+    if (destinationId && !leaf(destinationId))
+      throw new Error("Choose a storage leaf");
+    for (const i of items) {
+      if (
+        !Number.isSafeInteger(i.quantity) ||
+        i.quantity < 1 ||
+        !leaf(i.sourceId)
+      )
+        throw new Error("Invalid selection");
+      const holding = row(i.sourceId, i.editionId);
+      if (!holding || holding.version !== i.expectedVersion)
+        throw new CollectionError("STALE_HOLDING");
+      if (holding.quantity < i.quantity)
+        throw new CollectionError("INSUFFICIENT_QUANTITY");
+    }
+    const arrivals = new Map<string, number>();
+    for (const i of items)
+      arrivals.set(i.editionId, (arrivals.get(i.editionId) ?? 0) + i.quantity);
+    if (destinationId)
+      for (const [id, quantity] of arrivals) {
+        if (
+          BigInt(row(destinationId, id)?.quantity ?? 0) + BigInt(quantity) >
+          CORE_MAX
+        )
+          throw new Error("Quantity overflow");
+      }
+  }
+  const writer: CollectionWriter = {
+    owner,
+    add: (input, options) =>
+      command("add", input, options, () => {
+        const edition = editions.find((e) => e.id === input.editionId);
+        if (
+          !edition ||
+          !leaf(input.locationId) ||
+          !Number.isSafeInteger(input.quantity) ||
+          input.quantity < 1
+        )
+          throw new Error("Invalid Add");
+        if (
+          BigInt(row(input.locationId, edition.id)?.quantity ?? 0) +
+            BigInt(input.quantity) >
+          CORE_MAX
+        )
+          throw new Error("Quantity overflow");
+        store.revision++;
+        change(input.locationId, edition, input.quantity);
+        return {
+          ...input,
+          quantity: row(input.locationId, edition.id)!.quantity,
+          version: store.revision,
+          ownerRevision: store.revision,
+        };
+      }),
+    move: (input, options) =>
+      command("move", input, options, () =>
+        applySelection(
+          "move",
+          input.items,
+          input.destinationId,
+          options.idempotencyKey
+        )
+      ),
+    remove: (input, options) =>
+      command("remove", input, options, () =>
+        applySelection("remove", input.items, null, options.idempotencyKey)
+      ),
+    undoList: (options) =>
+      command("undoList", null, options, () =>
+        records
+          .filter((e) => Date.parse(e.record.expiresAt) > clock())
+          .slice(0, 5)
+          .map((e) => e.record)
+      ),
+    dismissUndo: (id, options) =>
+      command("dismissUndo", id, options, () => {
+        if (!records.some((e) => e.record.id === id))
+          throw new CollectionError("UNDO_NOT_FOUND");
+        records = records.filter((e) => e.record.id !== id);
+        // Core dismissal does not mutate Holdings or bump the inventory revision.
+        return { ownerRevision: store.revision };
+      }),
+    undo: (id, options) =>
+      command("undo", id, options, () => {
+        const entry = records.find((e) => e.record.id === id);
+        if (!entry) throw new CollectionError("UNDO_NOT_FOUND");
+        if (Date.parse(entry.record.expiresAt) <= clock())
+          throw new CollectionError("UNDO_EXPIRED");
+        if (
+          records.find((e) => Date.parse(e.record.expiresAt) > clock()) !==
+          entry
+        )
+          throw new CollectionError("UNDO_NOT_NEWEST");
+        for (const i of entry.items) {
+          if (
+            !leaf(i.sourceId) ||
+            (entry.destinationId && !leaf(entry.destinationId)) ||
+            BigInt(row(i.sourceId, i.editionId)?.quantity ?? 0) +
+              BigInt(i.quantity) >
+              CORE_MAX
+          )
+            throw new CollectionError("UNDO_INCOMPATIBLE");
+        }
+        const departures = new Map<string, number>();
+        for (const i of entry.items)
+          departures.set(
+            i.editionId,
+            (departures.get(i.editionId) ?? 0) + i.quantity
+          );
+        if (entry.destinationId)
+          for (const [editionId, quantity] of departures) {
+            if ((row(entry.destinationId, editionId)?.quantity ?? 0) < quantity)
+              throw new CollectionError("UNDO_INCOMPATIBLE");
+          }
+        store.revision++;
+        entry.items.forEach((i, n) => {
+          if (entry.destinationId)
+            change(entry.destinationId, entry.editions[n], -i.quantity);
+          change(i.sourceId, entry.editions[n], i.quantity);
+        });
+        records = records.filter(
+          (e) => e !== entry && Date.parse(e.record.expiresAt) > clock()
+        );
+        return { ownerRevision: store.revision };
+      }),
+  };
+  function applySelection(
+    action: "move" | "remove",
+    items: SelectionItem[],
+    destinationId: string | null,
+    id: string
+  ) {
+    if (
+      destinationId &&
+      items.length &&
+      items.every((i) => i.sourceId === destinationId)
+    )
+      throw new CollectionError("SAME_LOCATION");
+    items = items.filter((i) => i.sourceId !== destinationId);
+    select(items, destinationId);
+    const snapshots = items.map((i) => row(i.sourceId, i.editionId)!.edition);
+    store.revision++;
+    items.forEach((i, n) => {
+      change(i.sourceId, snapshots[n], -i.quantity);
+      if (destinationId) change(destinationId, snapshots[n], i.quantity);
+    });
+    const undo = {
+      id: JSON.stringify([owner, id]),
+      action,
+      expiresAt: new Date(clock() + 600_000).toISOString(),
+    };
+    records = [
+      {
+        record: undo,
+        items: structuredClone(items),
+        destinationId,
+        editions: snapshots,
+      },
+      ...records.filter((e) => Date.parse(e.record.expiresAt) > clock()),
+    ].slice(0, 5);
+    return { ownerRevision: store.revision, undo };
+  }
+  writers.set(key, writer);
+  return writer;
 }
