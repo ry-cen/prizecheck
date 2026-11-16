@@ -10,21 +10,39 @@ export class DeckEdits {
   };
   private running = false;
   error = "";
+  private paused = false;
+  private needsReload = false;
+  private refused = false;
   constructor(
     public detail: DeckDetail,
     private writer: Pick<DeckWriter, "owner" | "changeDeckList">,
     private changed: () => void
   ) {}
+  acceptLocation(location: DeckDetail["location"]) {
+    if (
+      !this.alive ||
+      location.id !== this.detail.location.id ||
+      location.version <= this.detail.location.version
+    )
+      return;
+    this.detail = { ...this.detail, location };
+    this.changed();
+  }
+  private installDetail(detail: DeckDetail) {
+    const location =
+      this.detail.location.version > detail.location.version
+        ? this.detail.location
+        : detail.location;
+    this.detail =
+      detail.listRevision >= this.detail.listRevision
+        ? { ...detail, location }
+        : { ...this.detail, location };
+  }
   acceptRead(detail: DeckDetail) {
     if (!this.alive || this.detail === detail) return;
-    if (this.busy) {
-      if (detail.location.version > this.detail.location.version) {
-        this.detail = { ...this.detail, location: detail.location };
-        this.changed();
-      }
-      return;
-    }
-    this.detail = detail;
+    this.acceptLocation(detail.location);
+    if (this.busy) return;
+    this.installDetail(detail);
     this.changed();
   }
   quantity(id: string) {
@@ -38,18 +56,22 @@ export class DeckEdits {
     return this.running || this.totals.size > 0;
   }
   get canRetry() {
-    return !!this.error && this.totals.size > 0;
+    return this.paused && this.totals.size > 0;
   }
   adjust(id: string, delta: number) {
     if (!this.alive) return;
-    if (!this.canRetry) this.error = "";
+    if (!this.paused) {
+      this.error = "";
+      this.refused = false;
+    }
     this.totals.set(id, Math.max(0, this.quantity(id) + delta));
     this.changed();
-    if (!this.error) void this.flush();
+    if (!this.paused) void this.flush();
   }
   retry() {
     if (this.alive && !this.running && this.canRetry) {
       this.error = "";
+      this.paused = false;
       this.changed();
       void this.flush();
     }
@@ -61,41 +83,45 @@ export class DeckEdits {
   private async flush() {
     if (this.running || !this.alive || !this.totals.size) return;
     this.running = true;
-    this.attempt ??= {
-      input: {
-        deckId: this.detail.location.id,
-        listRevision: this.detail.listRevision,
-        changes: [...this.totals].map(([editionId, quantity]) => ({
-          editionId,
-          quantity,
-        })),
-      },
-      key: JSON.stringify([
-        "riftbound",
-        this.writer.owner,
-        crypto.randomUUID(),
-      ]),
-    };
-    const sent = this.attempt;
-    const baseline = this.detail;
-    this.changed();
+    let baseline = this.detail;
     try {
+      if (this.needsReload) {
+        const fresh = await this.writerRead();
+        if (!this.alive) return;
+        if (!fresh) throw new DeckError("DECK_NOT_FOUND");
+        this.installDetail(fresh);
+        this.needsReload = false;
+      }
+      baseline = this.detail;
+      this.attempt ??= {
+        input: {
+          deckId: this.detail.location.id,
+          listRevision: this.detail.listRevision,
+          changes: [...this.totals].map(([editionId, quantity]) => ({
+            editionId,
+            quantity,
+          })),
+        },
+        key: JSON.stringify([
+          "riftbound",
+          this.writer.owner,
+          crypto.randomUUID(),
+        ]),
+      };
+      const sent = this.attempt;
       const result = await this.writer.changeDeckList(sent.input, {
         signal: this.controller.signal,
         idempotencyKey: sent.key,
       });
       if (!this.alive) return;
-      this.detail = {
-        ...result,
-        location:
-          this.detail.location.version > result.location.version
-            ? this.detail.location
-            : result.location,
-      };
+      this.installDetail(result);
       for (const c of sent.input.changes)
         if (this.totals.get(c.editionId) === c.quantity)
           this.totals.delete(c.editionId);
       this.attempt = undefined;
+      if (this.refused && !this.totals.size)
+        this.error =
+          "That card can't be added any more. Your other changes were saved.";
     } catch (e) {
       if (!this.alive) return;
       if (e instanceof DeckError && e.code === "STALE_DECK_LIST") {
@@ -110,29 +136,54 @@ export class DeckEdits {
               (fresh.lines.find((line) => line.edition.id === id)?.quantity ??
                 0)
           );
-          this.detail = fresh;
+          this.installDetail(fresh);
           if (!unchanged) this.totals.clear();
           this.attempt = undefined;
+          this.paused = unchanged;
           this.error = unchanged
             ? "This Deck changed somewhere else, so your last change wasn't saved. It's up to date now: try again."
             : "This Deck changed somewhere else, so your last change wasn't saved. Review the refreshed Deck List.";
         } catch {
-          if (this.alive)
+          if (this.alive) {
+            this.paused = true;
             this.error =
               "Your last Deck List change may not have been saved. Try again to check safely.";
+          }
         }
       } else if (e instanceof DeckError && e.code === "EDITION_UNAVAILABLE") {
+        // The batch failed atomically. Only unchanged, nonzero new-line changes
+        // could have caused this refusal; preserve every other absolute total.
+        for (const change of this.attempt!.input.changes) {
+          if (
+            change.quantity > 0 &&
+            !baseline.lines.some(
+              (line) => line.edition.id === change.editionId
+            ) &&
+            this.totals.get(change.editionId) === change.quantity
+          )
+            this.totals.delete(change.editionId);
+        }
         this.attempt = undefined;
-        this.totals.clear();
-        this.error =
-          "That card can't be added any more, so the Deck List wasn't changed.";
+        this.refused = true;
+        this.needsReload = true;
+        this.error = this.totals.size
+          ? "That card can't be added any more. Your other changes are still being saved."
+          : "That card can't be added any more. Review the Deck List.";
         try {
           const fresh = await this.writerRead();
-          if (this.alive && fresh) this.detail = fresh;
+          if (!this.alive) return;
+          if (!fresh) throw new DeckError("DECK_NOT_FOUND");
+          this.installDetail(fresh);
+          this.needsReload = false;
         } catch {
-          // The refusal is definitive even when its follow-up read fails.
+          if (this.alive && this.totals.size) {
+            this.paused = true;
+            this.error =
+              "That card can't be added any more. Your other changes haven't been saved. Try again to reload and save them.";
+          }
         }
       } else {
+        this.paused = true;
         this.error =
           "Your last Deck List change may not have been saved. Try again to check safely.";
       }
@@ -140,7 +191,7 @@ export class DeckEdits {
       if (this.alive) {
         this.running = false;
         this.changed();
-        if (!this.error) void this.flush();
+        if (!this.paused) void this.flush();
       }
     }
   }

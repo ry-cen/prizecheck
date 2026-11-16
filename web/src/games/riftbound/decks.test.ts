@@ -510,3 +510,143 @@ it("releases a definitive retained re-add refusal, accepts ownership reads and s
   ).toBe(3);
   edits.dispose();
 });
+
+for (const mixed of [false, true]) {
+  it(`preserves unrelated ${mixed ? "batched" : "later queued"} edits across a retained re-add refusal`, async () => {
+    const api = deckFixture("a");
+    const initial = (await api.deck("deck-1", signal))!;
+    const releases: (() => void)[] = [];
+    const change = vi.fn<DeckWriter["changeDeckList"]>(async (input, opts) => {
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return api.changeDeckList(input, opts);
+    });
+    const edits = new DeckEdits(
+      initial,
+      { owner: "a", changeDeckList: change },
+      () => {}
+    );
+    edits.reload = (s) => api.deck("deck-1", s);
+    edits.adjust("retained", -1);
+    edits.adjust("retained", 1);
+    if (mixed) edits.adjust("1", 1);
+    releases[0]();
+    await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(2));
+    if (!mixed) edits.adjust("1", 1);
+    releases[1]();
+    await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(3));
+    expect(edits.error).toBe(
+      "That card can't be added any more. Your other changes are still being saved."
+    );
+    expect(edits.canRetry).toBe(false);
+    expect(change.mock.calls[2][0]).toEqual({
+      deckId: "deck-1",
+      listRevision: 2,
+      changes: [{ editionId: "1", quantity: 3 }],
+    });
+    expect(change.mock.calls[1][0].changes).toHaveLength(mixed ? 2 : 1);
+    releases[2]();
+    await vi.waitFor(() => expect(edits.busy).toBe(false));
+    const final = (await api.deck("deck-1", signal))!;
+    expect(final.listRevision).toBe(3);
+    expect(final.lines.find((l) => l.edition.id === "1")?.quantity).toBe(3);
+    expect(final.lines.some((l) => l.edition.id === "retained")).toBe(false);
+    expect(
+      new Set(change.mock.calls.map((call) => call[1].idempotencyKey)).size
+    ).toBe(3);
+    expect(edits.error).toContain("Your other changes were saved");
+    edits.dispose();
+  });
+}
+it("keeps a new-line total changed after dispatch and retries kept edits only after a failed reload recovers", async () => {
+  const api = deckFixture("a");
+  const initial = (await api.deck("deck-2", signal))!;
+  let release!: () => void;
+  const change = vi
+    .fn<DeckWriter["changeDeckList"]>()
+    .mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      throw new DeckError("EDITION_UNAVAILABLE");
+    })
+    .mockImplementation(api.changeDeckList);
+  const edits = new DeckEdits(
+    initial,
+    { owner: "a", changeDeckList: change },
+    () => {}
+  );
+  edits.reload = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Read failed"))
+    .mockImplementation((s) => api.deck("deck-2", s));
+  edits.adjust("retained", 1);
+  edits.adjust("retained", -1); // A zero queued after dispatch must survive.
+  edits.adjust("1", 1);
+  release();
+  await vi.waitFor(() => expect(edits.canRetry).toBe(true));
+  expect(change).toHaveBeenCalledTimes(1);
+  expect(edits.quantity("retained")).toBe(0);
+  edits.retry();
+  await vi.waitFor(() => expect(edits.busy).toBe(false));
+  expect(change.mock.calls[1][0].changes).toEqual([
+    { editionId: "retained", quantity: 0 },
+    { editionId: "1", quantity: 1 },
+  ]);
+  expect(change.mock.calls[1][1].idempotencyKey).not.toBe(
+    change.mock.calls[0][1].idempotencyKey
+  );
+  expect(edits.reload).toHaveBeenCalledTimes(2);
+  expect((await api.deck("deck-2", signal))?.lines[0]).toMatchObject({
+    edition: { id: "1" },
+    quantity: 1,
+  });
+  edits.dispose();
+});
+it("applies rename Locations immediately while busy and rejects older Location and list reads", async () => {
+  const initial = (await deckFixture("a").deck("deck-1", signal))!;
+  let resolve!: (d: DeckDetail) => void;
+  const edits = new DeckEdits(
+    initial,
+    {
+      owner: "a",
+      changeDeckList: () =>
+        new Promise<DeckDetail>((r) => {
+          resolve = r;
+        }),
+    },
+    () => {}
+  );
+  edits.adjust("1", 1);
+  edits.acceptLocation({
+    ...initial.location,
+    name: "First rename",
+    version: 2,
+  });
+  edits.acceptRead({
+    ...initial,
+    location: { ...initial.location, name: "Second rename", version: 3 },
+  });
+  expect(edits.detail.location).toMatchObject({
+    name: "Second rename",
+    version: 3,
+  });
+  expect(edits.quantity("1")).toBe(3);
+  edits.acceptLocation({ ...initial.location, name: "Old rename", version: 2 });
+  const saved = {
+    ...initial,
+    listRevision: 2,
+    lines: initial.lines.map((l) =>
+      l.edition.id === "1" ? { ...l, quantity: 3 } : l
+    ),
+  };
+  resolve(saved);
+  await vi.waitFor(() => expect(edits.busy).toBe(false));
+  edits.acceptRead(initial);
+  expect(edits.detail.location).toMatchObject({
+    name: "Second rename",
+    version: 3,
+  });
+  expect(edits.quantity("1")).toBe(3);
+  expect(edits.detail.listRevision).toBe(2);
+  edits.dispose();
+});
