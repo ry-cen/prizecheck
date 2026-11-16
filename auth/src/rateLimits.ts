@@ -10,6 +10,8 @@ import { normalizeIp } from "./caller.js";
 
 export const SIGNUPS_PER_IP_PER_DAY = 10;
 export const STARTS_PER_IP_PER_HOUR = 60;
+export const NATIVE_APPROVES_PER_IP_PER_HOUR = 20;
+export const NATIVE_TOKENS_PER_IP_PER_HOUR = 30;
 const DEFAULT_DAILY_SIGNUP_CAP = 100;
 // Taken: 914701 allowedSend (server.ts), 914702/914703 catalog dispatch/runner, 914705 publications, 914706 public catalog drain.
 const RATE_EVENT_LOCK = 914704;
@@ -41,7 +43,7 @@ async function countRefusal(pool: Pool): Promise<void> {
 
 async function admit(
   pool: Pool,
-  kind: "signup" | "start",
+  kind: "signup" | "start" | "native_approve" | "native_token",
   ip: string,
   window: "24 hours" | "1 hour",
   within: (fromIp: number, total: number) => boolean
@@ -78,7 +80,9 @@ async function admit(
     // A failed connection is destroyed rather than returned to the pool.
     client.release(failure);
   }
-  if (!permitted) await countRefusal(pool);
+  // The native limits are not sign-up refusals: they leave the too_many_sign_ups counter alone.
+  if (!permitted && (kind === "signup" || kind === "start"))
+    await countRefusal(pool);
   return permitted;
 }
 
@@ -87,6 +91,10 @@ export type RateLimits = {
   allowSignup: (ip: string) => Promise<boolean>;
   /** One sign-in or link start from `ip`: at most 60 per IP per rolling hour. */
   allowStart: (ip: string) => Promise<boolean>;
+  /** One native consent approval from `ip`: at most 20 per IP per rolling hour (NATIVE_SIGN_IN only). */
+  allowNativeApprove: (ip: string) => Promise<boolean>;
+  /** One native code exchange from `ip`: at most 30 per IP per rolling hour (NATIVE_SIGN_IN only). */
+  allowNativeToken: (ip: string) => Promise<boolean>;
 };
 
 export function createRateLimits(pool: Pool, dailyCap: number): RateLimits {
@@ -106,6 +114,22 @@ export function createRateLimits(pool: Pool, dailyCap: number): RateLimits {
         ip,
         "1 hour",
         (fromIp) => fromIp < STARTS_PER_IP_PER_HOUR
+      ),
+    allowNativeApprove: (ip) =>
+      admit(
+        pool,
+        "native_approve",
+        ip,
+        "1 hour",
+        (fromIp) => fromIp < NATIVE_APPROVES_PER_IP_PER_HOUR
+      ),
+    allowNativeToken: (ip) =>
+      admit(
+        pool,
+        "native_token",
+        ip,
+        "1 hour",
+        (fromIp) => fromIp < NATIVE_TOKENS_PER_IP_PER_HOUR
       ),
   };
 }

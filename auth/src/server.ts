@@ -21,6 +21,7 @@ import { betterRequest, relay } from "./betterRelay.js";
 import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { ipContext } from "./ipContext.js";
+import { createNative, nativeSignInEnabled } from "./native.js";
 import { safeNext } from "./nextPath.js";
 import { pokemonUpstream } from "./pokemonRoutes.js";
 import { PublicReadLimiter } from "./publicReads.js";
@@ -334,6 +335,21 @@ async function budgetedSession(request: IncomingMessage) {
   });
 }
 
+// Opt-in native iOS sign-in (auth/src/native.ts): off unless NATIVE_SIGN_IN=on, an invalid value or `on` in production stops
+// the gateway here. While off, no native route exists and Authorization headers are ignored, as before.
+const nativeEnabled = nativeSignInEnabled();
+const native = nativeEnabled
+  ? createNative({
+      pool,
+      origin,
+      internalSecret,
+      providers,
+      rateLimits,
+      getSession: session,
+      clientIp: trustedClientIp,
+    })
+  : null;
+
 const server = createServer(async (request, response) => {
   // Monotonic receipt time, before any body read or session lookup: budgeted routes spend their three seconds from here.
   const received = performance.now();
@@ -444,7 +460,8 @@ const server = createServer(async (request, response) => {
             `${SIGN_IN_PAGE}?provider=${provider.id}&error=too_many_sign_ups`
           );
         const next = safeNext(
-          new URL(request.url || "/", origin).searchParams.get("next")
+          new URL(request.url || "/", origin).searchParams.get("next"),
+          nativeEnabled
         );
         const started = await auth.handler(
           betterRequest(
@@ -605,6 +622,9 @@ const server = createServer(async (request, response) => {
       );
       return relay(response, result);
     }
+    if (native && path.startsWith("/auth/native/")) {
+      if (await native.handle(request, response, path)) return;
+    }
     // Riftbound's own public prefix (ADR 0023, 2026-11-16 amendment). Handled before the generic /api/ branch so a
     // /api/riftbound path can never reach the Pokémon upstream; riftboundTargetRefused above has already refused any
     // target whose raw and normalised readings disagree about the namespace.
@@ -617,6 +637,11 @@ const server = createServer(async (request, response) => {
         path === "/api/riftbound/"
       )
         return json(response, 404, { error: "Not found" });
+      // With the native switch on, an Authorization header on any /api/* path is native-or-401, never a cookie
+      // fallback; a native credential reads only the Collection, so it is never accepted here. Refused before the
+      // Origin check, any session lookup or upstream contact.
+      if (native?.hasAuthorization(request))
+        return json(response, 401, { error: "Authentication required" });
       if (
         request.method !== "GET" &&
         request.method !== "HEAD" &&
@@ -659,6 +684,18 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (path.startsWith("/api/")) {
+      // A native credential (auth/src/native.ts) reads the Collection only. With the switch on, any request that carries an
+      // Authorization header is either exactly that read or refused; there is never a fallback to the cookie.
+      let nativeUser: string | null = null;
+      if (native?.hasAuthorization(request)) {
+        nativeUser = await native.bearerUser(
+          request,
+          request.method || "",
+          path
+        );
+        if (!nativeUser)
+          return json(response, 401, { error: "Authentication required" });
+      }
       if (
         request.method !== "GET" &&
         request.method !== "HEAD" &&
@@ -690,8 +727,9 @@ const server = createServer(async (request, response) => {
       );
       const left = () =>
         BUDGET_MS - RESPONSE_MARGIN_MS - (performance.now() - received);
-      const current =
-        publicPath || path === "/api/health"
+      const current = nativeUser
+        ? { user: { id: nativeUser } }
+        : publicPath || path === "/api/health"
           ? null
           : budgeted
             ? await withinBudget(budgetedSession(request), left())
