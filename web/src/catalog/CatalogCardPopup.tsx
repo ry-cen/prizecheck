@@ -1,7 +1,11 @@
 import {
+  createContext,
+  useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type RefObject,
@@ -433,35 +437,39 @@ export function CatalogCardPopup({
             <SelectedEdition edition={selected} />
           )}
           <Where where={where} places={places} />
-          <FriendsWhoHaveThis
-            printingId={ready.printing.id}
-            editionId={selected?.id ?? null}
-            action={(copy) => (
-              <>
-                <AskControl
-                  friend={copy}
-                  card={copyCard(
-                    copy,
-                    editions.find((edition) => edition.id === copy.edition_id)
-                      ?.imageUrl ?? null
-                  )}
-                  cap={copyCap(copy)}
-                  lendable={lendableText(copy)}
-                  text="Ask to borrow"
-                />
-                <ReviewDraft
-                  friend={copy}
-                  onReview={(review) => {
-                    // The popup is modal and the drafts tray sits behind it: it closes, giving focus back to the
-                    // tile, and the composer opens over the page with that tile as its opener.
-                    const opener = returnFocus?.current ?? null;
-                    onClose();
-                    review(opener);
-                  }}
-                />
-              </>
-            )}
-          />
+          <ReviewOwnersProvider>
+            <FriendsWhoHaveThis
+              printingId={ready.printing.id}
+              editionId={selected?.id ?? null}
+              action={(copy) => (
+                // One group per row, so on a phone Review wraps with its row's control, never alone.
+                <span className="inline-flex items-center gap-x-2 empty:hidden">
+                  <AskControl
+                    friend={copy}
+                    card={copyCard(
+                      copy,
+                      editions.find((edition) => edition.id === copy.edition_id)
+                        ?.imageUrl ?? null
+                    )}
+                    cap={copyCap(copy)}
+                    lendable={lendableText(copy)}
+                    text="Ask to borrow"
+                  />
+                  <ReviewDraft
+                    friend={copy}
+                    editionId={copy.edition_id}
+                    onReview={(review) => {
+                      // The popup is modal and the drafts tray sits behind it: it closes, giving focus back to the
+                      // tile, and the composer opens over the page with that tile as its opener.
+                      const opener = returnFocus?.current ?? null;
+                      onClose();
+                      review(opener);
+                    }}
+                  />
+                </span>
+              )}
+            />
+          </ReviewOwnersProvider>
           <AskToTrade printingId={ready.printing.id} />
         </>
       )}
@@ -472,23 +480,75 @@ export function CatalogCardPopup({
   );
 }
 
-/** Review beside Ask to borrow once a draft to this Friend exists: the drafts tray's Review, which the modal popup
- * covers. */
+/** Which row of each Friend carries Review: one per Friend, however many of their finishes are in the draft. */
+type ReviewOwners = {
+  /** Friend's collector id to the key of the row that carries their Review. */
+  owners: Record<string, string>;
+  claim: (friendId: string, rowKey: string) => void;
+  release: (friendId: string, rowKey: string) => void;
+};
+
+const ReviewOwnersContext = createContext<ReviewOwners | null>(null);
+
+function ReviewOwnersProvider({ children }: { children: ReactNode }) {
+  const [owners, setOwners] = useState<Record<string, string>>({});
+  const claim = useCallback(
+    (friendId: string, rowKey: string) =>
+      setOwners((current) =>
+        friendId in current ? current : { ...current, [friendId]: rowKey }
+      ),
+    []
+  );
+  const release = useCallback(
+    (friendId: string, rowKey: string) =>
+      setOwners((current) => {
+        if (current[friendId] !== rowKey) return current;
+        const { [friendId]: _gone, ...rest } = current;
+        return rest;
+      }),
+    []
+  );
+  const value = useMemo(
+    () => ({ owners, claim, release }),
+    [owners, claim, release]
+  );
+  return (
+    <ReviewOwnersContext.Provider value={value}>
+      {children}
+    </ReviewOwnersContext.Provider>
+  );
+}
+
+/** Review beside the stepper of a row that is in the Friend's draft: the drafts tray's Review, which the modal popup
+ * covers. A Friend's other rows that aren't in the draft keep Ask to borrow alone, and when several of their rows are
+ * in it the first one in the list (the first to claim it, in layout order) carries the one Review. */
 function ReviewDraft({
   friend,
+  editionId,
   onReview,
 }: {
   friend: DraftFriend;
+  editionId: string;
   onReview: (review: (opener: HTMLElement | null) => void) => void;
 }) {
   const drafts = useBorrowDrafts();
-  if (
-    !drafts ||
-    !drafts.drafts.some(
-      (draft) => draft.friend.collector_id === friend.collector_id
-    )
-  )
-    return null;
+  const reviews = useContext(ReviewOwnersContext);
+  const friendId = friend.collector_id;
+  const rowKey = `${friendId}:${editionId}`;
+  const drafted = (drafts?.quantity(friendId, editionId) ?? 0) > 0;
+  const owner = reviews?.owners[friendId];
+  const vacant = owner === undefined;
+  const claim = reviews?.claim;
+  const release = reviews?.release;
+  // A row that leaves the draft (or the popup) gives the Review up, and a row still in the draft takes it over.
+  useLayoutEffect(() => {
+    if (!drafted || !release) return;
+    return () => release(friendId, rowKey);
+  }, [drafted, release, friendId, rowKey]);
+  useLayoutEffect(() => {
+    if (drafted && vacant) claim?.(friendId, rowKey);
+  }, [drafted, vacant, claim, friendId, rowKey]);
+  if (!drafts || !drafted || owner !== rowKey) return null;
   return (
     <Button
       variant="primary"
