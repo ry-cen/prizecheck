@@ -96,3 +96,48 @@ final class FixtureUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Mew, Unspecified Variant"].exists)
     }
 }
+
+// The opt-in native sign-in, against the loopback stub on 127.0.0.1:4320 (mobile/native-fixture.mjs).
+// The launch argument is honoured only by Debug builds, and only for a loopback origin.
+// Sample data only: no real account, credential or gateway.
+final class NativeSignInUITests: XCTestCase {
+    let app = XCUIApplication(bundleIdentifier: "app.prizecheck.prototype")
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    let authSheet = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
+    let firstCard = "Bulbasaur, Unspecified Variant"
+
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+        app.launchArguments = ["-PrizecheckGatewayOrigin", "http://127.0.0.1:4320"]
+    }
+
+    override func tearDownWithError() throws {
+        app.terminate()
+    }
+
+    func testNativeSignInRestoreAndSignOut() {
+        app.launch()
+        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 45))
+        app.buttons["Sign in"].tap()
+        // iOS asks before opening the sign-in sheet; an ephemeral session may skip the alert.
+        let confirm = springboard.buttons["Continue"]
+        if confirm.waitForExistence(timeout: 10) { confirm.tap() }
+        // The sheet is remote Safari content; look for Allow where the system exposes it.
+        let allowed = NSPredicate { _, _ in
+            self.app.webViews.buttons["Allow"].exists || self.authSheet.buttons["Allow"].exists || self.app.buttons["Allow"].exists
+        }
+        expectation(for: allowed, evaluatedWith: app)
+        waitForExpectations(timeout: 60)
+        for candidate in [app.webViews.buttons["Allow"], authSheet.buttons["Allow"], app.buttons["Allow"]] where candidate.exists {
+            candidate.tap()
+            break
+        }
+        XCTAssertTrue(app.buttons[firstCard].waitForExistence(timeout: 30))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons[firstCard].waitForExistence(timeout: 30))
+        app.buttons["Sign out"].tap()
+        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons[firstCard].exists)
+    }
+}

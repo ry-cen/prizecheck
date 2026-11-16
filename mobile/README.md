@@ -24,6 +24,10 @@ Only the exact return route and a random 256-bit pending state are accepted, for
 
 Walk through success → sample Collection → terminate/relaunch → Collection recovery → Sign out → relaunch signed out. Also cancel in the app, cancel in the browser, simulate an error, and leave an attempt open five minutes. A session expires after 30 minutes; foreground polling and resume checks unmount the sample Collection. Closing the browser without returning leaves the app's Cancel sign-in action available. A failed browser launch shows a retry message. A real device cannot reach a Linux fixture server via its own loopback address; do not widen the listener or relax ATS to work around this.
 
+## Native sign-in (opt-in, nonprod)
+
+The app can also sign in through the gateway's native sign-in and read a real Collection. It is off by default, and the default build behaves as described above. See [NATIVE_SIGN_IN_IOS.md](NATIVE_SIGN_IN_IOS.md) for the iOS plugin, its configuration and the loopback stub on port 4320.
+
 ## Collection source and states
 
 The prototype reads its Collection through a typed `CollectionSource` (`web/src/shell/ios/collectionSource.ts`): a page, signed out, or unavailable. The packaged app uses only the sample source: two sample pages, so it exercises **Show more**, **Refresh** and the session-ended message. The loading, empty, error with **Try again**, Refresh, Show more and session-ended states are implemented and unit-tested with injected sources; the sample source never returns an empty page or `unavailable`, and its loading lasts one microtask. The native test covers Show more and Refresh; see VERIFICATION.md for its hosted result. The header keeps saying "Demo with sample cards".

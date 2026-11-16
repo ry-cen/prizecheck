@@ -10,6 +10,12 @@ import {
   type CollectionSource,
 } from "./collectionSource";
 import { FixtureSession } from "./fixtureSession";
+import {
+  NativeSignIn,
+  nativeCollectionSource,
+  nativeStatus,
+  type NativeSignInPlugin,
+} from "./nativeSignIn";
 import "../../tokens.css";
 import "../../tailwind.css";
 
@@ -32,7 +38,69 @@ const NONE: Reads = {
   loaded: false,
 };
 
-export function IosPrototype(props: {
+/** The loading, error, empty, list and Show more states, shared by both modes. */
+function CollectionBody(props: {
+  reads: Reads;
+  onRetry: () => void;
+  onMore: (cursor: string) => void;
+}) {
+  const { reads, onRetry, onMore } = props;
+  const { entries, next, busy, failed, loaded } = reads;
+  return (
+    <>
+      {busy === "first" && (
+        <p role="status" className="mt-4">
+          Loading your Collection…
+        </p>
+      )}
+      {busy === "refresh" && (
+        <p role="status" className="mt-4">
+          Refreshing…
+        </p>
+      )}
+      {failed && (
+        <div className="mt-4">
+          <p role="status" className="mb-2">
+            Couldn't load your Collection. Try again.
+          </p>
+          <Button onClick={onRetry}>Try again</Button>
+        </div>
+      )}
+      {loaded && entries.length === 0 && !failed && busy === null && (
+        <p className="mt-4">No cards in your Collection yet.</p>
+      )}
+      <ul className="mt-6 grid grid-cols-2 gap-4">
+        {entries.map((entry) => (
+          <li key={entry.edition_id}>
+            <CopyTile
+              disabled
+              label={`${entry.printing_name}, ${variantLabel(entry.descriptor)}`}
+              title={entry.printing_name}
+              name={entry.printing_name}
+              setName={entry.set_name}
+              collectorNumber={entry.collector_number}
+              variant={variantLabel(entry.descriptor)}
+              imageUrl={entry.image_url}
+              names
+              caption={`${entry.quantity} copies`}
+            />
+          </li>
+        ))}
+      </ul>
+      {next && !failed && (
+        <Button
+          className="mt-6"
+          disabled={busy !== null}
+          onClick={() => onMore(next)}
+        >
+          {busy === "more" ? "Loading…" : "Show more"}
+        </Button>
+      )}
+    </>
+  );
+}
+
+function FixtureDemo(props: {
   source?: CollectionSource;
   session?: FixtureSession;
 }) {
@@ -155,7 +223,7 @@ export function IosPrototype(props: {
       update();
     }
   }
-  const { entries, next, busy, failed, loaded } = reads;
+  const { busy, failed } = reads;
   const retry = () => {
     if (!failed) return;
     if (failed.mode === "more") void load("more", failed.cursor);
@@ -195,54 +263,11 @@ export function IosPrototype(props: {
           >
             Refresh
           </Button>
-          {busy === "first" && (
-            <p role="status" className="mt-4">
-              Loading your Collection…
-            </p>
-          )}
-          {busy === "refresh" && (
-            <p role="status" className="mt-4">
-              Refreshing…
-            </p>
-          )}
-          {failed && (
-            <div className="mt-4">
-              <p role="status" className="mb-2">
-                Couldn't load your Collection. Try again.
-              </p>
-              <Button onClick={retry}>Try again</Button>
-            </div>
-          )}
-          {loaded && entries.length === 0 && !failed && busy === null && (
-            <p className="mt-4">No cards in your Collection yet.</p>
-          )}
-          <ul className="mt-6 grid grid-cols-2 gap-4">
-            {entries.map((entry) => (
-              <li key={entry.edition_id}>
-                <CopyTile
-                  disabled
-                  label={`${entry.printing_name}, ${variantLabel(entry.descriptor)}`}
-                  title={entry.printing_name}
-                  name={entry.printing_name}
-                  setName={entry.set_name}
-                  collectorNumber={entry.collector_number}
-                  variant={variantLabel(entry.descriptor)}
-                  imageUrl={entry.image_url}
-                  names
-                  caption={`${entry.quantity} copies`}
-                />
-              </li>
-            ))}
-          </ul>
-          {next && !failed && (
-            <Button
-              className="mt-6"
-              disabled={busy !== null}
-              onClick={() => void load("more", next)}
-            >
-              {busy === "more" ? "Loading…" : "Show more"}
-            </Button>
-          )}
+          <CollectionBody
+            reads={reads}
+            onRetry={retry}
+            onMore={(cursor) => void load("more", cursor)}
+          />
         </>
       ) : (
         <>
@@ -268,4 +293,171 @@ export function IosPrototype(props: {
       )}
     </main>
   );
+}
+
+const SIGNED_OUT_MESSAGE = "Signed out.";
+
+/** Native mode: the gateway is configured, and the plugin holds the credential. */
+function NativeMode(props: {
+  plugin: NativeSignInPlugin;
+  signedInAtStart: boolean;
+}) {
+  const { plugin } = props;
+  const [source] = useState(() => nativeCollectionSource(plugin));
+  const [signedIn, setSignedIn] = useState(props.signedInAtStart);
+  const [signingIn, setSigningIn] = useState(false);
+  const [message, setMessage] = useState("");
+  const [reads, setReads] = useState<Reads>(NONE);
+  // Each read takes a generation; a result from an older one is ignored.
+  const generation = useRef(0);
+  async function load(mode: Mode, cursor?: string) {
+    const mine = ++generation.current;
+    setReads((prev) =>
+      mode === "first"
+        ? { ...NONE, busy: mode }
+        : { ...prev, busy: mode, failed: null }
+    );
+    const result = await source.read(cursor);
+    if (mine !== generation.current) return;
+    if (result.kind === "signed-out") {
+      generation.current += 1;
+      setReads(NONE);
+      setSignedIn(false);
+      setMessage(ENDED);
+      return;
+    }
+    if (result.kind === "unavailable") {
+      setReads((prev) => ({
+        ...prev,
+        busy: null,
+        failed: { mode, cursor },
+        loaded: mode === "first" ? false : prev.loaded,
+      }));
+      return;
+    }
+    const { entries, next_cursor } = result.page;
+    setReads((prev) => ({
+      entries: mode === "more" ? [...prev.entries, ...entries] : entries,
+      next: next_cursor ?? null,
+      busy: null,
+      failed: null,
+      loaded: true,
+    }));
+  }
+  useEffect(() => {
+    if (signedIn) void load("first");
+    else {
+      generation.current += 1;
+      setReads(NONE);
+    }
+  }, [signedIn]);
+  async function signIn() {
+    if (signingIn) return;
+    setSigningIn(true);
+    setMessage("");
+    let result: string;
+    try {
+      result = (await plugin.signIn()).result;
+    } catch {
+      result = "error";
+    }
+    setSigningIn(false);
+    if (result === "signed-in") setSignedIn(true);
+    else
+      setMessage(
+        result === "cancelled"
+          ? "Sign-in cancelled."
+          : "Unable to sign in. Please try again."
+      );
+  }
+  async function signOut() {
+    generation.current += 1;
+    setReads(NONE);
+    setSignedIn(false);
+    setMessage(SIGNED_OUT_MESSAGE);
+    try {
+      await plugin.signOut();
+    } catch {
+      // The plugin removes the credential on this device even when the server is unreachable.
+    }
+  }
+  const { busy, failed } = reads;
+  const retry = () => {
+    if (!failed) return;
+    if (failed.mode === "more") void load("more", failed.cursor);
+    else void load(failed.mode);
+  };
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-8 text-text [padding-top:max(2rem,env(safe-area-inset-top))] [padding-bottom:max(2rem,env(safe-area-inset-bottom))]">
+      <p className="mb-6 text-text-subtle">Prizecheck</p>
+      <h1 className="mb-6 text-2xl font-semibold">
+        {signedIn ? "Collection" : "Your Collection, with you"}
+      </h1>
+      {message && (
+        <p role="status" className="mb-4">
+          {message}
+        </p>
+      )}
+      {signedIn ? (
+        <>
+          <Button onClick={() => void signOut()}>Sign out</Button>{" "}
+          <Button
+            variant="secondary"
+            disabled={busy !== null}
+            onClick={() => void load("refresh")}
+          >
+            Refresh
+          </Button>
+          <CollectionBody
+            reads={reads}
+            onRetry={retry}
+            onMore={(cursor) => void load("more", cursor)}
+          />
+        </>
+      ) : (
+        <>
+          <p className="mb-4">Sign in to see your Collection.</p>
+          <Button disabled={signingIn} onClick={() => void signIn()}>
+            Sign in
+          </Button>
+        </>
+      )}
+    </main>
+  );
+}
+
+type Probe =
+  | { state: "pending" }
+  | { state: "fixture" }
+  | { state: "native"; signedIn: boolean };
+
+/**
+ * The packaged entry. With no gateway configured (the default build, and every web
+ * build) it is the fixture demo; with one, it signs in through the native plugin.
+ */
+export function IosPrototype(props: {
+  source?: CollectionSource;
+  session?: FixtureSession;
+  plugin?: NativeSignInPlugin;
+}) {
+  const { plugin = NativeSignIn, ...demo } = props;
+  const [probe, setProbe] = useState<Probe>({ state: "pending" });
+  useEffect(() => {
+    let disposed = false;
+    void nativeStatus(plugin).then((status) => {
+      if (disposed) return;
+      setProbe(
+        status.configured
+          ? { state: "native", signedIn: status.signedIn }
+          : { state: "fixture" }
+      );
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [plugin]);
+  if (probe.state === "pending") return null;
+  if (probe.state === "native")
+    return <NativeMode plugin={plugin} signedInAtStart={probe.signedIn} />;
+  return <FixtureDemo {...demo} />;
 }
