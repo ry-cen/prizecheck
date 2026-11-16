@@ -1,4 +1,4 @@
-import type { Edition } from "../catalog";
+import { deckListHeaders } from "./deckListFixtures";
 import { CollectionError, type WriteOptions } from "../collection";
 import {
   DeckError,
@@ -17,10 +17,6 @@ import { cleanLocationName } from "./locationCommands";
 import { casefold } from "./locationNames";
 export type DeckScenario =
   "normal" | "decks-empty" | "decks-failure" | "decks-slow" | "deck-stale";
-type Header = {
-  revision: number;
-  lines: { edition: Edition; quantity: number }[];
-};
 const fixtures = new WeakMap<
   FixtureStore,
   Map<string, DeckReader & DeckWriter>
@@ -38,7 +34,7 @@ export function deckFixture(
   }
   const existing = variants.get(scenario);
   if (existing) return existing;
-  const headers = new Map<string, Header>();
+  const headers = deckListHeaders(store);
   if (scenario !== "decks-empty") {
     const deck = {
       id: "deck-1",

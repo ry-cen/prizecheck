@@ -113,6 +113,20 @@ for (const width of [1280, 375]) {
       sheet.getByText("5 on Deck List", { exact: true })
     ).toBeVisible();
     await expect(page.getByRole("status")).toHaveCount(0);
+    await page.goBack();
+    await expect(
+      page.getByRole("tabpanel", { name: "Library", exact: true })
+    ).toBeVisible();
+    await expect(sheet).not.toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "First Light", exact: true })
+    ).toBeFocused();
+    await page.goForward();
+    await expect(page.getByRole("tabpanel", { name: /^Deck / })).toBeVisible();
+    await expect(sheet).not.toBeVisible();
+    await edit.focus();
+    await page.keyboard.press("Enter");
+    await expect(sheet).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(edit).toBeFocused();
     if (width === 375) {
@@ -213,12 +227,53 @@ for (const width of [1280, 375]) {
     await expect(
       page.getByText("This Deck is empty. Add cards from the Library.")
     ).toBeVisible();
-    expect(
-      await page.evaluate(() =>
-        localStorage.getItem("prizecheck:workspace:preferences:v1:1")
-      )
-    ).toBe("decks-sentinel");
-    expect(calls).toEqual([]);
+    await nav.getByRole("button", { name: "Collection", exact: true }).click();
+    await page
+      .getByRole("region", { name: "Collection results" })
+      .getByRole("button", {
+        name: "Ember Scout, FL 001, Standard, Unsorted",
+        exact: true,
+      })
+      .first()
+      .click();
+    if (width === 375) {
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Move…", exact: true })
+        .click();
+    } else {
+      await page.getByRole("button", { name: "Actions", exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+    }
+    const move = page.getByRole("dialog", { name: "Move 1 copy", exact: true });
+    await move
+      .getByRole("combobox", { name: "Location" })
+      .selectOption("deck-2");
+    await move
+      .getByRole("button", { name: "Move 1 copy", exact: true })
+      .click();
+    const notifications = page.getByRole("region", { name: "Notifications" });
+    await expect(notifications).toContainText("Moved 1 copy to New ideas");
+    await decksNav.click();
+    await page
+      .getByRole("button", {
+        name: "New ideas 1 cards in this Deck",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByRole("tabpanel", { name: /^Deck / }).getByText(/In this Deck 1/)
+    ).toBeVisible();
+    await notifications
+      .getByRole("button", { name: "Undo", exact: true })
+      .click();
+    await expect(
+      page.getByRole("tabpanel", { name: /^Deck / }).getByText(/In this Deck 0/)
+    ).toBeVisible();
+    await expect(
+      page.getByRole("tab", { name: "Deck 1", exact: true })
+    ).toBeVisible();
     await page.goto(`${entry}?owner=b#riftbound:section=decks&deck=deck-1`);
     await expect(
       page.getByRole("heading", { name: "Beacon Brigade", exact: true })
@@ -226,6 +281,52 @@ for (const width of [1280, 375]) {
     await expect(
       page.getByText("Forgotten Sentinel", { exact: true })
     ).toHaveCount(0);
+    expect(
+      await page.evaluate(() =>
+        localStorage.getItem("prizecheck:workspace:preferences:v1:1")
+      )
+    ).toBe("decks-sentinel");
+    expect(calls).toEqual([]);
+  });
+  test(`removing a retained line preserves its copies and returns focus at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(`${entry}#riftbound:section=decks&deck=deck-1`);
+    await page
+      .getByRole("button", {
+        name: "Edit Forgotten Sentinel Standard",
+        exact: true,
+      })
+      .click();
+    const sheet = page.getByRole("dialog", {
+      name: "Forgotten Sentinel",
+      exact: true,
+    });
+    await sheet
+      .getByRole("button", { name: "Decrease quantity", exact: true })
+      .click();
+    await expect(sheet).not.toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "First Light", exact: true })
+    ).toBeFocused();
+    await expect(
+      page.getByRole("tab", { name: "Deck 8", exact: true })
+    ).toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          (await state(page)).rows.find(
+            (row: { edition: { id: string } }) => row.edition.id === "retained"
+          )?.quantity
+      )
+      .toBe(1);
+    await page.getByRole("tab", { name: "Library", exact: true }).click();
+    await page.goBack();
+    await expect(
+      page.getByRole("tab", { name: "Deck 8", exact: true })
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
   test(`keyboard Deck creation and tab navigation at ${width}`, async ({
     page,
