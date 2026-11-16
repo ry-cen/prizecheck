@@ -1,3 +1,4 @@
+import { captureDeckArrivals, coverDeckArrivals } from "./deckListFixtures";
 import type { TreeNode } from "../../../location_generated";
 import type { CollectionReader, HoldingRow } from "../collection";
 import { expandCopies, pageHoldings } from "../collection";
@@ -433,8 +434,12 @@ export function collectionFixtureWriter(
           CORE_MAX
         )
           throw new Error("Quantity overflow");
+        const arrivals = captureDeckArrivals(store, [
+          { locationId: input.locationId, edition, added: input.quantity },
+        ]);
         store.revision++;
         change(input.locationId, edition, input.quantity);
+        coverDeckArrivals(store, arrivals);
         return {
           ...input,
           quantity: row(input.locationId, edition.id)!.quantity,
@@ -502,12 +507,21 @@ export function collectionFixtureWriter(
             if ((row(entry.destinationId, editionId)?.quantity ?? 0) < quantity)
               throw new CollectionError("UNDO_INCOMPATIBLE");
           }
+        const arrivals = captureDeckArrivals(
+          store,
+          entry.items.map((item, index) => ({
+            locationId: item.sourceId,
+            edition: entry.editions[index],
+            added: item.quantity,
+          }))
+        );
         store.revision++;
         entry.items.forEach((i, n) => {
           if (entry.destinationId)
             change(entry.destinationId, entry.editions[n], -i.quantity);
           change(i.sourceId, entry.editions[n], i.quantity);
         });
+        coverDeckArrivals(store, arrivals);
         records = records.filter(
           (e) => e !== entry && Date.parse(e.record.expiresAt) > clock()
         );
@@ -529,11 +543,22 @@ export function collectionFixtureWriter(
     items = items.filter((i) => i.sourceId !== destinationId);
     select(items, destinationId);
     const snapshots = items.map((i) => row(i.sourceId, i.editionId)!.edition);
+    const arrivals = captureDeckArrivals(
+      store,
+      destinationId
+        ? items.map((item, index) => ({
+            locationId: destinationId,
+            edition: snapshots[index],
+            added: item.quantity,
+          }))
+        : []
+    );
     store.revision++;
     items.forEach((i, n) => {
       change(i.sourceId, snapshots[n], -i.quantity);
       if (destinationId) change(destinationId, snapshots[n], i.quantity);
     });
+    coverDeckArrivals(store, arrivals);
     const undo = {
       id: JSON.stringify([owner, id]),
       action,

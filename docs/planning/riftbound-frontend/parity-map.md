@@ -148,3 +148,5 @@ Gates and omissions (each remains outside WP1):
 - Deck List Undo: grounded inverse batches but intentionally omitted from WP1; see decks-slice.md.
 - Lent presentation.
 - Spread/List view switching.
+
+Decks WP1 core correction: `local/deckListFixtures.ts` mirrors holding-arrival list coverage (baseline.sql:1143,1218), including Collection Add/Move and ordinary Inventory Undo. Leaving a Deck does not shrink its list. `DecksView.tsx` refetches ownership on inventory revision changes; no Deck List Undo or Put away UI is introduced. See decks-slice.md for the formula, retained-Edition distinction and tests.
