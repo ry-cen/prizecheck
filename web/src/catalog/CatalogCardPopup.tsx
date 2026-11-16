@@ -480,12 +480,16 @@ export function CatalogCardPopup({
   );
 }
 
-/** Which row of each Friend carries Review: one per Friend, however many of their finishes are in the draft. */
+/** Which row of each Friend carries Review: one per Friend with a draft, however many of their finishes are in it. A
+ * claim is made per Friend and tier: "drafted" by rows that are in the draft, "first" by every visible row of a Friend
+ * with a draft, so the first one in list order (the first to claim, in layout order) holds each. */
+type ReviewTier = "drafted" | "first";
+
 type ReviewOwners = {
-  /** Friend's collector id to the key of the row that carries their Review. */
+  /** `${tier}:${friend's collector id}` to the key of the row that holds that claim. */
   owners: Record<string, string>;
-  claim: (friendId: string, rowKey: string) => void;
-  release: (friendId: string, rowKey: string) => void;
+  claim: (tier: ReviewTier, friendId: string, rowKey: string) => void;
+  release: (tier: ReviewTier, friendId: string, rowKey: string) => void;
 };
 
 const ReviewOwnersContext = createContext<ReviewOwners | null>(null);
@@ -493,18 +497,19 @@ const ReviewOwnersContext = createContext<ReviewOwners | null>(null);
 function ReviewOwnersProvider({ children }: { children: ReactNode }) {
   const [owners, setOwners] = useState<Record<string, string>>({});
   const claim = useCallback(
-    (friendId: string, rowKey: string) =>
+    (tier: ReviewTier, friendId: string, rowKey: string) =>
       setOwners((current) =>
-        friendId in current ? current : { ...current, [friendId]: rowKey }
+        `${tier}:${friendId}` in current
+          ? current
+          : { ...current, [`${tier}:${friendId}`]: rowKey }
       ),
     []
   );
   const release = useCallback(
-    (friendId: string, rowKey: string) =>
+    (tier: ReviewTier, friendId: string, rowKey: string) =>
       setOwners((current) => {
-        if (current[friendId] !== rowKey) return current;
-        const { [friendId]: _gone, ...rest } = current;
-        return rest;
+        const { [`${tier}:${friendId}`]: held, ...rest } = current;
+        return held === rowKey ? rest : current;
       }),
     []
   );
@@ -519,9 +524,29 @@ function ReviewOwnersProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** Review beside the stepper of a row that is in the Friend's draft: the drafts tray's Review, which the modal popup
- * covers. A Friend's other rows that aren't in the draft keep Ask to borrow alone, and when several of their rows are
- * in it the first one in the list (the first to claim it, in layout order) carries the one Review. */
+/** Holds a tier's claim while `active`; a row that goes inactive or leaves gives it up, and an active row takes over. */
+function useReviewClaim(
+  reviews: ReviewOwners | null,
+  tier: ReviewTier,
+  friendId: string,
+  rowKey: string,
+  active: boolean
+) {
+  const vacant = reviews ? !(`${tier}:${friendId}` in reviews.owners) : true;
+  const claim = reviews?.claim;
+  const release = reviews?.release;
+  useLayoutEffect(() => {
+    if (!active || !release) return;
+    return () => release(tier, friendId, rowKey);
+  }, [active, release, tier, friendId, rowKey]);
+  useLayoutEffect(() => {
+    if (active && vacant) claim?.(tier, friendId, rowKey);
+  }, [active, vacant, claim, tier, friendId, rowKey]);
+}
+
+/** The drafts tray's Review, which the modal popup covers, once the Friend has a draft: beside the stepper of a row that
+ * is in it (the first such row when several are), or, when none of the Friend's rows here is, beside the Friend's first
+ * row, which keeps its Ask to borrow. A Friend's other rows never have a Review. */
 function ReviewDraft({
   friend,
   editionId,
@@ -535,20 +560,15 @@ function ReviewDraft({
   const reviews = useContext(ReviewOwnersContext);
   const friendId = friend.collector_id;
   const rowKey = `${friendId}:${editionId}`;
+  const hasDraft =
+    drafts?.drafts.some((draft) => draft.friend.collector_id === friendId) ??
+    false;
   const drafted = (drafts?.quantity(friendId, editionId) ?? 0) > 0;
-  const owner = reviews?.owners[friendId];
-  const vacant = owner === undefined;
-  const claim = reviews?.claim;
-  const release = reviews?.release;
-  // A row that leaves the draft (or the popup) gives the Review up, and a row still in the draft takes it over.
-  useLayoutEffect(() => {
-    if (!drafted || !release) return;
-    return () => release(friendId, rowKey);
-  }, [drafted, release, friendId, rowKey]);
-  useLayoutEffect(() => {
-    if (drafted && vacant) claim?.(friendId, rowKey);
-  }, [drafted, vacant, claim, friendId, rowKey]);
-  if (!drafts || !drafted || owner !== rowKey) return null;
+  useReviewClaim(reviews, "drafted", friendId, rowKey, drafted);
+  useReviewClaim(reviews, "first", friendId, rowKey, hasDraft);
+  const draftedOwner = reviews?.owners[`drafted:${friendId}`];
+  const holder = draftedOwner ?? reviews?.owners[`first:${friendId}`];
+  if (!drafts || !hasDraft || holder !== rowKey) return null;
   return (
     <Button
       variant="primary"

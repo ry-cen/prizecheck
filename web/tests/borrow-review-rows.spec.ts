@@ -183,4 +183,106 @@ for (const viewport of [
         .getByRole("listitem")
     ).toHaveCount(2);
   });
+
+  test(`A Friend's draft from another card still shows one Review in the popup, through every change, at ${viewport.width}`, async ({
+    page,
+    collectors,
+  }) => {
+    await page.setViewportSize(viewport);
+    const ids = seedCatalog();
+    const friend = await collectors.signIn({ next: "/loans" });
+    await nameCollector(friend.page, "Misty W");
+    const place = await unsorted(friend.page);
+    await hold(friend.page, place, ids["PAL 172"], 3);
+    await hold(friend.page, place, ids["PAL 172 Reverse Holo"], 2);
+    await hold(friend.page, place, ids["PAL 185"], 2);
+    await signInAsOwner(page, "/catalog");
+    await befriend(page, friend.page);
+
+    // Ask for Iono, then leave: the draft to Misty W holds a card that the next popup doesn't show.
+    const results = page.getByRole("region", { name: "Catalog results" });
+    await results.getByRole("button", { name: /^Iono, PAL 185/ }).click();
+    const popup = page.getByRole("dialog");
+    await popup
+      .getByRole("button", { name: "Ask to borrow Iono from Misty W" })
+      .click();
+    await popup.getByRole("button", { name: /^Close/ }).click();
+    await expect(popup).toHaveCount(0);
+
+    await results
+      .getByRole("button", { name: /^Boss's Orders, PAL 172, .*Normal,/ })
+      .click();
+    await expect(rowsOf(popup)).toHaveCount(2);
+    const review = popup.getByRole("button", { name: REVIEW });
+    const first = rowsOf(popup).first();
+    const asks = [ASK_NORMAL, ASK_REVERSE];
+
+    // (a) No finish of Boss's Orders is drafted, yet the Friend has a draft: exactly one Review, on the first row,
+    // level with that row's own Ask to borrow, and both rows still ask.
+    const expectFallback = async () => {
+      await expect(review).toHaveCount(1);
+      await expect(first.getByRole("button", { name: REVIEW })).toHaveCount(1);
+      for (const name of asks)
+        await expect(
+          popup.getByRole("button", { name, exact: true })
+        ).toBeVisible();
+      const firstAsk = first.getByRole("button", { name: /^Ask to borrow / });
+      const rowBox = (await first.boundingBox())!;
+      const askBox = (await firstAsk.boundingBox())!;
+      const reviewBox = (await review.boundingBox())!;
+      expect(Math.abs(reviewBox.y - askBox.y)).toBeLessThanOrEqual(1);
+      expect(reviewBox.x).toBeGreaterThan(askBox.x);
+      expect(reviewBox.y).toBeGreaterThanOrEqual(rowBox.y - 1);
+      expect(reviewBox.y + reviewBox.height).toBeLessThanOrEqual(
+        rowBox.y + rowBox.height + 1
+      );
+      if (phone) await expectTouchTarget(review);
+      await expectNoHorizontalOverflow(popup);
+    };
+    await expectFallback();
+
+    // A finish drafted on either row takes the one Review to that row; (b) taking it out again, with Iono still in
+    // the draft, hands the Review back to the first row: never none, never two.
+    for (const [ask, stepper, row] of [
+      [ASK_NORMAL, STEPPER_NORMAL, normalRow(popup)],
+      [ASK_REVERSE, STEPPER_REVERSE, reverseRow(popup)],
+    ] as const) {
+      await popup.getByRole("button", { name: ask }).click();
+      await expect(row.getByRole("group", { name: stepper })).toBeVisible();
+      await expect(review).toHaveCount(1);
+      await expect(row.getByRole("button", { name: REVIEW })).toHaveCount(1);
+      await row.getByRole("button", { name: `Decrease ${stepper}` }).click();
+      await expect(row.getByRole("button", { name: ask })).toBeVisible();
+      await expectFallback();
+    }
+
+    // Both finishes drafted, then both taken out: one Review throughout.
+    await popup.getByRole("button", { name: ASK_NORMAL }).click();
+    await popup.getByRole("button", { name: ASK_REVERSE }).click();
+    await expect(review).toHaveCount(1);
+    await normalRow(popup)
+      .getByRole("button", { name: `Decrease ${STEPPER_NORMAL}` })
+      .click();
+    await expect(review).toHaveCount(1);
+    await expect(
+      reverseRow(popup).getByRole("button", { name: REVIEW })
+    ).toHaveCount(1);
+    await reverseRow(popup)
+      .getByRole("button", { name: `Decrease ${STEPPER_REVERSE}` })
+      .click();
+    await expectFallback();
+
+    // The fallback Review opens the Friend's one composer, holding only Iono.
+    await review.click();
+    const composer = page.getByRole("dialog", {
+      name: "Borrow Request to Misty W",
+    });
+    await expect(composer).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await expect(
+      composer
+        .getByRole("list", { name: "Cards to borrow" })
+        .getByRole("listitem")
+    ).toHaveCount(1);
+  });
 }
