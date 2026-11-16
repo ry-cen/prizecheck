@@ -49,6 +49,7 @@ app.catalog_refresh root
 app.catalog_targets root
 app.public_catalog root
 app.public_prices root
+app.riftbound_main root
 app.core.imports core
 app.core.imports.collection_draft core
 app.games.pokemon.imports.collection_import pokemon
