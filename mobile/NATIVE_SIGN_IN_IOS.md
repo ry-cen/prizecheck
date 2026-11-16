@@ -42,9 +42,16 @@ node --test mobile/native-fixture.test.mjs
 
 **Swift is not compiled on Linux.** It was written against the Capacitor 8.6.2 iOS sources in `node_modules/@capacitor/ios`; the hosted macOS job compiles and runs it.
 
+A Keychain item survives deleting the app, so on the first plugin load after an install `NativeCredentialStore.purgeLeftoverCredentialsOnFirstLoad` deletes every native credential under the store's service (any gateway origin). It detects that first load with the `nativeSignIn.installMarker` `UserDefaults` flag, which an uninstall wipes. It logs nothing and leaves the Keychain attributes alone.
+
 ## Real gateway walkthrough (a nonprod gateway you run yourself)
 
-Start the gateway as described in `mobile/NATIVE_SIGN_IN.md`, set `PRIZECHECK_GATEWAY_ORIGIN` to its `https://` origin for a Debug or Release build, and run on the simulator. A physical device cannot reach a gateway on the host's loopback; do not widen the listener or relax ATS to work around this.
+Start the gateway as described in `mobile/NATIVE_SIGN_IN.md`, give the build its `https://` origin as `PRIZECHECK_GATEWAY_ORIGIN`, and run on the simulator. **Do not write `https://host` in an `.xcconfig` file:** there `//` starts a comment, so the value becomes `https:` and the app quietly runs unconfigured, on the fixture demo. Use one of the safe forms instead:
+
+- in a local, untracked xcconfig, break the slashes up with an empty macro: `PRIZECHECK_GATEWAY_ORIGIN = https:/$()/host.example`;
+- or pass it on the command line, which does not go through xcconfig parsing: `xcodebuild ... PRIZECHECK_GATEWAY_ORIGIN=https://host.example`.
+
+A physical device cannot reach a gateway on the host's loopback; do not widen the listener or relax ATS to work around this.
 
 ## Not covered
 
