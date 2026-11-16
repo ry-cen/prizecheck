@@ -430,6 +430,10 @@ test.describe("desktop", () => {
     );
     await expect(tiles(page)).toHaveCount(70);
 
+    // Start at the top before reloading: reload restores the current scroll position,
+    // and restoring the end of the gallery would immediately request its next page.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
     // A failed page shows Retry at the end of the gallery and loads nothing more until it is pressed. Focus reaching
     // the last tile (the keyboard path) asks for the next page, and loading never moves focus.
     await page.reload();

@@ -98,8 +98,9 @@ const heldTile = (panel: ReturnType<Page["getByRole"]>, start: RegExp) =>
 /** Prices are read once, when a slot first comes near the viewport, so each check starts from a fresh page load.
  * Catalog is an Edition gallery (#173): Furret's three Editions are three tiles, each with its compact price. */
 async function search(page: Page) {
-  await page.reload();
-  await page.getByRole("link", { name: "Catalog", exact: true }).click();
+  // Start a fresh Catalog visit without the inspected card from the previous price check.
+  // Reloading its card/edition address deliberately reopens that dialog.
+  await page.goto(`${ORIGIN}/catalog`);
   await page
     .getByRole("searchbox", { name: "Search the catalog" })
     .fill("Furret");

@@ -478,14 +478,23 @@ test.describe("desktop", () => {
         .getByRole("link", { name: `Keep ${s}`, exact: true })
     ).toHaveAttribute("aria-current", "page");
 
-    // Reload restores the Location and search; selection stays local to this visit.
+    // Reload restores this history entry's place as well as its Location and search;
+    // selection stays local to this visit.
+    await page.reload();
+    await expect(heading(page)).toHaveText(`Keep ${s}`);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(700);
+    await expect(selectionBar(page)).toHaveCount(0);
+
+    // Starting a reload at the top keeps the address without carrying a selection.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
     await page.reload();
     await expect(heading(page)).toHaveText(`Keep ${s}`);
     await expect(
       page.getByRole("searchbox", { name: "Search cards" })
     ).toHaveValue("Keep");
     await expect(selectionBar(page)).toHaveCount(0);
-    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   });
 
   test("browser Back closes Collection's open dialog instead of leaving it over the page now shown", async ({
