@@ -4,12 +4,14 @@ import { JSDOM } from "jsdom";
 import { expect, it, vi } from "vitest";
 import { DeckCommand } from "./DecksView";
 import { DeckError } from "./decks";
+import { deckFixture } from "./local/deckFixtures";
+import { resetCollectionFixtures } from "./local/collectionFixtures";
 vi.mock("../../ui/Dialog", () => ({
   Dialog: ({ children }: { children: React.ReactNode }) =>
     createElement("div", null, children),
 }));
 for (const deletion of [false, true])
-  it(`preserves ${deletion ? "Delete confirmation" : "Rename draft and focus"} across repeated version updates`, async () => {
+  it(`keeps an uncertain ${deletion ? "Delete" : "Rename"} attempt, its key and its version through repeated version updates, then replays it`, async () => {
     const dom = new JSDOM('<div id="root"></div>');
     vi.stubGlobal("window", dom.window);
     vi.stubGlobal("document", dom.window.document);
@@ -39,7 +41,6 @@ for (const deletion of [false, true])
     try {
       await act(async () => render(1));
       const input = document.querySelector("input")!;
-      input.focus();
       const submit = () =>
         document
           .querySelector("form")!
@@ -48,30 +49,31 @@ for (const deletion of [false, true])
           );
       await act(async () => submit());
       expect(input.disabled).toBe(true);
-      // A browser drops focus from a field that becomes disabled.
-      (document.activeElement as HTMLElement | null)?.blur();
-      await act(async () => render(2));
-      expect(input.value).toBe("My draft");
-      expect(input.disabled).toBe(false);
       expect(document.body.textContent).toContain(
-        "This Deck was renamed elsewhere."
+        "Your last change may not have been saved. Try again to check safely."
       );
-      expect(document.activeElement).toBe(input);
+      await act(async () => render(2));
       await act(async () => render(3));
-      expect(document.activeElement).toBe(input);
-      if (deletion)
-        expect(
-          document
-            .querySelector('button[type="submit"]')
-            ?.hasAttribute("disabled")
-        ).toBe(true);
-      else {
-        await act(async () => submit());
-        expect(done).toHaveBeenCalledTimes(1);
-        expect(send.mock.calls[1][1].idempotencyKey).not.toBe(
-          send.mock.calls[0][1].idempotencyKey
-        );
-      }
+      expect(input.value).toBe("My draft");
+      expect(input.disabled).toBe(true);
+      expect(document.body.textContent).not.toContain("renamed elsewhere");
+      expect(document.body.textContent).toContain(
+        "Your last change may not have been saved."
+      );
+      expect(
+        document
+          .querySelector('button[type="submit"]')
+          ?.hasAttribute("disabled")
+      ).toBe(false);
+      await act(async () => submit());
+      expect(done).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send.mock.calls[1][0]).toBe(send.mock.calls[0][0]);
+      expect(send.mock.calls[1][1].idempotencyKey).toBe(
+        send.mock.calls[0][1].idempotencyKey
+      );
+      expect(send.mock.calls[1][1].version).toBe(1);
+      expect(document.body.textContent).not.toContain("renamed elsewhere");
     } finally {
       await act(async () => root.unmount());
       dom.window.close();
@@ -84,7 +86,8 @@ async function harness(
     name: string,
     options: { signal: AbortSignal; idempotencyKey: string }
   ) => Promise<{ ownerRevision: number; location?: Location }>,
-  reload?: () => Promise<void>
+  reload?: () => Promise<void>,
+  props: { title?: string; initialName?: string; confirmName?: string } = {}
 ) {
   const dom = new JSDOM('<div id="root"></div>');
   vi.stubGlobal("window", dom.window);
@@ -97,6 +100,7 @@ async function harness(
       createElement(DeckCommand, {
         title: "Rename Deck",
         initialName: "Draft",
+        ...props,
         version,
         send: send as never,
         reload,
@@ -181,7 +185,7 @@ it("reports a rename elsewhere, with a fresh key and restored focus, when the re
     await h.finish();
   }
 });
-it("restores focus when an in-flight request fails after the version changed", async () => {
+it("restores focus when an in-flight request is definitively refused after the version changed", async () => {
   let fail!: (e: Error) => void;
   const h = await harness(
     () =>
@@ -193,7 +197,7 @@ it("restores focus when an in-flight request fails after the version changed", a
     await act(async () => h.render(1));
     await act(async () => h.submit());
     await act(async () => h.render(2));
-    await act(async () => fail(new Error("offline")));
+    await act(async () => fail(new DeckError("LOCATION_NAME_CONFLICT")));
     expect(document.body.textContent).toContain(
       "This Deck was renamed elsewhere."
     );
@@ -229,3 +233,77 @@ it("keeps the draft, reloads and restores focus after a stale Location", async (
     await h.finish();
   }
 });
+
+for (const deletion of [false, true])
+  it(`confirms a ${deletion ? "Delete" : "Rename"} whose response was lost exactly once after a background read delivers its version`, async () => {
+    resetCollectionFixtures();
+    const api = deckFixture("a");
+    const signal = new AbortController().signal;
+    const initial = (await api.deck("deck-1", signal))!.location;
+    const state = async () =>
+      JSON.stringify((await api.deck("deck-1", signal))?.location ?? null);
+    let lost = true;
+    let mutations = 0;
+    const send = vi.fn(
+      async (
+        name: string,
+        options: {
+          signal: AbortSignal;
+          idempotencyKey: string;
+          version?: number;
+        }
+      ) => {
+        const { version, ...write } = options;
+        const before = await state();
+        const result = deletion
+          ? await api.deleteDeck(
+              { id: initial.id, confirmName: name, version: version! },
+              write
+            )
+          : await api.renameDeck(
+              { id: initial.id, name, version: version! },
+              write
+            );
+        if (before !== (await state())) mutations++;
+        if (lost) {
+          lost = false;
+          throw new Error("response lost");
+        }
+        return result;
+      }
+    );
+    const h = await harness(send as never, undefined, {
+      title: deletion ? "Delete Deck" : "Rename Deck",
+      initialName: deletion ? initial.name : "Sol rename",
+      confirmName: deletion ? initial.name : undefined,
+    });
+    try {
+      await act(async () => h.render(initial.version));
+      await act(async () => h.submit());
+      await vi.waitFor(() =>
+        expect(document.body.textContent).toContain("may not have been saved")
+      );
+      expect(h.input().disabled).toBe(true);
+      expect(mutations).toBe(1);
+      // A background read observes the version the lost response produced.
+      await act(async () => h.render(initial.version + 1));
+      expect(document.body.textContent).not.toContain("renamed elsewhere");
+      await act(async () => h.submit());
+      await vi.waitFor(() => expect(h.done).toHaveBeenCalledTimes(1));
+      expect(send.mock.calls[1][1].idempotencyKey).toBe(
+        send.mock.calls[0][1].idempotencyKey
+      );
+      expect(send.mock.calls[1][1].version).toBe(initial.version);
+      expect(mutations).toBe(1);
+      const after = (await api.deck("deck-1", signal))?.location;
+      if (deletion) expect(after).toBeUndefined();
+      else
+        expect(after).toMatchObject({
+          name: "Sol rename",
+          version: initial.version + 1,
+        });
+      expect(document.body.textContent).not.toContain("renamed elsewhere");
+    } finally {
+      await h.finish();
+    }
+  });

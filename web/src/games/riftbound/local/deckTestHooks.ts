@@ -12,3 +12,26 @@ export function changeFixtureDeckLine(
   line.quantity = quantity;
   header.revision++;
 }
+/**
+ * Test-only lost response: the next rename applies on the fixture server, then
+ * fails as if the response never arrived. An optional gate holds the failure
+ * back, so a test can deliver a newer version first. No transport or storage.
+ */
+export function loseNextRenameResponse(
+  api: { renameDeck: (...args: never[]) => Promise<unknown> },
+  gate?: Promise<void>
+) {
+  const rename = api.renameDeck.bind(api) as (
+    ...args: unknown[]
+  ) => Promise<unknown>;
+  let lost = true;
+  api.renameDeck = (async (...args: unknown[]) => {
+    const result = await rename(...args);
+    if (lost) {
+      lost = false;
+      await gate;
+      throw new Error("Response lost");
+    }
+    return result;
+  }) as never;
+}

@@ -785,9 +785,10 @@ for (const width of [1280, 375]) {
     ).toBeVisible();
   });
   // The Deck's sheet closes as soon as a removed line leaves the list, so a
-  // collector cannot click the refused line again from the page. The queue is
-  // driven directly in the page, against the same slow fixture and a real
-  // browser clock, to reproduce that click.
+  // collector cannot click the refused line again from the page. This spec
+  // builds its own DeckEdits instance in the page and drives it against the
+  // same slow fixture and a real browser clock: it covers the queue, not the
+  // page's mounted queue.
   for (const reclick of ["again", "to zero"])
     test(`keeps an available new Edition when a refused line is changed ${reclick} while its batch is in flight at ${width}`, async ({
       page,
@@ -1057,6 +1058,90 @@ for (const width of [1280, 375]) {
     ).toBeVisible({ timeout: 15000 });
     await expect(dialog.getByLabel("Deck name")).toHaveValue("Stale draft");
     await expect(dialog.getByLabel("Deck name")).toBeFocused();
+  });
+  test(`retries a rename whose response was lost with the same key and applies it once at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(
+      `${entry}?decks=decks-slow#riftbound:section=decks&deck=deck-1`
+    );
+    type Lost = { __listRelease: () => void; __lostRelease: () => void };
+    await page.evaluate(async () => {
+      const path = "/src/games/riftbound/local/deckFixtures.ts";
+      const hooks = "/src/games/riftbound/local/deckTestHooks.ts";
+      const api = (await import(path)).deckFixture("a", "decks-slow");
+      const { loseNextRenameResponse } = await import(hooks);
+      const w = window as unknown as Lost & Record<string, unknown>;
+      const listGate = new Promise<void>((r) => {
+        w.__listRelease = r;
+      });
+      const lostGate = new Promise<void>((r) => {
+        w.__lostRelease = r;
+      });
+      w.__lostApplied = false;
+      const rename = api.renameDeck.bind(api);
+      api.renameDeck = async (...args: unknown[]) => {
+        const result = await rename(...args);
+        w.__lostApplied = true;
+        return result;
+      };
+      loseNextRenameResponse(api, lostGate);
+      const write = api.changeDeckList;
+      api.changeDeckList = async (input: unknown, options: unknown) => {
+        await listGate;
+        const result = await write(input, options);
+        w.__listDone = true;
+        return result;
+      };
+    });
+    // A list write is in flight when the rename applies; its response is the
+    // background read that observes the version the rename produced.
+    await page.getByRole("tab", { name: "Library", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Add Ember Scout Standard", exact: true })
+      .click();
+    await page.getByRole("tab", { name: /^Deck/ }).click();
+    await page.getByRole("button", { name: "Rename", exact: true }).click();
+    const dialog = page.getByRole("dialog", {
+      name: "Rename Deck",
+      exact: true,
+    });
+    await dialog.getByLabel("Deck name").fill("Lost response rename");
+    await dialog
+      .getByRole("button", { name: "Rename Deck", exact: true })
+      .click();
+    await page.waitForFunction(
+      () => (window as unknown as Record<string, unknown>).__lostApplied
+    );
+    await page.evaluate(() => (window as unknown as Lost).__listRelease());
+    await page.waitForFunction(
+      () => (window as unknown as Record<string, unknown>).__listDone
+    );
+    await page.evaluate(() => (window as unknown as Lost).__lostRelease());
+    await expect(dialog).toContainText("may not have been saved");
+    await expect(dialog.getByText("renamed elsewhere")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Lost response rename", exact: true })
+    ).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByText("renamed elsewhere")).toHaveCount(0);
+    const location = await page.evaluate(async () => {
+      const path = "/src/games/riftbound/local/deckFixtures.ts";
+      return (await import(path))
+        .deckFixture("a", "decks-slow")
+        .deck("deck-1", new AbortController().signal)
+        .then((d: { location: unknown }) => d.location);
+    });
+    // One mutation: version 1 to 2, not 3.
+    expect(location).toMatchObject({
+      name: "Lost response rename",
+      version: 2,
+    });
+    expect(
+      await page.evaluate(() => document.activeElement !== document.body)
+    ).toBe(true);
   });
   test(`keyboard Deck creation and tab navigation at ${width}`, async ({
     page,
