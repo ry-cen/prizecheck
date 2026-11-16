@@ -1,0 +1,1930 @@
+[
+  [
+    "/openapi.json",
+    ["GET", "HEAD"],
+    "openapi",
+    "fastapi.applications",
+    "FastAPI.setup.<locals>.openapi",
+    "None"
+  ],
+  [
+    "/docs",
+    ["GET", "HEAD"],
+    "swagger_ui_html",
+    "fastapi.applications",
+    "FastAPI.setup.<locals>.swagger_ui_html",
+    "None"
+  ],
+  [
+    "/docs/oauth2-redirect",
+    ["GET", "HEAD"],
+    "swagger_ui_redirect",
+    "fastapi.applications",
+    "FastAPI.setup.<locals>.swagger_ui_redirect",
+    "None"
+  ],
+  [
+    "/redoc",
+    ["GET", "HEAD"],
+    "redoc_html",
+    "fastapi.applications",
+    "FastAPI.setup.<locals>.redoc_html",
+    "None"
+  ],
+  [
+    "/api/health",
+    ["GET"],
+    "health",
+    "app.main",
+    "health",
+    "<class 'app.main.HealthResponse'>"
+  ],
+  [
+    "/api/collection/borrowed",
+    ["GET"],
+    "borrowed_gallery",
+    "app.games.pokemon.inventory.borrowed_gallery",
+    "borrowed_gallery",
+    "<class 'app.games.pokemon.inventory.borrowed_gallery.BorrowedGalleryPage'>"
+  ],
+  [
+    "/api/collection/borrowed/moves",
+    ["POST"],
+    "move_borrowed_copies",
+    "app.games.pokemon.inventory.borrowed_gallery",
+    "move_borrowed_copies",
+    "<class 'app.games.pokemon.inventory.borrowed_gallery.BorrowedMoveResult'>"
+  ],
+  [
+    "/api/locations",
+    ["GET"],
+    "locations",
+    "app.core.inventory.locations",
+    "locations",
+    "<class 'app.core.inventory.locations.LocationsResponse'>"
+  ],
+  [
+    "/api/locations/{location_id}",
+    ["GET"],
+    "location",
+    "app.core.inventory.locations",
+    "location",
+    "<class 'app.core.inventory.locations.Location'>"
+  ],
+  [
+    "/api/catalog/status",
+    ["GET"],
+    "catalog_status",
+    "app.games.pokemon.catalog.catalog_status",
+    "catalog_status",
+    "<class 'app.games.pokemon.catalog.catalog_status.CatalogStatus'>"
+  ],
+  [
+    "/api/admin/catalog-runs",
+    ["GET"],
+    "owner_catalog_status",
+    "app.games.pokemon.catalog.catalog_status",
+    "owner_catalog_status",
+    "<class 'app.games.pokemon.catalog.catalog_status.OwnerCatalogStatus'>"
+  ],
+  [
+    "/api/admin/catalog-runs",
+    ["POST"],
+    "start_catalog_run",
+    "app.games.pokemon.catalog.catalog_status",
+    "start_catalog_run",
+    "<class 'app.games.pokemon.catalog.catalog_status.OwnerCatalogStatus'>"
+  ],
+  [
+    "/api/location-tree",
+    ["GET"],
+    "tree",
+    "app.location_tree",
+    "tree",
+    "<class 'app.location_tree.TreeResponse'>"
+  ],
+  [
+    "/api/location-tree",
+    ["POST"],
+    "create_location",
+    "app.location_tree",
+    "create_location",
+    "<class 'app.location_tree.LocationCommandResult'>"
+  ],
+  [
+    "/api/location-tree/{location_id}",
+    ["PATCH"],
+    "edit_location",
+    "app.location_tree",
+    "edit_location",
+    "<class 'app.location_tree.LocationCommandResult'>"
+  ],
+  [
+    "/api/location-tree/{location_id}",
+    ["DELETE"],
+    "delete_location",
+    "app.location_tree",
+    "delete_location",
+    "<class 'app.location_tree.DeleteLocationResult'>"
+  ],
+  [
+    "/api/location-tree/{location_id}/hidden",
+    ["PUT"],
+    "set_location_hidden",
+    "app.location_tree",
+    "set_location_hidden",
+    "<class 'app.location_tree.LocationHiddenResult'>"
+  ],
+  [
+    "/api/location-tree/{location_id}/for-trade",
+    ["PUT"],
+    "set_location_for_trade",
+    "app.location_tree",
+    "set_location_for_trade",
+    "<class 'app.location_tree.LocationForTradeResult'>"
+  ],
+  [
+    "/api/catalog/search",
+    ["GET"],
+    "search_catalog",
+    "app.games.pokemon.catalog.catalog_search",
+    "search_catalog",
+    "<class 'app.games.pokemon.catalog.catalog_search.SearchResponse'>"
+  ],
+  [
+    "/api/catalog/printings/{printing_id}",
+    ["GET"],
+    "printing_detail",
+    "app.games.pokemon.catalog.catalog_search",
+    "printing_detail",
+    "<class 'app.games.pokemon.catalog.catalog_search.DetailResponse'>"
+  ],
+  [
+    "/api/holdings",
+    ["POST"],
+    "add_holding",
+    "app.core.inventory.holdings",
+    "add_holding",
+    "<class 'app.core.inventory.holdings.AddResult'>"
+  ],
+  [
+    "/api/holdings/batch",
+    ["POST"],
+    "add_holdings",
+    "app.core.inventory.holdings",
+    "add_holdings",
+    "<class 'app.core.inventory.holdings.BatchAddResult'>"
+  ],
+  [
+    "/api/holdings/{location_id}",
+    ["GET"],
+    "leaf_holdings",
+    "app.core.inventory.holdings",
+    "leaf_holdings",
+    "<class 'app.core.inventory.holdings.LeafHoldings'>"
+  ],
+  [
+    "/api/missing-card-reports",
+    ["POST"],
+    "submit_report",
+    "app.games.pokemon.catalog.missing_cards",
+    "submit_report",
+    "<class 'app.games.pokemon.catalog.missing_cards.ReportView'>"
+  ],
+  [
+    "/api/missing-card-reports",
+    ["GET"],
+    "my_reports",
+    "app.games.pokemon.catalog.missing_cards",
+    "my_reports",
+    "list[app.games.pokemon.catalog.missing_cards.ReportView]"
+  ],
+  [
+    "/api/missing-card-reports/{report_id}",
+    ["GET"],
+    "my_report",
+    "app.games.pokemon.catalog.missing_cards",
+    "my_report",
+    "<class 'app.games.pokemon.catalog.missing_cards.ReportView'>"
+  ],
+  [
+    "/api/missing-card-reports/{report_id}",
+    ["PATCH"],
+    "respond_to_review",
+    "app.games.pokemon.catalog.missing_cards",
+    "respond_to_review",
+    "<class 'app.games.pokemon.catalog.missing_cards.ReportView'>"
+  ],
+  [
+    "/api/admin/missing-card-reports",
+    ["GET"],
+    "review_queue",
+    "app.games.pokemon.catalog.missing_cards",
+    "review_queue",
+    "list[app.games.pokemon.catalog.missing_cards.ReportView]"
+  ],
+  [
+    "/api/admin/missing-card-reports",
+    ["POST"],
+    "owner_begin",
+    "app.games.pokemon.catalog.missing_cards",
+    "owner_begin",
+    "<class 'app.games.pokemon.catalog.missing_cards.ReportView'>"
+  ],
+  [
+    "/api/admin/missing-card-reports/{report_id}/decision",
+    ["POST"],
+    "decide_report",
+    "app.games.pokemon.catalog.missing_cards",
+    "decide_report",
+    "<class 'app.games.pokemon.catalog.missing_cards.ReportView'>"
+  ],
+  [
+    "/api/moves/manifests",
+    ["POST"],
+    "start_move",
+    "app.core.inventory.moves",
+    "start_move",
+    "<class 'app.core.inventory.moves.MoveManifest'>"
+  ],
+  [
+    "/api/moves/manifests/{manifest_id}/items",
+    ["PUT"],
+    "stage_items",
+    "app.core.inventory.moves",
+    "stage_items",
+    "<class 'app.core.inventory.moves.MoveManifest'>"
+  ],
+  [
+    "/api/moves/manifests/{manifest_id}",
+    ["DELETE"],
+    "cancel_move",
+    "app.core.inventory.moves",
+    "cancel_move",
+    "None"
+  ],
+  [
+    "/api/moves/manifests/{manifest_id}/commit",
+    ["POST"],
+    "commit_move",
+    "app.core.inventory.moves",
+    "commit_move",
+    "<class 'app.core.inventory.moves.MoveResult'>"
+  ],
+  [
+    "/api/moves/manifests/{manifest_id}/commit-without-undo",
+    ["POST"],
+    "commit_move_without_undo",
+    "app.core.inventory.moves",
+    "commit_move_without_undo",
+    "<class 'app.core.inventory.moves.MoveResult'>"
+  ],
+  [
+    "/api/moves/manifests/{manifest_id}/remove",
+    ["POST"],
+    "remove_inventory",
+    "app.core.inventory.moves",
+    "remove_inventory",
+    "<class 'app.core.inventory.moves.MoveResult'>"
+  ],
+  [
+    "/api/moves/undo",
+    ["GET"],
+    "list_undo",
+    "app.core.inventory.moves",
+    "list_undo",
+    "None"
+  ],
+  [
+    "/api/moves/undo/{undo_id}",
+    ["DELETE"],
+    "dismiss_undo",
+    "app.core.inventory.moves",
+    "dismiss_undo",
+    "None"
+  ],
+  [
+    "/api/moves/undo/{undo_id}",
+    ["POST"],
+    "undo_inventory",
+    "app.core.inventory.moves",
+    "undo_inventory",
+    "<class 'app.core.inventory.moves.MoveResult'>"
+  ],
+  [
+    "/api/collection",
+    ["GET"],
+    "collection",
+    "app.games.pokemon.inventory.collection",
+    "collection",
+    "<class 'app.core.inventory.collection.CollectionPage'>"
+  ],
+  [
+    "/api/collection/editions/{edition_id}",
+    ["GET"],
+    "distribution",
+    "app.games.pokemon.inventory.collection",
+    "distribution",
+    "<class 'app.core.inventory.collection.Distribution'>"
+  ],
+  [
+    "/api/collection/holdings",
+    ["GET"],
+    "collection_holdings",
+    "app.games.pokemon.inventory.collection",
+    "collection_holdings",
+    "<class 'app.games.pokemon.inventory.collection.CollectionHoldingPage'>"
+  ],
+  [
+    "/api/collection/sets",
+    ["GET"],
+    "collection_sets",
+    "app.games.pokemon.inventory.collection",
+    "collection_sets",
+    "<class 'app.core.inventory.collection.CollectionSetList'>"
+  ],
+  [
+    "/api/collection/revision",
+    ["GET"],
+    "collection_revision",
+    "app.games.pokemon.inventory.collection",
+    "collection_revision",
+    "<class 'app.core.inventory.collection.CollectionRevision'>"
+  ],
+  [
+    "/api/catalog/editions",
+    ["GET"],
+    "browse_editions",
+    "app.games.pokemon.catalog.catalog_browse",
+    "browse_editions",
+    "<class 'app.games.pokemon.catalog.catalog_browse.BrowsePage'>"
+  ],
+  [
+    "/api/catalog/sets",
+    ["GET"],
+    "catalog_sets",
+    "app.games.pokemon.catalog.catalog_browse",
+    "catalog_sets",
+    "<class 'app.games.pokemon.catalog.catalog_browse.CatalogSetList'>"
+  ],
+  [
+    "/api/settings",
+    ["GET"],
+    "get_settings",
+    "app.settings",
+    "get_settings",
+    "<class 'app.settings.AccountSettings'>"
+  ],
+  [
+    "/api/settings/want-list-counting",
+    ["PUT"],
+    "set_want_list_counting",
+    "app.settings",
+    "set_want_list_counting",
+    "<class 'app.settings.AccountSettings'>"
+  ],
+  [
+    "/api/decks",
+    ["POST"],
+    "create_deck",
+    "app.games.pokemon.decks.routes",
+    "create_deck",
+    "<class 'app.location_tree.LocationCommandResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}",
+    ["PATCH"],
+    "edit_deck",
+    "app.games.pokemon.decks.routes",
+    "edit_deck",
+    "<class 'app.location_tree.LocationCommandResult'>"
+  ],
+  [
+    "/api/decks",
+    ["GET"],
+    "deck_index",
+    "app.games.pokemon.decks.routes",
+    "deck_index",
+    "<class 'app.games.pokemon.decks.models.DeckIndex'>"
+  ],
+  [
+    "/api/decks/{deck_id}",
+    ["GET"],
+    "deck_detail",
+    "app.games.pokemon.decks.routes",
+    "deck_detail",
+    "<class 'app.games.pokemon.decks.models.DeckDetail'>"
+  ],
+  [
+    "/api/decks/{deck_id}/deck-list/lines",
+    ["POST"],
+    "add_deck_list_line",
+    "app.games.pokemon.decks.routes",
+    "add_deck_list_line",
+    "<class 'app.games.pokemon.decks.models.DeckListCommandResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/deck-list/lines/{edition_id}",
+    ["PATCH"],
+    "change_deck_list_line",
+    "app.games.pokemon.decks.routes",
+    "change_deck_list_line",
+    "<class 'app.games.pokemon.decks.models.DeckListCommandResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/deck-list/lines/{edition_id}",
+    ["DELETE"],
+    "remove_deck_list_line",
+    "app.games.pokemon.decks.routes",
+    "remove_deck_list_line",
+    "<class 'app.games.pokemon.decks.models.DeckListCommandResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/deck-list/target-format",
+    ["PUT"],
+    "set_target_format",
+    "app.games.pokemon.decks.routes",
+    "set_target_format",
+    "<class 'app.games.pokemon.decks.models.DeckListCommandResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/cover",
+    ["PUT"],
+    "set_deck_cover",
+    "app.games.pokemon.decks.routes",
+    "set_deck_cover",
+    "<class 'app.core.decks.store.DeckCoverResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/deck-list/changes",
+    ["POST"],
+    "change_deck_list",
+    "app.games.pokemon.decks.routes",
+    "change_deck_list",
+    "<class 'app.games.pokemon.decks.models.DeckListCommandResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/contents",
+    ["GET"],
+    "deck_contents",
+    "app.games.pokemon.decks.routes",
+    "deck_contents",
+    "<class 'app.core.decks.contents.DeckContents'>"
+  ],
+  [
+    "/api/decks/{deck_id}/deck-list/printings",
+    ["POST"],
+    "add_deck_list_printing",
+    "app.games.pokemon.decks.printing",
+    "add_deck_list_printing",
+    "<class 'app.games.pokemon.decks.printing.DeckListPrintingResult'>"
+  ],
+  [
+    "/api/decks/import/review",
+    ["POST"],
+    "review_import",
+    "app.games.pokemon.imports.deck_import",
+    "review_import",
+    "<class 'app.games.pokemon.imports.deck_import.ImportReview'>"
+  ],
+  [
+    "/api/decks/import",
+    ["POST"],
+    "import_deck",
+    "app.games.pokemon.imports.deck_import",
+    "import_deck",
+    "<class 'app.games.pokemon.imports.deck_import.ImportDeckResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/pick-list",
+    ["GET"],
+    "pick_list",
+    "app.deck_pick_list",
+    "pick_list",
+    "<class 'app.deck_pick_list.PickList'>"
+  ],
+  [
+    "/api/decks/{deck_id}/pick-list/confirm",
+    ["POST"],
+    "confirm_picks",
+    "app.deck_pick_list",
+    "confirm_picks",
+    "<class 'app.deck_pick_list.PickConfirmResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}",
+    ["DELETE"],
+    "delete_deck",
+    "app.deck_deletion",
+    "delete_deck",
+    "<class 'app.deck_deletion.DeleteDeckResult'>"
+  ],
+  [
+    "/api/admin/catalog-reviews",
+    ["GET"],
+    "reviews",
+    "app.games.pokemon.catalog.catalog_reconciliation",
+    "reviews",
+    "list[app.games.pokemon.catalog.catalog_reconciliation.CatalogReviewView]"
+  ],
+  [
+    "/api/admin/catalog-reviews/{review_id}/decision",
+    ["POST"],
+    "decide",
+    "app.games.pokemon.catalog.catalog_reconciliation",
+    "decide",
+    "<class 'app.games.pokemon.catalog.catalog_reconciliation.CatalogReviewView'>"
+  ],
+  [
+    "/api/catalog/edition-replacements",
+    ["GET"],
+    "replacements",
+    "app.games.pokemon.catalog.catalog_reconciliation",
+    "replacements",
+    "list[app.games.pokemon.catalog.catalog_reconciliation.ReplacementView]"
+  ],
+  [
+    "/api/holdings/reassign",
+    ["POST"],
+    "reassign",
+    "app.games.pokemon.catalog.catalog_reconciliation",
+    "reassign",
+    "<class 'app.games.pokemon.catalog.catalog_reconciliation.ReassignResult'>"
+  ],
+  [
+    "/api/admin/catalog-reviews/{review_id}/editions",
+    ["GET"],
+    "review_editions",
+    "app.games.pokemon.catalog.catalog_reconciliation",
+    "review_editions",
+    "list[app.games.pokemon.catalog.catalog_reconciliation.ReviewEditionView]"
+  ],
+  [
+    "/api/catalog/metadata-reports",
+    ["POST"],
+    "submit_report",
+    "app.games.pokemon.prices.metadata_reviews",
+    "submit_report",
+    "<class 'app.games.pokemon.prices.metadata_reviews.MetadataReportView'>"
+  ],
+  [
+    "/api/catalog/metadata-reports",
+    ["GET"],
+    "my_reports",
+    "app.games.pokemon.prices.metadata_reviews",
+    "my_reports",
+    "list[app.games.pokemon.prices.metadata_reviews.MetadataReportView]"
+  ],
+  [
+    "/api/catalog/metadata-reports/{report_id}",
+    ["GET"],
+    "my_report",
+    "app.games.pokemon.prices.metadata_reviews",
+    "my_report",
+    "<class 'app.games.pokemon.prices.metadata_reviews.MetadataReportView'>"
+  ],
+  [
+    "/api/catalog/metadata-reports/{report_id}",
+    ["PATCH"],
+    "answer_report",
+    "app.games.pokemon.prices.metadata_reviews",
+    "answer_report",
+    "<class 'app.games.pokemon.prices.metadata_reviews.MetadataReportView'>"
+  ],
+  [
+    "/api/admin/catalog-metadata/reports/{report_id}/decision",
+    ["POST"],
+    "decide_report",
+    "app.games.pokemon.prices.metadata_reviews",
+    "decide_report",
+    "<class 'app.games.pokemon.prices.metadata_reviews.MetadataReportView'>"
+  ],
+  [
+    "/api/admin/catalog-metadata/queue",
+    ["GET"],
+    "review_queue",
+    "app.games.pokemon.prices.metadata_reviews",
+    "review_queue",
+    "<class 'app.games.pokemon.prices.metadata_reviews.MetadataQueuePage'>"
+  ],
+  [
+    "/api/admin/catalog-metadata/{kind}/{target_id}",
+    ["GET"],
+    "target_evidence",
+    "app.games.pokemon.prices.metadata_reviews",
+    "target_evidence",
+    "<class 'app.games.pokemon.prices.metadata_reviews.MetadataQueueItem'>"
+  ],
+  [
+    "/api/admin/catalog-metadata/{kind}/{target_id}/history",
+    ["GET"],
+    "target_history",
+    "app.games.pokemon.prices.metadata_reviews",
+    "target_history",
+    "list[app.games.pokemon.prices.metadata_reviews.MetadataDecisionRow]"
+  ],
+  [
+    "/api/admin/catalog-metadata/decisions",
+    ["POST"],
+    "decide",
+    "app.games.pokemon.prices.metadata_reviews",
+    "decide",
+    "<class 'app.games.pokemon.prices.metadata_reviews.MetadataDecisionResult'>"
+  ],
+  [
+    "/api/admin/catalog-rules",
+    ["GET"],
+    "rules",
+    "app.games.pokemon.prices.metadata_reviews",
+    "rules",
+    "list[app.games.pokemon.prices.metadata_reviews.MetadataRuleView]"
+  ],
+  [
+    "/api/catalog/attribute-reports",
+    ["POST"],
+    "submit_report",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "submit_report",
+    "<class 'app.games.pokemon.catalog.attribute_corrections.AttributeReportView'>"
+  ],
+  [
+    "/api/catalog/attribute-reports",
+    ["GET"],
+    "my_reports",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "my_reports",
+    "list[app.games.pokemon.catalog.attribute_corrections.AttributeReportView]"
+  ],
+  [
+    "/api/catalog/attribute-reports/{report_id}",
+    ["GET"],
+    "my_report",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "my_report",
+    "<class 'app.games.pokemon.catalog.attribute_corrections.AttributeReportView'>"
+  ],
+  [
+    "/api/catalog/attribute-reports/{report_id}",
+    ["PATCH"],
+    "answer_report",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "answer_report",
+    "<class 'app.games.pokemon.catalog.attribute_corrections.AttributeReportView'>"
+  ],
+  [
+    "/api/admin/card-attributes/reports/{report_id}/decision",
+    ["POST"],
+    "decide_report",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "decide_report",
+    "<class 'app.games.pokemon.catalog.attribute_corrections.AttributeReportView'>"
+  ],
+  [
+    "/api/admin/card-attributes/queue",
+    ["GET"],
+    "review_queue",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "review_queue",
+    "<class 'app.games.pokemon.catalog.attribute_corrections.AttributeQueuePage'>"
+  ],
+  [
+    "/api/admin/card-attributes/{printing_id}",
+    ["GET"],
+    "printing_evidence",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "printing_evidence",
+    "<class 'app.games.pokemon.catalog.attribute_corrections.AttributeEvidence'>"
+  ],
+  [
+    "/api/admin/card-attributes/{printing_id}/history",
+    ["GET"],
+    "printing_history",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "printing_history",
+    "list[app.games.pokemon.catalog.attribute_corrections.AttributeDecisionRow]"
+  ],
+  [
+    "/api/admin/card-attributes/decisions",
+    ["POST"],
+    "decide",
+    "app.games.pokemon.catalog.attribute_corrections",
+    "decide",
+    "<class 'app.games.pokemon.catalog.attribute_corrections.AttributeDecisionResult'>"
+  ],
+  [
+    "/api/admin/card-identities/queue",
+    ["GET"],
+    "review_queue",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "review_queue",
+    "<class 'app.games.pokemon.catalog.reprint_group_reviews.CardIdentityQueuePage'>"
+  ],
+  [
+    "/api/admin/card-identities",
+    ["GET"],
+    "printing_identity",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "printing_identity",
+    "<class 'app.games.pokemon.catalog.reprint_group_reviews.CardIdentityEvidence'>"
+  ],
+  [
+    "/api/admin/card-identities/likely-reprints",
+    ["GET"],
+    "likely_reprints",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "likely_reprints",
+    "<class 'app.games.pokemon.catalog.reprint_group_reviews.LikelyReprintPage'>"
+  ],
+  [
+    "/api/admin/card-identities/likely-reprints/dismiss",
+    ["POST"],
+    "dismiss_likely_reprints",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "dismiss_likely_reprints",
+    "<class 'app.games.pokemon.catalog.reprint_group_reviews.LikelyReprintDecision'>"
+  ],
+  [
+    "/api/admin/card-identities/likely-reprints/{decision_id}/undo",
+    ["POST"],
+    "undo_likely_reprints",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "undo_likely_reprints",
+    "<class 'app.games.pokemon.catalog.reprint_group_reviews.LikelyReprintDecision'>"
+  ],
+  [
+    "/api/admin/card-identities/{identity_id}",
+    ["GET"],
+    "identity_evidence",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "identity_evidence",
+    "<class 'app.games.pokemon.catalog.reprint_group_reviews.CardIdentityEvidence'>"
+  ],
+  [
+    "/api/admin/card-identities/{identity_id}/history",
+    ["GET"],
+    "identity_history",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "identity_history",
+    "list[app.games.pokemon.catalog.reprint_group_reviews.CardIdentityDecisionRow]"
+  ],
+  [
+    "/api/admin/reprint-groups/decisions",
+    ["POST"],
+    "decide_groups",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "decide_groups",
+    "<class 'app.games.pokemon.catalog.reprint_group_reviews.ReprintGroupDecisionResult'>"
+  ],
+  [
+    "/api/admin/card-identities/decisions",
+    ["POST"],
+    "merge_identities",
+    "app.games.pokemon.catalog.reprint_group_reviews",
+    "merge_identities",
+    "<class 'app.games.pokemon.catalog.reprint_group_reviews.CardIdentityMergeResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/publication",
+    ["GET"],
+    "publication_status",
+    "app.games.pokemon.publications.publications",
+    "publication_status",
+    "<class 'app.core.publications.publish.PublicationStatus'>"
+  ],
+  [
+    "/api/decks/{deck_id}/publication",
+    ["POST"],
+    "publish",
+    "app.games.pokemon.publications.publications",
+    "publish",
+    "<class 'app.core.publications.publish.PublicationResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/publication",
+    ["PUT"],
+    "republish",
+    "app.games.pokemon.publications.publications",
+    "republish",
+    "<class 'app.core.publications.publish.PublicationResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/publication",
+    ["DELETE"],
+    "revoke",
+    "app.games.pokemon.publications.publications",
+    "revoke",
+    "<class 'app.core.publications.publish.PublicationResult'>"
+  ],
+  [
+    "/api/decks/{deck_id}/publication/visibility",
+    ["PATCH"],
+    "set_visibility",
+    "app.games.pokemon.publications.publications",
+    "set_visibility",
+    "<class 'app.core.publications.publish.PublicationResult'>"
+  ],
+  [
+    "/api/publications",
+    ["GET"],
+    "owned_publications",
+    "app.games.pokemon.publications.publications",
+    "owned_publications",
+    "<class 'app.core.publications.publish.OwnedPublications'>"
+  ],
+  [
+    "/api/publications/{token}",
+    ["DELETE"],
+    "revoke_publication",
+    "app.games.pokemon.publications.publications",
+    "revoke_publication",
+    "<class 'app.core.publications.publish.PublicationResult'>"
+  ],
+  [
+    "/api/publications/{token}/visibility",
+    ["PATCH"],
+    "set_publication_visibility",
+    "app.games.pokemon.publications.publications",
+    "set_publication_visibility",
+    "<class 'app.core.publications.publish.PublicationResult'>"
+  ],
+  [
+    "/api/public/decks/{token}",
+    ["GET"],
+    "public_snapshot",
+    "app.games.pokemon.publications.publications",
+    "public_snapshot",
+    "<class 'app.games.pokemon.publications.models.PublicSnapshot'>"
+  ],
+  [
+    "/api/public/discovery",
+    ["GET"],
+    "discover",
+    "app.games.pokemon.publications.discovery",
+    "discover",
+    "<class 'app.games.pokemon.publications.models.DiscoveryPage'>"
+  ],
+  [
+    "/api/public/sitemap.xml",
+    ["GET"],
+    "sitemap",
+    "app.games.pokemon.publications.discovery",
+    "sitemap",
+    "None"
+  ],
+  [
+    "/api/admin/operations",
+    ["GET"],
+    "operations_status",
+    "app.operations",
+    "operations_status",
+    "<class 'app.operations.OperationsStatus'>"
+  ],
+  [
+    "/api/prices/editions",
+    ["POST"],
+    "edition_prices",
+    "app.games.pokemon.prices.prices",
+    "edition_prices",
+    "<class 'app.games.pokemon.prices.prices.PricesResponse'>"
+  ],
+  [
+    "/api/decks/{deck_id}/exports/live",
+    ["GET"],
+    "live_export",
+    "app.games.pokemon.exports.deck_live_export",
+    "live_export",
+    "<class 'app.games.pokemon.exports.deck_live_export.LiveExportView'>"
+  ],
+  [
+    "/api/decks/{deck_id}/exports/live.txt",
+    ["GET"],
+    "live_export_text",
+    "app.games.pokemon.exports.deck_live_export",
+    "live_export_text",
+    "None"
+  ],
+  [
+    "/api/decks/{deck_id}/exports/tcgplayer",
+    ["GET"],
+    "tcgplayer_export",
+    "app.games.pokemon.exports.deck_mass_entry",
+    "tcgplayer_export",
+    "<class 'app.games.pokemon.exports.deck_mass_entry.MassEntryView'>"
+  ],
+  [
+    "/api/decks/{deck_id}/exports/tcgplayer.txt",
+    ["GET"],
+    "tcgplayer_download",
+    "app.games.pokemon.exports.deck_mass_entry",
+    "tcgplayer_download",
+    "None"
+  ],
+  [
+    "/api/decks/{deck_id}/cost",
+    ["GET"],
+    "deck_cost",
+    "app.games.pokemon.decks.cost",
+    "deck_cost",
+    "<class 'app.core.prices.cost.DeckCost'>"
+  ],
+  [
+    "/api/want-list",
+    ["GET"],
+    "want_list",
+    "app.games.pokemon.decks.want_list",
+    "want_list",
+    "<class 'app.want_list.WantList'>"
+  ],
+  [
+    "/api/want-list/cost",
+    ["GET"],
+    "want_list_cost_route",
+    "app.games.pokemon.decks.want_list_cost",
+    "want_list_cost_route",
+    "<class 'app.games.pokemon.decks.want_list_cost.WantListCost'>"
+  ],
+  [
+    "/api/want-list/exports/tcgplayer",
+    ["GET"],
+    "want_list_tcgplayer_export",
+    "app.games.pokemon.exports.want_list_mass_entry",
+    "want_list_tcgplayer_export",
+    "<class 'app.games.pokemon.exports.want_list_mass_entry.WantListMassEntryView'>"
+  ],
+  [
+    "/api/want-list/exports/tcgplayer.txt",
+    ["GET"],
+    "want_list_tcgplayer_download",
+    "app.games.pokemon.exports.want_list_mass_entry",
+    "want_list_tcgplayer_download",
+    "None"
+  ],
+  [
+    "/api/decks/{deck_id}/format-checks",
+    ["GET"],
+    "deck_format_checks",
+    "app.games.pokemon.formats.deck_format_checks",
+    "deck_format_checks",
+    "<class 'app.games.pokemon.formats.deck_format_checks.DeckFormatChecks'>"
+  ],
+  [
+    "/api/public/decks/{token}/versions/{version}/cost",
+    ["GET"],
+    "published_cost",
+    "app.games.pokemon.publications.published_cost",
+    "published_cost",
+    "<class 'app.games.pokemon.publications.published_cost.PublishedDeckCost'>"
+  ],
+  [
+    "/api/public/decks/{token}/versions/{version}/exports/live",
+    ["GET"],
+    "published_live_export",
+    "app.games.pokemon.exports.published_live_export",
+    "published_live_export",
+    "<class 'app.games.pokemon.exports.published_live_export.PublishedLiveExportView'>"
+  ],
+  [
+    "/api/public/decks/{token}/versions/{version}/exports/live.txt",
+    ["GET"],
+    "published_live_export_text",
+    "app.games.pokemon.exports.published_live_export",
+    "published_live_export_text",
+    "None"
+  ],
+  [
+    "/api/public/decks/{token}/versions/{version}/exports/tcgplayer",
+    ["GET"],
+    "published_mass_entry_export",
+    "app.games.pokemon.exports.published_mass_entry",
+    "published_mass_entry_export",
+    "<class 'app.games.pokemon.exports.published_mass_entry.PublishedMassEntryView'>"
+  ],
+  [
+    "/api/public/decks/{token}/versions/{version}/exports/tcgplayer.txt",
+    ["GET"],
+    "published_mass_entry_download",
+    "app.games.pokemon.exports.published_mass_entry",
+    "published_mass_entry_download",
+    "None"
+  ],
+  [
+    "/api/public/decks/{token}/versions/{version}/format-checks",
+    ["GET"],
+    "published_deck_format_checks",
+    "app.games.pokemon.formats.published_format_checks",
+    "published_deck_format_checks",
+    "<class 'app.games.pokemon.formats.published_format_checks.PublishedDeckFormatChecks'>"
+  ],
+  [
+    "/api/collection-imports",
+    ["POST"],
+    "start_import",
+    "app.games.pokemon.imports.collection_import",
+    "start_import",
+    "<class 'app.core.imports.collection_draft.CollectionImportSummary'>"
+  ],
+  [
+    "/api/collection-imports/current",
+    ["GET"],
+    "current_import",
+    "app.games.pokemon.imports.collection_import",
+    "current_import",
+    "<class 'app.core.imports.collection_draft.CollectionImportSummary'>"
+  ],
+  [
+    "/api/collection-imports/{import_id}/rows",
+    ["GET"],
+    "import_rows",
+    "app.games.pokemon.imports.collection_import",
+    "import_rows",
+    "<class 'app.core.imports.collection_draft.CollectionImportRowsPage'>"
+  ],
+  [
+    "/api/collection-imports/{import_id}/changes",
+    ["POST"],
+    "change_import",
+    "app.games.pokemon.imports.collection_import",
+    "change_import",
+    "<class 'app.core.imports.collection_draft.CollectionImportChanges'>"
+  ],
+  [
+    "/api/collection-imports/{import_id}/skipped.csv",
+    ["GET"],
+    "skipped_rows",
+    "app.games.pokemon.imports.collection_import",
+    "skipped_rows",
+    "None"
+  ],
+  [
+    "/api/collection-imports/{import_id}/left-out.csv",
+    ["GET"],
+    "left_out_rows",
+    "app.games.pokemon.imports.collection_import",
+    "left_out_rows",
+    "None"
+  ],
+  [
+    "/api/collection-imports/{import_id}/save",
+    ["POST"],
+    "save_import",
+    "app.games.pokemon.imports.collection_import",
+    "save_import",
+    "<class 'app.core.imports.collection_draft.CollectionImportSaveResult'>"
+  ],
+  [
+    "/api/scanner/manifest",
+    ["GET"],
+    "manifest",
+    "app.games.pokemon.scanner.scanner",
+    "manifest",
+    "<class 'app.games.pokemon.scanner.scanner.ScannerManifest'>"
+  ],
+  [
+    "/api/scanner/cards/{key}",
+    ["GET"],
+    "cards",
+    "app.games.pokemon.scanner.scanner",
+    "cards",
+    "None"
+  ],
+  [
+    "/api/scanner/fingerprints/{sha256}",
+    ["GET"],
+    "fingerprints",
+    "app.games.pokemon.scanner.scanner",
+    "fingerprints",
+    "None"
+  ],
+  [
+    "/api/scanner/printings",
+    ["POST"],
+    "printings",
+    "app.games.pokemon.scanner.scanner",
+    "printings",
+    "<class 'app.games.pokemon.scanner.scanner.ScannerPrintingsResponse'>"
+  ],
+  [
+    "/api/art/{printing_id}/{size}",
+    ["GET"],
+    "art",
+    "app.games.pokemon.art.route",
+    "art",
+    "None"
+  ],
+  [
+    "/api/public/art/{printing_ref}/{size}",
+    ["GET"],
+    "public_art",
+    "app.games.pokemon.art.route",
+    "public_art",
+    "None"
+  ],
+  [
+    "/api/public/edition-art/{edition_ref}/{size}",
+    ["GET"],
+    "edition_art",
+    "app.games.pokemon.art.route",
+    "edition_art",
+    "None"
+  ],
+  [
+    "/api/scanner/save",
+    ["POST"],
+    "save",
+    "app.games.pokemon.scanner.scanner_save",
+    "save",
+    "<class 'app.games.pokemon.scanner.scanner_save.ScanSaveResult'>"
+  ],
+  [
+    "/api/threads/pulse",
+    ["GET"],
+    "read_pulse",
+    "app.social.threads",
+    "read_pulse",
+    "<class 'app.social.threads.Pulse'>"
+  ],
+  [
+    "/api/trades",
+    ["GET"],
+    "listing",
+    "app.social.threads",
+    "register_routes.<locals>.listing",
+    "list[app.social.threads.ThreadItem]"
+  ],
+  [
+    "/api/trades/{thread_id}/timeline",
+    ["GET"],
+    "timeline",
+    "app.social.threads",
+    "register_routes.<locals>.timeline",
+    "<class 'app.social.threads.Timeline'>"
+  ],
+  [
+    "/api/trades/{thread_id}/messages",
+    ["POST"],
+    "message",
+    "app.social.threads",
+    "register_routes.<locals>.message",
+    "<class 'app.social.threads.Message'>"
+  ],
+  [
+    "/api/trades/{thread_id}/read",
+    ["POST"],
+    "read",
+    "app.social.threads",
+    "register_routes.<locals>.read",
+    "<class 'app.social.threads.ReadResult'>"
+  ],
+  [
+    "/api/loans",
+    ["GET"],
+    "listing",
+    "app.social.threads",
+    "register_routes.<locals>.listing",
+    "list[app.social.threads.ThreadItem]"
+  ],
+  [
+    "/api/loans/{thread_id}/timeline",
+    ["GET"],
+    "timeline",
+    "app.social.threads",
+    "register_routes.<locals>.timeline",
+    "<class 'app.social.threads.Timeline'>"
+  ],
+  [
+    "/api/loans/{thread_id}/messages",
+    ["POST"],
+    "message",
+    "app.social.threads",
+    "register_routes.<locals>.message",
+    "<class 'app.social.threads.Message'>"
+  ],
+  [
+    "/api/loans/{thread_id}/read",
+    ["POST"],
+    "read",
+    "app.social.threads",
+    "register_routes.<locals>.read",
+    "<class 'app.social.threads.ReadResult'>"
+  ],
+  [
+    "/api/profile",
+    ["GET"],
+    "get_profile",
+    "app.social.profile",
+    "get_profile",
+    "<class 'app.social.profile.CollectorProfile'>"
+  ],
+  [
+    "/api/profile/display-name",
+    ["PUT"],
+    "set_display_name",
+    "app.social.profile",
+    "set_display_name",
+    "<class 'app.social.profile.CollectorProfile'>"
+  ],
+  [
+    "/api/profile/invite-link",
+    ["POST"],
+    "new_invite_link",
+    "app.social.profile",
+    "new_invite_link",
+    "<class 'app.social.profile.CollectorProfile'>"
+  ],
+  [
+    "/api/profile/handle",
+    ["PUT"],
+    "set_handle",
+    "app.social.profile",
+    "set_handle",
+    "<class 'app.social.profile.CollectorProfile'>"
+  ],
+  [
+    "/api/public/invites/{token}",
+    ["GET"],
+    "public_invite",
+    "app.social.profile",
+    "public_invite",
+    "<class 'app.social.profile.PublicInvite'>"
+  ],
+  [
+    "/api/social/friends",
+    ["GET"],
+    "friends",
+    "app.social.friends",
+    "friends",
+    "<class 'app.social.friends.FriendsView'>"
+  ],
+  [
+    "/api/social/lookup",
+    ["POST"],
+    "lookup",
+    "app.social.friends",
+    "lookup",
+    "<class 'app.social.friends.CollectorLookup'>"
+  ],
+  [
+    "/api/social/invites/{token}",
+    ["GET"],
+    "invite",
+    "app.social.friends",
+    "invite",
+    "<class 'app.social.friends.InviteCollector'>"
+  ],
+  [
+    "/api/social/friend-requests",
+    ["POST"],
+    "send_friend_request",
+    "app.social.friends",
+    "send_friend_request",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/friend-requests/{collector_id}/accept",
+    ["POST"],
+    "accept_friend_request",
+    "app.social.friends",
+    "accept_friend_request",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/friend-requests/{collector_id}/decline",
+    ["POST"],
+    "decline_friend_request",
+    "app.social.friends",
+    "decline_friend_request",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/friend-requests/{collector_id}/withdraw",
+    ["POST"],
+    "withdraw_friend_request",
+    "app.social.friends",
+    "withdraw_friend_request",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/trades/{trade_id}/add-friend",
+    ["POST"],
+    "add_friend_from_trade",
+    "app.social.friends",
+    "add_friend_from_trade",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/trades/{trade_id}/add-friend/withdraw",
+    ["POST"],
+    "withdraw_add_friend",
+    "app.social.friends",
+    "withdraw_add_friend",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/friends/{collector_id}/remove",
+    ["POST"],
+    "remove_friend",
+    "app.social.friends",
+    "remove_friend",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/blocks",
+    ["GET"],
+    "blocks",
+    "app.social.friends",
+    "blocks",
+    "<class 'app.social.friends.BlockedList'>"
+  ],
+  [
+    "/api/social/blocks",
+    ["POST"],
+    "block",
+    "app.social.friends",
+    "block",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/blocks/{collector_id}/unblock",
+    ["POST"],
+    "unblock",
+    "app.social.friends",
+    "unblock",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/traders/{trader_id}/block",
+    ["POST"],
+    "block_trader",
+    "app.social.friends",
+    "block_trader",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/traders/{trader_id}/unblock",
+    ["POST"],
+    "unblock_trader",
+    "app.social.friends",
+    "unblock_trader",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/blocked/{block_id}/unblock",
+    ["POST"],
+    "unblock_by_id",
+    "app.social.friends",
+    "unblock_by_id",
+    "<class 'app.social.friends.FriendCommandResult'>"
+  ],
+  [
+    "/api/social/collections/{handle}",
+    ["GET"],
+    "friend_collection",
+    "app.social.friend_reads",
+    "friend_collection",
+    "<class 'app.social.friend_reads.FriendCollection'>"
+  ],
+  [
+    "/api/social/want-list-matches",
+    ["GET"],
+    "want_list_matches",
+    "app.social.friend_reads",
+    "want_list_matches",
+    "<class 'app.social.friend_reads.WantListMatches'>"
+  ],
+  [
+    "/api/social/card-matches",
+    ["GET"],
+    "card_matches",
+    "app.social.friend_reads",
+    "card_matches",
+    "<class 'app.social.friend_reads.CardMatches'>"
+  ],
+  [
+    "/api/social/trade-lists/{handle}",
+    ["GET"],
+    "friend_trade_list",
+    "app.social.trade_matches",
+    "friend_trade_list",
+    "<class 'app.social.trade_matches.FriendTradeList'>"
+  ],
+  [
+    "/api/social/trade-matches",
+    ["GET"],
+    "trade_matches",
+    "app.social.trade_matches",
+    "trade_matches",
+    "<class 'app.social.trade_matches.TradeMatches'>"
+  ],
+  [
+    "/api/social/trade-matches/near",
+    ["GET"],
+    "nearby_matches",
+    "app.social.trade_matches",
+    "nearby_matches",
+    "<class 'app.social.trade_matches.NearbyMatches'>"
+  ],
+  [
+    "/api/social/trade-matches/needs",
+    ["GET"],
+    "own_trade_needs",
+    "app.social.trade_matches",
+    "own_trade_needs",
+    "list[app.social.trade_matches.OwnTradeNeed]"
+  ],
+  [
+    "/api/social/trade-matches/{collector_id}",
+    ["GET"],
+    "friend_trade_match",
+    "app.social.trade_matches",
+    "friend_trade_match",
+    "<class 'app.social.trade_matches.TradeMatchRow'>"
+  ],
+  [
+    "/api/social/traders/{trader_id}",
+    ["GET"],
+    "trader_view",
+    "app.social.trade_matches",
+    "trader_view",
+    "<class 'app.social.trade_matches.TraderView'>"
+  ],
+  [
+    "/api/social/traders/{trader_id}/trade-list",
+    ["GET"],
+    "trader_trade_list",
+    "app.social.trade_matches",
+    "trader_trade_list",
+    "<class 'app.social.trade_matches.TraderTradeList'>"
+  ],
+  [
+    "/api/social/traders/{trader_id}/matches",
+    ["GET"],
+    "trader_match",
+    "app.social.trade_matches",
+    "trader_match",
+    "<class 'app.social.trade_matches.TraderMatchRow'>"
+  ],
+  [
+    "/api/social/trade-card-matches",
+    ["GET"],
+    "trade_card_matches",
+    "app.social.trade_matches",
+    "trade_card_matches",
+    "<class 'app.social.trade_matches.TradeCardMatches'>"
+  ],
+  [
+    "/api/social/trade-card-search",
+    ["GET"],
+    "trade_card_search",
+    "app.social.trade_matches",
+    "trade_card_search",
+    "<class 'app.social.trade_matches.TradeCardSearch'>"
+  ],
+  [
+    "/api/loans/command-keys/void",
+    ["POST"],
+    "void_command_key",
+    "app.loan_inventory",
+    "void_command_key",
+    "<class 'app.loan_inventory.CommandKeyOutcome'>"
+  ],
+  [
+    "/api/loans",
+    ["POST"],
+    "send_borrow_request",
+    "app.loan_inventory",
+    "send_borrow_request",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/accept",
+    ["POST"],
+    "accept",
+    "app.loan_inventory",
+    "accept",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/offers",
+    ["POST"],
+    "send_lend_offer",
+    "app.loan_inventory",
+    "send_lend_offer",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/accept-offer",
+    ["POST"],
+    "accept_offer",
+    "app.loan_inventory",
+    "accept_offer",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/lent-out",
+    ["GET"],
+    "lent_out",
+    "app.loan_inventory",
+    "lent_out",
+    "<class 'app.loan_inventory.LentOut'>"
+  ],
+  [
+    "/api/loans/pending",
+    ["GET"],
+    "pending_loans",
+    "app.loan_inventory",
+    "pending_loans",
+    "<class 'app.loan_inventory.PendingLoans'>"
+  ],
+  [
+    "/api/loans/borrowed",
+    ["GET"],
+    "list_borrowed",
+    "app.loan_inventory",
+    "list_borrowed",
+    "<class 'app.loan_inventory.BorrowedCopies'>"
+  ],
+  [
+    "/api/loans/borrowed/move",
+    ["POST"],
+    "move_borrowed",
+    "app.loan_inventory",
+    "move_borrowed",
+    "<class 'app.loan_inventory.BorrowedCopies'>"
+  ],
+  [
+    "/api/loans/{loan_id}/side",
+    ["GET"],
+    "loan_side",
+    "app.loan_inventory",
+    "loan_side",
+    "<class 'app.loan_inventory.LoanSide'>"
+  ],
+  [
+    "/api/loans/{loan_id}/handover",
+    ["POST"],
+    "confirm_handover",
+    "app.loan_inventory",
+    "confirm_handover",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/take-back",
+    ["POST"],
+    "take_back",
+    "app.loan_inventory",
+    "take_back",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/picks/use-suggested",
+    ["POST"],
+    "use_suggested_picks",
+    "app.loan_inventory",
+    "use_suggested_picks",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/returns",
+    ["POST"],
+    "start_return",
+    "app.loan_inventory",
+    "start_return",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/returns/confirm",
+    ["POST"],
+    "confirm_return",
+    "app.loan_inventory",
+    "confirm_return",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/write-off",
+    ["POST"],
+    "write_off",
+    "app.loan_inventory",
+    "write_off",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/written-off",
+    ["POST"],
+    "choose_written_off",
+    "app.loan_inventory",
+    "choose_written_off",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{thread_id}/terms",
+    ["POST"],
+    "edit_terms",
+    "app.loan_inventory",
+    "edit_terms",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/resolve/{identifier}",
+    ["GET"],
+    "resolve_loan",
+    "app.social.loans",
+    "resolve_loan",
+    "<class 'app.social.loans.LoanResolution'>"
+  ],
+  [
+    "/api/loans/{loan_id:uuid}",
+    ["GET"],
+    "read_loan",
+    "app.social.loans",
+    "read_loan",
+    "<class 'app.social.threads.LoanDetail'>"
+  ],
+  [
+    "/api/loans/{loan_id}/decline",
+    ["POST"],
+    "decline",
+    "app.social.loans",
+    "decline",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/withdraw",
+    ["POST"],
+    "withdraw",
+    "app.social.loans",
+    "withdraw",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/cancel",
+    ["POST"],
+    "cancel",
+    "app.social.loans",
+    "cancel",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/return-by",
+    ["POST"],
+    "change_return_by",
+    "app.social.loans",
+    "change_return_by",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/extension",
+    ["POST"],
+    "ask_for_more_time",
+    "app.social.loans",
+    "ask_for_more_time",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/extension/approve",
+    ["POST"],
+    "approve_extension",
+    "app.social.loans",
+    "approve_extension",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/extension/decline",
+    ["POST"],
+    "decline_extension",
+    "app.social.loans",
+    "decline_extension",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/loans/{loan_id}/notices/seen",
+    ["POST"],
+    "see_notices",
+    "app.social.loans",
+    "see_notices",
+    "<class 'app.social.loans.LoanView'>"
+  ],
+  [
+    "/api/social/inbox",
+    ["GET"],
+    "read_inbox",
+    "app.social.inbox",
+    "read_inbox",
+    "<class 'app.social.inbox.InboxView'>"
+  ],
+  [
+    "/api/social/inbox/read",
+    ["POST"],
+    "mark_read",
+    "app.social.inbox",
+    "mark_read",
+    "<class 'app.social.inbox.InboxView'>"
+  ],
+  [
+    "/api/social/inbox/clear",
+    ["POST"],
+    "clear",
+    "app.social.inbox",
+    "clear",
+    "<class 'app.social.inbox.InboxView'>"
+  ],
+  [
+    "/api/trades/list",
+    ["GET"],
+    "trade_list",
+    "app.trade_list",
+    "trade_list",
+    "<class 'app.trade_list.OwnTradeList'>"
+  ],
+  [
+    "/api/trades",
+    ["POST"],
+    "send_trade_proposal",
+    "app.games.pokemon.trading.trade_inventory",
+    "send_trade_proposal",
+    "app.social.trades.TradeView | app.social.trades.ReplayedTradeSend"
+  ],
+  [
+    "/api/trades/{trade_id}/accept",
+    ["POST"],
+    "accept_trade",
+    "app.games.pokemon.trading.trade_inventory",
+    "accept_trade",
+    "<class 'app.social.trades.TradeView'>"
+  ],
+  [
+    "/api/trades/{trade_id}/offer",
+    ["POST"],
+    "change_offer",
+    "app.games.pokemon.trading.trade_inventory",
+    "change_offer",
+    "<class 'app.social.trades.TradeView'>"
+  ],
+  [
+    "/api/trades/{trade_id}/side",
+    ["GET"],
+    "trade_side",
+    "app.games.pokemon.trading.trade_inventory",
+    "trade_side",
+    "<class 'app.games.pokemon.trading.trade_inventory.OwnTradeSide'>"
+  ],
+  [
+    "/api/trades/{trade_id}/picks/use-suggested",
+    ["POST"],
+    "use_suggested_trade_picks",
+    "app.games.pokemon.trading.trade_inventory",
+    "use_suggested_trade_picks",
+    "<class 'app.social.trades.TradeView'>"
+  ],
+  [
+    "/api/trades/{trade_id}/confirm-swap",
+    ["POST"],
+    "confirm_swap",
+    "app.games.pokemon.trading.trade_inventory",
+    "confirm_swap",
+    "<class 'app.games.pokemon.trading.trade_inventory.ConfirmedSwap'>"
+  ],
+  [
+    "/api/trades/value",
+    ["POST"],
+    "trade_value",
+    "app.games.pokemon.trading.trade_value",
+    "trade_value",
+    "<class 'app.games.pokemon.trading.trade_value.TradeValue'>"
+  ],
+  [
+    "/api/trades/resolve/{identifier}",
+    ["GET"],
+    "resolve_trade",
+    "app.social.trades",
+    "resolve_trade",
+    "<class 'app.social.trades.TradeResolution'>"
+  ],
+  [
+    "/api/trades/{trade_id:uuid}",
+    ["GET"],
+    "read_trade",
+    "app.social.trades",
+    "read_trade",
+    "<class 'app.social.threads.TradeDetail'>"
+  ],
+  [
+    "/api/trades/{trade_id}/withdraw",
+    ["POST"],
+    "withdraw",
+    "app.social.trades",
+    "withdraw",
+    "<class 'app.social.trades.TradeView'>"
+  ],
+  [
+    "/api/trades/{trade_id}/decline",
+    ["POST"],
+    "decline",
+    "app.social.trades",
+    "decline",
+    "<class 'app.social.trades.TradeView'>"
+  ],
+  [
+    "/api/trades/{trade_id}/cancel",
+    ["POST"],
+    "cancel",
+    "app.social.trades",
+    "cancel",
+    "<class 'app.social.trades.TradeView'>"
+  ],
+  [
+    "/api/social/trade-settings",
+    ["GET"],
+    "get_trade_settings",
+    "app.social.trades",
+    "get_trade_settings",
+    "<class 'app.social.trades.TradeSettings'>"
+  ],
+  [
+    "/api/social/trade-settings",
+    ["PUT"],
+    "set_trade_settings",
+    "app.social.trades",
+    "set_trade_settings",
+    "<class 'app.social.trades.TradeSettings'>"
+  ],
+  [
+    "/api/social/discovery",
+    ["GET"],
+    "get_discovery",
+    "app.social.discovery",
+    "get_discovery",
+    "<class 'app.social.discovery.DiscoverySettings'>"
+  ],
+  [
+    "/api/social/discovery",
+    ["PUT"],
+    "set_discovery",
+    "app.social.discovery",
+    "set_discovery",
+    "<class 'app.social.discovery.DiscoverySettings'>"
+  ],
+  [
+    "/api/trade-wants",
+    ["GET"],
+    "get_trade_wants",
+    "app.games.pokemon.trading.trade_wants",
+    "get_trade_wants",
+    "<class 'app.games.pokemon.trading.trade_wants.TradeWants'>"
+  ],
+  [
+    "/api/trade-wants/{edition_id}",
+    ["PUT"],
+    "set_trade_want",
+    "app.games.pokemon.trading.trade_wants",
+    "set_trade_want",
+    "<class 'app.games.pokemon.trading.trade_wants.TradeWants'>"
+  ],
+  [
+    "/api/trade-wants/will-accept/{edition_id}",
+    ["PUT"],
+    "set_will_accept",
+    "app.games.pokemon.trading.trade_wants",
+    "set_will_accept",
+    "<class 'app.games.pokemon.trading.trade_wants.TradeWants'>"
+  ],
+  [
+    "/api/social/reports",
+    ["POST"],
+    "report_collector",
+    "app.social.reports",
+    "report_collector",
+    "<class 'app.social.reports.ReportResult'>"
+  ],
+  [
+    "/api/admin/trade-reports",
+    ["GET"],
+    "list_trade_reports",
+    "app.social.reports",
+    "list_trade_reports",
+    "<class 'app.social.reports.TradeReportList'>"
+  ],
+  [
+    "/api/admin/trade-reports/{report_id}",
+    ["GET"],
+    "read_trade_report",
+    "app.social.reports",
+    "read_trade_report",
+    "<class 'app.social.reports.TradeReportDetail'>"
+  ],
+  [
+    "/api/admin/trade-reports/{report_id}/decision",
+    ["POST"],
+    "decide_trade_report",
+    "app.social.reports",
+    "decide_trade_report",
+    "<class 'app.social.reports.ReportDecided'>"
+  ],
+  [
+    "/api/admin/collectors/{collector_id}/restore",
+    ["POST"],
+    "restore_collector",
+    "app.social.reports",
+    "restore_collector",
+    "<class 'app.social.reports.CollectorRestored'>"
+  ]
+]
