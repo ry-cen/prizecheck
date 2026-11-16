@@ -12,7 +12,7 @@ Issue [#661](https://github.com/ry-cen/prizecheck/issues/661), under umbrella #5
 
 | Route | Result |
 | --- | --- |
-| `GET /api/catalog/sets` | `[{id, name, code}]` for sets with at least one visible Edition, ordered by name then id. `code` is the verified set code or `''`. |
+| `GET /api/catalog/sets` | `[{id, name, code}]` for sets with at least one visible Edition, ordered by name then id. `code` is the verified set code of the current generation's set id, or `''`. |
 | `GET /api/catalog/editions?q=&set=&page=` | `{editions, total, pages, catalog_empty}`. `q`: case-insensitive substring of card name or collector number (trimmed; blank means no filter). `set`: a set id, optional. `page`: from 1 (below 1 is a 422), `PAGE_SIZE = 24` per page. `pages` is at least 1. A page past the end returns no Editions with the real `total`. `catalog_empty` is true only when no Edition is visible at all (no accepted generation, or none listed), whatever the filters. |
 | `GET /api/catalog/editions/{edition_id}` | One Edition, or 404 for an unknown, invisible or malformed id. |
 
@@ -32,13 +32,13 @@ Visible means all of: `catalog_state.active_generation` is that generation; `cat
 | `catalog_generation_edition` | `generation_id`, `edition_id`, `printing_id`, `active` |
 | `catalog_generation_printing` | `generation_id`, `printing_id`, `tombstoned`, `display_name`, `set_id`, `set_name`, `collector_number` (current accepted display, not the retained one) |
 | `catalog_edition` | `id`, `printing_id`, `descriptor` (jsonb object; the writer's descriptors are `{"finish": ...}` or the unspecified one) |
-| `catalog_printing_set_code` (view) | `printing_id`, `set_code`: one row per Printing, `''` without a verified code (`003_set_codes.sql`) |
+| `catalog_set_code` (`001_catalog.sql`, primary key `set_id`; seeded by `003_set_codes.sql`) | `set_id`, `code`, left-joined on the current generation's `gp.set_id`; no row means `''`. The shared `catalog_printing_set_code` view is not used: it derives the code from the Printing's first, immutable retained `set_id`, so a Printing that moved sets would show the old set's code. |
 
 `migrations/riftbound/README.md`: Riftbound's art views return no art, so `art` is null.
 
 ## Tests
 
-`api/tests/test_riftbound_catalog_read_api.py` runs the real migrations on a disposable database with synthetic rows: the auth matrix on every route (including the Pokémon key), an empty catalog, sets, name and number search, set filter, paging boundaries and totals, detail and 404, finishes as separate Editions, and invisibility of old, pending, held, retired and tombstoned rows. It also checks the entry mounts only health and the Riftbound routes with `DATABASE_URL` unset and that the entry is not wired into Pokémon or deploy files. `api/tests/riftbound_contract/` holds the Riftbound OpenAPI and route-table snapshots; Pokémon's snapshots (`api/tests/api_contract/`, `api/tests/app_builder_contract/`) are unchanged.
+Each read runs in one `REPEATABLE READ` transaction, so `total` and `catalog_empty` come from one snapshot. `api/tests/test_riftbound_catalog_read_api.py` runs the real migrations on a disposable database with synthetic rows: the auth matrix on every route (including the Pokémon key), an empty catalog, sets, name and number search, set filter, paging boundaries and totals, detail and 404, finishes as separate Editions, and invisibility of old, pending, held, retired and tombstoned rows. It also checks the entry mounts only health and the Riftbound routes with `DATABASE_URL` unset and that the entry is not wired into Pokémon or deploy files. `api/tests/riftbound_contract/` holds the Riftbound OpenAPI and route-table snapshots; Pokémon's snapshots (`api/tests/api_contract/`, `api/tests/app_builder_contract/`) are unchanged.
 
 ## Remaining gates before the frontend connects
 

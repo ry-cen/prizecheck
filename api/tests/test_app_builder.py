@@ -1,7 +1,11 @@
-"""Compare against untouched origin/dev 989fbfcbc4ae57938fc0f05e696694e5c40780e3.
+"""Compare against untouched origin/dev 1bac580100876c5c16e08e21045759a26f5dcaec.
 
 The two snapshots were captured before extraction, using the same serialization
 below. They include endpoint/model identity as well as route registration order.
+
+To recapture after dev adds routes: check out untouched dev in a temporary worktree (no app/core/app_builder.py),
+run its app.main with the serialization in the first test, and copy routes.json and openapi.txt here. Never capture
+from a tree that already has the builder, which would make the proof circular.
 """
 import asyncio
 import json
