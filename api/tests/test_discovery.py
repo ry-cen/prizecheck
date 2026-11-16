@@ -122,3 +122,15 @@ def test_featured_image_uses_public_art(monkeypatch, tmp_path):
     monkeypatch.setattr(psycopg, 'connect', forbidden)
     monkeypatch.setenv('DATABASE_URL', 'postgresql://unreachable:1/private')
     assert client.get('/api/public/discovery').json()['decks'][0]['image_url'] == f'/api/public/art/{ref}/small?v=bbbbbbbb'
+
+
+def test_robots_txt_allows_everything_and_names_the_sitemap(monkeypatch):
+    # Reads no store and never varies by deck: the same body whatever is Listed, and it works with the database down.
+    monkeypatch.setenv('PUBLIC_ORIGIN', 'https://cards.example/')
+    monkeypatch.setenv('DATABASE_URL', 'postgresql://unreachable:1/private')
+    response = client.get('/api/public/robots.txt')
+    assert response.status_code == 200
+    assert response.headers['content-type'] == 'text/plain; charset=utf-8'
+    assert response.headers['x-robots-tag'] == 'index, follow'
+    assert response.text == 'User-agent: *\nAllow: /\n\nSitemap: https://cards.example/sitemap.xml\n'
+    assert 'Disallow' not in response.text

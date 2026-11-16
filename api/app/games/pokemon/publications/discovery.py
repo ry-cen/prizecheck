@@ -256,10 +256,23 @@ def discover(response: Response, q: str = '', cursor: str | None = None,
         next_cursor=cursor_encode(query, format_name, revision, list(_order_key(shown[-1][0]))) if more else None)
 
 
+def _public_origin() -> str:
+    return os.environ.get('PUBLIC_ORIGIN','http://localhost:5173').rstrip('/')
+
+
+@router.get('/api/public/robots.txt', response_class=Response)
+def robots():
+    # The site's robots.txt, served at /robots.txt by the edge (deploy/docker/nginx.conf). It reads no store and never
+    # varies by deck. Nothing is disallowed: the Published Deck page's render fetches /api/public/*, and an Unlisted
+    # page must stay crawlable so a crawler can see its noindex.
+    body = f'User-agent: *\nAllow: /\n\nSitemap: {_public_origin()}/sitemap.xml\n'
+    return Response(body, media_type='text/plain; charset=utf-8', headers=HEADERS)
+
+
 @router.get('/api/public/sitemap.xml', response_class=Response)
 def sitemap():
     objects, _ = listed_snapshots(parse=public_deck.parse_record)
-    origin = os.environ.get('PUBLIC_ORIGIN','http://localhost:5173').rstrip('/')
+    origin = _public_origin()
     urls = ''.join(f'<url><loc>{escape(origin + "/published/" + token)}</loc><lastmod>{active.snapshot.published_at.date().isoformat()}</lastmod></url>'
                    for token, active in sorted(objects, key=lambda item: item[0]))
     xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + urls + '</urlset>'

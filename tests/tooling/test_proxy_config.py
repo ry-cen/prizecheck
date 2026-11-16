@@ -18,6 +18,7 @@ PLAIN = re.sub(r'\bif \([^\n]*?\) \{[^{}]*\}', '', CONFIG)
 DIRECTIVE = re.compile(r'^\s*([a-z0-9_]+)\s+([^;{}]*);', re.MULTILINE)
 START = 'location = /api/collection-imports {'
 GATEWAY = 'location ~ ^/(api|auth)/ {'
+CRAWLER_FILES = {'location = /robots.txt {': '/api/public/robots.txt', 'location = /sitemap.xml {': '/api/public/sitemap.xml'}
 
 
 def block(opening):
@@ -145,6 +146,33 @@ class ProxyConfigTest(unittest.TestCase):
         self.assertEqual(headers(block(MJS))['Cross-Origin-Embedder-Policy'], COEP)
         self.assertNotIn('Cross-Origin-Opener-Policy', headers(own_directives(ASSETS)))
         self.assertNotIn('Cross-Origin-Opener-Policy', headers(block(MJS)))
+
+    def test_the_crawler_files_forward_as_the_gateway_location_does(self):
+        # /robots.txt and /sitemap.xml are rewritten to the API's public routes and proxied like /api and /auth, the
+        # identity-header strips included: nginx shares no proxy directive between sibling locations.
+        gateway = block(GATEWAY)
+        for opening, target in CRAWLER_FILES.items():
+            self.assertEqual(CONFIG.count(opening), 1, opening)
+            self.assertTrue(starts_with_guard(opening), opening)
+            directives = block(opening)
+            self.assertEqual([d for d in directives if d[0] not in ('rewrite', 'proxy_method', 'add_header')], gateway, opening)
+            self.assertEqual([value for name, value in directives if name == 'rewrite'], [f'^ {target} break'], opening)
+            # The API's routes answer GET alone, so a HEAD is fetched as a GET and nginx drops the body.
+            self.assertIn(('proxy_method', 'GET'), directives)
+            self.assertEqual(headers(directives), SECURITY, opening)
+            self.assertIn(('proxy_set_header', 'X-Internal-User ""'), directives)
+            self.assertIn(('proxy_set_header', 'X-Real-IP $remote_addr'), directives)
+            self.assertLess(CONFIG.index(opening), CONFIG.index(FALLBACK))
+
+    def test_the_spa_fallback_is_unchanged_by_the_crawler_files(self):
+        self.assertEqual(block(FALLBACK), [('try_files', '$uri /index.html'),
+                                           ('add_header', 'Cache-Control "no-cache" always'),
+                                           ('add_header', SECURITY['X-Content-Type-Options']),
+                                           ('add_header', SECURITY['X-Frame-Options'])])
+        self.assertTrue(starts_with_guard(FALLBACK))
+        self.assertEqual(CONFIG.count(FALLBACK), 1)
+        self.assertEqual(CONFIG.count('location = /scan.html {'), 1)
+        self.assertEqual(CONFIG.count(SCANNER), 1)
 
     def test_the_gateway_gets_the_client_address_from_nginx(self):
         for opening in (START, GATEWAY):

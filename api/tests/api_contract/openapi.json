@@ -36344,6 +36344,20 @@
     ]
    }
   },
+  "/api/public/robots.txt": {
+   "get": {
+    "operationId": "robots_api_public_robots_txt_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Robots",
+    "tags": [
+     "public discovery"
+    ]
+   }
+  },
   "/api/public/sitemap.xml": {
    "get": {
     "operationId": "sitemap_api_public_sitemap_xml_get",
