@@ -518,6 +518,7 @@ function Editor({
       )}
       {command && command.tab === tab && (
         <DeckCommand
+          key={`${command.kind}:${detail.location.version}`}
           title={command.kind === "rename" ? "Rename Deck" : "Delete Deck"}
           initialName={command.kind === "rename" ? detail.location.name : ""}
           confirmName={
@@ -544,6 +545,7 @@ function Editor({
                 )
           }
           done={(r) => {
+            if (r.location) edits.acceptLocation(r.location);
             setCommand(null);
             (command.kind === "delete" ? onDeleted : onChanged)(
               r.ownerRevision
@@ -568,9 +570,12 @@ function DeckCommand({
   send: (
     name: string,
     options: { signal: AbortSignal; idempotencyKey: string }
-  ) => Promise<{ ownerRevision: number }>;
+  ) => Promise<{ ownerRevision: number; location?: DeckDetail["location"] }>;
   close: () => void;
-  done: (r: { ownerRevision: number }) => void;
+  done: (r: {
+    ownerRevision: number;
+    location?: DeckDetail["location"];
+  }) => void;
 }) {
   const [name, setName] = useState(initialName),
     [error, setError] = useState(""),
@@ -578,6 +583,14 @@ function DeckCommand({
   const lifetime = useRef({ alive: true, controller: new AbortController() });
   const attempt = useRef<{ name: string; key: string } | null>(null);
   const guard = useRef(false);
+  const nameField = useRef<HTMLInputElement>(null);
+  const [focusName, requestNameFocus] = useState(0);
+  useEffect(() => {
+    if (focusName && !busy) {
+      nameField.current?.focus();
+      nameField.current?.select();
+    }
+  }, [focusName, busy]);
   useEffect(() => {
     const run = lifetime.current;
     return () => {
@@ -603,8 +616,10 @@ function DeckCommand({
           e instanceof DeckError &&
           e.code !== "STALE_LOCATION" &&
           e.code !== "IDEMPOTENCY_KEY_REUSED"
-        )
+        ) {
           attempt.current = null;
+          requestNameFocus((n) => n + 1);
+        }
         setError(
           e instanceof DeckError
             ? ((
@@ -646,6 +661,7 @@ function DeckCommand({
           label="Deck name"
           value={name}
           disabled={busy || !!attempt.current}
+          ref={nameField}
           onChange={(e) => {
             setName(e.target.value);
             setError("");
