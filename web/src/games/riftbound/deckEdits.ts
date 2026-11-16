@@ -14,7 +14,7 @@ export class DeckEdits {
   private needsReload = false;
   private refused = false;
   private isolate = new Set<string>();
-  private reconcile(fresh: DeckDetail) {
+  private reconcile(fresh: DeckDetail, refusal = false) {
     let dropped = false;
     for (const id of this.totals.keys()) {
       if (
@@ -29,8 +29,9 @@ export class DeckEdits {
     this.installDetail(fresh);
     if (dropped) {
       this.paused = true;
-      this.error =
-        "This Deck changed somewhere else, so some changes weren’t saved. Review the Deck List.";
+      this.error = refusal
+        ? "That card can't be added any more, and this Deck changed somewhere else, so some changes weren’t saved. Review the Deck List."
+        : "This Deck changed somewhere else, so some changes weren’t saved. Review the Deck List.";
     }
     return dropped;
   }
@@ -110,7 +111,7 @@ export class DeckEdits {
         const fresh = await this.writerRead();
         if (!this.alive) return;
         if (!fresh) throw new DeckError("DECK_NOT_FOUND");
-        const dropped = this.reconcile(fresh);
+        const dropped = this.reconcile(fresh, true);
         this.needsReload = false;
         if (dropped || !this.totals.size) return;
       }
@@ -141,11 +142,11 @@ export class DeckEdits {
       });
       if (!this.alive) return;
       this.installDetail(result);
-      for (const c of sent.input.changes)
-        if (this.totals.get(c.editionId) === c.quantity) {
+      for (const c of sent.input.changes) {
+        if (this.totals.get(c.editionId) === c.quantity)
           this.totals.delete(c.editionId);
-          this.isolate.delete(c.editionId);
-        }
+        this.isolate.delete(c.editionId);
+      }
       this.attempt = undefined;
       if (this.refused && !this.totals.size)
         this.error =
@@ -165,7 +166,10 @@ export class DeckEdits {
                 0)
           );
           this.installDetail(fresh);
-          if (!unchanged) this.totals.clear();
+          if (!unchanged) {
+            this.totals.clear();
+            this.isolate.clear();
+          }
           this.attempt = undefined;
           this.paused = unchanged;
           this.error = unchanged
@@ -179,21 +183,26 @@ export class DeckEdits {
           }
         }
       } else if (e instanceof DeckError && e.code === "EDITION_UNAVAILABLE") {
-        // The batch failed atomically. Only unchanged, nonzero new-line changes
-        // could have caused this refusal; preserve every other absolute total.
+        // The batch failed atomically and the refusal names no Edition
+        // (api/app/games/pokemon/decks/routes.py:268-278). Every sent
+        // nonzero line absent from the baseline could be the cause,
+        // whatever the collector has queued for it since.
         const candidates = this.attempt!.input.changes.filter(
           (change) =>
             change.quantity > 0 &&
-            !baseline.lines.some(
-              (line) => line.edition.id === change.editionId
-            ) &&
-            this.totals.get(change.editionId) === change.quantity
-        );
+            !baseline.lines.some((line) => line.edition.id === change.editionId)
+        ).map((change) => change.editionId);
         if (candidates.length === 1) {
-          this.totals.delete(candidates[0].editionId);
-          this.isolate.delete(candidates[0].editionId);
+          // Certainly unavailable: any nonzero re-add would be refused again.
+          this.totals.delete(candidates[0]);
+          this.isolate.delete(candidates[0]);
         } else
-          for (const change of candidates) this.isolate.add(change.editionId);
+          for (const id of candidates) {
+            if ((this.totals.get(id) ?? 0) === 0) {
+              this.totals.delete(id);
+              this.isolate.delete(id);
+            } else this.isolate.add(id);
+          }
         this.attempt = undefined;
         this.refused = true;
         this.needsReload = true;
@@ -204,7 +213,7 @@ export class DeckEdits {
           const fresh = await this.writerRead();
           if (!this.alive) return;
           if (!fresh) throw new DeckError("DECK_NOT_FOUND");
-          this.reconcile(fresh);
+          this.reconcile(fresh, true);
           this.needsReload = false;
         } catch {
           if (this.alive && this.totals.size) {

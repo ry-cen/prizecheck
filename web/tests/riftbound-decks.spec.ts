@@ -784,6 +784,280 @@ for (const width of [1280, 375]) {
       page.getByRole("heading", { name: "My retained draft", exact: true })
     ).toBeVisible();
   });
+  // The Deck's sheet closes as soon as a removed line leaves the list, so a
+  // collector cannot click the refused line again from the page. The queue is
+  // driven directly in the page, against the same slow fixture and a real
+  // browser clock, to reproduce that click.
+  for (const reclick of ["again", "to zero"])
+    test(`keeps an available new Edition when a refused line is changed ${reclick} while its batch is in flight at ${width}`, async ({
+      page,
+    }) => {
+      test.setTimeout(90000);
+      await page.setViewportSize({ width, height });
+      await page.goto(
+        `${entry}?decks=decks-slow#riftbound:section=decks&deck=deck-1`
+      );
+      const result = await page.evaluate(async (again) => {
+        const { DeckEdits } = await import(
+          "/src/games/riftbound/deckEdits.ts" as string
+        );
+        const api = (
+          await import("/src/games/riftbound/local/deckFixtures.ts" as string)
+        ).deckFixture("a", "decks-slow");
+        const signal = new AbortController().signal;
+        const sent: string[][] = [];
+        let started!: () => void;
+        const second = new Promise<void>((r) => {
+          started = r;
+        });
+        const writer = {
+          owner: "a",
+          changeDeckList: (
+            input: { changes: { editionId: string }[] },
+            o: unknown
+          ) => {
+            sent.push(input.changes.map((c) => c.editionId));
+            if (sent.length === 2) started();
+            return api.changeDeckList(input, o);
+          },
+        };
+        const edits = new DeckEdits(
+          await api.deck("deck-1", signal),
+          writer,
+          () => {}
+        );
+        edits.reload = (s: AbortSignal) => api.deck("deck-1", s);
+        edits.adjust("retained", -1);
+        edits.adjust("retained", 1);
+        edits.adjust("4", 1);
+        await second;
+        edits.adjust("retained", again ? 1 : -1);
+        for (let i = 0; i < 200 && edits.busy; i++)
+          await new Promise((r) => setTimeout(r, 100));
+        const final = await api.deck("deck-1", signal);
+        const quantity = (id: string) =>
+          final.lines.find(
+            (l: { edition: { id: string } }) => l.edition.id === id
+          )?.quantity ?? 0;
+        const out = {
+          sent,
+          busy: edits.busy,
+          four: quantity("4"),
+          retained: quantity("retained"),
+          pending: edits.quantity("retained"),
+        };
+        edits.dispose();
+        return out;
+      }, reclick === "again");
+      expect(result).toMatchObject({
+        busy: false,
+        four: 1,
+        retained: 0,
+        pending: 0,
+      });
+      expect(result.sent.slice(1)).toEqual(
+        reclick === "again"
+          ? [["retained", "4"], ["retained"], ["4"]]
+          : [["retained", "4"], ["4"]]
+      );
+    });
+  test(`tells a refusal and a change elsewhere apart at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(
+      `${entry}?decks=decks-slow#riftbound:section=decks&deck=deck-1`
+    );
+    await page.evaluate(async () => {
+      const path = "/src/games/riftbound/local/deckFixtures.ts";
+      const hooks = "/src/games/riftbound/local/deckTestHooks.ts";
+      const api = (await import(path)).deckFixture("a", "decks-slow");
+      const { changeFixtureDeckLine } = await import(hooks);
+      const write = api.changeDeckList,
+        read = api.deck;
+      let armed = false;
+      api.changeDeckList = async (input: unknown, options: unknown) => {
+        try {
+          return await write(input, options);
+        } catch (e) {
+          armed = true;
+          throw e;
+        }
+      };
+      api.deck = async (id: string, signal: AbortSignal) => {
+        if (armed) {
+          armed = false;
+          changeFixtureDeckLine("a", "deck-1", "1", 7);
+        }
+        return read(id, signal);
+      };
+    });
+    await page
+      .getByRole("button", {
+        name: "Edit Forgotten Sentinel Standard",
+        exact: true,
+      })
+      .click();
+    await page.getByRole("dialog").evaluate((dialog) => {
+      (
+        dialog.querySelector(
+          '[aria-label="Decrease quantity"]'
+        ) as HTMLButtonElement
+      ).click();
+      (
+        dialog.querySelector(
+          '[aria-label="Increase quantity"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await page.keyboard.press("Escape");
+    await page
+      .getByRole("button", { name: "Edit Ember Scout Standard", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Increase quantity", exact: true })
+      .click();
+    await expect(page.getByRole("alert")).toHaveText(
+      "That card can't be added any more, and this Deck changed somewhere else, so some changes weren’t saved. Review the Deck List.",
+      { timeout: 15000 }
+    );
+  });
+  test(`keeps focus in the rename field through version changes at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(
+      `${entry}?decks=decks-slow#riftbound:section=decks&deck=deck-1`
+    );
+    type Hooks = {
+      __arm: () => void;
+      __listRelease: () => void;
+      __renameRelease: () => void;
+      __listDone: boolean;
+      __renameApplied: boolean;
+      __holdRename: boolean;
+      __renameRaw: (...args: unknown[]) => Promise<unknown>;
+    };
+    await page.evaluate(async () => {
+      const path = "/src/games/riftbound/local/deckFixtures.ts";
+      const api = (await import(path)).deckFixture("a", "decks-slow");
+      const w = window as unknown as Hooks & Record<string, Promise<void>>;
+      // Each arm() makes the next list write and rename wait for a release.
+      w.__arm = () => {
+        w.__listDone = false;
+        w.__renameApplied = false;
+        w.__holdRename = true;
+        w.__listGate = new Promise<void>((r) => {
+          w.__listRelease = r;
+        });
+        w.__renameGate = new Promise<void>((r) => {
+          w.__renameRelease = r;
+        });
+      };
+      w.__holdRename = false;
+      w.__renameRaw = api.renameDeck.bind(api);
+      const write = api.changeDeckList,
+        rename = api.renameDeck;
+      api.changeDeckList = async (input: unknown, options: unknown) => {
+        if (w.__holdRename) await w.__listGate;
+        const result = await write(input, options);
+        w.__listDone = true;
+        return result;
+      };
+      api.renameDeck = async (input: unknown, options: unknown) => {
+        const result = await rename(input, options);
+        w.__renameApplied = true;
+        if (w.__holdRename) await w.__renameGate;
+        return result;
+      };
+    });
+    const call = (name: "__arm" | "__listRelease" | "__renameRelease") =>
+      page.evaluate((n) => (window as unknown as Hooks)[n](), name);
+    const start = async (name: string) => {
+      await page.getByRole("button", { name: "Rename", exact: true }).click();
+      const dialog = page.getByRole("dialog", {
+        name: "Rename Deck",
+        exact: true,
+      });
+      await dialog.getByLabel("Deck name").fill(name);
+      await dialog
+        .getByRole("button", { name: "Rename Deck", exact: true })
+        .click();
+      await expect(dialog.getByLabel("Deck name")).toBeDisabled();
+      return dialog;
+    };
+    const addInLibrary = async () => {
+      await page.getByRole("tab", { name: "Library", exact: true }).click();
+      await page
+        .getByRole("button", { name: "Add Ember Scout Standard", exact: true })
+        .click();
+      await page.getByRole("tab", { name: /^Deck/ }).click();
+    };
+    const elsewhere = (version: number) =>
+      page.evaluate(async (version) => {
+        await (window as unknown as Hooks).__renameRaw(
+          { id: "deck-1", name: `Elsewhere ${version}`, version },
+          {
+            signal: new AbortController().signal,
+            idempotencyKey: crypto.randomUUID(),
+          }
+        );
+      }, version);
+    // 1. The collector's own rename: a list write delivers the version it
+    //    produced while the rename is still returning, and is not mistaken
+    //    for a change elsewhere.
+    await call("__arm");
+    await addInLibrary();
+    let dialog = await start("Own rename");
+    await page.waitForFunction(
+      () => (window as unknown as Hooks).__renameApplied
+    );
+    await call("__listRelease");
+    await page.waitForFunction(() => (window as unknown as Hooks).__listDone);
+    await expect(dialog.getByLabel("Deck name")).toBeDisabled();
+    await expect(
+      dialog.getByText("This Deck was renamed elsewhere.")
+    ).toHaveCount(0);
+    await call("__renameRelease");
+    await expect(
+      page.getByRole("heading", { name: "Own rename", exact: true })
+    ).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    // 2. Another rename lands while the collector's is still returning, so the
+    //    change cannot be attributed to it: the draft stays and focus returns.
+    await call("__arm");
+    await addInLibrary();
+    dialog = await start("Mid-flight draft");
+    await page.waitForFunction(
+      () => (window as unknown as Hooks).__renameApplied
+    );
+    await elsewhere(3);
+    await call("__listRelease");
+    await page.waitForFunction(() => (window as unknown as Hooks).__listDone);
+    await call("__renameRelease");
+    await expect(
+      dialog.getByText("This Deck was renamed elsewhere.")
+    ).toBeVisible();
+    await expect(dialog.getByLabel("Deck name")).toHaveValue(
+      "Mid-flight draft"
+    );
+    await expect(dialog.getByLabel("Deck name")).toBeEnabled();
+    await expect(dialog.getByLabel("Deck name")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    // 3. A stale rename: someone else renamed first. The draft stays, the Deck
+    //    reloads and focus returns to the field.
+    await page.evaluate(() => {
+      (window as unknown as Hooks).__holdRename = false;
+    });
+    void elsewhere(4);
+    dialog = await start("Stale draft");
+    await expect(
+      dialog.getByText("This Deck was renamed elsewhere.")
+    ).toBeVisible({ timeout: 15000 });
+    await expect(dialog.getByLabel("Deck name")).toHaveValue("Stale draft");
+    await expect(dialog.getByLabel("Deck name")).toBeFocused();
+  });
   test(`keyboard Deck creation and tab navigation at ${width}`, async ({
     page,
   }) => {
