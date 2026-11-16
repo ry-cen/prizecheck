@@ -2,7 +2,7 @@
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
-import { ToastProvider, useToast } from "../ui/Toast";
+import { TOAST_LIFETIME_MS, ToastProvider, useToast } from "../ui/Toast";
 import { useUndoToast } from "./UndoToast";
 import type { ToastState } from "./useInventoryActions";
 let root: ReturnType<typeof createRoot>,
@@ -121,4 +121,28 @@ test("re-show on return is never checked", async () => {
   await render();
   expect(element.textContent).toContain("Restored offer");
   expect(superseded).not.toHaveBeenCalled();
+});
+
+test("a confirmation with no Undo leaves after its time and Collection forgets it, so it is not drawn again; a sticky failure stays", async () => {
+  vi.useFakeTimers();
+  try {
+    await render();
+    expect(element.textContent).toContain("Restored offer");
+    await act(async () => vi.advanceTimersByTime(TOAST_LIFETIME_MS));
+    expect(element.textContent).not.toContain("Restored offer");
+    expect(superseded).toHaveBeenCalledExactlyOnceWith(1);
+    state = {
+      id: 2,
+      message: "Undo unavailable. Refresh before continuing.",
+      entry: null,
+      unavailable: true,
+      sticky: true,
+    };
+    await render();
+    await act(async () => vi.advanceTimersByTime(TOAST_LIFETIME_MS * 3));
+    expect(element.textContent).toContain("Refresh before continuing.");
+    expect(superseded).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });

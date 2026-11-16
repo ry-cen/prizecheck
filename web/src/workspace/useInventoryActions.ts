@@ -78,6 +78,9 @@ export type ToastState = {
   unavailable: boolean;
   /** The collector acted on the toast (Undo, Dismiss Undo): its first usable button takes focus. */
   focus?: boolean;
+  /** A failure or outcome with no Undo to press that has no other home: it stays until dismissed or replaced,
+   * where a plain confirmation leaves on its own. */
+  sticky?: boolean;
 };
 
 type Options = {
@@ -901,6 +904,7 @@ export function useInventoryActions({
         message: "Undo unavailable. Refresh before continuing.",
         entry: null,
         unavailable: true,
+        sticky: true,
       });
       return;
     }
@@ -967,6 +971,7 @@ export function useInventoryActions({
           entry: entries[0] ?? null,
           unavailable: false,
           focus: true,
+          sticky: true,
         });
       } else if (!(cause instanceof MoveError) || cause.status >= 500) {
         // Unknown outcome (no response or a server error): the same key makes a retry apply once.
@@ -982,6 +987,7 @@ export function useInventoryActions({
           entry: null,
           unavailable: false,
           focus: true,
+          sticky: true,
         });
         live.current.reloadGallery();
         void live.current.reloadTree();
@@ -1007,6 +1013,7 @@ export function useInventoryActions({
         message: "Undo unavailable. Refresh before continuing.",
         entry: null,
         unavailable: true,
+        sticky: true,
       });
       return;
     }
@@ -1070,6 +1077,7 @@ export function useInventoryActions({
               {
                 ...current,
                 message: "Couldn't dismiss this Undo. Try again.",
+                sticky: true,
               },
               turn.since
             );
@@ -1150,6 +1158,7 @@ export function useInventoryActions({
         unavailable: failure.mixed
           ? false
           : (toastLive.current?.unavailable ?? false),
+        sticky: true,
       });
       // The bar and Actions unmount with the selection; focus would fall to <body>.
       focusAfter.current = "heading";

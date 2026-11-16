@@ -290,6 +290,7 @@ function ShellFrame({
     if (!(await onSignOut()))
       toast.show({
         message: "Couldn't sign out. Check your connection and try again.",
+        sticky: true,
       });
   }
   // The skip link moves focus to the shown page's heading.

@@ -117,7 +117,7 @@ export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
   useEffect(() => {
     if (target === null || cards.length || busyRef.current) return;
     if (error) {
-      toastId.current = kit.show({ message: error, focus: true });
+      toastId.current = kit.show({ message: error, focus: true, sticky: true });
       setError("");
     }
     setTarget(null);
@@ -190,6 +190,7 @@ export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
               message:
                 "Undo unavailable: these copies have moved since they were put away, so nothing was restored.",
               focus: true,
+              sticky: true,
             });
             live.current.onChanged();
           } else if (code === "UNDO_NOT_NEWEST") {
@@ -197,6 +198,7 @@ export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
               message:
                 "Undo unavailable: your collection changed since, so nothing was restored.",
               focus: true,
+              sticky: true,
             });
             live.current.onChanged();
           } else if (code === "REPLAY_OUTCOME_UNAVAILABLE") {
@@ -204,15 +206,21 @@ export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
               message:
                 "Undo may already have finished. The Deck now shows where your cards are.",
               focus: true,
+              sticky: true,
             });
             live.current.onChanged();
           } else if (code === "UNDO_EXPIRED" || code === "UNDO_NOT_FOUND") {
-            show({ message: "That Undo is no longer available.", focus: true });
+            show({
+              message: "That Undo is no longer available.",
+              focus: true,
+              sticky: true,
+            });
             live.current.onChanged();
           } else {
             show({
               message: "Undo couldn't be completed. Nothing was restored.",
               focus: true,
+              sticky: true,
             });
           }
         } finally {

@@ -75,6 +75,9 @@ export function useUndoToast({
             }
           : undefined,
       onDismiss: () => live.current.onClose(),
+      // A confirmation with no Undo leaves on its own; Collection forgets it too, so it isn't drawn again on return.
+      sticky: toast.sticky,
+      onExpire: () => live.current.onSuperseded(toast.id),
       focus: !!toast.focus && toast.id > focused.current,
     };
     if (toast.focus) focused.current = Math.max(focused.current, toast.id);

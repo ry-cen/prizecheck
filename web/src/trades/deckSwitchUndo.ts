@@ -63,6 +63,7 @@ export function offerSwitchUndo(
               cause.code === "STALE_DECK_LIST"
                 ? `Can't undo: ${deck?.deck_name ?? "a Deck"} changed.`
                 : "That Undo is no longer available.",
+            sticky: true,
           });
         } else
           toast.update(

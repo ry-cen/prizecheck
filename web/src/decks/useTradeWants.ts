@@ -137,6 +137,7 @@ export function useTradeWants(onRulesChanged: () => void): TradeWantsApi {
     } catch {
       kit.show({
         message: "That choice couldn't be saved. Please try again.",
+        sticky: true,
       });
     } finally {
       if (mounted.current) {

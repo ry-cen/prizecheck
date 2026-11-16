@@ -174,7 +174,7 @@ export function TradeReportReview({
       onDecided();
       await load();
     } catch (error) {
-      toast.show({ message: failure(error) });
+      toast.show({ message: failure(error), sticky: true });
       if (error instanceof SocialError && error.code === "REPORT_DECIDED")
         onDecided();
       await load();
