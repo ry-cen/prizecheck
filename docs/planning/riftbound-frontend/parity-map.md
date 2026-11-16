@@ -75,7 +75,7 @@ Contract column:
 | Location create, rename, move, delete (Collection sidebar `+` and gear) | partial: **WP3 fixture commands** | verified (`api/app/location_tree.py`), fixture store | Unsorted opens only a neutral message through the shared row tools; the recorded CONTEXT/code conflict needs an owner decision. The `create_unsorted_child` conversion is left out for the same reason. |
 | Hidden Locations and For trade (Location settings) | missing | gated | Friends and Trading capabilities; no Riftbound social backend. |
 | Borrowed and Lent entries | missing | gated | Loans backend and social graph. |
-| Decks list, Deck editor, Library (`/decks`, `/decks/<id>`) | missing | gated / candidate fixture slice | #663. The deck shape and the section and count rules are unverified. A fixture slice needs grounding of the generic Deck List operations first (isolated check in progress). Formats, legality, readiness, prices, publishing, Gather and Buy missing are never invented. |
+| Decks list, Deck editor, Library (`/decks`, `/decks/<id>`) | partial (fixture): #663 WP1 | verified generic semantics, provisional fixture contract | See decks-slice.md. Real Riftbound Deck shape/routes remain #534 / owner. Game sections, counts and targets remain gated. |
 | Want List, Pick List, Trade wants (`/decks/want-list`) | missing | gated | #663 requires actual backend semantics. |
 | Published Decks and Discover (public routes) | missing | gated | Publishing is excluded by #663. |
 | Deck import and export, Pokémon TCG Live export | missing | intentional difference / gated | Excluded by #662 and #663. |
@@ -116,3 +116,35 @@ Reference SHA: M9 `0d22c23cea23277a1a43d86efadc60043c8ff99c` (saved PNGs, read-o
 | Unsorted gate | LocationWrites.tsx | Shared props cannot suppress individual row tools. Both open a dialog titled Unsorted with “Unsorted's Locations can't be changed here.” and no actions. Nested Unsorted and its conversion remain an owner decision. |
 
 Earlier WP1/WP2 deferred Location rows are superseded by this partial WP3 coverage. No live API, authentication, storage or network behavior is claimed. See collection-slice.md for verified core semantics and contract corrections.
+
+
+## Decks WP1 surfaces
+
+Reference: frozen M9 `0d22c23cea23277a1a43d86efadc60043c8ff99c`, saved PNGs only. Paths below are under `web/src/games/riftbound/`. This fixture slice does not satisfy #663 real-API criteria.
+
+| M9 surface | Riftbound file | Status |
+| --- | --- | --- |
+| Desktop/phone navigation | RiftboundApp.tsx | Collection, Decks, Catalog; Layers icon; aria-current. |
+| Desktop/phone Decks index | DecksView.tsx | Your Decks, name/create, neutral cover cards and counts without target. |
+| Deck header and bottom actions | DecksView.tsx | All Decks, rename, confirmed delete to Unsorted; unsupported bottom actions omitted. |
+| Deck tab | DecksView.tsx | Flat Deck List and three ownership counts; no game section policy. |
+| Library / builder | DecksView.tsx | Exact Edition search/add through CatalogReader; no Printing-only add. |
+| Copy sheet | DecksView.tsx | Quantity −/+ and actual per-Location Holdings; no price, cover, swap or Gather. |
+| Stale/save lifecycle | deckEdits.ts | Serialized/coalesced writes, same-key transient retry, stale reload/review, unmount guard. |
+| Collection Deck integration | CollectionWrites.tsx, LocationWrites.tsx, local/deckFixtures.ts | Move destination, shared Holdings, deletion merge; no ordinary Location management for Decks. |
+
+Gates and omissions (each remains outside WP1):
+
+- Riftbound Deck shape and routes (#534 / owner).
+- Core target_format default, which only allows standard/expanded/glc.
+- Sections, groups, counts, eligibility and targets (rules owner); no target such as /60.
+- Legality and readiness, formats.
+- Prices, “to complete”, Buy missing.
+- Publishing, Discover, Published Decks.
+- Want List, Pick List, Gather, Put away.
+- Printing-only add, which needs Printing→Edition selection.
+- Import, export, Replace list.
+- Cover policy.
+- Deck List Undo: grounded inverse batches but intentionally omitted from WP1; see decks-slice.md.
+- Lent presentation.
+- Spread/List view switching.

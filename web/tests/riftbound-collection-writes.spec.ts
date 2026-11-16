@@ -397,6 +397,9 @@ for (const width of [1280, 375]) {
     const move = page.getByRole("dialog", { name: "Move 1 copy", exact: true });
     await tabTo(page, move.getByRole("combobox", { name: "Location" }));
     await page.keyboard.press("End");
+    // The two Deck destinations follow the ordinary Locations in this fixture.
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
     await expect(move.getByRole("combobox", { name: "Location" })).toHaveValue(
       "5"
     );
@@ -541,5 +544,5 @@ test("desktop pagination clears the selection pill at the bottom", async ({
   });
   await next.click();
   await expect(results).toContainText("Page 2 of 2");
-  await expect(results.getByRole("listitem")).toHaveCount(12);
+  await expect(results.getByRole("listitem")).toHaveCount(14);
 });

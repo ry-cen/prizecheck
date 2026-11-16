@@ -285,7 +285,7 @@ for (const width of [1280, 375]) {
       page
         .getByRole("region", { name: "Collection results" })
         .getByRole("listitem")
-    ).toHaveCount(2);
+    ).toHaveCount(4);
     await expect(
       page.getByRole("button", { name: /Beacon Keeper/ }).first()
     ).toBeVisible();
@@ -298,8 +298,8 @@ for (const width of [1280, 375]) {
 }
 
 for (const [owner, pageNumber, expectedPage, tiles] of [
-  ["b", 2, 1, 2],
-  ["a", 9, 2, 12],
+  ["b", 2, 1, 4],
+  ["a", 9, 2, 14],
 ] as const) {
   test(`clamps owner ${owner} Collection page ${pageNumber}`, async ({
     page,

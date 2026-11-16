@@ -4,7 +4,9 @@ export type View = {
   query: Query;
   edition: string;
   home: boolean;
-  section?: "catalog" | "collection";
+  section?: "catalog" | "collection" | "decks";
+  deck?: string;
+  deckTab?: string;
   collection?: CollectionQuery;
 };
 export function parseView(hash: string): View {
@@ -17,9 +19,11 @@ export function parseView(hash: string): View {
     ...(p.has("section")
       ? {
           section:
-            p.get("section") === "collection"
-              ? ("collection" as const)
-              : ("catalog" as const),
+            p.get("section") === "decks"
+              ? ("decks" as const)
+              : p.get("section") === "collection"
+                ? ("collection" as const)
+                : ("catalog" as const),
           collection: {
             ...emptyCollectionQuery,
             location: p.get("location") ?? "all",
@@ -39,6 +43,12 @@ export function parseView(hash: string): View {
       type: p.get("type") ?? "",
       page: Number.isSafeInteger(raw) && raw > 0 ? raw : 1,
     },
+    ...(p.get("section") === "decks"
+      ? {
+          deck: p.get("deck") ?? "",
+          deckTab: p.get("deckTab") === "library" ? "library" : "deck",
+        }
+      : {}),
     edition: p.get("edition") ?? "",
     home: p.get("view") === "home",
   };
@@ -50,6 +60,9 @@ export function viewHash(view: View): string {
       ...(view.section
         ? {
             section: view.section,
+            ...(view.section === "decks"
+              ? { deck: view.deck ?? "", deckTab: view.deckTab ?? "deck" }
+              : {}),
             location: view.collection?.location ?? "all",
             collectionSearch: view.collection?.search ?? "",
             collectionPage: String(view.collection?.page ?? 1),

@@ -1,0 +1,310 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { deckFixture } from "./local/deckFixtures";
+import {
+  collectionFixtureStore,
+  collectionFixtureWriter,
+  resetCollectionFixtures,
+} from "./local/collectionFixtures";
+import { DeckEdits } from "./deckEdits";
+import {
+  DeckError,
+  ownership,
+  type DeckDetail,
+  type DeckWriter,
+} from "./decks";
+const signal = new AbortController().signal;
+const options = (idempotencyKey = crypto.randomUUID()) => ({
+  signal,
+  idempotencyKey,
+});
+beforeEach(() => {
+  resetCollectionFixtures();
+});
+describe("fixture Deck commands", () => {
+  it("sets exact Edition totals, removes zero lines, advances only list revision, and replays normalized batches", async () => {
+    const api = deckFixture("a");
+    const store = collectionFixtureStore("a");
+    const before = structuredClone(store);
+    const initial = (await api.deck("deck-1", signal))!;
+    const input = {
+      deckId: "deck-1",
+      listRevision: initial.listRevision,
+      changes: [
+        { editionId: "1", quantity: 3 },
+        { editionId: "4", quantity: 2 },
+      ],
+    };
+    const opt = options();
+    await expect(
+      api.changeDeckList({ ...input, listRevision: 99, changes: [] }, options())
+    ).rejects.toMatchObject({ code: "NO_CHANGES" });
+    await expect(
+      api.changeDeckList(
+        {
+          ...input,
+          listRevision: 99,
+          changes: [{ editionId: "1", quantity: -1 }],
+        },
+        options()
+      )
+    ).rejects.toMatchObject({ code: "INVALID_QUANTITY" });
+    const result = await api.changeDeckList(input, opt);
+    expect(result.listRevision).toBe(2);
+    expect(result.lines.find((l) => l.edition.id === "4")?.quantity).toBe(2);
+    expect(
+      await api.changeDeckList(
+        {
+          changes: [...input.changes].reverse(),
+          listRevision: input.listRevision,
+          deckId: input.deckId,
+        },
+        opt
+      )
+    ).toEqual(result);
+    await expect(
+      api.changeDeckList(
+        { ...input, changes: [{ editionId: "1", quantity: 8 }] },
+        opt
+      )
+    ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
+    await expect(api.changeDeckList(input, options())).rejects.toMatchObject({
+      code: "STALE_DECK_LIST",
+    });
+    const removed = await api.changeDeckList(
+      {
+        deckId: "deck-1",
+        listRevision: 2,
+        changes: [{ editionId: "4", quantity: 0 }],
+      },
+      options()
+    );
+    expect(removed.lines.some((l) => l.edition.id === "4")).toBe(false);
+    expect(store).toEqual(before);
+  });
+  it("permits increasing and decreasing a retained line but refuses creating it again", async () => {
+    const api = deckFixture("a");
+    let revision = 1;
+    for (const quantity of [3, 1, 0]) {
+      const result = await api.changeDeckList(
+        {
+          deckId: "deck-1",
+          listRevision: revision,
+          changes: [{ editionId: "retained", quantity }],
+        },
+        options()
+      );
+      expect(
+        result.lines.find((l) => l.edition.id === "retained")?.quantity ?? 0
+      ).toBe(quantity);
+      revision = result.listRevision;
+    }
+    await expect(
+      api.changeDeckList(
+        {
+          deckId: "deck-1",
+          listRevision: revision,
+          changes: [{ editionId: "retained", quantity: 1 }],
+        },
+        options()
+      )
+    ).rejects.toMatchObject({ code: "EDITION_UNAVAILABLE" });
+  });
+  it("counts ownership per exact Edition, with no Loans", async () => {
+    expect(ownership(4, 2, 1)).toEqual({
+      inDeck: 2,
+      elsewhere: 1,
+      notOwned: 1,
+    });
+    expect(ownership(2, 5, 6)).toEqual({
+      inDeck: 2,
+      elsewhere: 0,
+      notOwned: 0,
+    });
+    const deck = (await deckFixture("a").deck("deck-1", signal))!;
+    expect(deck.lines.find((l) => l.edition.id === "1")).toMatchObject({
+      inDeck: 2,
+      elsewhere: 0,
+      notOwned: 0,
+    });
+    expect(deck.lines.find((l) => l.edition.id === "2")).toMatchObject({
+      inDeck: 0,
+      elsewhere: 2,
+      notOwned: 2,
+    });
+    expect(deck.lines.find((l) => l.edition.id === "3")).toMatchObject({
+      inDeck: 0,
+      elsewhere: 0,
+      notOwned: 2,
+    });
+  });
+  it("requires version/name confirmation and merges deleted holdings into Unsorted once", async () => {
+    const api = deckFixture("a");
+    const input = { id: "deck-1", confirmName: "First Light", version: 1 };
+    const opt = options();
+    await expect(
+      api.deleteDeck({ ...input, version: 9 }, options())
+    ).rejects.toMatchObject({ code: "STALE_LOCATION" });
+    await expect(
+      api.deleteDeck({ ...input, confirmName: "Wrong" }, options())
+    ).rejects.toMatchObject({ code: "LOCATION_NAME_CONFIRMATION_MISMATCH" });
+    const result = await api.deleteDeck(input, opt);
+    expect(await api.deleteDeck(input, opt)).toEqual(result);
+    expect(await api.deck(input.id, signal)).toBeNull();
+    const store = collectionFixtureStore("a");
+    expect(
+      store.rows.find((r) => r.locationId === "1" && r.edition.id === "1")
+        ?.quantity
+    ).toBe(5);
+    expect(store.rows.some((r) => r.locationId === input.id)).toBe(false);
+  });
+  it("accepts WP2 Move into a Deck and recomputes its in-Deck ownership", async () => {
+    const api = deckFixture("a");
+    const writer = collectionFixtureWriter("a");
+    await api.changeDeckList(
+      {
+        deckId: "deck-1",
+        listRevision: 1,
+        changes: [{ editionId: "1", quantity: 4 }],
+      },
+      options()
+    );
+    await writer.move(
+      {
+        items: [
+          { editionId: "1", sourceId: "1", quantity: 1, expectedVersion: 1 },
+        ],
+        destinationId: "deck-1",
+      },
+      options()
+    );
+    expect(
+      (await api.deck("deck-1", signal))?.lines.find(
+        (l) => l.edition.id === "1"
+      )
+    ).toMatchObject({ quantity: 4, inDeck: 3, elsewhere: 1, notOwned: 0 });
+  });
+  it("isolates owners with colliding ids and rejects duplicate names", async () => {
+    const a = deckFixture("a"),
+      b = deckFixture("b");
+    const bBefore = await b.deck("deck-1", signal);
+    await a.renameDeck(
+      { id: "deck-1", name: "Renamed", version: 1 },
+      options()
+    );
+    expect(await b.deck("deck-1", signal)).toEqual(bBefore);
+    await expect(
+      a.createDeck({ name: " renamed " }, options())
+    ).rejects.toMatchObject({ code: "LOCATION_NAME_CONFLICT" });
+    const created = await a.createDeck({ name: "Fresh" }, options());
+    expect((await a.deck(created.location.id, signal))?.listRevision).toBe(1);
+  });
+});
+describe("serialized Deck edits", () => {
+  const detail: DeckDetail = {
+    location: {
+      id: "deck",
+      name: "Deck",
+      kind: "deck",
+      parent_id: null,
+      depth: 1,
+      version: 1,
+    },
+    listRevision: 1,
+    lines: [],
+  };
+  it("coalesces a burst into one next write and uses the returned revision", async () => {
+    const resolves: ((d: DeckDetail) => void)[] = [];
+    const change = vi.fn(
+      (
+        _input: Parameters<DeckWriter["changeDeckList"]>[0],
+        _options: Parameters<DeckWriter["changeDeckList"]>[1]
+      ) => new Promise<DeckDetail>((resolve) => resolves.push(resolve))
+    );
+    const writer = {
+      owner: "a",
+      changeDeckList: change,
+    };
+    const edits = new DeckEdits(detail, writer, () => {});
+    edits.adjust("1", 1);
+    edits.adjust("1", 1);
+    edits.adjust("1", 1);
+    expect(change).toHaveBeenCalledTimes(1);
+    edits.acceptRead({ ...detail, listRevision: 9 });
+    expect(edits.detail.listRevision).toBe(1);
+    resolves[0]({ ...detail, listRevision: 2 });
+    await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(2));
+    expect(change.mock.calls[1]).toBeDefined();
+    expect(change).toHaveBeenLastCalledWith(
+      {
+        deckId: "deck",
+        listRevision: 2,
+        changes: [{ editionId: "1", quantity: 3 }],
+      },
+      expect.anything()
+    );
+    resolves[1]({ ...detail, listRevision: 3 });
+    await vi.waitFor(() => expect(edits.busy).toBe(false));
+    edits.acceptRead({ ...detail, listRevision: 4 });
+    expect(edits.detail.listRevision).toBe(4);
+    edits.dispose();
+  });
+  it("keeps the same payload/key after failure and ignores a late completion after unmount", async () => {
+    let resolve!: (d: DeckDetail) => void;
+    const change = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementation(
+        () =>
+          new Promise<DeckDetail>((r) => {
+            resolve = r;
+          })
+      );
+    const changed = vi.fn();
+    const edits = new DeckEdits(
+      detail,
+      { owner: "a", changeDeckList: change },
+      changed
+    );
+    edits.adjust("1", 1);
+    await vi.waitFor(() => expect(edits.error).toContain("Unable"));
+    edits.retry();
+    expect(change.mock.calls[1]).toEqual(change.mock.calls[0]);
+    edits.dispose();
+    changed.mockClear();
+    resolve({ ...detail, listRevision: 2 });
+    await Promise.resolve();
+    expect(changed).not.toHaveBeenCalled();
+    expect(edits.detail.listRevision).toBe(1);
+  });
+});
+
+it("retains unambiguous stale intent at the new revision and drops intent when quantities changed", async () => {
+  const initial = (await deckFixture("a").deck("deck-1", signal))!;
+  for (const concurrent of [false, true]) {
+    const fresh = structuredClone(initial);
+    fresh.listRevision = 2;
+    if (concurrent) fresh.lines[0].quantity++;
+    const change = vi
+      .fn<DeckWriter["changeDeckList"]>()
+      .mockRejectedValueOnce(new DeckError("STALE_DECK_LIST"))
+      .mockResolvedValue({ ...fresh, listRevision: 3 });
+    const edits = new DeckEdits(
+      initial,
+      { owner: "a", changeDeckList: change },
+      () => {}
+    );
+    edits.reload = async () => fresh;
+    edits.adjust(initial.lines[0].edition.id, 1);
+    await vi.waitFor(() =>
+      expect(edits.error).toContain("This Deck changed somewhere else")
+    );
+    expect(edits.detail.listRevision).toBe(2);
+    expect(edits.busy).toBe(!concurrent);
+    if (!concurrent) {
+      edits.retry();
+      await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(2));
+      expect(change.mock.calls[1][0].listRevision).toBe(2);
+    }
+    edits.dispose();
+  }
+});
