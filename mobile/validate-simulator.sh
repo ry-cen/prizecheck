@@ -3,8 +3,10 @@
 set -euo pipefail
 simulator_id=""
 fixture_pid=""
+native_pid=""
 cleanup() {
   if [ -n "$fixture_pid" ]; then kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true; fi
+  if [ -n "$native_pid" ]; then kill "$native_pid" 2>/dev/null || true; wait "$native_pid" 2>/dev/null || true; fi
   if [ -n "$simulator_id" ]; then
     xcrun simctl shutdown "$simulator_id" || true
     xcrun simctl delete "$simulator_id" || true
@@ -38,6 +40,24 @@ PY
 # Assert the fixture still has only a loopback listener; do not alter ATS or network settings.
 lsof -nP -iTCP:4319 -sTCP:LISTEN
 test "$(lsof -nP -a -p "$fixture_pid" -iTCP:4319 -sTCP:LISTEN -Fn | sed -n 's/^n//p')" = "127.0.0.1:4319"
+# The native sign-in stub: in-memory, no credentials, loopback 4320 only.
+node mobile/native-fixture.mjs > .scratch/ios-native-fixture.log 2>&1 &
+native_pid=$!
+python3 - <<'PY'
+import time, urllib.request
+until = time.monotonic() + 15
+while True:
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:4320/auth/native/start?challenge=' + 'a' * 43 + '&state=' + 'b' * 43, timeout=1) as response:
+            assert response.status == 200
+        break
+    except OSError:
+        if time.monotonic() >= until:
+            raise
+        time.sleep(0.1)
+PY
+lsof -nP -iTCP:4320 -sTCP:LISTEN
+test "$(lsof -nP -a -p "$native_pid" -iTCP:4320 -sTCP:LISTEN -Fn | sed -n 's/^n//p')" = "127.0.0.1:4320"
 set -o pipefail
 xcodebuild -project mobile/ios/App/App.xcodeproj -scheme FixtureValidation \
   -configuration Debug -destination "platform=iOS Simulator,id=$simulator_id" \

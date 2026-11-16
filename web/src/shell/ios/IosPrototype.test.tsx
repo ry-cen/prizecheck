@@ -274,3 +274,138 @@ it("shows no message on a cold start while signed out", async () => {
   expect(host.textContent).not.toContain("Your session ended.");
   expect(host.textContent).not.toContain("Signed out.");
 });
+
+// Native mode: the gateway is configured and the plugin holds the credential.
+import type { NativeSignInPlugin } from "./nativeSignIn";
+function fakePlugin(
+  status: { configured: boolean; signedIn: boolean },
+  overrides: Partial<NativeSignInPlugin> = {}
+) {
+  return {
+    status: vi.fn(async () => status),
+    signIn: vi.fn(async () => ({ result: "signed-in" as const })),
+    collection: vi.fn(async () => ({
+      kind: "page" as const,
+      page: pageOf(["Bulbasaur"]),
+    })),
+    signOut: vi.fn(async () => {}),
+    ...overrides,
+  } satisfies NativeSignInPlugin;
+}
+async function mountNative(plugin: NativeSignInPlugin) {
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  await act(async () => root.render(<IosPrototype plugin={plugin} />));
+}
+it("keeps the fixture demo when the plugin says it is not configured", async () => {
+  await mountNative(fakePlugin({ configured: false, signedIn: false }));
+  expect(host.textContent).toContain("Demo with sample cards");
+  expect(host.textContent).toContain("Sign in with browser");
+});
+it("keeps the fixture demo when the plugin call fails, as in a web build", async () => {
+  await mountNative(
+    fakePlugin(
+      { configured: true, signedIn: false },
+      {
+        status: () => {
+          throw new Error("not implemented");
+        },
+      }
+    )
+  );
+  expect(host.textContent).toContain("Sign in with browser");
+});
+it("shows nothing but the shell until status resolves", async () => {
+  let release!: (value: { configured: boolean; signedIn: boolean }) => void;
+  const plugin = fakePlugin(
+    { configured: true, signedIn: false },
+    {
+      status: () =>
+        new Promise((done) => {
+          release = done;
+        }),
+    }
+  );
+  await mountNative(plugin);
+  expect(host.textContent).toBe("");
+  await act(async () => release({ configured: true, signedIn: false }));
+  expect(host.textContent).toContain("Sign in to see your Collection.");
+});
+it("signs in natively, shows the Collection and signs out", async () => {
+  const plugin = fakePlugin({ configured: true, signedIn: false });
+  await mountNative(plugin);
+  expect(host.textContent).toContain("Prizecheck");
+  expect(host.textContent).not.toContain("Demo with sample cards");
+  expect(host.textContent).toContain("Sign in to see your Collection.");
+  await click("Sign in");
+  expect(plugin.signIn).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain("Bulbasaur");
+  await click("Sign out");
+  expect(plugin.signOut).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain("Signed out.");
+  expect(host.textContent).not.toContain("Bulbasaur");
+  expect(host.textContent).toContain("Sign in to see your Collection.");
+});
+it("restores a signed-in session from status", async () => {
+  await mountNative(fakePlugin({ configured: true, signedIn: true }));
+  expect(host.textContent).toContain("Bulbasaur");
+  expect(host.textContent).toContain("Sign out");
+});
+it("says so when sign-in is cancelled or fails, and allows another try", async () => {
+  const results = ["cancelled", "error", "signed-in"] as const;
+  let calls = 0;
+  const plugin = fakePlugin(
+    { configured: true, signedIn: false },
+    { signIn: vi.fn(async () => ({ result: results[calls++] })) }
+  );
+  await mountNative(plugin);
+  await click("Sign in");
+  expect(host.textContent).toContain("Sign-in cancelled.");
+  await click("Sign in");
+  expect(host.textContent).toContain("Unable to sign in. Please try again.");
+  await click("Sign in");
+  expect(host.textContent).toContain("Bulbasaur");
+  expect(host.textContent).not.toContain("Unable to sign in");
+});
+it("treats a thrown sign-in as a failure", async () => {
+  await mountNative(
+    fakePlugin(
+      { configured: true, signedIn: false },
+      { signIn: () => Promise.reject(new Error("x")) }
+    )
+  );
+  await click("Sign in");
+  expect(host.textContent).toContain("Unable to sign in. Please try again.");
+});
+it("shows the session-ended message when a read is signed out", async () => {
+  await mountNative(
+    fakePlugin(
+      { configured: true, signedIn: true },
+      { collection: async () => ({ kind: "signed-out" as const }) }
+    )
+  );
+  expect(host.textContent).toContain("Your session ended. Sign in again.");
+  expect(host.textContent).toContain("Sign in to see your Collection.");
+});
+it("offers Try again, and Show more and Refresh, in native mode", async () => {
+  const reads = [
+    { kind: "unavailable" as const },
+    { kind: "page" as const, page: pageOf(["Bulbasaur", "Charmander"], "c2") },
+    { kind: "page" as const, page: pageOf(["Squirtle"]) },
+    { kind: "page" as const, page: pageOf(["Bulbasaur"]) },
+  ];
+  const plugin = fakePlugin(
+    { configured: true, signedIn: true },
+    { collection: vi.fn(async () => reads.shift()!) }
+  );
+  await mountNative(plugin);
+  expect(host.textContent).toContain("Couldn't load your Collection.");
+  await click("Try again");
+  expect(host.textContent).toContain("Charmander");
+  await click("Show more");
+  expect(plugin.collection).toHaveBeenLastCalledWith({ cursor: "c2" });
+  expect(host.textContent).toContain("Squirtle");
+  await click("Refresh");
+  expect(host.textContent).not.toContain("Squirtle");
+  expect(host.textContent).toContain("Bulbasaur");
+});

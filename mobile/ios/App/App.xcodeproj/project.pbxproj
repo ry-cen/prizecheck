@@ -25,6 +25,9 @@
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		F10000000000000000000001 = {isa = PBXBuildFile; fileRef = F10000000000000000000002; };
+		F20000000000000000000002 /* NativeSignInPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* NativeSignInPlugin.swift */; };
+		F20000000000000000000004 /* PrizecheckBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* PrizecheckBridgeViewController.swift */; };
+		F20000000000000000000006 /* NativeCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000005 /* NativeCredentialStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +44,9 @@
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		F10000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureUITests.swift; sourceTree = "<group>"; };
 		F10000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FixtureUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F20000000000000000000001 /* NativeSignInPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSignInPlugin.swift; sourceTree = "<group>"; };
+		F20000000000000000000003 /* PrizecheckBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrizecheckBridgeViewController.swift; sourceTree = "<group>"; };
+		F20000000000000000000005 /* NativeCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCredentialStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,6 +85,9 @@
 			isa = PBXGroup;
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
+				F20000000000000000000001 /* NativeSignInPlugin.swift */,
+				F20000000000000000000003 /* PrizecheckBridgeViewController.swift */,
+				F20000000000000000000005 /* NativeCredentialStore.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -178,6 +187,9 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				F20000000000000000000002 /* NativeSignInPlugin.swift in Sources */,
+				F20000000000000000000004 /* PrizecheckBridgeViewController.swift in Sources */,
+				F20000000000000000000006 /* NativeCredentialStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

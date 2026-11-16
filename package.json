@@ -10,7 +10,7 @@
     "check:bundle": ".venv/bin/python scripts/check_bundle_boundary.py",
     "build": "npm run check && vite build --config web/vite.config.ts",
     "test:auth": "vitest run",
-    "test:unit": "vitest run web/src --exclude \"**/*.local.test.ts\" --exclude \"**/*.models.test.ts\" && node --test mobile/fixture-browser.test.mjs",
+    "test:unit": "vitest run web/src --exclude \"**/*.local.test.ts\" --exclude \"**/*.models.test.ts\" && node --test mobile/fixture-browser.test.mjs mobile/native-fixture.test.mjs",
     "format:check": "prettier --check .",
     "test:api": "PYTHONPATH=api .venv/bin/pytest api/tests",
     "prepare": "husky",
@@ -26,7 +26,7 @@
     "build:ios": "tsc -p mobile/tsconfig.json && vite build --config web/vite-ios.config.ts",
     "ios:sync": "npm run build:ios && cap sync ios",
     "ios:fixture": "node mobile/fixture-browser.mjs",
-    "test:ios": "vitest run web/src/shell/ios && node --test mobile/fixture-browser.test.mjs"
+    "test:ios": "vitest run web/src/shell/ios && node --test mobile/fixture-browser.test.mjs mobile/native-fixture.test.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.6",
