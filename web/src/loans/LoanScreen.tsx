@@ -215,9 +215,14 @@ export function LoanScreen({
   }>();
   const retained = authority.command;
   const refreshAfterCommand = useRef(false);
-  // A refresh may have read the old Loan before waiting for its side data.
-  // Once a command settles, that refresh cannot replace the command's result.
+  // A refresh can finish after a command while carrying either older or newer terms.
   const readGeneration = useRef(0);
+  const displayedLoan = useRef<LoanView | null>(null);
+  function showLoan(loan: LoanView, side: LoanSide) {
+    // Track adoption synchronously, including commands not rendered yet.
+    displayedLoan.current = loan;
+    setLoad({ kind: "ready", loan, side });
+  }
   const commandPending = authority.pending || durable.fence.pending;
   const roundId = load.kind === "ready" ? load.loan.loan_id : null;
   const recovery = [
@@ -270,11 +275,20 @@ export function LoanScreen({
       ),
     ]).then(
       ([loan, side]) => {
-        if (controller.signal.aborted || generation !== readGeneration.current)
-          return;
+        if (controller.signal.aborted) return;
         if (ownsCommand()) {
           refreshAfterCommand.current = true;
           return;
+        }
+        if (generation !== readGeneration.current) {
+          const shown = displayedLoan.current;
+          if (!shown || shown.loan_id !== loan.loan_id) {
+            // Revisions order one round only. Resolve different rounds with one
+            // replacement refresh; its generation is current, so it cannot loop.
+            setAttempt((n) => n + 1);
+            return;
+          }
+          if (loan.revision <= shown.revision) return;
         }
         if (loanId !== loan.thread_id) {
           openedFromInbox(loanId, loan.thread_id);
@@ -293,7 +307,7 @@ export function LoanScreen({
           focusNext.current = "heading";
           focusInitialHeading.current = false;
         }
-        setLoad({ kind: "ready", loan, side });
+        showLoan(loan, side);
         setPromised(promiseStart(loan, side));
         setAnswerDate(loan.return_by ?? "");
       },
@@ -592,7 +606,7 @@ export function LoanScreen({
         if (!guard.live(tok)) return;
         focusNext.current = "heading";
         closeModes();
-        setLoad({ kind: "ready", loan: fresh, side: freshSide });
+        showLoan(fresh, freshSide);
         setPromised(promiseStart(fresh, freshSide));
         setMessage("");
       } catch {
@@ -703,7 +717,7 @@ export function LoanScreen({
       release();
       focusNext.current = "heading";
       closeModes();
-      setLoad({ kind: "ready", loan: next, side: nextSide });
+      showLoan(next, nextSide);
       setPromised(promiseStart(next, nextSide));
       refreshInbox();
       onLoanChanged();
@@ -1240,8 +1254,7 @@ export function LoanScreen({
                   read: getLoan,
                   readSide: getLoanSide,
                 },
-                (fresh, freshSide) =>
-                  setLoad({ kind: "ready", loan: fresh, side: freshSide })
+                (fresh, freshSide) => showLoan(fresh, freshSide)
               )
             )
           }

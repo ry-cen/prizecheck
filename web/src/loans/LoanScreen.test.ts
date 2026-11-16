@@ -1416,93 +1416,131 @@ it("ACCOUNT_CHANGED on Terms says who to sign in as and the Terms body carries t
   }, true);
 });
 
-it("a refresh started before take-back cannot restore an obsolete handover confirmation", async () => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
-    1000
-  );
-  vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
-    1000
-  );
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
-    new DOMRect(10, 10, 30, 30)
-  );
-  const confirmed: LoanView = {
-    ...loan,
-    thread_id: threadId,
-    role: "lender",
-    state: "accepted",
-    closed_reason: null,
-    closed_by: null,
-    you_confirmed_handover: true,
-    actions: ["take_back"],
-    revision: 4,
-  };
-  const undone: LoanView = {
-    ...confirmed,
-    you_confirmed_handover: false,
-    actions: ["confirm_handover"],
-    revision: 5,
-  };
-  let finishRead!: (value: LoanView) => void;
-  const oldRead = new Promise<LoanView>((resolve) => {
-    finishRead = resolve;
-  });
-  vi.mocked(getLoan)
-    .mockReset()
-    .mockResolvedValueOnce(confirmed)
-    .mockResolvedValueOnce(confirmed)
-    .mockReturnValueOnce(oldRead)
-    .mockReturnValueOnce(oldRead)
-    .mockResolvedValue(undone);
-  vi.mocked(getLoanSide).mockResolvedValue({
-    loan_id: "round",
-    deck: null,
-    can_promise: [],
-    picks: [],
-    suggested: [],
-  });
-  vi.mocked(takeBackHandover).mockResolvedValue(undone);
-  const host = document.createElement("div");
-  document.body.append(host);
-  const root = createRoot(host);
-  const button = (text: string) =>
-    [...host.querySelectorAll("button")].find((b) => b.textContent === text);
-  try {
-    await act(async () =>
-      root.render(
-        h(LoanScreen, {
-          loanId: threadId,
-          onCanonicalLoan: vi.fn(),
-          onLoanChanged: vi.fn(),
-          onAllLoans: vi.fn(),
-          onOpenDeck: vi.fn(),
-        })
-      )
+it.each(["older", "equal", "newer", "other_round"] as const)(
+  "a delayed %s refresh preserves the newest Loan after take-back without a read loop",
+  async (ordering) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+      1000
     );
-    await act(async () => button("Chat moderation completed")!.click());
-    expect(getLoan).toHaveBeenCalledTimes(4);
-    await act(async () =>
-      host
-        .querySelector<HTMLButtonElement>('[aria-label="More for this Loan"]')!
-        .click()
+    vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+      1000
     );
-    await act(async () =>
-      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-        .find((item) => item.textContent === "Take back my confirmation")!
-        .click()
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(10, 10, 30, 30)
     );
-    expect(takeBackHandover).toHaveBeenCalledOnce();
-    expect(button("Mark as handed over")).toBeDefined();
-    await act(async () => finishRead(confirmed));
-    expect(button("Mark as handed over")).toBeDefined();
-    expect(host.textContent).not.toContain("Waiting for Misty to confirm");
-    expect(toast.show).not.toHaveBeenCalled();
-  } finally {
-    await act(async () => root.unmount());
-    host.remove();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-    vi.clearAllMocks();
+    const confirmed: LoanView = {
+      ...loan,
+      thread_id: threadId,
+      role: "lender",
+      state: "accepted",
+      closed_reason: null,
+      closed_by: null,
+      you_confirmed_handover: true,
+      actions: ["take_back"],
+      revision: 4,
+    };
+    const undone: LoanView = {
+      ...confirmed,
+      you_confirmed_handover: false,
+      actions: ["confirm_handover"],
+      revision: 5,
+    };
+    const remote: LoanView = {
+      ...undone,
+      state: "closed",
+      closed_reason: "cancelled",
+      closed_by: "them",
+      actions: [],
+      revision: 6,
+      ...(ordering === "other_round"
+        ? { loan_id: "next-round", revision: 1 }
+        : {}),
+    };
+    const read =
+      ordering === "newer" || ordering === "other_round"
+        ? remote
+        : { ...confirmed, revision: ordering === "equal" ? 5 : 4 };
+    const side = {
+      loan_id: "round",
+      deck: null,
+      can_promise: [],
+      picks: [],
+      suggested: [],
+    };
+    let finishSide!: (value: Awaited<ReturnType<typeof getLoanSide>>) => void;
+    const heldSide = new Promise<Awaited<ReturnType<typeof getLoanSide>>>(
+      (resolve) => {
+        finishSide = resolve;
+      }
+    );
+    vi.mocked(getLoan)
+      .mockReset()
+      .mockResolvedValueOnce(confirmed)
+      .mockResolvedValueOnce(confirmed)
+      .mockResolvedValueOnce(read)
+      .mockResolvedValueOnce(read)
+      .mockResolvedValue(remote);
+    vi.mocked(getLoanSide)
+      .mockReset()
+      .mockResolvedValueOnce(side)
+      .mockReturnValueOnce(heldSide)
+      .mockResolvedValue(side);
+    vi.mocked(takeBackHandover).mockResolvedValue(undone);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const button = (text: string) =>
+      [...host.querySelectorAll("button")].find((b) => b.textContent === text);
+    try {
+      await act(async () =>
+        root.render(
+          h(LoanScreen, {
+            loanId: threadId,
+            onCanonicalLoan: vi.fn(),
+            onLoanChanged: vi.fn(),
+            onAllLoans: vi.fn(),
+            onOpenDeck: vi.fn(),
+          })
+        )
+      );
+      await act(async () => button("Chat moderation completed")!.click());
+      expect(getLoan).toHaveBeenCalledTimes(4);
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(
+            '[aria-label="More for this Loan"]'
+          )!
+          .click()
+      );
+      await act(async () =>
+        [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+          .find((item) => item.textContent === "Take back my confirmation")!
+          .click()
+      );
+      expect(takeBackHandover).toHaveBeenCalledOnce();
+      expect(button("Mark as handed over")).toBeDefined();
+      // The refresh has already read the remote revision; only its side data is delayed.
+      await act(async () => finishSide(side));
+      if (ordering === "newer" || ordering === "other_round") {
+        expect(host.querySelector("h1")?.textContent).toBe(
+          "Misty cancelled this Loan"
+        );
+        expect(button("Mark as handed over")).toBeUndefined();
+      } else {
+        expect(button("Mark as handed over")).toBeDefined();
+        expect(host.textContent).not.toContain("Waiting for Misty to confirm");
+      }
+      // Same-round revision checks need no replacement. Unordered rounds need just one.
+      await act(async () => {});
+      expect(getLoan).toHaveBeenCalledTimes(ordering === "other_round" ? 6 : 4);
+      expect(toast.show).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+      vi.clearAllMocks();
+    }
   }
-});
+);
