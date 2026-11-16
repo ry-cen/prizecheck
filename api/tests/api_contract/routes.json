@@ -763,6 +763,13 @@
   [
    "GET"
   ],
+  "/api/public/robots.txt",
+  "robots"
+ ],
+ [
+  [
+   "GET"
+  ],
   "/api/public/sitemap.xml",
   "sitemap"
  ],

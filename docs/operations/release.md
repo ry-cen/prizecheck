@@ -96,6 +96,7 @@ The configured origin can be HTTPS or loopback HTTP; control redirects are refus
 - `POST /__release/apply`, JSON `{"commit":"FULL_SHA"}`: verify the sealed artifact and database readiness, set RELEASE_COMMIT to the loaded commit (never an inherited stale value), actually load that auth/API/assets release, and return its commit only after readiness. Preserve and stop old processes safely.
 - `POST /__release/clear`, JSON `{}`: stop an unsuccessful initial runtime and return a null commit.
 - Normal `/`, built asset, `/auth/*`, and `/api/*` routes must reflect the current runtime and preserve public privacy/cache headers.
+- `/robots.txt` and `/sitemap.xml` answer from the API's `/api/public/robots.txt` and `/api/public/sitemap.xml` (never the SPA's `index.html`).
 
 Keep control endpoints private and authenticated; prevent unauthorized callers and serialize provider-side changes. Configure its artifact resolver to the same immutable store (or a verified equivalent object/image store). Supply a service-specific filesystem lock/shared release coordinator when more than one deploy host exists. TLS ingress, remote artifact distribution, provider credentials and actual CI attestation are adapter responsibilities, not domain-code changes.
 

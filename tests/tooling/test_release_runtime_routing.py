@@ -1,5 +1,6 @@
 """The local release adapter's static routing (scripts/release_runtime.py) mirrors deploy/docker/nginx.conf for the card
-scanner: scan.html at /collection/scan with COOP and COEP, COEP on /assets/ responses, and nothing else isolated."""
+scanner: scan.html at /collection/scan with COOP and COEP, COEP on /assets/ responses, and nothing else isolated. It also
+forwards /robots.txt and /sitemap.xml to the auth bundle as /api/public/robots.txt and /api/public/sitemap.xml."""
 from pathlib import Path
 import sys
 import tempfile
@@ -8,7 +9,7 @@ import types
 import unittest
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -27,14 +28,40 @@ class ReleaseRuntimeRoutingTest(unittest.TestCase):
         (assets / 'scan.html').write_text('<html>scanner')
         (assets / 'assets/a-1.mjs').write_text('export {}')
         (assets / 'assets/a.js').write_text('1')
+        cls.seen = []
+        cls.upstream = ThreadingHTTPServer(('127.0.0.1', 0), cls.upstream_handler())
+        threading.Thread(target=cls.upstream.serve_forever, daemon=True).start()
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), release_runtime.Handler)
         cls.server.key = 'k'
-        cls.server.runtime = types.SimpleNamespace(lock=threading.Lock(), current={'assets': assets})
+        cls.server.runtime = types.SimpleNamespace(lock=threading.Lock(), current={'assets': assets, 'auth': f'http://127.0.0.1:{cls.upstream.server_port}'})
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def upstream_handler(cls):
+        seen = cls.seen
+
+        class Upstream(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                seen.append((self.command, self.path))
+                body = b'upstream'
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            do_POST = do_GET
+
+        return Upstream
 
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.upstream.shutdown()
+        cls.upstream.server_close()
         cls.server.server_close()
         cls.temp.cleanup()
 
@@ -69,6 +96,25 @@ class ReleaseRuntimeRoutingTest(unittest.TestCase):
             self.assertEqual((status, body), (200, '<html>app'), path)
             self.assertIsNone(headers[COOP], path)
             self.assertIsNone(headers[COEP], path)
+
+    def test_the_crawler_files_are_the_apis_public_routes(self):
+        for path, target in (('/robots.txt', '/api/public/robots.txt'), ('/sitemap.xml', '/api/public/sitemap.xml')):
+            self.seen.clear()
+            for requested in (path, path + '?x=1'):
+                status, body, _ = self.get(requested)
+                self.assertEqual((status, body), (200, 'upstream'), requested)
+            self.assertEqual(self.seen, [('GET', target), ('GET', target + '?x=1')])
+
+    def test_the_crawler_files_take_get_only_and_nothing_else_changes(self):
+        self.seen.clear()
+        request = urllib.request.Request(f'http://127.0.0.1:{self.server.server_port}/robots.txt', data=b'x', method='POST')
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request, timeout=10)
+        caught.exception.close()
+        self.assertEqual(caught.exception.code, 405)
+        self.assertEqual(self.seen, [])
+        self.assertEqual(self.get('/definitely-not-a-route')[:2], (200, '<html>app'))
+        self.assertEqual(self.get('/scan.html')[0], 404)
 
 
 if __name__ == '__main__':

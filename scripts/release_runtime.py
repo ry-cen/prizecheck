@@ -147,6 +147,14 @@ class Handler(BaseHTTPRequestHandler):
             if bundle is None:
                 self.reply(503,b'{}')
                 return
+            # Mirrors deploy/docker/nginx.conf: the crawler files at the site root are the API's public routes.
+            crawler_files = {'/robots.txt':'/api/public/robots.txt','/sitemap.xml':'/api/public/sitemap.xml'}
+            crawler_path,_,crawler_query = self.path.partition('?')
+            if crawler_path in crawler_files:
+                if self.command != 'GET':
+                    self.reply(405,b'{}')
+                    return
+                self.path = crawler_files[crawler_path]+('?'+crawler_query if crawler_query else '')
             if self.path.startswith(('/api/','/auth/')):
                 length = int(self.headers.get('Content-Length','0'))
                 body = self.rfile.read(length) if length else None
