@@ -38,12 +38,14 @@ Each stays outside this slice:
 - Deck List Undo: inverse-batch behavior **is grounded** in `api/app/games/pokemon/decks/routes.py:273` and `web/src/decks/useDeckListEdits.ts:147`, but omitted as an explicit WP1 scope boundary; no inventory Undo is reused.
 - Lent presentation.
 - Spread/List view switching (M9 presentation omitted in WP1).
+- Surplus presentation is omitted: core computes owned copies held beyond the list with `beyond_list` (`api/app/core/decks/ownership.py:129`). These copies remain visible in Collection, including after a line is removed at zero; WP1's Deck tab only displays listed Editions.
+- Competition warning (“Other Decks count the same spare copies”, M9 `j4-phone-deck.png`) is omitted. Core compares other Decks' counted copies with spare copies (`api/app/core/decks/ownership.py:180-186`). WP1 makes no exclusive allocation claim and adds no competition UI.
 
 ## Composition and edit lifecycle
 
 Local entry provides `?decks=decks-empty|decks-failure|decks-slow|deck-stale`; `?owner=b` has distinct data with colliding Deck/Edition/Location ids. The Collection scenario remains independently selectable. Data is memory-only. Keys include game and owner. Deck summaries show the Deck List total as “N cards in this Deck”, with no target.
 
-Index reads pause in the editor and refetch on return. An idle editor accepts a refreshed detail read; an in-flight or pending write retains its own state until resolved. Hashes carry section=decks, deck id and deckTab=deck|library. Back/Forward restores tab and Deck, with heading focus. Library uses the existing CatalogReader for exact Editions. Copy sheet uses neutral Dialog/Button primitives and per-Location holdings. List writes serialize per editor; clicks during a write coalesce into the next absolute-total batch at the returned revision. Transient failures retain payload/key. Stale reload uses Pokémon wording. If every pending Edition still has its baseline quantity, its pending absolute total is retained for an explicit retry at the new revision and a new key. If any changed, pending totals are discarded and review is required. Unmount aborts and guards late completions, with no success toast. No collector-facing diagnostic IDs or source metadata appear.
+Index reads pause in the editor and refetch on return. An idle editor accepts a refreshed detail read. While list writes are in flight or pending, `acceptRead` and `acceptLocation` merge newer Location metadata while preserving pending list intent. Rename applies its returned name/version immediately, and older reads cannot replace them. Hashes carry section=decks, deck id and deckTab=deck|library. Back/Forward restores tab and Deck, with heading focus. Library uses the existing CatalogReader for exact Editions. Copy sheet uses neutral Dialog/Button primitives and per-Location holdings. List writes serialize per editor; clicks during a write coalesce into the next absolute-total batch at the returned revision. Transient failures retain payload/key. EDITION_UNAVAILABLE drops only unchanged nonzero new-line totals from the refused batch, with no Retry for that intent. Unrelated sent or later queued changes survive, reload the list revision, and flush with a new key; a failed reload pauses only the kept work until a safe retry. Stale reload uses Pokémon wording. If every pending Edition still has its baseline quantity, its pending absolute total is retained for an explicit retry at the new revision and a new key. If any changed, pending totals are discarded and review is required. Unmount aborts and guards late completions, with no success toast. No collector-facing diagnostic IDs or source metadata appear.
 
 WP3 correction: if automatic Location reload after refusal fails, show “Unable to save this change” instead of claiming the list refreshed (`web/src/games/riftbound/LocationWrites.tsx`, refusal catch).
 
@@ -55,7 +57,6 @@ Reference correction: supplied `j6-phone-builder.png` actually depicts “Trade 
 
 Validation order mirrors core: names are cleaned before replay (`api/app/location_tree.py:318`, `api/app/deck_deletion.py:67`); batch shape/duplicate/quantity validation precedes owner lock, replay and list revision (`api/app/games/pokemon/decks/routes.py:250`). Unit assertions cover invalid batches combined with stale revisions.
 
-
 ## Core arrival-coverage correction
 
 Re-reading `migrations/core/000_baseline.sql:1143` (`deck_list_cover`), `:1218` (`deck_list_cover_holdings`) and the holding statement triggers at `:2813` and `:2817` established the inverse direction that the initial brief omitted: incoming Holdings can extend a Deck List. Departures never shrink it. With no Borrowed Copies, an arrival sets `max(listed, min(listed, held_before) + added)`. Filling an already-covered line leaves its revision unchanged; surplus cuts are preserved rather than listing every pre-existing physical copy. Insert and update transition-trigger phases each advance a growing Deck once, so a mixed upsert can advance it twice. This is generic core storage behavior, not a Riftbound construction count or target.
@@ -65,9 +66,3 @@ Re-reading `migrations/core/000_baseline.sql:1143` (`deck_list_cover`), `:1218` 
 Inventory revision changes refetch Deck reads without changing the same-Deck read key, so an idle editor updates ownership after the existing global Inventory Undo action. Pending list intent stays owned by its write queue. Unit cases cover mixed insert/update arrivals, replay and owner isolation, covered lines, surplus cuts, retained Editions and Inventory Undo. The browser journey moves an actual Collection copy into an empty Deck, then verifies its In this Deck count and the ownership refresh after Undo.
 
 Copy sheets and command dialogs close when history changes the editor tab. Removing a line at zero clears its opener state and focuses the Deck heading, preserving all Holdings. Browser coverage checks Back/Forward with a sheet open and removal of the retained line without a phantom sheet reopening.
-
-
-Decks WP1 review omissions:
-
-- Surplus presentation is omitted: core computes owned copies held beyond the list with `beyond_list` (`api/app/core/decks/ownership.py:129`). These copies remain visible in Collection, including after a line is removed at zero; WP1's Deck tab only displays listed Editions.
-- Competition warning (“Other Decks count the same spare copies”, M9 `j4-phone-deck.png`) is omitted. Core compares other Decks' counted copies with spare copies (`api/app/core/decks/ownership.py:180-186`). WP1 makes no exclusive allocation claim and adds no competition UI.
