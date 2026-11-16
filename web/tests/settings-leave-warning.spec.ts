@@ -13,7 +13,7 @@ for (const phone of [false, true]) {
       isMobile: phone,
       hasTouch: phone,
     });
-    test("unsaved Settings can be kept, discarded, reverted or saved", async ({
+    test("unsaved Settings survive navigation and warn only before reload", async ({
       page,
     }) => {
       const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -38,37 +38,17 @@ for (const phone of [false, true]) {
       await expect(name).toHaveValue(original);
       await name.fill("Ash K");
       await leave();
-      const dialog = page.getByRole("dialog", {
-        name: "Discard these Settings changes?",
-      });
-      await expect(dialog).toBeVisible();
-      await dialog.getByRole("button", { name: "Keep editing" }).click();
+      await expect(page).toHaveURL(/\/collection$/);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.goBack();
       await expect(name).toHaveValue("Ash K");
-      // A programmatic departure can start with body focused (for example after a sheet closes).
-      await page.evaluate(() => (document.activeElement as HTMLElement).blur());
-      await expect(page.locator("body")).toBeFocused();
-      await page
-        .getByRole("navigation", { name: "Main views" })
-        .getByRole("link", { name: "Collection", exact: true })
-        .evaluate((link) => (link as HTMLElement).click());
-      await expect(dialog).toBeVisible();
-      await dialog.getByRole("button", { name: "Keep editing" }).click();
-      await expect(
-        page.getByRole("heading", { level: 1, name: "Settings" })
-      ).toBeFocused();
       const warning = page.waitForEvent("dialog");
       void page.reload().catch(() => {});
       const prompt = await warning;
       expect(prompt.type()).toBe("beforeunload");
       await prompt.dismiss();
       await expect(name).toHaveValue("Ash K");
-      await leave();
-      await dialog
-        .getByRole("button", { name: "Discard", exact: true })
-        .click();
-      await expect(page).toHaveURL(/\/collection$/);
-      await page.goBack();
-      await expect(name).toHaveValue(original);
+      await name.fill(original);
       for (const [label, value] of [
         ["Handle", "ash_changed"],
         ["Zip code", "10001"],
@@ -77,16 +57,16 @@ for (const phone of [false, true]) {
         const saved = await field.inputValue();
         await field.fill(value);
         await leave();
-        await expect(dialog).toBeVisible();
-        await dialog.getByRole("button", { name: "Keep editing" }).click();
-        await expect(field).toHaveValue(value);
-        await leave();
-        await dialog
-          .getByRole("button", { name: "Discard", exact: true })
-          .click();
         await expect(page).toHaveURL(/\/collection$/);
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        const warning = page.waitForEvent("dialog");
+        void page.reload().catch(() => {});
+        const prompt = await warning;
+        expect(prompt.type()).toBe("beforeunload");
+        await prompt.dismiss();
         await page.goBack();
-        await expect(field).toHaveValue(saved);
+        await expect(field).toHaveValue(value);
+        await field.fill(saved);
       }
       const native: string[] = [];
       page.on("dialog", (d) => {
@@ -116,7 +96,7 @@ for (const phone of [false, true]) {
     });
     for (const field of ["Display Name", "Handle", "Zip code"] as const) {
       for (const editAgain of [false, true]) {
-        test(`${field}: delayed save after Discard ${editAgain ? "preserves a subsequent edit" : "returns clean"}`, async ({
+        test(`${field}: delayed save across navigation ${editAgain ? "preserves a subsequent edit" : "returns clean"}`, async ({
           page,
         }) => {
           const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -128,7 +108,6 @@ for (const phone of [false, true]) {
           await signInAsOwner(page, "/settings");
           const input = page.getByRole("textbox", { name: field, exact: true });
           await expect(input).toBeVisible();
-          const original = await input.inputValue();
           const tail = Array.from(
             { length: 10 },
             () => "bcdfghjklmnpqrstvwxz"[randomInt(20)]
@@ -185,20 +164,20 @@ for (const phone of [false, true]) {
               .getByRole("navigation", { name: "Main views" })
               .getByRole("link", { name: "Collection", exact: true })
               .click();
-          const dialog = page.getByRole("dialog", {
-            name: "Discard these Settings changes?",
-          });
           try {
             await input.fill(value);
             await button.click();
             await held;
             await leave();
-            await dialog
-              .getByRole("button", { name: "Discard", exact: true })
-              .click();
             await expect(page).toHaveURL(/\/collection$/);
+            await expect(page.getByRole("dialog")).toHaveCount(0);
+            const warning = page.waitForEvent("dialog");
+            void page.reload().catch(() => {});
+            const prompt = await warning;
+            expect(prompt.type()).toBe("beforeunload");
+            await prompt.dismiss();
             await page.goBack();
-            await expect(input).toHaveValue(original);
+            await expect(input).toHaveValue(value);
             if (editAgain) await input.fill(newer);
             const received = page.waitForResponse(
               (response) =>
@@ -221,18 +200,14 @@ for (const phone of [false, true]) {
             if (editAgain) await expect(button).toBeEnabled();
             else await expect(button).toBeDisabled();
             await leave();
+            await expect(page).toHaveURL(/\/collection$/);
+            await expect(page.getByRole("dialog")).toHaveCount(0);
+            await page.goBack();
+            await expect(input).toHaveValue(editAgain ? newer : value);
             if (editAgain) {
-              await expect(dialog).toBeVisible();
-              await dialog
-                .getByRole("button", { name: "Keep editing" })
-                .click();
-              await expect(input).toHaveValue(newer);
               await input.fill(value);
               await expect(button).toBeDisabled();
-              await leave();
             }
-            await expect(page).toHaveURL(/\/collection$/);
-            await expect(dialog).toHaveCount(0);
           } finally {
             release();
             await page.unroute(pattern);

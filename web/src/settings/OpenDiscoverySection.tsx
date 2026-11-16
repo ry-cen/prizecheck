@@ -38,10 +38,8 @@ type Load =
  */
 export function OpenDiscoverySection({
   onDirtyChange,
-  discardVersion = 0,
 }: {
   onDirtyChange?: (dirty: boolean) => void;
-  discardVersion?: number;
 }) {
   const headingId = useId();
   const helpId = useId();
@@ -56,22 +54,13 @@ export function OpenDiscoverySection({
   const currentDraft = useRef(draft);
   currentDraft.current = draft;
   const savedZip = load.kind === "ready" ? (load.settings.zip ?? "") : "";
-  const savedZipRef = useRef(savedZip);
-  savedZipRef.current = savedZip;
-  const pendingZip = useRef<number | null>(null);
+  const pendingZip = useRef(false);
   const edits = useRef(0);
-  const discarded = useRef({ generation: discardVersion, edits: 0 });
   const dirty =
-    load.kind === "ready" &&
-    (draft !== savedZip || pendingZip.current === discardVersion);
+    load.kind === "ready" && (draft !== savedZip || pendingZip.current);
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
-  useEffect(() => {
-    discarded.current = { generation: discardVersion, edits: edits.current };
-    setDraft(savedZipRef.current);
-  }, [discardVersion]);
-
   useEffect(() => {
     const controller = new AbortController();
     getDiscovery(controller.signal).then(
@@ -91,8 +80,7 @@ export function OpenDiscoverySection({
     if (pending) return;
     const submitted = currentDraft.current;
     const submittedEdits = edits.current;
-    const generation = discardVersion;
-    pendingZip.current = body.zip !== undefined ? generation : null;
+    pendingZip.current = body.zip !== undefined;
     setPending(true);
     setNotice("");
     setSaved("");
@@ -100,10 +88,8 @@ export function OpenDiscoverySection({
       const settings = await setDiscovery(body);
       setLoad({ kind: "ready", settings });
       if (
-        discarded.current.generation === generation
-          ? edits.current === submittedEdits &&
-            (body.zip !== undefined || submitted === savedZip)
-          : edits.current === discarded.current.edits
+        edits.current === submittedEdits &&
+        (body.zip !== undefined || submitted === savedZip)
       )
         setDraft(settings.zip ?? "");
       setSaved(done);
@@ -116,7 +102,7 @@ export function OpenDiscoverySection({
         setAttempt((n) => n + 1);
       else setNotice(discoveryMessage(cause));
     } finally {
-      pendingZip.current = null;
+      pendingZip.current = false;
       setPending(false);
     }
   }

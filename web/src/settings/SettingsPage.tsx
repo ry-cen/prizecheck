@@ -1,19 +1,9 @@
-import {
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { FirstReadContext, useFirstReadSettled } from "../shell/keptRead";
 import {
   SettingsNavigationScope,
   SETTINGS_LOADING_SECTIONS,
 } from "./settingsNavigation";
-import { useLeaveGuard } from "../shell/useRoute";
-import { Dialog } from "../ui/Dialog";
-import { Button } from "../ui/Button";
 import { PriceCredit } from "../ui/PriceCredit";
 import { PageHeader } from "../shell/PageHeader";
 import { SignInsSection } from "../shell/SignInsSection";
@@ -42,31 +32,10 @@ export function SettingsPage({
 }) {
   const [privacyDirty, setPrivacyDirty] = useState(false);
   const [discoveryDirty, setDiscoveryDirty] = useState(false);
-  const [discardVersion, setDiscardVersion] = useState(0);
-  const [asking, setAsking] = useState<{ leave: () => void } | null>(null);
-  const returnTo = useRef<HTMLElement | null>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  // Kept pages retain drafts while hidden; only leaving the document loses them.
   const boundary = useRef(false);
-  boundary.current = active && (privacyDirty || discoveryDirty);
-  const guard = useMemo(
-    () => ({
-      blocks: () => boundary.current,
-      ask: (leave: () => void) => {
-        const focused = document.activeElement;
-        returnTo.current =
-          focused instanceof HTMLElement &&
-          focused !== document.body &&
-          !focused.closest("dialog")
-            ? focused
-            : headingRef.current;
-        setAsking({ leave });
-      },
-    }),
-    []
-  );
-  useLeaveGuard(guard);
+  boundary.current = privacyDirty || discoveryDirty;
   useEffect(() => {
-    if (!active) setAsking(null);
     const warn = (event: BeforeUnloadEvent) => {
       if (!boundary.current) return;
       event.preventDefault();
@@ -74,7 +43,7 @@ export function SettingsPage({
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [active]);
+  }, []);
   const forward = useContext(SettingsNavigationScope);
   const [settled, setSettled] = useState<ReadonlySet<string>>(() => new Set());
   const report = useCallback<NonNullable<typeof forward>>(
@@ -106,56 +75,17 @@ export function SettingsPage({
     <SettingsNavigationScope.Provider value={report}>
       <FirstReadContext.Provider value={signInsSettled}>
         <main className="mx-auto box-border flex max-w-7xl flex-col gap-8 px-7 py-7 phone:px-4 phone:py-5 [&>*]:max-w-3xl">
-          <PageHeader title="Settings" headingRef={headingRef} />
+          <PageHeader title="Settings" />
           <WantListCountingSection />
           <PrivacySection
             onDirtyChange={setPrivacyDirty}
-            discardVersion={discardVersion}
             blocked={<BlockedSection active={active} />}
           >
             <HiddenLocationsSection active={active} />
             <ForTradeLocationsSection active={active} />
           </PrivacySection>
-          <OpenDiscoverySection
-            onDirtyChange={setDiscoveryDirty}
-            discardVersion={discardVersion}
-          />
+          <OpenDiscoverySection onDirtyChange={setDiscoveryDirty} />
           <SignInsSection active={active} email={email} />
-          <Dialog
-            open={asking !== null}
-            onClose={() => setAsking(null)}
-            title="Discard these Settings changes?"
-            closeLabel="Back to Settings"
-            returnFocus={returnTo}
-          >
-            <div className="flex flex-col gap-4">
-              <p className="m-0 text-body">
-                Your unsaved changes will be discarded.
-              </p>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Button
-                  data-autofocus
-                  variant="secondary"
-                  onClick={() => setAsking(null)}
-                >
-                  Keep editing
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => {
-                    if (!asking) return;
-                    const { leave } = asking;
-                    setDiscardVersion((version) => version + 1);
-                    boundary.current = false;
-                    setAsking(null);
-                    leave();
-                  }}
-                >
-                  Discard
-                </Button>
-              </div>
-            </div>
-          </Dialog>
           <PriceCredit className="phone:pb-tabbar" />
         </main>
       </FirstReadContext.Provider>

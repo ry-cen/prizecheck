@@ -20,7 +20,7 @@ vi.mock("../profile_generated", async (original) => ({
     invite_token: "token",
   }),
 }));
-it("reports dirty name and Handle, and clears reverted or discarded drafts", async () => {
+it("reports dirty name and Handle, and clears reverted drafts", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div");
   document.body.append(host);
@@ -28,9 +28,7 @@ it("reports dirty name and Handle, and clears reverted or discarded drafts", asy
   const changed = vi.fn();
   try {
     await act(async () =>
-      root.render(
-        h(PrivacySection, { onDirtyChange: changed, discardVersion: 0 })
-      )
+      root.render(h(PrivacySection, { onDirtyChange: changed }))
     );
     expect(changed).toHaveBeenLastCalledWith(false);
     for (const autocomplete of ["nickname", "username"]) {
@@ -69,12 +67,7 @@ vi.mock("../social_generated", async (original) => ({
 }));
 
 for (const field of ["name", "handle", "zip"] as const) {
-  for (const outcome of [
-    "newer edit",
-    "discard",
-    "edit after discard",
-    "failed discarded save",
-  ] as const) {
+  for (const outcome of ["unchanged", "newer edit", "failed save"] as const) {
     it(`${field}: pending save handles ${outcome}`, async () => {
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       const host = document.createElement("div");
@@ -147,41 +140,22 @@ for (const field of ["name", "handle", "zip"] as const) {
               new Event("submit", { bubbles: true, cancelable: true })
             )
         );
-        if (outcome !== "newer edit") {
-          await act(async () =>
-            root.render(
-              field === "zip"
-                ? h(OpenDiscoverySection, {
-                    onDirtyChange: changed,
-                    discardVersion: 1,
-                  })
-                : h(PrivacySection, {
-                    onDirtyChange: changed,
-                    discardVersion: 1,
-                  })
-            )
-          );
-          expect(input.value).toBe(original);
+        if (outcome === "unchanged") {
+          await act(async () => complete());
+          expect(input.value).toBe(field === "zip" ? "10002" : "changed");
           expect(changed).toHaveBeenLastCalledWith(false);
-          if (outcome === "failed discarded save") {
-            await act(async () => fail());
-            expect(input.value).toBe(original);
-            expect(changed).toHaveBeenLastCalledWith(false);
-            return;
-          }
-          if (outcome === "discard") {
-            await act(async () => complete());
-            expect(input.value).toBe(field === "zip" ? "10002" : "changed");
-            expect(
-              input.closest("form")!.querySelector("button")!.disabled
-            ).toBe(true);
-            expect(changed).toHaveBeenLastCalledWith(false);
-            return;
-          }
-        } else await edit(original);
+          return;
+        }
+        await edit(original);
         if (outcome === "newer edit")
           expect(changed).toHaveBeenLastCalledWith(true);
         await edit(field === "zip" ? "10003" : "newer");
+        if (outcome === "failed save") {
+          await act(async () => fail());
+          expect(input.value).toBe(field === "zip" ? "10003" : "newer");
+          expect(changed).toHaveBeenLastCalledWith(true);
+          return;
+        }
         await act(async () => complete());
         expect(input.value).toBe(field === "zip" ? "10003" : "newer");
         expect(changed).toHaveBeenLastCalledWith(true);
