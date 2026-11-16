@@ -191,7 +191,13 @@ export function DecksView({
               title="Create Deck"
               initialName={name}
               send={(value, options) =>
-                writer.createDeck({ name: value }, options)
+                writer.createDeck(
+                  { name: value },
+                  {
+                    signal: options.signal,
+                    idempotencyKey: options.idempotencyKey,
+                  }
+                )
               }
               close={() => setCreate(false)}
               done={(result) => {
@@ -533,13 +539,13 @@ function Editor({
             command.kind === "delete" ? detail.location.name : undefined
           }
           close={() => setCommand(null)}
-          send={(name, options) =>
+          send={(name, { version, ...options }) =>
             command.kind === "rename"
               ? writer.renameDeck(
                   {
                     id: detail.location.id,
                     name,
-                    version: detail.location.version,
+                    version: version ?? detail.location.version,
                   },
                   options
                 )
@@ -547,7 +553,7 @@ function Editor({
                   {
                     id: detail.location.id,
                     confirmName: name,
-                    version: detail.location.version,
+                    version: version ?? detail.location.version,
                   },
                   options
                 )
@@ -562,6 +568,20 @@ function Editor({
         />
       )}
     </>
+  );
+}
+/** Refusals the server returns without applying anything. Any other failure leaves the outcome unknown. */
+function definitive(e: unknown) {
+  return (
+    e instanceof DeckError &&
+    [
+      "STALE_LOCATION",
+      "INVALID_LOCATION_NAME",
+      "LOCATION_NAME_CONFLICT",
+      "LOCATION_NAME_CONFIRMATION_MISMATCH",
+      "DECK_NOT_FOUND",
+      "IDEMPOTENCY_KEY_REUSED",
+    ].includes(e.code)
   );
 }
 export function DeckCommand({
@@ -581,7 +601,12 @@ export function DeckCommand({
   reload?: () => Promise<void>;
   send: (
     name: string,
-    options: { signal: AbortSignal; idempotencyKey: string }
+    options: {
+      signal: AbortSignal;
+      idempotencyKey: string;
+      /** The version this attempt was first submitted against; a retry replays it. */
+      version?: number;
+    }
   ) => Promise<{ ownerRevision: number; location?: DeckDetail["location"] }>;
   close: () => void;
   done: (r: {
@@ -593,7 +618,14 @@ export function DeckCommand({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const lifetime = useRef({ alive: true, controller: new AbortController() });
-  const attempt = useRef<{ name: string; key: string } | null>(null);
+  /** The exact first attempt. It outlives an uncertain failure so a retry replays the same payload, version and key. */
+  const attempt = useRef<{
+    name: string;
+    key: string;
+    version?: number;
+    uncertain: boolean;
+  } | null>(null);
+  const [changedMeanwhile, setChangedMeanwhile] = useState(false);
   const guard = useRef(false);
   const currentVersion = useRef(version);
   const [renamed, setRenamed] = useState(false);
@@ -605,6 +637,11 @@ export function DeckCommand({
     // A request in flight is the collector's own: its result decides whether
     // this change came from it or from elsewhere.
     if (guard.current) return;
+    if (attempt.current?.uncertain) {
+      // The first attempt may have applied: only its replay can say.
+      setChangedMeanwhile(true);
+      return;
+    }
     setRenamed(true);
     attempt.current = null;
     setError("");
@@ -628,17 +665,25 @@ export function DeckCommand({
     guard.current = true;
     setBusy(true);
     setError("");
-    attempt.current ??= { name, key: crypto.randomUUID() };
-    const submittedVersion = version;
+    attempt.current ??= {
+      name,
+      key: crypto.randomUUID(),
+      version,
+      uncertain: false,
+    };
+    const sent = attempt.current;
+    const submittedVersion = sent.version;
     const controller = lifetime.current.controller;
     try {
-      const r = await send(attempt.current.name, {
+      const r = await send(sent.name, {
         signal: lifetime.current.controller.signal,
-        idempotencyKey: attempt.current.key,
+        idempotencyKey: sent.key,
+        version: sent.version,
       });
       if (lifetime.current.alive && !controller.signal.aborted) {
         if (
           !r.location ||
+          sent.uncertain ||
           currentVersion.current === submittedVersion ||
           r.location.version === currentVersion.current
         )
@@ -652,6 +697,15 @@ export function DeckCommand({
       }
     } catch (e) {
       if (lifetime.current.alive && !controller.signal.aborted) {
+        if (!definitive(e)) {
+          // Applied or not, unknown: keep the exact attempt and key so a
+          // retry replays it instead of applying it a second time.
+          sent.uncertain = true;
+          setError(
+            "Your last change may not have been saved. Try again to check safely."
+          );
+          return;
+        }
         if (currentVersion.current !== submittedVersion) {
           // The Deck changed while this request was in flight and it did not
           // succeed, so the change cannot be attributed to it.
@@ -672,14 +726,8 @@ export function DeckCommand({
           requestNameFocus((n) => n + 1);
           return;
         }
-        if (
-          e instanceof DeckError &&
-          e.code !== "STALE_LOCATION" &&
-          e.code !== "IDEMPOTENCY_KEY_REUSED"
-        ) {
-          attempt.current = null;
-          requestNameFocus((n) => n + 1);
-        }
+        attempt.current = null;
+        requestNameFocus((n) => n + 1);
         setError(
           e instanceof DeckError
             ? ((
@@ -712,6 +760,11 @@ export function DeckCommand({
         className="flex flex-col gap-4"
       >
         {renamed && <p>This Deck was renamed elsewhere.</p>}
+        {changedMeanwhile && attempt.current && (
+          <p>
+            This Deck changed elsewhere. Retry checks your last change first.
+          </p>
+        )}
         {confirmName && (
           <p>
             Its cards return to Unsorted. Type {confirmName} exactly to delete
@@ -736,8 +789,9 @@ export function DeckCommand({
             type="submit"
             disabled={
               busy ||
-              !name.trim() ||
-              (confirmName !== undefined && name !== confirmName)
+              (!attempt.current &&
+                (!name.trim() ||
+                  (confirmName !== undefined && name !== confirmName)))
             }
           >
             {busy ? "Saving…" : error && attempt.current ? "Retry" : title}
