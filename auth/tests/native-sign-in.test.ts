@@ -209,7 +209,21 @@ describe("the switch", () => {
     expect(
       nativeSignInEnabled({ NATIVE_SIGN_IN: "on", NODE_ENV: "development" })
     ).toBe(true);
-    for (const value of ["true", "1", "yes", "enabled", "onn"])
+    for (const value of [
+      "true",
+      "1",
+      "yes",
+      "enabled",
+      "onn",
+      "ON",
+      "On",
+      " on ",
+      "on\n",
+      "OFF",
+      "Off",
+      " ",
+      " off",
+    ])
       expect(() => nativeSignInEnabled({ NATIVE_SIGN_IN: value })).toThrow(
         /NATIVE_SIGN_IN/
       );

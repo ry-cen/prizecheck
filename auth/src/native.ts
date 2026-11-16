@@ -34,13 +34,13 @@ const FORM_TYPE = /^application\/x-www-form-urlencoded(?:\s*;.*)?$/i;
 const JSON_TYPE = /^application\/json(?:\s*;.*)?$/i;
 
 /**
- * NATIVE_SIGN_IN: `on` enables the feature; unset, empty or `off` leaves it disabled; anything else is a startup error, and
+ * NATIVE_SIGN_IN: `on` enables the feature; unset, empty or `off` leaves it disabled (exact match: no trimming or case folding); anything else is a startup error, and
  * so is `on` together with NODE_ENV=production (this slice is for nonprod only).
  */
 export function nativeSignInEnabled(
   env: NodeJS.ProcessEnv = process.env
 ): boolean {
-  const value = (env.NATIVE_SIGN_IN ?? "").trim().toLowerCase();
+  const value = env.NATIVE_SIGN_IN ?? "";
   if (value === "" || value === "off") return false;
   if (value !== "on") throw new Error("NATIVE_SIGN_IN must be on or off");
   if (env.NODE_ENV === "production")

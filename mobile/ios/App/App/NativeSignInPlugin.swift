@@ -168,6 +168,10 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "signOut", returnType: CAPPluginReturnPromise)
     ]
 
+    @objc override public func load() {
+        NativeCredentialStore.purgeLeftoverCredentialsOnFirstLoad()
+    }
+
     private static let requestTimeout: TimeInterval = 15
     private static let maxBody = 4 * 1024 * 1024
     private static let maxCursor = 2048

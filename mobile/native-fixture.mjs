@@ -234,10 +234,8 @@ export function nativeFixture({
       html(response, status, `<h1>Prizecheck</h1><p>${text}</p>`);
     if (request.headers.origin !== origin)
       return fail(403, "This request wasn't allowed.");
-    if (limited("native_approve", request))
-      return fail(429, "Too many attempts. Try again later.");
     if (
-      !/^application\/x-www-form-urlencoded(;|$)/i.test(
+      !/^application\/x-www-form-urlencoded(?:\s*;.*)?$/i.test(
         request.headers["content-type"] ?? ""
       )
     ) {
@@ -246,7 +244,7 @@ export function nativeFixture({
         "This sign-in link isn't valid. Go back to the app and try again."
       );
     }
-    const body = await readBody(request, 4096);
+    const body = await readBody(request, 2048);
     const params =
       body === null
         ? null
@@ -258,14 +256,20 @@ export function nativeFixture({
     if (
       !params ||
       !CHALLENGE_OR_STATE.test(params.challenge) ||
-      !CHALLENGE_OR_STATE.test(params.state) ||
-      !nonceValid(params.nonce, params.challenge, params.state)
+      !CHALLENGE_OR_STATE.test(params.state)
     ) {
       return fail(
         400,
         "This sign-in link isn't valid. Go back to the app and try again."
       );
     }
+    if (!nonceValid(params.nonce, params.challenge, params.state))
+      return fail(
+        403,
+        "This request couldn't be verified. Go back to the app and try again."
+      );
+    if (limited("native_approve", request))
+      return fail(429, "Too many attempts. Try again later.");
     const code = b64url(randomBytes(32));
     prune();
     grants.set(sha256(code).toString("hex"), {
@@ -285,10 +289,8 @@ export function nativeFixture({
       request.headers.origin !== undefined
     )
       return bad();
-    if (limited("native_token", request))
-      return json(response, 429, { error: "rate_limited" });
     if (
-      !/^application\/json(\s*;\s*charset=utf-8)?$/i.test(
+      !/^application\/json(?:\s*;.*)?$/i.test(
         request.headers["content-type"] ?? ""
       )
     )
@@ -312,6 +314,13 @@ export function nativeFixture({
     ) {
       return bad();
     }
+    if (limited("native_token", request))
+      return json(
+        response,
+        429,
+        { error: "too_many_requests" },
+        { "retry-after": "3600" }
+      );
     prune();
     const hash = sha256(parsed.code).toString("hex");
     const grant = grants.get(hash);

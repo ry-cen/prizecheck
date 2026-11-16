@@ -16,6 +16,26 @@ struct NativeCredential: Codable, Equatable {
 final class NativeCredentialStore {
     static let service = "app.prizecheck.native-credential"
 
+    /// UserDefaults is wiped when the app is deleted, but Keychain items are not. This flag is
+    /// therefore absent on the first run after an install or reinstall.
+    static let installMarkerKey = "nativeSignIn.installMarker"
+
+    /// On the first load after an install, removes every native credential left in the Keychain
+    /// by an earlier install (any gateway origin), then records the marker. Keychain attributes
+    /// of new items are unchanged. Logs nothing.
+    static func purgeLeftoverCredentialsOnFirstLoad(defaults: UserDefaults = .standard) {
+        if defaults.bool(forKey: installMarkerKey) { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        // Only mark the install as handled once the sweep succeeded (or found nothing).
+        if status == errSecSuccess || status == errSecItemNotFound {
+            defaults.set(true, forKey: installMarkerKey)
+        }
+    }
+
     private let account: String
 
     init(account: String) {

@@ -195,7 +195,8 @@ test("approving issues a code with a 303 to the callback, only for the exact Ori
         headers: { ...FORM, origin: stub.origin },
         body: form(fields),
       });
-      assert.equal(response.status, 400);
+      // A well-formed request with a nonce that does not verify is 403; a missing nonce is a malformed request, 400.
+      assert.equal(response.status, "nonce" in fields ? 403 : 400);
       assert.doesNotMatch(response.headers.location ?? "", /code=/);
     }
     // A nonce lasts through the next ten-minute window, then goes stale.
@@ -210,7 +211,7 @@ test("approving issues a code with a 303 to the callback, only for the exact Ori
       headers: { ...FORM, origin: stub.origin },
       body: form({ challenge: attempt.challenge, state: attempt.state, nonce }),
     });
-    assert.equal(stale.status, 400);
+    assert.equal(stale.status, 403);
     assert.equal(
       (
         await stub.call(
@@ -304,12 +305,22 @@ test("the token route refuses cookies, an Origin, malformed bodies and floods", 
     assert.equal(form.status, 400);
     // The refused attempts never touched the code.
     assert.equal((await exchange(stub, code, attempt.verifier)).status, 200);
-    let limited = 0;
-    for (let i = 0; i < 40; i += 1) {
-      limited +=
-        (await exchange(stub, code, attempt.verifier)).status === 429 ? 1 : 0;
+    let limitedResponse;
+    for (let i = 0; i < 40 && !limitedResponse; i += 1) {
+      const next = await exchange(stub, code, attempt.verifier);
+      if (next.status === 429) limitedResponse = next;
     }
-    assert.ok(limited > 0, "a durable per-address limit answers 429");
+    assert.ok(limitedResponse, "a durable per-address limit answers 429");
+    assert.deepEqual(JSON.parse(limitedResponse.text), {
+      error: "too_many_requests",
+    });
+    assert.equal(limitedResponse.headers["retry-after"], "3600");
+    // Validation comes before the limit: a malformed body is still 400 once the address is limited.
+    const malformed = await stub.call("POST", "/auth/native/token", {
+      headers: JSON_TYPE,
+      body: "not json",
+    });
+    assert.equal(malformed.status, 400);
   } finally {
     await stub.close();
   }
@@ -426,6 +437,39 @@ test("other routes are 404 and the listener is loopback", async () => {
     assert.equal((await stub.call("GET", "/auth/native/token")).status, 404);
     assert.equal((await stub.call("GET", "/")).status, 404);
     assert.match(stub.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
+  } finally {
+    await stub.close();
+  }
+});
+
+test("approve validates before it rate limits, limits after 20 valid requests, and caps the body at 2048 bytes", async () => {
+  const stub = await boot();
+  try {
+    const attempt = pkce();
+    const { page } = await approve(stub, attempt);
+    const nonce = /name="nonce" value="([^"]+)"/.exec(page.text)[1];
+    const good = {
+      challenge: attempt.challenge,
+      state: attempt.state,
+      nonce,
+    };
+    const post = (body) =>
+      stub.call("POST", "/auth/native/approve", {
+        headers: { ...FORM, origin: stub.origin },
+        body,
+      });
+    assert.equal(
+      (await post(form(good) + "&pad=" + "a".repeat(2100))).status,
+      400
+    );
+    let last;
+    for (let i = 0; i < 25; i += 1) last = await post(form(good));
+    assert.equal(last.status, 429);
+    assert.equal(
+      (await post(form({ ...good, nonce: "x" }))).status,
+      403,
+      "an invalid request is refused as itself, not as a flood"
+    );
   } finally {
     await stub.close();
   }
