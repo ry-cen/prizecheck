@@ -56,7 +56,9 @@ promote({'collection-1':'Collection Pikachu'})`,
     await search.fill("Collection Pika");
     await searched;
     await expect(
-      page.getByRole("main").getByText("7 copies · 1 edition", { exact: true })
+      page
+        .getByRole("main")
+        .getByText("7 matching copies · 1 matching edition", { exact: true })
     ).toBeVisible();
     const tiles = page
       .getByRole("region", { name: "Cards" })
@@ -72,7 +74,7 @@ promote({'collection-1':'Collection Pikachu'})`,
     ).toHaveText([/^7 in /]);
     await search.fill("Missing owned card");
     await expect(
-      page.getByText("No cards match your search or filters.")
+      page.getByText("No copies match your search or filters.")
     ).toBeVisible();
   } finally {
     await pool.end();

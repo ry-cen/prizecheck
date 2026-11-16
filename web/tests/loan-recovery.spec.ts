@@ -252,13 +252,13 @@ test("a lost start return is checked after a reload, not started twice", async (
   ).toHaveCount(0);
   expect(sends).toHaveLength(1);
   await page.getByRole("button", { name: "Send it again" }).click();
-  await expect(page.getByRole("main")).toContainText("It was sent.");
+  await expect(
+    page.getByRole("region", { name: "Notifications" })
+  ).toContainText("Return recorded.");
   {
     const sent = page
-      .getByRole("main")
-      .getByRole("status")
-      .filter({ hasText: "It was sent." })
-      .last();
+      .getByRole("region", { name: "Notifications" })
+      .getByText("Return recorded.", { exact: true });
     await expect(sent).toBeVisible();
     await expect(sent).not.toHaveClass(/\btext-(danger|warning)\b/);
     expect(await sent.evaluate((e) => !!e.closest('[role="alert"]'))).toBe(
@@ -328,13 +328,13 @@ test("a lost write-off is confirmed with Check again", async ({
     lender.getByRole("button", { name: "Check again" })
   ).toBeVisible();
   await lender.getByRole("button", { name: "Check again" }).click();
-  await expect(lender.getByRole("main")).toContainText("It was sent.");
+  await expect(
+    lender.getByRole("region", { name: "Notifications" })
+  ).toContainText("Write-off recorded.");
   {
     const sent = lender
-      .getByRole("main")
-      .getByRole("status")
-      .filter({ hasText: "It was sent." })
-      .last();
+      .getByRole("region", { name: "Notifications" })
+      .getByText("Write-off recorded.", { exact: true });
     await expect(sent).toBeVisible();
     await expect(sent).not.toHaveClass(/\btext-(danger|warning)\b/);
     expect(await sent.evaluate((e) => !!e.closest('[role="alert"]'))).toBe(

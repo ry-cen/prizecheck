@@ -429,7 +429,9 @@ test.describe("desktop", () => {
     });
     await filters.getByLabel("Set").selectOption({ label: "Fixture Set" });
     await settled;
-    await expect(counts(page, "123 copies · 2 editions")).toBeVisible();
+    await expect(
+      counts(page, "123 matching copies · 2 matching editions")
+    ).toBeVisible();
     await page.getByLabel("Card size").selectOption("medium");
     const names = page.getByRole("button", { name: "Names", exact: true });
     const namesPressed = await names.getAttribute("aria-pressed");
