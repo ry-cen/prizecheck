@@ -18,6 +18,10 @@ from app.games.riftbound.db import connect
 from app.games.riftbound.identity import verified_user
 
 PAGE_SIZE = 24
+# Input bounds mirror Pokémon's Catalog browse (games/pokemon/catalog/catalog_browse.py: q max 120, set max 80).
+# A NUL byte is rejected with a 422: PostgreSQL text cannot hold one, and psycopg would raise a 500 otherwise.
+NO_NUL = r"^[^\x00]*$"
+MAX_PAGE = 100000
 
 router = APIRouter(prefix="/api/catalog", dependencies=[Depends(verified_user)])
 
@@ -96,7 +100,9 @@ def sets():
 
 
 @router.get("/editions", response_model=CatalogEditionPage)
-def editions(q: str = "", set_id: str = Query("", alias="set"), page: int = Query(1, ge=1)):
+def editions(q: str = Query("", max_length=120, pattern=NO_NUL),
+             set_id: str = Query("", alias="set", max_length=80, pattern=NO_NUL),
+             page: int = Query(1, ge=1, le=MAX_PAGE)):
     with connect() as conn:
         conn.execute(SNAPSHOT)  # the list and the emptiness check read one snapshot, so total and catalog_empty agree
         rows = sorted(conn.execute(EDITIONS, {"q": q.strip(), "set": set_id}).fetchall(), key=order)

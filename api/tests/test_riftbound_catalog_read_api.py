@@ -295,6 +295,8 @@ def test_a_printing_that_moved_sets_shows_the_current_sets_code(rb):
 
 
 def test_each_read_runs_in_one_repeatable_read_snapshot(rb, monkeypatch):
+    """Proves the snapshot applies: inside the connection the isolation level is repeatable read and a transaction is open."""
+    from psycopg.pq import TransactionStatus
     from app.games.riftbound.catalog import browse
     seen = []
 
@@ -303,14 +305,17 @@ def test_each_read_runs_in_one_repeatable_read_snapshot(rb, monkeypatch):
             self.conn = conn
 
         def execute(self, sql, *args):
-            seen.append(sql)
+            if not sql.startswith('SET TRANSACTION'):
+                level = self.conn.execute('SHOW transaction_isolation').fetchone()['transaction_isolation']
+                seen.append((level, self.conn.info.transaction_status))
+            else:
+                seen.append(sql)
             return self.conn.execute(sql, *args)
 
     class Opened:
         def __enter__(self):
             self.opened = real()
-            self.conn = self.opened.__enter__()
-            return Spy(self.conn)
+            return Spy(self.opened.__enter__())
 
         def __exit__(self, *exc):
             return self.opened.__exit__(*exc)
@@ -320,7 +325,27 @@ def test_each_read_runs_in_one_repeatable_read_snapshot(rb, monkeypatch):
         seen.clear()
         rb.get(path)
         assert seen[0] == 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY', path
-        assert len(seen) >= 2
+        reads = seen[1:]
+        assert len(reads) >= 1
+        assert all(read == ('repeatable read', TransactionStatus.INTRANS) for read in reads), (path, reads)
+    seen.clear()
+    rb.get('/api/catalog/editions')
+    assert len([x for x in seen if isinstance(x, tuple)]) == 2  # the list and the emptiness check share the snapshot
+
+
+@pytest.mark.parametrize('params', [{'q': '\x00'}, {'q': 'a\x00b'}, {'set': '\x00'}, {'set': 'a\x00b'},
+                                    {'q': 'x' * 121}, {'set': 'x' * 81}, {'page': 100001}, {'page': 0}, {'page': 'x'}],
+                         ids=['q-nul', 'q-nul-inside', 'set-nul', 'set-nul-inside', 'q-long', 'set-long', 'page-huge', 'page-zero', 'page-text'])
+def test_invalid_filters_are_422_not_500(rb, params):
+    seed(rb.url, cards(1))
+    assert rb.get('/api/catalog/editions', **params).status_code == 422
+
+
+def test_filters_at_exactly_the_maximum_succeed(rb):
+    seed(rb.url, cards(1))
+    response = rb.get('/api/catalog/editions', q='x' * 120, set='y' * 80, page=100000)
+    assert response.status_code == 200
+    assert response.json() == {'editions': [], 'total': 0, 'pages': 1, 'catalog_empty': False}
 
 
 def test_natural_number_order_and_no_leaked_fields(rb):
