@@ -35,3 +35,10 @@ export function loseNextRenameResponse(
     return result;
   }) as never;
 }
+/** Test-only: the root Location named Unsorted can no longer hold cards, so deleting a Deck with cards is refused (core `deck_deletion.py:59`). */
+export function occupyUnsortedName(owner: "a" | "b") {
+  const unsorted = collectionFixtureStore(owner).locations.find(
+    (n) => n.parent_id === null && n.name === "Unsorted"
+  )!;
+  unsorted.kind = "storage_container";
+}

@@ -307,3 +307,74 @@ for (const deletion of [false, true])
       await h.finish();
     }
   });
+
+for (const code of ["UNSORTED_UNAVAILABLE", "QUANTITY_OVERFLOW"] as const)
+  it(`treats a Delete refused with ${code} as final: no uncertain note and a new key`, async () => {
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new DeckError(code))
+      .mockResolvedValue({ ownerRevision: 2 });
+    const h = await harness(send as never, undefined, {
+      title: "Delete Deck",
+      initialName: "Draft",
+      confirmName: "Draft",
+    });
+    try {
+      await act(async () => h.render(1));
+      await act(async () => h.submit());
+      expect(document.body.textContent).not.toContain(
+        "may not have been saved"
+      );
+      expect(document.querySelector("[role=alert]")?.textContent).toContain(
+        "can't be deleted"
+      );
+      expect(h.input().disabled).toBe(false);
+      await act(async () => h.submit());
+      expect(h.done).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[1][1].idempotencyKey).not.toBe(
+        send.mock.calls[0][1].idempotencyKey
+      );
+    } finally {
+      await h.finish();
+    }
+  });
+it("moves focus to Retry after an uncertain failure", async () => {
+  const send = vi.fn().mockRejectedValueOnce(new Error("offline"));
+  const h = await harness(send as never);
+  try {
+    await act(async () => h.render(1));
+    await act(async () => h.submit());
+    expect(document.activeElement).toBe(
+      document.querySelector('button[type="submit"]')
+    );
+    expect(document.activeElement?.textContent).toBe("Retry");
+  } finally {
+    await h.finish();
+  }
+});
+it("does not carry an earlier attempt's changed-elsewhere note into a new attempt", async () => {
+  const send = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockRejectedValueOnce(new DeckError("STALE_LOCATION"))
+    .mockRejectedValueOnce(new Error("offline again"));
+  const h = await harness(send as never);
+  try {
+    await act(async () => h.render(1));
+    await act(async () => h.submit());
+    await act(async () => h.render(2));
+    expect(document.body.textContent).toContain("This Deck changed elsewhere.");
+    await act(async () => h.submit());
+    expect(document.body.textContent).toContain(
+      "This Deck was renamed elsewhere."
+    );
+    expect(h.input().disabled).toBe(false);
+    await act(async () => h.submit());
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(document.body.textContent).toContain("may not have been saved");
+    expect(document.body.textContent).not.toContain("changed elsewhere");
+    expect(document.body.textContent).not.toContain("renamed elsewhere");
+  } finally {
+    await h.finish();
+  }
+});
