@@ -21,6 +21,8 @@ The JavaScript side is `web/src/shell/ios/nativeSignIn.ts`. `IosPrototype` calls
 - A **Debug** build also accepts the launch argument `-PrizecheckGatewayOrigin <origin>` (from the argument domain only), and only for `http://127.0.0.1:<port>` or `http://localhost:<port>`.
 - Anything else means not configured.
 
+The gateway's native pages allow `form-action 'self' prizecheck-native:` so the consent form's `303` to the app callback is not blocked (see `NATIVE_SIGN_IN.md`); the fixture sends the same header.
+
 No URL scheme, App Transport Security, CSP (`connect-src 'none'` still holds: the web view makes no requests), signing or `capacitor.config.ts` setting changed.
 
 ## Simulator stub
