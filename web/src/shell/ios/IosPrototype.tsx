@@ -50,8 +50,8 @@ export function IosPrototype(props: {
   const generation = useRef(0);
   // True once this mount has shown a signed-in Collection and not yet left it.
   const wasSignedIn = useRef(false);
-  const latest = useRef({ source, reads });
-  latest.current = { source, reads };
+  const latest = useRef({ source });
+  latest.current = { source };
   function endSession() {
     generation.current += 1;
     wasSignedIn.current = false;

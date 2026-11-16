@@ -26,7 +26,7 @@ Walk through success → sample Collection → terminate/relaunch → Collection
 
 ## Collection source and states
 
-The prototype reads its Collection through a typed `CollectionSource` (`web/src/shell/ios/collectionSource.ts`): a page, signed out, or unavailable. The packaged app uses only the sample source: two sample pages, so it can show loading, empty, error with **Try again**, **Refresh**, **Show more** and the session-ended message. The header keeps saying "Demo with sample cards".
+The prototype reads its Collection through a typed `CollectionSource` (`web/src/shell/ios/collectionSource.ts`): a page, signed out, or unavailable. The packaged app uses only the sample source: two sample pages, so it exercises **Show more**, **Refresh** and the session-ended message. The loading, empty, error with **Try again**, Refresh, Show more and session-ended states are implemented and unit-tested with injected sources; the sample source never returns an empty page or `unavailable`, and its loading lasts one microtask. The native test covers Show more and Refresh; its hosted result is pending. The header keeps saying "Demo with sample cards".
 
 `gatewayCollection.ts` is the same boundary for the real gateway. It wraps the generated `getCollection` client and maps a 401 to signed out. It is not imported by the packaged entry, and `mobile/index.html` still has `connect-src 'none'`. It stays unwired until the production handoff below is reviewed.
 

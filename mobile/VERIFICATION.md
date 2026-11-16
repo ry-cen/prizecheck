@@ -103,6 +103,6 @@ One passing run after a repair does not prove the slow-runner flake is gone. A f
 
 ### Collection source and states (slice 2)
 
-The prototype now reads sample pages through a typed `CollectionSource` and shows loading, empty, error with retry, refresh, show more and session-ended states. A gateway source exists but is not wired into the packaged app; no network, cookie, CORS, CSRF or Origin behavior changed.
+The prototype now reads sample pages through a typed `CollectionSource` and implements loading, empty, error with retry, refresh, show more and session-ended states, unit-tested with injected sources. The packaged sample app exercises only paging (Show more), Refresh and the session-ended message: its source never returns an empty page or `unavailable`, and loading lasts one microtask. The new native test covers Show more and Refresh; its hosted result is pending. A gateway source exists but is not wired into the packaged app; no network, cookie, CORS, CSRF or Origin behavior changed.
 
 Evidence is recorded in the pull request after the hosted run. A new `testCollectionShowMoreAndRefresh` UI scenario is added (the existing four are kept). Swift cannot be compiled on Linux, so it has no native result until the hosted simulator job runs at the pushed head.

@@ -44,7 +44,7 @@ final class FixtureUITests: XCTestCase {
         openBrowser()
         returnFromBrowser("Continue to sample Collection")
         XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["Pikachu, Unspecified Variant"].exists)
+        XCTAssertTrue(app.buttons["Pikachu, Unspecified Variant"].waitForExistence(timeout: 10))
         app.terminate()
         app.launch()
         XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 15))
@@ -92,7 +92,7 @@ final class FixtureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Mew, Unspecified Variant"].waitForExistence(timeout: 10))
         app.buttons["Refresh"].tap()
         XCTAssertTrue(app.buttons["Show more"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Pikachu, Unspecified Variant"].exists)
+        XCTAssertTrue(app.buttons["Pikachu, Unspecified Variant"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Mew, Unspecified Variant"].exists)
     }
 }
