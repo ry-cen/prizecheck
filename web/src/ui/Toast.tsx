@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -22,12 +23,22 @@ export type ToastAction = {
   keepOpen?: boolean;
 };
 
+/** How long a toast with no action stays up before it leaves on its own. */
+export const TOAST_LIFETIME_MS = 5_000;
+
 export type ToastInput = {
   message: string;
   /** False when an inline live region already announces this feedback. The toast and its actions remain available. */
   announce?: boolean;
-  /** Optional route lifetime for plain informational feedback. Other toasts (especially Undo) stay persistent. */
+  /** Optional route lifetime for plain informational feedback: the toast leaves when the page is no longer this
+   * pathname. Without one, a toast with no action leaves on the first pathname change after it is drawn. */
   route?: string;
+  /** Keep a toast that has no action up until it is dismissed or replaced. For a failure or an outcome the
+   * collector has to read and that the page shows nowhere else. Toasts with an action already stay. */
+  sticky?: boolean;
+  /** Runs when the toast leaves on its own (its time is up, or the page changed), not when it is dismissed,
+   * replaced or taken down in code, so its owner can forget it. */
+  onExpire?: () => void;
   /** One action on the thing the message names, for example Undo. */
   action?: ToastAction;
   /** A second, quieter action after it, for example Dismiss Undo. */
@@ -91,22 +102,33 @@ export function useLift(source: LiftSource): number {
   return useContext(LiftContext)[source] ?? 0;
 }
 
+/** Focus the shown page's heading (its main region when it has none), as the skip link does. */
+function focusPage() {
+  const main = document.getElementById("main-content");
+  const target = main?.querySelector<HTMLElement>("h1") ?? main;
+  if (!target) return;
+  if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+  target.focus({ preventScroll: true });
+}
+
 const ACTION =
   "inline-flex h-control cursor-pointer items-center whitespace-nowrap rounded-control border-0 bg-transparent px-3 font-sans text-control hover:bg-surface-selected disabled:cursor-default disabled:font-normal disabled:text-text-muted aria-disabled:cursor-progress aria-disabled:opacity-60 phone:min-h-tap";
 
 /**
  * One toast host for the app (ADR 0012): one toast at a time, and a new one replaces it, so its action
- * (Undo) always belongs to the message beside it. A toast stays until it is replaced, dismissed or its
- * action is used (unless the action keeps it open). It sits at the bottom centre, above the phone tab bar
+ * (Undo) always belongs to the message beside it. A toast with an action stays until it is replaced, dismissed or
+ * its action is used (unless the action keeps it open). One with no action (and not `sticky`) is a confirmation: it
+ * leaves after TOAST_LIFETIME_MS, and when the pathname changes. It sits at the bottom centre, above the phone tab bar
  * and above every bottom bar that has set a lift (setLift: the Actions strip and the drafts tray, added up). The host is a "Notifications" region that stays mounted
  * while empty, so each new message is announced; it has no status role, so pages' own status lines stay
  * the only ones. A toast that replaces one holding focus takes the focus over, so it never falls to the
  * page.
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toast, setToast] = useState<(ToastInput & { id: number }) | null>(
-    null
-  );
+  // `rev` is new on every show and update (one counter): the expiry timer and the page the toast started from begin again.
+  const [toast, setToast] = useState<
+    (ToastInput & { id: number; rev: number }) | null
+  >(null);
   const [lifts, setLifts] = useState<Lifts>({});
   // Shell renders this provider on navigation. Only callers that explicitly opt in lose their feedback on leaving.
   const path = window.location.pathname;
@@ -118,6 +140,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const host = useRef<HTMLElement>(null);
   const shownId = useRef<number | null>(null);
   shownId.current = visible?.id ?? null;
+  const latest = useRef(toast);
+  latest.current = toast;
+  const revision = useRef(0);
+  // The pathname the toast is judged against: the one it was first drawn on, so a toast shown just before its own
+  // navigation (Deleted, Removed, Added) survives it.
+  const baseline = useRef<{ rev: number; path: string } | null>(null);
+  const expires =
+    !!toast && !toast.action && !toast.secondaryAction && !toast.sticky;
   const api = useMemo<ToastApi>(() => {
     const firstButton = () =>
       host.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
@@ -127,12 +157,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         const id = ++next.current;
         const focus =
           !!input.focus || !!host.current?.contains(document.activeElement);
-        setToast({ ...input, focus, id });
+        setToast({ ...input, focus, id, rev: ++revision.current });
         return id;
       },
       update: (id, input) =>
         setToast((current) =>
-          current?.id === id ? { ...input, focus: current.focus, id } : current
+          current?.id === id
+            ? { ...input, focus: current.focus, id, rev: ++revision.current }
+            : current
         ),
       dismiss: (id) =>
         setToast((current) =>
@@ -155,6 +187,38 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     if (toast?.route && toast.route !== path) setToast(null);
   }, [toast, path]);
+
+  // A toast with no action leaves when the pathname changes (not for a query or hash change). A toast with a route
+  // follows that route instead, and one with an action stays.
+  useLayoutEffect(() => {
+    if (!toast) {
+      baseline.current = null;
+      return;
+    }
+    if (baseline.current?.rev !== toast.rev) {
+      baseline.current = { rev: toast.rev, path };
+      return;
+    }
+    if (expires && !toast.route && baseline.current.path !== path) {
+      setToast(null);
+      toast.onExpire?.();
+    }
+  }, [toast, path, expires]);
+
+  // ...and after a while. Focus inside the toast (Dismiss, after `focus`) would fall to the page, so it goes to the
+  // page heading first, as the skip link does.
+  useEffect(() => {
+    if (!toast || !expires) return;
+    const { id, rev } = toast;
+    const timer = window.setTimeout(() => {
+      const current = latest.current;
+      if (current?.id !== id || current.rev !== rev) return;
+      if (host.current?.contains(document.activeElement)) focusPage();
+      setToast(null);
+      current.onExpire?.();
+    }, TOAST_LIFETIME_MS);
+    return () => window.clearTimeout(timer);
+  }, [toast?.id, toast?.rev, expires]);
 
   // A new toast that asked for focus (or replaced one that had it) takes it as soon as it is drawn.
   useLayoutEffect(() => {

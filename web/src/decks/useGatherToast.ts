@@ -32,7 +32,7 @@ export function useGatherToast(deckName: string, onChanged: () => void) {
   );
 
   const show = useCallback(
-    (message: string, undoId: string | null) => {
+    (message: string, undoId: string | null, sticky = false) => {
       const id = kit.show({
         message,
         action: undoId
@@ -43,6 +43,7 @@ export function useGatherToast(deckName: string, onChanged: () => void) {
             }
           : undefined,
         focus: true,
+        sticky,
       });
       shown.current = id;
     },
@@ -81,7 +82,8 @@ export function useGatherToast(deckName: string, onChanged: () => void) {
             : cause.code === "REPLAY_OUTCOME_UNAVAILABLE"
               ? "Undo may already have finished. This Deck was refreshed: check it before trying again."
               : "That Undo is no longer available.",
-        null
+        null,
+        true
       );
       live.current.onChanged();
     } finally {

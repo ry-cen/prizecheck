@@ -113,6 +113,7 @@ export function offerReplaceUndo(
             cause.code === "STALE_DECK_LIST"
               ? "Can't undo: this deck changed."
               : "That Undo is no longer available.",
+          sticky: true,
         });
       // No answer: the same key makes pressing Undo again apply it once.
       else

@@ -206,7 +206,12 @@ export function useDeckListEdits({
     };
   }, [kit]);
 
-  function say(message: string, job: UndoJob | null, busy = false) {
+  function say(
+    message: string,
+    job: UndoJob | null,
+    busy = false,
+    sticky = false
+  ) {
     if (!mounted.current) return;
     const id = job?.feedbackId ?? ++feedbackIds.current;
     const undo = job && !busy ? () => requestUndo(job) : null;
@@ -220,6 +225,7 @@ export function useDeckListEdits({
             onAction: () => requestUndo(job),
           }
         : undefined,
+      sticky,
     };
     if (busy && toastId.current !== null) kit.update(toastId.current, input);
     else toastId.current = kit.show(input);
@@ -327,7 +333,9 @@ export function useDeckListEdits({
         cause.code === "STALE_DECK_LIST"
           ? "Can't undo: this deck changed."
           : "That Undo is no longer available.",
-        null
+        null,
+        false,
+        true
       );
     } finally {
       undoing.current = false;

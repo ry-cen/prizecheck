@@ -163,7 +163,12 @@ export function useWantListSwap({
     live.current.reload();
   }
 
-  function say(message: string, job: UndoJob | null, busyUndo = false) {
+  function say(
+    message: string,
+    job: UndoJob | null,
+    busyUndo = false,
+    sticky = false
+  ) {
     if (!mounted.current) return;
     const input = {
       message,
@@ -176,6 +181,7 @@ export function useWantListSwap({
             onAction: () => void undo(job),
           }
         : undefined,
+      sticky,
     };
     if (busyUndo && toastId.current !== null)
       kit.update(toastId.current, input);
@@ -249,7 +255,9 @@ export function useWantListSwap({
           cause.code === "STALE_DECK_LIST"
             ? "Can't undo: this deck changed."
             : "That Undo is no longer available.",
-          null
+          null,
+          false,
+          true
         );
     } finally {
       finish(job.generation);

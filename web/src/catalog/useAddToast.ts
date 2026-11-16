@@ -90,7 +90,8 @@ export function useAddToast({ shown, onUndone }: Options) {
       added: AddedCards | null,
       focus: boolean,
       undoable = !!added,
-      announce = true
+      announce = true,
+      sticky = false
     ) => {
       const input: ToastInput = {
         message,
@@ -106,6 +107,7 @@ export function useAddToast({ shown, onUndone }: Options) {
               }
             : undefined,
         focus,
+        sticky,
         onDismiss: added ? () => dismiss(added, id, undoable) : undefined,
       };
       const id = kit.show(input);
@@ -164,9 +166,11 @@ export function useAddToast({ shown, onUndone }: Options) {
       onDismiss: () => dismiss(added, toastId, false),
     };
     inputs.current.set(toastId, input);
+    // The popup's own Undo asks the host whether this toast is still up, so it stays while the popup owns the action.
     kit.update(toastId, {
       ...input,
       action: inlineOwned ? undefined : input.action,
+      sticky: inlineOwned,
     });
     const key = keys.current.get(added.undoId) ?? crypto.randomUUID();
     keys.current.set(added.undoId, key);
@@ -193,12 +197,14 @@ export function useAddToast({ shown, onUndone }: Options) {
       );
       let next: InlineUndo | null = null;
       if (kit.isShown(toastId)) {
+        // A refusal that can't be retried names what happened to the copies, and has no other home.
         const id = show(
           outcome,
           added,
           !inlineOwned,
           retry,
-          !inlineAnnounces()
+          !inlineAnnounces(),
+          !retry
         );
         if (retry) next = inline(id, added, outcome);
       }
@@ -226,7 +232,12 @@ export function useAddToast({ shown, onUndone }: Options) {
           const owner = Symbol();
           owned.current.set(toastId, owner);
           const input = inputs.current.get(toastId);
-          if (input) kit.update(toastId, { ...input, action: undefined });
+          if (input)
+            kit.update(toastId, {
+              ...input,
+              action: undefined,
+              sticky: true,
+            });
           return () => {
             if (owned.current.get(toastId) !== owner) return;
             owned.current.delete(toastId);
