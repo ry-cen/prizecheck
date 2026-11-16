@@ -231,8 +231,9 @@ export function collectionFixtureWriter(
       (r) => r.locationId === location && r.edition.id === edition
     );
   const leaf = (id: string) =>
-    store.locations.some((n) => n.id === id && n.kind === "storage_leaf") &&
-    !store.locations.some((n) => n.parent_id === id);
+    store.locations.some(
+      (n) => n.id === id && (n.kind === "storage_leaf" || n.kind === "deck")
+    ) && !store.locations.some((n) => n.parent_id === id);
   function change(
     locationId: string,
     edition: HoldingRow["edition"],

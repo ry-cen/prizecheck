@@ -117,6 +117,7 @@ export function LocationWriteDialog({
   }, [reader, writer]);
   const index = indexLocations(nodes);
   const create = action.mode === "create";
+  const deck = node?.kind === "deck";
   const unsorted = node?.name === "Unsorted" && node.parent_id === null;
   const parent = nodes.find((n) => n.id === parentId);
   const stocked =
@@ -262,7 +263,9 @@ export function LocationWriteDialog({
             if (!run.alive) return;
             reviewTree(updated);
           } catch {
-            /* Keep the original refusal; Reload and retry can reload again. */
+            if (!run.alive) return;
+            setError(new Error("Reload failed"));
+            return;
           }
           if (!run.alive) return;
         }
@@ -295,7 +298,9 @@ export function LocationWriteDialog({
       onClose={onClose}
       returnFocus={returnFocus}
     >
-      {unsorted ? (
+      {deck ? (
+        <p>Manage this Deck from Decks.</p>
+      ) : unsorted ? (
         <p>Unsorted's Locations can't be changed here.</p>
       ) : !create && !node ? (
         <div className="flex flex-col gap-2">
@@ -303,7 +308,11 @@ export function LocationWriteDialog({
             <p role="alert">That Location no longer exists.</p>
           )}
           {nodes
-            .filter((n) => !(n.name === "Unsorted" && n.parent_id === null))
+            .filter(
+              (n) =>
+                n.kind !== "deck" &&
+                !(n.name === "Unsorted" && n.parent_id === null)
+            )
             .map((n) => (
               <Button
                 key={n.id}
