@@ -51,20 +51,22 @@ VISIBLE = """
   JOIN catalog_generation_printing gp ON gp.generation_id = ge.generation_id AND gp.printing_id = ge.printing_id
        AND NOT gp.tombstoned
   JOIN catalog_edition e ON e.id = ge.edition_id AND e.printing_id = ge.printing_id
-  JOIN catalog_printing_set_code psc ON psc.printing_id = gp.printing_id
+  LEFT JOIN catalog_set_code sc ON sc.set_id = gp.set_id
   WHERE s.singleton"""
 
-EDITIONS = f"""SELECT e.id, e.printing_id, gp.display_name AS name, gp.set_id, gp.set_name, psc.set_code AS code,
+EDITIONS = f"""SELECT e.id, e.printing_id, gp.display_name AS name, gp.set_id, gp.set_name, coalesce(sc.code, '') AS code,
   gp.collector_number AS number, e.descriptor {VISIBLE}
   AND (%(set)s = '' OR gp.set_id = %(set)s)
   AND (%(q)s = '' OR position(lower(%(q)s) in lower(gp.display_name)) > 0
        OR position(lower(%(q)s) in lower(gp.collector_number)) > 0)"""
 
-ONE = f"""SELECT e.id, e.printing_id, gp.display_name AS name, gp.set_id, gp.set_name, psc.set_code AS code,
+ONE = f"""SELECT e.id, e.printing_id, gp.display_name AS name, gp.set_id, gp.set_name, coalesce(sc.code, '') AS code,
   gp.collector_number AS number, e.descriptor {VISIBLE} AND e.id = %s"""
 
-SETS = f"""SELECT gp.set_id AS id, gp.set_name AS name, min(psc.set_code) AS code {VISIBLE}
+SETS = f"""SELECT gp.set_id AS id, gp.set_name AS name, coalesce(min(sc.code), '') AS code {VISIBLE}
   GROUP BY gp.set_id, gp.set_name ORDER BY gp.set_name, gp.set_id"""
+
+SNAPSHOT = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
 
 ANY_EDITION = f"SELECT EXISTS (SELECT 1 {VISIBLE}) AS present"
 
@@ -89,12 +91,14 @@ def order(row):
 @router.get("/sets", response_model=list[CatalogSet])
 def sets():
     with connect() as conn:
+        conn.execute(SNAPSHOT)
         return [CatalogSet(**row) for row in conn.execute(SETS).fetchall()]
 
 
 @router.get("/editions", response_model=CatalogEditionPage)
 def editions(q: str = "", set_id: str = Query("", alias="set"), page: int = Query(1, ge=1)):
     with connect() as conn:
+        conn.execute(SNAPSHOT)  # the list and the emptiness check read one snapshot, so total and catalog_empty agree
         rows = sorted(conn.execute(EDITIONS, {"q": q.strip(), "set": set_id}).fetchall(), key=order)
         present = conn.execute(ANY_EDITION).fetchone()["present"]
     start = (page - 1) * PAGE_SIZE
@@ -109,6 +113,7 @@ def edition_detail(edition_id: str):
     except ValueError:
         raise HTTPException(404, "Edition not found") from None
     with connect() as conn:
+        conn.execute(SNAPSHOT)
         row = conn.execute(ONE, (found,)).fetchone()
     if row is None:
         raise HTTPException(404, "Edition not found")

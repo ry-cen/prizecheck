@@ -111,7 +111,9 @@ PATHS = ['/api/catalog/sets', '/api/catalog/editions', f'/api/catalog/editions/{
 
 @pytest.mark.parametrize('path', PATHS)
 @pytest.mark.parametrize('case', ['no-secret', 'no-headers', 'no-signature', 'stale', 'future', 'bad-time', 'wrong-signature',
-                                  'pokemon-key', 'other-path', 'wrong-method'])
+                                  'pokemon-key', 'other-path', 'wrong-method', 'huge-time', 'negative-time', 'float-time',
+                                  'non-ascii-time', 'padded-time', 'non-ascii-signature', 'short-signature', 'long-signature',
+                                  'non-hex-signature', 'uppercase-signature', 'non-ascii-user'])
 def test_every_route_requires_a_riftbound_signed_user(rb, monkeypatch, path, case):
     headers = signed('GET', path)
     if case == 'no-secret':
@@ -134,6 +136,28 @@ def test_every_route_requires_a_riftbound_signed_user(rb, monkeypatch, path, cas
         headers = signed('GET', '/api/catalog/other')
     elif case == 'wrong-method':
         headers = signed('POST', path)
+    elif case == 'huge-time':
+        headers['x-internal-time'] = '9' * 400
+    elif case == 'negative-time':
+        headers['x-internal-time'] = '-5'
+    elif case == 'float-time':
+        headers['x-internal-time'] = '1.5'
+    elif case == 'non-ascii-time':
+        headers['x-internal-time'] = b'\xb2'  # a superscript two: str.isdigit() is true for it
+    elif case == 'padded-time':
+        headers['x-internal-time'] = '0' * 40 + headers['x-internal-time']
+    elif case == 'non-ascii-signature':
+        headers['x-internal-signature'] = b'\xe9' * 64
+    elif case == 'short-signature':
+        headers['x-internal-signature'] = headers['x-internal-signature'][:63]
+    elif case == 'long-signature':
+        headers['x-internal-signature'] += '0'
+    elif case == 'non-hex-signature':
+        headers['x-internal-signature'] = 'g' * 64
+    elif case == 'uppercase-signature':
+        headers['x-internal-signature'] = headers['x-internal-signature'].upper()
+    elif case == 'non-ascii-user':
+        headers['x-internal-user'] = b'caf\xe9'
     response = rb.http.get(path, headers=headers)
     assert response.status_code == 401
     assert response.json() == {'detail': 'Authentication required'}
@@ -242,6 +266,63 @@ def test_unaccepted_and_retired_rows_are_invisible(rb):
     assert rb.get(f'/api/catalog/editions/{hidden[0]}').status_code == 404
 
 
+def test_a_printing_that_moved_sets_shows_the_current_sets_code(rb):
+    _, made = seed(rb.url, [
+        ('Synthetic Leaver', '001/100', '24344', 'Origins Synthetic', ('normal',)),
+        ('Synthetic Joiner', '002/100', 'syn01', 'Synthetic Set 900', ('normal',)),
+        ('Synthetic Stayer', '003/100', 'syn01', 'Synthetic Set 900', ('normal',))])
+    leaver, joiner = made[('Synthetic Leaver', '001/100')], made[('Synthetic Joiner', '002/100')]
+    stayer = made[('Synthetic Stayer', '003/100')]
+    gen = uuid4()
+    with psycopg.connect(rb.url) as conn:  # a later accepted generation moves the two Printings to each other's set
+        conn.execute('INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256) VALUES (%s,3,%s,%s)', (gen, b'synthetic', 'synthetic'))
+        for card, name, number, set_id, set_name in ((leaver, 'Synthetic Leaver', '001/100', 'syn01', 'Synthetic Set 900'),
+                                                     (joiner, 'Synthetic Joiner', '002/100', '24344', 'Origins Synthetic'),
+                                                     (stayer, 'Synthetic Stayer', '003/100', 'syn01', 'Synthetic Set 900')):
+            source_id = conn.execute('SELECT source_id FROM catalog_printing WHERE id=%s', (card['printing'],)).fetchone()[0]
+            conn.execute('''INSERT INTO catalog_generation_printing(generation_id,printing_id,source_id,set_id,set_name,
+                collector_number,display_name,search_name,source_fingerprint,basic_energy,tombstoned)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'synthetic','not_applicable',false)''',
+                         (gen, card['printing'], source_id, set_id, set_name, number, name, name.lower()))
+            conn.execute('INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id,active) VALUES (%s,%s,%s,true)',
+                         (gen, card['editions'][0], card['printing']))
+        conn.execute('UPDATE catalog_state SET active_generation=%s,revision=revision+1 WHERE singleton', (gen,))
+    codes = {e['name']: (e['set']['id'], e['set']['code']) for e in rb.get('/api/catalog/editions').json()['editions']}
+    assert codes == {'Synthetic Leaver': ('syn01', ''), 'Synthetic Joiner': ('24344', 'OGN'), 'Synthetic Stayer': ('syn01', '')}
+    assert rb.get(f"/api/catalog/editions/{leaver['editions'][0]}").json()['set']['code'] == ''
+    assert rb.get('/api/catalog/sets').json() == [{'id': '24344', 'name': 'Origins Synthetic', 'code': 'OGN'},
+                                                  {'id': 'syn01', 'name': 'Synthetic Set 900', 'code': ''}]
+
+
+def test_each_read_runs_in_one_repeatable_read_snapshot(rb, monkeypatch):
+    from app.games.riftbound.catalog import browse
+    seen = []
+
+    class Spy:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def execute(self, sql, *args):
+            seen.append(sql)
+            return self.conn.execute(sql, *args)
+
+    class Opened:
+        def __enter__(self):
+            self.opened = real()
+            self.conn = self.opened.__enter__()
+            return Spy(self.conn)
+
+        def __exit__(self, *exc):
+            return self.opened.__exit__(*exc)
+    real = browse.connect
+    monkeypatch.setattr(browse, 'connect', lambda: Opened())
+    for path in PATHS:
+        seen.clear()
+        rb.get(path)
+        assert seen[0] == 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY', path
+        assert len(seen) >= 2
+
+
 def test_natural_number_order_and_no_leaked_fields(rb):
     seed(rb.url, [(f'Synthetic Same', n, 'syn01', 'Synthetic Set 900', ('normal',)) for n in ('10/100', '2/100', '1/100')])
     rows = rb.get('/api/catalog/editions').json()['editions']
@@ -268,11 +349,19 @@ def test_the_riftbound_entry_is_not_wired_into_pokemon_or_deploy_files():
     for path in (root / 'deploy').rglob('*'):
         if path.is_file():
             assert 'riftbound_main' not in path.read_text(errors='ignore'), path
-    for path in (APP_DIR / 'games' / 'riftbound').rglob('*.py'):
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ''] if isinstance(node, ast.ImportFrom) else []
-            assert not any(n.startswith('app.games.pokemon') for n in names), path
+    forbidden = ('app.games.pokemon', 'app.db', 'app.identity', 'app.main')
+    for path in [*(APP_DIR / 'games' / 'riftbound').rglob('*.py'), APP_DIR / 'riftbound_main.py']:
+        package = ['app', *path.relative_to(APP_DIR).parent.parts]
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = '.'.join(package[:len(package) - (node.level - 1)]) if node.level else ''
+                module = '.'.join(x for x in (base, node.module) if x)
+                names = [module, *(f'{module}.{a.name}' for a in node.names)]
+            else:
+                continue
+            assert not [n for n in names if any(n == f or n.startswith(f + '.') for f in forbidden)], (path, names)
 
 
 def route_table(app):
