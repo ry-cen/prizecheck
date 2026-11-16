@@ -1155,6 +1155,52 @@ for (const width of [1280, 375]) {
       await page.evaluate(() => document.activeElement !== document.body)
     ).toBe(true);
   });
+  test(`shows a refused Delete as final and moves focus to Retry after an uncertain one at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(`${entry}#riftbound:section=decks&deck=deck-1`);
+    await page.evaluate(async () => {
+      const path = "/src/games/riftbound/local/deckFixtures.ts";
+      const hooks = "/src/games/riftbound/local/deckTestHooks.ts";
+      const api = (await import(path)).deckFixture("a");
+      (await import(hooks)).occupyUnsortedName("a");
+      const remove = api.deleteDeck.bind(api);
+      let lost = true;
+      api.deleteDeck = async (input: unknown, options: unknown) => {
+        if (lost) {
+          lost = false;
+          throw new Error("Uncertain response");
+        }
+        return remove(input, options);
+      };
+    });
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    const dialog = page.getByRole("dialog", {
+      name: "Delete Deck",
+      exact: true,
+    });
+    await dialog.getByLabel("Deck name").fill("First Light");
+    const submit = dialog.getByRole("button", {
+      name: "Delete Deck",
+      exact: true,
+    });
+    await submit.click();
+    // Uncertain: the attempt stays and focus goes to Retry.
+    await expect(dialog).toContainText("may not have been saved");
+    const retry = dialog.getByRole("button", { name: "Retry", exact: true });
+    await expect(retry).toBeFocused();
+    await retry.click();
+    // The fixture refuses the replay before it mutates: final, field editable.
+    await expect(dialog.getByRole("alert")).toContainText("can't be deleted");
+    await expect(dialog).not.toContainText("may not have been saved");
+    await expect(dialog.getByLabel("Deck name")).toBeEnabled();
+    await expect(dialog.getByLabel("Deck name")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(
+      page.getByRole("heading", { name: "First Light", exact: true })
+    ).toBeVisible();
+  });
   test(`keyboard Deck creation and tab navigation at ${width}`, async ({
     page,
   }) => {

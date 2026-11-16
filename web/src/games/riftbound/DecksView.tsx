@@ -581,6 +581,10 @@ function definitive(e: unknown) {
       "LOCATION_NAME_CONFIRMATION_MISMATCH",
       "DECK_NOT_FOUND",
       "IDEMPOTENCY_KEY_REUSED",
+      // Deleting: raised inside the rolled-back transaction, after the replay
+      // check (api/app/deck_deletion.py:59, :106; replay at :74).
+      "UNSORTED_UNAVAILABLE",
+      "QUANTITY_OVERFLOW",
     ].includes(e.code)
   );
 }
@@ -631,6 +635,14 @@ export function DeckCommand({
   const [renamed, setRenamed] = useState(false);
   const nameField = useRef<HTMLInputElement>(null);
   const [focusName, requestNameFocus] = useState(0);
+  const form = useRef<HTMLFormElement>(null);
+  const [focusRetry, requestRetryFocus] = useState(0);
+  useEffect(() => {
+    if (focusRetry && !busy)
+      form.current
+        ?.querySelector<HTMLButtonElement>('button[type="submit"]')
+        ?.focus();
+  }, [focusRetry, busy]);
   useEffect(() => {
     if (currentVersion.current === version) return;
     currentVersion.current = version;
@@ -665,6 +677,11 @@ export function DeckCommand({
     guard.current = true;
     setBusy(true);
     setError("");
+    if (!attempt.current) {
+      // A new attempt starts without the last one's notes.
+      setRenamed(false);
+      setChangedMeanwhile(false);
+    }
     attempt.current ??= {
       name,
       key: crypto.randomUUID(),
@@ -701,6 +718,9 @@ export function DeckCommand({
           // Applied or not, unknown: keep the exact attempt and key so a
           // retry replays it instead of applying it a second time.
           sent.uncertain = true;
+          if (currentVersion.current !== submittedVersion)
+            setChangedMeanwhile(true);
+          requestRetryFocus((n) => n + 1);
           setError(
             "Your last change may not have been saved. Try again to check safely."
           );
@@ -740,6 +760,10 @@ export function DeckCommand({
                     "This Deck changed. Close this dialog and reload before trying again.",
                   LOCATION_NAME_CONFIRMATION_MISMATCH:
                     "Type the Deck name exactly.",
+                  UNSORTED_UNAVAILABLE:
+                    "This Deck can't be deleted until the other Location named Unsorted can hold cards.",
+                  QUANTITY_OVERFLOW:
+                    "This Deck can't be deleted: its cards would exceed the most copies one Location can hold.",
                 } as Partial<Record<string, string>>
               )[e.code] ?? "Unable to save this change. Retry.")
             : "Unable to save this change. Retry."
@@ -753,6 +777,7 @@ export function DeckCommand({
   return (
     <Dialog open title={title} onClose={close}>
       <form
+        ref={form}
         onSubmit={(e) => {
           e.preventDefault();
           void save();
