@@ -289,7 +289,8 @@ export function useDeckListEdits({
       setNoticeIfMounted({
         text:
           cause.code === "STALE_DECK_LIST"
-            ? "This Deck changed somewhere else, so your last change wasn't saved. It's up to date now: try again."
+            ? // No read follows this refusal here (the rebuild above already used its one), so it can't claim the Deck is up to date.
+              "This Deck changed somewhere else, so your last change wasn't saved."
             : cause.code === "EDITION_UNAVAILABLE"
               ? "That card can't be added any more, so the Deck List wasn't changed."
               : "The Deck List couldn't be changed. Please try again.",
