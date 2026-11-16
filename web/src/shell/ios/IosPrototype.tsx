@@ -1,19 +1,92 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { App } from "@capacitor/app";
 import { AppLauncher } from "@capacitor/app-launcher";
 import { Button } from "../../ui/Button";
 import { CopyTile } from "../../ui/CopyTile";
 import { variantLabel } from "../../ui/variantLabel";
-import { collectionFixture } from "./collectionFixture";
+import type { CollectionEntry } from "../../collection_generated";
+import {
+  fixtureCollectionSource,
+  type CollectionSource,
+} from "./collectionSource";
 import { FixtureSession } from "./fixtureSession";
 import "../../tokens.css";
 import "../../tailwind.css";
 
-export function IosPrototype() {
-  const [session] = useState(() => new FixtureSession(window.localStorage));
+const ENDED = "Your session ended. Sign in again.";
+type Mode = "first" | "refresh" | "more";
+type Reads = {
+  entries: CollectionEntry[];
+  next: string | null;
+  /** The read in flight, if any. */
+  busy: Mode | null;
+  /** The read that failed and can be retried. */
+  failed: { mode: Mode; cursor?: string } | null;
+  loaded: boolean;
+};
+const NONE: Reads = {
+  entries: [],
+  next: null,
+  busy: null,
+  failed: null,
+  loaded: false,
+};
+
+export function IosPrototype(props: {
+  source?: CollectionSource;
+  session?: FixtureSession;
+}) {
+  const [ownSession] = useState(
+    () => props.session ?? new FixtureSession(window.localStorage)
+  );
+  const session = props.session ?? ownSession;
+  const [ownSource] = useState(() => fixtureCollectionSource(session));
+  const source = props.source ?? ownSource;
   const [, redraw] = useState(0);
   const [message, setMessage] = useState("");
+  const [reads, setReads] = useState<Reads>(NONE);
   const update = () => redraw((value) => value + 1);
+  // Each read takes a generation; a result from an older one is ignored.
+  const generation = useRef(0);
+  const shown = useRef(false);
+  const latest = useRef({ source, reads });
+  latest.current = { source, reads };
+  function endSession() {
+    generation.current += 1;
+    shown.current = false;
+    session.cancel();
+    setReads(NONE);
+    setMessage(ENDED);
+    update();
+  }
+  async function load(mode: Mode, cursor?: string) {
+    const mine = ++generation.current;
+    setReads((prev) =>
+      mode === "first"
+        ? { ...NONE, busy: mode }
+        : { ...prev, busy: mode, failed: null }
+    );
+    const result = await latest.current.source.read(cursor);
+    if (mine !== generation.current) return;
+    if (result.kind === "signed-out") return endSession();
+    if (result.kind === "unavailable") {
+      setReads((prev) => ({
+        ...prev,
+        busy: null,
+        failed: { mode, cursor },
+        loaded: mode === "first" ? false : prev.loaded,
+      }));
+      return;
+    }
+    const { entries, next_cursor } = result.page;
+    setReads((prev) => ({
+      entries: mode === "more" ? [...prev.entries, ...entries] : entries,
+      next: next_cursor ?? null,
+      busy: null,
+      failed: null,
+      loaded: true,
+    }));
+  }
   useEffect(() => {
     let disposed = false;
     const receive = (url: string) => {
@@ -39,7 +112,15 @@ export function IosPrototype() {
       })
       .catch(() => {});
     const resume = () => {
-      if (!session.signedIn()) update();
+      if (!session.signedIn()) {
+        if (shown.current) {
+          shown.current = false;
+          generation.current += 1;
+          setReads(NONE);
+          setMessage(ENDED);
+        }
+        update();
+      }
     };
     const active = App.addListener("appStateChange", resume);
     // Clear the displayed Collection at expiry even when the app stays in the foreground.
@@ -51,6 +132,15 @@ export function IosPrototype() {
       void active.then((handle) => handle.remove());
     };
   }, []);
+  const signedIn = session.signedIn();
+  shown.current = signedIn;
+  useEffect(() => {
+    if (signedIn) void load("first");
+    else {
+      generation.current += 1;
+      setReads(NONE);
+    }
+  }, [signedIn, source]);
   async function signIn() {
     setMessage("");
     const url = session.begin();
@@ -64,11 +154,16 @@ export function IosPrototype() {
       update();
     }
   }
-  const signedIn = session.signedIn();
+  const { entries, next, busy, failed, loaded } = reads;
+  const retry = () => {
+    if (!failed) return;
+    if (failed.mode === "more") void load("more", failed.cursor);
+    else void load(failed.mode);
+  };
   return (
     <main className="mx-auto max-w-3xl px-6 py-8 text-text [padding-top:max(2rem,env(safe-area-inset-top))] [padding-bottom:max(2rem,env(safe-area-inset-bottom))]">
       <p className="mb-6 text-text-subtle">
-        Prizecheck · Demo with sample cards
+        {source.sample ? "Prizecheck · Demo with sample cards" : "Prizecheck"}
       </p>
       <h1 className="mb-6 text-2xl font-semibold">
         {signedIn ? "Collection" : "Your Collection, with you"}
@@ -82,15 +177,46 @@ export function IosPrototype() {
         <>
           <Button
             onClick={() => {
+              generation.current += 1;
+              shown.current = false;
               session.cancel();
+              setReads(NONE);
               setMessage("Signed out.");
               update();
             }}
           >
             Sign out
+          </Button>{" "}
+          <Button
+            variant="secondary"
+            disabled={busy !== null}
+            onClick={() => void load("refresh")}
+          >
+            Refresh
           </Button>
+          {busy === "first" && (
+            <p role="status" className="mt-4">
+              Loading your Collection…
+            </p>
+          )}
+          {busy === "refresh" && (
+            <p role="status" className="mt-4">
+              Refreshing…
+            </p>
+          )}
+          {failed && (
+            <div className="mt-4">
+              <p role="status" className="mb-2">
+                Couldn't load your Collection. Try again.
+              </p>
+              <Button onClick={retry}>Try again</Button>
+            </div>
+          )}
+          {loaded && entries.length === 0 && !failed && busy === null && (
+            <p className="mt-4">No cards in your Collection yet.</p>
+          )}
           <ul className="mt-6 grid grid-cols-2 gap-4">
-            {collectionFixture.entries.map((entry) => (
+            {entries.map((entry) => (
               <li key={entry.edition_id}>
                 <CopyTile
                   disabled
@@ -107,6 +233,15 @@ export function IosPrototype() {
               </li>
             ))}
           </ul>
+          {next && !failed && (
+            <Button
+              className="mt-6"
+              disabled={busy !== null}
+              onClick={() => void load("more", next)}
+            >
+              {busy === "more" ? "Loading…" : "Show more"}
+            </Button>
+          )}
         </>
       ) : (
         <>

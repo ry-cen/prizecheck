@@ -4,6 +4,8 @@ import { JSDOM } from "jsdom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FixtureSession, RETURN_URL } from "./fixtureSession";
+import type { CollectionPage } from "../../collection_generated";
+import type { CollectionRead, CollectionSource } from "./collectionSource";
 
 const native = vi.hoisted(() => ({
   receive: (_event: { url: string }) => {},
@@ -31,6 +33,43 @@ vi.mock("@capacitor/app-launcher", () => ({
   AppLauncher: { openUrl: native.launch },
 }));
 import { IosPrototype } from "./IosPrototype";
+
+function entry(name: string) {
+  return {
+    edition_id: `e-${name}`,
+    quantity: "1",
+    printing_id: `p-${name}`,
+    printing_name: name,
+    set_id: "s",
+    set_name: "Demo set",
+    collector_number: "1",
+    descriptor: {},
+    image_url: null,
+  };
+}
+function pageOf(names: string[], next: string | null = null): CollectionPage {
+  return {
+    entries: names.map(entry),
+    owner_revision: 1,
+    catalog_revision: 1,
+    next_cursor: next,
+  };
+}
+const ok = (page: CollectionPage): CollectionRead => ({ kind: "page", page });
+function deferred() {
+  let resolve!: (value: CollectionRead) => void;
+  const promise = new Promise<CollectionRead>((done) => (resolve = done));
+  return { promise, resolve };
+}
+function scripted(read: CollectionSource["read"]) {
+  return { sample: true, read: vi.fn(read) } satisfies CollectionSource;
+}
+async function mountWith(source: CollectionSource) {
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  await act(async () => root.render(<IosPrototype source={source} />));
+  await complete();
+}
 
 let root: Root;
 let host: HTMLDivElement;
@@ -77,6 +116,7 @@ async function complete() {
 it("opens browser, shows Collection, recovers after remount and removes it on sign-out", async () => {
   await complete();
   expect(host.textContent).toContain("Pikachu");
+  expect(host.textContent).toContain("Demo with sample cards");
   await act(async () => root.unmount());
   root = createRoot(host);
   await act(async () => root.render(<IosPrototype />));
@@ -119,4 +159,95 @@ it("clears an expired Collection on appStateChange without advancing the polling
   await act(async () => native.active({ isActive: true }));
   expect(host.textContent).not.toContain("Pikachu");
   expect(host.textContent).toContain("Sign in with browser");
+});
+
+it("shows loading, then the empty message", async () => {
+  const wait = deferred();
+  await mountWith(scripted(() => wait.promise));
+  expect(host.textContent).toContain("Loading your Collection…");
+  await act(async () => wait.resolve(ok(pageOf([]))));
+  expect(host.textContent).not.toContain("Loading your Collection…");
+  expect(host.textContent).toContain("No cards in your Collection yet.");
+});
+it("offers Try again after a failed first read", async () => {
+  const reads: CollectionRead[] = [
+    { kind: "unavailable" },
+    ok(pageOf(["Mew"])),
+  ];
+  await mountWith(scripted(async () => reads.shift()!));
+  expect(host.textContent).toContain(
+    "Couldn't load your Collection. Try again."
+  );
+  await click("Try again");
+  expect(host.textContent).toContain("Mew");
+  expect(host.textContent).not.toContain("Couldn't load");
+});
+it("appends on Show more and keeps the list when it fails", async () => {
+  const source = scripted(async (cursor) =>
+    !cursor
+      ? ok(pageOf(["Mew"], "c2"))
+      : source.read.mock.calls.length === 2
+        ? { kind: "unavailable" }
+        : ok(pageOf(["Eevee"]))
+  );
+  await mountWith(source);
+  const wait = deferred();
+  source.read.mockImplementationOnce(() => wait.promise);
+  await click("Show more");
+  const busy = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent === "Loading…"
+  );
+  expect(busy?.disabled).toBe(true);
+  await act(async () => wait.resolve({ kind: "unavailable" }));
+  expect(host.textContent).toContain("Mew");
+  expect(host.textContent).toContain("Couldn't load your Collection");
+  await click("Try again");
+  expect(host.textContent).toContain("Mew");
+  expect(host.textContent).toContain("Eevee");
+  expect(host.textContent).not.toContain("Show more");
+});
+it("replaces the list on Refresh and keeps it when Refresh fails", async () => {
+  const reads: CollectionRead[] = [
+    ok(pageOf(["Mew"])),
+    ok(pageOf(["Eevee"])),
+    { kind: "unavailable" },
+  ];
+  await mountWith(scripted(async () => reads.shift()!));
+  await click("Refresh");
+  expect(host.textContent).toContain("Eevee");
+  expect(host.textContent).not.toContain("Mew");
+  await click("Refresh");
+  expect(host.textContent).toContain("Eevee");
+  expect(host.textContent).toContain("Couldn't load your Collection");
+});
+it("keeps the list and says Refreshing… while a refresh is pending", async () => {
+  const source = scripted(async () => ok(pageOf(["Mew"])));
+  await mountWith(source);
+  const wait = deferred();
+  source.read.mockImplementationOnce(() => wait.promise);
+  await click("Refresh");
+  expect(host.textContent).toContain("Refreshing…");
+  expect(host.textContent).toContain("Mew");
+  await act(async () => wait.resolve(ok(pageOf(["Eevee"]))));
+  expect(host.textContent).not.toContain("Refreshing…");
+});
+it("shows the session-ended message on a signed-out read", async () => {
+  await mountWith(scripted(async () => ({ kind: "signed-out" })));
+  expect(host.textContent).toContain("Your session ended. Sign in again.");
+  expect(host.textContent).toContain("Sign in with browser");
+  expect(new FixtureSession(window.localStorage).signedIn()).toBe(false);
+});
+it("ignores a late result after sign-out", async () => {
+  const wait = deferred();
+  await mountWith(scripted(() => wait.promise));
+  await click("Sign out");
+  await act(async () => wait.resolve(ok(pageOf(["Mew"]))));
+  expect(host.textContent).not.toContain("Mew");
+  expect(host.textContent).toContain("Signed out.");
+});
+it("says the session ended when it expires in the foreground", async () => {
+  await mountWith(scripted(async () => ok(pageOf(["Mew"]))));
+  await act(async () => vi.advanceTimersByTime(30 * 60_000));
+  expect(host.textContent).not.toContain("Mew");
+  expect(host.textContent).toContain("Your session ended. Sign in again.");
 });

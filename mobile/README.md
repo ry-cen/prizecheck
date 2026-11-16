@@ -24,6 +24,12 @@ Only the exact return route and a random 256-bit pending state are accepted, for
 
 Walk through success → sample Collection → terminate/relaunch → Collection recovery → Sign out → relaunch signed out. Also cancel in the app, cancel in the browser, simulate an error, and leave an attempt open five minutes. A session expires after 30 minutes; foreground polling and resume checks unmount the sample Collection. Closing the browser without returning leaves the app's Cancel sign-in action available. A failed browser launch shows a retry message. A real device cannot reach a Linux fixture server via its own loopback address; do not widen the listener or relax ATS to work around this.
 
+## Collection source and states
+
+The prototype reads its Collection through a typed `CollectionSource` (`web/src/shell/ios/collectionSource.ts`): a page, signed out, or unavailable. The packaged app uses only the sample source: two sample pages, so it can show loading, empty, error with **Try again**, **Refresh**, **Show more** and the session-ended message. The header keeps saying "Demo with sample cards".
+
+`gatewayCollection.ts` is the same boundary for the real gateway. It wraps the generated `getCollection` client and maps a 401 to signed out. It is not imported by the packaged entry, and `mobile/index.html` still has `connect-src 'none'`. It stays unwired until the production handoff below is reviewed.
+
 ## Production handoff decision required
 
 The existing Better Auth gateway uses same-origin HttpOnly cookie sessions and forwards signed internal requests to the private FastAPI API. Safari's cookie jar is not WKWebView's cookie jar, and a packaged app's origin is not the web origin. A wrapper alone cannot reuse browser login safely.

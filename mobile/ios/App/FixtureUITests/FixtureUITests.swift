@@ -82,4 +82,17 @@ final class FixtureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Sign-in cancelled."].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Sign in with browser"].exists)
     }
+
+    func testCollectionShowMoreAndRefresh() {
+        openBrowser()
+        returnFromBrowser("Continue to sample Collection")
+        XCTAssertTrue(app.buttons["Pikachu, Unspecified Variant"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Mew, Unspecified Variant"].exists)
+        app.buttons["Show more"].tap()
+        XCTAssertTrue(app.buttons["Mew, Unspecified Variant"].waitForExistence(timeout: 10))
+        app.buttons["Refresh"].tap()
+        XCTAssertTrue(app.buttons["Show more"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Pikachu, Unspecified Variant"].exists)
+        XCTAssertFalse(app.buttons["Mew, Unspecified Variant"].exists)
+    }
 }

@@ -100,3 +100,9 @@ Commit `95a644f4` changes only `FixtureUITests.swift`:
 No scenario step or assertion changed. [Run 43700919303](https://github.com/ry-cen/prizecheck/actions/runs/43700919303) at `95a644f4` passed **4 of 4, with 0 failed and 0 skipped** on the iPhone 17 simulator (iOS 26.2), after `TEST BUILD SUCCEEDED` with `CODE_SIGNING_ALLOWED=NO`. Linux Verify for the same PR head passed 2,971 unit tests and 678 tooling tests (three historical migration tests skipped in the shallow checkout).
 
 One passing run after a repair does not prove the slow-runner flake is gone. A failing hosted run that recurs should be reported, not retried until it passes.
+
+### Collection source and states (slice 2)
+
+The prototype now reads sample pages through a typed `CollectionSource` and shows loading, empty, error with retry, refresh, show more and session-ended states. A gateway source exists but is not wired into the packaged app; no network, cookie, CORS, CSRF or Origin behavior changed.
+
+Evidence is recorded in the pull request after the hosted run. A new `testCollectionShowMoreAndRefresh` UI scenario is added (the existing four are kept). Swift cannot be compiled on Linux, so it has no native result until the hosted simulator job runs at the pushed head.
