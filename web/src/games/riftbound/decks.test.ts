@@ -266,7 +266,11 @@ describe("serialized Deck edits", () => {
       changed
     );
     edits.adjust("1", 1);
-    await vi.waitFor(() => expect(edits.error).toContain("Unable"));
+    await vi.waitFor(() =>
+      expect(edits.error).toBe(
+        "Your last Deck List change may not have been saved. Try again to check safely."
+      )
+    );
     edits.retry();
     expect(change.mock.calls[1]).toEqual(change.mock.calls[0]);
     edits.dispose();
@@ -300,6 +304,12 @@ it("retains unambiguous stale intent at the new revision and drops intent when q
     );
     expect(edits.detail.listRevision).toBe(2);
     expect(edits.busy).toBe(!concurrent);
+    expect(edits.canRetry).toBe(!concurrent);
+    expect(edits.error).toBe(
+      concurrent
+        ? "This Deck changed somewhere else, so your last change wasn't saved. Review the refreshed Deck List."
+        : "This Deck changed somewhere else, so your last change wasn't saved. It's up to date now: try again."
+    );
     if (!concurrent) {
       edits.retry();
       await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(2));
@@ -451,4 +461,52 @@ describe("Holdings arriving in Decks cover their Deck Lists", () => {
     expect(deck.listRevision).toBe(4);
     expect(deck.lines[0]).toMatchObject({ quantity: 1, inDeck: 1 });
   });
+});
+
+it("releases a definitive retained re-add refusal, accepts ownership reads and starts new edits with new keys", async () => {
+  const api = deckFixture("a");
+  const initial = (await api.deck("deck-1", signal))!;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const change = vi.fn<DeckWriter["changeDeckList"]>();
+  change
+    .mockImplementationOnce(async (input, opts) => {
+      await gate;
+      return api.changeDeckList(input, opts);
+    })
+    .mockImplementation(api.changeDeckList);
+  const edits = new DeckEdits(
+    initial,
+    { owner: "a", changeDeckList: change },
+    () => {}
+  );
+  edits.reload = (s) => api.deck("deck-1", s);
+  edits.adjust("retained", -1);
+  edits.adjust("retained", 1);
+  release();
+  await vi.waitFor(() => expect(edits.error).toContain("can't be added"));
+  await vi.waitFor(() => expect(edits.busy).toBe(false));
+  expect(edits.canRetry).toBe(false);
+  expect(edits.detail.lines.some((l) => l.edition.id === "retained")).toBe(
+    false
+  );
+  edits.retry();
+  expect(change).toHaveBeenCalledTimes(2);
+  await collectionFixtureWriter("a").add(
+    { locationId: "deck-1", editionId: "1", quantity: 1 },
+    options()
+  );
+  edits.acceptRead((await api.deck("deck-1", signal))!);
+  expect(edits.detail.lines.find((l) => l.edition.id === "1")?.inDeck).toBe(3);
+  edits.adjust("1", 1);
+  await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(edits.busy).toBe(false));
+  expect(edits.error).toBe("");
+  expect(edits.quantity("1")).toBe(4);
+  expect(
+    new Set(change.mock.calls.map((call) => call[1].idempotencyKey)).size
+  ).toBe(3);
+  edits.dispose();
 });
