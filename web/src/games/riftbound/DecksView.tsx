@@ -597,19 +597,19 @@ export function DeckCommand({
   const guard = useRef(false);
   const currentVersion = useRef(version);
   const [renamed, setRenamed] = useState(false);
+  const nameField = useRef<HTMLInputElement>(null);
+  const [focusName, requestNameFocus] = useState(0);
   useEffect(() => {
     if (currentVersion.current === version) return;
     currentVersion.current = version;
+    // A request in flight is the collector's own: its result decides whether
+    // this change came from it or from elsewhere.
+    if (guard.current) return;
     setRenamed(true);
     attempt.current = null;
-    lifetime.current.controller.abort();
-    lifetime.current.controller = new AbortController();
-    guard.current = false;
-    setBusy(false);
     setError("");
+    requestNameFocus((n) => n + 1);
   }, [version]);
-  const nameField = useRef<HTMLInputElement>(null);
-  const [focusName, requestNameFocus] = useState(0);
   useEffect(() => {
     if (focusName && !busy) {
       nameField.current?.focus();
@@ -636,18 +636,31 @@ export function DeckCommand({
         signal: lifetime.current.controller.signal,
         idempotencyKey: attempt.current.key,
       });
-      if (
-        lifetime.current.alive &&
-        currentVersion.current === submittedVersion &&
-        !controller.signal.aborted
-      )
-        done(r);
+      if (lifetime.current.alive && !controller.signal.aborted) {
+        if (
+          !r.location ||
+          currentVersion.current === submittedVersion ||
+          r.location.version === currentVersion.current
+        )
+          done(r);
+        else {
+          // The version moved on past what this request produced.
+          attempt.current = null;
+          setRenamed(true);
+          requestNameFocus((n) => n + 1);
+        }
+      }
     } catch (e) {
-      if (
-        lifetime.current.alive &&
-        currentVersion.current === submittedVersion &&
-        !controller.signal.aborted
-      ) {
+      if (lifetime.current.alive && !controller.signal.aborted) {
+        if (currentVersion.current !== submittedVersion) {
+          // The Deck changed while this request was in flight and it did not
+          // succeed, so the change cannot be attributed to it.
+          attempt.current = null;
+          setRenamed(true);
+          setError("");
+          requestNameFocus((n) => n + 1);
+          return;
+        }
         if (e instanceof DeckError && e.code === "STALE_LOCATION") {
           attempt.current = null;
           setRenamed(true);
@@ -656,6 +669,7 @@ export function DeckCommand({
           } catch {
             setError("Unable to reload this Deck. Try again.");
           }
+          requestNameFocus((n) => n + 1);
           return;
         }
         if (
@@ -684,10 +698,8 @@ export function DeckCommand({
         );
       }
     } finally {
-      if (currentVersion.current === submittedVersion) {
-        guard.current = false;
-        if (lifetime.current.alive) setBusy(false);
-      }
+      guard.current = false;
+      if (lifetime.current.alive) setBusy(false);
     }
   }
   return (

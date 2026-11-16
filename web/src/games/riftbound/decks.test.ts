@@ -588,8 +588,9 @@ it("keeps a new-line total changed after dispatch and retries kept edits only af
   expect(edits.quantity("retained")).toBe(0);
   edits.retry();
   await vi.waitFor(() => expect(edits.busy).toBe(false));
+  // The sole refused-candidate line is certainly unavailable: its pending
+  // total, even a zero queued after dispatch, is dropped with it.
   expect(change.mock.calls[1][0].changes).toEqual([
-    { editionId: "retained", quantity: 0 },
     { editionId: "1", quantity: 1 },
   ]);
   expect(change.mock.calls[1][1].idempotencyKey).not.toBe(
@@ -728,6 +729,9 @@ for (const failed of [false, true])
     await vi.waitFor(() =>
       expect(edits.error).toContain("Review the Deck List")
     );
+    expect(edits.error).toBe(
+      "That card can't be added any more, and this Deck changed somewhere else, so some changes weren’t saved. Review the Deck List."
+    );
     expect(change).toHaveBeenCalledTimes(1);
     expect(edits.canRetry).toBe(true);
     edits.retry();
@@ -740,3 +744,132 @@ for (const failed of [false, true])
     ]);
     edits.dispose();
   });
+
+function gatedWriter(api: ReturnType<typeof deckFixture>, gated: number) {
+  const releases: (() => void)[] = [];
+  let n = 0;
+  const change = vi.fn<DeckWriter["changeDeckList"]>(async (input, opts) => {
+    if (n++ < gated)
+      await new Promise<void>((resolve) => releases.push(resolve));
+    return api.changeDeckList(input, opts);
+  });
+  return { change, releases };
+}
+const editionsOf = (change: ReturnType<typeof gatedWriter>["change"]) =>
+  change.mock.calls.map((c) => c[0].changes.map((x) => x.editionId));
+for (const reclick of ["again", "to zero"])
+  it(`keeps an available Edition when the refused line is changed ${reclick} while their batch is in flight`, async () => {
+    const api = deckFixture("a");
+    const initial = (await api.deck("deck-1", signal))!;
+    const { change, releases } = gatedWriter(api, 2);
+    const edits = new DeckEdits(
+      initial,
+      { owner: "a", changeDeckList: change },
+      () => {}
+    );
+    edits.reload = (s) => api.deck("deck-1", s);
+    edits.adjust("retained", -1);
+    edits.adjust("retained", 1);
+    edits.adjust("4", 1);
+    releases[0]();
+    await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(2));
+    expect(change.mock.calls[1][0].changes).toEqual([
+      { editionId: "retained", quantity: 1 },
+      { editionId: "4", quantity: 1 },
+    ]);
+    edits.adjust("retained", reclick === "again" ? 1 : -1);
+    releases[1]();
+    await vi.waitFor(() => expect(edits.busy).toBe(false));
+    const final = (await api.deck("deck-1", signal))!;
+    expect(final.lines.find((l) => l.edition.id === "4")?.quantity).toBe(1);
+    expect(final.lines.some((l) => l.edition.id === "retained")).toBe(false);
+    expect(edits.quantity("retained")).toBe(0);
+    expect(editionsOf(change).slice(2)).toEqual(
+      reclick === "again" ? [["retained"], ["4"]] : [["4"]]
+    );
+    expect(
+      new Set(change.mock.calls.map((c) => c[1].idempotencyKey)).size
+    ).toBe(change.mock.calls.length);
+    edits.dispose();
+  });
+it("flushes ordinary totals first, then isolates and drops each of two refused additions", async () => {
+  const api = deckFixture("a");
+  const initial = (await api.deck("deck-1", signal))!;
+  const { change, releases } = gatedWriter(api, 2);
+  const edits = new DeckEdits(
+    initial,
+    { owner: "a", changeDeckList: change },
+    () => {}
+  );
+  edits.reload = (s) => api.deck("deck-1", s);
+  edits.adjust("1", 1);
+  edits.adjust("missing", 1);
+  edits.adjust("gone", 1);
+  edits.adjust("4", 1);
+  edits.adjust("2", 1);
+  releases[0]();
+  await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(2));
+  releases[1]();
+  await vi.waitFor(() => expect(edits.busy).toBe(false), { timeout: 8000 });
+  expect(editionsOf(change)).toEqual([
+    ["1"],
+    ["missing", "gone", "4", "2"],
+    ["2"],
+    ["missing"],
+    ["gone"],
+    ["4"],
+  ]);
+  const final = (await api.deck("deck-1", signal))!;
+  expect(final.lines.find((l) => l.edition.id === "4")?.quantity).toBe(1);
+  expect(final.lines.find((l) => l.edition.id === "2")?.quantity).toBe(5);
+  expect(
+    final.lines.some((l) => ["missing", "gone"].includes(l.edition.id))
+  ).toBe(false);
+  expect(edits.quantity("missing")).toBe(0);
+  expect(edits.quantity("gone")).toBe(0);
+  edits.dispose();
+});
+it("forgets isolated additions when a stale Deck List clears the pending edits", async () => {
+  const { changeFixtureDeckLine } = await import("./local/deckTestHooks");
+  const api = deckFixture("a");
+  const initial = (await api.deck("deck-1", signal))!;
+  const releases: (() => void)[] = [];
+  let n = 0;
+  const change = vi.fn<DeckWriter["changeDeckList"]>(async (input, opts) => {
+    const call = n++;
+    if (call === 0 || call === 3)
+      await new Promise<void>((resolve) => releases.push(resolve));
+    if (call === 1) throw new DeckError("EDITION_UNAVAILABLE");
+    if (call === 2) {
+      changeFixtureDeckLine("a", "deck-1", "2", 9);
+      throw new DeckError("STALE_DECK_LIST");
+    }
+    return api.changeDeckList(input, opts);
+  });
+  const edits = new DeckEdits(
+    initial,
+    { owner: "a", changeDeckList: change },
+    () => {}
+  );
+  edits.reload = (s) => api.deck("deck-1", s);
+  edits.adjust("1", 1);
+  edits.adjust("missing", 1);
+  edits.adjust("gone", 1);
+  edits.adjust("2", 1);
+  releases[0]();
+  await vi.waitFor(() => expect(edits.busy).toBe(false), { timeout: 8000 });
+  expect(editionsOf(change)).toEqual([["1"], ["missing", "gone", "2"], ["2"]]);
+  expect(edits.error).toContain("Review the refreshed Deck List");
+  edits.adjust("2", 1);
+  await vi.waitFor(() => expect(change).toHaveBeenCalledTimes(4));
+  edits.adjust("missing", 1);
+  edits.adjust("1", 1);
+  releases[1]();
+  await vi.waitFor(() => expect(edits.busy).toBe(false));
+  // A leftover isolation mark would have sent "1" without "missing".
+  expect(change.mock.calls[4][0].changes.map((c) => c.editionId)).toEqual([
+    "missing",
+    "1",
+  ]);
+  edits.dispose();
+});
