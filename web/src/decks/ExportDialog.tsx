@@ -30,6 +30,7 @@ type Props = {
   onClose: () => void;
   returnFocus: React.RefObject<HTMLElement | null>;
   detail: DeckDetail;
+  countReady: boolean;
   /** An export named a newer revision than the page drew: the page reads the Deck again. */
   onStale: () => void;
 };
@@ -47,6 +48,7 @@ export function ExportDialog({
   onClose,
   returnFocus,
   detail,
+  countReady,
   onStale,
 }: Props) {
   const idBase = useId();
@@ -98,10 +100,11 @@ export function ExportDialog({
               type="radio"
               name={`${idBase}-scope`}
               className="m-0 size-4 accent-accent"
+              disabled={!countReady}
               checked={scope === "not_owned"}
               onChange={() => setScope("not_owned")}
             />
-            Cards you don't own ({toGet})
+            Cards you don't own{countReady ? ` (${toGet})` : ""}
           </label>
           <label className={RADIO_ROW}>
             <input
@@ -130,6 +133,10 @@ export function ExportDialog({
       >
         {kind === "live" ? (
           <DeckLiveExport {...revisions} checks={listChecks} />
+        ) : scope === "not_owned" && !countReady ? (
+          <p role="status">
+            Wait for this Deck's missing count before exporting cards.
+          </p>
         ) : scope === "not_owned" ? (
           <DeckMassEntryExport
             key="not_owned"

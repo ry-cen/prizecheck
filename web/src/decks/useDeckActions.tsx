@@ -13,6 +13,8 @@ type Options = {
   deckId: string;
   /** The Deck as last read, or null before the first read. */
   detail: DeckDetail | null;
+  /** No Deck List edit is pending, and a full Deck read supplied the missing count. */
+  countReady: boolean;
   /** The Target Format's result as of today, or null while a Target Format change is in flight. */
   result: FormatCheck | null;
   /** The Target Format shown (a change in flight shows the one it asks for). */
@@ -43,6 +45,7 @@ const plural = (count: string) =>
 export function useDeckActions({
   deckId,
   detail,
+  countReady,
   result,
   target,
   read,
@@ -65,6 +68,7 @@ export function useDeckActions({
       ? publication.status
       : null;
   const reasonId = `${idBase}-publish-reason`;
+  const countReasonId = `${idBase}-missing-count-reason`;
   // The copies Buy missing sends: the Deck's need under the Want List counting setting (#208), not `not_owned`.
   const toGet = detail ? BigInt(detail.to_get) : 0n;
 
@@ -114,15 +118,23 @@ export function useDeckActions({
   );
 
   const buyMissing: ReactNode = (
-    <Button
-      disabled={toGet === 0n}
-      onClick={(event) => {
-        exportOpener.current = event.currentTarget;
-        setExporting({ kind: "mass", scope: "not_owned" });
-      }}
-    >
-      Buy missing
-    </Button>
+    <>
+      <Button
+        disabled={!countReady || toGet === 0n}
+        aria-describedby={!countReady ? countReasonId : undefined}
+        onClick={(event) => {
+          exportOpener.current = event.currentTarget;
+          setExporting({ kind: "mass", scope: "not_owned" });
+        }}
+      >
+        Buy missing
+      </Button>
+      {!countReady && (
+        <span id={countReasonId} className="max-w-60 text-meta text-text-muted">
+          Wait for this Deck's missing count.
+        </span>
+      )}
+    </>
   );
 
   const dialogs: ReactNode = detail && (
@@ -132,6 +144,7 @@ export function useDeckActions({
         onClose={() => setExporting(null)}
         returnFocus={exportOpener}
         detail={detail}
+        countReady={countReady}
         onStale={read}
       />
       <PublishDialog

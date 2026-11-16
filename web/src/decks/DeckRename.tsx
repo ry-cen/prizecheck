@@ -117,9 +117,12 @@ export function useDeckRename(options: {
         setError("That name can't be used. Choose a different Deck name.");
         settle();
       } else if (cause instanceof DeckError && cause.status === 409) {
-        await reread();
+        // The re-read gives the Deck it loaded, or nothing if it failed or a newer read took over.
+        const fresh = await reread();
         setError(
-          "This Deck changed somewhere else, so it wasn't renamed. It's up to date now: try again."
+          fresh
+            ? "This Deck changed somewhere else, so it wasn't renamed. It's up to date now: try again."
+            : "This Deck changed somewhere else, so it wasn't renamed."
         );
       } else if (cause instanceof DeckError && cause.status === 404) {
         onMissing();
