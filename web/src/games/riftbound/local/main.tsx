@@ -1,3 +1,4 @@
+import { deckFixture, type DeckScenario } from "./deckFixtures";
 import { createRoot } from "react-dom/client";
 import "../../../tokens.css";
 import "../../../tailwind.css";
@@ -15,6 +16,11 @@ const scenario = new URLSearchParams(location.search).get(
 // This HTML is a dev-server entry only, absent from the production Rollup inputs.
 createRoot(document.getElementById("root")!).render(
   <RiftboundApp
+    decks={deckFixture(
+      params.get("owner") === "b" ? "b" : "a",
+      (params.get("decks") ?? "normal") as DeckScenario,
+      (params.get("collection") ?? "normal") as CollectionScenario
+    )}
     reader={fixtureReader(scenario ?? "normal")}
     writer={collectionFixtureWriter(
       params.get("owner") === "b" ? "b" : "a",

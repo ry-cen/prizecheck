@@ -184,7 +184,7 @@ export function CollectionWriteDialog({
   );
   const leaves = (tree.value ?? []).filter(
     (n) =>
-      n.kind === "storage_leaf" &&
+      (n.kind === "storage_leaf" || n.kind === "deck") &&
       n.id !== row?.locationId &&
       !tree.value!.some((child) => child.parent_id === n.id)
   );
