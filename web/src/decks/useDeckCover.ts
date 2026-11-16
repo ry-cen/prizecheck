@@ -61,13 +61,16 @@ export function useDeckCover(options: {
       settle();
     } catch (cause) {
       if (cause instanceof DeckError && cause.status === 409) {
-        await reread();
+        // The re-read gives the Deck it loaded, or nothing if it failed or a newer read took over.
+        const fresh = await reread();
         setMessage({
           editionId,
           text:
             cause.code === "COVER_NOT_ON_DECK_LIST"
               ? "This card is no longer on the Deck List, so it can't be the cover."
-              : "This Deck's cover changed somewhere else, so nothing changed. It's up to date now: try again.",
+              : fresh
+                ? "This Deck's cover changed somewhere else, so nothing changed. It's up to date now: try again."
+                : "This Deck's cover changed somewhere else, so nothing changed.",
         });
       } else if (cause instanceof DeckError && cause.status === 404) {
         onMissing();

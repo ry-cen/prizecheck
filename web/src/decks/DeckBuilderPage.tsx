@@ -69,6 +69,9 @@ type Load =
 
 type Pane = "library" | "deck";
 
+const READ_NOTICE =
+  "This Deck couldn't be loaded. Check your connection and try again.";
+
 const VIEWS = [
   { value: "spread", label: "Spread" },
   { value: "stacked", label: "Stacked" },
@@ -113,6 +116,8 @@ export function DeckBuilderPage({
   const idBase = useId();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [notice, setNotice] = useState("");
+  const [readFailed, setReadFailed] = useState(false);
+  const [readNotice, setReadNotice] = useState("");
   const [view, setView] = useState<DeckView>(() =>
     window.matchMedia(MOBILE_QUERY).matches ? "stacked" : "spread"
   );
@@ -145,6 +150,8 @@ export function DeckBuilderPage({
   const resultButton = useRef<HTMLButtonElement | null>(null);
   const reads = useRef(0);
   const readsInFlight = useRef(0);
+  const countKnown = useRef(false);
+  const pendingReplay = useRef(false);
   // The newest Deck List revision shown, from a read or an edit's answer (#177): a read that left before an edit
   // landed is behind it and is dropped (the edit queue reads again once it drains).
   const shownRevision = useRef(0);
@@ -165,13 +172,23 @@ export function DeckBuilderPage({
     try {
       const detail = await getDeck(deckId);
       if (ticket !== reads.current) return null;
-      if (detail.deck_list.revision < shownRevision.current) return null;
+      if (detail.deck_list.revision < shownRevision.current) {
+        if (!edits.busyNow() && !countKnown.current) {
+          setReadFailed(true);
+          setReadNotice(READ_NOTICE);
+        }
+        return null;
+      }
       shownRevision.current = detail.deck_list.revision;
+      countKnown.current = true;
+      if (!edits.busyNow()) pendingReplay.current = false;
       setLoad({ kind: "ready", detail, readinessToGet: detail.to_get });
-      setNotice("");
+      setReadFailed(false);
+      setReadNotice("");
       return detail;
     } catch (cause) {
       if (ticket !== reads.current) return null;
+      setReadFailed(true);
       if (
         cause instanceof DeckError &&
         (cause.status === 404 || cause.status === 422)
@@ -181,9 +198,7 @@ export function DeckBuilderPage({
         setLoad((previous) =>
           previous.kind === "ready" ? previous : { kind: "failed" }
         );
-        setNotice(
-          "This Deck couldn't be loaded. Check your connection and try again."
-        );
+        setReadNotice(READ_NOTICE);
       }
       return null;
     } finally {
@@ -191,19 +206,49 @@ export function DeckBuilderPage({
     }
   }
 
-  /** Before a cover or rename command: drop Deck reads already on their way (they'd show the old name or cover), and
-   * give back the call that re-reads once the command has landed if one was dropped. */
+  function invalidateCount() {
+    countKnown.current = false;
+    setLoad((previous) =>
+      previous.kind === "ready"
+        ? { ...previous, readinessToGet: undefined }
+        : previous
+    );
+  }
+
+  /** Server-side changes invalidate the count before requesting the current Deck. */
+  function refreshCount() {
+    void rereadFresh();
+  }
+
+  /** A re-read some command asked for because the server may have moved: never keeps the old count. */
+  function rereadFresh() {
+    invalidateCount();
+    return readDeck();
+  }
+
+  /** Coalesce deferred replays until the edit queue is no longer busy. */
+  function settleReads() {
+    if ((pendingReplay.current || !countKnown.current) && !edits.busyNow()) {
+      pendingReplay.current = false;
+      void read();
+    }
+  }
+
+  /** Supersede reads before a command; every command outcome settles the deferred replay. */
   function beginCommand(): () => void {
     const dropped = readsInFlight.current > 0;
+    pendingReplay.current ||= dropped;
     reads.current++;
     return () => {
-      if (dropped) void read();
+      pendingReplay.current ||= dropped;
+      settleReads();
     };
   }
 
   /** An edit's answer (#177): its Deck List, Target Format and result show at once; the read that follows once the
    * edits drain brings the ownership, checks and surplus up to date. */
   function applyResult(result: DeckListCommandResult) {
+    countKnown.current = false;
     shownRevision.current = Math.max(
       shownRevision.current,
       result.deck_list.revision
@@ -250,7 +295,7 @@ export function DeckBuilderPage({
     failedChange.current = null;
     setChanging(target);
     setNotice("");
-    reads.current++; // A Deck read already in flight must not overwrite the command's answer.
+    const settle = beginCommand();
     try {
       const result = await setTargetFormat(deckId, {
         target_format: target,
@@ -273,12 +318,15 @@ export function DeckBuilderPage({
             }
           : previous
       );
+      settle();
     } catch (cause) {
       if (cause instanceof DeckError && cause.status === 409) {
-        // Re-read first: a successful read clears the notice.
-        await read();
+        // Mark the count unknown and refresh the Deck before explaining the conflicting Target Format change.
+        const fresh = await rereadFresh();
         setNotice(
-          "This Deck changed somewhere else, so its Target Format wasn't changed. It's up to date now: try again."
+          fresh
+            ? "This Deck changed somewhere else, so its Target Format wasn't changed. It's up to date now: try again."
+            : "This Deck changed somewhere else, so its Target Format wasn't changed."
         );
       } else if (cause instanceof DeckError && cause.status === 404) {
         setLoad({ kind: "missing" });
@@ -287,6 +335,7 @@ export function DeckBuilderPage({
         setNotice(
           "The Target Format couldn't be changed. Check your connection and try again."
         );
+        settle();
       }
     } finally {
       setChanging(null);
@@ -298,7 +347,13 @@ export function DeckBuilderPage({
   useLayoutEffect(() => {
     void read();
   }, []);
-  useDeckListChanged(deckId, () => void read());
+  useDeckListChanged(deckId, refreshCount);
+  useEffect(() => {
+    if (!readFailed) return;
+    const retry = () => void read();
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [readFailed, deckId]);
 
   const detail = load.kind === "ready" ? load.detail : null;
   // A Deck that already lists cards opens on its Deck tab and an empty one on Library, picked once from the first read,
@@ -310,8 +365,12 @@ export function DeckBuilderPage({
     deckId,
     deckList: detail?.deck_list ?? null,
     onResult: applyResult,
-    onSettled: () => void read(),
-    reread: async () => (await readDeck())?.deck_list ?? null,
+    onSettled: () => {
+      // The hook emits this only for dirty commands, including a refused Undo after an external change.
+      invalidateCount();
+      settleReads();
+    },
+    reread: async () => (await rereadFresh())?.deck_list ?? null,
     onMissing: () => setLoad({ kind: "missing" }),
   });
   const coverId = detail?.cover_edition_id ?? null;
@@ -329,7 +388,7 @@ export function DeckBuilderPage({
             }
           : previous
       ),
-    reread: readDeck,
+    reread: rereadFresh,
     onMissing: () => setLoad({ kind: "missing" }),
   });
   const rename = useDeckRename({
@@ -342,7 +401,7 @@ export function DeckBuilderPage({
           ? { ...previous, detail: { ...previous.detail, deck } }
           : previous
       ),
-    reread: readDeck,
+    reread: rereadFresh,
     onMissing: () => setLoad({ kind: "missing" }),
   });
   /** One Edition, `delta` copies on or off the Deck List, as one edit. */
@@ -410,7 +469,7 @@ export function DeckBuilderPage({
     deckId,
     detail?.deck_list.revision ?? null,
     detail?.owner_revision ?? null,
-    () => void read(),
+    refreshCount,
     detail?.settings_revision ?? null,
     cardsRevision
   );
@@ -419,7 +478,7 @@ export function DeckBuilderPage({
     deckId,
     deckName: detail?.deck.name ?? "",
     surplus: detail?.surplus,
-    onChanged: () => void read(),
+    onChanged: refreshCount,
   });
   const lineOrder = useRef<Map<string, number> | null>(null);
   const model = useMemo(
@@ -437,7 +496,7 @@ export function DeckBuilderPage({
   useEffect(() => {
     if (model) lineOrder.current = extendOrder(lineOrder.current, model);
   }, [model]);
-  const gathered = useGatherToast(detail?.deck.name ?? "", () => void read());
+  const gathered = useGatherToast(detail?.deck.name ?? "", refreshCount);
   const targetResult = detail
     ? resultFor(detail.format_checks, detail.target_format)
     : null;
@@ -445,9 +504,11 @@ export function DeckBuilderPage({
   const deckActions = useDeckActions({
     deckId,
     detail,
+    countReady:
+      !edits.busy && load.kind === "ready" && load.readinessToGet !== undefined,
     result: changing ? null : targetResult,
     target: changing ?? detail?.target_format ?? "standard",
-    read: () => void read(),
+    read: refreshCount,
     onAllDecks,
     onReplaceList,
   });
@@ -520,7 +581,7 @@ export function DeckBuilderPage({
           <>
             <PageHeader title="Deck unavailable" />
             <p role="status" className="m-0 text-body text-text-muted">
-              {notice}
+              {readNotice}
             </p>
             <Button className="self-start" onClick={() => void read()}>
               Retry
@@ -694,6 +755,15 @@ export function DeckBuilderPage({
           {notice}
         </p>
       )}
+      {readFailed && load.kind === "ready" && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-3 text-body text-warning"
+        >
+          <p className="m-0">{readNotice}</p>
+          <Button onClick={() => void read()}>Retry</Button>
+        </div>
+      )}
       {edits.notice && (
         <div
           role="alert"
@@ -784,10 +854,10 @@ export function DeckBuilderPage({
         onClose={() => setGather(null)}
         onConfirmed={(result) => {
           setGather(null);
-          void read();
+          refreshCount();
           void gathered(result);
         }}
-        onChanged={() => void read()}
+        onChanged={refreshCount}
       />
       {targetResult && (
         <FormatResultsDialog
