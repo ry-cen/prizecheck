@@ -251,3 +251,26 @@ it("says the session ended when it expires in the foreground", async () => {
   expect(host.textContent).not.toContain("Mew");
   expect(host.textContent).toContain("Your session ended. Sign in again.");
 });
+it("says the session ended when a read resolves after expiry but before any tick", async () => {
+  const wait = deferred();
+  await mountWith(scripted(() => wait.promise));
+  vi.setSystemTime(Date.now() + 30 * 60_000);
+  await act(async () => wait.resolve(ok(pageOf(["Mew"]))));
+  expect(host.textContent).not.toContain("Mew");
+  expect(host.textContent).toContain("Your session ended. Sign in again.");
+  expect(host.textContent).toContain("Sign in with browser");
+});
+it("shows Signed out., not the ended message, for Sign out during a pending read", async () => {
+  const wait = deferred();
+  await mountWith(scripted(() => wait.promise));
+  await click("Sign out");
+  await act(async () => vi.advanceTimersByTime(2000));
+  expect(host.textContent).toContain("Signed out.");
+  expect(host.textContent).not.toContain("Your session ended.");
+});
+it("shows no message on a cold start while signed out", async () => {
+  await act(async () => vi.advanceTimersByTime(2000));
+  expect(host.textContent).toContain("Sign in with browser");
+  expect(host.textContent).not.toContain("Your session ended.");
+  expect(host.textContent).not.toContain("Signed out.");
+});

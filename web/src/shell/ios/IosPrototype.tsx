@@ -48,12 +48,13 @@ export function IosPrototype(props: {
   const update = () => redraw((value) => value + 1);
   // Each read takes a generation; a result from an older one is ignored.
   const generation = useRef(0);
-  const shown = useRef(false);
+  // True once this mount has shown a signed-in Collection and not yet left it.
+  const wasSignedIn = useRef(false);
   const latest = useRef({ source, reads });
   latest.current = { source, reads };
   function endSession() {
     generation.current += 1;
-    shown.current = false;
+    wasSignedIn.current = false;
     session.cancel();
     setReads(NONE);
     setMessage(ENDED);
@@ -68,7 +69,8 @@ export function IosPrototype(props: {
     );
     const result = await latest.current.source.read(cursor);
     if (mine !== generation.current) return;
-    if (result.kind === "signed-out") return endSession();
+    if (result.kind === "signed-out" || !session.signedIn())
+      return endSession();
     if (result.kind === "unavailable") {
       setReads((prev) => ({
         ...prev,
@@ -111,16 +113,9 @@ export function IosPrototype(props: {
         if (value) receive(value.url);
       })
       .catch(() => {});
+    // A render notices an expired session; the effect below handles the change.
     const resume = () => {
-      if (!session.signedIn()) {
-        if (shown.current) {
-          shown.current = false;
-          generation.current += 1;
-          setReads(NONE);
-          setMessage(ENDED);
-        }
-        update();
-      }
+      if (!session.signedIn()) update();
     };
     const active = App.addListener("appStateChange", resume);
     // Clear the displayed Collection at expiry even when the app stays in the foreground.
@@ -133,12 +128,18 @@ export function IosPrototype(props: {
     };
   }, []);
   const signedIn = session.signedIn();
-  shown.current = signedIn;
   useEffect(() => {
-    if (signedIn) void load("first");
-    else {
+    if (signedIn) {
+      wasSignedIn.current = true;
+      void load("first");
+    } else {
       generation.current += 1;
       setReads(NONE);
+      // Leaving the signed-in screen by any route but Sign out ends the session.
+      if (wasSignedIn.current) {
+        wasSignedIn.current = false;
+        setMessage(ENDED);
+      }
     }
   }, [signedIn, source]);
   async function signIn() {
@@ -178,7 +179,7 @@ export function IosPrototype(props: {
           <Button
             onClick={() => {
               generation.current += 1;
-              shown.current = false;
+              wasSignedIn.current = false;
               session.cancel();
               setReads(NONE);
               setMessage("Signed out.");
