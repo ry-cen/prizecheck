@@ -158,7 +158,7 @@ test("the consent page carries the contract's text, headers, Allow form and Canc
     assert.equal(page.headers["x-content-type-options"], "nosniff");
     assert.equal(
       page.headers["content-security-policy"],
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' prizecheck-native:; base-uri 'none'; frame-ancestors 'none'"
     );
     assert.equal(page.headers["content-type"], "text/html; charset=utf-8");
     assert.doesNotMatch(page.text, /<script/);

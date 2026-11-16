@@ -88,7 +88,7 @@ const PAGE_HEADERS = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store",
   "content-security-policy":
-    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' prizecheck-native:; base-uri 'none'; frame-ancestors 'none'",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
 };
@@ -419,6 +419,11 @@ export function createNative(deps: NativeDeps): Native {
         await client.query("ROLLBACK");
         return jsonBody(response, 400, { error: "invalid_grant" });
       }
+      // Expired or revoked more than a day ago: nothing reads these rows again.
+      await client.query(
+        `DELETE FROM native_credential
+         WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '1 day'`
+      );
       const credential = await client.query<{ expires_at: Date }>(
         `INSERT INTO native_credential(token_hash,user_id,scope,expires_at)
          VALUES($1,$2,'collection:read', now() + interval '24 hours') RETURNING expires_at`,

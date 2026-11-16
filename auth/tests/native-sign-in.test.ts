@@ -404,7 +404,7 @@ describe("start", () => {
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' prizecheck-native:; base-uri 'none'; frame-ancestors 'none'"
     );
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -460,7 +460,7 @@ describe("approve page", () => {
     const response = await getPage(on, approvePath(challenge, state), jar);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-security-policy")).toContain(
-      "form-action 'self'"
+      "form-action 'self' prizecheck-native:"
     );
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -745,6 +745,38 @@ describe("token", () => {
     const again = await exchange(on, { code, verifier });
     expect(again.status).toBe(400);
     expect(await again.json()).toEqual({ error: "invalid_grant" });
+  });
+
+  it("prunes credentials that expired or were revoked over a day ago and keeps the rest", async () => {
+    const hash = (token: string) =>
+      createHash("sha256").update(token).digest("hex");
+    const oldExpired = await issueToken(on, "owner");
+    const oldRevoked = await issueToken(on, "owner");
+    const recentExpired = await issueToken(on, "owner");
+    const active = await issueToken(on, "owner");
+    await on.pool.query(
+      "UPDATE native_credential SET expires_at=now()-interval '2 days' WHERE token_hash=$1",
+      [hash(oldExpired)]
+    );
+    await on.pool.query(
+      "UPDATE native_credential SET revoked_at=now()-interval '2 days' WHERE token_hash=$1",
+      [hash(oldRevoked)]
+    );
+    await on.pool.query(
+      "UPDATE native_credential SET expires_at=now()-interval '1 hour' WHERE token_hash=$1",
+      [hash(recentExpired)]
+    );
+    const issued = await issueToken(on, "owner");
+    const present = async (token: string) =>
+      count(
+        on,
+        `SELECT count(*)::int AS n FROM native_credential WHERE token_hash='${hash(token)}'`
+      );
+    expect(await present(oldExpired)).toBe(0);
+    expect(await present(oldRevoked)).toBe(0);
+    expect(await present(recentExpired)).toBe(1);
+    expect(await present(active)).toBe(1);
+    expect(await present(issued)).toBe(1);
   });
 
   it("gives exactly one of several concurrent exchanges the credential", async () => {
