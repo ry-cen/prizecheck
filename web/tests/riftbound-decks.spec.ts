@@ -55,7 +55,7 @@ for (const width of [1280, 375]) {
     await expect(
       page.getByRole("heading", { name: "First Light", exact: true })
     ).toBeVisible();
-    await expect(page.getByText("No image available").first()).toBeVisible();
+    await expect(page.getByText("Artwork unavailable").first()).toBeVisible();
     await shot(`deck-editor-${width}.png`);
     await page.getByRole("tab", { name: "Library", exact: true }).click();
     await expect(page.getByRole("tabpanel", { name: "Library" })).toBeVisible();
@@ -328,6 +328,132 @@ for (const width of [1280, 375]) {
     ).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("dialog")).toHaveCount(0);
   });
+  test(`corrects refused create and rename names at ${width}`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(`${entry}#riftbound:section=decks`);
+    await page.getByLabel("Deck name").fill("First Light");
+    await page
+      .getByRole("button", { name: "Create Deck", exact: true })
+      .click();
+    const create = page.getByRole("dialog", {
+      name: "Create Deck",
+      exact: true,
+    });
+    await create
+      .getByRole("button", { name: "Create Deck", exact: true })
+      .click();
+    await expect(create.getByRole("alert")).toContainText("already exists");
+    await expect(create.getByLabel("Deck name")).toBeEnabled();
+    await expect(
+      create.getByRole("button", { name: "Retry", exact: true })
+    ).toHaveCount(0);
+    await create.getByLabel("Deck name").fill("Corrected create");
+    await create
+      .getByRole("button", { name: "Create Deck", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "Corrected create 0 cards in this Deck",
+      })
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "First Light 9 cards in this Deck" })
+      .click();
+    await page.getByRole("button", { name: "Rename", exact: true }).click();
+    const rename = page.getByRole("dialog", {
+      name: "Rename Deck",
+      exact: true,
+    });
+    await rename.getByLabel("Deck name").fill("New ideas");
+    await rename
+      .getByRole("button", { name: "Rename Deck", exact: true })
+      .click();
+    await expect(rename.getByRole("alert")).toContainText("already exists");
+    await expect(rename.getByLabel("Deck name")).toBeEnabled();
+    await page.screenshot({
+      path: info.outputPath(`rename-refusal-${width}.png`),
+      fullPage: true,
+    });
+    await rename.getByLabel("Deck name").fill("Corrected rename");
+    await rename
+      .getByRole("button", { name: "Rename Deck", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Corrected rename", exact: true })
+    ).toBeVisible();
+  });
+  test(`slow rename preserves queued edits and retained refusal recovers at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(
+      `${entry}?decks=decks-slow#riftbound:section=decks&deck=deck-1&deckTab=library`
+    );
+    const add = page.getByRole("button", {
+      name: "Add Ember Scout Standard",
+      exact: true,
+    });
+    await add.evaluate((button) => {
+      button.click();
+      button.click();
+    });
+    await page.getByRole("button", { name: "Rename", exact: true }).click();
+    const rename = page.getByRole("dialog", {
+      name: "Rename Deck",
+      exact: true,
+    });
+    await rename.getByLabel("Deck name").fill("Slow renamed");
+    await rename
+      .getByRole("button", { name: "Rename Deck", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Slow renamed", exact: true })
+    ).toBeVisible();
+    await expect(page.getByRole("status")).toHaveCount(0);
+    await page.getByRole("tab", { name: "Deck 11", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Edit Ember Scout Standard", exact: true })
+      .click();
+    await expect(
+      page.getByRole("dialog").getByText("4 on Deck List", { exact: true })
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page
+      .getByRole("button", {
+        name: "Edit Forgotten Sentinel Standard",
+        exact: true,
+      })
+      .click();
+    await page.getByRole("dialog").evaluate((dialog) => {
+      (
+        dialog.querySelector(
+          '[aria-label="Decrease quantity"]'
+        ) as HTMLButtonElement
+      ).click();
+      (
+        dialog.querySelector(
+          '[aria-label="Increase quantity"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await expect(page.getByRole("alert")).toContainText("can't be added");
+    await expect(
+      page.getByRole("button", { name: "Retry", exact: true })
+    ).toHaveCount(0);
+    await expect(page.getByRole("status")).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Edit Ember Scout Standard", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Increase quantity", exact: true })
+      .click();
+    await expect(
+      page.getByRole("dialog").getByText("5 on Deck List", { exact: true })
+    ).toBeVisible();
+    await expect(page.getByRole("status")).toHaveCount(0);
+  });
   test(`keyboard Deck creation and tab navigation at ${width}`, async ({
     page,
   }) => {
@@ -394,7 +520,9 @@ for (const width of [1280, 375]) {
       .click();
     let sheet = page.getByRole("dialog", { name: "Ember Scout", exact: true });
     await sheet.getByRole("button", { name: "Increase quantity" }).click();
-    await expect(page.getByRole("alert")).toContainText("Unable to save");
+    await expect(page.getByRole("alert")).toContainText(
+      "Your last Deck List change may not have been saved"
+    );
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(page.getByRole("alert")).toHaveCount(0);
