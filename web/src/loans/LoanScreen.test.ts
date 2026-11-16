@@ -10,6 +10,8 @@ import {
   getLoanSide,
   startReturn,
   writeOff,
+  confirmReturn,
+  confirmHandover,
   takeBackHandover,
   acceptBorrowRequest,
   changeReturnBy,
@@ -19,10 +21,62 @@ import {
 import { useRoute } from "../shell/useRoute";
 import { LoanScreen as Screen } from "./LoanScreen";
 import { LoanRecoveryProvider } from "./LoanRecovery";
-import { fixture, reply } from "./testing/loanFakes";
+import { deferred, fixture, reply } from "./testing/loanFakes";
+import type { FlowOutcome, IntentView } from "./loanIntents";
 import { createTabContext } from "./loanIntents";
 const toast = vi.hoisted(() => ({ show: vi.fn() }));
 vi.mock("../ui/Toast", () => ({ useToast: () => toast }));
+// Controlled recovery completions exercise the screen's writers; the normal harness keeps real recovery.
+const adoptionTest = vi.hoisted(() => ({
+  enabled: false,
+  pulse: 0,
+  send: vi.fn(),
+  blockers: new Map<string, IntentView>(),
+  callbacks: new Map<string, (outcome: FlowOutcome) => void>(),
+}));
+vi.mock("./LoanRecovery", async (original) => {
+  const real = await original<typeof import("./LoanRecovery")>();
+  const blockerFor = (scope: string) => adoptionTest.blockers.get(scope);
+  return {
+    ...real,
+    useLoanRecovery: () =>
+      adoptionTest.enabled
+        ? {
+            accountId: "A",
+            accountName: "Ana",
+            blockerFor,
+            store: { blockerFor },
+          }
+        : real.useLoanRecovery(),
+    useDurableSend: () =>
+      adoptionTest.enabled
+        ? {
+            fence: { pending: false, command: { current: null } },
+            send: adoptionTest.send,
+          }
+        : real.useDurableSend(),
+  };
+});
+vi.mock("../inbox/Inbox", async (original) => {
+  const real = await original<typeof import("../inbox/Inbox")>();
+  return {
+    ...real,
+    usePulseChanged: () =>
+      adoptionTest.enabled ? adoptionTest.pulse : real.usePulseChanged(),
+  };
+});
+vi.mock("./PendingLoanNotice", async (original) => {
+  const real = await original<typeof import("./PendingLoanNotice")>();
+  return {
+    PendingLoanNotice: (
+      props: Parameters<typeof real.PendingLoanNotice>[0]
+    ) => {
+      if (!adoptionTest.enabled) return h(real.PendingLoanNotice, props);
+      adoptionTest.callbacks.set(props.view.scope, props.onOutcome);
+      return h("button", null, "Recovery fixture");
+    },
+  };
+});
 const threadId = "00000000-0000-4000-8000-000000000099";
 let keepReadView = false;
 let packets: string[] = [];
@@ -77,13 +131,25 @@ vi.mock("../social_generated", async (original) => ({
   getLoanSide: vi.fn(),
   startReturn: vi.fn(),
   writeOff: vi.fn(),
+  confirmReturn: vi.fn(),
+  confirmHandover: vi.fn(),
   takeBackHandover: vi.fn(),
   acceptBorrowRequest: vi.fn(),
   changeReturnBy: vi.fn(),
 }));
 vi.mock("../threads/ThreadTimeline", () => ({
-  ThreadTimeline: ({ onChanged }: { onChanged?: () => void }) =>
-    h("button", { onClick: onChanged }, "Chat moderation completed"),
+  ThreadTimeline: ({
+    onChanged,
+    revision,
+  }: {
+    onChanged?: () => void;
+    revision?: string;
+  }) =>
+    h(
+      "button",
+      { onClick: onChanged, "data-loan-revision": revision },
+      "Chat moderation completed"
+    ),
 }));
 vi.mock("./BorrowDrafts", async (original) => ({
   ...(await original<typeof import("./BorrowDrafts")>()),
@@ -1485,7 +1551,10 @@ it.each(["older", "equal", "newer", "other_round"] as const)(
       .mockReset()
       .mockResolvedValueOnce(side)
       .mockReturnValueOnce(heldSide)
-      .mockResolvedValue(side);
+      .mockResolvedValueOnce(side)
+      .mockResolvedValue(
+        ordering === "other_round" ? { ...side, loan_id: "next-round" } : side
+      );
     vi.mocked(takeBackHandover).mockResolvedValue(undone);
     const host = document.createElement("div");
     document.body.append(host);
@@ -1544,3 +1613,524 @@ it.each(["older", "equal", "newer", "other_round"] as const)(
     }
   }
 );
+
+// Planner W1–W4 ordering tests. The revision is observed at the real timeline
+// boundary, without adding revision/provenance text to the collector's screen.
+type TestSide = Awaited<ReturnType<typeof getLoanSide>>;
+const sideFor = (v: LoanView): TestSide => ({
+  loan_id: v.loan_id,
+  deck: null,
+  can_promise: [],
+  picks: [],
+  suggested: [],
+});
+const revisionView = (
+  revision: number,
+  changes: Partial<LoanView> = {}
+): LoanView => ({
+  ...loan,
+  thread_id: threadId,
+  revision,
+  role: "lender",
+  state: "handed_over",
+  closed_reason: null,
+  closed_by: null,
+  you_confirmed_handover: true,
+  they_confirmed_handover: true,
+  lines: [{ ...loan.lines[0], promised: "3", requested: "3", returned: "0" }],
+  pending_return: {
+    return_id: "claim",
+    started_by: "them",
+    lines: [{ edition_id: "iono", copies: "1" }],
+    you_confirmed: false,
+    they_confirmed: true,
+  },
+  actions: ["confirm_return"],
+  ...changes,
+});
+function heldValue<T>(value: T) {
+  const gate = deferred();
+  return { ...gate, value: gate.promise.then(() => value) };
+}
+const done: FlowOutcome = { kind: "done", response: {} };
+const returnScope = "start_return:round";
+const recoveryView = (scope = returnScope): IntentView => ({
+  operationId: scope,
+  scope,
+  kind: "start_return",
+  state: "unknown",
+  waitingAccount: false,
+  replayable: true,
+});
+async function adoptionHarness(
+  run: (t: {
+    host: HTMLDivElement;
+    readAs: (v: LoanView) => void;
+    refresh: () => Promise<void>;
+    pulse: () => Promise<void>;
+    click: (name: string) => Promise<void>;
+    takeBack: () => Promise<void>;
+    armRecovery: (scope?: string) => Promise<(outcome: FlowOutcome) => void>;
+    recover: (outcome?: FlowOutcome, scope?: string) => Promise<void>;
+    recoveryCallback: (scope?: string) => (outcome: FlowOutcome) => void;
+    effectSide: (
+      v: LoanView,
+      side?: TestSide
+    ) => ReturnType<typeof heldValue<TestSide>>;
+    check: (v: LoanView, reads: number, sides: number, notices: number) => void;
+  }) => Promise<void>,
+  initial = revisionView(4)
+) {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+    1000
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(10, 10, 30, 30)
+  );
+  adoptionTest.enabled = true;
+  adoptionTest.pulse = 0;
+  adoptionTest.blockers.clear();
+  adoptionTest.callbacks.clear();
+  adoptionTest.send.mockReset().mockResolvedValue(done);
+  toast.show.mockClear();
+  for (const fn of [
+    getLoan,
+    getLoanSide,
+    confirmReturn,
+    confirmHandover,
+    takeBackHandover,
+  ])
+    vi.mocked(fn).mockReset();
+  const readAs = (v: LoanView) => {
+    vi.mocked(getLoan).mockResolvedValue(v);
+    vi.mocked(getLoanSide).mockResolvedValue(sideFor(v));
+  };
+  readAs(initial);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const props = {
+    loanId: threadId,
+    onCanonicalLoan: vi.fn(),
+    onLoanChanged: vi.fn(),
+    onAllLoans: vi.fn(),
+    onOpenDeck: vi.fn(),
+  };
+  const render = () => root.render(h(LoanScreen, props));
+  const click = async (name: string) => {
+    const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === name
+    );
+    expect(button, name).toBeDefined();
+    await act(async () => button!.click());
+  };
+  const recoveryCallback = (scope = returnScope) => {
+    const callback = adoptionTest.callbacks.get(scope);
+    expect(callback).toBeDefined();
+    return callback!;
+  };
+  try {
+    await act(async () => render());
+    await run({
+      host,
+      readAs,
+      click,
+      recoveryCallback,
+      refresh: () => click("Chat moderation completed"),
+      pulse: async () => {
+        adoptionTest.pulse++;
+        await act(async () => render());
+      },
+      takeBack: async () => {
+        await act(async () =>
+          host
+            .querySelector<HTMLButtonElement>(
+              '[aria-label="More for this Loan"]'
+            )!
+            .click()
+        );
+        await act(async () =>
+          [...host.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+            .find((b) => b.textContent === "Take back my confirmation")!
+            .click()
+        );
+      },
+      armRecovery: async (scope = returnScope) => {
+        adoptionTest.blockers.set(scope, recoveryView(scope));
+        await act(async () => render());
+        const callback = recoveryCallback(scope);
+        adoptionTest.blockers.delete(scope);
+        await act(async () => render());
+        return callback;
+      },
+      recover: async (outcome = done, scope = returnScope) => {
+        adoptionTest.blockers.set(scope, recoveryView(scope));
+        await act(async () => render());
+        const callback = recoveryCallback(scope);
+        adoptionTest.blockers.delete(scope);
+        await act(async () => {
+          callback(outcome);
+          render();
+        });
+      },
+      effectSide: (v, side = sideFor(v)) => {
+        const gate = heldValue(side);
+        vi.mocked(getLoan).mockResolvedValueOnce(v).mockResolvedValueOnce(v);
+        vi.mocked(getLoanSide).mockReturnValueOnce(gate.value);
+        return gate;
+      },
+      check: (v, reads, sides, notices) => {
+        expect(
+          host
+            .querySelector("[data-loan-revision]")
+            ?.getAttribute("data-loan-revision")
+        ).toBe(`${v.loan_id}:${v.revision}`);
+        expect(getLoan).toHaveBeenCalledTimes(reads);
+        expect(getLoanSide).toHaveBeenCalledTimes(sides);
+        expect(toast.show).toHaveBeenCalledTimes(notices);
+      },
+    });
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    adoptionTest.enabled = false;
+    adoptionTest.blockers.clear();
+    adoptionTest.callbacks.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  }
+}
+
+it("planner 01: a late obsolete W1 cannot undo W2 take-back", async () => {
+  const initial = revisionView(4, {
+    state: "accepted",
+    they_confirmed_handover: false,
+    pending_return: null,
+    actions: ["take_back"],
+  });
+  await adoptionHarness(async (t) => {
+    const read = t.effectSide(initial);
+    await t.refresh();
+    const next = {
+      ...initial,
+      revision: 5,
+      you_confirmed_handover: false,
+      actions: ["confirm_handover"],
+    } satisfies LoanView;
+    vi.mocked(takeBackHandover).mockResolvedValue(next);
+    await t.takeBack();
+    await act(async () => read.resolve());
+    t.check(next, 4, 3, 0);
+  }, initial);
+});
+it("planner 02: W1 deferred by W2 rereads exactly once after settle", async () => {
+  await adoptionHarness(async (t) => {
+    const read = t.effectSide(revisionView(6));
+    await t.refresh();
+    const post = heldValue(revisionView(5));
+    vi.mocked(confirmReturn).mockReturnValue(post.value);
+    await t.click("Yes, it's back");
+    await act(async () => read.resolve());
+    t.readAs(revisionView(6));
+    await act(async () => post.resolve());
+    t.check(revisionView(6), 6, 4, 1);
+  });
+});
+it("planner 03: W4 revision 5 cannot undo W1 revision 6", async () => {
+  await adoptionHarness(async (t) => {
+    const side = heldValue(sideFor(revisionView(5)));
+    vi.mocked(getLoan).mockResolvedValueOnce(revisionView(5));
+    vi.mocked(getLoanSide).mockReturnValueOnce(side.value);
+    await t.recover();
+    t.readAs(revisionView(6));
+    await t.pulse();
+    await act(async () => side.resolve());
+    t.check(revisionView(6), 5, 3, 1);
+    expect(toast.show).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Return recorded." })
+    );
+  });
+});
+it("planner 04: W4 revision 6 survives an earlier W1 revision 5", async () => {
+  await adoptionHarness(async (t) => {
+    const read = t.effectSide(revisionView(5));
+    await t.pulse();
+    t.readAs(revisionView(6));
+    await t.recover();
+    await act(async () => read.resolve());
+    t.check(revisionView(6), 5, 3, 1);
+  });
+});
+it("planner 05: a late W4 read failure cannot hide a newer W1", async () => {
+  await adoptionHarness(async (t) => {
+    const gate = deferred();
+    vi.mocked(getLoan).mockReturnValueOnce(
+      gate.promise.then(() => {
+        throw new TypeError("lost read");
+      })
+    );
+    await t.recover();
+    t.readAs(revisionView(6));
+    await t.pulse();
+    await act(async () => gate.resolve());
+    t.check(revisionView(6), 5, 3, 1);
+    expect(t.host.textContent).not.toContain("couldn't be loaded");
+  });
+});
+it("planner 06: W3 then W2 advance past an overlapping obsolete W1", async () => {
+  const initial = revisionView(4, {
+    state: "accepted",
+    you_confirmed_handover: false,
+    they_confirmed_handover: false,
+    pending_return: null,
+    actions: ["confirm_handover"],
+  });
+  await adoptionHarness(async (t) => {
+    const read = t.effectSide(initial);
+    await t.refresh();
+    const peer = { ...initial, revision: 5, they_confirmed_handover: true };
+    const receipt = {
+      ...peer,
+      revision: 6,
+      you_confirmed_handover: true,
+      state: "handed_over",
+    } satisfies LoanView;
+    vi.mocked(getLoan).mockResolvedValueOnce(peer);
+    vi.mocked(confirmHandover)
+      .mockRejectedValueOnce(new SocialError(409, "LOAN_CHANGED"))
+      .mockResolvedValueOnce(receipt);
+    await t.click("Mark as handed over");
+    await act(async () => read.resolve());
+    t.check(receipt, 5, 4, 1);
+    expect(confirmHandover).toHaveBeenCalledTimes(2);
+  }, initial);
+});
+it("planner 07: a lost W2 retries its first ticket and rereads once", async () => {
+  await adoptionHarness(async (t) => {
+    const read = t.effectSide(revisionView(6));
+    await t.refresh();
+    vi.mocked(confirmReturn)
+      .mockRejectedValueOnce(new TypeError("lost response"))
+      .mockResolvedValueOnce(revisionView(5));
+    await t.click("Yes, it's back");
+    expect(toast.show).not.toHaveBeenCalled();
+    await act(async () => read.resolve());
+    t.readAs(revisionView(6));
+    await t.click("Retry request");
+    t.check(revisionView(6), 6, 4, 1);
+    expect(vi.mocked(confirmReturn).mock.calls[1]).toEqual(
+      vi.mocked(confirmReturn).mock.calls[0]
+    );
+  });
+});
+it("planner 08: a late W4 recovery cannot undo W2", async () => {
+  await adoptionHarness(async (t) => {
+    const side = heldValue(sideFor(revisionView(5)));
+    vi.mocked(getLoan).mockResolvedValueOnce(revisionView(5));
+    vi.mocked(getLoanSide).mockReturnValueOnce(side.value);
+    await t.recover();
+    vi.mocked(confirmReturn).mockResolvedValue(revisionView(6));
+    await t.click("Yes, it's back");
+    await act(async () => side.resolve());
+    t.check(revisionView(6), 3, 3, 2);
+  });
+});
+it("planner 09: an overlapping round is replaced by one fresh W1", async () => {
+  await adoptionHarness(async (t) => {
+    const other = revisionView(1, { loan_id: "next-round" });
+    const read = t.effectSide(other);
+    await t.refresh();
+    vi.mocked(confirmReturn).mockResolvedValue(revisionView(5));
+    await t.click("Yes, it's back");
+    t.readAs(other);
+    await act(async () => read.resolve());
+    t.check(other, 6, 4, 1);
+  });
+});
+it("planner 10: independent W4 and W1 conflicts coalesce into one replacement", async () => {
+  await adoptionHarness(async (t) => {
+    const other = revisionView(1, { loan_id: "next-round" });
+    const pulse = t.effectSide(other);
+    await t.pulse();
+    const third = revisionView(1, { loan_id: "third-round" });
+    const follow = heldValue(sideFor(third));
+    vi.mocked(getLoan).mockResolvedValueOnce(third);
+    vi.mocked(getLoanSide).mockReturnValueOnce(follow.value);
+    await t.recover();
+    // A second confirmed recovery read starts before W2, but lands after the replacement starts.
+    const followAgain = heldValue(sideFor(third));
+    vi.mocked(getLoan).mockResolvedValueOnce(third);
+    vi.mocked(getLoanSide).mockReturnValueOnce(followAgain.value);
+    await act(async () => t.recoveryCallback()(done));
+    vi.mocked(confirmReturn).mockResolvedValue(revisionView(5));
+    await t.click("Yes, it's back");
+    const replacement = t.effectSide(revisionView(6));
+    // Both independent candidates land before the wanted replacement is issued.
+    await act(async () => {
+      follow.resolve();
+      pulse.resolve();
+      await Promise.all([follow.value, pulse.value]);
+    });
+    t.check(revisionView(5), 8, 6, 2);
+    await act(async () => followAgain.resolve());
+    t.check(revisionView(5), 8, 6, 2);
+    await act(async () => replacement.resolve());
+    t.check(revisionView(6), 8, 6, 2);
+  });
+});
+it("planner 11: replacement reads adopt, drop, mismatch, or inherit an abort without chaining", async () => {
+  for (const mode of ["adopt", "disturbed", "mismatch", "aborted"] as const) {
+    await adoptionHarness(async (t) => {
+      const other = revisionView(1, { loan_id: "next-round" });
+      const follow = heldValue(sideFor(other));
+      vi.mocked(getLoan).mockResolvedValueOnce(other);
+      vi.mocked(getLoanSide).mockReturnValueOnce(follow.value);
+      await t.recover();
+      vi.mocked(confirmReturn).mockResolvedValue(revisionView(5));
+      await t.click("Yes, it's back");
+      const replacement = t.effectSide(
+        other,
+        mode === "mismatch" ? sideFor(revisionView(5)) : sideFor(other)
+      );
+      await act(async () => follow.resolve());
+      if (mode === "disturbed") {
+        vi.mocked(confirmReturn).mockResolvedValue(revisionView(6));
+        await t.click("Yes, it's back");
+      }
+      if (mode === "aborted") {
+        const carried = t.effectSide(other);
+        await t.pulse();
+        await act(async () => replacement.resolve());
+        t.check(revisionView(5), 7, 5, 2);
+        await act(async () => carried.resolve());
+        t.check(other, 7, 5, 2);
+      } else {
+        await act(async () => replacement.resolve());
+        t.check(
+          mode === "adopt" ? other : revisionView(mode === "disturbed" ? 6 : 5),
+          5,
+          mode === "disturbed" ? 5 : 4,
+          mode === "disturbed" ? 3 : 2
+        );
+      }
+    });
+  }
+});
+it("planner 12: a mismatched W1 pair never shows and has one replacement", async () => {
+  await adoptionHarness(async (t) => {
+    const bad = t.effectSide(revisionView(5), {
+      ...sideFor(revisionView(5)),
+      loan_id: "wrong-round",
+    });
+    await t.refresh();
+    const replacement = t.effectSide(revisionView(6));
+    await act(async () => bad.resolve());
+    t.check(revisionView(4), 6, 3, 0);
+    await act(async () => replacement.resolve());
+    t.check(revisionView(6), 6, 3, 0);
+  });
+});
+it("planner 13: W2 never combines a new-round receipt with its old fallback side", async () => {
+  await adoptionHarness(async (t) => {
+    const other = revisionView(1, { loan_id: "next-round" });
+    vi.mocked(getLoanSide).mockRejectedValueOnce(new TypeError("lost side"));
+    const replacement = t.effectSide(other);
+    vi.mocked(confirmReturn).mockResolvedValue(other);
+    await t.click("Yes, it's back");
+    t.check(revisionView(4), 4, 3, 1);
+    await act(async () => replacement.resolve());
+    t.check(other, 4, 3, 1);
+  });
+});
+it("planner 14: unknown W2, pending durable, and voided durable outcomes never confirm", async () => {
+  await adoptionHarness(async (t) => {
+    vi.mocked(confirmReturn).mockRejectedValue(new TypeError("lost response"));
+    await t.click("Yes, it's back");
+    t.check(revisionView(4), 2, 1, 0);
+  });
+  const initial = revisionView(4, {
+    pending_return: null,
+    actions: ["start_return"],
+  });
+  for (const outcome of [
+    { kind: "pending", view: recoveryView(), refusal: null },
+    { kind: "voided", refusal: null, otherAccount: false },
+  ] satisfies FlowOutcome[]) {
+    await adoptionHarness(async (t) => {
+      adoptionTest.send.mockResolvedValue(outcome);
+      await t.click("All back");
+      t.check(initial, 2, 1, 0);
+    }, initial);
+  }
+});
+it("planner 15: duplicate recovery/send completions confirm once, and a later operation confirms again", async () => {
+  await adoptionHarness(async (t) => {
+    t.readAs(revisionView(5));
+    await t.recover();
+    const callback = t.recoveryCallback();
+    await act(async () => callback(done));
+    t.check(revisionView(5), 4, 3, 1);
+  });
+  const initial = revisionView(4, {
+    pending_return: null,
+    actions: ["start_return"],
+  });
+  await adoptionHarness(async (t) => {
+    const callback = await t.armRecovery();
+    const first = { ...initial, revision: 5 };
+    t.readAs(first);
+    await t.click("All back");
+    await act(async () => callback(done));
+    t.check(first, 4, 3, 1);
+    const second = { ...initial, revision: 6 };
+    t.readAs(second);
+    await t.click("All back");
+    t.check(second, 5, 4, 2);
+    expect(adoptionTest.send).toHaveBeenCalledTimes(2);
+  }, initial);
+});
+it("planner 15b: replayed receipts keep their first ticket after W4 adopts a newer state", async () => {
+  for (const mode of ["same_round", "other_round"] as const) {
+    await adoptionHarness(async (t) => {
+      const newer = revisionView(
+        mode === "same_round" ? 6 : 1,
+        mode === "other_round" ? { loan_id: "next-round" } : {}
+      );
+      const follow = heldValue(sideFor(newer));
+      vi.mocked(getLoan).mockResolvedValueOnce(newer);
+      vi.mocked(getLoanSide).mockReturnValueOnce(follow.value);
+      await t.recover();
+      vi.mocked(confirmReturn)
+        .mockRejectedValueOnce(new TypeError("lost committed receipt"))
+        .mockResolvedValueOnce(revisionView(5));
+      await t.click("Yes, it's back");
+      await t.pulse();
+      expect(toast.show).toHaveBeenCalledTimes(1); // W4 done only; the W2 answer remains unknown.
+      await act(async () => follow.resolve());
+      if (mode === "other_round") {
+        vi.mocked(getLoanSide).mockResolvedValueOnce(sideFor(revisionView(5)));
+        const replacement = t.effectSide({ ...newer, revision: 2 });
+        await t.click("Retry request");
+        t.check(newer, 5, 4, 2);
+        await act(async () => replacement.resolve());
+        t.check({ ...newer, revision: 2 }, 5, 4, 2);
+      } else {
+        await t.click("Retry request");
+        t.check(newer, 3, 3, 2);
+      }
+      expect(vi.mocked(confirmReturn).mock.calls[1]).toEqual(
+        vi.mocked(confirmReturn).mock.calls[0]
+      );
+      expect(
+        toast.show.mock.calls.filter(
+          ([input]) => input.message === "Return confirmed."
+        )
+      ).toHaveLength(1);
+    });
+  }
+});

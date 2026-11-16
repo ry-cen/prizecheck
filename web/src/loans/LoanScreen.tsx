@@ -211,17 +211,55 @@ export function LoanScreen({
   const authority = useLoanCommand<{
     name: string;
     key: string;
+    ticket: number;
     call: (key: string) => Promise<LoanView>;
   }>();
   const retained = authority.command;
   const refreshAfterCommand = useRef(false);
-  // A refresh can finish after a command while carrying either older or newer terms.
-  const readGeneration = useRef(0);
-  const displayedLoan = useRef<LoanView | null>(null);
-  function showLoan(loan: LoanView, side: LoanSide) {
-    // Track adoption synchronously, including commands not rendered yet.
-    displayedLoan.current = loan;
-    setLoad({ kind: "ready", loan, side });
+  const shown = useRef<{ loan: LoanView; side: LoanSide } | null>(null);
+  const epoch = useRef(0);
+  const replacement = useRef<"idle" | "wanted" | "inFlight">("idle");
+  const confirmed = useRef(new Set<string>());
+  const ticket = () => epoch.current;
+  function canFail(t: number) {
+    return t === epoch.current;
+  }
+  /** Every writer carries the ticket from when its request was first issued.
+   * Revisions order one round; overlapping different rounds require one fresh read. */
+  function adopt(
+    loan: LoanView,
+    side: LoanSide,
+    t: number,
+    replacementRead = false
+  ): "adopted" | "stale" | "conflict" {
+    const conflict = () => {
+      if (!replacementRead && replacement.current === "idle") {
+        replacement.current = "wanted";
+        setAttempt((n) => n + 1);
+      } else if (replacementRead && !shown.current && canFail(t)) {
+        setLoad({ kind: "failed" });
+      }
+      return "conflict" as const;
+    };
+    if (side.loan_id !== loan.loan_id) return conflict();
+    const current = shown.current;
+    if (
+      current &&
+      current.loan.loan_id === loan.loan_id &&
+      loan.revision < current.loan.revision
+    )
+      return "stale";
+    if (current && t !== epoch.current) {
+      if (current.loan.loan_id !== loan.loan_id) return conflict();
+      if (loan.revision === current.loan.revision) return "stale";
+    }
+    function showLoan() {
+      shown.current = { loan, side };
+      epoch.current += 1;
+      setLoad({ kind: "ready", loan, side });
+    }
+    showLoan();
+    return "adopted";
   }
   const commandPending = authority.pending || durable.fence.pending;
   const roundId = load.kind === "ready" ? load.loan.loan_id : null;
@@ -267,7 +305,9 @@ export function LoanScreen({
 
   useEffect(() => {
     const controller = new AbortController();
-    const generation = readGeneration.current;
+    const isReplacement = replacement.current === "wanted";
+    if (isReplacement) replacement.current = "inFlight";
+    const t = ticket();
     Promise.all([
       getLoan(loanId, controller.signal),
       getLoan(loanId, controller.signal).then((view) =>
@@ -276,25 +316,17 @@ export function LoanScreen({
     ]).then(
       ([loan, side]) => {
         if (controller.signal.aborted) return;
+        if (isReplacement) replacement.current = "idle";
         if (ownsCommand()) {
           refreshAfterCommand.current = true;
           return;
-        }
-        if (generation !== readGeneration.current) {
-          const shown = displayedLoan.current;
-          if (!shown || shown.loan_id !== loan.loan_id) {
-            // Revisions order one round only. Resolve different rounds with one
-            // replacement refresh; its generation is current, so it cannot loop.
-            setAttempt((n) => n + 1);
-            return;
-          }
-          if (loan.revision <= shown.revision) return;
         }
         if (loanId !== loan.thread_id) {
           openedFromInbox(loanId, loan.thread_id);
           onCanonicalLoan(loan.thread_id);
           return;
         }
+        if (adopt(loan, side, t, isReplacement) !== "adopted") return;
         if (reloading.current) {
           reloading.current = false;
           focusNext.current = "heading";
@@ -307,25 +339,29 @@ export function LoanScreen({
           focusNext.current = "heading";
           focusInitialHeading.current = false;
         }
-        showLoan(loan, side);
         setPromised(promiseStart(loan, side));
         setAnswerDate(loan.return_by ?? "");
       },
       (cause) => {
-        if (controller.signal.aborted || generation !== readGeneration.current)
-          return;
+        if (controller.signal.aborted) return;
+        if (isReplacement) replacement.current = "idle";
         if (ownsCommand()) {
           refreshAfterCommand.current = true;
           return;
         }
-        setLoad(
-          cause instanceof SocialError && cause.status === 404
-            ? { kind: "missing" }
-            : { kind: "failed" }
-        );
+        if (canFail(t))
+          setLoad(
+            cause instanceof SocialError && cause.status === 404
+              ? { kind: "missing" }
+              : { kind: "failed" }
+          );
       }
     );
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (isReplacement && replacement.current === "inFlight")
+        replacement.current = "wanted";
+    };
   }, [loanId, attempt]);
   const lastPulse = useRef(pulseChanged);
   useEffect(() => {
@@ -580,6 +616,14 @@ export function LoanScreen({
     focusNext.current = "ask";
     setAsking(step);
   }
+  function confirmOnce(id: string, message: string) {
+    if (confirmed.current.has(id)) return;
+    confirmed.current.add(id);
+    toast.show({
+      message,
+      route: `${LOANS_PATH}/${encodeURIComponent(loan.thread_id)}`,
+    });
+  }
   async function durableOutcome(
     o: FlowOutcome,
     kind: "start_return" | "write_off"
@@ -590,14 +634,13 @@ export function LoanScreen({
       onLoanChanged();
     }
     if (o.kind === "done") {
-      readGeneration.current += 1;
-      toast.show({
-        message:
-          kind === "start_return" ? "Return recorded." : "Write-off recorded.",
-        route: `${LOANS_PATH}/${encodeURIComponent(loan.thread_id)}`,
-      });
+      confirmOnce(
+        kind + ":" + loan.loan_id,
+        kind === "start_return" ? "Return recorded." : "Write-off recorded."
+      );
       refreshAfterCommand.current = false;
       const tok = guard.capture();
+      const t = ticket();
       try {
         const [fresh, freshSide] = await Promise.all([
           getLoan(loan.thread_id),
@@ -606,11 +649,11 @@ export function LoanScreen({
         if (!guard.live(tok)) return;
         focusNext.current = "heading";
         closeModes();
-        showLoan(fresh, freshSide);
-        setPromised(promiseStart(fresh, freshSide));
+        if (adopt(fresh, freshSide, t) === "adopted")
+          setPromised(promiseStart(fresh, freshSide));
         setMessage("");
       } catch {
-        if (guard.live(tok)) setLoad({ kind: "failed" });
+        if (guard.live(tok) && canFail(t)) setLoad({ kind: "failed" });
       }
     } else if ((o.kind === "voided" || o.kind === "pending") && o.refusal) {
       const cause = refusalError(o.refusal);
@@ -662,9 +705,11 @@ export function LoanScreen({
     setBusy(true);
     setMessage("");
     setNotice("");
+    const scope = kind + ":" + loan.loan_id;
+    confirmed.current.delete(scope);
     const o = await durable.send({
       kind,
-      scope: kind + ":" + loan.loan_id,
+      scope,
       path: `/api/loans/${loan.thread_id}/${kind === "start_return" ? "returns" : "write-off"}`,
       fields,
     });
@@ -687,6 +732,7 @@ export function LoanScreen({
     const command = retained.current ?? {
       name,
       key: keys.current.get(name) ?? crypto.randomUUID(),
+      ticket: ticket(),
       call,
     };
     if (!authority.beginAttempt()) return "unknown";
@@ -697,7 +743,6 @@ export function LoanScreen({
     const key = command.key;
     keys.current.set(name, key);
     const release = () => {
-      readGeneration.current += 1;
       authority.settle();
       keys.current.delete(name);
       stepBodies.current.delete(key);
@@ -717,16 +762,12 @@ export function LoanScreen({
       release();
       focusNext.current = "heading";
       closeModes();
-      showLoan(next, nextSide);
-      setPromised(promiseStart(next, nextSide));
+      if (adopt(next, nextSide, command.ticket) === "adopted")
+        setPromised(promiseStart(next, nextSide));
       refreshInbox();
       onLoanChanged();
       const confirmation = loanStepConfirmation(command.name, loan);
-      if (confirmation)
-        toast.show({
-          message: confirmation,
-          route: `${LOANS_PATH}/${encodeURIComponent(loan.thread_id)}`,
-        });
+      if (confirmation) confirmOnce(command.key, confirmation);
       return "applied";
     } catch (cause) {
       if (!outcomeUnknown(cause)) release();
@@ -1254,7 +1295,8 @@ export function LoanScreen({
                   read: getLoan,
                   readSide: getLoanSide,
                 },
-                (fresh, freshSide) => showLoan(fresh, freshSide)
+                (fresh, freshSide) =>
+                  adopt(fresh, freshSide, retained.current?.ticket ?? -1)
               )
             )
           }
