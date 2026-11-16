@@ -308,3 +308,147 @@ it("retains unambiguous stale intent at the new revision and drops intent when q
     edits.dispose();
   }
 });
+
+describe("Holdings arriving in Decks cover their Deck Lists", () => {
+  const item = (
+    store: ReturnType<typeof collectionFixtureStore>,
+    sourceId: string,
+    editionId: string,
+    quantity = 1
+  ) => ({
+    sourceId,
+    editionId,
+    quantity,
+    expectedVersion: store.rows.find(
+      (row) => row.locationId === sourceId && row.edition.id === editionId
+    )!.version,
+  });
+  it("covers new and extended lines, including mixed upsert phases, without replaying arrivals", async () => {
+    const api = deckFixture("a"),
+      other = deckFixture("b");
+    const writer = collectionFixtureWriter("a"),
+      store = collectionFixtureStore("a");
+    const otherBefore = await other.deck("deck-2", signal);
+    await writer.add(
+      { locationId: "deck-2", editionId: "1", quantity: 1 },
+      options()
+    );
+    expect((await api.deck("deck-2", signal))?.listRevision).toBe(2);
+    const input = {
+      items: [item(store, "1", "1"), item(store, "4", "2")],
+      destinationId: "deck-2",
+    };
+    const key = options();
+    const result = await writer.move(input, key);
+    const deck = (await api.deck("deck-2", signal))!;
+    expect(deck.listRevision).toBe(4); // One growing update phase, one growing insert phase.
+    expect(
+      deck.lines.map((line) => [line.edition.id, line.quantity, line.inDeck])
+    ).toEqual([
+      ["1", 2, 2],
+      ["2", 1, 1],
+    ]);
+    expect(await writer.move(input, key)).toEqual(result);
+    expect(await api.deck("deck-2", signal)).toEqual(deck);
+    expect(await other.deck("deck-2", signal)).toEqual(otherBefore);
+  });
+  it("fills a covered line without changing its revision and preserves surplus cuts", async () => {
+    const api = deckFixture("a"),
+      writer = collectionFixtureWriter("a"),
+      store = collectionFixtureStore("a");
+    await api.changeDeckList(
+      {
+        deckId: "deck-1",
+        listRevision: 1,
+        changes: [{ editionId: "1", quantity: 4 }],
+      },
+      options()
+    );
+    await writer.move(
+      { items: [item(store, "1", "1")], destinationId: "deck-1" },
+      options()
+    );
+    let deck = (await api.deck("deck-1", signal))!;
+    expect(deck.listRevision).toBe(2);
+    expect(deck.lines.find((line) => line.edition.id === "1")).toMatchObject({
+      quantity: 4,
+      inDeck: 3,
+    });
+    await api.changeDeckList(
+      {
+        deckId: "deck-1",
+        listRevision: 2,
+        changes: [{ editionId: "1", quantity: 1 }],
+      },
+      options()
+    );
+    await writer.move(
+      { items: [item(store, "1", "1")], destinationId: "deck-1" },
+      options()
+    );
+    deck = (await api.deck("deck-1", signal))!;
+    expect(deck.listRevision).toBe(4);
+    expect(deck.lines.find((line) => line.edition.id === "1")).toMatchObject({
+      quantity: 2,
+      inDeck: 2,
+    });
+    expect(
+      store.rows.find(
+        (row) => row.locationId === "deck-1" && row.edition.id === "1"
+      )?.quantity
+    ).toBe(4);
+  });
+  it("allows an owned retained Edition to arrive even though explicit new-line creation is unavailable", async () => {
+    const api = deckFixture("a"),
+      writer = collectionFixtureWriter("a"),
+      store = collectionFixtureStore("a");
+    await expect(
+      api.changeDeckList(
+        {
+          deckId: "deck-2",
+          listRevision: 1,
+          changes: [{ editionId: "retained", quantity: 1 }],
+        },
+        options()
+      )
+    ).rejects.toMatchObject({ code: "EDITION_UNAVAILABLE" });
+    await writer.move(
+      { items: [item(store, "4", "retained")], destinationId: "deck-2" },
+      options()
+    );
+    const deck = (await api.deck("deck-2", signal))!;
+    expect(deck.listRevision).toBe(2);
+    expect(deck.lines[0]).toMatchObject({
+      edition: { id: "retained" },
+      quantity: 1,
+      inDeck: 1,
+      notOwned: 0,
+    });
+  });
+  it("does not shrink on removal and covers ordinary Inventory Undo returns", async () => {
+    const api = deckFixture("a"),
+      writer = collectionFixtureWriter("a"),
+      store = collectionFixtureStore("a");
+    await writer.add(
+      { locationId: "deck-2", editionId: "1", quantity: 1 },
+      options()
+    );
+    const removed = await writer.remove(
+      { items: [item(store, "deck-2", "1")] },
+      options()
+    );
+    expect((await api.deck("deck-2", signal))?.listRevision).toBe(2);
+    await api.changeDeckList(
+      {
+        deckId: "deck-2",
+        listRevision: 2,
+        changes: [{ editionId: "1", quantity: 0 }],
+      },
+      options()
+    );
+    await writer.undo(removed.undo.id, options());
+    const deck = (await api.deck("deck-2", signal))!;
+    expect(deck.listRevision).toBe(4);
+    expect(deck.lines[0]).toMatchObject({ quantity: 1, inDeck: 1 });
+  });
+});

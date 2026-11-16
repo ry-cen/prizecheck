@@ -37,6 +37,7 @@ export function DecksView({
   writer,
   catalog,
   collection,
+  inventoryRevision,
   id,
   tab,
   navigate,
@@ -46,6 +47,7 @@ export function DecksView({
   writer: DeckWriter;
   catalog: CatalogReader;
   collection: CollectionReader;
+  inventoryRevision: number;
   id: string;
   tab: string;
   navigate: (id: string, tab?: string) => void;
@@ -57,12 +59,15 @@ export function DecksView({
   const heading = useRef<HTMLHeadingElement>(null);
   const listing = useRead(
     deckKey(reader.owner) + epoch,
-    useCallback((s) => reader.decks(s), [reader, epoch]),
+    useCallback((s) => reader.decks(s), [reader, epoch, inventoryRevision]),
     !id
   );
   const detail = useRead(
     deckKey(reader.owner, id) + epoch,
-    useCallback((s) => reader.deck(id, s), [reader, id, epoch]),
+    useCallback(
+      (s) => reader.deck(id, s),
+      [reader, id, epoch, inventoryRevision]
+    ),
     !!id
   );
   useEffect(() => {
@@ -243,8 +248,15 @@ function Editor({
     return () => edits.dispose();
   }, [edits, reader, initial.location.id]);
   const detail = edits.detail;
-  const [command, setCommand] = useState<"rename" | "delete" | null>(null);
+  const [command, setCommand] = useState<{
+    kind: "rename" | "delete";
+    tab: string;
+  } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  useEffect(() => {
+    setSelected(null);
+    setCommand(null);
+  }, [tab]);
   const opener = useRef<HTMLElement | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -268,7 +280,19 @@ function Editor({
     JSON.stringify(["riftbound", reader.owner, "deck-locations"]),
     useCallback((s) => collection.locations(s), [collection])
   );
-  const line = detail.lines.find((l) => l.edition.id === selected);
+  const line =
+    tab === "library"
+      ? undefined
+      : detail.lines.find((l) => l.edition.id === selected);
+  useEffect(() => {
+    if (
+      selected &&
+      !detail.lines.some((line) => line.edition.id === selected)
+    ) {
+      setSelected(null);
+      heading.current?.focus();
+    }
+  }, [selected, detail.lines, heading]);
   const count = detail.lines.reduce(
     (n, l) => n + edits.quantity(l.edition.id),
     0
@@ -284,8 +308,13 @@ function Editor({
           {detail.location.name}
         </h1>
         <div className="flex gap-2">
-          <Button onClick={() => setCommand("rename")}>Rename</Button>
-          <Button variant="danger" onClick={() => setCommand("delete")}>
+          <Button onClick={() => setCommand({ kind: "rename", tab })}>
+            Rename
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => setCommand({ kind: "delete", tab })}
+          >
             Delete
           </Button>
         </div>
@@ -485,14 +514,16 @@ function Editor({
           </div>
         </Dialog>
       )}
-      {command && (
+      {command && command.tab === tab && (
         <DeckCommand
-          title={command === "rename" ? "Rename Deck" : "Delete Deck"}
-          initialName={command === "rename" ? detail.location.name : ""}
-          confirmName={command === "delete" ? detail.location.name : undefined}
+          title={command.kind === "rename" ? "Rename Deck" : "Delete Deck"}
+          initialName={command.kind === "rename" ? detail.location.name : ""}
+          confirmName={
+            command.kind === "delete" ? detail.location.name : undefined
+          }
           close={() => setCommand(null)}
           send={(name, options) =>
-            command === "rename"
+            command.kind === "rename"
               ? writer.renameDeck(
                   {
                     id: detail.location.id,
@@ -512,7 +543,9 @@ function Editor({
           }
           done={(r) => {
             setCommand(null);
-            (command === "delete" ? onDeleted : onChanged)(r.ownerRevision);
+            (command.kind === "delete" ? onDeleted : onChanged)(
+              r.ownerRevision
+            );
           }}
         />
       )}

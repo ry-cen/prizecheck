@@ -449,6 +449,7 @@ function RiftboundComposition({
         <DecksView
           reader={decks}
           writer={decks}
+          inventoryRevision={revision}
           catalog={reader}
           collection={collection}
           id={view.deck ?? ""}
