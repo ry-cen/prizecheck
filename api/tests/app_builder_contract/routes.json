@@ -1536,6 +1536,14 @@
     "<class 'app.loan_inventory.PendingLoans'>"
   ],
   [
+    "/api/loans/waiting",
+    ["GET"],
+    "waiting_loans",
+    "app.loan_inventory",
+    "waiting_loans",
+    "<class 'app.loan_inventory.WaitingLoans'>"
+  ],
+  [
     "/api/loans/borrowed",
     ["GET"],
     "list_borrowed",
