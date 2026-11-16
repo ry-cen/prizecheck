@@ -63,6 +63,7 @@ async function mount(scenario: CollectionScenario = "normal", id?: string) {
   return {
     root,
     writer,
+    reader,
     originalCreate,
     create,
     store,
@@ -410,6 +411,27 @@ it("a create parent that gains cards offers conversion without resending the ref
     expect(f.create).toHaveBeenCalledTimes(2);
     expect(f.create.mock.calls[1][0].conversion).toBe("move_holdings_to_child");
     expect(f.confirmed).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it("does not claim a Location refresh when the refusal reload fails", async () => {
+  const f = await mount();
+  try {
+    f.create.mockRejectedValue(new CollectionError("LOCATION_NOT_FOUND"));
+    vi.spyOn(f.reader, "locations").mockRejectedValue(new Error("offline"));
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+      "Unable to save this change"
+    );
+    expect(document.body.textContent).not.toContain(
+      "The list has been refreshed"
+    );
+    expect(f.confirmed).not.toHaveBeenCalled();
   } finally {
     await f.cleanup();
   }

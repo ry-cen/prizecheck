@@ -1,5 +1,7 @@
+import { DecksView } from "./DecksView";
+import type { DeckReader, DeckWriter } from "./decks";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, LayoutGrid } from "lucide-react";
+import { BookOpen, LayoutGrid, Layers } from "lucide-react";
 import { Button } from "../../ui/Button";
 import { SearchField } from "../../ui/SearchField";
 import { Chip, PickerChip } from "../../ui/Chip";
@@ -30,6 +32,7 @@ export function RiftboundApp(props: {
   reader: CatalogReader;
   collection?: CollectionReader;
   writer?: CollectionWriter;
+  decks?: DeckReader & DeckWriter;
 }) {
   return (
     <ToastProvider key={props.collection?.owner ?? "catalog"}>
@@ -44,10 +47,12 @@ function RiftboundComposition({
   reader,
   collection,
   writer,
+  decks,
 }: {
   reader: CatalogReader;
   collection?: CollectionReader;
   writer?: CollectionWriter;
+  decks?: DeckReader & DeckWriter;
 }) {
   const [view, setView] = useState(() => parseView(location.hash));
   const [revision, setRevision] = useState(1);
@@ -96,7 +101,8 @@ function RiftboundComposition({
     );
     setView(next);
   }
-  const active = !view.home && view.section !== "collection";
+  const active =
+    !view.home && view.section !== "collection" && view.section !== "decks";
   useEffect(() => {
     const root = document.documentElement;
     const previous = root.style.scrollPaddingBottom;
@@ -170,7 +176,11 @@ function RiftboundComposition({
         href="#content"
         onClick={(event) => {
           event.preventDefault();
-          if (view.section === "collection" && !view.home)
+          if (view.section === "decks" && !view.home)
+            document
+              .querySelector<HTMLElement>("[data-decks-content] h1")
+              ?.focus();
+          else if (view.section === "collection" && !view.home)
             document
               .querySelector<HTMLElement>("[data-collection-content] h1")
               ?.focus();
@@ -196,20 +206,6 @@ function RiftboundComposition({
         </Button>
         <span className="text-meta font-semibold">Riftbound</span>
         <nav aria-label="Main navigation" className="phone:hidden">
-          <Button
-            icon={BookOpen}
-            variant="quiet"
-            aria-current={active ? "page" : undefined}
-            onClick={() =>
-              navigate({
-                ...view,
-                home: false,
-                section: view.section ? "catalog" : undefined,
-              })
-            }
-          >
-            Catalog
-          </Button>
           {collection && (
             <Button
               icon={LayoutGrid}
@@ -230,6 +226,40 @@ function RiftboundComposition({
               Collection
             </Button>
           )}
+          {decks && (
+            <Button
+              icon={Layers}
+              variant="quiet"
+              aria-current={
+                !view.home && view.section === "decks" ? "page" : undefined
+              }
+              onClick={() =>
+                navigate({
+                  ...view,
+                  home: false,
+                  section: "decks",
+                  deck: "",
+                  edition: "",
+                })
+              }
+            >
+              Decks
+            </Button>
+          )}
+          <Button
+            icon={BookOpen}
+            variant="quiet"
+            aria-current={active ? "page" : undefined}
+            onClick={() =>
+              navigate({
+                ...view,
+                home: false,
+                section: view.section ? "catalog" : undefined,
+              })
+            }
+          >
+            Catalog
+          </Button>
         </nav>
       </header>
       {view.home && (
@@ -415,24 +445,25 @@ function RiftboundComposition({
           }
         />
       )}
+      {decks && collection && !view.home && view.section === "decks" && (
+        <DecksView
+          reader={decks}
+          writer={decks}
+          inventoryRevision={revision}
+          catalog={reader}
+          collection={collection}
+          id={view.deck ?? ""}
+          tab={view.deckTab ?? "deck"}
+          navigate={(deck, deckTab = "deck") =>
+            navigate({ ...view, deck, deckTab })
+          }
+          confirmed={(next) => setRevision((n) => Math.max(n, next))}
+        />
+      )}
       <nav
         aria-label="Mobile navigation"
         className="fixed inset-x-0 bottom-0 z-(--layer-sticky) hidden h-tabbar border-t border-border bg-surface phone:flex"
       >
-        <button
-          className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent p-0 text-caption font-medium text-text-muted aria-[current=page]:text-accent-strong"
-          aria-current={active ? "page" : undefined}
-          onClick={() =>
-            navigate({
-              ...view,
-              home: false,
-              section: view.section ? "catalog" : undefined,
-            })
-          }
-        >
-          <Icon icon={BookOpen} />
-          Catalog
-        </button>
         {collection && (
           <button
             className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent p-0 text-caption font-medium text-text-muted aria-[current=page]:text-accent-strong"
@@ -453,6 +484,40 @@ function RiftboundComposition({
             Collection
           </button>
         )}
+        {decks && (
+          <button
+            className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent p-0 text-caption font-medium text-text-muted aria-[current=page]:text-accent-strong"
+            aria-current={
+              !view.home && view.section === "decks" ? "page" : undefined
+            }
+            onClick={() =>
+              navigate({
+                ...view,
+                home: false,
+                section: "decks",
+                deck: "",
+                edition: "",
+              })
+            }
+          >
+            <Icon icon={Layers} />
+            Decks
+          </button>
+        )}
+        <button
+          className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent p-0 text-caption font-medium text-text-muted aria-[current=page]:text-accent-strong"
+          aria-current={active ? "page" : undefined}
+          onClick={() =>
+            navigate({
+              ...view,
+              home: false,
+              section: view.section ? "catalog" : undefined,
+            })
+          }
+        >
+          <Icon icon={BookOpen} />
+          Catalog
+        </button>
       </nav>
       <Dialog
         open={picking && active}
