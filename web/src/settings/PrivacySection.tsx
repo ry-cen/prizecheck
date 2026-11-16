@@ -37,13 +37,11 @@ export function PrivacySection({
   blocked,
   children,
   onDirtyChange,
-  discardVersion = 0,
 }: {
   /** Blocked collectors (#248), first in the section. */
   blocked?: ReactNode;
   children?: ReactNode;
   onDirtyChange?: (dirty: boolean) => void;
-  discardVersion?: number;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   useSettingsSectionSettled("privacy", load.kind !== "loading");
@@ -70,38 +68,17 @@ export function PrivacySection({
   const currentHandle = useRef("");
   const nameEdits = useRef(0);
   const handleEdits = useRef(0);
-  // A discard abandons drafts, not requests that may already have saved.
-  const discarded = useRef({ generation: discardVersion, name: 0, handle: 0 });
-  const savingGeneration = useRef(discardVersion);
-
   const profile = load.kind === "ready" ? load.profile : null;
-  const savedProfile = useRef(profile);
-  savedProfile.current = profile;
   const dirty =
     !!profile &&
     (name !== profile.display_name ||
       handle !== profile.handle ||
       (busy &&
-        savingGeneration.current === discardVersion &&
         (pending.current?.action === "display_name" ||
           pending.current?.action === "handle")));
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
-  useEffect(() => {
-    discarded.current = {
-      generation: discardVersion,
-      name: nameEdits.current,
-      handle: handleEdits.current,
-    };
-    const saved = savedProfile.current;
-    if (!saved) return;
-    setName(saved.display_name);
-    currentName.current = saved.display_name;
-    setHandleText(saved.handle);
-    currentHandle.current = saved.handle;
-  }, [discardVersion]);
-
   function setHandleNotice(message: string) {
     setHandleFeedback(message ? { kind: "request", message } : null);
   }
@@ -162,7 +139,6 @@ export function PrivacySection({
         ? previous.key
         : crypto.randomUUID();
     pending.current = { action, value, key };
-    savingGeneration.current = discardVersion;
     setBusy(true);
     // One notice at a time: a new change clears every earlier one.
     setNameNotice("");
@@ -171,23 +147,14 @@ export function PrivacySection({
     setStatus("");
     const submittedNameEdits = nameEdits.current;
     const submittedHandleEdits = handleEdits.current;
-    const generation = discardVersion;
     try {
       const updated = await send(key);
       setLoad({ kind: "ready", profile: updated });
-      if (
-        discarded.current.generation === generation
-          ? nameEdits.current === submittedNameEdits
-          : nameEdits.current === discarded.current.name
-      ) {
+      if (nameEdits.current === submittedNameEdits) {
         setName(updated.display_name);
         currentName.current = updated.display_name;
       }
-      if (
-        discarded.current.generation === generation
-          ? handleEdits.current === submittedHandleEdits
-          : handleEdits.current === discarded.current.handle
-      ) {
+      if (handleEdits.current === submittedHandleEdits) {
         setHandleText(updated.handle);
         currentHandle.current = updated.handle;
       }
