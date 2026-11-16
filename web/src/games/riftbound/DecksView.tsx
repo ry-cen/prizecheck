@@ -518,7 +518,15 @@ function Editor({
       )}
       {command && command.tab === tab && (
         <DeckCommand
-          key={`${command.kind}:${detail.location.version}`}
+          key={command.kind}
+          version={detail.location.version}
+          reload={async () => {
+            const fresh = await reader.deck(
+              detail.location.id,
+              new AbortController().signal
+            );
+            if (fresh) edits.acceptLocation(fresh.location);
+          }}
           title={command.kind === "rename" ? "Rename Deck" : "Delete Deck"}
           initialName={command.kind === "rename" ? detail.location.name : ""}
           confirmName={
@@ -556,10 +564,12 @@ function Editor({
     </>
   );
 }
-function DeckCommand({
+export function DeckCommand({
   title,
   initialName,
   confirmName,
+  version,
+  reload,
   send,
   close,
   done,
@@ -567,6 +577,8 @@ function DeckCommand({
   title: string;
   initialName: string;
   confirmName?: string;
+  version?: number;
+  reload?: () => Promise<void>;
   send: (
     name: string,
     options: { signal: AbortSignal; idempotencyKey: string }
@@ -583,6 +595,19 @@ function DeckCommand({
   const lifetime = useRef({ alive: true, controller: new AbortController() });
   const attempt = useRef<{ name: string; key: string } | null>(null);
   const guard = useRef(false);
+  const currentVersion = useRef(version);
+  const [renamed, setRenamed] = useState(false);
+  useEffect(() => {
+    if (currentVersion.current === version) return;
+    currentVersion.current = version;
+    setRenamed(true);
+    attempt.current = null;
+    lifetime.current.controller.abort();
+    lifetime.current.controller = new AbortController();
+    guard.current = false;
+    setBusy(false);
+    setError("");
+  }, [version]);
   const nameField = useRef<HTMLInputElement>(null);
   const [focusName, requestNameFocus] = useState(0);
   useEffect(() => {
@@ -604,14 +629,35 @@ function DeckCommand({
     setBusy(true);
     setError("");
     attempt.current ??= { name, key: crypto.randomUUID() };
+    const submittedVersion = version;
+    const controller = lifetime.current.controller;
     try {
       const r = await send(attempt.current.name, {
         signal: lifetime.current.controller.signal,
         idempotencyKey: attempt.current.key,
       });
-      if (lifetime.current.alive) done(r);
+      if (
+        lifetime.current.alive &&
+        currentVersion.current === submittedVersion &&
+        !controller.signal.aborted
+      )
+        done(r);
     } catch (e) {
-      if (lifetime.current.alive) {
+      if (
+        lifetime.current.alive &&
+        currentVersion.current === submittedVersion &&
+        !controller.signal.aborted
+      ) {
+        if (e instanceof DeckError && e.code === "STALE_LOCATION") {
+          attempt.current = null;
+          setRenamed(true);
+          try {
+            await reload?.();
+          } catch {
+            setError("Unable to reload this Deck. Try again.");
+          }
+          return;
+        }
         if (
           e instanceof DeckError &&
           e.code !== "STALE_LOCATION" &&
@@ -638,8 +684,10 @@ function DeckCommand({
         );
       }
     } finally {
-      guard.current = false;
-      if (lifetime.current.alive) setBusy(false);
+      if (currentVersion.current === submittedVersion) {
+        guard.current = false;
+        if (lifetime.current.alive) setBusy(false);
+      }
     }
   }
   return (
@@ -651,6 +699,7 @@ function DeckCommand({
         }}
         className="flex flex-col gap-4"
       >
+        {renamed && <p>This Deck was renamed elsewhere.</p>}
         {confirmName && (
           <p>
             Its cards return to Unsorted. Type {confirmName} exactly to delete

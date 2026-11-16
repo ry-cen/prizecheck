@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { deckFixture } from "./local/deckFixtures";
+import { deckFixture, queueDeckFixtureReadEdit } from "./local/deckFixtures";
 import {
   collectionFixtureStore,
   collectionFixtureWriter,
@@ -650,3 +650,93 @@ it("applies rename Locations immediately while busy and rejects older Location a
   expect(edits.detail.listRevision).toBe(2);
   edits.dispose();
 });
+
+it("isolates ambiguous additions so an available new Edition survives repeated batch refusals", async () => {
+  const api = deckFixture("a");
+  const initial = (await api.deck("deck-1", signal))!;
+  let release!: () => void;
+  const change = vi
+    .fn<DeckWriter["changeDeckList"]>()
+    .mockImplementationOnce(async (input, opts) => {
+      await new Promise<void>((r) => {
+        release = r;
+      });
+      return api.changeDeckList(input, opts);
+    })
+    .mockImplementation(api.changeDeckList);
+  const edits = new DeckEdits(
+    initial,
+    { owner: "a", changeDeckList: change },
+    () => {}
+  );
+  edits.reload = (s) => api.deck("deck-1", s);
+  edits.adjust("retained", -1);
+  edits.adjust("retained", 1);
+  edits.adjust("4", 1);
+  edits.adjust("1", 1);
+  release();
+  await vi.waitFor(() => expect(edits.busy).toBe(false));
+  const final = (await api.deck("deck-1", signal))!;
+  expect(final.lines.find((l) => l.edition.id === "4")?.quantity).toBe(1);
+  expect(final.lines.find((l) => l.edition.id === "1")?.quantity).toBe(3);
+  expect(final.lines.some((l) => l.edition.id === "retained")).toBe(false);
+  expect(
+    change.mock.calls.slice(2).map((c) => c[0].changes.map((x) => x.editionId))
+  ).toEqual([["1"], ["retained"], ["4"]]);
+  expect(new Set(change.mock.calls.map((c) => c[1].idempotencyKey)).size).toBe(
+    change.mock.calls.length
+  );
+  edits.dispose();
+});
+for (const failed of [false, true])
+  it(`reviews per-Edition conflicts during ${failed ? "Retry" : "automatic refusal reload"}`, async () => {
+    const { changeFixtureDeckLine } = await import("./local/deckTestHooks");
+    const api = deckFixture("a");
+    const initial = (await api.deck("deck-1", signal))!;
+    let release!: () => void;
+    const change = vi
+      .fn<DeckWriter["changeDeckList"]>()
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        throw new DeckError("EDITION_UNAVAILABLE");
+      })
+      .mockImplementation(api.changeDeckList);
+    const edits = new DeckEdits(
+      initial,
+      { owner: "a", changeDeckList: change },
+      () => {}
+    );
+    let reads = 0;
+    edits.reload = async (s) => {
+      reads++;
+      if (failed && reads === 1) throw Error("offline");
+      queueDeckFixtureReadEdit("a", () =>
+        changeFixtureDeckLine("a", "deck-1", "1", 7)
+      );
+      return api.deck("deck-1", s);
+    };
+    edits.adjust("missing", 1);
+    edits.adjust("1", 1);
+    edits.adjust("2", 1);
+    release();
+    if (failed) {
+      await vi.waitFor(() => expect(edits.canRetry).toBe(true));
+      edits.retry();
+    }
+    await vi.waitFor(() =>
+      expect(edits.error).toContain("Review the Deck List")
+    );
+    expect(change).toHaveBeenCalledTimes(1);
+    expect(edits.canRetry).toBe(true);
+    edits.retry();
+    await vi.waitFor(() => expect(edits.busy).toBe(false));
+    const final = (await api.deck("deck-1", signal))!;
+    expect(final.lines.find((l) => l.edition.id === "1")?.quantity).toBe(7);
+    expect(final.lines.find((l) => l.edition.id === "2")?.quantity).toBe(5);
+    expect(change.mock.calls[1][0].changes).toEqual([
+      { editionId: "2", quantity: 5 },
+    ]);
+    edits.dispose();
+  });
