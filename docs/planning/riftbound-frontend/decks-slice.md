@@ -65,3 +65,9 @@ Re-reading `migrations/core/000_baseline.sql:1143` (`deck_list_cover`), `:1218` 
 Inventory revision changes refetch Deck reads without changing the same-Deck read key, so an idle editor updates ownership after the existing global Inventory Undo action. Pending list intent stays owned by its write queue. Unit cases cover mixed insert/update arrivals, replay and owner isolation, covered lines, surplus cuts, retained Editions and Inventory Undo. The browser journey moves an actual Collection copy into an empty Deck, then verifies its In this Deck count and the ownership refresh after Undo.
 
 Copy sheets and command dialogs close when history changes the editor tab. Removing a line at zero clears its opener state and focuses the Deck heading, preserving all Holdings. Browser coverage checks Back/Forward with a sheet open and removal of the retained line without a phantom sheet reopening.
+
+
+Decks WP1 review omissions:
+
+- Surplus presentation is omitted: core computes owned copies held beyond the list with `beyond_list` (`api/app/core/decks/ownership.py:129`). These copies remain visible in Collection, including after a line is removed at zero; WP1's Deck tab only displays listed Editions.
+- Competition warning (“Other Decks count the same spare copies”, M9 `j4-phone-deck.png`) is omitted. Core compares other Decks' counted copies with spare copies (`api/app/core/decks/ownership.py:180-186`). WP1 makes no exclusive allocation claim and adds no competition UI.

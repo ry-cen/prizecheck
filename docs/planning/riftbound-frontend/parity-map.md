@@ -150,3 +150,9 @@ Gates and omissions (each remains outside WP1):
 - Spread/List view switching.
 
 Decks WP1 core correction: `local/deckListFixtures.ts` mirrors holding-arrival list coverage (baseline.sql:1143,1218), including Collection Add/Move and ordinary Inventory Undo. Leaving a Deck does not shrink its list. `DecksView.tsx` refetches ownership on inventory revision changes; no Deck List Undo or Put away UI is introduced. See decks-slice.md for the formula, retained-Edition distinction and tests.
+
+
+Decks WP1 review omissions:
+
+- Surplus presentation is omitted: core computes owned copies held beyond the list with `beyond_list` (`api/app/core/decks/ownership.py:129`). These copies remain visible in Collection, including after a line is removed at zero; WP1's Deck tab only displays listed Editions.
+- Competition warning (“Other Decks count the same spare copies”, M9 `j4-phone-deck.png`) is omitted. Core compares other Decks' counted copies with spare copies (`api/app/core/decks/ownership.py:180-186`). WP1 makes no exclusive allocation claim and adds no competition UI.

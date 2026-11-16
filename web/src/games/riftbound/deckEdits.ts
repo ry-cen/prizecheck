@@ -16,7 +16,14 @@ export class DeckEdits {
     private changed: () => void
   ) {}
   acceptRead(detail: DeckDetail) {
-    if (!this.alive || this.busy || this.detail === detail) return;
+    if (!this.alive || this.detail === detail) return;
+    if (this.busy) {
+      if (detail.location.version > this.detail.location.version) {
+        this.detail = { ...this.detail, location: detail.location };
+        this.changed();
+      }
+      return;
+    }
     this.detail = detail;
     this.changed();
   }
@@ -30,14 +37,18 @@ export class DeckEdits {
   get busy() {
     return this.running || this.totals.size > 0;
   }
+  get canRetry() {
+    return !!this.error && this.totals.size > 0;
+  }
   adjust(id: string, delta: number) {
     if (!this.alive) return;
+    if (!this.canRetry) this.error = "";
     this.totals.set(id, Math.max(0, this.quantity(id) + delta));
     this.changed();
     if (!this.error) void this.flush();
   }
   retry() {
-    if (this.alive && !this.running) {
+    if (this.alive && !this.running && this.canRetry) {
       this.error = "";
       this.changed();
       void this.flush();
@@ -74,7 +85,13 @@ export class DeckEdits {
         idempotencyKey: sent.key,
       });
       if (!this.alive) return;
-      this.detail = result;
+      this.detail = {
+        ...result,
+        location:
+          this.detail.location.version > result.location.version
+            ? this.detail.location
+            : result.location,
+      };
       for (const c of sent.input.changes)
         if (this.totals.get(c.editionId) === c.quantity)
           this.totals.delete(c.editionId);
@@ -96,16 +113,29 @@ export class DeckEdits {
           this.detail = fresh;
           if (!unchanged) this.totals.clear();
           this.attempt = undefined;
-          this.error =
-            "This Deck changed somewhere else, so your last change wasn't saved. It's up to date now: try again. Review the refreshed list.";
+          this.error = unchanged
+            ? "This Deck changed somewhere else, so your last change wasn't saved. It's up to date now: try again."
+            : "This Deck changed somewhere else, so your last change wasn't saved. Review the refreshed Deck List.";
         } catch {
-          if (this.alive) this.error = "Unable to save this change. Retry.";
+          if (this.alive)
+            this.error =
+              "Your last Deck List change may not have been saved. Try again to check safely.";
         }
-      } else
+      } else if (e instanceof DeckError && e.code === "EDITION_UNAVAILABLE") {
+        this.attempt = undefined;
+        this.totals.clear();
         this.error =
-          e instanceof DeckError && e.code === "EDITION_UNAVAILABLE"
-            ? "This Edition is no longer available. Review your changes."
-            : "Unable to save this change. Retry.";
+          "That card can't be added any more, so the Deck List wasn't changed.";
+        try {
+          const fresh = await this.writerRead();
+          if (this.alive && fresh) this.detail = fresh;
+        } catch {
+          // The refusal is definitive even when its follow-up read fails.
+        }
+      } else {
+        this.error =
+          "Your last Deck List change may not have been saved. Try again to check safely.";
+      }
     } finally {
       if (this.alive) {
         this.running = false;

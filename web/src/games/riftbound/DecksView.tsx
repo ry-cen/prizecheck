@@ -25,8 +25,11 @@ function Art({ edition }: { edition: Edition }) {
           className="h-full w-full object-contain"
         />
       ) : (
-        <span className="flex h-full items-center justify-center p-2 text-caption text-text-muted">
-          No image available
+        <span
+          aria-label={`Artwork unavailable for ${edition.name}`}
+          className="flex h-full items-center justify-center p-2 text-caption text-text-muted"
+        >
+          Artwork unavailable
         </span>
       )}
     </span>
@@ -104,7 +107,7 @@ export function DecksView({
             <p role="status">Loading Deck…</p>
           ) : (
             <Editor
-              key={id + epoch}
+              key={id}
               initial={detail.value}
               reader={reader}
               writer={writer}
@@ -115,7 +118,6 @@ export function DecksView({
               heading={heading}
               onChanged={(revision) => {
                 confirmed(revision);
-                bump((n) => n + 1);
               }}
               onDeleted={(revision) => {
                 confirmed(revision);
@@ -335,9 +337,9 @@ function Editor({
       {edits.error && !line && (
         <div role="alert" className="mb-4">
           <p>{edits.error}</p>
-          <Button onClick={() => edits.retry()}>
-            {edits.busy ? "Retry" : "Review changes"}
-          </Button>
+          {edits.canRetry && (
+            <Button onClick={() => edits.retry()}>Retry</Button>
+          )}
         </div>
       )}
       {edits.busy && !edits.error && !line && (
@@ -474,9 +476,9 @@ function Editor({
           {edits.error && (
             <div role="alert">
               <p>{edits.error}</p>
-              <Button onClick={() => edits.retry()}>
-                {edits.busy ? "Retry" : "Review changes"}
-              </Button>
+              {edits.canRetry && (
+                <Button onClick={() => edits.retry()}>Retry</Button>
+              )}
             </div>
           )}
           {edits.busy && !edits.error && <p role="status">Saving changes…</p>}
@@ -596,7 +598,13 @@ function DeckCommand({
       });
       if (lifetime.current.alive) done(r);
     } catch (e) {
-      if (lifetime.current.alive)
+      if (lifetime.current.alive) {
+        if (
+          e instanceof DeckError &&
+          e.code !== "STALE_LOCATION" &&
+          e.code !== "IDEMPOTENCY_KEY_REUSED"
+        )
+          attempt.current = null;
         setError(
           e instanceof DeckError
             ? ((
@@ -613,6 +621,7 @@ function DeckCommand({
               )[e.code] ?? "Unable to save this change. Retry.")
             : "Unable to save this change. Retry."
         );
+      }
     } finally {
       guard.current = false;
       if (lifetime.current.alive) setBusy(false);
@@ -637,7 +646,10 @@ function DeckCommand({
           label="Deck name"
           value={name}
           disabled={busy || !!attempt.current}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setError("");
+          }}
         />
         {error && <p role="alert">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -651,7 +663,7 @@ function DeckCommand({
               (confirmName !== undefined && name !== confirmName)
             }
           >
-            {busy ? "Saving…" : error ? "Retry" : title}
+            {busy ? "Saving…" : error && attempt.current ? "Retry" : title}
           </Button>
         </div>
       </form>
