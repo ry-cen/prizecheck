@@ -17,6 +17,14 @@ import { cleanLocationName } from "./locationCommands";
 import { casefold } from "./locationNames";
 export type DeckScenario =
   "normal" | "decks-empty" | "decks-failure" | "decks-slow" | "deck-stale";
+const readEdits = new WeakMap<FixtureStore, (() => void)[]>();
+/** Test-only one-shot edit immediately before the next detail read. */
+export function queueDeckFixtureReadEdit(owner: "a" | "b", edit: () => void) {
+  const store = collectionFixtureStore(owner);
+  const queue = readEdits.get(store) ?? [];
+  queue.push(edit);
+  readEdits.set(store, queue);
+}
 const fixtures = new WeakMap<
   FixtureStore,
   Map<string, DeckReader & DeckWriter>
@@ -205,6 +213,7 @@ export function deckFixture(
     },
     async deck(id, signal) {
       await delay(signal);
+      readEdits.get(store)?.shift()?.();
       return detail(id);
     },
     async createDeck(input, options) {

@@ -561,6 +561,59 @@ for (const width of [1280, 375]) {
       ).toBe(false);
     });
   }
+  test(`isolates available new additions from a retained refusal at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(
+      `${entry}?decks=decks-slow#riftbound:section=decks&deck=deck-1`
+    );
+    await page
+      .getByRole("button", {
+        name: "Edit Forgotten Sentinel Standard",
+        exact: true,
+      })
+      .click();
+    await page.getByRole("dialog").evaluate((dialog) => {
+      (
+        dialog.querySelector(
+          '[aria-label="Decrease quantity"]'
+        ) as HTMLButtonElement
+      ).click();
+      (
+        dialog.querySelector(
+          '[aria-label="Increase quantity"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await page.keyboard.press("Escape");
+    await page.getByRole("tab", { name: "Library", exact: true }).click();
+    await page
+      .getByRole("button", {
+        name: "Add Moonlit Crossing Standard",
+        exact: true,
+      })
+      .click();
+    await expect(page.getByRole("alert")).toContainText(
+      "Your other changes were saved",
+      { timeout: 15000 }
+    );
+    const final = await page.evaluate(async () => {
+      const path = "/src/games/riftbound/local/deckFixtures.ts";
+      return (await import(path))
+        .deckFixture("a", "decks-slow")
+        .deck("deck-1", new AbortController().signal);
+    });
+    expect(
+      final.lines.find((l: { edition: { id: string } }) => l.edition.id === "4")
+        .quantity
+    ).toBe(1);
+    expect(
+      final.lines.some(
+        (l: { edition: { id: string } }) => l.edition.id === "retained"
+      )
+    ).toBe(false);
+  });
   test(`immediate second rename and delete use the returned Location at ${width}`, async ({
     page,
   }) => {
@@ -597,7 +650,7 @@ for (const width of [1280, 375]) {
     ).toBeVisible();
     await expect(page.getByRole("alert")).toHaveCount(0);
   });
-  test(`background Location refresh resets a locked Delete confirmation at ${width}`, async ({
+  test(`background Location refresh preserves a locked Delete confirmation at ${width}`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height });
@@ -652,13 +705,83 @@ for (const width of [1280, 375]) {
       timeout: 10000,
     });
     await expect(dialog.getByLabel("Deck name")).toBeEnabled();
-    await expect(dialog.getByLabel("Deck name")).toHaveValue("");
+    await expect(dialog.getByLabel("Deck name")).toHaveValue(
+      "Foreground rename"
+    );
+    await expect(
+      dialog.getByRole("button", { name: "Delete Deck", exact: true })
+    ).toBeDisabled();
     await dialog.getByLabel("Deck name").fill("Background rename");
     await dialog
       .getByRole("button", { name: "Delete Deck", exact: true })
       .click();
     await expect(
       page.getByRole("heading", { name: "Decks", exact: true })
+    ).toBeVisible();
+  });
+  test(`background Location refresh preserves a Rename draft at ${width}`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(
+      `${entry}?decks=decks-slow#riftbound:section=decks&deck=deck-1`
+    );
+    await expect(
+      page.getByRole("heading", { name: "First Light", exact: true })
+    ).toBeVisible();
+    await page.evaluate(async () => {
+      const path = "/src/games/riftbound/local/deckFixtures.ts";
+      const api = (await import(path)).deckFixture("a", "decks-slow");
+      const read = api.deck,
+        remove = api.deleteDeck;
+      let refreshed = false,
+        failed = false;
+      api.deck = async (id: string, signal: AbortSignal) => {
+        if (!refreshed) {
+          refreshed = true;
+          await api.renameDeck(
+            { id, name: "Background rename", version: 2 },
+            { signal, idempotencyKey: crypto.randomUUID() }
+          );
+        }
+        return read(id, signal);
+      };
+      api.deleteDeck = async (input: unknown, options: unknown) => {
+        if (!failed) {
+          failed = true;
+          throw new Error("Uncertain response");
+        }
+        return remove(input, options);
+      };
+    });
+    await page.getByRole("button", { name: "Rename", exact: true }).click();
+    let dialog = page.getByRole("dialog", { name: "Rename Deck", exact: true });
+    await dialog.getByLabel("Deck name").fill("Foreground rename");
+    await dialog
+      .getByRole("button", { name: "Rename Deck", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Foreground rename", exact: true })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Rename", exact: true }).click();
+    dialog = page.getByRole("dialog", { name: "Rename Deck", exact: true });
+    await dialog.getByLabel("Deck name").fill("My retained draft");
+    await expect(
+      dialog.getByText("This Deck was renamed elsewhere.")
+    ).toBeVisible({ timeout: 10000 });
+    await expect(dialog.getByLabel("Deck name")).toHaveValue(
+      "My retained draft"
+    );
+    await expect(dialog.getByLabel("Deck name")).toBeFocused();
+    await page.screenshot({
+      path: info.outputPath(`rename-note-${width}.png`),
+      fullPage: true,
+    });
+    await dialog
+      .getByRole("button", { name: "Rename Deck", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "My retained draft", exact: true })
     ).toBeVisible();
   });
   test(`keyboard Deck creation and tab navigation at ${width}`, async ({

@@ -13,6 +13,27 @@ export class DeckEdits {
   private paused = false;
   private needsReload = false;
   private refused = false;
+  private isolate = new Set<string>();
+  private reconcile(fresh: DeckDetail) {
+    let dropped = false;
+    for (const id of this.totals.keys()) {
+      if (
+        (this.detail.lines.find((l) => l.edition.id === id)?.quantity ?? 0) !==
+        (fresh.lines.find((l) => l.edition.id === id)?.quantity ?? 0)
+      ) {
+        this.totals.delete(id);
+        this.isolate.delete(id);
+        dropped = true;
+      }
+    }
+    this.installDetail(fresh);
+    if (dropped) {
+      this.paused = true;
+      this.error =
+        "This Deck changed somewhere else, so some changes weren’t saved. Review the Deck List.";
+    }
+    return dropped;
+  }
   constructor(
     public detail: DeckDetail,
     private writer: Pick<DeckWriter, "owner" | "changeDeckList">,
@@ -89,15 +110,20 @@ export class DeckEdits {
         const fresh = await this.writerRead();
         if (!this.alive) return;
         if (!fresh) throw new DeckError("DECK_NOT_FOUND");
-        this.installDetail(fresh);
+        const dropped = this.reconcile(fresh);
         this.needsReload = false;
+        if (dropped || !this.totals.size) return;
       }
       baseline = this.detail;
       this.attempt ??= {
         input: {
           deckId: this.detail.location.id,
           listRevision: this.detail.listRevision,
-          changes: [...this.totals].map(([editionId, quantity]) => ({
+          changes: (() => {
+            const all = [...this.totals];
+            const normal = all.filter(([id]) => !this.isolate.has(id));
+            return normal.length ? normal : all.slice(0, 1);
+          })().map(([editionId, quantity]) => ({
             editionId,
             quantity,
           })),
@@ -116,8 +142,10 @@ export class DeckEdits {
       if (!this.alive) return;
       this.installDetail(result);
       for (const c of sent.input.changes)
-        if (this.totals.get(c.editionId) === c.quantity)
+        if (this.totals.get(c.editionId) === c.quantity) {
           this.totals.delete(c.editionId);
+          this.isolate.delete(c.editionId);
+        }
       this.attempt = undefined;
       if (this.refused && !this.totals.size)
         this.error =
@@ -153,16 +181,19 @@ export class DeckEdits {
       } else if (e instanceof DeckError && e.code === "EDITION_UNAVAILABLE") {
         // The batch failed atomically. Only unchanged, nonzero new-line changes
         // could have caused this refusal; preserve every other absolute total.
-        for (const change of this.attempt!.input.changes) {
-          if (
+        const candidates = this.attempt!.input.changes.filter(
+          (change) =>
             change.quantity > 0 &&
             !baseline.lines.some(
               (line) => line.edition.id === change.editionId
             ) &&
             this.totals.get(change.editionId) === change.quantity
-          )
-            this.totals.delete(change.editionId);
-        }
+        );
+        if (candidates.length === 1) {
+          this.totals.delete(candidates[0].editionId);
+          this.isolate.delete(candidates[0].editionId);
+        } else
+          for (const change of candidates) this.isolate.add(change.editionId);
         this.attempt = undefined;
         this.refused = true;
         this.needsReload = true;
@@ -173,7 +204,7 @@ export class DeckEdits {
           const fresh = await this.writerRead();
           if (!this.alive) return;
           if (!fresh) throw new DeckError("DECK_NOT_FOUND");
-          this.installDetail(fresh);
+          this.reconcile(fresh);
           this.needsReload = false;
         } catch {
           if (this.alive && this.totals.size) {
