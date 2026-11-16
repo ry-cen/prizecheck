@@ -1164,6 +1164,9 @@ test("desktop focus clearance is limited to the app shell", async ({
         publicHeader: css.getPropertyValue("--public-header-height").trim(),
         top: css.scrollPaddingTop,
         bottom: css.scrollPaddingBottom,
+        phoneBottom:
+          parseFloat(css.getPropertyValue("--layout-tabbar-height")) +
+          parseFloat(css.getPropertyValue("--space-2")),
         header: parseFloat(css.getPropertyValue("--layout-header-height")),
         ring:
           parseFloat(css.getPropertyValue("--focus-width")) +
@@ -1240,7 +1243,7 @@ test("desktop focus clearance is limited to the app shell", async ({
         expect(css.margin).toBe("0px");
         expect(css.bottomMargin).toBe("0px");
         expect(["auto", "0px"]).toContain(css.top);
-        expect(["auto", "0px"]).toContain(css.bottom);
+        expect(css.bottom).toBe(`${css.phoneBottom}px`);
       }
     }
     await page.keyboard.press("Tab");

@@ -374,8 +374,14 @@ test.describe("desktop", () => {
     );
 
     await link.click();
-    // The catalog reads the link once and removes it from the address.
-    await expect(page).toHaveURL(/\/catalog$/);
+    // The report trigger is consumed once; the open card and Edition remain reloadable.
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/catalog" &&
+        url.searchParams.get("card") === printing &&
+        url.searchParams.get("edition") === ids.normal &&
+        !url.searchParams.has("printing")
+    );
     const report = page.getByRole("region", { name: "Report card metadata" });
     await expect(report).toBeVisible();
     await expect(
@@ -389,7 +395,7 @@ test.describe("desktop", () => {
     await expect(
       report.locator("label", { hasText: "Card Edition" }).locator("select")
     ).toHaveValue(ids.normal);
-    // The plain catalog search opens after a reload.
+    // Reload keeps the card open without reopening its one-use report form.
     await page.reload();
     await expect(
       page.getByRole("region", { name: "Report card metadata" })

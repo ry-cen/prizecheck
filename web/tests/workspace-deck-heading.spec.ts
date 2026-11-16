@@ -582,10 +582,13 @@ test("a blocked Live export lists every blocker and offers no text, on a phone o
   const blockers = live.getByRole("region", { name: "Live export blockers" });
   await expect(blockers.getByRole("listitem")).toHaveCount(2);
   await expect(blockers).toContainText(
+    "Live export isn't available for the cards below. No export was created."
+  );
+  await expect(blockers).toContainText(
     "Alt Art Card · Trainer Gallery #TG01 · ×2"
   );
   await expect(blockers).toContainText(
-    "Furret · Seed Set #136 · ×3 · source_changed"
+    "Furret · Seed Set #136 · ×3 · This Card Printing's details have changed and need to be confirmed before Live export."
   );
   await expect(live.getByRole("button", { name: "Copy for Live" })).toHaveCount(
     0
