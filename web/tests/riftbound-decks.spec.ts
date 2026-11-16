@@ -701,6 +701,18 @@ for (const width of [1280, 375]) {
       .getByRole("button", { name: "Delete Deck", exact: true })
       .click();
     await expect(dialog.getByLabel("Deck name")).toBeDisabled();
+    // The response was uncertain: the attempt, its key and its version stay,
+    // even once a background read shows the Deck was renamed.
+    await expect(dialog).toContainText("may not have been saved", {
+      timeout: 10000,
+    });
+    await expect(dialog.getByLabel("Deck name")).toBeDisabled();
+    await expect(dialog.getByLabel("Deck name")).toHaveValue(
+      "Foreground rename"
+    );
+    // Retry replays the original attempt; the server refuses it definitively
+    // because it never applied and the Deck has moved on.
+    await dialog.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(dialog).toContainText("Type Background rename exactly", {
       timeout: 10000,
     });
