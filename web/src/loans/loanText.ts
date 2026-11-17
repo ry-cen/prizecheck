@@ -18,6 +18,25 @@ export function cardCount(n: number): string {
   return n === 1 ? "1 card" : `${n} cards`;
 }
 
+/** "1 copy", "2 copies": a quantity that says what it counts. */
+export function copiesLabel(n: number): string {
+  return n === 1 ? "1 copy" : `${n} copies`;
+}
+
+/**
+ * Where a borrower's copies go until the handover, and where they arrived once handed over: with a Deck the lead before
+ * its name ("For Charizard", "Arrived in Charizard"), without one the whole phrase ("Goes to Unsorted", "Arrived in
+ * Unsorted"). Past tense after the handover, because the borrower may Move the copies later and the Loan doesn't follow.
+ */
+export function borrowedPlace(loan: Pick<LoanView, "state">): {
+  deck: string;
+  unsorted: string;
+} {
+  return loan.state === "handed_over"
+    ? { deck: "Arrived in", unsorted: "Arrived in Unsorted" }
+    : { deck: "For", unsorted: "Goes to Unsorted" };
+}
+
 /** Whether the lender promised anything yet: a Loan they accepted, before or after it closed. */
 function promisedAny(loan: LoanView): boolean {
   return loan.lines.some((line) => line.promised !== "0");

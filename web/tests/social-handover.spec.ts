@@ -390,7 +390,7 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await page.getByRole("link", { name: "All Loans" }).click();
   await expect(
     page.getByRole("region", { name: "Out now" }).getByRole("link")
-  ).toContainText("Borrowing 2");
+  ).toContainText("Borrowing 1 Iono, 1 Boss's Orders from Misty W");
   await expect(
     page.getByRole("region", { name: "Out now" }).getByRole("link")
   ).toContainText("Misty W");

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { LoanView } from "../social_generated";
 import {
+  borrowedPlace,
+  copiesLabel,
   loanStepConfirmation,
   handoverConfirmText,
   returnConfirmText,
@@ -250,4 +252,30 @@ it("confirms the performed step in Loan terms, preserving singular receipt wordi
   expect(loanStepConfirmation("confirm_return", loan)).toBe(
     "Return confirmed."
   );
+});
+
+describe("quantity labels", () => {
+  it.each([
+    [1, "1 copy"],
+    [2, "2 copies"],
+    [0, "0 copies"],
+  ])("labels %s as %s", (count, label) => {
+    expect(copiesLabel(count)).toBe(label);
+  });
+});
+
+describe("where a borrower's copies are", () => {
+  for (const state of ["requested", "accepted"] as const)
+    it(`says where they will go while the Loan is ${state}`, () => {
+      expect(borrowedPlace({ state })).toEqual({
+        deck: "For",
+        unsorted: "Goes to Unsorted",
+      });
+    });
+  it("says where they arrived once handed over", () => {
+    expect(borrowedPlace({ state: "handed_over" })).toEqual({
+      deck: "Arrived in",
+      unsorted: "Arrived in Unsorted",
+    });
+  });
 });

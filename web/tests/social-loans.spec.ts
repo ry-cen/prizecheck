@@ -329,7 +329,9 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
   await expect(needsYou.getByRole("link")).toHaveCount(1);
   await expect(needsYou.getByRole("link")).toContainText("Ash K");
   await expect(needsYou.getByRole("link")).toContainText("Borrow Request");
-  await expect(needsYou.getByRole("link")).toContainText("Lending 3");
+  await expect(needsYou.getByRole("link")).toContainText(
+    "Lending 2 Iono, 1 Boss's Orders to Ash K"
+  );
   await expect(lender.getByRole("main")).not.toContainText(deckName);
   await test.info().attach("loan-row-after", {
     body: await needsYou.innerText(),
@@ -412,7 +414,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
     .click();
   await expect(
     page.getByRole("region", { name: "Pending" }).getByRole("link")
-  ).toContainText("Borrowing 2");
+  ).toContainText("Borrowing 2 Iono from Misty W");
   await expectPageChecks(page, "the Loans tab on a phone");
   await page.setViewportSize(DESKTOP);
   await page.goto(`${ORIGIN}/decks/want-list`);
