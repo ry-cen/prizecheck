@@ -437,3 +437,114 @@ plain(
     ).toEqual([]);
   }
 );
+
+// The same words twice in a row. A polite region speaks what is added to it, so "Added 1 Iono." drawn over an identical
+// "Added 1 Iono." changes nothing and is silent. Each completed edit must add content to the same mounted
+// [data-edit-feedback] region, and the toast behind the modal stays quiet, so this is the only announcement. These
+// cases read the region itself (a text addition inside it for every action), not the aria-live filtering `watch` does.
+for (const surface of ["copy sheet on a phone", "library popup on a desktop"]) {
+  const phone = surface.includes("phone");
+  test(`${surface}: repeated +1 and −1, and Undo, are each announced in the mounted status line`, async ({
+    collectors,
+  }) => {
+    const ids = seedCatalog();
+    const { page } = await collectors.signIn({
+      contextOptions: phone
+        ? { viewport: PHONE, hasTouch: true }
+        : { viewport: DESKTOP },
+    });
+    await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+      route.abort()
+    );
+    const deck = await createDeck(page, "Announce repeats");
+    await setLine(page, deck, ids["PAL 185"], 3);
+    await page.goto(`${ORIGIN}/decks/${deck}`);
+    let dialog;
+    if (phone) {
+      const control = page.locator("[data-edition-id]").first();
+      await expect(control).toBeVisible();
+      await control.tap();
+      dialog = page.getByRole("dialog", { name: "Iono", exact: true });
+    } else {
+      const library = page.getByRole("complementary", { name: "Library" });
+      await library.getByRole("radio", { name: "All" }).click();
+      await library.getByRole("button", { name: /^Iono, PAL 185, / }).click();
+      dialog = page.getByRole("dialog", { name: "Iono", exact: true });
+    }
+    await expect(dialog).toBeVisible();
+    const line = dialog.locator("[data-edit-feedback]");
+    await expect(line).toHaveAttribute("role", "status");
+    const count = dialog
+      .getByRole("group", { name: "Deck List copies" })
+      .locator("strong");
+    await expect(count).toHaveText("3");
+
+    // Count each batch of mutations that adds words to this one element, and keep a handle on it to prove it stays.
+    await page.evaluate(() => {
+      const el = document.querySelector("dialog[open] [data-edit-feedback]")!;
+      const log: string[] = [];
+      const w = window as unknown as { __line: Element; __log: string[] };
+      w.__line = el;
+      w.__log = log;
+      new MutationObserver((records) => {
+        const added = records.flatMap((record) =>
+          record.type === "characterData"
+            ? [record.target.textContent ?? ""]
+            : [...record.addedNodes].map((node) => node.textContent ?? "")
+        );
+        const words = added.join(" ").trim();
+        if (words) log.push(words);
+      }).observe(el, { childList: true, characterData: true, subtree: true });
+    });
+    const additions = () =>
+      page.evaluate(() => (window as unknown as { __log: string[] }).__log);
+    const sameElement = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __line: Element }).__line ===
+            document.querySelector("dialog[open] [data-edit-feedback]") &&
+          (window as unknown as { __line: Element }).__line.isConnected
+      );
+    const press = (name: RegExp) =>
+      phone
+        ? dialog.getByRole("button", { name }).tap()
+        : dialog.getByRole("button", { name }).click();
+
+    let total = 3;
+    for (const [name, saying, delta] of [
+      [/^\+1, Add one Iono/, "Added 1 Iono.", 1],
+      [/^\+1, Add one Iono/, "Added 1 Iono.", 1],
+      [/^−1, Remove one Iono/, "Removed 1 Iono.", -1],
+      [/^−1, Remove one Iono/, "Removed 1 Iono.", -1],
+      [/^−1, Remove one Iono/, "Removed 1 Iono.", -1],
+    ] as const) {
+      const before = (await additions()).length;
+      total += delta;
+      await press(name);
+      await expect(count).toHaveText(String(total));
+      await expect
+        .poll(async () => (await additions()).length)
+        .toBe(before + 1);
+      await settle(page);
+      expect((await additions()).slice(before)).toEqual([saying]);
+      await expect(line).toHaveText(saying);
+      expect(await sameElement()).toBe(true);
+      // The toast is behind the modal, so it must not announce the same edit.
+      await expect(page.locator("#app-toasts")).toHaveAttribute(
+        "aria-live",
+        "off"
+      );
+    }
+
+    // Undo says its own words in the same line.
+    const before = (await additions()).length;
+    await press(/^Undo$/);
+    await expect(count).toHaveText(String(total + 1));
+    await expect.poll(async () => (await additions()).length).toBe(before + 1);
+    await settle(page);
+    expect((await additions()).slice(before)).toEqual([
+      "Undone: Removed 1 Iono.",
+    ]);
+    expect(await sameElement()).toBe(true);
+  });
+}

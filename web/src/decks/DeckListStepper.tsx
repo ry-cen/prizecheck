@@ -68,8 +68,10 @@ export function EditFeedbackLine({
   const shown = feedback && feedback.id > since ? feedback : null;
   return (
     <div className="flex min-h-control flex-wrap items-center gap-2 text-meta">
+      {/* The polite region stays mounted. Each completed edit draws its words in a new span keyed by the feedback id, so
+          the same words twice in a row (+1, then +1) are still new content in the region and are announced again. */}
       <p role="status" data-edit-feedback className="m-0 min-w-0 grow">
-        {shown?.message ?? ""}
+        {shown && <span key={shown.id}>{shown.message}</span>}
       </p>
       {shown && (shown.undo || shown.busy) && (
         <Button
