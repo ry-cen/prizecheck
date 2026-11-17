@@ -116,3 +116,7 @@ The next commit waits for Collection tiles instead of checking them at once. The
 [Run 44036494533](https://github.com/ry-cen/prizecheck/actions/runs/44036494533) at `bd0a89ca` reported `TEST BUILD SUCCEEDED`. The five demo tests passed: `testAppCancellationAfterNativeResume` 78 s, `testBrowserCancellationAndError` 55 s, `testColdBrowserReturn` 39 s, `testCollectionShowMoreAndRefresh` 38 s and `testWarmBrowserReturnRecoveryAndSignOut` 69 s. The native sign-in test was cancelled by the 25-minute job timeout after 19 s, so it has no result.
 
 XCTest runs classes in alphabetical order, so the native class ran last. It is renamed `AuthNativeSignInUITests` to run first; the timeout and runner are unchanged.
+
+### Native sign-in stage diagnostics (candidate, not run)
+
+A local-only candidate adds diagnostics to find where the native sign-in test stops after **Allow**. It changes no behaviour. A Debug build logs one line per stage to the `app.prizecheck.prototype` subsystem, category `native-stage`, with fixed labels and integer codes only. The native stub prints one allowlisted `route`, `method` and `status` line per response. The native test prints `native-ui-state=` and `native-auth-sheet=` when the first card does not appear, and `validate-simulator.sh` prints the stub and stage logs before it cleans up. None of this has run on a simulator or on a hosted runner.

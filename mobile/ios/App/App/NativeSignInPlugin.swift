@@ -4,12 +4,73 @@ import CryptoKit
 import Foundation
 import Security
 import UIKit
+import os
 
 // Opt-in native sign-in for nonprod gateways: ASWebAuthenticationSession with PKCE, a
 // one-time code exchanged for a short-lived `collection:read` credential kept in the
 // Keychain, and a native-only Collection read. JavaScript never sees the credential.
 //
-// This file logs nothing: no URLs, codes, verifiers, tokens or response bodies.
+// This file logs nothing in a release build. A DEBUG build writes only the fixed stage labels
+// and integer codes of `NativeStage` below: no URLs, codes, verifiers, tokens or response bodies.
+
+/// DEBUG-only diagnostics for the simulator job: one line per stage, a fixed label with at most
+/// one integer. Every value is a case of these enums or an `Int`; nothing else can be logged.
+enum NativeStage: String {
+    case signinBegin = "signin_begin"
+    case signinStartFailed = "signin_start_failed"
+    case browserError = "browser_error"
+    case callbackMissing = "callback_missing"
+    case callbackInvalid = "callback_invalid"
+    case callbackDenied = "callback_denied"
+    case callbackCode = "callback_code"
+    case tokenTransportFailed = "token_transport_failed"
+    case tokenHTTP = "token_http"
+    case tokenBodyInvalid = "token_body_invalid"
+    case keychainSave = "keychain_save"
+    case signinResolved = "signin_resolved"
+    case collectionNoCredential = "collection_no_credential"
+    case collectionTransportFailed = "collection_transport_failed"
+    case collectionHTTP = "collection_http"
+    case collectionBodyInvalid = "collection_body_invalid"
+    case collectionPage = "collection_page"
+    case signoutBegin = "signout_begin"
+
+    /// The name of the one integer a stage may carry.
+    enum Field: String {
+        case code
+        case nsurl
+        case status
+    }
+
+    #if DEBUG
+    private static let logger = Logger(subsystem: "app.prizecheck.prototype", category: "native-stage")
+    #endif
+
+    func log() {
+        #if DEBUG
+        NativeStage.logger.notice("\(self.rawValue, privacy: .public)")
+        #endif
+    }
+
+    func log(_ field: Field, _ value: Int) {
+        #if DEBUG
+        NativeStage.logger.notice("\(self.rawValue, privacy: .public) \(field.rawValue, privacy: .public)=\(value, privacy: .public)")
+        #endif
+    }
+
+    func log(result: SignInResult) {
+        #if DEBUG
+        NativeStage.logger.notice("\(self.rawValue, privacy: .public) result=\(result.rawValue, privacy: .public)")
+        #endif
+    }
+}
+
+/// The three values `signIn` resolves with.
+enum SignInResult: String {
+    case signedIn = "signed-in"
+    case cancelled
+    case error
+}
 
 /// Where the gateway is. Empty or invalid means "not configured": the fixture demo runs.
 enum GatewayConfiguration {
@@ -263,17 +324,25 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
 
     // MARK: Sign in
 
+    private func resolveSignIn(_ call: CAPPluginCall, _ result: SignInResult) {
+        NativeStage.signinResolved.log(result: result)
+        call.resolve(["result": result.rawValue])
+    }
+
     private func beginSignIn(_ call: CAPPluginCall) {
+        NativeStage.signinBegin.log()
         guard let origin = gateway, !signInPending,
               let verifierBytes = NativeSignInFormats.randomBytes(32),
               let stateBytes = NativeSignInFormats.randomBytes(32) else {
-            call.resolve(["result": "error"])
+            NativeStage.signinStartFailed.log()
+            resolveSignIn(call, .error)
             return
         }
         let verifier = NativeSignInFormats.base64URL(verifierBytes)
         let state = NativeSignInFormats.base64URL(stateBytes)
         guard var start = URLComponents(url: origin, resolvingAgainstBaseURL: false) else {
-            call.resolve(["result": "error"])
+            NativeStage.signinStartFailed.log()
+            resolveSignIn(call, .error)
             return
         }
         start.path = "/auth/native/start"
@@ -282,7 +351,8 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
             URLQueryItem(name: "state", value: state)
         ]
         guard let startURL = start.url else {
-            call.resolve(["result": "error"])
+            NativeStage.signinStartFailed.log()
+            resolveSignIn(call, .error)
             return
         }
         signInPending = true
@@ -300,7 +370,8 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
         if !session.start() {
             authSession = nil
             signInPending = false
-            call.resolve(["result": "error"])
+            NativeStage.signinStartFailed.log()
+            resolveSignIn(call, .error)
         }
     }
 
@@ -315,37 +386,43 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
         authSession = nil
         if let error = error {
             signInPending = false
-            let cancelled = (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
-            call.resolve(["result": cancelled ? "cancelled" : "error"])
+            let browserError = error as? ASWebAuthenticationSessionError
+            NativeStage.browserError.log(.code, browserError?.code.rawValue ?? -1)
+            let cancelled = browserError?.code == .canceledLogin
+            resolveSignIn(call, cancelled ? .cancelled : .error)
             return
         }
         guard let callbackURL = callbackURL else {
             signInPending = false
-            call.resolve(["result": "error"])
+            NativeStage.callbackMissing.log()
+            resolveSignIn(call, .error)
             return
         }
         switch NativeSignInFormats.parseCallback(callbackURL, expectedState: state) {
         case .denied:
             signInPending = false
-            call.resolve(["result": "cancelled"])
+            NativeStage.callbackDenied.log()
+            resolveSignIn(call, .cancelled)
         case .invalid:
             signInPending = false
-            call.resolve(["result": "error"])
+            NativeStage.callbackInvalid.log()
+            resolveSignIn(call, .error)
         case .code(let code):
+            NativeStage.callbackCode.log()
             exchange(code: code, verifier: verifier, origin: origin, call: call)
         }
     }
 
     private func exchange(code: String, verifier: String, origin: URL, call: CAPPluginCall) {
-        func finish(_ result: String) {
+        func finish(_ result: SignInResult) {
             DispatchQueue.main.async {
                 self.signInPending = false
-                call.resolve(["result": result])
+                self.resolveSignIn(call, result)
             }
         }
         guard let url = endpoint(origin, "/auth/native/token", query: nil),
               let body = try? JSONSerialization.data(withJSONObject: ["code": code, "verifier": verifier]) else {
-            finish("error")
+            finish(.error)
             return
         }
         var request = URLRequest(url: url)
@@ -353,19 +430,25 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        send(request) { status, data in
+        send(request) { status, data, nsurlCode in
+            if let status = status {
+                NativeStage.tokenHTTP.log(.status, status)
+            } else {
+                NativeStage.tokenTransportFailed.log(.nsurl, nsurlCode ?? -1)
+            }
             guard status == 200, let data = data,
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let token = object["token"] as? String, NativeSignInFormats.isToken(token),
                   let expires = (object["expires_at"] as? String).flatMap(NativeSignInFormats.parseDate),
                   expires > Date() else {
-                finish("error")
+                if status == 200 { NativeStage.tokenBodyInvalid.log() }
+                finish(.error)
                 return
             }
             DispatchQueue.main.async {
                 let saved = self.store?.save(NativeCredential(token: token, expiresAt: expires)) ?? false
                 self.signInPending = false
-                call.resolve(["result": saved ? "signed-in" : "error"])
+                self.resolveSignIn(call, saved ? .signedIn : .error)
             }
         }
     }
@@ -374,6 +457,7 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
 
     private func readCollection(cursor: String?, call: CAPPluginCall) {
         guard let origin = gateway, let credential = currentCredential() else {
+            NativeStage.collectionNoCredential.log()
             call.resolve(["kind": "signed-out"])
             return
         }
@@ -396,8 +480,13 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
         request.httpMethod = "GET"
         request.setValue("Bearer " + credential.token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        send(request) { status, data in
+        send(request) { status, data, nsurlCode in
             DispatchQueue.main.async {
+                if let status = status {
+                    NativeStage.collectionHTTP.log(.status, status)
+                } else {
+                    NativeStage.collectionTransportFailed.log(.nsurl, nsurlCode ?? -1)
+                }
                 if status == 401 {
                     self.store?.delete(ifToken: credential.token)
                     call.resolve(["kind": "signed-out"])
@@ -406,9 +495,11 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
                 guard status == 200, let data = data,
                       let page = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       page["entries"] is [Any] else {
+                    if status == 200 { NativeStage.collectionBodyInvalid.log() }
                     call.resolve(["kind": "unavailable"])
                     return
                 }
+                NativeStage.collectionPage.log()
                 call.resolve(["kind": "page", "page": page])
             }
         }
@@ -419,6 +510,7 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
     /// The credential is removed on this device first, so sign-out cannot be defeated by a
     /// slow or unreachable gateway. The server-side revoke is then best effort.
     private func endSession(_ call: CAPPluginCall) {
+        NativeStage.signoutBegin.log()
         let token = store?.load()?.token
         store?.delete()
         guard let origin = gateway, let token = token,
@@ -429,7 +521,7 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-        send(request) { _, _ in
+        send(request) { _, _, _ in
             DispatchQueue.main.async {
                 call.resolve()
             }
@@ -446,22 +538,34 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
     }
 
     /// Completion gets the HTTP status and body, or nil, nil on a transport failure or an
-    /// oversized body. Redirects are refused by the session delegate.
-    private func send(_ request: URLRequest, completion: @escaping (Int?, Data?) -> Void) {
+    /// oversized body. Redirects are refused by the session delegate. In a DEBUG build the third
+    /// value is the `NSURLError` code of a transport failure (-1 for any other failure); it is
+    /// always nil in a release build.
+    private func send(_ request: URLRequest, completion: @escaping (Int?, Data?, Int?) -> Void) {
         var request = request
         request.httpShouldHandleCookies = false
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.timeoutInterval = NativeSignInPlugin.requestTimeout
         urlSession.dataTask(with: request) { data, response, error in
             guard error == nil, let http = response as? HTTPURLResponse else {
-                completion(nil, nil)
+                #if DEBUG
+                let nsError = error as NSError?
+                let code = nsError?.domain == NSURLErrorDomain ? nsError?.code : nil
+                completion(nil, nil, code ?? -1)
+                #else
+                completion(nil, nil, nil)
+                #endif
                 return
             }
             if let data = data, data.count > NativeSignInPlugin.maxBody {
-                completion(nil, nil)
+                #if DEBUG
+                completion(nil, nil, -1)
+                #else
+                completion(nil, nil, nil)
+                #endif
                 return
             }
-            completion(http.statusCode, data)
+            completion(http.statusCode, data, nil)
         }.resume()
     }
 }

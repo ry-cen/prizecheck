@@ -9,8 +9,9 @@ import { pathToFileURL } from "node:url";
 
 // Loopback-only stand-in for the gateway's native sign-in, for the simulator job. It mirrors the
 // HTTP contract with in-memory state, one sample collector (always "signed in" to the web
-// session) and sample data. It carries no credentials, cookies, accounts or real data, and
-// logs nothing about requests.
+// session) and sample data. It carries no credentials, cookies, accounts or real data. After each
+// response it logs one allowlisted line (a fixed route label, a method label and the status), never
+// a path, query, header, body or parameter value.
 export const PORT = 4320;
 const CALLBACK = "prizecheck-native://auth/callback";
 const CHALLENGE_OR_STATE = /^[A-Za-z0-9_-]{43}$/;
@@ -66,6 +67,21 @@ const PAGES = [
   },
 ];
 
+/** The one writer for request lines: a line is allowlisted text, never request content. */
+export const stdoutLog = (line) => process.stdout.write(`${line}\n`);
+
+/** The fixed label for a route, from the pathname alone, so no path text is ever logged. */
+function routeLabel(path, method) {
+  if (path === "/auth/native/start" && method === "GET") return "start";
+  if (path === "/auth/native/approve" && method === "GET") return "approve_get";
+  if (path === "/auth/native/approve" && method === "POST")
+    return "approve_post";
+  if (path === "/auth/native/token" && method === "POST") return "token";
+  if (path === "/auth/native/sign-out" && method === "POST") return "sign_out";
+  if (path === "/api/collection") return "collection";
+  return "other";
+}
+
 /** Every parameter exactly once, only the expected names. Returns null when invalid. */
 function exactParams(params, names) {
   const seen = [...params.keys()];
@@ -82,6 +98,7 @@ function exactParams(params, names) {
 export function nativeFixture({
   now = () => Date.now(),
   tokenLifetimeMs = 24 * HOUR,
+  log = null,
 } = {}) {
   const key = createHmac("sha256", randomBytes(32))
     .update("native-approve-key")
@@ -361,9 +378,24 @@ export function nativeFixture({
   }
 
   const server = createServer((request, response) => {
-    const url = new URL(request.url, origin);
-    const path = url.pathname;
     const method = request.method;
+    let label = "other";
+    response.on("finish", () => {
+      if (!log) return;
+      const verb = method === "GET" || method === "POST" ? method : "OTHER";
+      log(
+        `native-fixture route=${label} method=${verb} status=${response.statusCode}`
+      );
+    });
+    let url;
+    try {
+      url = new URL(request.url, origin);
+    } catch {
+      response.writeHead(400, { "cache-control": "no-store" });
+      return response.end();
+    }
+    const path = url.pathname;
+    label = routeLabel(path, method);
     if (path === "/auth/native/start" && method === "GET")
       return start(url, response);
     if (path === "/auth/native/approve" && method === "GET")
@@ -392,7 +424,7 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  nativeFixture().listen(PORT, "127.0.0.1", () =>
+  nativeFixture({ log: stdoutLog }).listen(PORT, "127.0.0.1", () =>
     process.stdout.write(
       `Native sign-in stub listening on loopback port ${PORT}\n`
     )
