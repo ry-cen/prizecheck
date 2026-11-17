@@ -8,7 +8,7 @@ import {
 } from "./support/gateway";
 import { afterEach, describe, expect, it } from "vitest";
 import { type ChildProcess } from "node:child_process";
-import { type Server } from "node:http";
+import { request as httpRequest, type Server } from "node:http";
 import { launch, serverReady } from "./support/servers";
 
 // ADR 0023 (2026-11-16 amendment): Riftbound gets its own /api/riftbound prefix through the gateway. It is off unless
@@ -44,7 +44,9 @@ async function listen(seen: Seen[], behaviour: () => Behaviour) {
 }
 
 /** Starts both mock upstreams and a gateway; `riftbound` picks the RIFTBOUND_API_ORIGIN setting. */
-async function start(riftbound: "unset" | "empty" | "on") {
+async function start(
+  riftbound: "unset" | "empty" | "on" | ((riftboundPort: number) => string)
+) {
   pokemonSeen.length = 0;
   riftboundSeen.length = 0;
   const pokemonPort = await listen(pokemonSeen, () => pokemonBehaviour);
@@ -64,6 +66,8 @@ async function start(riftbound: "unset" | "empty" | "on") {
   if (riftbound === "empty") env.RIFTBOUND_API_ORIGIN = "";
   if (riftbound === "on")
     env.RIFTBOUND_API_ORIGIN = `http://127.0.0.1:${riftboundPort}`;
+  if (typeof riftbound === "function")
+    env.RIFTBOUND_API_ORIGIN = riftbound(riftboundPort);
   gateway = launch(
     process.execPath,
     [
@@ -86,7 +90,7 @@ async function start(riftbound: "unset" | "empty" | "on") {
   return base;
 }
 
-afterEach(async () => {
+async function stopAll() {
   if (gateway && gateway.exitCode === null) {
     gateway.kill();
     await new Promise((resolve) => gateway!.once("exit", resolve));
@@ -96,7 +100,38 @@ afterEach(async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
-});
+}
+afterEach(stopAll);
+
+/** A request with the target exactly as given: fetch() would normalise dot segments and backslashes first. */
+function rawRequest(
+  base: string,
+  target: string,
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  } = {}
+) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = httpRequest(
+      {
+        host: "127.0.0.1",
+        port: new URL(base).port,
+        path: target,
+        method: options.method || "GET",
+        headers: { cookie, ...options.headers },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => (body += chunk));
+        res.on("end", () => resolve({ status: res.statusCode!, body }));
+      }
+    );
+    req.on("error", reject);
+    req.end(options.body);
+  });
+}
 
 const lookups = () => stderr.split("session-lookup").length - 1;
 
@@ -274,4 +309,147 @@ describe("Pokémon routes are unchanged", () => {
       expect(riftboundSeen).toEqual([]);
     });
   }
+});
+
+describe("Riftbound prefix, request body limit", () => {
+  const post = (base: string, body: string) =>
+    fetch(base + "/api/riftbound/catalog/sets", {
+      method: "POST",
+      headers: { cookie, origin, "content-type": "text/plain" },
+      body,
+    });
+
+  it("passes an ASCII body of exactly 16,384 bytes and refuses 16,385", async () => {
+    const base = await start("on");
+    expect((await post(base, "a".repeat(16_384))).status).toBe(200);
+    expect(riftboundSeen).toHaveLength(1);
+    expect(riftboundSeen[0].body).toHaveLength(16_384);
+    riftboundSeen.length = 0;
+    expect((await post(base, "a".repeat(16_385))).status).toBe(413);
+    expect(riftboundSeen).toEqual([]);
+    expect(pokemonSeen).toEqual([]);
+  });
+
+  it("counts bytes: a multibyte body under 16,384 characters but over 16,384 bytes is refused", async () => {
+    const base = await start("on");
+    // 8,193 characters, 16,386 bytes.
+    const response = await post(base, "é".repeat(8_193));
+    expect(response.status).toBe(413);
+    expect(riftboundSeen).toEqual([]);
+    expect(pokemonSeen).toEqual([]);
+    // 8,192 characters is exactly 16,384 bytes and passes, bytes unchanged.
+    expect((await post(base, "é".repeat(8_192))).status).toBe(200);
+    expect(Buffer.byteLength(riftboundSeen[0].body)).toBe(16_384);
+  });
+});
+
+describe("Riftbound prefix, raw request targets", () => {
+  // Each target is sent exactly as written. The namespace is read twice, on the raw target and on the normalised path;
+  // any disagreement, and any dot segment, encoded slash or backslash inside the namespace, is a 404 before a session
+  // lookup, a body read or an upstream call.
+  const refused = [
+    "/api/riftbound/%2e%2e/loans",
+    "/api/riftbound/%2E%2E/loans",
+    "/api/riftbound/.%2e/loans",
+    "/api/riftbound/../loans",
+    "/api/riftbound/./catalog/sets",
+    "/api/riftbound/%2e/catalog/sets",
+    "/api/riftbound\\..\\loans",
+    "/api/riftbound\\catalog\\sets",
+    "/api/riftbound/x/%2e%2e/%2e%2e/loans",
+    "/api/riftbound/catalog%2fsets",
+    "/api/riftbound/catalog%2Fsets",
+    "/api/riftbound/catalog%5csets",
+    "/api/riftbound/catalog%5Csets",
+    "/api/catalog/%2e%2e/riftbound/x",
+    "/api/catalog/../riftbound/x",
+    "/api/riftbound/%2e",
+    "/api/riftbound/%2e?q=1",
+  ];
+  for (const setting of ["on", "unset"] as const) {
+    it(`answers 404 with no lookup or upstream call (Riftbound ${setting})`, async () => {
+      const base = await start(setting);
+      for (const target of refused) {
+        const response = await rawRequest(base, target);
+        expect([target, response.status]).toEqual([target, 404]);
+      }
+      const cross = await rawRequest(base, "/api/riftbound/%2e%2e/loans", {
+        method: "POST",
+        headers: { origin: "https://elsewhere.example" },
+        body: "{}",
+      });
+      expect(cross.status).toBe(404);
+      expect(lookups()).toBe(0);
+      expect(pokemonSeen).toEqual([]);
+      expect(riftboundSeen).toEqual([]);
+    });
+  }
+
+  it("answers 404 for the bare prefix with a trailing slash, without a lookup or upstream call", async () => {
+    const base = await start("on");
+    for (const target of ["/api/riftbound/", "/api/riftbound/?q=1"])
+      expect([target, (await rawRequest(base, target)).status]).toEqual([
+        target,
+        404,
+      ]);
+    expect(lookups()).toBe(0);
+    expect(pokemonSeen).toEqual([]);
+    expect(riftboundSeen).toEqual([]);
+  });
+
+  it("forwards /api/riftbound//x as /api//x and sends /api//riftbound/x to the Pokémon upstream", async () => {
+    const base = await start("on");
+    expect((await rawRequest(base, "/api/riftbound//x")).status).toBe(200);
+    expect(riftboundSeen.map((r) => r.url)).toEqual(["/api//x"]);
+    expect(pokemonSeen).toEqual([]);
+    riftboundSeen.length = 0;
+    expect((await rawRequest(base, "/api//riftbound/x")).status).toBe(200);
+    expect(pokemonSeen.map((r) => r.url)).toEqual(["/api//riftbound/x"]);
+    expect(riftboundSeen).toEqual([]);
+  });
+
+  it("leaves other targets alone: a Pokémon path with dot segments still reaches the Pokémon upstream", async () => {
+    const base = await start("on");
+    expect((await rawRequest(base, "/api/catalog/../loans")).status).toBe(200);
+    expect(pokemonSeen).toHaveLength(1);
+    expect(riftboundSeen).toEqual([]);
+  });
+});
+
+describe("Riftbound prefix, origin setting", () => {
+  it("ignores a trailing slash and any path in the setting", async () => {
+    for (const suffix of ["/", "/prefix/", "/prefix"]) {
+      const base = await start((port) => `http://127.0.0.1:${port}${suffix}`);
+      expect(
+        (
+          await fetch(base + "/api/riftbound/catalog/sets?q=a", {
+            headers: { cookie },
+          })
+        ).status
+      ).toBe(200);
+      expect(riftboundSeen.map((r) => r.url)).toEqual([
+        "/api/catalog/sets?q=a",
+      ]);
+      await stopAll();
+    }
+  });
+
+  it("treats an unparsable or non-HTTP value as off, with no crash", async () => {
+    for (const value of [
+      "not a url",
+      "127.0.0.1:9",
+      "ftp://example.test",
+      "  ",
+    ]) {
+      const base = await start(() => value);
+      const response = await fetch(base + "/api/riftbound/catalog/sets", {
+        headers: { cookie },
+      });
+      expect([value, response.status]).toEqual([value, 404]);
+      expect(lookups()).toBe(0);
+      expect(riftboundSeen).toEqual([]);
+      expect((await fetch(base + "/auth/session")).status).toBe(200);
+      await stopAll();
+    }
+  });
 });

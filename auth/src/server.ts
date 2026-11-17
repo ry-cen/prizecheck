@@ -37,8 +37,10 @@ const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 const apiOrigin = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 const internalSecret = process.env.INTERNAL_AUTH_SECRET || "";
-// The Riftbound backend's origin. Empty or unset (the default) leaves /api/riftbound switched off.
-const riftboundOrigin = (process.env.RIFTBOUND_API_ORIGIN || "").trim();
+// The Riftbound backend's origin, taken from RIFTBOUND_API_ORIGIN as `new URL(...).origin`, so a trailing slash or a path
+// in the setting never changes the upstream path. Empty, unset or unparsable (the default) leaves /api/riftbound
+// switched off, without a crash.
+const riftboundOrigin = originOf(process.env.RIFTBOUND_API_ORIGIN);
 const publicReadLimiter = new PublicReadLimiter();
 const PUBLIC_ART_PATH = /^\/api\/public\/(?:art|edition-art)\/[^/]+\/[^/]+$/;
 const EDITION_ART_PATH = /^\/api\/public\/edition-art\/[^/]+\/[^/]+$/;
@@ -116,6 +118,36 @@ function importLimit(method: string | undefined, path: string) {
 
 class BudgetExceeded extends Error {}
 class PayloadTooLarge extends Error {}
+
+function originOf(value: string | undefined): string {
+  try {
+    const url = new URL((value || "").trim());
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.origin
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+// The /api/riftbound namespace is decided twice, on the raw request target and on the normalised path (the URL parser
+// resolves dot segments and reads a backslash as a slash). A target that the two readings place differently, or a raw
+// target in the namespace that carries a dot segment (raw or percent-encoded), an encoded slash or a backslash, is
+// answered 404 before any other check, so a Riftbound-looking target never reaches the Pokémon upstream and a
+// Pokémon-looking one never reaches Riftbound.
+const RIFTBOUND_RAW = /^\/api\/riftbound(?:[/\\]|$)/;
+function riftboundTargetRefused(request: IncomingMessage, path: string) {
+  const raw = (request.url || "/").split(/[?#]/, 1)[0];
+  const rawIn = RIFTBOUND_RAW.test(raw);
+  const pathIn =
+    path === "/api/riftbound" || path.startsWith("/api/riftbound/");
+  if (rawIn !== pathIn) return true;
+  if (!rawIn) return false;
+  return (
+    /%2f|%5c|\\/i.test(raw) ||
+    raw.split("/").some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))
+  );
+}
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, {
@@ -295,6 +327,8 @@ const server = createServer(async (request, response) => {
   const received = performance.now();
   const path = new URL(request.url || "/", origin).pathname;
   try {
+    if (riftboundTargetRefused(request, path))
+      return json(response, 404, { error: "Not found" });
     if (path === "/auth/request-code" && request.method === "POST") {
       if (!emailSignIn) return json(response, 404, { error: "Not found" });
       if (!sameOrigin(request))
@@ -552,10 +586,16 @@ const server = createServer(async (request, response) => {
       return relay(response, result);
     }
     // Riftbound's own public prefix (ADR 0023, 2026-11-16 amendment). Handled before the generic /api/ branch so a
-    // /api/riftbound path can never reach the Pokémon upstream.
+    // /api/riftbound path can never reach the Pokémon upstream; riftboundTargetRefused above has already refused any
+    // target whose raw and normalised readings disagree about the namespace.
     if (path === "/api/riftbound" || path.startsWith("/api/riftbound/")) {
       // Off unless a Riftbound upstream is configured: no session lookup, no upstream contact.
-      if (!riftboundOrigin || path === "/api/riftbound")
+      // The bare prefix, with or without a trailing slash, is not a route.
+      if (
+        !riftboundOrigin ||
+        path === "/api/riftbound" ||
+        path === "/api/riftbound/"
+      )
         return json(response, 404, { error: "Not found" });
       if (
         request.method !== "GET" &&
@@ -569,7 +609,8 @@ const server = createServer(async (request, response) => {
       const body =
         request.method === "GET" || request.method === "HEAD"
           ? ""
-          : await readBody(request);
+          : // Bytes, not characters, against the gateway's standard 16 KiB limit (413 past it).
+            await readBytes(request, 16_384);
       // Deliberately NO identity is forwarded: no x-internal-user, x-internal-time, x-internal-signature or budget
       // headers, nothing signed with INTERNAL_AUTH_SECRET (Pokémon's key), and no Riftbound key is read or created.
       // Only content-type is passed on, so any incoming x-internal-* header is dropped. The Riftbound backend therefore

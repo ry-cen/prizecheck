@@ -194,9 +194,15 @@ class ProxyConfigTest(unittest.TestCase):
         # /api/riftbound/* needs no proxy change: the gateway location already matches it. The gateway's setting stays out of
         # every deploy file until the owner enables the route (ADR 0023, 2026-11-16 amendment).
         self.assertIn(GATEWAY, CONFIG)
-        self.assertTrue(re.match(r'^/(api|auth)/', '/api/riftbound/catalog/sets'))
+        # The pattern comes from the actual location line, so a change to it breaks this test.
+        pattern = re.fullmatch(r'location ~ (\S+) \{', GATEWAY).group(1)
+        self.assertRegex('/api/riftbound/catalog/sets', pattern)
+        self.assertNotRegex('/apix/riftbound/catalog/sets', pattern)
         root = Path(__file__).resolve().parents[2]
-        files = [*(root/'deploy').rglob('*'), *root.glob('compose*.yml'), *root.glob('docker-compose*.yml'), *root.glob('.env*')]
+        files = [*(root/'deploy').rglob('*'), *(root/'.github'/'workflows').glob('*'), root/'scripts'/'release_runtime.py',
+                 *root.glob('compose*.yml'), *root.glob('docker-compose*.yml'), *root.glob('.env*')]
+        self.assertIn(root/'scripts'/'release_runtime.py', [file for file in files if file.is_file()])
+        self.assertTrue(list((root/'.github'/'workflows').glob('*.yml')))
         for file in files:
             if file.is_file():
                 self.assertNotIn('RIFTBOUND_API_ORIGIN', file.read_text(errors='ignore'), str(file))
