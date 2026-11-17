@@ -607,11 +607,15 @@ describe("single routes answer only the methods they have", () => {
 // fetch() normalises a URL before it is sent, so these go out as written, with node:http. The namespace is decided on
 // the raw target: a dot segment or encoded slash must not carry a request out of /api/pokemon into a route that then gets
 // a session lookup (a 401 for a visitor, an upstream call for a collector).
-function raw(path: string, headers: Record<string, string> = {}) {
+function raw(
+  path: string,
+  headers: Record<string, string> = {},
+  method = "GET"
+) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const url = new URL(base);
     const outgoing = httpRequest(
-      { host: url.hostname, port: url.port, method: "GET", path, headers },
+      { host: url.hostname, port: url.port, method, path, headers },
       (incoming) => {
         let body = "";
         incoming.on("data", (chunk) => (body += chunk));
@@ -640,6 +644,10 @@ describe("raw /api/pokemon targets", () => {
     "/api/pokemon/catalog%2f..%2floans",
     "/api/pokemon%2fcatalog/sets",
     "/api/pokemon/%2e%2e/loans?x=1",
+    // Backslash as part of the prefix: WHATWG parsing reads it as a slash.
+    "/api\\pokemon/%2e%2e/loans",
+    "/api\\pokemon/../loans",
+    "http://h/api/pokemon/%2e%2e/loans",
   ];
 
   it.each(HOSTILE)(
@@ -652,6 +660,17 @@ describe("raw /api/pokemon targets", () => {
       expect(seen).toHaveLength(0);
     }
   );
+
+  it("never serves an absolute-form target whose authority ends in a backslash: Node refuses it, and the helper would 404", async () => {
+    seen.length = 0;
+    for (const path of [
+      "http://h\\api/pokemon/%2e%2e/loans",
+      "http://h\\api\\pokemon\\catalog",
+    ])
+      for (const headers of [{}, { cookie }])
+        expect([400, 404]).toContain((await raw(path, headers)).status);
+    expect(seen).toHaveLength(0);
+  });
 
   it("reaches the moved route for a clean raw target, and normalises an old path exactly as before", async () => {
     seen.length = 0;
@@ -668,5 +687,51 @@ describe("raw /api/pokemon targets", () => {
     );
     expect(seen).toHaveLength(1);
     expect((await raw("/api/catalog/../locations")).status).toBe(401);
+  });
+});
+
+describe("names an object would inherit", () => {
+  const NAMES = [
+    "toString",
+    "constructor",
+    "__proto__",
+    "hasOwnProperty",
+    "valueOf",
+    "isPrototypeOf",
+  ];
+
+  it("answers 404 for each, with every method and a trailing segment, and the gateway keeps serving afterwards", async () => {
+    seen.length = 0;
+    for (const name of NAMES)
+      for (const path of [
+        `/api/pokemon/${name}`,
+        `/api/pokemon/${name}/x`,
+        `/api/pokemon/admin/${name}`,
+      ])
+        for (const method of ["GET", "POST", "PUT", "DELETE", "PATCH"]) {
+          const headers: Record<string, string> = {
+            origin,
+            "content-type": "application/json",
+          };
+          for (const withCookie of [false, true]) {
+            const response = await raw(
+              path,
+              withCookie ? { ...headers, cookie } : headers,
+              method
+            );
+            expect(response.status, `${method} ${path}`).toBe(404);
+          }
+        }
+    expect(seen).toHaveLength(0);
+    // The same process still answers: an unhandled rejection would have ended it.
+    expect((await raw("/api/health")).status).toBe(200);
+    expect((await raw("/api/pokemon/catalog/status", { cookie })).status).toBe(
+      200
+    );
+    expect(seen.map((request) => request.url)).toEqual([
+      "/api/health",
+      "/api/catalog/status",
+    ]);
+    expect(gateway.exitCode).toBeNull();
   });
 });

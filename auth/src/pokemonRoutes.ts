@@ -34,53 +34,69 @@ export const POKEMON_EXACT: Record<string, string[]> = {
   "admin/reprint-groups/decisions": ["POST"],
 };
 
+// Own entries only: `POKEMON_EXACT["toString"]` or `["__proto__"]` would read an inherited property.
+const EXACT = new Map(Object.entries(POKEMON_EXACT));
+
 /**
  * The namespace is decided on the raw request target, before any URL normalisation: `/api/pokemon/%2e%2e/loans` is
- * normalised to `/api/loans`, so deciding afterwards would let it out of the namespace.
+ * normalised to `/api/loans`, so deciding afterwards would let it out of the namespace. The authority of an absolute-form
+ * target ends at `/`, `\`, `?` or `#`, as WHATWG URL parsing ends it.
  */
 function rawPathOf(target: string): string {
-  const absolute = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(target);
+  const absolute = /^[a-z][a-z0-9+.-]*:\/\/[^/\\?#]*/i.exec(target);
   const path = absolute ? target.slice(absolute[0].length) : target;
   return path.split(/[?#]/, 1)[0];
 }
 
-/** True when `/api/pokemon` is followed by the end of the path or by a separator, raw or percent-encoded. */
+/**
+ * True when `/api/pokemon` is followed by the end of the path or by a separator, raw or percent-encoded. A backslash
+ * counts as the slash it is parsed as (`/api\pokemon/..` is `/api/pokemon/..`).
+ */
 export function underPokemon(target: string): boolean {
-  const path = rawPathOf(target);
+  const path = rawPathOf(target).replace(/\\/g, "/");
   if (!path.startsWith(POKEMON_PREFIX)) return false;
   const next = path.charAt(POKEMON_PREFIX.length);
-  return next === "" || next === "/" || next === "\\" || next === "%";
+  return next === "" || next === "/" || next === "%";
 }
 
 // A dot segment (raw or percent-encoded, any case), a backslash, or an encoded slash or backslash: none of these may
 // appear in a /api/pokemon path, whatever follows.
-function hostile(rest: string): boolean {
-  if (rest.includes("\\") || /%(?:2f|5c)/i.test(rest)) return true;
-  return rest
+function hostile(path: string): boolean {
+  if (path.includes("\\") || /%(?:2f|5c)/i.test(path)) return true;
+  return path
     .replace(/%2e/gi, ".")
     .split("/")
     .some((segment) => segment === "." || segment === "..");
 }
 
-/**
- * For a request target under /api/pokemon: the upstream path and query (`/api/<rest>?...`) when it is a moved route, or
- * null when it is not (the caller answers 404). `undefined` means the target is not under /api/pokemon at all.
- */
-export function pokemonUpstream(
-  target: string,
-  method: string | undefined
-): string | null | undefined {
+function resolve(target: string, method: string | undefined) {
   if (!underPokemon(target)) return undefined;
-  const raw = rawPathOf(target).slice(POKEMON_PREFIX.length);
+  const raw = rawPathOf(target);
   if (hostile(raw)) return null;
   const url = new URL(target, "http://gateway.invalid");
-  const rest = url.pathname.slice(POKEMON_PREFIX.length + 1);
   if (!url.pathname.startsWith(`${POKEMON_PREFIX}/`)) return null;
-  const methods = POKEMON_EXACT[rest];
+  const rest = url.pathname.slice(POKEMON_PREFIX.length + 1);
+  const methods = EXACT.get(rest);
   const moved =
     (methods !== undefined &&
       method !== undefined &&
       methods.includes(method)) ||
     POKEMON_TREES.some((tree) => rest === tree || rest.startsWith(`${tree}/`));
   return moved ? `/api/${rest}${url.search}` : null;
+}
+
+/**
+ * For a request target under /api/pokemon: the upstream path and query (`/api/<rest>?...`) when it is a moved route, or
+ * null when it is not (the caller answers 404). `undefined` means the target is not under /api/pokemon at all. Total:
+ * the gateway calls it before any try block, so anything unexpected inside is a 404, never an exception.
+ */
+export function pokemonUpstream(
+  target: string,
+  method: string | undefined
+): string | null | undefined {
+  try {
+    return resolve(target, method);
+  } catch {
+    return underPokemon(target) ? null : undefined;
+  }
 }
