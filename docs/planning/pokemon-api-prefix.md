@@ -135,9 +135,9 @@ So old and new paths are served together until a later release removes the old o
 
 ## Recommended rollout
 
-1. Land the Riftbound gateway prefix (`feature/534-riftbound-gateway-prefix`) first. That branch is not committed yet, so a
-   conflict in the same region of `auth/src/server.ts` (the start of the request handler where `path` is computed) is
-   expected, not observed. This branch rebases on it after it lands: keep one `path`/upstream-URL pair, make the Pokémon helper and the Riftbound one siblings (ideally one
+1. Land the Riftbound gateway prefix (`feature/534-riftbound-gateway-prefix`) first. That branch now has local commits and is in its
+   final review round, so a conflict in the same region of `auth/src/server.ts` (the start of the request handler where
+   `path` is computed) is still expected, not observed. This branch rebases on it after it lands: keep one `path`/upstream-URL pair, make the Pokémon helper and the Riftbound one siblings (ideally one
    per-game prefix table), and keep the rule that an unlisted `/api/<game>/...` answers 404 without an upstream call.
    Re-run `auth/tests/pokemon-prefix-gateway.test.ts` after the rebase.
 2. Land this slice to `dev`, then release it with the host steps below.
