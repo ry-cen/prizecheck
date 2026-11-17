@@ -371,6 +371,8 @@ export function ProposalBuilderPage({
   const returnTo = useRef<HTMLElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const sendButtonRef = useRef<HTMLButtonElement>(null);
+  const sendGroupRef = useRef<HTMLDivElement>(null);
+  const sendGroupId = useId();
   const reviewRegionRef = useRef<HTMLElement>(null);
   const reviewNoticeRef = useRef<HTMLParagraphElement>(null);
   const sendMessageRef = useRef<HTMLParagraphElement>(null);
@@ -1231,6 +1233,20 @@ export function ProposalBuilderPage({
       }}
     >
       <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
+        {phone && (
+          <a
+            href={`#${sendGroupId}`}
+            className="fixed top-2 left-2 z-(--layer-modal) box-border inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 py-2 text-body font-semibold text-text no-underline focus:translate-y-0"
+            onClick={(event) => {
+              event.preventDefault();
+              const group = sendGroupRef.current;
+              group?.scrollIntoView({ block: "center" });
+              group?.focus({ preventScroll: true });
+            }}
+          >
+            Jump to Send
+          </a>
+        )}
         {lifecycle &&
           (reviewNeeded ||
             lifecycle.phase === "read_failed" ||
@@ -1399,7 +1415,18 @@ export function ProposalBuilderPage({
             }}
           />
         )}
-        <div className="flex flex-wrap items-center gap-3">
+        <div
+          ref={sendGroupRef}
+          {...(phone
+            ? {
+                id: sendGroupId,
+                role: "group",
+                "aria-label": "Send",
+                tabIndex: -1,
+              }
+            : {})}
+          className="flex flex-wrap items-center gap-3"
+        >
           <Button
             variant="primary"
             ref={sendButtonRef}

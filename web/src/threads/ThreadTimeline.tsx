@@ -400,8 +400,14 @@ function ThreadTimelineContent({
       ) : null}
       {(checkingPermission || permissionFailed) && (
         <p role="status">
-          {permissionFailed ? "Chat couldn't be checked." : "Checking chat…"}{" "}
-          <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
+          {permissionFailed ? (
+            <>
+              Chat couldn't be checked.{" "}
+              <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
+            </>
+          ) : (
+            "Checking chat…"
+          )}
         </p>
       )}
       {message && <p role="alert">{message}</p>}

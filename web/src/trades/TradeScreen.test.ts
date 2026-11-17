@@ -781,3 +781,63 @@ it("names ticked Deck switches only when they are shown", async () => {
     "Only confirm after the physical swap. The swap can't be undone."
   );
 });
+
+it("on a phone, puts one action group with a copy count and Review cards before the cards, and Decline still asks inline", async () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(max-width: 760px)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+  const card = (edition_id: string, name: string, copies: string) => ({
+    edition_id,
+    name,
+    set_code: "PAL",
+    set_name: "Paldea Evolved",
+    collector_number: "185",
+    descriptor: { finish: "normal" },
+    image_url: null,
+    copies,
+  });
+  vi.mocked(getTrade).mockResolvedValue({
+    ...trade,
+    actions: ["accept", "counter", "decline"],
+    you_give: [card("a", "Iono", "2"), card("b", "Arven", "1")],
+    you_get: [card("c", "Boss's Orders", "1")],
+  });
+  await act(async () =>
+    root.render(
+      h(ToastProvider, {
+        children: h(TradeScreen, {
+          tradeId: "item",
+          onAllTrades: vi.fn(),
+          onNavigate: vi.fn(),
+        }),
+      })
+    )
+  );
+  const groups = host.querySelectorAll(
+    '[role="group"][aria-label="Trade actions"]'
+  );
+  expect(groups).toHaveLength(1);
+  const cards = host.querySelector('[aria-label="Cards in this Trade"]')!;
+  const follows = (a: Element, b: Element) =>
+    !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(follows(groups[0], cards)).toBe(true);
+  expect(host.textContent).toContain("You give 3 cards · You get 1 card");
+  const review = [...host.querySelectorAll("a")].find(
+    (link) => link.textContent === "Review cards"
+  )!;
+  expect(follows(review, groups[0])).toBe(true);
+  cards.scrollIntoView = vi.fn();
+  await act(async () => review.click());
+  expect(document.activeElement).toBe(cards);
+  const decline = [...groups[0].querySelectorAll("button")].find(
+    (button) => button.textContent === "Decline"
+  )!;
+  await act(async () => decline.click());
+  expect(declineTrade).not.toHaveBeenCalled();
+  const sure = host.querySelector('[role="group"][aria-label="Decline"]')!;
+  expect(follows(sure, cards)).toBe(true);
+  expect(document.activeElement).toBe(sure.querySelector("p"));
+  expect(host.querySelectorAll('[aria-label="Trade actions"]')).toHaveLength(0);
+});
