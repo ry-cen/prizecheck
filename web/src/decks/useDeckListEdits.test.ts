@@ -14,9 +14,10 @@ vi.mock("../decks_generated", async (original) => ({
   ...(await original<typeof import("../decks_generated")>()),
   changeDeckList: vi.fn(),
 }));
+const shown = vi.hoisted(() => vi.fn((_input: { announce?: boolean }) => 1));
 vi.mock("../ui/Toast", () => ({
   useToast: () => ({
-    show: () => 1,
+    show: shown,
     update: () => {},
     dismiss: () => {},
     focus: () => false,
@@ -28,6 +29,7 @@ let host: HTMLDivElement;
 let edits!: ReturnType<typeof useDeckListEdits>;
 beforeEach(() => {
   vi.mocked(changeDeckList).mockReset();
+  shown.mockClear();
 });
 afterEach(async () => {
   await act(async () => root?.unmount());
@@ -186,4 +188,36 @@ test("a refusal's notice has an id too", async () => {
   await mount(vi.fn());
   await act(async () => edits.edit(add));
   expect(edits.notice?.id).toBeTypeOf("number");
+});
+
+test("a saved change's toast announces, unless an open dialog's own feedback line already says it", async () => {
+  vi.mocked(changeDeckList).mockResolvedValue(SAVED);
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  expect(shown).toHaveBeenCalledTimes(1);
+  expect(shown.mock.calls[0][0].announce).toBe(true);
+
+  // The card popup and the copy sheet draw EditFeedbackLine; the toast host is inert behind them.
+  const dialog = document.createElement("dialog");
+  dialog.setAttribute("open", "");
+  dialog.innerHTML = '<p role="status" data-edit-feedback></p>';
+  document.body.append(dialog);
+  try {
+    await act(async () => edits.edit(add));
+    expect(shown).toHaveBeenCalledTimes(2);
+    expect(shown.mock.calls[1][0].announce).toBe(false);
+  } finally {
+    dialog.remove();
+  }
+
+  // A dialog with no such line (Export, say) leaves the toast as the one announcement.
+  const other = document.createElement("dialog");
+  other.setAttribute("open", "");
+  document.body.append(other);
+  try {
+    await act(async () => edits.edit(add));
+    expect(shown.mock.calls[2][0].announce).toBe(true);
+  } finally {
+    other.remove();
+  }
 });

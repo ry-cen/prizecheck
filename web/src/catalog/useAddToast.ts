@@ -17,7 +17,8 @@ export type AddedCards = {
   undoId: string;
   /** Add N cards in Add mode's bar, or the card popup's Add N. */
   from: "bar" | "popup";
-  /** The mounted Add row has already presented this result in its inline live region. */
+  /** The mounted Add row, or the toast this add showed first while the Undo was looked up, has already announced this
+   * result, so the toast with its Undo stays quiet. */
   announcedInline?: boolean;
   /** Whether this add's specific receiving row can still present an Undo outcome. */
   presentsInlineUndo?: () => boolean;

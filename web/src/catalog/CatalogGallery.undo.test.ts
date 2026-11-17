@@ -1205,3 +1205,48 @@ test("Catalog popup completion shows one success notice even when its Undo read 
     shown.mockRestore();
   }
 });
+
+// A bar add shows a first toast while the Undo is looked up, and another toast replaces it. Exactly one of the two
+// announces the add: on the Catalog page the first (the one with the Undo stays quiet); in Collection the first stays
+// quiet and Collection's own toast speaks.
+for (const page of [true, false]) {
+  test(`a bar add is announced by one toast, ${page ? "the first on the Catalog page" : "Collection's own"}`, async () => {
+    function Owner() {
+      const notify = useAddToast({ shown: true, onUndone: vi.fn() });
+      return h(CatalogGallery, {
+        active: true,
+        adding: true,
+        fixedTarget: { id: "box", label: "Box" },
+        undoToast: page,
+        onAdded: page ? undefined : notify,
+        stick: page ? "page" : "dialog",
+      });
+    }
+    await act(async () => root.render(h(ToastProvider, null, h(Owner))));
+    const live = () =>
+      host.querySelector("#app-toasts")!.getAttribute("aria-live");
+    let finish!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
+    vi.mocked(listUndo).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    const spoke: (string | null)[] = [];
+    await act(async () => {
+      void popupProps.onAdded({ ...added, from: "bar" });
+    });
+    // The first toast is on screen while the Undo lookup waits.
+    expect(host.querySelector("#app-toasts p")?.textContent).toBe(
+      "Added 1 card to Box."
+    );
+    spoke.push(live());
+    await act(async () =>
+      finish([{ id: "add" }] as Awaited<ReturnType<typeof listUndo>>)
+    );
+    expect(host.querySelector("#app-toasts p")?.textContent).toBe(
+      "Added 1 card to Box."
+    );
+    spoke.push(live());
+    expect(spoke).toEqual(page ? ["polite", "off"] : ["off", "polite"]);
+  });
+}

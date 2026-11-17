@@ -222,8 +222,14 @@ export function useDeckListEdits({
     if (!mounted.current) return;
     const id = job?.feedbackId ?? ++feedbackIds.current;
     const undo = job && !busy ? () => requestUndo(job) : null;
+    // An open dialog with its own feedback line (the card popup, the copy sheet) says this in the place the collector
+    // is working, and the toast host is inert behind the modal, so the toast stays on screen but doesn't announce.
+    const inline = !!document.querySelector(
+      "dialog[open] [data-edit-feedback]"
+    );
     const input = {
       message,
+      announce: !inline,
       action: job
         ? {
             label: "Undo",

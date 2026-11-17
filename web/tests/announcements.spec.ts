@@ -1,0 +1,439 @@
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { expect, test as plain, type Page } from "@playwright/test";
+import { Pool } from "pg";
+import { test } from "./support/collectors";
+import { api, createDeck, ORIGIN, seedCatalog, setLine } from "./support/loans";
+import { startAsNewOwner } from "./support/owner";
+import { signInAsOwner } from "./support/sign-in";
+
+// One announcement per action (Opus m11 F3). A screen reader speaks a polite region when its words change, so each
+// add, remove or load must change exactly one live region with words, never a bare number, and a price summary must not
+// be a live region at all. `watch` records what a screen reader would be told: every change to a live region's text,
+// except a region switched off (aria-live="off"), a region inside a Toast host that is silenced, and anything outside
+// the open modal dialog (inert, so unheard). `snapshot` is the other way to see it, and the one a reviewer's script
+// uses: the text of every `[aria-live]`, `[role=status]` and `[role=alert]` on the page right now.
+
+const PHONE = { width: 375, height: 812 };
+const DESKTOP = { width: 1280, height: 800 };
+const BARE_NUMBER = /^[\s\d.,]+$/;
+
+/** Starts recording on this page now and on every page it loads next. */
+async function watch(page: Page) {
+  await page.addInitScript(recorder);
+  await page.evaluate(recorder);
+}
+
+function recorder() {
+  const selector = '[aria-live], [role="status"], [role="alert"], output';
+  const clean = (text: string | null) =>
+    (text ?? "").replace(/\s+/g, " ").trim();
+  const updates: string[] = [];
+  const spoken = (region: Element) => {
+    // The nearest aria-live decides: "off" silences the region and what is inside it.
+    if (region.closest("[aria-live]")?.getAttribute("aria-live") === "off")
+      return false;
+    // A modal dialog makes the rest of the page inert, so nothing outside it is spoken.
+    const modal = [...document.querySelectorAll("dialog[open]")].at(-1);
+    return !modal || modal.contains(region);
+  };
+  // What a screen reader says for a live region is the text added to it (not what stays), and a region that appears with
+  // words in it.
+  new MutationObserver((records) => {
+    const added = new Map<Element, string[]>();
+    const note = (region: Element | null, text: string) => {
+      if (!region || !text || !spoken(region)) return;
+      added.set(region, [...(added.get(region) ?? []), text]);
+    };
+    for (const record of records) {
+      if (record.type === "characterData")
+        note(
+          (record.target.parentElement ?? null)?.closest(selector) ?? null,
+          clean(record.target.textContent)
+        );
+      else
+        record.addedNodes.forEach((node) => {
+          const el = node instanceof Element ? node : node.parentElement;
+          const inside = (record.target as Element).closest?.(selector);
+          if (inside) note(inside, clean(node.textContent));
+          else if (node instanceof Element) {
+            if (node.matches(selector)) note(node, clean(node.textContent));
+            node
+              .querySelectorAll(selector)
+              .forEach((region) => note(region, clean(region.textContent)));
+          } else if (el) note(el.closest(selector), clean(node.textContent));
+        });
+    }
+    for (const texts of added.values()) updates.push(clean(texts.join(" ")));
+    document.documentElement.dataset.liveUpdates = JSON.stringify(updates);
+  }).observe(document.documentElement, {
+    childList: true,
+    characterData: true,
+    subtree: true,
+  });
+  document.documentElement.dataset.liveUpdates = "[]";
+}
+
+const heard = (page: Page) =>
+  page.evaluate(
+    () =>
+      JSON.parse(
+        document.documentElement.dataset.liveUpdates ?? "[]"
+      ) as string[]
+  );
+
+/** The text of every live region a script would find, leaving out the ones switched off (a silenced toast). */
+const snapshot = (page: Page) =>
+  page.evaluate(() =>
+    [
+      ...document.querySelectorAll(
+        '[aria-live], [role="status"], [role="alert"]'
+      ),
+    ]
+      .filter(
+        (el) => el.closest("[aria-live]")?.getAttribute("aria-live") !== "off"
+      )
+      .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+  );
+
+/** Everything heard since `mark` (a count from `heard`). */
+async function since(page: Page, mark: number) {
+  return (await heard(page)).slice(mark);
+}
+
+/** Lets a step's late announcements land: call it once the step's last visible effect is on screen, and two more
+ * frames have drawn. */
+async function settle(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => done()))
+      )
+  );
+}
+
+function seedPopup() {
+  execFileSync(
+    ".venv/bin/python",
+    ["-c", "from test_catalog_browse import seed_popup\nseed_popup()"],
+    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+  );
+}
+
+const noBareNumbers = (messages: string[]) =>
+  expect(messages.filter((text) => BARE_NUMBER.test(text))).toEqual([]);
+
+for (const viewport of [DESKTOP, PHONE]) {
+  plain.describe(`Catalog at ${viewport.width}`, () => {
+    plain.use({ viewport });
+
+    plain(
+      "the popup's Add is announced once, and the copies stepper never reads a bare number",
+      async ({ page }) => {
+        seedPopup();
+        await signInAsOwner(page, "/catalog");
+        await page
+          .getByRole("region", { name: "Catalog results" })
+          .getByRole("button", { name: /^Switch,/ })
+          .click();
+        const popup = page.getByRole("dialog");
+        await expect(
+          popup.getByRole("button", { name: "Add 1", exact: true })
+        ).toBeEnabled();
+        await watch(page);
+
+        let mark = (await heard(page)).length;
+        await popup
+          .getByRole("button", { name: "Increase Copies to add" })
+          .click();
+        await expect(
+          popup.getByRole("button", { name: "Add 2", exact: true })
+        ).toBeVisible();
+        await settle(page);
+        const stepped = await since(page, mark);
+        noBareNumbers(stepped);
+        // Whatever a step says, it says it once, with the stepper's name.
+        expect(stepped).toEqual(["Copies to add 2"]);
+
+        mark = (await heard(page)).length;
+        await popup.getByRole("button", { name: "Add 2", exact: true }).click();
+        await expect(
+          popup.getByRole("button", { name: "Undo", exact: true })
+        ).toBeVisible();
+        await expect(
+          page
+            .getByRole("region", { name: "Notifications" })
+            .getByText("Added 2 cards to Unsorted.")
+        ).toBeAttached();
+        await settle(page);
+        const added = await since(page, mark);
+        noBareNumbers(added);
+        expect(added.filter((text) => /^Added /.test(text))).toEqual([
+          "Added 2 copies to Unsorted.",
+        ]);
+        // A script that reads every live-region attribute and role sees the add once, too.
+        expect(
+          (await snapshot(page)).filter((text) => /^Added /.test(text))
+        ).toEqual(["Added 2 copies to Unsorted."]);
+      }
+    );
+
+    plain(
+      "Add mode: queueing cards is quiet, and Add N cards is announced once",
+      async ({ page }) => {
+        seedPopup();
+        await signInAsOwner(page, "/catalog");
+        await page
+          .getByRole("radiogroup", { name: "Catalog mode" })
+          .getByRole("radio", { name: "Add to a Location" })
+          .click();
+        const results = page.getByRole("region", { name: "Catalog results" });
+        const more = results.getByRole("button", { name: /^One more / });
+        await expect(more.first()).toBeVisible();
+        await watch(page);
+
+        let mark = (await heard(page)).length;
+        await more.first().click();
+        await more.first().click();
+        await more.nth(1).click();
+        await expect(
+          page
+            .getByRole("region", { name: "Add to a Location" })
+            .getByRole("button", { name: "Add 3 cards" })
+        ).toBeVisible();
+        await settle(page);
+        const queued = await since(page, mark);
+        noBareNumbers(queued);
+        // A draft count is never spoken on its own: it is silent, or it says what it counts.
+        expect(queued.filter((text) => /\d/.test(text))).toEqual(
+          queued.filter((text) => /\bcards? queued$/.test(text))
+        );
+
+        mark = (await heard(page)).length;
+        await page
+          .getByRole("region", { name: "Add to a Location" })
+          .getByRole("button", { name: "Add 3 cards" })
+          .click();
+        await expect(
+          page
+            .getByRole("region", { name: "Notifications" })
+            .getByText(/^Added 3 cards to /)
+        ).toBeVisible();
+        await settle(page);
+        const added = await since(page, mark);
+        noBareNumbers(added);
+        expect(added.filter((text) => /^Added /.test(text))).toHaveLength(1);
+        // The toast with the Undo replaces the first one and is switched off, so it isn't a second live message.
+        expect(
+          (await snapshot(page)).filter((text) => /^Added /.test(text)).length
+        ).toBeLessThanOrEqual(1);
+      }
+    );
+  });
+}
+
+test("phone: +1 and −1 in the copy sheet are each announced once", async ({
+  collectors,
+}) => {
+  const ids = seedCatalog();
+  const { page } = await collectors.signIn({
+    contextOptions: { viewport: PHONE, hasTouch: true },
+  });
+  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+    route.abort()
+  );
+  const deck = await createDeck(page, "Announce once");
+  await setLine(page, deck, ids["PAL 185"], 3);
+  await page.goto(`${ORIGIN}/decks/${deck}`);
+  const control = page.locator("[data-edition-id]").first();
+  await expect(control).toBeVisible();
+  await control.tap();
+  const sheet = page.getByRole("dialog", { name: "Iono", exact: true });
+  await expect(sheet).toBeVisible();
+  await watch(page);
+
+  for (const [button, saying, total] of [
+    [/^\+1, Add one Iono/, "Added 1 Iono.", "4"],
+    [/^−1, Remove one Iono/, "Removed 1 Iono.", "3"],
+  ] as const) {
+    const mark = (await heard(page)).length;
+    await sheet.getByRole("button", { name: button }).tap();
+    await expect(
+      sheet.getByRole("group", { name: "Deck List copies" }).locator("strong")
+    ).toHaveText(total);
+    await expect(sheet.getByText(saying)).toBeVisible();
+    await settle(page);
+    const said = await since(page, mark);
+    noBareNumbers(said);
+    expect(said).toEqual([saying]);
+    expect(
+      (await snapshot(page)).filter((text) => text.includes(saying))
+    ).toEqual([saying]);
+  }
+});
+
+test("desktop: the − and + on a Deck card are each announced once", async ({
+  collectors,
+}) => {
+  const ids = seedCatalog();
+  const { page } = await collectors.signIn({
+    contextOptions: { viewport: DESKTOP },
+  });
+  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+    route.abort()
+  );
+  const deck = await createDeck(page, "Announce hover");
+  await setLine(page, deck, ids["PAL 185"], 3);
+  await page.goto(`${ORIGIN}/decks/${deck}`);
+  await expect(page.locator("[data-edition-id]").first()).toBeVisible();
+  await watch(page);
+  const toast = page.getByRole("region", { name: "Notifications" });
+
+  for (const [button, saying] of [
+    ["Add one Iono", "Added 1 Iono."],
+    ["Remove one Iono", "Removed 1 Iono."],
+  ] as const) {
+    const mark = (await heard(page)).length;
+    // The − and + show over the card while the pointer is on it.
+    await page.locator("[data-edition-id]").first().hover();
+    await page
+      .getByRole("button", { name: button, exact: true })
+      .first()
+      .click();
+    await expect(toast).toContainText(saying);
+    await settle(page);
+    const said = await since(page, mark);
+    noBareNumbers(said);
+    expect(said.filter((text) => text.startsWith(saying))).toHaveLength(1);
+    expect(
+      (await snapshot(page)).filter((text) => text.startsWith(saying))
+    ).toHaveLength(1);
+  }
+});
+
+plain.describe("Collection's Add cards", () => {
+  plain.use({ viewport: DESKTOP });
+
+  plain(
+    "Add N cards and the popup's Add are each announced once",
+    async ({ page }) => {
+      seedPopup();
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      try {
+        await pool.query("DELETE FROM auth_send_event");
+        await startAsNewOwner(pool);
+      } finally {
+        await pool.end();
+      }
+      await signInAsOwner(page, "/collection");
+      await page
+        .getByRole("button", { name: "Add cards", exact: true })
+        .click();
+      const add = page.getByRole("dialog", { name: /^Add cards/ });
+      await expect(add).toBeVisible();
+      const results = add.getByRole("region", { name: "Catalog results" });
+      await expect(
+        results.getByRole("button", { name: /^One more / }).first()
+      ).toBeVisible();
+      await watch(page);
+      const toast = page.getByRole("region", { name: "Notifications" });
+
+      // The popup's Add inside Add cards: said once, in the popup.
+      await results.getByRole("button", { name: /^Switch,/ }).click();
+      const popup = page.getByRole("dialog", { name: "Switch" });
+      await expect(
+        popup.getByRole("button", { name: "Add 1", exact: true })
+      ).toBeEnabled();
+      let mark = (await heard(page)).length;
+      await popup.getByRole("button", { name: "Add 1", exact: true }).click();
+      await expect(
+        popup.getByRole("button", { name: "Undo", exact: true })
+      ).toBeVisible();
+      await expect(toast).toContainText(/^Added 1 card to /);
+      await settle(page);
+      let said = await since(page, mark);
+      noBareNumbers(said);
+      expect(said.filter((text) => /^Added /.test(text))).toHaveLength(1);
+      expect(
+        (await snapshot(page)).filter((text) => /^Added /.test(text))
+      ).toHaveLength(1);
+      // Closing the popup doesn't say the add again, in the gallery behind it or in the toast.
+      mark = (await heard(page)).length;
+      await page.keyboard.press("Escape");
+      await expect(popup).toHaveCount(0);
+      await expect(add).toBeVisible();
+      await settle(page);
+      expect(
+        (await since(page, mark)).filter((text) => /^Added /.test(text))
+      ).toEqual([]);
+
+      // Add N cards: the dialog closes and Collection's toast says it once.
+      mark = (await heard(page)).length;
+      await results
+        .getByRole("button", { name: /^One more / })
+        .first()
+        .click();
+      await results
+        .getByRole("button", { name: /^One more / })
+        .first()
+        .click();
+      await add
+        .getByRole("region", { name: "Add to a Location" })
+        .getByRole("button", { name: "Add 2 cards" })
+        .click();
+      await expect(add).toHaveCount(0);
+      await expect(toast).toContainText(/^Added 2 cards to /);
+      await settle(page);
+      said = await since(page, mark);
+      noBareNumbers(said);
+      expect(said.filter((text) => /^Added /.test(text))).toHaveLength(1);
+      expect(
+        (await snapshot(page)).filter((text) => /^Added /.test(text))
+      ).toHaveLength(1);
+    }
+  );
+});
+
+plain(
+  "Want List: loading prices does not read out the cost summary",
+  async ({ page }) => {
+    plain.setTimeout(120_000);
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await pool.query("DELETE FROM auth_send_event");
+      await startAsNewOwner(pool);
+    } finally {
+      await pool.end();
+    }
+    const ids = seedCatalog();
+    await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+      route.abort()
+    );
+    await signInAsOwner(page, "/decks");
+    const deck = await createDeck(page, `Announce ${randomUUID().slice(0, 6)}`);
+    await setLine(page, deck, ids["PAL 185"], 3);
+    await setLine(page, deck, ids["PAL 172"], 2);
+    await api(page, "GET", `/api/decks/${deck}`);
+    await page.goto(`${ORIGIN}/decks`);
+    await watch(page);
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    await expect(page.getByText("Estimated cost").first()).toBeVisible();
+    await expect(
+      page.getByText(/cards priced|Price unavailable/).first()
+    ).toBeVisible();
+    await settle(page);
+    const said = await heard(page);
+    noBareNumbers(said);
+    expect(
+      said.filter((text) =>
+        /Estimated cost|Checking prices|cards priced|Price unavailable|\$\d/.test(
+          text
+        )
+      )
+    ).toEqual([]);
+    expect(
+      (await snapshot(page)).filter((text) => /Estimated cost/.test(text))
+    ).toEqual([]);
+  }
+);
