@@ -154,7 +154,8 @@ export function buildBatch(
  *   exactly that request again, with the same key, so the server replays it instead of applying it twice.
  * - Any other refusal drops that batch with a notice.
  *
- * `quantityOf` is an Edition's quantity as the collector expects it: confirmed, plus everything on its way.
+ * `quantityOf` is an Edition's quantity as the collector expects it: confirmed, plus everything on its way. A request
+ * whose outcome is unknown isn't counted (it may not have been saved); `uncertainOf` gives it, to be marked.
  */
 export function useDeckListEdits({
   deckId,
@@ -409,15 +410,17 @@ export function useDeckListEdits({
       (item) => item.edition_id === editionId
     );
     let total = big(line?.quantity);
-    const pending = [
-      ...(inFlight.current ? [inFlight.current] : []),
-      ...(failed.current ? [failed.current] : []),
-    ];
-    for (const batch of pending) total += batch.deltas.get(editionId) ?? 0n;
+    // A change whose outcome is unknown isn't counted: it may not have been saved, and the count the collector
+    // sees must match the Deck List the page shows. `uncertainOf` marks it; Try again sends the same request again.
+    if (inFlight.current) total += inFlight.current.deltas.get(editionId) ?? 0n;
     for (const queuedEdit of queued.current)
       total += queuedEdit.deltas.get(editionId) ?? 0n;
     return total < 0n ? 0n : total;
   };
+
+  /** The change to an Edition's copies that was sent without an answer and waits for Try again (0 when none). */
+  const uncertainOf = (editionId: string): bigint =>
+    failed.current?.deltas.get(editionId) ?? 0n;
 
   function working() {
     return (
@@ -432,6 +435,7 @@ export function useDeckListEdits({
   return {
     edit,
     quantityOf,
+    uncertainOf,
     /** A command or an Undo is on its way, waiting to be sent again, or queued, as of this render. */
     busy: working(),
     /** The same, read now: for an effect that may run late, after an event handler queued an edit. */

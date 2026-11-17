@@ -110,3 +110,55 @@ test("the first refusal rebuilds on the fresh Deck List and shows no notice", as
   expect(edits.notice).toBeNull();
   expect(settled).toHaveBeenCalledTimes(1);
 });
+
+const SAVED = {
+  deck_list: list(2, "2"),
+  target_format: "standard",
+} as unknown as DeckListCommandResult;
+
+test("quantityOf shows a change on its way, then the confirmed quantity while its outcome is unknown, then the saved one after Try again", async () => {
+  let answer!: (reason: unknown) => void;
+  vi.mocked(changeDeckList).mockImplementationOnce(
+    () =>
+      new Promise((_, reject) => {
+        answer = reject;
+      })
+  );
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  // On its way: the collector's tap shows at once.
+  expect(edits.quantityOf("energy")).toBe(2n);
+  await act(async () => answer(new TypeError("Failed to fetch")));
+  // No answer: nothing is confirmed, so the count is the confirmed one, and a Try again is waiting for the change.
+  expect(edits.notice?.retry).toBeTypeOf("function");
+  expect(edits.quantityOf("energy")).toBe(1n);
+  expect(edits.uncertainOf("energy")).toBe(1n);
+  expect(edits.uncertainOf("other")).toBe(0n);
+  vi.mocked(changeDeckList).mockResolvedValueOnce(SAVED);
+  await act(async () => edits.notice!.retry!());
+  expect(vi.mocked(changeDeckList).mock.calls[1][1]).toEqual(
+    vi.mocked(changeDeckList).mock.calls[0][1]
+  );
+  expect(edits.notice).toBeNull();
+  expect(edits.quantityOf("energy")).toBe(2n);
+  expect(edits.uncertainOf("energy")).toBe(0n);
+});
+
+test("a 5xx answer is just as unconfirmed: the count stays at the confirmed quantity", async () => {
+  vi.mocked(changeDeckList).mockRejectedValue(new DeckError(503, "DOWN"));
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  expect(edits.quantityOf("energy")).toBe(1n);
+  expect(edits.notice?.retry).toBeTypeOf("function");
+});
+
+test("a tap made while a change is unconfirmed shows at once and doesn't hide the unconfirmed change", async () => {
+  vi.mocked(changeDeckList).mockRejectedValueOnce(new TypeError("offline"));
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  await act(async () => edits.edit(add));
+  // Confirmed 1, the unconfirmed +1 isn't counted, the new tap waits behind it and is.
+  expect(edits.quantityOf("energy")).toBe(2n);
+  expect(edits.uncertainOf("energy")).toBe(1n);
+  expect(edits.notice?.retry).toBeTypeOf("function");
+});

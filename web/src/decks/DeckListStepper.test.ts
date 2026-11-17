@@ -50,3 +50,42 @@ test("Remove one is disabled when the card is not on the Deck List", () => {
   );
   expect(remove!.disabled).toBe(true);
 });
+
+test("an unconfirmed change is marked beside the count, outside the live count", () => {
+  root = createRoot(host);
+  act(() =>
+    root.render(
+      createElement(DeckListStepper, {
+        cardName: "Tangela",
+        quantity: 3n,
+        unconfirmed: 1n,
+        onChange: vi.fn(),
+      })
+    )
+  );
+  const live = host.querySelector("[aria-live='polite']")!;
+  expect(live.textContent).toBe("3 on Deck List");
+  expect(host.textContent).toContain("+1 not confirmed");
+  expect(live.textContent).not.toContain("not confirmed");
+  act(() =>
+    root.render(
+      createElement(DeckListStepper, {
+        cardName: "Tangela",
+        quantity: 3n,
+        unconfirmed: -2n,
+        onChange: vi.fn(),
+      })
+    )
+  );
+  expect(host.textContent).toContain("−2 not confirmed");
+  act(() =>
+    root.render(
+      createElement(DeckListStepper, {
+        cardName: "Tangela",
+        quantity: 3n,
+        onChange: vi.fn(),
+      })
+    )
+  );
+  expect(host.textContent).not.toContain("not confirmed");
+});

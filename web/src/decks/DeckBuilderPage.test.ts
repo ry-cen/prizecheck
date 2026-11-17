@@ -41,6 +41,7 @@ vi.mock("./useDeckListEdits", () => ({
       notice: state.editNotice,
       busyNow: () => state.busy,
       quantityOf: () => 0n,
+      uncertainOf: () => 0n,
     };
   },
 }));
