@@ -1442,7 +1442,8 @@ test("hidden galleries do not request per-card prices or art after their warm fi
   const art: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname === "/api/pokemon/prices/editions")
+    // The new path and the old one that is still served: a regression to either counts.
+    if (/^\/api(?:\/pokemon)?\/prices\/editions$/.test(url.pathname))
       prices.push(request.url());
     if (url.pathname.startsWith("/api/art/")) art.push(request.url());
   });

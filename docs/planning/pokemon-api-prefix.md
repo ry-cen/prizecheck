@@ -18,14 +18,29 @@ Read-only count of `api/tests/api_contract/routes.json` at the base of this bran
 | -------------------------------------------------------------------------------------------------- | ------: | ------------------------------------- |
 | Pokémon-only, moved in this slice (list below)                                                     |      60 | `/api/pokemon/...` and the old path   |
 | Scanner (`scanner`)                                                                                |       5 | stays; later rollout                  |
-| Shared or core (social 37, loans 33, moves 9, location-tree 6, locations 2, holdings 3, profile 4, settings 2, threads 1, the other trades routes 16, admin collectors, operations and trade reports 5) | 118 | stays on `/api` |
-| Infrastructure and anonymous reads (health 1, art 1, public 13)                                    |      15 | stays on `/api`                       |
+| Shared or core (social 37, loans 33, moves 9, location-tree 6, locations 2, holdings 3, profile 4, settings 2, threads 1, the other trades routes 16, admin collectors, operations and trade reports 5; see the note below the table) | 118 | stays on `/api` |
+| Infrastructure and anonymous reads (health 1, art 1, public 13; see the note below the table)      |      15 | stays on `/api`                       |
 | Ambiguous, waiting on the owner (decks 28, collection 7, publications 3, trade-wants 3)            |      41 | stays on `/api` for now               |
 | Total                                                                                              | **239** |                                       |
 
+Two groups are counted where they are for now but are still open questions for the owner: the public decks and discovery
+routes sit inside the 13 `public` routes, and the Pokémon trade inventory routes sit inside the 16 other `trades` routes.
+The ambiguous row is decks, collection, publications and trade-wants only. Prose elsewhere in this page uses the same split.
+
 ### The allowlist moved in this slice
 
-Matched on a segment boundary: `/api/pokemon/<route>` or `/api/pokemon/<route>/...`, nothing else.
+Two kinds of entry, both on a segment boundary and nothing else:
+
+- **Trees** move with everything below them (`/api/pokemon/<route>` and `/api/pokemon/<route>/...`, any method): `catalog`,
+  `collection-imports`, `want-list`, `missing-card-reports` and the admin trees `admin/missing-card-reports`,
+  `admin/catalog-reviews`, `admin/catalog-metadata`, `admin/card-attributes` and `admin/card-identities`.
+- **Single routes** match exactly, and only for the methods the contract has for them, so a longer path can never fall into a
+  shared route's pattern (`/api/pokemon/trades/value/accept` must not become `POST /api/trades/{id}/accept`, and
+  `GET /api/pokemon/holdings/reassign` must not become `GET /api/holdings/{location_id}`): `POST prices/editions`,
+  `POST trades/value`, `POST holdings/reassign`, `GET`/`POST admin/catalog-runs`, `GET admin/catalog-rules` and
+  `POST admin/reprint-groups/decisions`.
+
+The table counts the routes of `routes.json` each prefix covers.
 
 | Prefix                       | Routes |
 | ---------------------------- | -----: |
@@ -43,12 +58,13 @@ Matched on a segment boundary: `/api/pokemon/<route>` or `/api/pokemon/<route>/.
 | `admin/catalog-rules`        |      1 |
 | `admin/card-attributes`      |      5 |
 | `admin/card-identities`      |      8 |
-| `admin/reprint-groups`       |      1 |
+| `admin/reprint-groups` (`/decisions`) |      1 |
 | **Total**                    | **60** |
 
-The list lives in two places that must agree: `POKEMON_ROUTES` in `auth/src/server.ts` and `POKEMON_ROUTES` in
-`scripts/client_generator.py`. `tests/tooling/test_client_generator.py` fails when they differ, and when a listed prefix
-has no route in `routes.json`.
+The list lives in two places that must agree: `POKEMON_TREES` and `POKEMON_EXACT` in `auth/src/pokemonRoutes.ts` and the
+same two lists in `scripts/client_generator.py`. `tests/tooling/test_client_generator.py` fails when they differ.
+`auth/tests/pokemon-routes.test.ts` walks `routes.json` and fails unless exactly these 60 routes move, whatever a path
+parameter is filled in with (a shared pattern such as `/api/trades/{trade_id}/accept` is tried with `trade_id = value`).
 
 ### What stays on `/api`, and why
 
@@ -57,16 +73,20 @@ has no route in `routes.json`.
 - **Shared and core routes.** Social, loans, moves, locations, holdings core, profile, settings, threads, the trade social
   routes and admin operations serve every game. A per-game prefix would be wrong for them.
 - **Infrastructure.** Health, art, public reads and auth are not game-scoped.
-- **Ambiguous routes.** Decks, collection, publications, public decks, discovery, the Pokémon trade inventory routes and
-  trade-wants mix per-game and shared behaviour. The owner decides where they live.
+- **Ambiguous routes.** Decks, collection, publications and trade-wants mix per-game and shared behaviour, and so do the
+  public decks and discovery routes and the Pokémon trade inventory routes counted under infrastructure and shared above.
+  The owner decides where they live.
 
-Any other `/api/pokemon/...` answers 404 from the gateway without contacting the API: `/api/pokemon`, `/api/pokemon/health`,
+Any other `/api/pokemon/...` answers 404 from the gateway before any session lookup, rate limiter or API call: `/api/pokemon`, `/api/pokemon/health`,
 `/api/pokemon/auth/...`, `/api/pokemon/public/...`, `/api/pokemon/loans`, a double prefix (`/api/pokemon/pokemon/...`), another
-game (`/api/pokemon/riftbound/...`), and any name that only starts with a moved one (`/api/pokemon/catalogue`).
+game (`/api/pokemon/riftbound/...`), any name that only starts with a moved one (`/api/pokemon/catalogue`), a single route with a longer path or another method
+(`/api/pokemon/trades/value/accept`, `GET /api/pokemon/holdings/reassign`), and any target with a dot segment, an encoded
+slash or a backslash (`/api/pokemon/%2e%2e/loans`). The namespace is decided on the raw request target, before the URL is
+normalised, because normalising first would turn that last one into `/api/loans` and let it out of the namespace.
 
 ## How it works
 
-- **Gateway (`auth/src/server.ts`).** `pokemonUpstreamPath` runs first in the request handler. For a moved route it rewrites
+- **Gateway (`auth/src/server.ts`).** `pokemonUpstream` (`auth/src/pokemonRoutes.ts`) runs first in the request handler. For a moved route it rewrites
   the path to `/api/<rest>`; the same value is then used for every later rule: same-origin and method checks, the public,
   health, budget, import-limit and art tests, the identity signature, the budget signature and the URL forwarded to the API
   (rewritten pathname plus the original query string). The API therefore receives, and verifies signatures over, exactly the
@@ -101,8 +121,8 @@ So old and new paths are served together until a later release removes the old o
 
 ## Open decisions for the owner
 
-1. **Where the ambiguous routes live:** decks, collection, publications, public decks, discovery, the Pokémon trade
-   inventory routes and trade-wants. This decides whether they get `/api/pokemon/...` twins, stay shared, or split.
+1. **Where the ambiguous routes live:** decks, collection, publications and trade-wants, and the two groups noted under the
+   inventory table (public decks and discovery, inside `public`; the Pokémon trade inventory routes, inside `trades`). This decides whether they get `/api/pokemon/...` twins, stay shared, or split.
 2. **Whether the catalog admin routes move.** This slice moved them with the rest of the Pokémon catalog; say so if the
    owner screens should stay on `/api/admin`.
 3. **The scanner cache migration:** version the cache name, or serve both URL shapes until the old entries expire, then move
@@ -115,9 +135,9 @@ So old and new paths are served together until a later release removes the old o
 
 ## Recommended rollout
 
-1. Land the Riftbound gateway prefix (`feature/534-riftbound-gateway-prefix`) first. This slice and that branch both edit
-   the same region of `auth/src/server.ts`, the start of the request handler where `path` is computed. This branch rebases on
-   it after it lands: keep one `path`/upstream-URL pair, make the Pokémon helper and the Riftbound one siblings (ideally one
+1. Land the Riftbound gateway prefix (`feature/534-riftbound-gateway-prefix`) first. That branch is not committed yet, so a
+   conflict in the same region of `auth/src/server.ts` (the start of the request handler where `path` is computed) is
+   expected, not observed. This branch rebases on it after it lands: keep one `path`/upstream-URL pair, make the Pokémon helper and the Riftbound one siblings (ideally one
    per-game prefix table), and keep the rule that an unlisted `/api/<game>/...` answers 404 without an upstream call.
    Re-run `auth/tests/pokemon-prefix-gateway.test.ts` after the rebase.
 2. Land this slice to `dev`, then release it with the host steps below.

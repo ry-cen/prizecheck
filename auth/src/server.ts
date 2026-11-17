@@ -22,6 +22,7 @@ import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { ipContext } from "./ipContext.js";
 import { safeNext } from "./nextPath.js";
+import { pokemonUpstream } from "./pokemonRoutes.js";
 import { PublicReadLimiter } from "./publicReads.js";
 import { sessionBody } from "./sessionView.js";
 import {
@@ -114,44 +115,6 @@ const IMPORT_ROUTES: { pattern: RegExp; limit: number }[] = [
 function importLimit(method: string | undefined, path: string) {
   if (method !== "POST") return undefined;
   return IMPORT_ROUTES.find((route) => route.pattern.test(path))?.limit;
-}
-
-// Pokémon-only routes are also served under /api/pokemon/ (the per-game prefix). This is a transitional,
-// additive rewrite: the gateway maps /api/pokemon/<rest> to the upstream's existing /api/<rest> before anything else
-// looks at the path (public, budget, import-limit and art checks, and the identity and budget signatures), so the API
-// keeps receiving, and signing over, exactly the paths it has today. The old /api/<rest> paths are retained unchanged
-// while open tabs, caches and native clients still use them; removing them needs a later, explicit rollout decision
-// (docs/planning/pokemon-api-prefix.md). Only the prefixes below move: scanner, shared routes and infrastructure stay
-// where they are, and any other /api/pokemon/... is a 404 that never reaches the upstream.
-const POKEMON_PREFIX = "/api/pokemon";
-const POKEMON_ROUTES = [
-  "catalog",
-  "collection-imports",
-  "want-list",
-  "missing-card-reports",
-  "prices/editions",
-  "trades/value",
-  "holdings/reassign",
-  "admin/catalog-runs",
-  "admin/missing-card-reports",
-  "admin/catalog-reviews",
-  "admin/catalog-metadata",
-  "admin/catalog-rules",
-  "admin/card-attributes",
-  "admin/card-identities",
-  "admin/reprint-groups",
-];
-
-/**
- * For a request under /api/pokemon: the upstream path (`/api/<rest>`) when `<rest>` is one of POKEMON_ROUTES on a
- * segment boundary, or null when it is not (the caller answers 404). Other paths are not for this function.
- */
-function pokemonUpstreamPath(pathname: string): string | null {
-  const rest = pathname.slice(POKEMON_PREFIX.length + 1);
-  const moved = POKEMON_ROUTES.some(
-    (route) => rest === route || rest.startsWith(`${route}/`)
-  );
-  return moved ? `/api/${rest}` : null;
 }
 
 class BudgetExceeded extends Error {}
@@ -375,18 +338,14 @@ const server = createServer(async (request, response) => {
   // Monotonic receipt time, before any body read or session lookup: budgeted routes spend their three seconds from here.
   const received = performance.now();
   const requested = new URL(request.url || "/", origin);
-  const underPokemon =
-    requested.pathname === POKEMON_PREFIX ||
-    requested.pathname.startsWith(`${POKEMON_PREFIX}/`);
-  const moved = underPokemon ? pokemonUpstreamPath(requested.pathname) : null;
+  // /api/pokemon is decided on the raw request target (auth/src/pokemonRoutes.ts): a moved route is handled below as its
+  // old /api twin, anything else under the prefix is a 404 before any session lookup, limiter or upstream call.
+  const moved = pokemonUpstream(request.url || "/", request.method);
   // Everything below sees the upstream path, so a /api/pokemon request is handled exactly as its old /api twin.
-  const path = moved ?? requested.pathname;
-  const upstreamUrl = moved ? `${moved}${requested.search}` : request.url;
+  const path = moved ? new URL(moved, origin).pathname : requested.pathname;
+  const upstreamUrl = moved ? moved : request.url;
   try {
-    if (
-      (underPokemon && moved === null) ||
-      riftboundTargetRefused(request, path)
-    )
+    if (moved === null || riftboundTargetRefused(request, path))
       return json(response, 404, { error: "Not found" });
     if (path === "/auth/request-code" && request.method === "POST") {
       if (!emailSignIn) return json(response, 404, { error: "Not found" });

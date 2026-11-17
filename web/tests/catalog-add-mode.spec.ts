@@ -940,7 +940,7 @@ for (const viewport of [
         const requestedSets: string[] = [];
         page.on("request", (request) => {
           const url = new URL(request.url());
-          if (url.pathname === "/api/pokemon/catalog/editions")
+          if (/^\/api(?:\/pokemon)?\/catalog\/editions$/.test(url.pathname))
             requestedSets.push(url.searchParams.get("set_id") ?? "");
         });
         try {
