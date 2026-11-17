@@ -109,7 +109,7 @@ export function CopySheet({
             className="flex flex-col gap-2"
           >
             <h3 id="copy-sheet-copies" className="m-0 text-meta font-semibold">
-              {line.quantity.toString()} on the Deck List
+              {(editing?.quantity ?? line.quantity).toString()} on the Deck List
             </h3>
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
               <li>
@@ -159,11 +159,12 @@ export function CopySheet({
                 feedback={editing.feedback}
                 since={editing.since}
               />
-              {/* Always present, so its words are announced politely when they arrive. */}
+              {/* Always rendered and in the accessibility tree, with no height while empty (empty:-mt-1 takes back the
+                  column's gap), so its words are announced politely when they arrive. */}
               <p
                 role="status"
                 data-edit-notice
-                className="m-0 text-meta text-warning empty:hidden"
+                className="m-0 text-meta text-warning empty:-mt-1"
               >
                 {editing.notice?.text ?? ""}
               </p>

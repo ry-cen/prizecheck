@@ -546,6 +546,12 @@ export function DeckBuilderPage({
   // banner takes focus, which brings it into view; a failure that arrives with the sheet already closed is scrolled to
   // if it would sit off screen (focus stays with the collector).
   const editBanner = useRef<HTMLDivElement>(null);
+  // Each new notice is announced through one surface only: the copy sheet's own line when the sheet is open as the
+  // notice arrives, else the banner. That is fixed for the notice's life, so opening or closing the sheet later never
+  // makes the banner announce it again.
+  const announcedBy = useRef<{ id: number; banner: boolean } | null>(null);
+  if (edits.notice && announcedBy.current?.id !== edits.notice.id)
+    announcedBy.current = { id: edits.notice.id, banner: sheetLine === null };
   const sheetNotice = useRef<{
     open: boolean;
     opened: typeof edits.notice;
@@ -793,9 +799,8 @@ export function DeckBuilderPage({
         <div
           ref={editBanner}
           tabIndex={-1}
-          // Behind the copy sheet the sheet's own line says it, politely; the banner announces only when the page is
-          // what the collector is looking at.
-          role={sheetLine ? undefined : "alert"}
+          data-edit-banner
+          role={announcedBy.current?.banner ? "alert" : undefined}
           className="flex flex-wrap items-center gap-3 text-body text-warning"
         >
           <p className="m-0">{edits.notice.text}</p>
