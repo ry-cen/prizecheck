@@ -12,6 +12,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { cardCount } from "../loans/loanText";
+import { MOBILE_QUERY } from "../workspace/media";
 import {
   ArrowLeftRight,
   ChevronLeft,
@@ -73,8 +75,31 @@ import {
   tradeStaleText,
   tradeCashText,
   tradeStepMessage,
+  sideCopies,
 } from "./tradeText";
 import { sideValueText, useTradeValue } from "./useTradeValue";
+
+/** The copies one side of a Trade moves, in the words of its summary line. */
+function sideCount(cards: readonly { copies: string }[]): string {
+  const copies = sideCopies(cards);
+  return copies === 0 ? "nothing" : cardCount(copies);
+}
+
+/** Whether this is the phone layout now. False where there is no matchMedia (a unit test's jsdom). */
+function usePhone(): boolean {
+  const [phone, setPhone] = useState(
+    () => window.matchMedia?.(MOBILE_QUERY).matches ?? false
+  );
+  useEffect(() => {
+    const media = window.matchMedia?.(MOBILE_QUERY);
+    if (!media) return;
+    const onChange = () => setPhone(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+  return phone;
+}
 
 type Load =
   | { kind: "loading" }
@@ -228,6 +253,9 @@ export function TradeScreen({
     held.current = null;
   };
   const heading = useRef<HTMLHeadingElement>(null);
+  const phone = usePhone();
+  const cardsRegion = useRef<HTMLDivElement>(null);
+  const cardsId = useId();
   const menuAnchor = useRef<HTMLDivElement>(null);
   const askQuestion = useRef<HTMLParagraphElement>(null);
   const declineButton = useRef<HTMLButtonElement>(null);
@@ -731,94 +759,32 @@ export function TradeScreen({
       </Button>
     </div>
   ) : null;
-  const note = tradeNote(trade, stale);
-  const headline = tradeHeadline(trade);
-  const record =
-    trade.other.available === true
-      ? trackRecord(trade.other.completed_trades)
-      : null;
-  // Most state headlines already name the other collector. Own closed actions ("You declined") still need context.
-  const needsParty = tradeNeedsPartyLabel(trade);
-  return frame(
-    headline,
+  const errorLine = (
+    <p role="alert" className="m-0 text-meta text-danger empty:hidden">
+      {message}
+    </p>
+  );
+  const region = (
     <>
-      {(needsParty || (trade.other.friend && trade.other.handle)) && (
-        <p className="m-0 text-body">
-          {needsParty && (
-            <span className="font-semibold">Trade with {name}</span>
-          )}
-          {needsParty && " "}
-          {trade.other.friend && trade.other.handle && (
-            <a
-              className="inline-flex min-h-tap items-center text-text-muted"
-              href={`/friends/${encodeURIComponent(trade.other.handle)}`}
-              onClick={(event) => {
-                if (
-                  event.button !== 0 ||
-                  event.metaKey ||
-                  event.ctrlKey ||
-                  event.shiftKey ||
-                  event.altKey
-                )
-                  return;
-                event.preventDefault();
-                onNavigate(
-                  `/friends/${encodeURIComponent(trade.other.handle!)}`
-                );
-              }}
-            >
-              @{trade.other.handle}
-            </a>
-          )}
-        </p>
-      )}
-      {record && <p className="m-0 text-meta text-text-muted">{record}</p>}
-      {note && <p className="m-0 text-body text-text-muted">{note}</p>}
-      <MeetInPublicTip trade={trade} />
-      <div
-        className={`grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 ${trade.you_give.length <= 1 && trade.you_get.length <= 1 ? "phone:grid-cols-2 phone:gap-3" : "phone:grid-cols-1"}`}
-      >
-        <TradeSide
-          title="You give"
-          cards={trade.you_give}
-          side={side}
-          total={
-            trade.state === "proposed"
-              ? sideValueText(value, "you_give", trade.you_give.length > 0)
-              : null
-          }
-        />
-        <Icon
-          icon={ArrowLeftRight}
-          className="mt-12 text-text-muted phone:hidden"
-        />
-        <TradeSide
-          title="You get"
-          cards={trade.you_get}
-          match={incomingMatch.match}
-          ownNeeds={incomingMatch.needs}
-          total={
-            trade.state === "proposed"
-              ? sideValueText(value, "you_get", trade.you_get.length > 0)
-              : null
-          }
-        />
-      </div>
-      {trade.cash && (
-        <>
-          <section
-            aria-labelledby={cashId}
-            className="flex min-w-0 flex-col gap-2"
+      {phone && (asking || answers) && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <p className="m-0 text-body font-semibold">
+            You give {sideCount(trade.you_give)} · You get{" "}
+            {sideCount(trade.you_get)}
+          </p>
+          <a
+            href={`#${cardsId}`}
+            className="inline-flex min-h-tap items-center rounded-control text-body text-accent-strong underline"
+            onClick={(event) => {
+              event.preventDefault();
+              const cards = cardsRegion.current;
+              cards?.scrollIntoView({ block: "start" });
+              cards?.focus({ preventScroll: true });
+            }}
           >
-            <h2 id={cashId} className="m-0 text-heading font-semibold">
-              Cash
-            </h2>
-            <p className="m-0 text-body tabular-nums">
-              {tradeCashText(trade.cash, name)}
-            </p>
-          </section>
-          <LiabilityNotice />
-        </>
+            Review cards
+          </a>
+        </div>
       )}
       {asking ? (
         <div
@@ -863,11 +829,118 @@ export function TradeScreen({
         <div
           role="group"
           aria-label="Trade actions"
-          className="flex flex-wrap items-center gap-3 border-t border-border pt-4"
+          className={`flex flex-wrap items-center gap-3 ${phone ? "" : "border-t border-border pt-4"}`}
         >
           {answers}
         </div>
       ) : null}
+    </>
+  );
+  const note = tradeNote(trade, stale);
+  const headline = tradeHeadline(trade);
+  const record =
+    trade.other.available === true
+      ? trackRecord(trade.other.completed_trades)
+      : null;
+  // Most state headlines already name the other collector. Own closed actions ("You declined") still need context.
+  const needsParty = tradeNeedsPartyLabel(trade);
+  return frame(
+    headline,
+    <>
+      {phone && (
+        <>
+          {region}
+          {errorLine}
+        </>
+      )}
+      {(needsParty || (trade.other.friend && trade.other.handle)) && (
+        <p className="m-0 text-body">
+          {needsParty && (
+            <span className="font-semibold">Trade with {name}</span>
+          )}
+          {needsParty && " "}
+          {trade.other.friend && trade.other.handle && (
+            <a
+              className="inline-flex min-h-tap items-center text-text-muted"
+              href={`/friends/${encodeURIComponent(trade.other.handle)}`}
+              onClick={(event) => {
+                if (
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                )
+                  return;
+                event.preventDefault();
+                onNavigate(
+                  `/friends/${encodeURIComponent(trade.other.handle!)}`
+                );
+              }}
+            >
+              @{trade.other.handle}
+            </a>
+          )}
+        </p>
+      )}
+      {record && <p className="m-0 text-meta text-text-muted">{record}</p>}
+      {note && <p className="m-0 text-body text-text-muted">{note}</p>}
+      <MeetInPublicTip trade={trade} />
+      <div
+        ref={cardsRegion}
+        {...(phone
+          ? {
+              id: cardsId,
+              role: "group",
+              "aria-label": "Cards in this Trade",
+              tabIndex: -1,
+            }
+          : {})}
+        className={`grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4 ${trade.you_give.length <= 1 && trade.you_get.length <= 1 ? "phone:grid-cols-2 phone:gap-3" : "phone:grid-cols-1"}`}
+      >
+        <TradeSide
+          title="You give"
+          cards={trade.you_give}
+          side={side}
+          total={
+            trade.state === "proposed"
+              ? sideValueText(value, "you_give", trade.you_give.length > 0)
+              : null
+          }
+        />
+        <Icon
+          icon={ArrowLeftRight}
+          className="mt-12 text-text-muted phone:hidden"
+        />
+        <TradeSide
+          title="You get"
+          cards={trade.you_get}
+          match={incomingMatch.match}
+          ownNeeds={incomingMatch.needs}
+          total={
+            trade.state === "proposed"
+              ? sideValueText(value, "you_get", trade.you_get.length > 0)
+              : null
+          }
+        />
+      </div>
+      {trade.cash && (
+        <>
+          <section
+            aria-labelledby={cashId}
+            className="flex min-w-0 flex-col gap-2"
+          >
+            <h2 id={cashId} className="m-0 text-heading font-semibold">
+              Cash
+            </h2>
+            <p className="m-0 text-body tabular-nums">
+              {tradeCashText(trade.cash, name)}
+            </p>
+          </section>
+          <LiabilityNotice />
+        </>
+      )}
+      {!phone && region}
       {showsAddFriend(trade) && (
         <AddAsFriend
           tradeId={trade.offer_id}
@@ -875,9 +948,7 @@ export function TradeScreen({
           name={name}
         />
       )}
-      <p role="alert" className="m-0 text-meta text-danger empty:hidden">
-        {message}
-      </p>
+      {!phone && errorLine}
       {report.panel}
     </>,
     menu.length > 0 && (

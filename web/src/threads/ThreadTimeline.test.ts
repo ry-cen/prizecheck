@@ -447,3 +447,58 @@ it("requires both a fine pointer and hover for the shortcut hint", async () => {
     vi.clearAllMocks();
   }
 });
+
+it("shows no Retry while the chat check is open, and Retry only once the check has failed", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const allowed = await getThreadDetail("trade", "item");
+  let fail!: (reason: unknown) => void;
+  const held = new Promise<typeof allowed>((_, reject) => {
+    fail = reject;
+  });
+  vi.mocked(getThreadDetail).mockReturnValueOnce(held);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const buttonNames = () =>
+    [...host.querySelectorAll("button")].map((button) => button.textContent);
+  try {
+    await act(async () =>
+      root.render(h(ThreadTimeline, { kind: "trade", id: "item" }))
+    );
+    // The check is still open: a neutral line, and nothing to press.
+    expect(host.querySelector('[role="status"]')?.textContent).toContain(
+      "Checking chat…"
+    );
+    expect(buttonNames()).not.toContain("Retry");
+    await act(async () => fail(new TypeError("offline")));
+    // The check failed: now, and only now, Retry is offered.
+    expect(host.querySelector('[role="status"]')?.textContent).toContain(
+      "Chat couldn't be checked."
+    );
+    expect(buttonNames()).toContain("Retry");
+    // Pressing it starts a new check, which is neutral again until it answers.
+    const again = vi.mocked(getThreadDetail);
+    let release!: (value: typeof allowed) => void;
+    again.mockReturnValueOnce(
+      new Promise<typeof allowed>((resolve) => {
+        release = resolve;
+      })
+    );
+    await act(async () =>
+      [...host.querySelectorAll("button")]
+        .find((button) => button.textContent === "Retry")!
+        .click()
+    );
+    expect(host.querySelector('[role="status"]')?.textContent).toContain(
+      "Checking chat…"
+    );
+    expect(buttonNames()).not.toContain("Retry");
+    await act(async () => release(allowed));
+    expect(host.querySelector('[role="status"]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
