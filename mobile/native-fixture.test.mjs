@@ -3,21 +3,18 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createHash, randomBytes } from "node:crypto";
 import { request as httpRequest } from "node:http";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { nativeFixture, NATIVE_SECOND_CURSOR } from "./native-fixture.mjs";
 
 const b64url = (buffer) => Buffer.from(buffer).toString("base64url");
 const challengeFor = (verifier) =>
   b64url(createHash("sha256").update(verifier).digest());
 
-async function boot(options) {
-  const clock = { at: 1_800_000_000_000 };
-  const server = nativeFixture({ now: () => clock.at, ...options });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const port = server.address().port;
-  const origin = `http://127.0.0.1:${port}`;
-  // node:http, because fetch refuses to send some of the headers these tests need.
-  const call = (method, path, { headers = {}, body } = {}) =>
+// node:http, because fetch refuses to send some of the headers these tests need.
+const makeCall =
+  (port) =>
+  (method, path, { headers = {}, body } = {}) =>
     new Promise((resolve, reject) => {
       const req = httpRequest(
         { host: "127.0.0.1", port, method, path, headers },
@@ -36,6 +33,15 @@ async function boot(options) {
       req.on("error", reject);
       req.end(body);
     });
+
+async function boot(options) {
+  const clock = { at: 1_800_000_000_000 };
+  const server = nativeFixture({ now: () => clock.at, ...options });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = server.address().port;
+  const origin = `http://127.0.0.1:${port}`;
+  const call = makeCall(port);
   const close = () => new Promise((done) => server.close(done));
   return { clock, origin, call, close };
 }
@@ -472,5 +478,149 @@ test("approve validates before it rate limits, limits after 20 valid requests, a
     );
   } finally {
     await stub.close();
+  }
+});
+
+test("the stub's stdout carries only allowlisted route lines, never a request value", async () => {
+  // A child process, so its stdout is exactly the stub's and nothing else.
+  const moduleUrl = new URL("./native-fixture.mjs", import.meta.url).href;
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import { nativeFixture, stdoutLog } from ${JSON.stringify(moduleUrl)};
+       const server = nativeFixture({ log: stdoutLog });
+       server.listen(0, "127.0.0.1", () => process.stderr.write("port=" + server.address().port + "\\n"));`,
+    ],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: fileURLToPath(new URL(".", import.meta.url)),
+    }
+  );
+  let out = "";
+  child.stdout.on("data", (chunk) => (out += chunk));
+  try {
+    const port = await new Promise((resolve, reject) => {
+      let err = "";
+      child.stderr.on("data", (chunk) => {
+        err += chunk;
+        const match = /port=(\d+)/.exec(err);
+        if (match) resolve(Number(match[1]));
+      });
+      child.on("exit", () => reject(new Error("stub exited early")));
+    });
+    const stub = { origin: `http://127.0.0.1:${port}`, call: makeCall(port) };
+    const secrets = {
+      verifier: "V".repeat(43),
+      challenge: challengeFor("V".repeat(43)),
+      state: "S".repeat(43),
+      code: "C".repeat(43),
+      token: "T".repeat(43),
+      cursor: "cursor-SECRETVALUE",
+      extra: "extra-SECRETVALUE",
+    };
+    // A full flow with a known challenge and state (the real code and token are random).
+    const attempt = {
+      verifier: secrets.verifier,
+      challenge: secrets.challenge,
+      state: secrets.state,
+    };
+    const { posted } = await approve(stub, attempt);
+    const code = codeOf(posted, attempt.state);
+    secrets.code = code;
+    const exchanged = await exchange(stub, code, attempt.verifier);
+    assert.equal(exchanged.status, 200);
+    const { token } = JSON.parse(exchanged.text);
+    secrets.token = token;
+    assert.equal((await read(stub, token)).status, 200);
+    assert.equal(
+      (
+        await read(
+          stub,
+          token,
+          `/api/collection?cursor=${NATIVE_SECOND_CURSOR}`
+        )
+      ).status,
+      200
+    );
+    assert.equal(
+      (
+        await stub.call("POST", "/auth/native/sign-out", {
+          headers: { authorization: `Bearer ${token}` },
+        })
+      ).status,
+      204
+    );
+    // Malformed and unknown requests.
+    const odd = "/odd-path-SECRETVALUE/" + "x".repeat(3000);
+    await stub.call("GET", odd);
+    await stub.call("PUT", odd);
+    await stub.call("DELETE", "/auth/native/token");
+    await stub.call(
+      "GET",
+      `/auth/native/start?challenge=${secrets.challenge}&state=${secrets.state}&extra=${secrets.extra}`
+    );
+    await stub.call("POST", "/auth/native/token", {
+      headers: JSON_TYPE,
+      body: JSON.stringify({
+        code: secrets.code,
+        verifier: secrets.verifier,
+        extra: secrets.extra,
+      }),
+    });
+    await stub.call(
+      "GET",
+      `/api/collection?cursor=${secrets.cursor}&extra=${secrets.extra}`,
+      {
+        headers: { authorization: `Bearer ${secrets.token}` },
+      }
+    );
+    await stub.call("GET", `/api/other?extra=${secrets.extra}`);
+    await stub.call("POST", "/auth/native/approve", {
+      headers: { ...FORM, origin: stub.origin },
+      body: form({
+        challenge: secrets.challenge,
+        state: secrets.state,
+        nonce: "bad",
+        extra: secrets.extra,
+      }),
+    });
+    // Let the last response's finish event write its line.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const lines = out.split("\n").filter((line) => line !== "");
+    assert.ok(lines.length >= 14, `expected route lines, got ${lines.length}`);
+    const allowed =
+      /^native-fixture route=(start|approve_get|approve_post|token|collection|sign_out|other) method=(GET|POST|OTHER) status=\d{3}$/;
+    for (const line of lines) assert.match(line, allowed);
+    assert.ok(lines.some((line) => line.includes("route=other method=OTHER")));
+    for (const label of [
+      "start",
+      "approve_get",
+      "approve_post",
+      "token",
+      "collection",
+      "sign_out",
+    ])
+      assert.ok(
+        lines.some((line) => line.includes(`route=${label} `)),
+        label
+      );
+    for (const value of [
+      ...Object.values(secrets),
+      "SECRETVALUE",
+      "?",
+      "/auth",
+      "/api",
+      "odd-path",
+      "Bearer",
+    ])
+      assert.ok(
+        !out.includes(value),
+        `output must not contain ${value.slice(0, 12)}`
+      );
+  } finally {
+    child.kill();
+    await once(child, "exit");
   }
 });

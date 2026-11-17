@@ -69,7 +69,9 @@ final class NativeCredentialStore {
         var item = identity
         item[kSecValueData as String] = data
         item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
+        let status = SecItemAdd(item as CFDictionary, nil)
+        NativeStage.keychainSave.log(.status, Int(status))
+        return status == errSecSuccess
     }
 
     func delete() {

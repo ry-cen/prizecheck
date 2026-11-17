@@ -5,6 +5,13 @@ simulator_id=""
 fixture_pid=""
 native_pid=""
 cleanup() {
+  # Diagnostics only, best effort: never changes the exit status.
+  echo "== native stub route log (allowlisted lines only) =="
+  grep -E '^native-fixture route=[a-z_]+ method=(GET|POST|OTHER) status=[0-9]{3}$' .scratch/ios-native-fixture.log || true
+  if [ -n "$simulator_id" ]; then
+    echo "== native-stage log (subsystem app.prizecheck.prototype, category native-stage) =="
+    xcrun simctl spawn "$simulator_id" log show --last 60m --style compact --predicate 'subsystem == "app.prizecheck.prototype" AND category == "native-stage"' || true
+  fi
   if [ -n "$fixture_pid" ]; then kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true; fi
   if [ -n "$native_pid" ]; then kill "$native_pid" 2>/dev/null || true; wait "$native_pid" 2>/dev/null || true; fi
   if [ -n "$simulator_id" ]; then

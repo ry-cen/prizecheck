@@ -133,12 +133,30 @@ final class AuthNativeSignInUITests: XCTestCase {
             candidate.tap()
             break
         }
-        XCTAssertTrue(app.buttons[firstCard].waitForExistence(timeout: 30))
+        let firstCardAppeared = app.buttons[firstCard].waitForExistence(timeout: 30)
+        if !firstCardAppeared { reportFinalState() }
+        XCTAssertTrue(firstCardAppeared)
         app.terminate()
         app.launch()
         XCTAssertTrue(app.buttons[firstCard].waitForExistence(timeout: 30))
         app.buttons["Sign out"].tap()
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons[firstCard].exists)
+    }
+
+    /// Diagnostics only: names the state the app was left in when the first card did not appear.
+    /// Fixed labels, nothing read from the page beyond whether a known string exists.
+    private func reportFinalState() {
+        let states: [(String, Bool)] = [
+            ("unable_to_sign_in", app.staticTexts["Unable to sign in. Please try again."].exists),
+            ("signin_cancelled", app.staticTexts["Sign-in cancelled."].exists),
+            ("session_ended", app.staticTexts["Your session ended. Sign in again."].exists),
+            ("collection_error", app.staticTexts["Couldn't load your Collection. Try again."].exists),
+            ("loading", app.staticTexts["Loading your Collection…"].exists),
+            ("sign_in_button", app.buttons["Sign in"].exists)
+        ]
+        let label = states.first(where: { $0.1 })?.0 ?? "unknown"
+        print("native-ui-state=\(label)")
+        print("native-auth-sheet=\(authSheet.state == .runningForeground ? "foreground" : "not_foreground")")
     }
 }
