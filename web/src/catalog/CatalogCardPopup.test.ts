@@ -349,6 +349,66 @@ test("an Add that fails is not guarded, so Retry and a second press work at once
   });
 });
 
+// Each Edition has its own cooldown: another Edition's Add neither replaces nor clears it.
+test.each(["succeeds", "fails"])(
+  "Add on Edition A stays guarded for its own window after Edition B's Add %s",
+  async (otherOutcome) => {
+    await journey(async ({ button, host }) => {
+      const pick = async (index: number) =>
+        act(async () =>
+          [...host.querySelectorAll("button[aria-pressed]")][
+            index
+          ].dispatchEvent(new MouseEvent("click", { bubbles: true }))
+        );
+      const aDisabled = () => button("Add 1").getAttribute("aria-disabled");
+      await act(async () => button("Add 1").click());
+      expect(addToCollection).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        vi.advanceTimersByTime(ADD_GUARD_MS / 2);
+      });
+      // B's Add, which commits or fails.
+      await pick(1);
+      if (otherOutcome === "fails")
+        vi.mocked(addToCollection).mockResolvedValueOnce({
+          ok: false,
+          code: "EDITION_UNAVAILABLE",
+          editionId: "f",
+          retry: false,
+        });
+      await act(async () => button("Add 1").click());
+      expect(addToCollection).toHaveBeenCalledTimes(2);
+      // Back on A, inside its window: disabled, and the handler agrees.
+      await pick(0);
+      expect(aDisabled()).toBe("true");
+      await act(async () => button("Add 1").click());
+      expect(addToCollection).toHaveBeenCalledTimes(2);
+      // A's own window ends on schedule, whatever B did.
+      await act(async () => {
+        vi.advanceTimersByTime(ADD_GUARD_MS / 2);
+      });
+      expect(aDisabled()).toBeNull();
+      await act(async () => button("Add 1").click());
+      expect(addToCollection).toHaveBeenCalledTimes(3);
+      expect(vi.mocked(addToCollection).mock.calls[2][2]).toBe("e");
+    });
+  }
+);
+
+test("every Edition's cooldown timer is cleared when the Add row unmounts", async () => {
+  await journey(async ({ button, host, render }) => {
+    await act(async () => button("Add 1").click());
+    await act(async () =>
+      [...host.querySelectorAll("button[aria-pressed]")][1].dispatchEvent(
+        new MouseEvent("click", { bubbles: true })
+      )
+    );
+    await act(async () => button("Add 1").click());
+    const running = vi.getTimerCount();
+    await render(null);
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(running - 2);
+  });
+});
+
 test("add, retryable failure and Undo success each change the inline announcement once, with no replay on close", async () => {
   await journey(async ({ host, button, render }) => {
     const messages: string[] = [];
