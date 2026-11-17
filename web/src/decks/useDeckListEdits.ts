@@ -6,7 +6,7 @@ import {
   type DeckListChange,
   type DeckListCommandResult,
 } from "../decks_generated";
-import { useToast } from "../ui/Toast";
+import { useToast, type ToastInput } from "../ui/Toast";
 
 /**
  * One collector action on the Deck List (#177): copies to add (positive) or take off (negative) per Card Edition,
@@ -53,7 +53,9 @@ type Batch = {
 };
 
 type UndoJob = {
-  feedbackId: number;
+  /** Which saved batch this undoes, in the order batches were saved. A refusal is dropped when a newer batch has been
+   * saved, since that batch has its own Undo. Separate from `EditFeedback.id`, which names an announcement. */
+  batch: number;
   message: string;
   changes: DeckListChange[];
   /** The revision the batch answered: the inverse is refused (STALE_DECK_LIST) if the list moved since. */
@@ -185,7 +187,13 @@ export function useDeckListEdits({
   const dirty = useRef(false);
   const pumping = useRef(false);
   const toastId = useRef<number | null>(null);
+  // Names announcements: it grows only when a completed outcome is said (`say`), never for a pending state.
   const feedbackIds = useRef(0);
+  // Counts saved edit batches, for the order of Undo jobs.
+  const batchSeq = useRef(0);
+  // What the toast and the feedback line are showing, so a pending Undo can change their state and not their words.
+  const shownToast = useRef<ToastInput | null>(null);
+  const shownJob = useRef<UndoJob | null>(null);
   const [, setTick] = useState(0);
   const redraw = () => setTick((value) => value + 1);
   const [notice, setNotice] = useState<EditNotice | null>(null);
@@ -213,42 +221,59 @@ export function useDeckListEdits({
     };
   }, [kit]);
 
-  function say(
-    message: string,
-    job: UndoJob | null,
-    busy = false,
-    sticky = false
-  ) {
+  /** Says a completed outcome (a saved edit, an Undo done, uncertain or refused): always a new announcement, so the
+   * same words twice are heard twice. A pending state never comes through here, see `markUndoBusy`. */
+  function say(message: string, job: UndoJob | null, sticky = false) {
     if (!mounted.current) return;
-    const id = job?.feedbackId ?? ++feedbackIds.current;
-    const undo = job && !busy ? () => requestUndo(job) : null;
+    const id = ++feedbackIds.current;
     // An open dialog with its own feedback line (the card popup, the copy sheet) says this in the place the collector
     // is working, and the toast host is inert behind the modal, so the toast stays on screen but doesn't announce.
     const inline = !!document.querySelector(
       "dialog[open] [data-edit-feedback]"
     );
-    const input = {
+    const input: ToastInput = {
       message,
       announce: !inline,
       action: job
         ? {
             label: "Undo",
             keepOpen: true,
-            busy,
             onAction: () => requestUndo(job),
           }
         : undefined,
       sticky,
     };
-    if (busy && toastId.current !== null) kit.update(toastId.current, input);
-    else toastId.current = kit.show(input);
-    setFeedback({ id, message, undo, busy });
+    toastId.current = kit.show(input);
+    shownToast.current = input;
+    shownJob.current = job;
+    setFeedback({
+      id,
+      message,
+      undo: job ? () => requestUndo(job) : null,
+      busy: false,
+    });
+  }
+
+  /** An Undo is on its way: its button is busy, and nothing said changes. The words and the announcement stay as
+   * they were; the outcome is said by `say` when it lands. */
+  function markUndoBusy() {
+    const input = shownToast.current;
+    if (input?.action && toastId.current !== null)
+      kit.update(toastId.current, {
+        ...input,
+        action: { ...input.action, busy: true },
+      });
+    if (mounted.current)
+      setFeedbackState(
+        (current) => current && { ...current, undo: null, busy: true }
+      );
   }
 
   function requestUndo(job: UndoJob) {
     if (undoJob.current || undoing.current) return;
     undoJob.current = job;
-    say(job.message, job, true);
+    // Only the Undo the page is showing has a button to mark: a late press on an older one changes nothing on screen.
+    if (shownJob.current === job) markUndoBusy();
     void pump();
   }
 
@@ -267,7 +292,7 @@ export function useDeckListEdits({
       if (mounted.current) live.current.onResult(result);
       const message = batchMessage(batch);
       say(message, {
-        feedbackId: ++feedbackIds.current,
+        batch: ++batchSeq.current,
         message,
         changes: batch.changes.map((change) => ({
           edition_id: change.edition_id,
@@ -341,13 +366,12 @@ export function useDeckListEdits({
         return;
       }
       // A newer batch has its own toast and Undo: don't replace them with this refusal.
-      if (job.feedbackId < feedbackIds.current) return;
+      if (job.batch < batchSeq.current) return;
       say(
         cause.code === "STALE_DECK_LIST"
           ? "Can't undo: this deck changed."
           : "That Undo is no longer available.",
         null,
-        false,
         true
       );
     } finally {

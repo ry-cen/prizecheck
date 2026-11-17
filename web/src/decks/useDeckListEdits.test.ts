@@ -15,10 +15,18 @@ vi.mock("../decks_generated", async (original) => ({
   changeDeckList: vi.fn(),
 }));
 const shown = vi.hoisted(() => vi.fn((_input: { announce?: boolean }) => 1));
+const updated = vi.hoisted(() =>
+  vi.fn(
+    (
+      _id: number,
+      _input: { message: string; action?: { busy?: boolean } }
+    ) => {}
+  )
+);
 vi.mock("../ui/Toast", () => ({
   useToast: () => ({
     show: shown,
-    update: () => {},
+    update: updated,
     dismiss: () => {},
     focus: () => false,
   }),
@@ -30,6 +38,7 @@ let edits!: ReturnType<typeof useDeckListEdits>;
 beforeEach(() => {
   vi.mocked(changeDeckList).mockReset();
   shown.mockClear();
+  updated.mockClear();
 });
 afterEach(async () => {
   await act(async () => root?.unmount());
@@ -220,4 +229,125 @@ test("a saved change's toast announces, unless an open dialog's own feedback lin
   } finally {
     other.remove();
   }
+});
+
+// Announcements: one per completed outcome, silent while pending. `edits.feedback.id` names an announcement.
+const UNSURE = "Undo may not have finished. Try again to check safely.";
+async function savedThenUncertainUndo() {
+  vi.mocked(changeDeckList).mockResolvedValueOnce(SAVED);
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  const saved = edits.feedback!;
+  vi.mocked(changeDeckList).mockRejectedValueOnce(new TypeError("offline"));
+  await act(async () => edits.feedback!.undo!());
+  return saved;
+}
+function held() {
+  let answer!: (value: DeckListCommandResult) => void;
+  vi.mocked(changeDeckList).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      })
+  );
+  return (value: DeckListCommandResult) => answer(value);
+}
+
+test("retrying an uncertain Undo keeps the uncertain words while it is pending, then says its one outcome", async () => {
+  const saved = await savedThenUncertainUndo();
+  const uncertain = edits.feedback!;
+  expect(uncertain.message).toBe(UNSURE);
+  expect(uncertain.id).not.toBe(saved.id);
+  const showsBefore = shown.mock.calls.length;
+  const answer = held();
+  await act(async () => edits.feedback!.undo!());
+  // Pending: the same announcement, the same words, only busy; the toast changes in place, not by new words.
+  expect(edits.feedback).toMatchObject({
+    id: uncertain.id,
+    message: UNSURE,
+    busy: true,
+    undo: null,
+  });
+  expect(shown).toHaveBeenCalledTimes(showsBefore);
+  expect(updated.mock.lastCall![1]).toMatchObject({
+    message: UNSURE,
+    action: { busy: true },
+  });
+  await act(async () => answer(SAVED));
+  expect(edits.feedback).toMatchObject({
+    message: "Undone: Added 1 Energy.",
+    busy: false,
+  });
+  expect(edits.feedback!.id).toBeGreaterThan(uncertain.id);
+  expect(shown).toHaveBeenCalledTimes(showsBefore + 1);
+  // The same key on every try, so the server applies the Undo once.
+  const keys = vi
+    .mocked(changeDeckList)
+    .mock.calls.slice(1)
+    .map((call) => call[1].idempotency_key);
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]);
+});
+
+test("two uncertain Undos in a row are two announcements with the same words", async () => {
+  const saved = await savedThenUncertainUndo();
+  const first = edits.feedback!;
+  vi.mocked(changeDeckList).mockRejectedValueOnce(new TypeError("offline"));
+  await act(async () => edits.feedback!.undo!());
+  const second = edits.feedback!;
+  expect(second.message).toBe(first.message);
+  expect(new Set([saved.id, first.id, second.id]).size).toBe(3);
+  expect(shown).toHaveBeenCalledTimes(3);
+});
+
+test("pressing Undo keeps the saved message and its announcement, and only marks the button busy", async () => {
+  vi.mocked(changeDeckList).mockResolvedValueOnce(SAVED);
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  const saved = edits.feedback!;
+  const answer = held();
+  await act(async () => saved.undo!());
+  expect(edits.feedback).toMatchObject({
+    id: saved.id,
+    message: saved.message,
+    busy: true,
+  });
+  expect(shown).toHaveBeenCalledTimes(1);
+  expect(updated.mock.lastCall![1]).toMatchObject({
+    message: saved.message,
+    action: { busy: true },
+  });
+  await act(async () => answer(SAVED));
+  expect(edits.feedback!.message).toBe("Undone: Added 1 Energy.");
+});
+
+test("a retried Undo that is refused with no newer batch says so", async () => {
+  await savedThenUncertainUndo();
+  vi.mocked(changeDeckList).mockRejectedValueOnce(
+    new DeckError(409, "STALE_DECK_LIST")
+  );
+  await act(async () => edits.feedback!.undo!());
+  expect(edits.feedback!.message).toBe("Can't undo: this deck changed.");
+  expect(edits.feedback!.busy).toBe(false);
+});
+
+test("an Undo refused after a newer batch was saved leaves the newer batch's feedback alone", async () => {
+  vi.mocked(changeDeckList).mockResolvedValue(SAVED);
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  const older = edits.feedback!;
+  await act(async () => edits.edit(add));
+  const newer = edits.feedback!;
+  expect(newer.id).not.toBe(older.id);
+  vi.mocked(changeDeckList).mockRejectedValueOnce(
+    new DeckError(409, "STALE_DECK_LIST")
+  );
+  const showsBefore = shown.mock.calls.length;
+  await act(async () => older.undo!());
+  expect(edits.feedback).toMatchObject({
+    id: newer.id,
+    message: newer.message,
+    busy: false,
+  });
+  expect(shown).toHaveBeenCalledTimes(showsBefore);
 });
