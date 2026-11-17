@@ -43,10 +43,10 @@ export function browseEditions(query: BrowseQuery, cursor?: string | null, signa
   if (query.reprints_of) params.set('reprints_of', query.reprints_of);
   if (cursor) params.set('cursor', cursor);
   const suffix = params.toString() ? '?' + params.toString() : '';
-  return browseRequest<BrowsePage>(`/api/catalog/editions${suffix}`, signal);
+  return browseRequest<BrowsePage>(`/api/pokemon/catalog/editions${suffix}`, signal);
 }
 
 /** Every set in the active catalog, A-Z by name, for the set picker. */
 export function getCatalogSets(signal?: AbortSignal): Promise<CatalogSetList> {
-  return browseRequest<CatalogSetList>('/api/catalog/sets', signal);
+  return browseRequest<CatalogSetList>('/api/pokemon/catalog/sets', signal);
 }

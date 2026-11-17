@@ -12,6 +12,7 @@ An emitter for another app may also define ``load_openapi()``; ``write_or_check`
 the shared one.
 """
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,9 +99,28 @@ def header(script, source=True):
     return f"// Generated {origin}by scripts/{script}.py. Do not edit."
 
 
+# Pokémon-only routes the gateway also serves under /api/pokemon/ (auth/src/server.ts POKEMON_ROUTES). The OpenAPI
+# document, and every emitter's assertion on it, keep the upstream /api/<route> path; only the path an emitted client
+# calls moves. The old paths stay served during the transition (docs/planning/pokemon-api-prefix.md).
+POKEMON_ROUTES = (
+    "catalog", "collection-imports", "want-list", "missing-card-reports", "prices/editions", "trades/value",
+    "holdings/reassign", "admin/catalog-runs", "admin/missing-card-reports", "admin/catalog-reviews",
+    "admin/catalog-metadata", "admin/catalog-rules", "admin/card-attributes", "admin/card-identities",
+    "admin/reprint-groups",
+)
+# A path inside a string literal (opening quote or backtick before it, a segment boundary after it).
+_POKEMON_LITERAL = re.compile(r"""(?<=['"`])/api/((?:%s)(?=[/?'"`]))""" % "|".join(map(re.escape, POKEMON_ROUTES)))
+
+
+def pokemon_paths(text):
+    """``text`` with each quoted ``/api/<moved route>`` rewritten to ``/api/pokemon/<moved route>``."""
+    return _POKEMON_LITERAL.sub(r"/api/pokemon/\1", text)
+
+
 def assemble(lines, trailing=""):
-    """The file text: lines joined by newlines. The last line is the body, which carries its own final newline."""
-    return "\n".join(lines) + trailing
+    """The file text: lines joined by newlines, with the moved routes' paths public. The last line is the body, which
+    carries its own final newline."""
+    return pokemon_paths("\n".join(lines) + trailing)
 
 
 # Transport text. The error constructor is always (status, code, ...extra); a domain adds what its API's refusals carry.

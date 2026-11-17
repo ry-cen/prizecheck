@@ -29,31 +29,31 @@ export async function getLocations(): Promise<LocationsResponse> {
   return response.json() as Promise<LocationsResponse>;
 }
 export async function getCatalogStatus(): Promise<CatalogStatus> {
-  const response = await fetch('/api/catalog/status', { credentials: 'same-origin' });
+  const response = await fetch('/api/pokemon/catalog/status', { credentials: 'same-origin' });
   if (!response.ok) throw new Error(`Catalog status failed (${response.status})`);
   return response.json() as Promise<CatalogStatus>;
 }
 export async function getOwnerCatalogStatus(): Promise<OwnerCatalogStatus | null> {
-  const response = await fetch('/api/admin/catalog-runs', { credentials: 'same-origin' });
+  const response = await fetch('/api/pokemon/admin/catalog-runs', { credentials: 'same-origin' });
   if (response.status === 403) return null;
   if (!response.ok) throw new Error(`Owner status failed (${response.status})`);
   return response.json() as Promise<OwnerCatalogStatus>;
 }
 export async function startCatalogRun(): Promise<OwnerCatalogStatus> {
-  const response = await fetch('/api/admin/catalog-runs', { method: 'POST', credentials: 'same-origin' });
+  const response = await fetch('/api/pokemon/admin/catalog-runs', { method: 'POST', credentials: 'same-origin' });
   if (!response.ok) throw new Error(`Catalog start failed (${response.status})`);
   return response.json() as Promise<OwnerCatalogStatus>;
 }
 export async function searchCatalog(filters: { name?: string; set_id?: string; number?: string }, cursor?: string): Promise<SearchResponse> {
   const params = new URLSearchParams(filters);
   if (cursor) params.set('cursor', cursor);
-  const response = await fetch(`/api/catalog/search?${params}`, { credentials: 'same-origin' });
+  const response = await fetch(`/api/pokemon/catalog/search?${params}`, { credentials: 'same-origin' });
   if (response.status === 409) throw new Error('CATALOG_CHANGED');
   if (!response.ok) throw new Error(`Catalog search failed (${response.status})`);
   return response.json() as Promise<SearchResponse>;
 }
 export async function getPrinting(id: string): Promise<DetailResponse> {
-  const response = await fetch(`/api/catalog/printings/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
+  const response = await fetch(`/api/pokemon/catalog/printings/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
   if (!response.ok) throw new Error(`Printing detail failed (${response.status})`);
   return response.json() as Promise<DetailResponse>;
 }
@@ -68,20 +68,20 @@ async function reportRequest<T>(path: string, method = 'GET', body?: unknown): P
   return response.json() as Promise<T>;
 }
 export function getMyMissingCardReports(): Promise<ReportView[]> {
-  return reportRequest('/api/missing-card-reports');
+  return reportRequest('/api/pokemon/missing-card-reports');
 }
 export function submitMissingCardReport(body: ReportInput): Promise<ReportView> {
-  return reportRequest('/api/missing-card-reports', 'POST', body);
+  return reportRequest('/api/pokemon/missing-card-reports', 'POST', body);
 }
 export function respondToMissingCardReview(id: string, body: ReportUpdate): Promise<ReportView> {
-  return reportRequest(`/api/missing-card-reports/${encodeURIComponent(id)}`, 'PATCH', body);
+  return reportRequest(`/api/pokemon/missing-card-reports/${encodeURIComponent(id)}`, 'PATCH', body);
 }
 export function getOwnerMissingCardReports(): Promise<ReportView[]> {
-  return reportRequest('/api/admin/missing-card-reports');
+  return reportRequest('/api/pokemon/admin/missing-card-reports');
 }
 export function beginOwnerMissingCardReport(body: ReportInput): Promise<ReportView> {
-  return reportRequest('/api/admin/missing-card-reports', 'POST', body);
+  return reportRequest('/api/pokemon/admin/missing-card-reports', 'POST', body);
 }
 export function decideMissingCardReport(id: string, body: DecisionInput): Promise<ReportView> {
-  return reportRequest(`/api/admin/missing-card-reports/${encodeURIComponent(id)}/decision`, 'POST', body);
+  return reportRequest(`/api/pokemon/admin/missing-card-reports/${encodeURIComponent(id)}/decision`, 'POST', body);
 }

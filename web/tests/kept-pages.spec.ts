@@ -124,8 +124,8 @@ test("idle sign-in warms populated roots and their first opens never show loadin
     "/api/decks",
     "/api/loans",
     "/api/trades",
-    "/api/missing-card-reports",
-    "/api/catalog/editions",
+    "/api/pokemon/missing-card-reports",
+    "/api/pokemon/catalog/editions",
     "/auth/sign-ins",
     `/api/decks/${deckId}/cost`,
   ];
@@ -983,7 +983,7 @@ test("an Owner action failing after leaving cannot put its message on Catalog", 
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/admin/catalog-runs", async (route) => {
+  await page.route("**/api/pokemon/admin/catalog-runs", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     await held;
     await route.fulfill({ status: 503, json: {} });
@@ -996,7 +996,7 @@ test("an Owner action failing after leaving cannot put its message on Catalog", 
     const started = page.waitForRequest(
       (request) =>
         request.method() === "POST" &&
-        request.url().endsWith("/api/admin/catalog-runs")
+        request.url().endsWith("/api/pokemon/admin/catalog-runs")
     );
     await main(page)
       .getByRole("button", { name: "Start full pull", exact: true })
@@ -1008,7 +1008,7 @@ test("an Owner action failing after leaving cannot put its message on Catalog", 
     const failed = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
-        response.url().endsWith("/api/admin/catalog-runs")
+        response.url().endsWith("/api/pokemon/admin/catalog-runs")
     );
     release();
     await (await failed).finished();
@@ -1442,10 +1442,11 @@ test("hidden galleries do not request per-card prices or art after their warm fi
   const art: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname === "/api/prices/editions") prices.push(request.url());
+    if (url.pathname === "/api/pokemon/prices/editions")
+      prices.push(request.url());
     if (url.pathname.startsWith("/api/art/")) art.push(request.url());
   });
-  await page.route("**/api/catalog/editions", async (route) => {
+  await page.route("**/api/pokemon/catalog/editions", async (route) => {
     const response = await route.fetch();
     const body = await response.json();
     await route.fulfill({

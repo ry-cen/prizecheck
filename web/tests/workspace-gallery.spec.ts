@@ -212,7 +212,7 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
   // Once the tile price settles, selection reuses it synchronously: the inspector never shows the checking
   // label and asks for no price.
   const priced: string[][] = [];
-  await page.route("**/api/prices/editions", async (route) => {
+  await page.route("**/api/pokemon/prices/editions", async (route) => {
     const ids: string[] = route.request().postDataJSON().edition_ids;
     priced.push(ids);
     await route.fulfill({
@@ -268,7 +268,7 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
     )
   ).toBe(false);
   expect(priced.flat()).toEqual(askedBeforeClick);
-  await page.unroute("**/api/prices/editions");
+  await page.unroute("**/api/pokemon/prices/editions");
   await expect(details).toContainText("fixture · 2");
   await expect(details).not.toContainText("Fixture Set");
   await expect(copy).toContainText("Binder 2");

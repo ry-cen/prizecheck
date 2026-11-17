@@ -577,15 +577,15 @@ for (const width of [375, 1280]) {
       sawCost = resolve;
     });
     const isCost = (response: { url(): string }) =>
-      new URL(response.url()).pathname === "/api/want-list/cost";
-    await page.route("**/api/want-list", async (route) => {
+      new URL(response.url()).pathname === "/api/pokemon/want-list/cost";
+    await page.route("**/api/pokemon/want-list", async (route) => {
       if (returning) {
         sawData();
         await dataGate;
       }
       await route.continue();
     });
-    await page.route("**/api/want-list/cost**", async (route) => {
+    await page.route("**/api/pokemon/want-list/cost**", async (route) => {
       if (returning) {
         sawCost();
         await costGate;

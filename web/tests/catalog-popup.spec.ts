@@ -102,7 +102,7 @@ const status = (page: Page) => page.getByRole("main").getByRole("status");
 const isWalkStart = (url: string) => {
   const parsed = new URL(url);
   return (
-    parsed.pathname === "/api/catalog/editions" &&
+    parsed.pathname === "/api/pokemon/catalog/editions" &&
     !parsed.searchParams.has("cursor") &&
     !parsed.searchParams.has("printing_id")
   );
@@ -445,7 +445,7 @@ test.describe("desktop", () => {
     // Only the popup's read of one Printing fails (a standings rebuild, a 503); the gallery behind it still loads.
     await page.route(
       (url) =>
-        url.pathname === "/api/catalog/editions" &&
+        url.pathname === "/api/pokemon/catalog/editions" &&
         url.searchParams.has("printing_id"),
       (route) =>
         route.fulfill({

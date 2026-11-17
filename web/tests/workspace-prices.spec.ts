@@ -155,7 +155,7 @@ const REPORT = "Report a problem with this card's data";
 /** Records every price request's Edition ids and the peak number in flight. */
 async function recordPrices(page: Page) {
   const seen = { batches: [] as string[][], live: 0, peak: 0 };
-  await page.route("**/api/prices/editions", async (route) => {
+  await page.route("**/api/pokemon/prices/editions", async (route) => {
     seen.batches.push(route.request().postDataJSON().edition_ids);
     seen.live += 1;
     seen.peak = Math.max(seen.peak, seen.live);
@@ -307,7 +307,7 @@ test.describe("desktop", () => {
         updated: ago(2),
       },
     ]);
-    await page.route("**/api/prices/editions", async (route) => {
+    await page.route("**/api/pokemon/prices/editions", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
       for (const row of body.prices)
@@ -338,7 +338,7 @@ test.describe("desktop", () => {
     await hold(await createLeaf(page, `Late ${randomUUID().slice(0, 6)}`), [
       ids.normal,
     ]);
-    await page.route("**/api/prices/editions", (route) =>
+    await page.route("**/api/pokemon/prices/editions", (route) =>
       route.fulfill({
         status: 504,
         contentType: "application/json",

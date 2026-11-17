@@ -39,6 +39,8 @@ class ReleaseRuntimeRoutingTest(unittest.TestCase):
     @classmethod
     def upstream_handler(cls):
         seen = cls.seen
+        cls.bodies = []
+        bodies = cls.bodies
 
         class Upstream(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -46,6 +48,7 @@ class ReleaseRuntimeRoutingTest(unittest.TestCase):
 
             def do_GET(self):
                 seen.append((self.command, self.path))
+                bodies.append(self.rfile.read(int(self.headers.get('Content-Length', '0'))))
                 body = b'upstream'
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/plain')
@@ -104,6 +107,30 @@ class ReleaseRuntimeRoutingTest(unittest.TestCase):
                 status, body, _ = self.get(requested)
                 self.assertEqual((status, body), (200, 'upstream'), requested)
             self.assertEqual(self.seen, [('GET', target), ('GET', target + '?x=1')])
+
+    def test_the_pokemon_prefixed_paths_are_proxied_to_the_gateway_like_every_api_path(self):
+        # nginx sends /api/ to the gateway, which owns the /api/pokemon/ rewrite; the adapter passes the path through.
+        self.seen.clear()
+        for path in ('/api/pokemon/catalog/editions?q=a', '/api/catalog/editions?q=a', '/api/pokemon/want-list'):
+            self.assertEqual(self.get(path)[:2], (200, 'upstream'), path)
+        self.assertEqual(self.seen, [('GET', '/api/pokemon/catalog/editions?q=a'), ('GET', '/api/catalog/editions?q=a'),
+                                     ('GET', '/api/pokemon/want-list')])
+
+    def test_collection_import_starts_pass_a_body_over_64k_with_the_location_unchanged_on_both_paths(self):
+        # The adapter enforces no body limit (nginx and the gateway do); the old and the /api/pokemon start routes
+        # must both carry a payload between nginx's default 64k and 5 MiB, query intact, to the auth bundle.
+        payload = b'Quantity,Name\n' + b'1,Starmie\n' * 100_000
+        self.assertTrue(64 * 1024 < len(payload) < 5 * 1024 * 1024)
+        self.seen.clear()
+        self.bodies.clear()
+        for path in ('/api/collection-imports', '/api/pokemon/collection-imports'):
+            request = urllib.request.Request(f'http://127.0.0.1:{self.server.server_port}{path}?location_id=leaf-1',
+                                             data=payload, method='POST', headers={'Content-Type': 'text/csv'})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                self.assertEqual(response.status, 200)
+        self.assertEqual(self.seen, [('POST', '/api/collection-imports?location_id=leaf-1'),
+                                     ('POST', '/api/pokemon/collection-imports?location_id=leaf-1')])
+        self.assertEqual(self.bodies, [payload, payload])
 
     def test_the_crawler_files_take_get_only_and_nothing_else_changes(self):
         self.seen.clear()

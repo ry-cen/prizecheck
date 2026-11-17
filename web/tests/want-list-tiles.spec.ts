@@ -26,7 +26,7 @@ for (const width of [320, 375, 390, 960, 1280]) {
     await setLine(page, deck, ids["SVE 13"], 2);
     // A missing artwork URL exercises the same placeholder used by Collection tiles.
     await page.route(
-      (url) => url.pathname === "/api/want-list",
+      (url) => url.pathname === "/api/pokemon/want-list",
       async (route) => {
         const response = await route.fetch();
         const body = await response.json();
