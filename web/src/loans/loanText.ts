@@ -24,15 +24,24 @@ export function copiesLabel(n: number): string {
 }
 
 /**
- * Where a borrower's copies go until the handover, and where they arrived once handed over: with a Deck the lead before
- * its name ("For Charizard", "Arrived in Charizard"), without one the whole phrase ("Goes to Unsorted", "Arrived in
- * Unsorted"). Past tense after the handover, because the borrower may Move the copies later and the Loan doesn't follow.
+ * Where a borrower's copies go until they arrive, and where they arrived: with a Deck the lead before its name ("For
+ * Charizard", "Arrived in Charizard"), without one the whole phrase ("Goes to Unsorted", "Arrived in Unsorted").
+ * The copies arrive when the borrower confirms their own handover, which can come before the lender's, so this reads
+ * the borrower's confirmation (the reader's own on the borrower's side, the other collector's on the lender's) and not
+ * the Loan's state; taking the confirmation back returns the "goes" wording. Past tense after arrival, because the
+ * borrower may Move the copies later and the Loan doesn't follow them.
  */
-export function borrowedPlace(loan: Pick<LoanView, "state">): {
-  deck: string;
-  unsorted: string;
-} {
-  return loan.state === "handed_over"
+export function borrowedPlace(
+  loan: Pick<
+    LoanView,
+    "state" | "role" | "you_confirmed_handover" | "they_confirmed_handover"
+  >
+): { deck: string; unsorted: string } {
+  const borrowerConfirmed =
+    loan.role === "borrower"
+      ? loan.you_confirmed_handover
+      : loan.they_confirmed_handover;
+  return loan.state === "handed_over" || borrowerConfirmed
     ? { deck: "Arrived in", unsorted: "Arrived in Unsorted" }
     : { deck: "For", unsorted: "Goes to Unsorted" };
 }
