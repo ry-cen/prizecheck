@@ -23,6 +23,10 @@ type Props = Omit<
   badge?: string;
   /** Keep ownership above controls overlaid on the bottom of the art. */
   ownedBadgePosition?: "bottom-right" | "top-right";
+  /** Catalog's Add mode only: while the tile also has queued copies, the badge reads "×N owned", so the owned count
+   * isn't mistaken for the queued count beside it. Without queued copies, or with an explicit `badge`, nothing
+   * changes. */
+  labelOwned?: boolean;
   /** How the label and title say what is owned, by default "N owned" or "not owned". */
   ownedText?: string;
   /** A small Pill on the artwork, such as "?" for a Format Standing that is unknown, and the words the label
@@ -65,6 +69,7 @@ export function EditionTile({
   imageUrl,
   owned,
   badge,
+  labelOwned = false,
   ownedBadgePosition = "bottom-right",
   ownedText,
   flag,
@@ -108,7 +113,14 @@ export function EditionTile({
             <span
               className={`pointer-events-none ${ownedBadgePosition === "top-right" ? "order-2 ml-auto shrink-0" : "absolute right-1 bottom-1"} box-border flex h-5 min-w-5 items-center justify-center rounded-round border-2 border-solid border-bg bg-accent px-1 text-caption font-semibold leading-none text-on-accent tabular-nums`}
             >
-              {badge ?? `×${owned}`}
+              {badge ??
+                (labelOwned && queued > 0 ? (
+                  <>
+                    <span>×{owned}</span> <span className="ml-1">owned</span>
+                  </>
+                ) : (
+                  `×${owned}`
+                ))}
             </span>
           )}
           {flag && (

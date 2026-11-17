@@ -333,6 +333,7 @@ export function BorrowDraftsProvider({
         if (guard.live(tok))
           toast.show({
             message: RECOVERY_TEXT.blockedDraft.replace("{name}", name),
+            sticky: true,
           });
         return;
       }
@@ -538,7 +539,7 @@ function BorrowTray({
     if (!guard.live(tok)) return;
     if (o.kind === "done" || o.kind === "voided") noteLoansChanged();
     const message = resultText(o);
-    if (message) toast.show({ message });
+    if (message) toast.show({ message, sticky: o.kind !== "done" });
   }
 
   useLayoutEffect(() => {
@@ -755,6 +756,7 @@ function BorrowComposer({
         toast.show({
           message: sendMessage(cause, name, cardName),
           focus: true,
+          sticky: true,
         });
         return;
       }

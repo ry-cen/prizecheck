@@ -42,6 +42,10 @@ export function closeSpellings(text: string): string {
   return `No exact matches. Showing close spellings of “${text}”.`;
 }
 
+/** The empty search's one-step way out, and what it says: Collection's wording for the same state. */
+export const NO_MATCH = "No cards match this search.";
+export const CLEAR_SEARCH = "Clear search and filters";
+
 export const CATALOG_UNAVAILABLE =
   "Catalog unavailable until the first complete import.";
 export const CATALOG_REFRESHED =
@@ -102,8 +106,20 @@ const ADD_ERRORS: Record<string, string> = {
 export const ADD_UNKNOWN =
   "Your earlier add may have finished. Check your collection before adding again.";
 
-export function addFailed(code: string, retry: boolean): string {
+/** An add that got no answer while the browser says it is offline. The same add is safe to send again, so this
+ * says only what the collector can act on. A request that went out before the connection dropped is
+ * indistinguishable from one that never left, so this is used only when the browser reports offline. */
+export const ADD_OFFLINE = "You're offline. Add again when you're back online.";
+
+/** The popup's Add result when it failed. `offline` is the browser's own report (`navigator.onLine === false`); it
+ * changes the wording only for a send that got no answer from the server (an empty `code`). */
+export function addFailed(
+  code: string,
+  retry: boolean,
+  offline = false
+): string {
   if (code === "REPLAY_OUTCOME_UNAVAILABLE") return ADD_UNKNOWN;
+  if (retry && offline && code === "") return ADD_OFFLINE;
   if (retry) return "Add may have completed. Press Add again to check safely.";
   return ADD_ERRORS[code] ?? "Add failed. Please retry.";
 }
