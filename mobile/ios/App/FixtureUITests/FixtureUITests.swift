@@ -100,7 +100,8 @@ final class FixtureUITests: XCTestCase {
 // The opt-in native sign-in, against the loopback stub on 127.0.0.1:4320 (mobile/native-fixture.mjs).
 // The launch argument is honoured only by Debug builds, and only for a loopback origin.
 // Sample data only: no real account, credential or gateway.
-final class NativeSignInUITests: XCTestCase {
+// The "Auth" prefix makes this class sort before FixtureUITests, so XCTest runs it first.
+final class AuthNativeSignInUITests: XCTestCase {
     let app = XCUIApplication(bundleIdentifier: "app.prizecheck.prototype")
     let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
     let authSheet = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
