@@ -7,9 +7,12 @@ import type { EditFeedback } from "./useDeckListEdits";
  * blocked (a Deck List can go over 60); −1 stops at none.
  */
 export function DeckListStepper({
+  cardName,
   quantity,
   onChange,
 }: {
+  /** The card the buttons change, so a screen reader hears "Remove one Tangela", not "−1". */
+  cardName: string;
   quantity: bigint;
   onChange: (delta: bigint) => void;
 }) {
@@ -19,14 +22,20 @@ export function DeckListStepper({
       aria-label="Deck List copies"
       className="flex flex-wrap items-center gap-2"
     >
-      <Button disabled={quantity <= 0n} onClick={() => onChange(-1n)}>
+      <Button
+        aria-label={`Remove one ${cardName}`}
+        disabled={quantity <= 0n}
+        onClick={() => onChange(-1n)}
+      >
         −1
       </Button>
       <span aria-live="polite" className="text-body tabular-nums">
         <strong className="font-semibold">{quantity.toString()}</strong> on Deck
         List
       </span>
-      <Button onClick={() => onChange(1n)}>+1</Button>
+      <Button aria-label={`Add one ${cardName}`} onClick={() => onChange(1n)}>
+        +1
+      </Button>
     </div>
   );
 }

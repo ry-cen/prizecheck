@@ -6,6 +6,7 @@ import {
   revokeDeck,
   setPublicationVisibility,
 } from "../publications_generated";
+import { Link2 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/TextField";
@@ -147,6 +148,17 @@ export function PublishDialog({
     }
   }
 
+  /** Copies the public link, as the Published Deck page's Share does: where the clipboard refuses, the link is shown to copy by hand. */
+  async function copyLink(token: string) {
+    const url = `${window.location.origin}/published/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setMessage("Link copied.");
+    } catch {
+      setMessage(`Copy this link: ${url}`);
+    }
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
     void act(status?.token ? "republish" : "publish");
@@ -190,14 +202,22 @@ export function PublishDialog({
                 <strong className="font-semibold">{status.title}</strong> ·{" "}
                 {visibilityText(status.visibility)} · version {status.version}
               </p>
-              <a
-                href={`/published/${status.token}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex min-h-control items-center self-start text-control text-accent-strong underline phone:min-h-tap"
-              >
-                View public snapshot
-              </a>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <a
+                  href={`/published/${status.token}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex min-h-control items-center text-control text-accent-strong underline phone:min-h-tap"
+                >
+                  View public snapshot
+                </a>
+                <Button
+                  icon={Link2}
+                  onClick={() => void copyLink(status.token!)}
+                >
+                  Copy link
+                </Button>
+              </div>
             </div>
           )}
           <form onSubmit={submit} className="flex flex-col gap-2">

@@ -90,3 +90,29 @@ test("Delete still calls onRemove", () => {
   key(buttons[0], "Delete");
   expect(onRemove).toHaveBeenCalledOnce();
 });
+test("a section heading's accessible name reads as one phrase, with no stray space before the comma", () => {
+  root = createRoot(host);
+  const group = (key: string, title: string, copies: bigint) => ({
+    key,
+    kind: key,
+    title,
+    copies,
+    lines: [],
+  });
+  act(() =>
+    root.render(
+      createElement(DeckListBody, {
+        view: "list",
+        groups: [group("p", "Pokémon", 16n), group("s", "Supporters", 1n)],
+        onOpen: vi.fn(),
+      })
+    )
+  );
+  const headings = [...host.querySelectorAll("h3")];
+  expect(headings.map((heading) => heading.getAttribute("aria-label"))).toEqual(
+    ["Pokémon, 16 cards", "Supporters, 1 card"]
+  );
+  // The visible text is unchanged: the title and the number.
+  expect(headings[0]!.textContent).toContain("Pokémon");
+  expect(headings[0]!.textContent).toContain("16");
+});
