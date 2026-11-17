@@ -130,7 +130,15 @@ export function useAddToast({ shown, onUndone }: Options) {
         return;
       }
       if (turn())
-        show("Couldn't dismiss this Undo. Try again.", added, false, undoable);
+        // Without an Undo to press it has no action, and no other copy: it stays until dismissed.
+        show(
+          "Couldn't dismiss this Undo. Try again.",
+          added,
+          false,
+          undoable,
+          true,
+          !undoable
+        );
     });
   }
 

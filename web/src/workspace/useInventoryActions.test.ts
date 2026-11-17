@@ -1141,6 +1141,86 @@ test("owned Move success whose list read failed still dismisses its record", asy
   await render(opts).closeToast();
   expect(dismissUndo).toHaveBeenCalledExactlyOnceWith("removal");
 });
+/** The Undo list read, held open until the test lets it answer. */
+function heldUndoList() {
+  let answer!: (entries: (typeof older)[]) => void;
+  vi.mocked(listUndo).mockReturnValueOnce(
+    new Promise((resolve) => {
+      answer = resolve;
+    })
+  );
+  return answer;
+}
+const settle = async () => {
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+};
+
+test.each([
+  { name: "an Undo record", mine: true },
+  { name: "no Undo record", mine: false },
+])(
+  "a Move confirmation whose Undo list read is still out stays up, then takes $name from the answer",
+  async ({ mine }) => {
+    const { commitMove } = await import("../moves_generated");
+    vi.mocked(commitMove).mockResolvedValueOnce({
+      copy_count: "2",
+      edition_count: 1,
+      source_count: 1,
+      already_at_destination_count: "0",
+      owner_revision: 2,
+      undo_id: "moved",
+    });
+    const opts = { ...options(), active: false };
+    render(opts);
+    const answer = heldUndoList();
+    const moving = render(opts).dropMove("dest", {
+      groups: owned,
+      borrowed: [],
+    });
+    await vi.waitFor(() => expect(render(opts).toast).not.toBeNull());
+    // Still waiting on the list: the toast must not leave (sticky), or the late answer has nothing to attach Undo to.
+    expect(render(opts).toast?.message).toContain("Moved 2 copies");
+    expect(render(opts).toast?.entry).toBeNull();
+    expect(render(opts).toast?.sticky).toBe(true);
+    answer(mine ? [{ ...older, id: "moved" }] : [older]);
+    await moving;
+    const toast = render(opts).toast;
+    expect(toast?.entry?.id).toBe(mine ? "moved" : undefined);
+    // With Undo it has an action and stays; without, its 5 s starts now.
+    expect(toast?.sticky).toBeFalsy();
+  }
+);
+
+test.each([
+  { name: "an Undo record", mine: true },
+  { name: "no Undo record", mine: false },
+])(
+  "a batch add's confirmation (fallback path) stays up while its Undo list read is out, then takes $name",
+  async ({ mine }) => {
+    const opts = options();
+    render(opts);
+    await settle();
+    const answer = heldUndoList();
+    const adding = render(opts).added({
+      locationId: "source",
+      path: "Box",
+      copies: 1,
+      items: [],
+      ownerRevision: 1,
+      undoId: "new",
+      from: "bar",
+    });
+    await settle();
+    expect(render(opts).toast?.entry).toBeNull();
+    expect(render(opts).toast?.sticky).toBe(true);
+    answer(mine ? [{ ...older, id: "new" }] : [older]);
+    await adding;
+    const toast = render(opts).toast;
+    expect(toast?.entry?.id).toBe(mine ? "new" : undefined);
+    expect(toast?.sticky).toBeFalsy();
+  }
+);
+
 test("mixed Move success has no record to dismiss", async () => {
   vi.mocked(commitMoveWithoutUndo).mockResolvedValueOnce({
     copy_count: "2",
