@@ -34,3 +34,35 @@ it("marks the empty title for initial focus and explains the publish requirement
     "The name shown on the Published Deck. You need one to publish."
   );
 });
+
+function markup(token: string | null) {
+  const host = document.createElement("div");
+  host.innerHTML = renderToStaticMarkup(
+    h(PublishDialog, {
+      open: true,
+      onClose: () => {},
+      returnFocus: createRef<HTMLElement>(),
+      deckId: "deck",
+      publication: {
+        kind: "ready",
+        status: token
+          ? { token, version: 1, title: "Mine", visibility: "unlisted" }
+          : { token: null, version: null, title: null, visibility: null },
+      },
+      onReload: async () => {},
+      blocked: null,
+      onNotLegal: () => {},
+    })
+  );
+  return host;
+}
+const names = (host: HTMLElement) =>
+  [...host.querySelectorAll("a, button")].map((el) => el.textContent?.trim());
+
+it("offers Copy link beside View public snapshot once published, and not before", () => {
+  expect(names(markup("tok"))).toEqual(
+    expect.arrayContaining(["View public snapshot", "Copy link"])
+  );
+  expect(names(markup(null))).not.toContain("Copy link");
+  expect(names(markup(null))).not.toContain("View public snapshot");
+});

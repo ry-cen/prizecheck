@@ -144,6 +144,7 @@ export function CopySheet({
           {editing && (
             <div className="flex flex-col gap-1">
               <DeckListStepper
+                cardName={line.line.name}
                 quantity={editing.quantity}
                 onChange={editing.onChange}
               />

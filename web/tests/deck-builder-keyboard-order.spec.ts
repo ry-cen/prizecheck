@@ -327,7 +327,9 @@ test.describe("desktop", () => {
     await library.getByRole("button", { name: /^Pikachu, / }).click();
     const sheet = page.getByRole("dialog", { name: "Pikachu", exact: true });
     for (let i = 0; i < 2; i++) {
-      await sheet.getByRole("button", { name: "+1", exact: true }).click();
+      await sheet
+        .getByRole("button", { name: "Add one Pikachu", exact: true })
+        .click();
       await expect
         .poll(() => listed(built))
         .toEqual({ "edit-1": 3, "edit-3": 3 + i });
@@ -373,7 +375,9 @@ test.describe("new Library line", () => {
       .getByRole("button", { name: /^Charmander, set-c 9, Gamma Set/ })
       .click();
     const sheet = page.getByRole("dialog", { name: "Charmander", exact: true });
-    await sheet.getByRole("button", { name: "+1", exact: true }).click();
+    await sheet
+      .getByRole("button", { name: "Add one Charmander", exact: true })
+      .click();
     await expect
       .poll(() => listed(built))
       .toEqual({ "edit-1": 3, "edit-3": 2, "edit-2": 1 });
@@ -403,7 +407,9 @@ test.describe("phone", () => {
     await copies(page, "Pikachu").first().click();
     const sheet = page.getByRole("dialog", { name: "Pikachu", exact: true });
     for (let i = 0; i < 2; i++) {
-      await sheet.getByRole("button", { name: "+1", exact: true }).click();
+      await sheet
+        .getByRole("button", { name: "Add one Pikachu", exact: true })
+        .click();
       await expect
         .poll(() => listed(built))
         .toEqual({ "edit-1": 3, "edit-3": 3 + i });

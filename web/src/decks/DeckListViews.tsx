@@ -146,6 +146,7 @@ export function DeckListBody({
         <section key={group.key} aria-labelledby={`${base}-group-${index}`}>
           <h3
             id={`${base}-group-${index}`}
+            aria-label={`${group.title}, ${group.copies.toString()} ${group.copies === 1n ? "card" : "cards"}`}
             className="m-0 mb-2 flex items-baseline gap-2 text-meta font-semibold text-text-muted"
           >
             {group.title}

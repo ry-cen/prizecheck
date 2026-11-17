@@ -99,7 +99,11 @@ export function LibraryCardPopup({
           <Legality standing={row.standing} />
           <div className="flex flex-col gap-1.5">
             <h3 className={HEADING}>Deck List</h3>
-            <DeckListStepper quantity={quantity} onChange={onChange} />
+            <DeckListStepper
+              cardName={row.name}
+              quantity={quantity}
+              onChange={onChange}
+            />
             <EditFeedbackLine feedback={feedback} since={since} />
           </div>
         </>
