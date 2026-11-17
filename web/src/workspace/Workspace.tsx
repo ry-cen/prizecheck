@@ -435,10 +435,21 @@ export function Workspace({
   const sheetActionOpener = useRef<HTMLButtonElement | null>(null);
   const sheetActionCard = useRef<typeof selection.details>(null);
   const [sheetActionDone, setSheetActionDone] = useState(false);
+  // A sheet or aside action ends on Cancel, Escape, success or failure of the dialog: nothing of it may
+  // outlive that, or a later selection-bar dialog would act on the stale opener.
+  function endSheetAction() {
+    sheetAction.current = null;
+    sheetActionOpener.current = null;
+    sheetActionCard.current = null;
+    asideAction.current = false;
+    asideRouted.current = false;
+    keepAsideCard.current = false;
+  }
   function openSheetAction(kind: "move" | "remove", opener: HTMLButtonElement) {
     const subject = selection.details ?? (mobile ? null : selection.inspected);
     if (!subject || actions.busy || actions.dialog) return;
     if (kind === "remove" && subject.holding.borrowed) return;
+    asideReturn.current = null;
     asideAction.current = selection.details === null;
     asideRouted.current = asideAction.current && selection.selected.size === 0;
     sheetActionOpener.current = opener;
@@ -451,18 +462,20 @@ export function Workspace({
     if (actions.busy && !forced) return;
     actions.closeDialog(forced);
     const restore = sheetAction.current;
-    sheetAction.current = null;
-    keepAsideCard.current = asideAction.current && asideRouted.current;
-    if (asideAction.current) asideReturn.current = sheetActionOpener.current;
+    // Only a sheet or aside action restores a selection or returns focus; a selection-bar dialog has
+    // neither and leaves focus to the actions hook (Actions).
+    const aside = restore !== null && asideAction.current;
+    keepAsideCard.current = aside && asideRouted.current;
+    if (aside) asideReturn.current = sheetActionOpener.current;
     restore?.();
-    keepAsideCard.current = false;
+    endSheetAction();
   }
   useEffect(() => {
     if (actions.dialog || !sheetAction.current) return;
-    sheetAction.current = null;
     // Completion must schedule a commit even if the reload already removed the routed details.
     setSheetActionDone(true);
     if (!asideAction.current) selection.closeDetails();
+    endSheetAction();
   }, [actions.dialog, selection.closeDetails]);
   // Cancelling from the aside puts focus back on the button that opened the dialog. The actions hook
   // sends it to the selection bar's Actions button when a dialog closes, so this runs after that effect.
