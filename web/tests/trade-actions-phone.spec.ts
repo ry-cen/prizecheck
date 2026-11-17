@@ -1,7 +1,7 @@
 // Hill-climb m12 s3 (Opus m11 F4): on a phone a Trade's decision actions stay within reach. Jordan counters Priya's
 // proposal with five card lines, so Priya's Accept, Counter and Decline would sit well below the first screen; on a
 // phone they come first, under the heading, after a one-line count of the copies and a Review cards link, and the
-// builder's Jump to Send takes a keyboard or screen-reader collector to Send. Desktop keeps its own layout. The catalog
+// builder's Jump to Send, a visible link, takes any collector to Send. Desktop keeps its own layout. The catalog
 // is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
@@ -204,21 +204,24 @@ test("phone: Counter opens the builder, and Jump to Send takes focus to Send", a
     "Counter to Jordan P"
   );
   const send = main.getByRole("button", { name: "Send Counter" });
+  await expectPageChecks(page, "the Counter builder on a phone");
+
+  // Jump to Send is a visible 44 px link near the top: one tap from the first screen, no programmatic focus, takes
+  // focus to the Send group and brings Send into view.
+  const jump = main.getByRole("link", { name: "Jump to Send" });
+  expect(await page.evaluate(() => scrollY)).toBe(0);
+  await expect(jump).toBeInViewport({ ratio: 1 });
+  await expectTouchTarget(jump);
+  await expect(send).not.toBeInViewport();
+  await jump.tap();
+  const group = main.getByRole("group", { name: "Send", exact: true });
+  await expect(group).toBeFocused();
+  await expect(send).toBeInViewport({ ratio: 1 });
   await main
     .getByRole("button", { name: /^Increase .* you give$/ })
     .first()
     .tap();
   await expect(send).toBeEnabled();
-  await expectPageChecks(page, "the Counter builder on a phone");
-
-  // The link is a skip link: it shows when focused, and Enter moves focus to the Send group.
-  const jump = main.getByRole("link", { name: "Jump to Send" });
-  await jump.focus();
-  await expect(jump).toBeInViewport();
-  await jump.press("Enter");
-  const group = main.getByRole("group", { name: "Send", exact: true });
-  await expect(group).toBeFocused();
-  await expect(send).toBeInViewport({ ratio: 1 });
   await send.tap();
   await expect(
     page.getByRole("region", { name: "Notifications" })

@@ -841,3 +841,90 @@ it("on a phone, puts one action group with a copy count and Review cards before 
   expect(document.activeElement).toBe(sure.querySelector("p"));
   expect(host.querySelectorAll('[aria-label="Trade actions"]')).toHaveLength(0);
 });
+
+it.each([
+  [
+    "you pay, with cards both ways",
+    { payer: "you", cents: "500" },
+    3,
+    1,
+    "You give 3 cards and $5.00 · You get 1 card",
+  ],
+  [
+    "they pay, with cards both ways",
+    { payer: "them", cents: "1250" },
+    3,
+    1,
+    "You give 3 cards · You get 1 card and $12.50",
+  ],
+  [
+    "you pay and get cards only",
+    { payer: "you", cents: "500" },
+    0,
+    2,
+    "You give $5.00 · You get 2 cards",
+  ],
+  [
+    "they pay and you give cards only",
+    { payer: "them", cents: "1250" },
+    2,
+    0,
+    "You give 2 cards · You get $12.50",
+  ],
+  ["no cash", null, 2, 1, "You give 2 cards · You get 1 card"],
+] as const)(
+  "on a phone the summary before Accept includes the cash: %s",
+  async (_, cash, give, get, text) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(max-width: 760px)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const line = (edition_id: string, copies: number) => ({
+      edition_id,
+      name: edition_id,
+      set_code: "PAL",
+      set_name: "Paldea Evolved",
+      collector_number: "185",
+      descriptor: { finish: "normal" },
+      image_url: null,
+      copies: String(copies),
+    });
+    // Three printings of copies split across lines: copies are counted, not lines.
+    const lines = (n: number, prefix: string) =>
+      n === 0
+        ? []
+        : n === 3
+          ? [line(`${prefix}1`, 2), line(`${prefix}2`, 1)]
+          : [line(`${prefix}1`, n)];
+    vi.mocked(getTrade).mockResolvedValue({
+      ...trade,
+      actions: ["accept", "counter", "decline"],
+      you_give: lines(give, "g"),
+      you_get: lines(get, "r"),
+      cash,
+    });
+    await act(async () =>
+      root.render(
+        h(ToastProvider, {
+          children: h(TradeScreen, {
+            tradeId: "item",
+            onAllTrades: vi.fn(),
+            onNavigate: vi.fn(),
+          }),
+        })
+      )
+    );
+    const summary = [...host.querySelectorAll("p")].find((p) =>
+      p.textContent?.startsWith("You give")
+    )!;
+    expect(summary.textContent).toBe(text);
+    const actions = host.querySelector('[aria-label="Trade actions"]')!;
+    expect(
+      !!(
+        summary.compareDocumentPosition(actions) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    ).toBe(true);
+  }
+);
