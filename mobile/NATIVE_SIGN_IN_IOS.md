@@ -29,7 +29,7 @@ No URL scheme, App Transport Security, CSP (`connect-src 'none'` still holds: th
 
 `node mobile/native-fixture.mjs` listens on **127.0.0.1:4320 only** and mirrors the gateway contract with in-memory state: one sample collector who is always signed in (so no provider step), the consent page, approve, the PKCE token exchange, `GET /api/collection` with two sample pages (Bulbasaur and Charmander, then Squirtle), and sign-out. It holds no credentials and logs nothing about requests. `mobile/native-fixture.test.mjs` runs the contract over HTTP, including a wrong verifier, single-use codes, expiry and the bearer's scope rules.
 
-`mobile/validate-simulator.sh` starts and stops the stub next to the existing demo fixture and checks that the listener is on loopback. `NativeSignInUITests.testNativeSignInRestoreAndSignOut` launches with `-PrizecheckGatewayOrigin http://127.0.0.1:4320`, signs in (the system "Continue" alert if iOS shows one, then **Allow**), sees the first card, terminates and relaunches to see it again, then signs out. The five demo tests are unchanged and launch without the argument.
+`mobile/validate-simulator.sh` starts and stops the stub next to the existing demo fixture and checks that the listener is on loopback. `AuthNativeSignInUITests.testNativeSignInRestoreAndSignOut` launches with `-PrizecheckGatewayOrigin http://127.0.0.1:4320`, signs in (the system "Continue" alert if iOS shows one, then **Allow**), sees the first card, terminates and relaunches to see it again, then signs out. The five demo tests are unchanged and launch without the argument.
 
 ## Local checks (Linux)
 

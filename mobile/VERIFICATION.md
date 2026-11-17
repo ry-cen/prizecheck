@@ -110,3 +110,9 @@ A new `testCollectionShowMoreAndRefresh` UI scenario was added, and the existing
 [Run 43859035800](https://github.com/ry-cen/prizecheck/actions/runs/43859035800) at `68aa863b` passed **5 of 5, with 0 failed and 0 skipped**, on the iPhone 17 simulator (iOS 26.2). The job took about 16 minutes against its 25-minute timeout. Linux Verify for that PR head passed 2,988 unit tests and 678 tooling tests, with three historical migration tests skipped in the shallow checkout.
 
 The next commit waits for Collection tiles instead of checking them at once. The pull request records the hosted result for that head. Native 30-minute expiry, so the session-ended message reached by expiry, is still unit-tested only.
+
+### Hosted run 44036494533 — bd0a89ca
+
+[Run 44036494533](https://github.com/ry-cen/prizecheck/actions/runs/44036494533) at `bd0a89ca` reported `TEST BUILD SUCCEEDED`. The five demo tests passed: `testAppCancellationAfterNativeResume` 78 s, `testBrowserCancellationAndError` 55 s, `testColdBrowserReturn` 39 s, `testCollectionShowMoreAndRefresh` 38 s and `testWarmBrowserReturnRecoveryAndSignOut` 69 s. The native sign-in test was cancelled by the 25-minute job timeout after 19 s, so it has no result.
+
+XCTest runs classes in alphabetical order, so the native class ran last. It is renamed `AuthNativeSignInUITests` to run first; the timeout and runner are unchanged.
