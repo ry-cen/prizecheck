@@ -11,7 +11,7 @@ export function DeckListStepper({
   quantity,
   onChange,
 }: {
-  /** The card the buttons change, so a screen reader hears "Remove one Tangela", not "−1". */
+  /** The card the buttons change, named label-first (WCAG 2.5.3): "−1, Remove one Tangela". */
   cardName: string;
   quantity: bigint;
   onChange: (delta: bigint) => void;
@@ -23,7 +23,7 @@ export function DeckListStepper({
       className="flex flex-wrap items-center gap-2"
     >
       <Button
-        aria-label={`Remove one ${cardName}`}
+        aria-label={`−1, Remove one ${cardName}`}
         disabled={quantity <= 0n}
         onClick={() => onChange(-1n)}
       >
@@ -33,7 +33,10 @@ export function DeckListStepper({
         <strong className="font-semibold">{quantity.toString()}</strong> on Deck
         List
       </span>
-      <Button aria-label={`Add one ${cardName}`} onClick={() => onChange(1n)}>
+      <Button
+        aria-label={`+1, Add one ${cardName}`}
+        onClick={() => onChange(1n)}
+      >
         +1
       </Button>
     </div>
