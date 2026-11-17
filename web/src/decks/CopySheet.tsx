@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useRef, type RefObject } from "react";
 import type { BrowseEdition } from "../catalog_browse_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -7,7 +7,7 @@ import { kindText } from "../games/pokemon/deckGroups";
 import { copyStateText, editionText, type DeckLine } from "./deckListModel";
 import { DeckListStepper, EditFeedbackLine } from "./DeckListStepper";
 import { SwapList } from "./SwapList";
-import type { EditFeedback } from "./useDeckListEdits";
+import type { EditFeedback, EditNotice } from "./useDeckListEdits";
 
 type Props = {
   /** The line shown, or null while closed. */
@@ -21,13 +21,18 @@ type Props = {
   /** Editing (#177). Without it the sheet is read-only. */
   editing?: {
     deckId: string;
-    /** Copies of the line's Edition on the Deck List, edits on their way included. */
+    /** Copies of the line's Edition on the Deck List, edits on their way included but not one whose outcome is unknown. */
     quantity: bigint;
+    /** A change to this Edition sent without an answer, which may not have been saved (0 when none). */
+    unconfirmed: bigint;
     /** −1 or +1 on the line. */
     onChange: (delta: bigint) => void;
     /** Swap this copy for a functionally identical Edition. */
     onSwap: (row: BrowseEdition) => void;
     feedback: EditFeedback | null;
+    /** Why the last change didn't land, and Try again when its outcome is unknown: the page's banner is behind this
+     * sheet, so the sheet shows it. */
+    notice: EditNotice | null;
     /** Feedback with this id or lower came before the sheet opened. */
     since: number;
   };
@@ -55,6 +60,7 @@ export function CopySheet({
   editing,
   cover,
 }: Props) {
+  const editArea = useRef<HTMLDivElement>(null);
   const copy =
     line && ordinal !== null && line.copies
       ? (line.copies.find((item) => item.ordinal === ordinal) ?? null)
@@ -142,16 +148,41 @@ export function CopySheet({
             </ul>
           </section>
           {editing && (
-            <div className="flex flex-col gap-1">
+            <div ref={editArea} className="flex flex-col gap-1">
               <DeckListStepper
                 cardName={line.line.name}
                 quantity={editing.quantity}
+                unconfirmed={editing.unconfirmed}
                 onChange={editing.onChange}
               />
               <EditFeedbackLine
                 feedback={editing.feedback}
                 since={editing.since}
               />
+              {/* Always present, so its words are announced politely when they arrive. */}
+              <p
+                role="status"
+                data-edit-notice
+                className="m-0 text-meta text-warning empty:hidden"
+              >
+                {editing.notice?.text ?? ""}
+              </p>
+              {editing.notice?.retry && (
+                <Button
+                  className="self-start"
+                  onClick={() => {
+                    // The button leaves with the notice: keep focus on the stepper rather than losing it.
+                    editArea.current
+                      ?.querySelector<HTMLElement>(
+                        "[role='group'] button:last-of-type"
+                      )
+                      ?.focus();
+                    editing.notice?.retry?.();
+                  }}
+                >
+                  Try again
+                </Button>
+              )}
             </div>
           )}
           {onGather && line.elsewhere > 0n && (

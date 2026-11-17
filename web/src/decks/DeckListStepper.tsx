@@ -9,11 +9,14 @@ import type { EditFeedback } from "./useDeckListEdits";
 export function DeckListStepper({
   cardName,
   quantity,
+  unconfirmed = 0n,
   onChange,
 }: {
   /** The card the buttons change, named label-first (WCAG 2.5.3): "−1, Remove one Tangela". */
   cardName: string;
   quantity: bigint;
+  /** A change sent without an answer, which may not have been saved: marked beside the count, which doesn't include it. */
+  unconfirmed?: bigint;
   onChange: (delta: bigint) => void;
 }) {
   return (
@@ -39,6 +42,13 @@ export function DeckListStepper({
       >
         +1
       </Button>
+      {unconfirmed !== 0n && (
+        <span className="text-meta text-warning">
+          {unconfirmed > 0n ? "+" : "−"}
+          {(unconfirmed < 0n ? -unconfirmed : unconfirmed).toString()} not
+          confirmed
+        </span>
+      )}
     </div>
   );
 }

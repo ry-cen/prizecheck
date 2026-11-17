@@ -542,6 +542,31 @@ export function DeckBuilderPage({
     )
       onNavigate(sheetClosedAddress, { replace: true, preserveScroll: true });
   }, [load.kind, editionId, copy, sheetLine, sheetClosedAddress, onNavigate]);
+  // A change that failed while the copy sheet was open was explained inside it. When the sheet closes, the page's
+  // banner takes focus, which brings it into view; a failure that arrives with the sheet already closed is scrolled to
+  // if it would sit off screen (focus stays with the collector).
+  const editBanner = useRef<HTMLDivElement>(null);
+  const sheetNotice = useRef<{
+    open: boolean;
+    opened: typeof edits.notice;
+    last: typeof edits.notice;
+  }>({ open: false, opened: null, last: null });
+  useEffect(() => {
+    const was = sheetNotice.current;
+    const notice = edits.notice;
+    const banner = editBanner.current;
+    if (sheetLine && !was.open) {
+      sheetNotice.current = { open: true, opened: notice, last: notice };
+      return;
+    }
+    sheetNotice.current = { ...was, open: sheetLine !== null, last: notice };
+    if (sheetLine || !banner || !notice) return;
+    if (was.open && notice !== was.opened) {
+      (banner.querySelector("button") ?? banner).focus();
+    } else if (!was.open && notice !== was.last) {
+      banner.scrollIntoView?.({ block: "nearest" });
+    }
+  });
   // Let the history traversal finish closing the sheet before opening the Pick List.
   useEffect(() => {
     if (!sheetLine && pendingGather.current) {
@@ -766,7 +791,11 @@ export function DeckBuilderPage({
       )}
       {edits.notice && (
         <div
-          role="alert"
+          ref={editBanner}
+          tabIndex={-1}
+          // Behind the copy sheet the sheet's own line says it, politely; the banner announces only when the page is
+          // what the collector is looking at.
+          role={sheetLine ? undefined : "alert"}
           className="flex flex-wrap items-center gap-3 text-body text-warning"
         >
           <p className="m-0">{edits.notice.text}</p>
@@ -818,12 +847,14 @@ export function DeckBuilderPage({
             ? {
                 deckId,
                 quantity: edits.quantityOf(sheetLine.line.edition_id),
+                unconfirmed: edits.uncertainOf(sheetLine.line.edition_id),
                 onChange: (delta) => {
                   if (delta < 0n) refocus.current = [sheetLine.line.edition_id];
                   step(sheetLine.line.edition_id, sheetLine.line.name, delta);
                 },
                 onSwap: (row) => swap(sheetLine, row),
                 feedback: edits.feedback,
+                notice: edits.notice,
                 since: sheetSince,
               }
             : undefined
