@@ -2,7 +2,11 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { expect, test as plain, type Page } from "@playwright/test";
 import { Pool } from "pg";
-import { test } from "./support/collectors";
+import {
+  test,
+  type OtherCollector,
+  type OtherCollectorOptions,
+} from "./support/collectors";
 import { api, createDeck, ORIGIN, seedCatalog, setLine } from "./support/loans";
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner } from "./support/sign-in";
@@ -546,5 +550,157 @@ for (const surface of ["copy sheet on a phone", "library popup on a desktop"]) {
       "Undone: Removed 1 Iono.",
     ]);
     expect(await sameElement()).toBe(true);
+  });
+}
+
+// One announcement per outcome, silence while it is pending. A retried Undo, and a failed change tried again, are the
+// places a pending state used to say words (the Undo's original success came back while it ran). `watch` records every
+// addition to a live region a screen reader would speak; the phone copy sheet says it in its own status line, a desktop
+// Deck card in the toast, and a failed change in the sheet's notice line or the page's banner.
+const CHANGES = /\/api\/decks\/[^/]+\/deck-list\/changes/;
+
+/** What was said since `mark`, leaving out the Deck's legality summary ("Standard: Not legal, 3 issues"), which the
+ * desktop page redraws after every change: a result of the edit, and not the words about the edit that these cases are
+ * about. */
+const spokenSince = async (page: Page, mark: number) =>
+  (await since(page, mark)).filter(
+    (text) => !/^(Standard|Expanded|GLC): /.test(text)
+  );
+
+for (const surface of ["phone copy sheet", "desktop Deck card"]) {
+  const phone = surface.startsWith("phone");
+  async function open(collectors: {
+    signIn: (options?: OtherCollectorOptions) => Promise<OtherCollector>;
+  }) {
+    const ids = seedCatalog();
+    const { page } = await collectors.signIn({
+      contextOptions: phone
+        ? { viewport: PHONE, hasTouch: true }
+        : { viewport: DESKTOP },
+    });
+    await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+      route.abort()
+    );
+    const deck = await createDeck(page, "Announce pending");
+    await setLine(page, deck, ids["PAL 185"], 3);
+    await page.goto(`${ORIGIN}/decks/${deck}`);
+    const card = page.locator("[data-edition-id]").first();
+    await expect(card).toBeVisible();
+    let scope = page.locator("body");
+    if (phone) {
+      await card.tap();
+      scope = page.getByRole("dialog", { name: "Iono", exact: true });
+      await expect(scope).toBeVisible();
+    }
+    const toast = page.getByRole("region", { name: "Notifications" });
+    const tap = (target: ReturnType<Page["locator"]>) =>
+      phone ? target.tap() : target.click();
+    return {
+      page,
+      add: async () => {
+        if (phone)
+          await tap(scope.getByRole("button", { name: /^\+1, Add one Iono/ }));
+        else {
+          await card.hover();
+          await page
+            .getByRole("button", { name: "Add one Iono", exact: true })
+            .first()
+            .click();
+        }
+      },
+      undo: () =>
+        tap(
+          (phone ? scope : toast).getByRole("button", {
+            name: "Undo",
+            exact: true,
+          })
+        ),
+      tryAgain: () =>
+        tap((phone ? scope : page).getByRole("button", { name: "Try again" })),
+    };
+  }
+
+  test(`${surface}: an Undo that is retried says nothing while it runs, then its one outcome`, async ({
+    collectors,
+  }) => {
+    const ui = await open(collectors);
+    const { page } = ui;
+    let call = 0;
+    let arrived!: () => void;
+    const reached = new Promise<void>((resolve) => (arrived = resolve));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route(CHANGES, async (route) => {
+      call += 1;
+      // 1: the +1. 2: its Undo, which gets no answer. 3: Undo again, held until released.
+      if (call === 2) return route.abort("failed");
+      if (call === 3) {
+        arrived();
+        await gate;
+      }
+      return route.continue();
+    });
+    await watch(page);
+
+    let mark = (await heard(page)).length;
+    await ui.add();
+    await expect
+      .poll(async () => await spokenSince(page, mark))
+      .toHaveLength(1);
+    await settle(page);
+    expect(await spokenSince(page, mark)).toEqual([
+      expect.stringMatching(/^Added 1 Iono\./),
+    ]);
+
+    mark = (await heard(page)).length;
+    await ui.undo();
+    await expect
+      .poll(async () => (await spokenSince(page, mark)).length)
+      .toBe(1);
+    await settle(page);
+    expect(await spokenSince(page, mark)).toEqual([
+      expect.stringMatching(/^Undo may not have finished/),
+    ]);
+
+    // Pressing Undo again: nothing is said while the request is on its way.
+    mark = (await heard(page)).length;
+    await ui.undo();
+    await reached;
+    await settle(page);
+    expect(await spokenSince(page, mark)).toEqual([]);
+
+    release();
+    await expect
+      .poll(async () => (await spokenSince(page, mark)).length)
+      .toBe(1);
+    await settle(page);
+    const outcome = await spokenSince(page, mark);
+    expect(outcome).toEqual([expect.stringMatching(/^Undone: Added 1 Iono\./)]);
+    expect(outcome.filter((text) => /^Added 1 /.test(text))).toEqual([]);
+  });
+
+  test(`${surface}: a failed change tried again and failing the same way is announced each time`, async ({
+    collectors,
+  }) => {
+    const ui = await open(collectors);
+    const { page } = ui;
+    await page.route(CHANGES, (route) => route.abort("failed"));
+    await watch(page);
+    const failed = (texts: string[]) =>
+      texts.filter((text) =>
+        /Your last Deck List change may not have been saved/.test(text)
+      );
+
+    const mark = (await heard(page)).length;
+    await ui.add();
+    await expect
+      .poll(async () => failed(await since(page, mark)).length)
+      .toBe(1);
+    await ui.tryAgain();
+    await expect
+      .poll(async () => failed(await since(page, mark)).length)
+      .toBe(2);
+    await settle(page);
+    expect(failed(await since(page, mark))).toHaveLength(2);
   });
 }
