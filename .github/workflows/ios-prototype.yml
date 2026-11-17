@@ -1,7 +1,7 @@
 name: iOS prototype simulator
 on:
   pull_request:
-    branches: [dev]
+    branches: [dev, feature/ios-shell-signin-prototype]
     types: [opened, synchronize, reopened]
     paths:
       - ".github/workflows/ios-prototype.yml"
@@ -19,8 +19,10 @@ jobs:
     if: >-
       github.repository == 'ry-cen/prizecheck' &&
       github.event.repository.private == false &&
-      github.event.pull_request.number == 671 &&
-      github.head_ref == 'feature/ios-shell-signin-prototype' &&
+      (
+        (github.event.pull_request.number == 671 && github.head_ref == 'feature/ios-shell-signin-prototype' && github.base_ref == 'dev') ||
+        (github.event.pull_request.number == 676 && github.head_ref == 'feature/ios-native-sign-in' && github.base_ref == 'feature/ios-shell-signin-prototype')
+      ) &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: macos-15-intel
     timeout-minutes: 25

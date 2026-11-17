@@ -54,13 +54,13 @@ The initial Capacitor add attempt from `mobile/` failed because it is not an npm
 - API tests, operations suite, full application gate and scanner real-model execution: not run for this slice. No API tests were changed.
 - GitHub CI and independent review are separate acceptance evidence; local results do not approve this implementation.
 
-This list was first written before any macOS work. The continuation below added the PR #671-only simulator workflow; no runner or account permissions were changed.
+This list was first written before any macOS work. The continuation below added the simulator workflow for PRs #671 and #676 only; no runner or account permissions were changed.
 
 ## Simulator validation continuation
 
 The continuation rechecked the same clean Linux worktree and PR head `2c326ed4d6d6df9a4cd3fc72a673b3c2cb912be1`; no competing iOS T3 owner was active. Repository metadata confirmed PUBLIC visibility, existing ADMIN access, Actions enabled, allowed actions and existing `workflow` OAuth scope. GitHub's standard-runner reference lists `macos-15-intel` as free for public repositories; its installed-image manifest includes Xcode 26.3, above Capacitor 8's minimum Xcode 26.0. No permissions, billing or account settings were changed.
 
-A PR #671/branch-only simulator workflow, shared XCTest scheme/target, four real UI scenarios and a loopback-only runner script were added. The script explicitly installs and launches the built app; the hosted job separates compile from UI execution, logs the exact head and toolchain, and uploads no artifacts or caches. Runtime outcomes belong to the exact-head Actions logs and PR evidence, not to these definitions.
+A simulator workflow for PRs #671 and #676 only, shared XCTest scheme/target, four real UI scenarios and a loopback-only runner script were added. The script explicitly installs and launches the built app; the hosted job separates compile from UI execution, logs the exact head and toolchain, and uploads no artifacts or caches. Runtime outcomes belong to the exact-head Actions logs and PR evidence, not to these definitions.
 
 Local continuation checks: 13 protocol/UI tests plus one loopback HTTP contract test passed, as did TypeScript/generated-contract checks, shell syntax and scheme XML parsing. The two new jsdom tests cover a populated getLaunchUrl on startup and appStateChange expiry without advancing the polling timer. These are mocked callback tests, not native evidence.
 
