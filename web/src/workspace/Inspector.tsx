@@ -36,6 +36,9 @@ type DetailsProps = {
   ownedTotals: Map<string, LeafCopies[]>;
   /** The phone sheet: the Dialog's title already names the card, and the art is narrower. */
   sheet?: boolean;
+  /** Move… and Remove… for the desktop aside, shown under the card's facts. The phone sheet draws its own
+   * above the details. */
+  actions?: React.ReactNode;
 };
 
 /** Card kind, Trainer Type and elemental type from the effective card attributes, for example
@@ -134,6 +137,7 @@ export function CardDetails({
   ownerRevision,
   ownedTotals,
   sheet = false,
+  actions,
 }: DetailsProps) {
   const { holding } = card.holding;
   const owned = useOwnedCopies(holding.edition_id, ownerRevision, ownedTotals);
@@ -173,6 +177,7 @@ export function CardDetails({
         </dd>
       </dl>
       {kind && <p className={`m-0 pt-1 ${META}`}>{kind}</p>}
+      {actions && <div className="flex flex-wrap gap-2 pt-3">{actions}</div>}
       <div className={`${SECTION} text-meta wrap-anywhere`}>
         <p className="m-0">
           {locationPath(holding.location_id) ?? holding.location_name}
@@ -260,15 +265,55 @@ function DetailsArt({
   );
 }
 
-type InspectorProps = Omit<DetailsProps, "card" | "sheet"> & {
+type CardActionProps = {
+  card: Inspected;
+  onMove: (opener: HTMLButtonElement) => void;
+  onRemove: (opener: HTMLButtonElement) => void;
+  disabled?: boolean;
+};
+
+/** Move… and Remove… for the copy shown: the same buttons, labels and order in the phone sheet and the
+ * desktop aside. A Borrowed Copy can be moved but not removed. */
+function CardActions({ card, onMove, onRemove, disabled }: CardActionProps) {
+  return (
+    <>
+      <Button
+        disabled={disabled}
+        onClick={(event) => onMove(event.currentTarget)}
+      >
+        Move…
+      </Button>
+      {!card.holding.borrowed && (
+        <Button
+          disabled={disabled}
+          onClick={(event) => onRemove(event.currentTarget)}
+        >
+          Remove…
+        </Button>
+      )}
+    </>
+  );
+}
+
+type InspectorProps = Omit<DetailsProps, "card" | "sheet" | "actions"> & {
   card: Inspected | null;
+  /** Move… and Remove… open the same dialogs the phone sheet's do, for the copy shown here. */
+  onMove: (opener: HTMLButtonElement) => void;
+  onRemove: (opener: HTMLButtonElement) => void;
+  actionsDisabled?: boolean;
 };
 
 /** The desktop inspector column. Its space is reserved; while nothing is selected it holds a quiet
  * card-shaped outline that says what goes there, so the column doesn't read as a gap.
  * It stays in view while the gallery scrolls, below the app shell's sticky header; when its content is
  * taller than the window (an Edition in many Leaves), it scrolls inside itself so nothing is cut off. */
-export function Inspector({ card, ...rest }: InspectorProps) {
+export function Inspector({
+  card,
+  onMove,
+  onRemove,
+  actionsDisabled,
+  ...rest
+}: InspectorProps) {
   return (
     <aside
       className="sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] mt-6 box-border flex max-h-[calc(100dvh-var(--space-4)-var(--layout-sticky-top))] min-w-0 flex-col self-start phone:hidden"
@@ -280,7 +325,18 @@ export function Inspector({ card, ...rest }: InspectorProps) {
         viewportClassName="overscroll-contain pb-1"
       >
         {card ? (
-          <CardDetails card={card} {...rest} />
+          <CardDetails
+            card={card}
+            {...rest}
+            actions={
+              <CardActions
+                card={card}
+                onMove={onMove}
+                onRemove={onRemove}
+                disabled={actionsDisabled}
+              />
+            }
+          />
         ) : (
           <p className="m-0 box-border flex aspect-(--tile-aspect) w-full items-center justify-center rounded-card border border-dashed border-border p-6 text-center text-meta text-text-subtle">
             Select a card to see its details.
@@ -291,7 +347,7 @@ export function Inspector({ card, ...rest }: InspectorProps) {
   );
 }
 
-type SheetProps = Omit<DetailsProps, "sheet"> & {
+type SheetProps = Omit<DetailsProps, "sheet" | "actions"> & {
   onClose: () => void;
   notice?: string;
   onMove: (opener: HTMLButtonElement) => void;
@@ -319,20 +375,12 @@ export function DetailsSheet({
     >
       {notice && <p role="status">{notice}</p>}
       <div className="mb-4 flex flex-wrap gap-2">
-        <Button
+        <CardActions
+          card={rest.card}
+          onMove={onMove}
+          onRemove={onRemove}
           disabled={actionsDisabled}
-          onClick={(event) => onMove(event.currentTarget)}
-        >
-          Move…
-        </Button>
-        {!rest.card.holding.borrowed && (
-          <Button
-            disabled={actionsDisabled}
-            onClick={(event) => onRemove(event.currentTarget)}
-          >
-            Remove…
-          </Button>
-        )}
+        />
       </div>
       <CardDetails sheet {...rest} />
     </Dialog>

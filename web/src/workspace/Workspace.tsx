@@ -268,6 +268,15 @@ export function Workspace({
   // The card keys the desktop inspector wrote to the address. A missing card whose key it wrote is the
   // collector's own action (a Move, an Inventory Removal) and is dropped without a notice.
   const inspectedInUrl = useRef<string | null>(null);
+  // The desktop aside's Move… and Remove… use the sheet's flow for the copy the aside shows. `asideAction`
+  // marks that case: the aside is not a sheet, so completion has no sheet to close. `asideRouted` marks a copy
+  // that only the address names (nothing selected), and `keepAsideCard` is true while Cancel restores that
+  // empty selection, which must not drop the copy from the address. `asideReturn` is the opener to refocus
+  // after Cancel.
+  const asideAction = useRef(false);
+  const asideRouted = useRef(false);
+  const keepAsideCard = useRef(false);
+  const asideReturn = useRef<HTMLButtonElement | null>(null);
   const selection = useSelection({
     holdings: gallery.holdings,
     byKey: gallery.byKey,
@@ -293,6 +302,7 @@ export function Workspace({
     // The desktop inspector is a side panel: its address writes replace the entry and never add one.
     onInspect: (card) => {
       if (!active || mobile) return;
+      if (card === null && keepAsideCard.current) return;
       const next = collectionHref(
         view,
         query,
@@ -426,11 +436,14 @@ export function Workspace({
   const sheetActionCard = useRef<typeof selection.details>(null);
   const [sheetActionDone, setSheetActionDone] = useState(false);
   function openSheetAction(kind: "move" | "remove", opener: HTMLButtonElement) {
-    if (!selection.details || actions.busy || actions.dialog) return;
-    if (kind === "remove" && selection.details.holding.borrowed) return;
+    const subject = selection.details ?? (mobile ? null : selection.inspected);
+    if (!subject || actions.busy || actions.dialog) return;
+    if (kind === "remove" && subject.holding.borrowed) return;
+    asideAction.current = selection.details === null;
+    asideRouted.current = asideAction.current && selection.selected.size === 0;
     sheetActionOpener.current = opener;
-    sheetActionCard.current = selection.details;
-    sheetAction.current = selection.selectForAction(selection.details);
+    sheetActionCard.current = subject;
+    sheetAction.current = selection.selectForAction(subject);
     if (kind === "move") actions.openMove();
     else actions.openRemoval();
   }
@@ -439,15 +452,26 @@ export function Workspace({
     actions.closeDialog(forced);
     const restore = sheetAction.current;
     sheetAction.current = null;
+    keepAsideCard.current = asideAction.current && asideRouted.current;
+    if (asideAction.current) asideReturn.current = sheetActionOpener.current;
     restore?.();
+    keepAsideCard.current = false;
   }
   useEffect(() => {
     if (actions.dialog || !sheetAction.current) return;
     sheetAction.current = null;
     // Completion must schedule a commit even if the reload already removed the routed details.
     setSheetActionDone(true);
-    selection.closeDetails();
+    if (!asideAction.current) selection.closeDetails();
   }, [actions.dialog, selection.closeDetails]);
+  // Cancelling from the aside puts focus back on the button that opened the dialog. The actions hook
+  // sends it to the selection bar's Actions button when a dialog closes, so this runs after that effect.
+  useEffect(() => {
+    const opener = asideReturn.current;
+    if (actions.dialog || !opener) return;
+    asideReturn.current = null;
+    if (opener.isConnected) opener.focus({ preventScroll: true });
+  }, [actions.dialog]);
   useLayoutEffect(() => {
     if (!sheetActionDone || selection.details) return;
     setSheetActionDone(false);
@@ -1062,6 +1086,9 @@ export function Workspace({
                 locationPath={locationPath}
                 ownerRevision={gallery.ownerRevision}
                 ownedTotals={ownedTotals}
+                onMove={(opener) => openSheetAction("move", opener)}
+                onRemove={(opener) => openSheetAction("remove", opener)}
+                actionsDisabled={actions.busy}
               />
             </div>
           </div>
