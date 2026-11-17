@@ -42,6 +42,8 @@ jobs:
           xcodebuild -version
           xcrun swift --version
           xcrun simctl list runtimes
+      - name: Start simulator boot early
+        run: bash mobile/boot-simulator.sh
       - run: npm ci
       - run: npm run ios:sync
       - name: Compile unsigned app and UI tests through Swift Package Manager
