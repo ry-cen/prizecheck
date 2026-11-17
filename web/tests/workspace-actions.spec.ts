@@ -165,7 +165,7 @@ async function expectCounts(page: Page, name: string, counts: string) {
 
 async function openActions(page: Page, item: string) {
   await bar(page).getByRole("button", { name: "Actions" }).click();
-  await bar(page).getByRole("button", { name: item }).click();
+  await bar(page).getByRole("button", { name: item, exact: true }).click();
 }
 
 const focusedId = (page: Page) =>
@@ -186,9 +186,12 @@ const onTop = (locator: Locator) =>
 async function expectActionsOverToast(page: Page) {
   const actions = bar(page).getByRole("button", { name: "Actions" });
   await actions.click();
-  for (const name of ["Move…", "Inventory Removal…", "Clear selection"])
+  for (const name of ["Move…", "Remove…", "Clear selection"])
     await expect
-      .poll(() => onTop(bar(page).getByRole("button", { name })), name)
+      .poll(
+        () => onTop(bar(page).getByRole("button", { name, exact: true })),
+        name
+      )
       .toBe(true);
   await actions.click();
   await expect(actions).toHaveAttribute("aria-expanded", "false");
@@ -214,8 +217,8 @@ for (const viewport of [
         await select.click();
       await tiles(page).first().click();
       await page.getByRole("button", { name: "Actions", exact: true }).click();
-      await page
-        .getByRole("button", { name: "Inventory Removal…", exact: true })
+      await bar(page)
+        .getByRole("button", { name: "Remove…", exact: true })
         .click();
       await page
         .getByRole("dialog")
@@ -285,7 +288,7 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
     await expect(tiles(page)).toHaveCount(1);
     // Leave an older success notice open, as in the return-to-Collection regression.
     await tiles(page).first().click();
-    await openActions(page, "Inventory Removal…");
+    await openActions(page, "Remove…");
     await page
       .getByRole("dialog")
       .getByRole("button", { name: "Remove 1 copy", exact: true })
@@ -408,7 +411,7 @@ test("a delayed Dismiss failure never replaces a newer sign-out notice", async (
   await page.reload();
   await expect(tiles(page)).toHaveCount(2);
   await tiles(page).first().click();
-  await openActions(page, "Inventory Removal…");
+  await openActions(page, "Remove…");
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Remove 1 copy", exact: true })
@@ -467,7 +470,7 @@ test("Undo feedback still shows after a newer sign-out notice", async ({
   await page.reload();
   await expect(tiles(page)).toHaveCount(2);
   await tiles(page).first().click();
-  await openActions(page, "Inventory Removal…");
+  await openActions(page, "Remove…");
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Remove 1 copy", exact: true })
@@ -790,7 +793,7 @@ test.describe("desktop", () => {
       .nth(2)
       .click({ modifiers: ["Shift"] });
     await expect(bar(page)).toContainText("3 copies selected");
-    await openActions(page, "Inventory Removal…");
+    await openActions(page, "Remove…");
     const dialog = page.getByRole("dialog", {
       name: "Remove 3 copies from your Collection",
     });
@@ -805,7 +808,7 @@ test.describe("desktop", () => {
     await expect(bar(page)).toContainText("3 copies selected");
     await expect(tiles(page)).toHaveCount(3);
 
-    await openActions(page, "Inventory Removal…");
+    await openActions(page, "Remove…");
     await dialog.getByRole("button", { name: "Remove 3 copies" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(toast(page)).toHaveText(
@@ -1285,7 +1288,7 @@ test.describe("desktop", () => {
     await expect(actions).toBeFocused();
     await expect(bar(page)).toContainText("1 copy selected");
     await page.keyboard.press("Enter");
-    // Move…, Inventory Removal…, Lend to a Friend… (#258), then Clear selection.
+    // Move…, Remove…, Lend to a Friend… (#258), then Clear selection.
     await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
@@ -1318,7 +1321,7 @@ test.describe("desktop", () => {
     await page.keyboard.press("Enter");
     await page.keyboard.press("Tab");
     await expect(
-      bar(page).getByRole("button", { name: "Move…" })
+      bar(page).getByRole("button", { name: "Move…", exact: true })
     ).toBeFocused();
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Move 2 copies" });
@@ -1487,7 +1490,9 @@ test.describe("desktop", () => {
       await expectPageChecks(page, "Actions open");
 
       // Move: Escape closes it, and focus goes back to Actions. So does its close button.
-      await bar(page).getByRole("button", { name: "Move…" }).click();
+      await bar(page)
+        .getByRole("button", { name: "Move…", exact: true })
+        .click();
       const move = page.getByRole("dialog", { name: "Move 1 copy" });
       await expect(
         move.getByRole("searchbox", { name: "Search locations" })
@@ -1502,7 +1507,7 @@ test.describe("desktop", () => {
       await expect(actions).toBeFocused();
 
       // Removal: a press on the scrim closes it and keeps the selection.
-      await openActions(page, "Inventory Removal…");
+      await openActions(page, "Remove…");
       const removal = page.getByRole("dialog", {
         name: "Remove 1 copy from your Collection",
       });
@@ -1611,7 +1616,7 @@ test.describe("mobile", () => {
     const actions = strip.getByRole("button", { name: "Actions" });
     await expectTouchTarget(actions, ["height"]);
     await actions.tap();
-    const move = strip.getByRole("button", { name: "Move…" });
+    const move = strip.getByRole("button", { name: "Move…", exact: true });
     await expectTouchTarget(move, ["height"]);
     await move.tap();
 
@@ -1640,7 +1645,7 @@ test.describe("mobile", () => {
     expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(812);
 
     await strip.getByRole("button", { name: "Actions" }).tap();
-    await strip.getByRole("button", { name: "Inventory Removal…" }).tap();
+    await strip.getByRole("button", { name: "Remove…" }).tap();
     const removal = page.getByRole("dialog", {
       name: "Remove 1 copy from your Collection",
     });
@@ -1677,7 +1682,7 @@ test.describe("mobile", () => {
     await actions.tap();
     await expectPageChecks(page, "phone Actions open");
 
-    await strip.getByRole("button", { name: "Move…" }).tap();
+    await strip.getByRole("button", { name: "Move…", exact: true }).tap();
     const move = page.getByRole("dialog", { name: "Move 1 copy" });
     await expect(move).toBeVisible();
     await expectPageChecks(page, "phone Move sheet");
@@ -1686,7 +1691,7 @@ test.describe("mobile", () => {
     await expect(actions).toBeFocused();
 
     await actions.tap();
-    await strip.getByRole("button", { name: "Inventory Removal…" }).tap();
+    await strip.getByRole("button", { name: "Remove…" }).tap();
     await expect(
       page.getByRole("dialog", { name: "Remove 1 copy from your Collection" })
     ).toBeVisible();
@@ -1728,7 +1733,7 @@ test.describe("mobile", () => {
 
     // A Move: the toast sits above the tab bar, and above a new selection's strip.
     await actions.tap();
-    await strip.getByRole("button", { name: "Move…" }).tap();
+    await strip.getByRole("button", { name: "Move…", exact: true }).tap();
     await move
       .getByRole("searchbox", { name: "Search locations" })
       .fill(`0 Dest ${s}`);

@@ -200,7 +200,7 @@ test("the aside's Move… and Remove… confirm one copy, return focus on cancel
   await expect(tiles(page)).toHaveCount(3);
 });
 
-test("the aside acts on the copy it shows, not on the whole selection", async ({
+test("while several copies are selected the aside shows the card but leaves Move… and Remove… to the selection bar", async ({
   page,
 }) => {
   promoteCatalog({ "card-1": "Aside Abra" });
@@ -211,30 +211,29 @@ test("the aside acts on the copy it shows, not on the whole selection", async ({
   await page.reload();
   await expect(tiles(page)).toHaveCount(3);
   await tiles(page).nth(0).click();
+  const selection = page.getByRole("region", { name: "Selection" });
+  await expect(
+    aside(page).getByRole("button", { name: "Move…", exact: true })
+  ).toBeVisible();
   await tiles(page)
     .nth(1)
     .click({ modifiers: ["ControlOrMeta"] });
-  const selection = page.getByRole("region", { name: "Selection" });
   await expect(selection).toContainText("2 copies selected");
-  await aside(page).getByRole("button", { name: "Move…", exact: true }).click();
-  const move = page.getByRole("dialog", { name: "Move 1 copy", exact: true });
-  await expect(move).toBeVisible();
-  await move.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(selection).toContainText("2 copies selected");
-  await expect(
-    page
-      .getByRole("region", { name: "Cards" })
-      .getByRole("button", { pressed: true })
-  ).toHaveCount(2);
+  await expect(aside(page)).toContainText("Aside Abra");
+  await expect(aside(page).getByRole("button")).toHaveCount(0);
 
-  await aside(page).getByRole("button", { name: "Move…", exact: true }).click();
+  // The selection bar acts on both copies.
+  await selection.getByRole("button", { name: "Actions" }).click();
+  await selection.getByRole("button", { name: "Move…", exact: true }).click();
+  const move = page.getByRole("dialog", { name: "Move 2 copies", exact: true });
   await move.getByRole("button", { name: "Other binder", exact: true }).click();
-  await move.getByRole("button", { name: "Move 1 copy", exact: true }).click();
+  await move
+    .getByRole("button", { name: "Move 2 copies", exact: true })
+    .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(toasts(page)).toContainText("Moved 1 copy to Other binder.");
-  // The other selected copy stays where it was.
+  await expect(toasts(page)).toContainText("Moved 2 copies to Other binder.");
   await page.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(toasts(page)).toContainText("Undo restored 1 copy");
+  await expect(toasts(page)).toContainText("Undo restored 2 copies");
 });
 
 test("cancelling from an aside opened by its address keeps the card in view", async ({

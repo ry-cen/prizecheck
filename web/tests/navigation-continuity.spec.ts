@@ -171,7 +171,7 @@ test.describe("the desktop inspector's address", () => {
       .click();
     await page
       .getByRole("region", { name: "Selection" })
-      .getByRole("button", { name: "Move…" })
+      .getByRole("button", { name: "Move…", exact: true })
       .click();
     const dialog = page.getByRole("dialog", { name: "Move 1 copy" });
     await dialog.getByRole("button", { name: "Move to", exact: true }).click();

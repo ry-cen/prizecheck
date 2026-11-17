@@ -1,4 +1,10 @@
-import React, { useEffect, useId, useLayoutEffect, useState } from "react";
+import React, {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { ChevronDown, TriangleAlert } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
@@ -21,7 +27,7 @@ type Props = {
   onClear: () => void;
   /** Opens the details sheet for the last clicked selected card (mobile). */
   onDetails: () => void;
-  /** Ticket 107: Actions → Move… and Inventory Removal… open their dialogs. */
+  /** Ticket 107: Actions → Move… and Remove… (the Inventory Removal dialog) open their dialogs. */
   onMove: () => void;
   onRemove: () => void;
   /** Lend to a Friend… (#258): offers the selected copies to a Friend. */
@@ -60,13 +66,19 @@ export function SelectionBar({
 }: Props) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
+  const menuRef = useRef<HTMLSpanElement>(null);
   const toast = useToast();
 
-  // A press anywhere outside the bar closes the Actions list.
+  // A press anywhere outside the bar closes the Actions list. A press on the toast is the exception: the
+  // toast sits clear of the list, and closing the list would lower the toast from under the pointer, so
+  // an Undo pressed with the list open would never land.
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!barRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Element;
+      if (barRef.current?.contains(target)) return;
+      if (target.closest?.("#app-toasts")) return;
+      setOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
@@ -76,7 +88,8 @@ export function SelectionBar({
     if (busy) setOpen(false);
   }, [busy]);
 
-  // The toast stacks above the bar, with the bar's gap between them.
+  // The toast stacks above the bar, with the bar's gap between them. While the Actions list is open it
+  // stacks above the list too, so neither covers the other and the toast's Undo stays reachable.
   useLayoutEffect(() => {
     const bar = barRef.current;
     if (!bar) return;
@@ -84,19 +97,22 @@ export function SelectionBar({
       const gap = parseFloat(
         getComputedStyle(bar).getPropertyValue("--space-2")
       );
-      toast.setLift(
-        "selection",
-        bar.getBoundingClientRect().height + (gap || 8)
+      const box = bar.getBoundingClientRect();
+      const top = Math.min(
+        box.top,
+        menuRef.current?.getBoundingClientRect().top ?? box.top
       );
+      toast.setLift("selection", box.bottom - top + (gap || 8));
     };
     lift();
     const observer = new ResizeObserver(lift);
     observer.observe(bar);
+    if (menuRef.current) observer.observe(menuRef.current);
     return () => {
       observer.disconnect();
       toast.setLift("selection", 0);
     };
-  }, [toast, barRef]);
+  }, [toast, barRef, open]);
 
   // The bar unmounts when the selection empties (Clear, Escape, a successful action). If it held
   // focus, focus would fall to the page, so it moves to the heading first.
@@ -160,6 +176,7 @@ export function SelectionBar({
             {open && (
               <span
                 id={menuId}
+                ref={menuRef}
                 className="absolute bottom-[calc(100%+var(--space-2))] right-0 z-1 box-border flex min-w-50 flex-col gap-1 rounded-panel border border-border-strong bg-surface-raised p-1 phone:min-w-55"
                 role="group"
                 aria-label="Actions"
@@ -178,7 +195,7 @@ export function SelectionBar({
                       className={LIST_ITEM}
                       onClick={() => choose(onRemove)}
                     >
-                      Inventory Removal…
+                      Remove…
                     </button>
                     <button
                       type="button"

@@ -372,7 +372,7 @@ async function story(
       .click();
     await page
       .getByRole("region", { name: "Selection" })
-      .getByRole("button", { name: "Inventory Removal…" })
+      .getByRole("button", { name: "Remove…" })
       .click();
     const removal = page.getByRole("dialog", {
       name: "Remove 1 copy from your Collection",

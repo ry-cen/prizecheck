@@ -373,7 +373,7 @@ promote({'card-1': 'Pikachu'})`,
     await expect(bar).toContainText("1 copy selected");
     // Move one copy out to the top-level Unsorted, then Undo puts it back.
     await bar.getByRole("button", { name: "Actions" }).click();
-    await bar.getByRole("button", { name: "Move…" }).click();
+    await bar.getByRole("button", { name: "Move…", exact: true }).click();
     const move = page.getByRole("dialog", { name: "Move 1 copy" });
     await move.getByRole("button", { name: "Unsorted", exact: true }).click();
     await move.getByRole("button", { name: "Move 1 copy" }).click();
@@ -389,14 +389,14 @@ promote({'card-1': 'Pikachu'})`,
     await tiles.nth(2).click({ modifiers: ["Shift"] });
     await expect(bar).toContainText("3 copies selected");
     await bar.getByRole("button", { name: "Actions" }).click();
-    await bar.getByRole("button", { name: "Inventory Removal…" }).click();
+    await bar.getByRole("button", { name: "Remove…" }).click();
     const removal = page.getByRole("dialog", {
       name: "Remove 3 copies from your Collection",
     });
     await removal.getByRole("button", { name: "Cancel" }).click();
     await expect(tiles).toHaveCount(3);
     await bar.getByRole("button", { name: "Actions" }).click();
-    await bar.getByRole("button", { name: "Inventory Removal…" }).click();
+    await bar.getByRole("button", { name: "Remove…" }).click();
     await removal.getByRole("button", { name: "Remove 3 copies" }).click();
     await expect(toast).toHaveText("Removed 3 copies from your Collection.");
     await expect(tiles).toHaveCount(0);

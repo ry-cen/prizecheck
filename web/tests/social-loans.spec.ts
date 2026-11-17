@@ -447,7 +447,7 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
     .click();
   await lender
     .getByRole("region", { name: "Selection" })
-    .getByRole("button", { name: "Inventory Removal…" })
+    .getByRole("button", { name: "Remove…" })
     .click();
   const removal = lender.getByRole("dialog", {
     name: "Remove 1 copy from your Collection",

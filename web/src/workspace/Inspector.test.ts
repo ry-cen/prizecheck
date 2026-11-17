@@ -123,6 +123,50 @@ test.each([false, true])(
   }
 );
 
+test("the desktop aside keeps the copy's details but offers no Move… or Remove… while several copies are selected", () => {
+  const card = {
+    ordinal: 0,
+    holding: {
+      key: "leaf:edition",
+      copies: 5,
+      holding: {
+        edition_id: "edition",
+        printing_id: "printing",
+        printing_name: "Abra",
+        location_id: "leaf",
+        descriptor: {},
+      },
+    },
+  } as Inspected;
+  const node = document.createElement("div");
+  const root = createRoot(node);
+  const render = (actionsHidden: boolean) =>
+    act(() =>
+      root.render(
+        React.createElement(Inspector, {
+          card,
+          locationPath: () => "Binder",
+          ownerRevision: 1,
+          ownedTotals: new Map([["1:edition", []]]),
+          onMove: vi.fn(),
+          onRemove: vi.fn(),
+          actionsHidden,
+        })
+      )
+    );
+  try {
+    render(false);
+    expect(
+      [...node.querySelectorAll("button")].map((button) => button.textContent)
+    ).toEqual(["Move…", "Remove…"]);
+    render(true);
+    expect(node.querySelectorAll("button")).toHaveLength(0);
+    expect(node.textContent).toContain("Abra");
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
 test("the empty aside has no Move… or Remove…", () => {
   const node = document.createElement("div");
   const root = createRoot(node);

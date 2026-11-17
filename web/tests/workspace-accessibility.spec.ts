@@ -233,7 +233,7 @@ async function moveTwo(page: Page, destination: string) {
     .nth(1)
     .click({ modifiers: ["ControlOrMeta"] });
   await bar(page).getByRole("button", { name: "Actions" }).click();
-  await bar(page).getByRole("button", { name: "Move…" }).click();
+  await bar(page).getByRole("button", { name: "Move…", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Move 2 copies" });
   await dialog
     .getByRole("searchbox", { name: "Search locations" })
@@ -283,7 +283,7 @@ test.describe("desktop", () => {
     await bar(page).getByRole("button", { name: "Actions" }).click();
     await expectAccessible(page, "selection and Actions");
 
-    await bar(page).getByRole("button", { name: "Move…" }).click();
+    await bar(page).getByRole("button", { name: "Move…", exact: true }).click();
     const move = page.getByRole("dialog", { name: "Move 2 copies" });
     await expect(move).toBeVisible();
     await expectAccessible(page, "Move dialog");
@@ -302,7 +302,7 @@ test.describe("desktop", () => {
 
     await tiles(page).nth(0).click();
     await bar(page).getByRole("button", { name: "Actions" }).click();
-    await bar(page).getByRole("button", { name: "Inventory Removal…" }).click();
+    await bar(page).getByRole("button", { name: "Remove…" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expectAccessible(page, "Removal dialog");
     await page
@@ -964,7 +964,7 @@ for (const viewport of [
       .getByRole("button", { name: "Actions", exact: true })
       .click();
     await bar(page)
-      .getByRole("button", { name: "Inventory Removal…", exact: true })
+      .getByRole("button", { name: "Remove…", exact: true })
       .click();
     await page
       .getByRole("dialog")

@@ -131,7 +131,7 @@ async function box(locator: Locator) {
 
 async function openActions(page: Page, item: string) {
   await bar(page).getByRole("button", { name: "Actions" }).click();
-  await bar(page).getByRole("button", { name: item }).click();
+  await bar(page).getByRole("button", { name: item, exact: true }).click();
 }
 
 // Ticket 113's copy.
@@ -182,7 +182,7 @@ test.describe("desktop", () => {
     const other = await secondTab(page);
     await expect(tiles(other)).toHaveCount(3);
     await tiles(other).nth(1).click();
-    await openActions(other, "Inventory Removal…");
+    await openActions(other, "Remove…");
     await other
       .getByRole("dialog", { name: "Remove 1 copy from your Collection" })
       .getByRole("button", { name: "Remove 1 copy" })
@@ -243,7 +243,7 @@ test.describe("desktop", () => {
     const other = await secondTab(page);
     await expect(tiles(other)).toHaveCount(3);
     await tiles(other).nth(1).click();
-    await openActions(other, "Inventory Removal…");
+    await openActions(other, "Remove…");
     await other.getByRole("button", { name: "Remove 1 copy" }).click();
     await expect(toast(other)).toHaveText(
       "Removed 1 copy from your Collection."

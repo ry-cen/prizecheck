@@ -448,6 +448,8 @@ export function Workspace({
   function openSheetAction(kind: "move" | "remove", opener: HTMLButtonElement) {
     const subject = selection.details ?? (mobile ? null : selection.inspected);
     if (!subject || actions.busy || actions.dialog) return;
+    // The desktop aside doesn't offer these while several copies are selected; the selection bar does.
+    if (selection.details === null && selection.summary.copies > 1) return;
     if (kind === "remove" && subject.holding.borrowed) return;
     asideReturn.current = null;
     asideAction.current = selection.details === null;
@@ -1102,6 +1104,7 @@ export function Workspace({
                 onMove={(opener) => openSheetAction("move", opener)}
                 onRemove={(opener) => openSheetAction("remove", opener)}
                 actionsDisabled={actions.busy}
+                actionsHidden={selection.summary.copies > 1}
               />
             </div>
           </div>
