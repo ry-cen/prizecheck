@@ -87,9 +87,13 @@ for (const viewport of VIEWPORTS) {
       const sheet = page.getByRole("dialog", { name: "Pikachu" });
       const stepper = sheet.getByRole("group", { name: "Deck List copies" });
       const remove = stepper.getByRole("button", {
-        name: "Remove one Pikachu",
+        name: "−1, Remove one Pikachu",
+        exact: true,
       });
-      const add = stepper.getByRole("button", { name: "Add one Pikachu" });
+      const add = stepper.getByRole("button", {
+        name: "+1, Add one Pikachu",
+        exact: true,
+      });
       await expect(remove).toHaveText("−1");
       await expect(add).toHaveText("+1");
       await expect(stepper.getByRole("button")).toHaveCount(2);

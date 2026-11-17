@@ -328,7 +328,7 @@ test.describe("desktop", () => {
     const sheet = page.getByRole("dialog", { name: "Pikachu", exact: true });
     for (let i = 0; i < 2; i++) {
       await sheet
-        .getByRole("button", { name: "Add one Pikachu", exact: true })
+        .getByRole("button", { name: "+1, Add one Pikachu", exact: true })
         .click();
       await expect
         .poll(() => listed(built))
@@ -376,7 +376,7 @@ test.describe("new Library line", () => {
       .click();
     const sheet = page.getByRole("dialog", { name: "Charmander", exact: true });
     await sheet
-      .getByRole("button", { name: "Add one Charmander", exact: true })
+      .getByRole("button", { name: "+1, Add one Charmander", exact: true })
       .click();
     await expect
       .poll(() => listed(built))
@@ -408,7 +408,7 @@ test.describe("phone", () => {
     const sheet = page.getByRole("dialog", { name: "Pikachu", exact: true });
     for (let i = 0; i < 2; i++) {
       await sheet
-        .getByRole("button", { name: "Add one Pikachu", exact: true })
+        .getByRole("button", { name: "+1, Add one Pikachu", exact: true })
         .click();
       await expect
         .poll(() => listed(built))

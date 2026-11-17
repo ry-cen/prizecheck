@@ -25,8 +25,8 @@ test("the stepper's buttons are named for the card, and still show −1 and +1",
     )
   );
   const [remove, add] = [...host.querySelectorAll("button")];
-  expect(remove!.getAttribute("aria-label")).toBe("Remove one Tangela");
-  expect(add!.getAttribute("aria-label")).toBe("Add one Tangela");
+  expect(remove!.getAttribute("aria-label")).toBe("−1, Remove one Tangela");
+  expect(add!.getAttribute("aria-label")).toBe("+1, Add one Tangela");
   expect(remove!.textContent).toBe("−1");
   expect(add!.textContent).toBe("+1");
   act(() => remove!.click());
@@ -46,7 +46,7 @@ test("Remove one is disabled when the card is not on the Deck List", () => {
     )
   );
   const remove = host.querySelector<HTMLButtonElement>(
-    "button[aria-label='Remove one Tangela']"
+    "button[aria-label='−1, Remove one Tangela']"
   );
   expect(remove!.disabled).toBe(true);
 });

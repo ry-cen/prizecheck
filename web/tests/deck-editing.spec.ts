@@ -562,12 +562,17 @@ test.describe("on a desktop", () => {
     const stepper = popup.getByRole("group", { name: "Deck List copies" });
     await expect(stepper).toContainText("0 on Deck List");
     await expect(
-      stepper.getByRole("button", { name: "Remove one Pikachu" })
+      stepper.getByRole("button", {
+        name: "−1, Remove one Pikachu",
+        exact: true,
+      })
     ).toBeDisabled();
     await expectPageChecks(page, "deck builder, library card popup");
 
     for (let tap = 0; tap < 10; tap++)
-      await stepper.getByRole("button", { name: "Add one Pikachu" }).click();
+      await stepper
+        .getByRole("button", { name: "+1, Add one Pikachu", exact: true })
+        .click();
     await expect(stepper).toContainText("10 on Deck List");
     release();
     await expect.poll(() => listed(built)).toEqual({ "edit-3": 10 });
@@ -583,10 +588,15 @@ test.describe("on a desktop", () => {
     );
     await expect.poll(() => listed(built)).toEqual({ "edit-3": 1 });
     await expect(stepper).toContainText("1 on Deck List");
-    await stepper.getByRole("button", { name: "Remove one Pikachu" }).click();
+    await stepper
+      .getByRole("button", { name: "−1, Remove one Pikachu", exact: true })
+      .click();
     await expect.poll(() => listed(built)).toEqual({});
     await expect(
-      stepper.getByRole("button", { name: "Remove one Pikachu" })
+      stepper.getByRole("button", {
+        name: "−1, Remove one Pikachu",
+        exact: true,
+      })
     ).toBeDisabled();
 
     // ‹ › and the arrow keys step through the library's results.
@@ -619,7 +629,9 @@ test.describe("on a desktop", () => {
     const sheet = page.getByRole("dialog", { name: "Charmander" });
     const stepper = sheet.getByRole("group", { name: "Deck List copies" });
     await expect(stepper).toContainText("2 on Deck List");
-    await stepper.getByRole("button", { name: "Add one Charmander" }).click();
+    await stepper
+      .getByRole("button", { name: "+1, Add one Charmander", exact: true })
+      .click();
     await expect(stepper).toContainText("3 on Deck List");
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 3 });
     // The sheet has two status lines (this feedback and the swap list's loading line), so pick the feedback by its text.
@@ -627,7 +639,7 @@ test.describe("on a desktop", () => {
       sheet.getByRole("status").filter({ hasText: "Added 1 Charmander." })
     ).toBeVisible();
     await stepper
-      .getByRole("button", { name: "Remove one Charmander" })
+      .getByRole("button", { name: "−1, Remove one Charmander", exact: true })
       .click();
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 2 });
 
@@ -850,7 +862,7 @@ test.describe("on a phone", () => {
     const popup = page.getByRole("dialog", { name: "Charmander" });
     await popup
       .getByRole("group", { name: "Deck List copies" })
-      .getByRole("button", { name: "Add one Charmander" })
+      .getByRole("button", { name: "+1, Add one Charmander", exact: true })
       .tap();
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 1 });
     await popup.getByRole("button", { name: "Close card details" }).tap();
@@ -887,7 +899,9 @@ test.describe("on a phone", () => {
     const stepper = popup.getByRole("group", { name: "Deck List copies" });
     await expect(stepper).toContainText("1 on Deck List");
     await expectPageChecks(page, "phone library card popup");
-    await stepper.getByRole("button", { name: "Add one Charmander" }).tap();
+    await stepper
+      .getByRole("button", { name: "+1, Add one Charmander", exact: true })
+      .tap();
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 2 });
     await popup.getByRole("button", { name: "Close card details" }).tap();
     await expect(page.getByRole("tab", { name: "Deck 2/60" })).toBeVisible();
