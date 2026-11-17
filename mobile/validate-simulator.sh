@@ -13,11 +13,18 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; rows=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]; assert rows, "No installed iOS runtime"; print(sorted(rows,key=lambda r:tuple(map(int,r["version"].split("."))))[-1]["identifier"])')
-device_type=$(xcrun simctl list devicetypes -j | python3 -c 'import json,sys; rows=[r for r in json.load(sys.stdin)["devicetypes"] if r["name"] == "iPhone 17"]; assert rows, "No iPhone 17 device type"; print(rows[0]["identifier"])')
-simulator_id=$(xcrun simctl create PrizecheckFixture "$device_type" "$runtime")
-echo "Simulator: $simulator_id ($runtime)"
-xcrun simctl boot "$simulator_id"
+early_id=""
+if [ -f .scratch/ios-simulator-id ]; then early_id=$(cat .scratch/ios-simulator-id); fi
+if [ -n "$early_id" ] && xcrun simctl list devices -j | EARLY_ID="$early_id" python3 -c 'import json,os,sys; i=os.environ["EARLY_ID"]; sys.exit(0 if any(d["udid"] == i for ds in json.load(sys.stdin)["devices"].values() for d in ds) else 1)'; then
+  simulator_id="$early_id"
+  echo "Simulator: $simulator_id (booted early by boot-simulator.sh)"
+else
+  runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; rows=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]; assert rows, "No installed iOS runtime"; print(sorted(rows,key=lambda r:tuple(map(int,r["version"].split("."))))[-1]["identifier"])')
+  device_type=$(xcrun simctl list devicetypes -j | python3 -c 'import json,sys; rows=[r for r in json.load(sys.stdin)["devicetypes"] if r["name"] == "iPhone 17"]; assert rows, "No iPhone 17 device type"; print(rows[0]["identifier"])')
+  simulator_id=$(xcrun simctl create PrizecheckFixture "$device_type" "$runtime")
+  echo "Simulator: $simulator_id ($runtime)"
+  xcrun simctl boot "$simulator_id"
+fi
 xcrun simctl bootstatus "$simulator_id" -b
 xcrun simctl install "$simulator_id" .scratch/ios-derived/Build/Products/Debug-iphonesimulator/App.app
 xcrun simctl launch "$simulator_id" app.prizecheck.prototype
