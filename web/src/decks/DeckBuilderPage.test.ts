@@ -26,7 +26,11 @@ const state = vi.hoisted(() => ({
   costChanged: null as (() => void) | null,
   gatherChanged: null as (() => void) | null,
   busy: false,
-  editNotice: null as { text: string; retry: () => void } | null,
+  editNotice: null as {
+    id: number;
+    text: string;
+    retry: (() => void) | null;
+  } | null,
 }));
 vi.mock("../decks_generated", async (original) => ({
   ...(await original<typeof import("../decks_generated")>()),
@@ -56,7 +60,12 @@ vi.mock("./useDeckCover", () => ({
   }) => {
     state.begin = options.beginCommand;
     state.coverReread = options.reread;
-    return {};
+    return {
+      busy: false,
+      messageFor: () => "",
+      toggle: async () => {},
+      reset: () => {},
+    };
   },
 }));
 vi.mock("./DeckRename", () => ({
@@ -273,12 +282,12 @@ async function mount(initial = fresh(1, "2", "2")) {
   await renderPage();
   expect(state.actions!.countReady).toBe(true);
 }
-async function renderPage() {
+async function renderPage(address = "/decks/deck") {
   await act(async () =>
     root!.render(
       createElement(DeckBuilderPage, {
         deckId: "deck",
-        address: "/decks/deck",
+        address,
         onNavigate() {},
         onCloseCard() {},
         onAllDecks() {},
@@ -488,6 +497,7 @@ for (const fails of [false, true]) {
     state.busy = true;
     if (fails)
       state.editNotice = {
+        id: 1,
         text: "Your last Deck List change may not have been saved.",
         retry: () => {
           state.busy = false;
@@ -728,4 +738,48 @@ test("T22: the edit queue's rebuild re-read marks the count unknown", async () =
   expect(state.actions!.countReady).toBe(false);
   retry();
   expect(getDeck).toHaveBeenCalledTimes(2);
+});
+
+// A new notice is announced through exactly one surface: the copy sheet's own line when the sheet was open as it
+// arrived, else the page's banner. Whether the sheet is open later doesn't change that.
+const SHEET = "/decks/deck?edition=energy";
+const banner = () => host.querySelector("[data-edit-banner]");
+
+test("a notice that arrives with the sheet closed is announced by the banner, and stays so while the sheet is open and after", async () => {
+  await mount();
+  state.editNotice = { id: 1, text: "Not saved.", retry: () => {} };
+  await renderPage();
+  expect(banner()?.getAttribute("role")).toBe("alert");
+  await renderPage(SHEET);
+  expect(banner()?.getAttribute("role")).toBe("alert");
+  await renderPage();
+  expect(banner()?.getAttribute("role")).toBe("alert");
+});
+
+test("a notice that arrives while the sheet is open is left to the sheet, and closing or reopening it never makes the banner announce", async () => {
+  await mount();
+  await renderPage(SHEET);
+  state.editNotice = { id: 1, text: "Not saved.", retry: () => {} };
+  await renderPage(SHEET);
+  expect(banner()).not.toBeNull();
+  expect(banner()!.hasAttribute("role")).toBe(false);
+  await renderPage();
+  expect(banner()!.hasAttribute("role")).toBe(false);
+  await renderPage(SHEET);
+  await renderPage();
+  expect(banner()!.hasAttribute("role")).toBe(false);
+});
+
+test("the next notice is announced afresh: by the banner when the sheet is closed as it arrives", async () => {
+  await mount();
+  await renderPage(SHEET);
+  state.editNotice = { id: 1, text: "Not saved.", retry: () => {} };
+  await renderPage(SHEET);
+  await renderPage();
+  state.editNotice = null;
+  await renderPage();
+  expect(banner()).toBeNull();
+  state.editNotice = { id: 2, text: "Not saved again.", retry: () => {} };
+  await renderPage();
+  expect(banner()!.getAttribute("role")).toBe("alert");
 });

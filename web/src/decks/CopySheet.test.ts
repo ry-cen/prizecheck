@@ -76,6 +76,7 @@ test("an unconfirmed change is explained inside the sheet, beside the stepper, w
   const retry = vi.fn();
   render(
     {
+      id: 1,
       text: "Your last Deck List change may not have been saved. Try again to check safely.",
       retry,
     },
@@ -104,6 +105,7 @@ test("an unconfirmed change is explained inside the sheet, beside the stepper, w
 
 test("a refusal with no Try again still shows its words inside the sheet", () => {
   render({
+    id: 1,
     text: "That card can't be added any more, so the Deck List wasn't changed.",
     retry: null,
   });
@@ -140,7 +142,7 @@ test("the error line is a polite status that is present before its words arrive,
           onSwap: vi.fn(),
           feedback: null,
           since: 0,
-          notice: { text: "May not have been saved.", retry: vi.fn() },
+          notice: { id: 1, text: "May not have been saved.", retry: vi.fn() },
         },
       })
     )
@@ -149,4 +151,43 @@ test("the error line is a polite status that is present before its words arrive,
   expect(after).toBe(before);
   expect(text(after)).toBe("May not have been saved.");
   expect(host.querySelectorAll("[role='alert']")).toHaveLength(0);
+});
+
+test("the heading and the stepper show the same number: the page's count for the Edition, not the line's confirmed one", () => {
+  // The line says 3 confirmed; a tap made after an unconfirmed +1 is queued, so the collector's count is 4.
+  render(
+    { id: 1, text: "May not have been saved.", retry: vi.fn() },
+    { quantity: 4n, unconfirmed: 1n }
+  );
+  expect(text(host.querySelector("#copy-sheet-copies"))).toBe(
+    "4 on the Deck List"
+  );
+  expect(text(stepper())).toContain("4 on Deck List");
+  expect(text(stepper().parentElement)).toContain("+1 not confirmed");
+});
+
+test("a sheet without editing keeps the line's own count in its heading", () => {
+  root = createRoot(host);
+  act(() =>
+    root.render(
+      createElement(CopySheet, {
+        line: LINE,
+        ordinal: null,
+        onClose: vi.fn(),
+        returnFocus: { current: null },
+      })
+    )
+  );
+  expect(text(host.querySelector("#copy-sheet-copies"))).toBe(
+    "3 on the Deck List"
+  );
+});
+
+test("the empty status region is never hidden from the accessibility tree", () => {
+  render(null);
+  const region = host.querySelector("[data-edit-notice]")!;
+  expect(region.getAttribute("role")).toBe("status");
+  expect(region.hasAttribute("hidden")).toBe(false);
+  expect(region.className).not.toMatch(/(^|\s)(\S*:)?(hidden|invisible)(\s|$)/);
+  expect(region.getAttribute("aria-hidden")).toBeNull();
 });

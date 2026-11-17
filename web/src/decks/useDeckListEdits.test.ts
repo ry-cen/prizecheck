@@ -162,3 +162,28 @@ test("a tap made while a change is unconfirmed shows at once and doesn't hide th
   expect(edits.uncertainOf("energy")).toBe(1n);
   expect(edits.notice?.retry).toBeTypeOf("function");
 });
+
+test("each new notice has its own id, and a notice keeps its id while it stays", async () => {
+  vi.mocked(changeDeckList).mockRejectedValue(new TypeError("offline"));
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  const first = edits.notice!;
+  expect(first.id).toBeTypeOf("number");
+  await act(async () => edits.edit(add));
+  // A tap while the notice stays doesn't make it a new one.
+  expect(edits.notice).toBe(first);
+  expect(edits.notice!.id).toBe(first.id);
+  // Try again that fails again is a new notice to announce.
+  await act(async () => edits.notice!.retry!());
+  expect(edits.notice).not.toBe(first);
+  expect(edits.notice!.id).not.toBe(first.id);
+});
+
+test("a refusal's notice has an id too", async () => {
+  vi.mocked(changeDeckList).mockRejectedValue(
+    new DeckError(422, "EDITION_UNAVAILABLE")
+  );
+  await mount(vi.fn());
+  await act(async () => edits.edit(add));
+  expect(edits.notice?.id).toBeTypeOf("number");
+});

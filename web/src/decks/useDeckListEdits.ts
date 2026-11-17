@@ -34,6 +34,8 @@ export type EditFeedback = {
 };
 
 export type EditNotice = {
+  /** Grows with every notice raised, so a surface can tell a new notice from the one it already showed. */
+  id: number;
   text: string;
   /** Send the same command again (a request whose outcome is unknown), or null. */
   retry: (() => void) | null;
@@ -194,9 +196,13 @@ export function useDeckListEdits({
   const setFeedback = (next: EditFeedback | null) => {
     if (mounted.current) setFeedbackState(next);
   };
+  const noticeIds = useRef(0);
   const setNoticeIfMounted = (next: EditNotice | null) => {
     if (mounted.current) setNotice(next);
   };
+  /** A new notice: every one gets a new id, even when its words are the same as the last one's. */
+  const raise = (text: string, retryWith: (() => void) | null) =>
+    setNoticeIfMounted({ id: ++noticeIds.current, text, retry: retryWith });
 
   // Leaving the Deck takes its toast down with the page.
   useEffect(() => {
@@ -268,10 +274,10 @@ export function useDeckListEdits({
       inFlight.current = null;
       if (!(cause instanceof DeckError) || cause.status >= 500) {
         failed.current = batch;
-        setNoticeIfMounted({
-          text: "Your last Deck List change may not have been saved. Try again to check safely.",
-          retry,
-        });
+        raise(
+          "Your last Deck List change may not have been saved. Try again to check safely.",
+          retry
+        );
         redraw();
         return;
       }
@@ -293,16 +299,15 @@ export function useDeckListEdits({
           confirmed.current = fresh;
         return;
       }
-      setNoticeIfMounted({
-        text:
-          cause.code === "STALE_DECK_LIST"
-            ? // No read follows this refusal here (the rebuild above already used its one), so it can't claim the Deck is up to date.
-              "This Deck changed somewhere else, so your last change wasn't saved."
-            : cause.code === "EDITION_UNAVAILABLE"
-              ? "That card can't be added any more, so the Deck List wasn't changed."
-              : "The Deck List couldn't be changed. Please try again.",
-        retry: null,
-      });
+      raise(
+        cause.code === "STALE_DECK_LIST"
+          ? // No read follows this refusal here (the rebuild above already used its one), so it can't claim the Deck is up to date.
+            "This Deck changed somewhere else, so your last change wasn't saved."
+          : cause.code === "EDITION_UNAVAILABLE"
+            ? "That card can't be added any more, so the Deck List wasn't changed."
+            : "The Deck List couldn't be changed. Please try again.",
+        null
+      );
     }
   }
 
