@@ -416,6 +416,46 @@ describe("Riftbound prefix, raw request targets", () => {
   });
 });
 
+describe("Riftbound prefix, absolute-form targets", () => {
+  // An absolute-form request line names its own path: `GET http://host/api/... HTTP/1.1`. The gateway reads that raw path
+  // like an origin-form one, and refuses every absolute-form target that is in the namespace on either reading.
+  const refused = [
+    "http://host/api/riftbound/%2E%2e/loans",
+    "HTTP://host/api/riftbound/x/%2e%2e/%2e%2e/loans",
+    "http://host/api/riftbound/..\\loans",
+    "http://host/api/catalog/%2e%2e/riftbound/x",
+    "http://host/api/riftbound/x",
+    "https://host:8443/api/riftbound/catalog/sets?q=a",
+    "http://host/api/riftbound",
+  ];
+  for (const setting of ["on", "unset"] as const) {
+    it(`answers 404 with no lookup or upstream call (Riftbound ${setting})`, async () => {
+      const base = await start(setting);
+      for (const target of refused) {
+        const response = await rawRequest(base, target);
+        expect([target, response.status]).toEqual([target, 404]);
+      }
+      const cross = await rawRequest(base, refused[0], {
+        method: "POST",
+        headers: { origin: "https://elsewhere.example" },
+        body: "{}",
+      });
+      expect(cross.status).toBe(404);
+      expect(lookups()).toBe(0);
+      expect(pokemonSeen).toEqual([]);
+      expect(riftboundSeen).toEqual([]);
+    });
+  }
+
+  it("does not look at an absolute-form target outside the namespace", async () => {
+    const base = await start("on");
+    // What the gateway makes of this target is unchanged; it only must not be refused as a Riftbound target.
+    await rawRequest(base, "http://host/api/catalog/x");
+    expect(lookups()).toBe(1);
+    expect(riftboundSeen).toEqual([]);
+  });
+});
+
 describe("Riftbound prefix, origin setting", () => {
   it("ignores a trailing slash and any path in the setting", async () => {
     for (const suffix of ["/", "/prefix/", "/prefix"]) {

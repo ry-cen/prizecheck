@@ -135,14 +135,25 @@ function originOf(value: string | undefined): string {
 // target in the namespace that carries a dot segment (raw or percent-encoded), an encoded slash or a backslash, is
 // answered 404 before any other check, so a Riftbound-looking target never reaches the Pokémon upstream and a
 // Pokémon-looking one never reaches Riftbound.
+// An absolute-form target (`http://host/api/...`) is read the same way, on the raw path after its authority, cut out by
+// string parsing that neither decodes nor normalises. Riftbound routes are origin-form only: an absolute-form target
+// that is in the namespace on either reading is refused whatever it contains. Other absolute-form targets, and `*` and
+// authority-form targets, are not looked at and are handled as before.
 const RIFTBOUND_RAW = /^\/api\/riftbound(?:[/\\]|$)/;
+const ABSOLUTE_FORM = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*/;
 function riftboundTargetRefused(request: IncomingMessage, path: string) {
-  const raw = (request.url || "/").split(/[?#]/, 1)[0];
+  const target = request.url || "/";
+  const authority = ABSOLUTE_FORM.exec(target);
+  const raw = (authority ? target.slice(authority[0].length) : target).split(
+    /[?#]/,
+    1
+  )[0];
   const rawIn = RIFTBOUND_RAW.test(raw);
   const pathIn =
     path === "/api/riftbound" || path.startsWith("/api/riftbound/");
   if (rawIn !== pathIn) return true;
   if (!rawIn) return false;
+  if (authority) return true;
   return (
     /%2f|%5c|\\/i.test(raw) ||
     raw.split("/").some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))
