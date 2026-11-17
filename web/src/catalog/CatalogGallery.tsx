@@ -439,7 +439,11 @@ export function CatalogGallery({
       }
     }
     return (
-      <div className="flex flex-wrap items-center gap-2">
+      // aria-live="off" keeps this line quiet inside the gallery's status region when another line already said it.
+      <div
+        aria-live={announce ? undefined : "off"}
+        className="flex flex-wrap items-center gap-2"
+      >
         <p
           role={announce ? "status" : undefined}
           className="m-0 min-w-0 flex-1 text-meta text-text"
@@ -502,11 +506,18 @@ export function CatalogGallery({
         ? claimNotice({ kind: "add", message, undo: null })
         : null;
       // Catalog popup adds have one notice owner, including when the popup closed during the request.
-      if (live && !(latest.current.undoToast && result.from === "popup"))
-        ownToast.current = queueToast.show({ message });
-      const external = latest.current.onAdded?.(result);
+      // This first toast fills the gap while the Undo is looked up, and another toast replaces it. Whoever shows that
+      // one announces the add, once: on the Catalog page this toast speaks and its Undo-bearing replacement stays
+      // quiet (announcedInline); in Collection that toast belongs to Collection and speaks, so this one stays quiet.
+      const interim =
+        live && !(latest.current.undoToast && result.from === "popup");
+      const speaks = interim && latest.current.undoToast;
+      if (interim)
+        ownToast.current = queueToast.show({ message, announce: speaks });
+      const handed = speaks ? { ...result, announcedInline: true } : result;
+      const external = latest.current.onAdded?.(handed);
       const undo = latest.current.undoToast
-        ? latest.current.addToast(result)
+        ? latest.current.addToast(handed)
         : Promise.resolve(external ?? null).then((undo) =>
             undo
               ? observeUndo(undo, (ownerRevision) =>
@@ -923,18 +934,20 @@ export function CatalogGallery({
         owned={owned}
         onOwned={setOwned}
       />
+      {/* Outside the status region below: this line is the toast's twin and says nothing of its own. */}
+      {!undoToast &&
+        !card &&
+        recovery.notice?.kind === "add" &&
+        renderAddFeedback(
+          () => {},
+          () =>
+            galleryRoot.current
+              ?.querySelector<HTMLInputElement>('input[type="search"]')
+              ?.focus(),
+          false,
+          "gallery"
+        )}
       <div role="status" className="flex flex-col gap-0.5 text-meta">
-        {!undoToast &&
-          !card &&
-          renderAddFeedback(
-            () => {},
-            () =>
-              galleryRoot.current
-                ?.querySelector<HTMLInputElement>('input[type="search"]')
-                ?.focus(),
-            false,
-            "gallery"
-          )}
         {browse.notice && (
           <p className="m-0 font-medium text-text">{browse.notice}</p>
         )}

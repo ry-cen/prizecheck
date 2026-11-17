@@ -441,6 +441,39 @@ test("add, retryable failure and Undo success each change the inline announcemen
   });
 });
 
+test("the copies stepper says what it counts when pressed, and an add's reset to 1 stays quiet", async () => {
+  await journey(async ({ host, button }) => {
+    const spoken: string[] = [];
+    new MutationObserver((records) => {
+      for (const record of records) {
+        const node =
+          record.target.nodeType === Node.TEXT_NODE
+            ? record.target.parentElement
+            : (record.target as Element);
+        const region = node?.closest('[aria-live], [role="status"], output');
+        if (region && node?.textContent && !node.closest('[aria-live="off"]'))
+          spoken.push(node.textContent);
+      }
+    }).observe(host, { subtree: true, childList: true, characterData: true });
+    const group = host.querySelector('[aria-label="Copies to add"]')!;
+    // No <output> in the stepper: its implicit status role would read the bare number.
+    expect(group.querySelector("output")).toBeNull();
+    const more = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="Increase Copies to add"]'
+    )!;
+    await act(async () => more.click());
+    await act(async () => more.click());
+    expect(spoken).toEqual(["Copies to add 2", "Copies to add 3"]);
+    spoken.length = 0;
+    await act(async () => button("Add 3").click());
+    // The count went back to 1 without a word; the add's own message is the only one.
+    expect(group.textContent).toBe("1");
+    expect(spoken.filter((text) => /^\d+$/.test(text))).toEqual([]);
+    expect(spoken.filter((text) => /Copies to add/.test(text))).toEqual([]);
+    expect(spoken.filter((text) => /^Added /.test(text))).toHaveLength(1);
+  });
+});
+
 test("stepping edition during Undo permits the next Edition's new inline Undo", async () => {
   await journey(async ({ host, button }) => {
     await act(async () => button("Add 1").click());

@@ -215,7 +215,6 @@ export function CostSummary({ compact = false }: { compact?: boolean }) {
   return (
     <p
       className={`m-0 flex min-w-0 max-w-full ${compact ? "flex-row flex-wrap items-baseline gap-x-2" : "flex-col"}`}
-      aria-live="polite"
     >
       <span className="text-meta text-text-muted">Estimated cost</span>
       <span

@@ -841,6 +841,9 @@ function AddRows({
     []
   );
   const [done, setDone] = useState("");
+  // What a press on the copies stepper says, with the stepper's name: only a press speaks, so the count going back to
+  // 1 after an add stays quiet and the add's own message is the only thing heard.
+  const [stepped, setStepped] = useState("");
   const words = (of: PopupEdition) =>
     `${cardName} ${variantLabel(of.descriptor)}`;
   // The last add's trouble: the Edition it was for (an add that may have completed stays resendable, kept by the
@@ -886,6 +889,7 @@ function AddRows({
     setBusy(true);
     setUndoing(false);
     setDone("");
+    setStepped("");
     setUndo(null);
     setNote(null);
     const sent = edition;
@@ -1022,10 +1026,14 @@ function AddRows({
         <Stepper
           label="Copies to add"
           value={count}
-          onChange={setCount}
+          onChange={(next) => {
+            setCount(next);
+            setStepped(`Copies to add ${next}`);
+          }}
           min={1}
           max={MAX_ADD}
           disabled={!usable}
+          announceValue={false}
         />
         <Button
           ref={addButton}
@@ -1042,6 +1050,9 @@ function AddRows({
           This Edition is unavailable, so it can't be added.
         </p>
       )}
+      <p aria-live="polite" className="sr-only">
+        {stepped}
+      </p>
       {renderAddFeedback ? (
         renderAddFeedback(onUndone, () => addButton.current?.focus())
       ) : (

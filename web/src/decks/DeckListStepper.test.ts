@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
-import { DeckListStepper } from "./DeckListStepper";
+import { DeckListStepper, EditFeedbackLine } from "./DeckListStepper";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const host = document.createElement("div");
@@ -51,7 +51,40 @@ test("Remove one is disabled when the card is not on the Deck List", () => {
   expect(remove!.disabled).toBe(true);
 });
 
-test("an unconfirmed change is marked beside the count, outside the live count", () => {
+test("the count is not a live region, so an edit is announced once, by its own message", () => {
+  root = createRoot(host);
+  act(() =>
+    root.render(
+      createElement(DeckListStepper, {
+        cardName: "Tangela",
+        quantity: 3n,
+        onChange: vi.fn(),
+      })
+    )
+  );
+  expect(host.querySelector("[aria-live], output, [role='status']")).toBeNull();
+  act(() => root.unmount());
+  root = createRoot(host);
+  act(() =>
+    root.render(
+      createElement(EditFeedbackLine, {
+        feedback: {
+          id: 2,
+          message: "Added 1 Tangela.",
+          undo: null,
+          busy: false,
+        },
+        since: 1,
+      })
+    )
+  );
+  const lines = host.querySelectorAll("[role='status']");
+  expect(lines).toHaveLength(1);
+  expect(lines[0].textContent).toBe("Added 1 Tangela.");
+  expect(lines[0].hasAttribute("data-edit-feedback")).toBe(true);
+});
+
+test("an unconfirmed change is marked beside the count, outside the count's words", () => {
   root = createRoot(host);
   act(() =>
     root.render(
@@ -63,10 +96,10 @@ test("an unconfirmed change is marked beside the count, outside the live count",
       })
     )
   );
-  const live = host.querySelector("[aria-live='polite']")!;
-  expect(live.textContent).toBe("3 on Deck List");
+  const count = host.querySelector("strong")!.parentElement!;
+  expect(count.textContent).toBe("3 on Deck List");
   expect(host.textContent).toContain("+1 not confirmed");
-  expect(live.textContent).not.toContain("not confirmed");
+  expect(count.textContent).not.toContain("not confirmed");
   act(() =>
     root.render(
       createElement(DeckListStepper, {

@@ -32,7 +32,8 @@ export function DeckListStepper({
       >
         −1
       </Button>
-      <span aria-live="polite" className="text-body tabular-nums">
+      {/* Not live: the edit's one message (EditFeedbackLine, or the toast) says what changed. */}
+      <span className="text-body tabular-nums">
         <strong className="font-semibold">{quantity.toString()}</strong> on Deck
         List
       </span>
@@ -67,7 +68,7 @@ export function EditFeedbackLine({
   const shown = feedback && feedback.id > since ? feedback : null;
   return (
     <div className="flex min-h-control flex-wrap items-center gap-2 text-meta">
-      <p role="status" className="m-0 min-w-0 grow">
+      <p role="status" data-edit-feedback className="m-0 min-w-0 grow">
         {shown?.message ?? ""}
       </p>
       {shown && (shown.undo || shown.busy) && (
