@@ -122,3 +122,60 @@ test("an unconfirmed change is marked beside the count, outside the count's word
   );
   expect(host.textContent).not.toContain("not confirmed");
 });
+
+test("the same words twice in a row add new content to the one mounted status line each time", () => {
+  root = createRoot(host);
+  const render = (id: number, message: string) =>
+    act(() =>
+      root.render(
+        createElement(EditFeedbackLine, {
+          feedback: { id, message, undo: null, busy: false },
+          since: 0,
+        })
+      )
+    );
+  render(1, "Added 1 Tangela.");
+  const line = host.querySelector("[role='status']")!;
+  const additions: string[] = [];
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === "characterData")
+        additions.push(record.target.textContent ?? "");
+      else
+        record.addedNodes.forEach((node) =>
+          additions.push(node.textContent ?? "")
+        );
+    }
+  });
+  observer.observe(line, {
+    childList: true,
+    characterData: true,
+    subtree: true,
+  });
+  // Another batch lands with identical words: a new feedback id.
+  render(2, "Added 1 Tangela.");
+  expect(host.querySelector("[role='status']")).toBe(line);
+  render(3, "Added 1 Tangela.");
+  expect(host.querySelector("[role='status']")).toBe(line);
+  return Promise.resolve().then(() => {
+    observer.disconnect();
+    expect(additions).toEqual(["Added 1 Tangela.", "Added 1 Tangela."]);
+  });
+});
+
+test("the same feedback id (an Undo on its way) doesn't announce again", () => {
+  root = createRoot(host);
+  const render = (busy: boolean) =>
+    act(() =>
+      root.render(
+        createElement(EditFeedbackLine, {
+          feedback: { id: 4, message: "Added 1 Tangela.", undo: null, busy },
+          since: 0,
+        })
+      )
+    );
+  render(false);
+  const span = host.querySelector("[role='status'] span");
+  render(true);
+  expect(host.querySelector("[role='status'] span")).toBe(span);
+});
