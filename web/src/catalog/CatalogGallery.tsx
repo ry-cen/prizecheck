@@ -1104,6 +1104,18 @@ export function CatalogGallery({
         onAdded={added}
         renderAddFeedback={undoToast ? undefined : renderAddFeedback}
         onReported={onReported ?? (() => {})}
+        onReopen={(request) => {
+          // A Borrow Request sent from the card brings the collector back to it, unless this gallery isn't showing.
+          if (!alive.current.mounted || !alive.current.active) return false;
+          if (routed && request.editionId !== null) {
+            // The address names the card again (the Review closed it), which opens it through the sync effect.
+            route.current.onCardRoute?.(
+              { printingId: request.printingId, editionId: request.editionId },
+              route.current.routeCard ? "replace" : "open"
+            );
+          } else setCard(request);
+          return true;
+        }}
         returnFocus={opener}
       />
     </div>

@@ -30,6 +30,7 @@ import {
   copyCard,
   useBorrowDrafts,
   type DraftFriend,
+  type ReviewOptions,
 } from "../loans/BorrowDrafts";
 import { lendableText } from "../social/friendCards";
 import { FriendsWhoHaveThis } from "../social/FriendsWhoHaveThis";
@@ -106,7 +107,22 @@ type Props = {
   renderAddFeedback?: AddFeedbackRenderer;
   /** A metadata report was sent: My metadata reports reads again. */
   onReported: () => void;
+  /** A Borrow Request reviewed from this popup was sent, so the popup closed for the composer: the card to open again.
+   * Returns true when it did. The popup then puts focus back on that lender's control and says the request was sent. */
+  onReopen?: (request: CardRequest) => boolean;
   returnFocus?: RefObject<HTMLElement | null>;
+};
+
+/** Where a Borrow Request sent from this popup's Review brings the collector back to: the card to show, the lender
+ * row to put focus on, and what to say. `focused` is set once that row has had its turn. */
+type Comeback = {
+  key: string;
+  friendId: string;
+  editionId: string;
+  message: string;
+  focused: boolean;
+  /** The confirmation has been put on screen once; it is not put back after the collector clears it. */
+  said: boolean;
 };
 
 const HEADING = "m-0 text-meta font-semibold text-text-muted";
@@ -160,6 +176,7 @@ export function CatalogCardPopup({
   renderAddFeedback,
   returnFocus,
   onEditionShown,
+  onReopen,
 }: Props) {
   const open = request !== null;
   // The popup outlives its keyed AddRows, so delayed failures follow the currently open modal.
@@ -182,6 +199,8 @@ export function CatalogCardPopup({
     selectedId: null,
     report: null,
   });
+  const comeback = useRef<Comeback | null>(null);
+  const [sentNote, setSentNote] = useState("");
   const focusReport = useRef(false);
   const reported = useRef<string | null>(request?.editionId ?? null);
   if (card.key !== cardKey) {
@@ -198,6 +217,33 @@ export function CatalogCardPopup({
   const reportRef = useRef<HTMLDivElement>(null);
 
   const ready = details.state === "ready" ? details : null;
+  const sentNoteRef = useRef<HTMLParagraphElement>(null);
+  // A card opened again by a send says so once, in a line that is on screen empty first (the lender rows' own block),
+  // so it is announced when its words arrive. It goes with the card, and with the collector's next click in it.
+  useEffect(() => {
+    const back = comeback.current;
+    if (!open || (back && back.key !== cardKey)) {
+      comeback.current = null;
+      setSentNote("");
+      return;
+    }
+    if (back && !back.said && ready) {
+      back.said = true;
+      setSentNote(back.message);
+    }
+  }, [open, cardKey, ready !== null]);
+  useEffect(() => {
+    if (!sentNote) return;
+    const clear = (event: Event) => {
+      const dialog = sentNoteRef.current?.closest("dialog");
+      if (event.target instanceof Node && dialog?.contains(event.target))
+        setSentNote("");
+    };
+    // Capturing: a press that replaces its own control (Ask turning into a stepper) has left the dialog by the time a
+    // bubbling listener runs.
+    document.addEventListener("click", clear, true);
+    return () => document.removeEventListener("click", clear, true);
+  }, [sentNote]);
   // Without the browse read, the gallery row still knows its own Edition's copies; the others read "unknown".
   const editions = (ready?.editions ?? []).map((edition) =>
     ready?.browse !== "ok" &&
@@ -437,13 +483,25 @@ export function CatalogCardPopup({
             <SelectedEdition edition={selected} />
           )}
           <Where where={where} places={places} />
+          <p
+            ref={sentNoteRef}
+            role="status"
+            className="m-0 min-w-0 break-words text-meta text-text empty:sr-only"
+          >
+            {sentNote}
+          </p>
           <ReviewOwnersProvider>
             <FriendsWhoHaveThis
               printingId={ready.printing.id}
               editionId={selected?.id ?? null}
               action={(copy) => (
                 // One group per row, so on a phone Review wraps with its row's control, never alone.
-                <span className="inline-flex items-center gap-x-2 empty:hidden">
+                <LenderControls
+                  comeback={comeback}
+                  cardKey={cardKey}
+                  friendId={copy.collector_id}
+                  editionId={copy.edition_id}
+                >
                   <AskControl
                     friend={copy}
                     card={copyCard(
@@ -460,13 +518,38 @@ export function CatalogCardPopup({
                     editionId={copy.edition_id}
                     onReview={(review) => {
                       // The popup is modal and the drafts tray sits behind it: it closes, giving focus back to the
-                      // tile, and the composer opens over the page with that tile as its opener.
+                      // tile, and the composer opens over the page with that tile as its opener. Sending from it
+                      // brings the collector back to this card (the Edition now picked), on this lender's control.
                       const opener = returnFocus?.current ?? null;
+                      const shown = selected?.id ?? request?.editionId ?? null;
+                      const back: CardRequest | null = request && {
+                        ...request,
+                        editionId: shown,
+                        row:
+                          request.row?.edition_id === shown
+                            ? request.row
+                            : null,
+                      };
                       onClose();
-                      review(opener);
+                      review(opener, {
+                        onSent: (message) => {
+                          if (!back || !onReopen) return false;
+                          comeback.current = {
+                            key: `${back.printingId}:${back.editionId ?? ""}`,
+                            friendId: copy.collector_id,
+                            editionId: copy.edition_id,
+                            message,
+                            focused: false,
+                            said: false,
+                          };
+                          if (onReopen(back)) return true;
+                          comeback.current = null;
+                          return false;
+                        },
+                      });
                     }}
                   />
-                </span>
+                </LenderControls>
               )}
             />
           </ReviewOwnersProvider>
@@ -477,6 +560,55 @@ export function CatalogCardPopup({
         {lateFailure}
       </p>
     </CardPopup>
+  );
+}
+
+/** One lender row's controls. When a Borrow Request sent from this card brought the collector back to it, focus goes to
+ * the first control here once the row is drawn (the popup's own opening focus has been given by then), unless the
+ * collector has already moved focus into the card. */
+function LenderControls({
+  comeback,
+  cardKey,
+  friendId,
+  editionId,
+  children,
+}: {
+  comeback: RefObject<Comeback | null>;
+  cardKey: string;
+  friendId: string;
+  editionId: string;
+  children: ReactNode;
+}) {
+  const group = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const back = comeback.current;
+    if (
+      !back ||
+      back.focused ||
+      back.key !== cardKey ||
+      back.friendId !== friendId ||
+      back.editionId !== editionId
+    )
+      return;
+    back.focused = true;
+    // After the composer's own dialog has given focus back (it runs in the same commit as the send).
+    queueMicrotask(() => {
+      const control = group.current?.querySelector<HTMLElement>(
+        "button:not(:disabled)"
+      );
+      const active = document.activeElement;
+      const idle =
+        !active ||
+        active === document.body ||
+        active === group.current?.closest("dialog") ||
+        active.hasAttribute("data-autofocus");
+      if (control?.isConnected && idle) control.focus();
+    });
+  });
+  return (
+    <span ref={group} className="inline-flex items-center gap-x-2 empty:hidden">
+      {children}
+    </span>
   );
 }
 
@@ -554,7 +686,9 @@ function ReviewDraft({
 }: {
   friend: DraftFriend;
   editionId: string;
-  onReview: (review: (opener: HTMLElement | null) => void) => void;
+  onReview: (
+    review: (opener: HTMLElement | null, options?: ReviewOptions) => void
+  ) => void;
 }) {
   const drafts = useBorrowDrafts();
   const reviews = useContext(ReviewOwnersContext);
@@ -574,7 +708,9 @@ function ReviewDraft({
       variant="primary"
       aria-label={`Review Borrow Request to ${friend.display_name}`}
       onClick={() =>
-        onReview((opener) => drafts.review(friend.collector_id, opener))
+        onReview((opener, options) =>
+          drafts.review(friend.collector_id, opener, options)
+        )
       }
     >
       Review

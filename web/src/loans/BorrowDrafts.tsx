@@ -121,9 +121,17 @@ type DraftsApi = {
     lendable: string,
     deckId?: string | null
   ) => void;
-  /** Opens the composer on the draft to one Friend. */
-  review: (friendId: string, opener?: HTMLElement | null) => void;
+  /** Opens the composer on the draft to one Friend. `onSent` runs once if that composer sends the request (not when it
+   * is closed unsent, and not when a recovered send finishes), with the confirmation that was to be said. It returns
+   * true when it took over saying it, so the toast stays quiet and doesn't take focus. */
+  review: (
+    friendId: string,
+    opener?: HTMLElement | null,
+    options?: ReviewOptions
+  ) => void;
 };
+
+export type ReviewOptions = { onSent?: (message: string) => boolean };
 
 const DraftsContext = createContext<DraftsApi | null>(null);
 
@@ -311,6 +319,11 @@ export function BorrowDraftsProvider({
   );
 
   const opener = useRef<HTMLElement | null>(null);
+  // What to do when the composer now open sends: set by the Review that opened it, gone when any composer opens
+  // without one or closes unsent.
+  const onSent = useRef<ReviewOptions["onSent"]>(undefined);
+  // The composer closed because the request was sent and the callback took the focus back: the page's h1 stays out.
+  const handedBack = useRef(false);
   const { store } = useLoanRecovery();
   const guard = useFlowGuard();
   const toast = useToast();
@@ -413,8 +426,9 @@ export function BorrowDraftsProvider({
           },
           friend.display_name
         ),
-      review: (friendId, from) => {
+      review: (friendId, from, options) => {
         opener.current = from ?? null;
+        onSent.current = options?.onSent;
         setComposing(friendId);
       },
     }),
@@ -427,12 +441,18 @@ export function BorrowDraftsProvider({
   useEffect(() => {
     if (composing !== null && !draft) setComposing(null);
   }, [composing, draft]);
+  // A composer that is gone without sending (Keep draft, Discard, a refusal, an emptied draft) leaves no return behind.
+  useEffect(() => {
+    if (composing === null) onSent.current = undefined;
+  }, [composing]);
   // After the composer's Dialog has given focus back to its opener: if the opener is gone, the page's h1 takes it.
   // This runs before the toast host's own effect, so a toast that asks for focus still gets it.
   const composerOpen = draft !== undefined;
   const wasOpen = useRef(composerOpen);
   useLayoutEffect(() => {
-    if (wasOpen.current && !composerOpen) focusPageHeading();
+    if (wasOpen.current && !composerOpen && !handedBack.current)
+      focusPageHeading();
+    handedBack.current = false;
     wasOpen.current = composerOpen;
   }, [composerOpen]);
   return (
@@ -463,6 +483,14 @@ export function BorrowDraftsProvider({
           )}
           onChange={(update) => change(draft.friend.collector_id, update)}
           onClose={() => setComposing(null)}
+          onSent={(message) => {
+            const sent = onSent.current;
+            onSent.current = undefined;
+            setComposing(null);
+            const taken = sent?.(message) === true;
+            handedBack.current = taken;
+            return taken;
+          }}
           onOpenLoan={onOpenLoan}
           returnFocus={opener}
         />
@@ -673,6 +701,7 @@ function BorrowComposer({
   onRetry,
   onChange,
   onClose,
+  onSent,
   onOpenLoan,
   returnFocus,
 }: {
@@ -682,6 +711,8 @@ function BorrowComposer({
   onRetry: () => void;
   onChange: (update: (draft: Draft | undefined) => Draft | null) => void;
   onClose: () => void;
+  /** Closes the composer because its request was sent: true when the Review that opened it took over the confirmation. */
+  onSent: (message: string) => boolean;
   onOpenLoan: (id: string) => void;
   returnFocus: RefObject<HTMLElement | null>;
 }) {
@@ -799,16 +830,21 @@ function BorrowComposer({
     if (o.kind === "done" || o.kind === "voided") noteLoansChanged();
     if (o.kind === "done") {
       const id = threadIdOf(o.response);
+      const message = recovered
+        ? RECOVERY_TEXT.done
+        : `Borrow Request sent to ${endSentence(name)}`;
       onChange(() => null);
-      onClose();
+      // A recovered send finishes as it always did. A new one may hand the collector back to the card it was asked
+      // from, which then says it (the toast waits behind that card's dialog) and keeps focus.
+      let handedBack = false;
+      if (recovered) onClose();
+      else handedBack = onSent(message);
       toast.show({
-        message: recovered
-          ? RECOVERY_TEXT.done
-          : `Borrow Request sent to ${endSentence(name)}`,
+        message,
         ...(id
           ? { action: { label: "View", onAction: () => onOpenLoan(id) } }
           : {}),
-        focus: true,
+        ...(handedBack ? { announce: false } : { focus: true }),
       });
     } else if (o.kind === "voided" && o.refusal)
       refused(refusalError(o.refusal));
