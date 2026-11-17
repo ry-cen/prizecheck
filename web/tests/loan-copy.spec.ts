@@ -84,3 +84,50 @@ for (const viewport of [
     ).not.toContain("1");
   });
 }
+
+test("a borrower's own confirmation says the copies arrived, and the lender's alone does not", async ({
+  page,
+  collectors,
+}) => {
+  const ids = seedCatalog();
+  const borrower = await collectors.signIn();
+  await nameCollector(borrower.page, "Ash K");
+  await signInAsOwner(page, "/loans");
+  await nameCollector(page, "Misty W");
+  await befriend(page, borrower.page);
+  await hold(page, await unsorted(page), ids["PAL 185"], 2);
+  const accepted = async () => {
+    const sent = await api(borrower.page, "POST", "/api/loans", {
+      lender_id: await accountId(page),
+      lines: [{ edition_id: ids["PAL 185"], quantity: "1" }],
+      idempotency_key: randomUUID(),
+    });
+    await loanStep(page, sent.id, "accept", {
+      lines: [{ edition_id: ids["PAL 185"], promised: "1" }],
+    });
+    return sent.id as string;
+  };
+  const facts = (loanId: string) =>
+    borrower.page.goto(`${ORIGIN}/loans/${loanId}`).then(() =>
+      borrower.page
+        .getByRole("main")
+        .locator("p")
+        .filter({ hasText: /^You're borrowing/ })
+    );
+
+  // The borrower confirms first: the copies are in Unsorted already, though the Loan is still accepted.
+  const first = await accepted();
+  await loanStep(borrower.page, first, "handover");
+  await expect(await facts(first)).toContainText(
+    "You're borrowing · Arrived in Unsorted"
+  );
+  await expect(await facts(first)).not.toContainText("Goes to");
+
+  // Only the lender confirmed: nothing has arrived yet.
+  const second = await accepted();
+  await loanStep(page, second, "handover");
+  await expect(await facts(second)).toContainText(
+    "You're borrowing · Goes to Unsorted"
+  );
+  await expect(await facts(second)).not.toContainText("Arrived");
+});

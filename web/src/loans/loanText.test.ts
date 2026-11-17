@@ -265,17 +265,54 @@ describe("quantity labels", () => {
 });
 
 describe("where a borrower's copies are", () => {
+  const goes = { deck: "For", unsorted: "Goes to Unsorted" };
+  const arrived = { deck: "Arrived in", unsorted: "Arrived in Unsorted" };
+  const loan = (
+    state: LoanView["state"],
+    role: LoanView["role"],
+    you: boolean,
+    they: boolean
+  ) => ({
+    state,
+    role,
+    you_confirmed_handover: you,
+    they_confirmed_handover: they,
+  });
   for (const state of ["requested", "accepted"] as const)
-    it(`says where they will go while the Loan is ${state}`, () => {
-      expect(borrowedPlace({ state })).toEqual({
-        deck: "For",
-        unsorted: "Goes to Unsorted",
-      });
+    it(`says where they will go while the Loan is ${state} and nobody confirmed`, () => {
+      expect(borrowedPlace(loan(state, "borrower", false, false))).toEqual(
+        goes
+      );
     });
+  it("says where they arrived once the borrower confirmed first, though the Loan is still accepted", () => {
+    expect(borrowedPlace(loan("accepted", "borrower", true, false))).toEqual(
+      arrived
+    );
+  });
+  it("still says where they will go when only the lender confirmed", () => {
+    expect(borrowedPlace(loan("accepted", "borrower", false, true))).toEqual(
+      goes
+    );
+  });
+  it("goes back to where they will go when the borrower takes the confirmation back", () => {
+    expect(borrowedPlace(loan("accepted", "borrower", true, false))).toEqual(
+      arrived
+    );
+    expect(borrowedPlace(loan("accepted", "borrower", false, false))).toEqual(
+      goes
+    );
+  });
   it("says where they arrived once handed over", () => {
-    expect(borrowedPlace({ state: "handed_over" })).toEqual({
-      deck: "Arrived in",
-      unsorted: "Arrived in Unsorted",
-    });
+    expect(borrowedPlace(loan("handed_over", "borrower", true, true))).toEqual(
+      arrived
+    );
+  });
+  it("reads the borrower's confirmation from the lender's side too", () => {
+    expect(borrowedPlace(loan("accepted", "lender", false, true))).toEqual(
+      arrived
+    );
+    expect(borrowedPlace(loan("accepted", "lender", true, false))).toEqual(
+      goes
+    );
   });
 });
