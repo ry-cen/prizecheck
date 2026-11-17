@@ -206,6 +206,7 @@ function ShellFrame({
   );
   const containers = useRef(new Map<PageId, HTMLDivElement>());
   const otherContainer = useRef<HTMLDivElement>(null);
+  const phoneNavigation = useRef<HTMLElement>(null);
   const restoredFocusEntry = useRef<string | null>(null);
   const current = pageDef(page);
   // The page whose tab is current: none while another page is shown.
@@ -305,6 +306,12 @@ function ShellFrame({
     heading.focus();
   }
 
+  // The phone's second skip link moves focus to the first tab of the bottom bar, past the page's own controls.
+  function skipToNavigation(event: React.MouseEvent) {
+    event.preventDefault();
+    phoneNavigation.current?.querySelector("a")?.focus();
+  }
+
   const allowed = (id: PageId) => id !== "owner" || owner;
   const accountItems: MenuItem[] = [
     ...ACCOUNT_PAGES.filter(allowed).map((id) => ({
@@ -350,6 +357,13 @@ function ShellFrame({
             className="fixed left-2 top-2 z-(--layer-modal) inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline focus:translate-y-0"
           >
             Skip to main content
+          </a>
+          <a
+            href="#main-views"
+            onClick={skipToNavigation}
+            className="fixed left-2 top-2 z-(--layer-modal) hidden min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline focus:translate-y-0 phone:inline-flex"
+          >
+            Skip to navigation
           </a>
 
           {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. At compact widths the gaps and
@@ -454,6 +468,8 @@ function ShellFrame({
 
           {/* Phone bottom tab bar. */}
           <nav
+            ref={phoneNavigation}
+            id="main-views"
             aria-label="Main views"
             className="fixed inset-x-0 bottom-0 z-(--layer-sticky) hidden h-tabbar border-t border-border bg-surface phone:flex"
           >

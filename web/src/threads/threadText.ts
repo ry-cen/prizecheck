@@ -125,19 +125,52 @@ export function timelineText(
   return `${actor}${EVENTS[event.kind] ?? "Agreement updated"}${changes.map((change) => ` · ${change}`).join("")}`;
 }
 
-/** Current terms only: the timeline owns the history of edits. */
+/**
+ * The agreement line of a row. A Loan's reads as one sentence with its direction, cards and Friend: "Borrowing 1 Switch
+ * from sam", "Lending 2 Iono to sam" (past tense once the cards went back or were written off; just the cards when it
+ * closed before any were handed over). A Trade's: "You give 2 · You get 1". Current terms only: the timeline owns the
+ * history of edits.
+ */
 export function agreementText(
-  row: Pick<ThreadItem, "kind" | "summary"> & { state?: string }
+  row: Pick<ThreadItem, "kind" | "summary"> & {
+    state?: string;
+    closed_reason?: ThreadItem["closed_reason"];
+    other?: Pick<ThreadItem["other"], "display_name">;
+  }
 ): string {
   const { summary } = row;
   if (row.kind === "loan") {
-    if (row.state === "closed") {
-      const total = Number(summary.you_give) + Number(summary.you_get);
-      return `${total} ${total === 1 ? "card" : "cards"}`;
-    }
-    return Number(summary.you_give) > 0
-      ? `Lending ${summary.you_give}`
-      : `Borrowing ${summary.you_get}`;
+    const give = Number(summary.you_give);
+    const total = give + Number(summary.you_get);
+    // The preview names at most three cards; what they miss is counted in copies.
+    // A line the lender left out stays in the preview with no copies; it isn't part of what changes hands.
+    const held = summary.cards.filter((card) => Number(card.copies) > 0);
+    const named = held.map((card) => `${card.copies} ${card.name}`);
+    const shown = held.reduce((sum, card) => sum + Number(card.copies), 0);
+    const left = total - shown;
+    const more =
+      left > 0 ? `${left} more ${left === 1 ? "copy" : "copies"}` : "";
+    const cards = named.length
+      ? [named.join(", "), more].filter(Boolean).join(" and ")
+      : `${total} ${total === 1 ? "card" : "cards"}`;
+    const closed = row.state === "closed";
+    // Closed before any card changed hands: nobody borrowed or lent anything.
+    if (
+      closed &&
+      row.closed_reason !== "returned" &&
+      row.closed_reason !== "written_off"
+    )
+      return cards;
+    const verb =
+      give > 0
+        ? closed
+          ? "Lent"
+          : "Lending"
+        : closed
+          ? "Borrowed"
+          : "Borrowing";
+    const who = row.other?.display_name;
+    return `${verb} ${cards}${who ? ` ${give > 0 ? "to" : "from"} ${who}` : ""}`;
   }
   const cash = cashText(row);
   return `You give ${summary.you_give} · You get ${summary.you_get}${cash ? ` · ${cash}` : ""}`;

@@ -183,7 +183,7 @@ export function ThreadList({
               ) : cashText(row) ? (
                 <span>{cashText(row)}</span>
               ) : null}
-              <span>{currentCardsText(row)}</span>
+              {row.kind !== "loan" && <span>{currentCardsText(row)}</span>}
               {row.kind === "loan" && (
                 <span className="text-meta text-text-muted">
                   Last activity {activityText(row.last_activity_at)}

@@ -61,6 +61,8 @@ import { Stepper } from "../ui/Stepper";
 import { TextField } from "../ui/TextField";
 import { readDecks, useBorrowDrafts } from "./BorrowDrafts";
 import {
+  borrowedPlace,
+  copiesLabel,
   loanStepConfirmation,
   handoverConfirmText,
   returnConfirmText,
@@ -932,6 +934,7 @@ export function LoanScreen({
   ];
 
   const deck = side.deck;
+  const place = borrowedPlace(loan);
   const facts: ReactNode[] = [
     loanRoleFact(loan),
     loan.role === "borrower" &&
@@ -939,7 +942,7 @@ export function LoanScreen({
     loan.state !== "offered" ? (
       deck ? (
         <>
-          For{" "}
+          {place.deck}{" "}
           <a
             href={`/decks/${encodeURIComponent(deck.id)}`}
             onClick={(event) => {
@@ -953,7 +956,7 @@ export function LoanScreen({
           </a>
         </>
       ) : (
-        "Goes to Unsorted"
+        place.unsorted
       )
     ) : null,
     loan.overdue_since
@@ -1719,7 +1722,7 @@ function LoanLine({
   else
     count = (
       <span className="text-heading font-semibold tabular-nums">
-        {accepted ? line.promised : line.requested}
+        {copiesLabel(Number(accepted ? line.promised : line.requested))}
         {accepted && line.promised !== line.requested && (
           <span className="text-meta font-normal text-text-muted">
             {" "}

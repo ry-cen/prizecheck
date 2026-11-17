@@ -247,7 +247,6 @@ it("S2-16: an item's latest log summary projects only public terms and its parti
     expect(host.querySelector("summary h2")?.textContent).toBe("Done");
     expect(host.querySelector('a[href="/collection"]')).not.toBeNull();
     const link = host.querySelector('a[data-thread="item"]')!;
-    expect(link.textContent).toContain("2 cards");
     expect(link.textContent).toContain("2 Iono");
     expect(link.textContent).not.toContain("Changed the Loan terms");
     expect(link.textContent).not.toContain("→");

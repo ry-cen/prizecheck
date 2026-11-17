@@ -1,5 +1,5 @@
-import { expect, it } from "vitest";
-import type { EventView, TimelineItem } from "../social_generated";
+import { describe, expect, it } from "vitest";
+import type { EventView, ThreadItem, TimelineItem } from "../social_generated";
 import {
   activityText,
   agreementText,
@@ -165,18 +165,90 @@ it("uses lending language for Loan changes", () => {
     )
   ).toBe("Misty: Changed the Loan terms · Added 2 Iono for Misty to lend");
 });
-it.each([
-  ["loan", "2", "0", "Lending 2"],
-  ["loan", "0", "3", "Borrowing 3"],
-  ["trade", "2", "1", "You give 2 · You get 1"],
-] as const)(
-  "summarizes %s current quantities",
-  (kind, you_give, you_get, expected) => {
-    expect(
-      agreementText({ kind, summary: { you_give, you_get, cards: [] } })
-    ).toBe(expected);
-  }
-);
+const loanRow = (
+  state: string,
+  you_give: string,
+  you_get: string,
+  cards: { side: "you_give" | "you_get"; name: string; copies: string }[],
+  closed_reason: ThreadItem["closed_reason"] = null
+) => ({
+  kind: "loan" as const,
+  state,
+  closed_reason,
+  other: { display_name: "sam" } as ThreadItem["other"],
+  summary: { you_give, you_get, cards } as ThreadItem["summary"],
+});
+describe("a Loan row's one line", () => {
+  it.each([
+    [
+      loanRow("requested", "2", "0", [
+        { side: "you_give", name: "Switch", copies: "2" },
+      ]),
+      "Lending 2 Switch to sam",
+    ],
+    [
+      loanRow("handed_over", "0", "1", [
+        { side: "you_get", name: "Switch", copies: "1" },
+      ]),
+      "Borrowing 1 Switch from sam",
+    ],
+    [
+      loanRow("handed_over", "0", "3", [
+        { side: "you_get", name: "Iono", copies: "1" },
+        { side: "you_get", name: "Switch", copies: "1" },
+      ]),
+      "Borrowing 1 Iono, 1 Switch and 1 more copy from sam",
+    ],
+    [
+      loanRow("accepted", "0", "2", [
+        { side: "you_get", name: "Iono", copies: "2" },
+        { side: "you_get", name: "Boss's Orders", copies: "0" },
+      ]),
+      "Borrowing 2 Iono from sam",
+    ],
+    [loanRow("accepted", "5", "0", []), "Lending 5 cards to sam"],
+    [
+      loanRow(
+        "closed",
+        "0",
+        "1",
+        [{ side: "you_get", name: "Switch", copies: "1" }],
+        "returned"
+      ),
+      "Borrowed 1 Switch from sam",
+    ],
+    [
+      loanRow(
+        "closed",
+        "1",
+        "0",
+        [{ side: "you_give", name: "Switch", copies: "1" }],
+        "written_off"
+      ),
+      "Lent 1 Switch to sam",
+    ],
+    [
+      loanRow(
+        "closed",
+        "0",
+        "1",
+        [{ side: "you_get", name: "Switch", copies: "1" }],
+        "declined"
+      ),
+      "1 Switch",
+    ],
+  ])("reads %#", (row, expected) => {
+    expect(agreementText(row)).toBe(expected);
+  });
+});
+it("keeps a Trade's agreement text", () => {
+  expect(
+    agreementText({
+      kind: "trade",
+      summary: { you_give: "2", you_get: "1", cards: [] },
+    })
+  ).toBe("You give 2 · You get 1");
+});
 
 it("describes removing cash and a return date without a raw diff", () => {
   expect(
