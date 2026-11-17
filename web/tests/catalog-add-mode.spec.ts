@@ -932,7 +932,7 @@ for (const viewport of [
         const lookup = new Promise<void>((done) => {
           sawLookup = done;
         });
-        await page.route("**/api/catalog/sets", async (route) => {
+        await page.route("**/api/pokemon/catalog/sets", async (route) => {
           sawLookup();
           await held;
           await route.continue();
@@ -940,7 +940,7 @@ for (const viewport of [
         const requestedSets: string[] = [];
         page.on("request", (request) => {
           const url = new URL(request.url());
-          if (url.pathname === "/api/catalog/editions")
+          if (url.pathname === "/api/pokemon/catalog/editions")
             requestedSets.push(url.searchParams.get("set_id") ?? "");
         });
         try {
@@ -955,12 +955,12 @@ for (const viewport of [
               .click();
           const validated = page.waitForResponse(
             (response) =>
-              new URL(response.url()).pathname === "/api/catalog/sets"
+              new URL(response.url()).pathname === "/api/pokemon/catalog/sets"
           );
           const resolvedBrowse = page.waitForResponse((response) => {
             const url = new URL(response.url());
             return (
-              url.pathname === "/api/catalog/editions" &&
+              url.pathname === "/api/pokemon/catalog/editions" &&
               !url.searchParams.get("set_id")
             );
           });
@@ -1011,7 +1011,7 @@ for (const viewport of [
       const filtered = page.waitForResponse((response) => {
         const url = new URL(response.url());
         return (
-          url.pathname === "/api/catalog/editions" &&
+          url.pathname === "/api/pokemon/catalog/editions" &&
           url.searchParams.get("q") === "Bulbasaur" &&
           url.searchParams.get("format") === "standard"
         );

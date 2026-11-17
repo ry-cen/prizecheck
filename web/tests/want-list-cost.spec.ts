@@ -191,7 +191,7 @@ test.describe("on a desktop", () => {
     // The cost is held until the page has drawn: the lists and counts never wait for prices.
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
-    await page.route("**/api/want-list/cost**", async (route) => {
+    await page.route("**/api/pokemon/want-list/cost**", async (route) => {
       await held;
       await route.continue();
     });

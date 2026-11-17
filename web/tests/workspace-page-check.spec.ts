@@ -150,7 +150,7 @@ async function seed(page: Page): Promise<World> {
   const abra = await editionOf("card-1");
   await addCopies(page, binderId, abra, 2);
   await addCopies(page, deckId, abra, 1);
-  await page.route("**/api/catalog/edition-replacements", (route) =>
+  await page.route("**/api/pokemon/catalog/edition-replacements", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",

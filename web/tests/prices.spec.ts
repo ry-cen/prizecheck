@@ -267,7 +267,7 @@ test("a Deck's Holdings and All owned price each tile's exact Edition, including
     },
   ]);
   const requested: string[][] = [];
-  await page.route("**/api/prices/editions", async (route) => {
+  await page.route("**/api/pokemon/prices/editions", async (route) => {
     requested.push(route.request().postDataJSON().edition_ids);
     await route.continue();
   });
@@ -366,7 +366,7 @@ test(
     await signIn(page);
     const held = await hold(page, [ids.normal, ids["reverse-holofoil"]]);
     await page.reload();
-    await page.route("**/api/prices/editions", async (route) => {
+    await page.route("**/api/pokemon/prices/editions", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 6_000));
       await route.continue().catch(() => undefined);
     });
@@ -390,7 +390,7 @@ test("a gateway deadline answer becomes the same labelled fallback", async ({
   await signIn(page);
   const held = await hold(page, [ids.normal]);
   await page.reload();
-  await page.route("**/api/prices/editions", (route) =>
+  await page.route("**/api/pokemon/prices/editions", (route) =>
     route.fulfill({
       status: 504,
       contentType: "application/json",
@@ -428,7 +428,7 @@ test("no refresh outcome adds a label or changes the cached price shown", async 
   await signIn(page);
   const held = await hold(page, [ids.normal]);
   for (const [refresh, failedAt] of REFRESH_OUTCOMES) {
-    await page.route("**/api/prices/editions", async (route) => {
+    await page.route("**/api/pokemon/prices/editions", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
       for (const row of body.prices) {
@@ -451,7 +451,7 @@ test("no refresh outcome adds a label or changes the cached price shown", async 
       .locator(".edition-price");
     await expect(slot).toHaveText("$0.25");
     await expect(slot.getByRole("button")).toHaveCount(0);
-    await page.unroute("**/api/prices/editions");
+    await page.unroute("**/api/pokemon/prices/editions");
   }
 });
 
@@ -476,7 +476,7 @@ test(
     let peak = 0;
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    await page.route("**/api/prices/editions", async (route) => {
+    await page.route("**/api/pokemon/prices/editions", async (route) => {
       seen.push(route.request().postDataJSON().edition_ids);
       live += 1;
       peak = Math.max(peak, live);
@@ -525,7 +525,7 @@ test("following a link does not prefetch prices for unrendered cards", async ({
   const held = await hold(page, [ids.normal]);
   await page.reload();
   const seen: string[][] = [];
-  await page.route("**/api/prices/editions", async (route) => {
+  await page.route("**/api/pokemon/prices/editions", async (route) => {
     seen.push(route.request().postDataJSON().edition_ids);
     await route.continue();
   });
@@ -566,7 +566,7 @@ test("price slots ask only once they come near the viewport, and each Edition on
   await page.setViewportSize({ width: 1280, height: 300 });
   await page.reload();
   const requested: string[][] = [];
-  await page.route("**/api/prices/editions", async (route) => {
+  await page.route("**/api/pokemon/prices/editions", async (route) => {
     requested.push(route.request().postDataJSON().edition_ids);
     await route.continue();
   });
@@ -607,7 +607,7 @@ test("without IntersectionObserver every rendered slot asks at once", async ({
   await page.setViewportSize({ width: 1280, height: 300 });
   await page.reload();
   const requested: string[][] = [];
-  await page.route("**/api/prices/editions", async (route) => {
+  await page.route("**/api/pokemon/prices/editions", async (route) => {
     requested.push(route.request().postDataJSON().edition_ids);
     await route.continue();
   });

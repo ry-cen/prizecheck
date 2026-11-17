@@ -277,7 +277,7 @@ test.describe("on a desktop", () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
     await page.route(
-      (url) => url.pathname === "/api/want-list",
+      (url) => url.pathname === "/api/pokemon/want-list",
       async (route) => {
         await gate;
         await route.continue();

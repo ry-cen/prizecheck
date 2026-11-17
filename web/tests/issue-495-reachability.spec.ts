@@ -93,7 +93,7 @@ for (const height of [800, 600])
       const deck = await createDeck(page, "Synthetic reachability Deck");
       await setLine(page, deck, ids["PAL 185"], 1);
       await page.route(
-        (url) => url.pathname === "/api/want-list",
+        (url) => url.pathname === "/api/pokemon/want-list",
         async (route) => {
           const response = await route.fetch();
           const body = await response.json();
@@ -251,7 +251,7 @@ for (const height of [800, 600])
       const deck = await createDeck(page, "Synthetic reachability Deck");
       await setLine(page, deck, ids["PAL 185"], 1);
       await page.route(
-        (url) => url.pathname === "/api/want-list",
+        (url) => url.pathname === "/api/pokemon/want-list",
         async (route) => {
           const response = await route.fetch();
           const body = await response.json();

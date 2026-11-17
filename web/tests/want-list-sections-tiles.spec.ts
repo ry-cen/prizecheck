@@ -78,7 +78,8 @@ async function sectionExample(
   // Missing URLs exercise a visible, sized fallback in every section without external image requests.
   await page.route(
     (url) =>
-      url.pathname === "/api/want-list" || url.pathname === "/api/trade-wants",
+      url.pathname === "/api/pokemon/want-list" ||
+      url.pathname === "/api/trade-wants",
     async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -362,7 +363,7 @@ for (const height of [800, 600]) {
     const deck = await createDeck(page, "Long summary reachability Deck");
     await setLine(page, deck, ids["PAL 185"], 1);
     await page.route(
-      (url) => url.pathname === "/api/want-list",
+      (url) => url.pathname === "/api/pokemon/want-list",
       async (route) => {
         const response = await route.fetch();
         const body = await response.json();

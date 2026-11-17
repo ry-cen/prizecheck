@@ -34,32 +34,32 @@ async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 /** Uploads the file's bytes as the body; the draft lands in the Storage Leaf `locationId`. */
 export const startCollectionImport = (locationId: string, file: Blob) =>
-  send<CollectionImportSummary>(`/api/collection-imports?${new URLSearchParams({ location_id: locationId })}`,
+  send<CollectionImportSummary>(`/api/pokemon/collection-imports?${new URLSearchParams({ location_id: locationId })}`,
     { method: 'POST', headers: { 'content-type': 'text/csv' }, body: file });
 /** The start body for pasted text (#234): JSON, as startCollectionImportPaste sends it. Its size counts against the
  * start route's 5 MiB, escapes included. */
 export const collectionImportPasteBody = (text: string) => JSON.stringify({ text });
 /** Starts an import from pasted text; the draft lands in the Storage Leaf `locationId`. */
 export const startCollectionImportPaste = (locationId: string, text: string) =>
-  send<CollectionImportSummary>(`/api/collection-imports?${new URLSearchParams({ location_id: locationId })}`,
+  send<CollectionImportSummary>(`/api/pokemon/collection-imports?${new URLSearchParams({ location_id: locationId })}`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: collectionImportPasteBody(text) });
-export const getCurrentCollectionImport = () => send<CollectionImportSummary>('/api/collection-imports/current');
+export const getCurrentCollectionImport = () => send<CollectionImportSummary>('/api/pokemon/collection-imports/current');
 export const getCollectionImportRows = (importId: string, filter: CollectionImportRowFilter, cursor?: string | null) => {
   const query = new URLSearchParams({ filter, ...(cursor ? { cursor } : {}) });
-  return send<CollectionImportRowsPage>(`/api/collection-imports/${encodeURIComponent(importId)}/rows?${query}`);
+  return send<CollectionImportRowsPage>(`/api/pokemon/collection-imports/${encodeURIComponent(importId)}/rows?${query}`);
 };
 /** Applies `body.changes` in order at `body.draft_revision`; 409 STALE_DRAFT when the draft has moved on. */
 export const changeCollectionImport = (importId: string, body: ChangeCollectionImport) =>
-  send<CollectionImportChanges>(`/api/collection-imports/${encodeURIComponent(importId)}/changes`,
+  send<CollectionImportChanges>(`/api/pokemon/collection-imports/${encodeURIComponent(importId)}/changes`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 export const saveCollectionImport = (importId: string, body: SaveCollectionImport) =>
-  send<CollectionImportSaveResult>(`/api/collection-imports/${encodeURIComponent(importId)}/save`,
+  send<CollectionImportSaveResult>(`/api/pokemon/collection-imports/${encodeURIComponent(importId)}/save`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 /** The skipped rows as a CSV file in the file's own columns (a pasted list's: its lines, as text), for a download
  * link. */
 export const collectionImportSkippedHref = (importId: string) =>
-  `/api/collection-imports/${encodeURIComponent(importId)}/skipped.csv`;
+  `/api/pokemon/collection-imports/${encodeURIComponent(importId)}/skipped.csv`;
 /** The rows left out (watchlist, sealed, other games, not in English) as a CSV file in the file's own columns (a pasted
  * list's: its lines, as text). */
 export const collectionImportLeftOutHref = (importId: string) =>
-  `/api/collection-imports/${encodeURIComponent(importId)}/left-out.csv`;
+  `/api/pokemon/collection-imports/${encodeURIComponent(importId)}/left-out.csv`;

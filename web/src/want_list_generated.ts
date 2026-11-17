@@ -14,7 +14,7 @@ export class WantListError extends Error {
 // What every Deck still needs under the account's counting setting (decklist import #209): every Deck's section and
 // the combined total, or, with a Deck id, that Deck's section and needs (404 DECK_NOT_FOUND for any other id).
 export async function getWantList(deckId?: string | null, signal?: AbortSignal): Promise<WantList> {
-  const response = await fetch('/api/want-list' + (deckId ? '?deck=' + encodeURIComponent(deckId) : ''),
+  const response = await fetch('/api/pokemon/want-list' + (deckId ? '?deck=' + encodeURIComponent(deckId) : ''),
     { credentials: 'same-origin', signal });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));

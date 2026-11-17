@@ -439,21 +439,24 @@ test.describe("desktop", () => {
     await addCopies(page, alpha, abra, 3);
     // A reviewed correction for Abra, stubbed: the review pipeline is covered by catalog-reconciliation.spec.ts.
     let reads = 0;
-    await page.route("**/api/catalog/edition-replacements", async (route) => {
-      reads += 1;
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([
-          {
-            edition_id: abra,
-            replacement_edition_id: randomUUID(),
-            evidence_url: "https://example.org/evidence",
-            reason: "Fixture correction.",
-          },
-        ]),
-      });
-    });
+    await page.route(
+      "**/api/pokemon/catalog/edition-replacements",
+      async (route) => {
+        reads += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([
+            {
+              edition_id: abra,
+              replacement_edition_id: randomUUID(),
+              evidence_url: "https://example.org/evidence",
+              reason: "Fixture correction.",
+            },
+          ]),
+        });
+      }
+    );
     await page.reload();
     await expect(tiles(page)).toHaveCount(3);
     const correction = page.getByRole("region", {

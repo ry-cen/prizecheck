@@ -13,9 +13,9 @@ async function request<T>(path: string,body?: object): Promise<T> {
   if(!response.ok){const result=await response.json().catch(()=>({}));throw new HoldingError(response.status,result?.detail?.code??'CATALOG_REVIEW_UNAVAILABLE');}
   return response.json() as Promise<T>;
 }
-export const getCatalogReviews=()=>request<CatalogReviewView[]>('/api/admin/catalog-reviews');
-export const getReviewEditions=(id: string)=>request<ReviewEditionView[]>(`/api/admin/catalog-reviews/${encodeURIComponent(id)}/editions`);
-export const decideCatalogReview=(id: string,body: CatalogDecision)=>request<CatalogReviewView>(`/api/admin/catalog-reviews/${encodeURIComponent(id)}/decision`,body);
-export const getEditionReplacements=()=>request<ReplacementView[]>('/api/catalog/edition-replacements');
-export const reassignHolding=(body: ReassignHolding)=>request<ReassignResult>('/api/holdings/reassign',body);
+export const getCatalogReviews=()=>request<CatalogReviewView[]>('/api/pokemon/admin/catalog-reviews');
+export const getReviewEditions=(id: string)=>request<ReviewEditionView[]>(`/api/pokemon/admin/catalog-reviews/${encodeURIComponent(id)}/editions`);
+export const decideCatalogReview=(id: string,body: CatalogDecision)=>request<CatalogReviewView>(`/api/pokemon/admin/catalog-reviews/${encodeURIComponent(id)}/decision`,body);
+export const getEditionReplacements=()=>request<ReplacementView[]>('/api/pokemon/catalog/edition-replacements');
+export const reassignHolding=(body: ReassignHolding)=>request<ReassignResult>('/api/pokemon/holdings/reassign',body);
 
