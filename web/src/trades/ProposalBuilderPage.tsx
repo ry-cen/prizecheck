@@ -1236,7 +1236,7 @@ export function ProposalBuilderPage({
         {phone && (
           <a
             href={`#${sendGroupId}`}
-            className="fixed top-2 left-2 z-(--layer-modal) box-border inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 py-2 text-body font-semibold text-text no-underline focus:translate-y-0"
+            className="box-border inline-flex min-h-tap items-center self-start rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline hover:bg-surface-selected"
             onClick={(event) => {
               event.preventDefault();
               const group = sendGroupRef.current;

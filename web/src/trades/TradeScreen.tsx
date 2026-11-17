@@ -76,13 +76,24 @@ import {
   tradeCashText,
   tradeStepMessage,
   sideCopies,
+  formatCents,
 } from "./tradeText";
 import { sideValueText, useTradeValue } from "./useTradeValue";
 
-/** The copies one side of a Trade moves, in the words of its summary line. */
-function sideCount(cards: readonly { copies: string }[]): string {
+/**
+ * What one side of a Trade moves, in the words of the phone summary: its copies, not its printings, and the cash that
+ * side pays ("2 cards and $5.00", "$5.00", "nothing").
+ */
+function sideCount(
+  cards: readonly { copies: string }[],
+  cashCents: string | null
+): string {
   const copies = sideCopies(cards);
-  return copies === 0 ? "nothing" : cardCount(copies);
+  const parts = [
+    ...(copies > 0 ? [cardCount(copies)] : []),
+    ...(cashCents ? [formatCents(cashCents)] : []),
+  ];
+  return parts.length ? parts.join(" and ") : "nothing";
 }
 
 /** Whether this is the phone layout now. False where there is no matchMedia (a unit test's jsdom). */
@@ -769,8 +780,16 @@ export function TradeScreen({
       {phone && (asking || answers) && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           <p className="m-0 text-body font-semibold">
-            You give {sideCount(trade.you_give)} · You get{" "}
-            {sideCount(trade.you_get)}
+            You give{" "}
+            {sideCount(
+              trade.you_give,
+              trade.cash?.payer === "you" ? trade.cash.cents : null
+            )}{" "}
+            · You get{" "}
+            {sideCount(
+              trade.you_get,
+              trade.cash?.payer === "them" ? trade.cash.cents : null
+            )}
           </p>
           <a
             href={`#${cardsId}`}
