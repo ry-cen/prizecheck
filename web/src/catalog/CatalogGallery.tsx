@@ -45,9 +45,11 @@ import {
   BROWSE_FAILED,
   batchAddedText,
   CATALOG_UNAVAILABLE,
+  CLEAR_SEARCH,
   earlierBatchFinished,
   FORMAT_NAMES,
   MAX_ADD,
+  NO_MATCH,
   QUEUE_FULL,
   searchHint,
 } from "./catalogText";
@@ -762,6 +764,30 @@ export function CatalogGallery({
     }
   }
 
+  // Something the collector typed or chose is narrowing the results, so an empty answer can be widened.
+  const narrowed = text.trim() !== "" || !!format || !!kind || !!setId || owned;
+  // One update for the search and every filter: calling the setters one after another would each start from the
+  // same address and the last would overwrite the others' resets. The Catalog address keeps its mode.
+  function clearSearchAndFilters() {
+    if (view && onViewChange)
+      onViewChange({
+        ...view,
+        q: "",
+        format: null,
+        kind: null,
+        setId: null,
+        owned: false,
+      });
+    else {
+      setLocalText("");
+      setLocalFormat(null);
+      setLocalKind(null);
+      setLocalOwned(false);
+      storeSet(null);
+    }
+    focusAfterCommit("search");
+  }
+
   useFirstReadSettled(browse.first !== null || !!searchError);
   const first = browse.first;
   const unavailable = first !== null && !first.available;
@@ -934,9 +960,14 @@ export function CatalogGallery({
         <section aria-label="Catalog results" className="flex flex-col gap-3">
           <p className="m-0 text-meta text-text-subtle">
             {browse.editions.length === 0
-              ? "No cards match this search."
+              ? NO_MATCH
               : `Showing ${browse.editions.length.toLocaleString()} of ${(first.matches ?? browse.editions.length).toLocaleString()} cards`}
           </p>
+          {browse.editions.length === 0 && narrowed && (
+            <div>
+              <Button onClick={clearSearchAndFilters}>{CLEAR_SEARCH}</Button>
+            </div>
+          )}
           {browse.editions.length > 0 && (
             <ul
               ref={tiles}
@@ -1051,7 +1082,8 @@ export function CatalogGallery({
         onAddFailed={
           undoToast
             ? (message) => {
-                queueToast.show({ message });
+                // The Add row closed before it failed, so this is the only place the collector can read why.
+                queueToast.show({ message, sticky: true });
               }
             : undefined
         }
@@ -1091,6 +1123,7 @@ function CatalogTile({
       imageUrl={edition.image_url}
       owned={edition.owned}
       ownedBadgePosition={adding ? "top-right" : "bottom-right"}
+      labelOwned={adding}
       flag={
         unknown
           ? { text: "?", label: `${FORMAT_NAMES[format]} legality unknown` }

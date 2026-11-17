@@ -746,6 +746,10 @@ function Where({
   );
 }
 
+/** Whether the browser says the device is offline. A request that fails with no answer while this is true is called
+ * offline; the browser's report is the only evidence, so nothing polls. */
+const offlineNow = () => typeof navigator !== "undefined" && !navigator.onLine;
+
 /** The Add row's last trouble: the Edition it was for, and what to say about it. */
 type AddNote = {
   editionId: string;
@@ -827,7 +831,7 @@ function AddRows({
           editionId: of.id,
           words: words(of),
           retry: true,
-          text: addFailed("", true),
+          text: addFailed("", true, offlineNow()),
         }
       : null;
   const [note, setNote] = useState<AddNote | null>(() => heldNote(edition));
@@ -916,14 +920,14 @@ function AddRows({
         setUndo(() => offered);
     } else {
       if (onAddFailed && (!mounted.current || shown.current !== sent.id)) {
-        onAddFailed(addFailed(outcome.code, outcome.retry));
+        onAddFailed(addFailed(outcome.code, outcome.retry, offlineNow()));
         return;
       }
       setNote({
         editionId: sent.id,
         words: words(sent),
         retry: outcome.retry,
-        text: addFailed(outcome.code, outcome.retry),
+        text: addFailed(outcome.code, outcome.retry, offlineNow()),
       });
       if (outcome.code === "LOCATION_NOT_FOUND") places.reload();
     }
@@ -1017,6 +1021,20 @@ function AddRows({
       <p role="alert" className="m-0 text-meta text-danger">
         {failure}
       </p>
+      {/* The same add, sent again under its own key, so a copy that did go through is not added twice. */}
+      {note?.retry && note.editionId === edition.id && (
+        <div>
+          <Button
+            onClick={() => {
+              // This button leaves while the add runs: focus goes to Add, which is beside it.
+              addButton.current?.focus();
+              void add();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
