@@ -1,6 +1,7 @@
 import { freePort, hex, signer, signUp } from "./support/gateway";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import {
@@ -507,6 +508,15 @@ describe("what /api/pokemon does not serve", () => {
     "/api/pokemon/admin",
     "/api/pokemon/admin/operations",
     "/api/pokemon/publications",
+    // A single route takes no subpath: these would otherwise reach shared patterns such as /api/trades/{id}/accept.
+    "/api/pokemon/trades/value/accept",
+    "/api/pokemon/trades/value/",
+    "/api/pokemon/prices/editions/x",
+    "/api/pokemon/holdings/reassign/x",
+    "/api/pokemon/admin/catalog-runs/x",
+    "/api/pokemon/admin/catalog-rules/x",
+    "/api/pokemon/admin/reprint-groups",
+    "/api/pokemon/admin/reprint-groups/decisions/x",
     // Not on a segment boundary, or a different spelling of a moved route.
     "/api/pokemon/catalogue",
     "/api/pokemon/want-listing",
@@ -570,5 +580,93 @@ describe("what /api/pokemon does not serve", () => {
     expect(
       (await call("GET", "/api/auth/session", { signedIn: false })).status
     ).toBe(404);
+  });
+});
+
+describe("single routes answer only the methods they have", () => {
+  it.each([
+    ["GET", "/api/pokemon/holdings/reassign"],
+    ["GET", "/api/pokemon/prices/editions"],
+    ["GET", "/api/pokemon/trades/value"],
+    ["DELETE", "/api/pokemon/admin/catalog-runs"],
+    ["POST", "/api/pokemon/admin/catalog-rules"],
+    ["GET", "/api/pokemon/admin/reprint-groups/decisions"],
+  ])(
+    "answers 404 for %s %s without contacting the upstream",
+    async (method, path) => {
+      seen.length = 0;
+      const response = await call(method, path, {
+        body: method === "POST" ? "{}" : undefined,
+      });
+      expect(response.status).toBe(404);
+      expect(seen).toHaveLength(0);
+    }
+  );
+});
+
+// fetch() normalises a URL before it is sent, so these go out as written, with node:http. The namespace is decided on
+// the raw target: a dot segment or encoded slash must not carry a request out of /api/pokemon into a route that then gets
+// a session lookup (a 401 for a visitor, an upstream call for a collector).
+function raw(path: string, headers: Record<string, string> = {}) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const url = new URL(base);
+    const outgoing = httpRequest(
+      { host: url.hostname, port: url.port, method: "GET", path, headers },
+      (incoming) => {
+        let body = "";
+        incoming.on("data", (chunk) => (body += chunk));
+        incoming.on("end", () =>
+          resolve({ status: incoming.statusCode!, body })
+        );
+      }
+    );
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
+
+describe("raw /api/pokemon targets", () => {
+  const HOSTILE = [
+    "/api/pokemon/%2e%2e/loans",
+    "/api/pokemon/%2E%2E/loans",
+    "/api/pokemon/./catalog/sets",
+    "/api/pokemon/%2e/catalog/sets",
+    "/api/pokemon/catalog/%2e%2e/%2e%2e/loans",
+    "/api/pokemon/catalog/../../loans",
+    "/api/pokemon/../loans",
+    "/api/pokemon\\..\\loans",
+    "/api/pokemon/catalog\\..\\..\\loans",
+    "/api/pokemon/catalog%5c..%5cloans",
+    "/api/pokemon/catalog%2f..%2floans",
+    "/api/pokemon%2fcatalog/sets",
+    "/api/pokemon/%2e%2e/loans?x=1",
+  ];
+
+  it.each(HOSTILE)(
+    "answers 404 for %s with no session lookup and no upstream call",
+    async (path) => {
+      seen.length = 0;
+      // A visitor would get 401 from any route that looked up a session: a 404 means none was reached.
+      expect((await raw(path)).status).toBe(404);
+      expect((await raw(path, { cookie })).status).toBe(404);
+      expect(seen).toHaveLength(0);
+    }
+  );
+
+  it("reaches the moved route for a clean raw target, and normalises an old path exactly as before", async () => {
+    seen.length = 0;
+    expect(
+      (await raw("/api/pokemon/catalog/sets?x=1", { cookie })).status
+    ).toBe(200);
+    expect(seen.map((request) => request.url)).toEqual([
+      "/api/catalog/sets?x=1",
+    ]);
+    // Old-path handling is unchanged: the gateway still normalises, and signs the normalised path.
+    seen.length = 0;
+    expect((await raw("/api/catalog/../locations", { cookie })).status).toBe(
+      200
+    );
+    expect(seen).toHaveLength(1);
+    expect((await raw("/api/catalog/../locations")).status).toBe(401);
   });
 });

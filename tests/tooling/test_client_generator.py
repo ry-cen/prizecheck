@@ -278,19 +278,31 @@ class PokemonPrefix(unittest.TestCase):
         self.assertEqual(gen.assemble(["// head", "fetch('/api/catalog/sets')"], "\n"),
                          "// head\nfetch('/api/pokemon/catalog/sets')\n")
 
-    def test_the_route_list_is_the_gateways(self):
-        server = (ROOT / 'auth/src/server.ts').read_text()
-        block = re.search(r'const POKEMON_ROUTES = \[(.*?)\];', server, re.S).group(1)
-        self.assertEqual(tuple(re.findall(r'"([^"]+)"', block)), gen.POKEMON_ROUTES)
+    def test_the_route_lists_are_the_gateways(self):
+        server = (ROOT / 'auth/src/pokemonRoutes.ts').read_text()
+        trees = re.search(r'export const POKEMON_TREES = \[(.*?)\];', server, re.S).group(1)
+        exact = re.search(r'export const POKEMON_EXACT[^=]*= \{(.*?)\};', server, re.S).group(1)
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', trees)), gen.POKEMON_TREES)
+        self.assertEqual(tuple(re.findall(r'^\s*"([^"]+)":', exact, re.M)), gen.POKEMON_EXACT)
 
     def test_every_moved_route_is_an_api_route(self):
         import json
         routes = {path for _, path, _ in json.loads((ROOT / 'api/tests/api_contract/routes.json').read_text())}
-        for route in gen.POKEMON_ROUTES:
+        for route in gen.POKEMON_TREES:
             self.assertTrue(any(path == f'/api/{route}' or path.startswith(f'/api/{route}/') for path in routes), route)
+        for route in gen.POKEMON_EXACT:
+            self.assertIn(f'/api/{route}', routes)
+
+    def test_a_template_substitution_ends_a_path_and_an_exact_route_takes_no_subpath(self):
+        self.assertEqual(gen.pokemon_paths("`/api/want-list${query}`"), "`/api/pokemon/want-list${query}`")
+        self.assertEqual(gen.pokemon_paths("`/api/prices/editions${query}`"), "`/api/pokemon/prices/editions${query}`")
+        self.assertEqual(gen.pokemon_paths("'/api/prices/editions/1'"), "'/api/prices/editions/1'")
+        self.assertEqual(gen.pokemon_paths("'/api/trades/value/accept'"), "'/api/trades/value/accept'")
+        self.assertEqual(gen.pokemon_paths("'/api/admin/reprint-groups/decisions'"), "'/api/pokemon/admin/reprint-groups/decisions'")
+        self.assertEqual(gen.pokemon_paths("'/api/admin/reprint-groups'"), "'/api/admin/reprint-groups'")
 
     def test_no_committed_client_calls_a_moved_route_by_its_old_path(self):
-        pattern = re.compile(r"""['"`]/api/(?:%s)(?=[/?'"`])""" % '|'.join(map(re.escape, gen.POKEMON_ROUTES)))
+        pattern = re.compile(r"""['"`]/api/(?:%s)(?=[/?'"`$])""" % '|'.join(map(re.escape, gen.POKEMON_ROUTES)))
         for path in sorted((ROOT / 'web/src').glob('*generated.ts')):
             self.assertIsNone(pattern.search(path.read_text()), path.name)
         for name, expected in (('want_list', "'/api/pokemon/want-list'"), ('prices', "'/api/pokemon/prices/editions'"),

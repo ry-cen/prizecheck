@@ -387,7 +387,9 @@ test.describe("large files", () => {
     page.on("request", (request) => {
       if (
         request.method() === "POST" &&
-        new URL(request.url()).pathname === "/api/pokemon/collection-imports"
+        /^\/api(?:\/pokemon)?\/collection-imports$/.test(
+          new URL(request.url()).pathname
+        )
       )
         uploads.push(request.url());
     });
