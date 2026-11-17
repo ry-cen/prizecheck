@@ -151,7 +151,10 @@ for (const viewport of [
         page.getByRole("button", { name: "Actions", exact: true })
       ).toBeFocused();
       await page.getByRole("button", { name: "Actions", exact: true }).click();
-      await page.getByRole("button", { name: "Move…", exact: true }).click();
+      await page
+        .getByRole("group", { name: "Actions" })
+        .getByRole("button", { name: "Move…", exact: true })
+        .click();
       await expect(
         page.getByRole("dialog", { name: "Move 1 copy", exact: true })
       ).toBeVisible();
