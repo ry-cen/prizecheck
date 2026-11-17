@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, test, vi } from "vitest";
-import { CatalogCardPopup } from "./CatalogCardPopup";
+import { ADD_GUARD_MS, CatalogCardPopup } from "./CatalogCardPopup";
 import { useAddToast, type InlineUndo } from "./useAddToast";
 import { addToCollection, type AddOutcome } from "./cardActions";
 import { applyUndo, listUndo } from "../inventoryUndo";
@@ -137,11 +137,14 @@ async function journey(
   run: (ui: {
     button: (text: string) => HTMLButtonElement;
     render: (printing: string | null) => Promise<void>;
+    /** Lets the Add control's guard window pass, as a collector's deliberate second press does. */
+    later: () => Promise<void>;
     host: HTMLElement;
   }) => Promise<void>,
   staleNext = false
 ) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   vi.mocked(addToCollection).mockResolvedValue(result);
   vi.mocked(listUndo).mockResolvedValue([{ id: "first" }] as Awaited<
     ReturnType<typeof listUndo>
@@ -193,10 +196,15 @@ async function journey(
     [...host.querySelectorAll("button")].find((b) => b.textContent === text)!;
   try {
     await render("p");
-    await run({ host, button, render });
+    const later = () =>
+      act(async () => {
+        vi.advanceTimersByTime(ADD_GUARD_MS);
+      });
+    await run({ host, button, render, later });
   } finally {
     await act(async () => root.unmount());
     host.remove();
+    vi.useRealTimers();
     vi.resetAllMocks();
     vi.unstubAllGlobals();
   }
@@ -257,7 +265,7 @@ test("closing during Add leaves its eventual Undo with the toast and reopening c
 });
 
 test("a newer add replaces the older inline action and Undo applies only that record", async () => {
-  await journey(async ({ host, button }) => {
+  await journey(async ({ host, button, later }) => {
     await act(async () => button("Add 1").click());
     vi.mocked(addToCollection).mockResolvedValueOnce({
       ...result,
@@ -266,6 +274,7 @@ test("a newer add replaces the older inline action and Undo applies only that re
     vi.mocked(listUndo).mockResolvedValueOnce([{ id: "second" }] as Awaited<
       ReturnType<typeof listUndo>
     >);
+    await later();
     await act(async () => button("Add 1").click());
     expect(undoCount(host)).toBe(1);
     await act(async () => button("Undo").click());
@@ -274,6 +283,69 @@ test("a newer add replaces the older inline action and Undo applies only that re
       expect.any(String)
     );
     expect(undoCount(host)).toBe(0);
+  });
+});
+
+test("a quick second press on Add commits one copy, and the control stays disabled for the guard window", async () => {
+  await journey(async ({ host, button, later }) => {
+    const add = button("Add 1");
+    add.focus();
+    await act(async () => add.click());
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    // The same press arriving again, in the same tick and a moment later, adds nothing.
+    await act(async () => {
+      add.click();
+      add.click();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(ADD_GUARD_MS - 1);
+    });
+    await act(async () => add.click());
+    expect(addToCollection).toHaveBeenCalledTimes(1);
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(add);
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(
+      "Added 1 copy to Unsorted."
+    );
+    expect(undoCount(host)).toBe(1);
+    // The window ends, and a deliberate press adds again under its own message and Undo.
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(add.getAttribute("aria-disabled")).toBeNull();
+    vi.mocked(addToCollection).mockResolvedValueOnce({
+      ...result,
+      undoId: "second",
+    });
+    vi.mocked(listUndo).mockResolvedValueOnce([{ id: "second" }] as Awaited<
+      ReturnType<typeof listUndo>
+    >);
+    await act(async () => add.click());
+    expect(addToCollection).toHaveBeenCalledTimes(2);
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    expect(undoCount(host)).toBe(1);
+    await act(async () => button("Undo").click());
+    expect(applyUndo).toHaveBeenCalledExactlyOnceWith(
+      "second",
+      expect.any(String)
+    );
+    await later();
+    expect(add.getAttribute("aria-disabled")).toBeNull();
+  });
+});
+
+test("an Add that fails is not guarded, so Retry and a second press work at once", async () => {
+  await journey(async ({ button }) => {
+    vi.mocked(addToCollection).mockResolvedValueOnce({
+      ok: false,
+      code: "",
+      editionId: "e",
+      retry: true,
+    });
+    await act(async () => button("Add 1").click());
+    expect(button("Add 1").getAttribute("aria-disabled")).toBeNull();
+    await act(async () => button("Retry").click());
+    expect(addToCollection).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -480,7 +552,7 @@ test.each(["edition", "card", "reopen"])(
 test.each(["older-first", "newer-first"])(
   "two popup adds retain the newest inline Undo regardless of lookup order (%s)",
   async (order) => {
-    await journey(async ({ host, button }) => {
+    await journey(async ({ host, button, later }) => {
       let older!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
       let newer!: (entries: Awaited<ReturnType<typeof listUndo>>) => void;
       vi.mocked(listUndo)
@@ -499,6 +571,7 @@ test.each(["older-first", "newer-first"])(
         ...result,
         undoId: "second",
       });
+      await later();
       await act(async () => button("Add 1").click());
       const finishOlder = async () => {
         await act(async () =>
@@ -541,7 +614,7 @@ test.each(
 )(
   "stale Undo cannot own the row: $stage reopen=$reopen fails=$fails",
   async ({ stage, reopen, fails }) => {
-    await journey(async ({ host, button, render }) => {
+    await journey(async ({ host, button, render, later }) => {
       await act(async () => button("Add 1").click());
       let resolveA!: (value: typeof removed) => void;
       let rejectA!: (cause: Error) => void;
@@ -576,6 +649,7 @@ test.each(
           finishLookup = resolve;
         })
       );
+      await later();
       await act(async () => button("Add 1").click());
       const second = {
         ...result,
@@ -654,7 +728,7 @@ test.each(
 );
 
 test("the row ignores a stale result even when it carries a retry", async () => {
-  await journey(async ({ host, button }) => {
+  await journey(async ({ host, button, later }) => {
     await act(async () => button("Add 1").click());
     let fail!: (cause: Error) => void;
     vi.mocked(applyUndo).mockReturnValueOnce(
@@ -663,6 +737,7 @@ test("the row ignores a stale result even when it carries a retry", async () => 
       })
     );
     await act(async () => button("Undo").click());
+    await later();
     await act(async () => button("Add 1").click());
     const focus = host.querySelector<HTMLSelectElement>("select")!;
     focus.focus();

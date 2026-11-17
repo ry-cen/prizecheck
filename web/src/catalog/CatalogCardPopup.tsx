@@ -750,6 +750,11 @@ function Where({
  * offline; the browser's report is the only evidence, so nothing polls. */
 const offlineNow = () => typeof navigator !== "undefined" && !navigator.onLine;
 
+/** How long the Add control stays disabled after an add commits. A second tap inside this window is the same press
+ * arriving twice, not a second add: the first request often finishes in tens of milliseconds, so without the window the
+ * second tap would add a hidden extra copy under the first one's message. */
+export const ADD_GUARD_MS = 600;
+
 /** The Add row's last trouble: the Edition it was for, and what to say about it. */
 type AddNote = {
   editionId: string;
@@ -820,6 +825,14 @@ function AddRows({
     leaves[0];
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState(false);
+  // The Edition whose Add is in flight or inside the guard window after it committed. A ref, so a second activation in the
+  // same tick as the first is blocked before any re-render; `settling` mirrors it for the control's look.
+  const guarded = useRef<string | null>(null);
+  const guardTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  );
+  const [settling, setSettling] = useState<string | null>(null);
+  useEffect(() => () => clearTimeout(guardTimer.current), []);
   const [done, setDone] = useState("");
   const words = (of: PopupEdition) =>
     `${cardName} ${variantLabel(of.descriptor)}`;
@@ -859,7 +872,8 @@ function AddRows({
       : addMayHaveCompletedFor(note.words);
 
   async function add() {
-    if (!location || busy) return;
+    if (!location || busy || guarded.current === edition.id) return;
+    guarded.current = edition.id;
     const request = ++latestAdd.current;
     onAddStarted?.();
     setBusy(true);
@@ -877,6 +891,16 @@ function AddRows({
     );
     setBusy(false);
     if (outcome.ok) {
+      // The Add control stays disabled for a moment, so a quick second tap doesn't add a hidden extra copy.
+      if (mounted.current) {
+        clearTimeout(guardTimer.current);
+        guarded.current = sent.id;
+        setSettling(sent.id);
+        guardTimer.current = setTimeout(() => {
+          guarded.current = null;
+          setSettling(null);
+        }, ADD_GUARD_MS);
+      }
       // A batch that may have completed earlier is settled first (#196): its copies are reported, and this press's
       // are not sent until the next one.
       const copiesAdded = outcome.items.reduce(
@@ -919,6 +943,7 @@ function AddRows({
       )
         setUndo(() => offered);
     } else {
+      guarded.current = null;
       if (onAddFailed && (!mounted.current || shown.current !== sent.id)) {
         onAddFailed(addFailed(outcome.code, outcome.retry, offlineNow()));
         return;
@@ -990,7 +1015,7 @@ function AddRows({
           ref={addButton}
           variant="primary"
           disabled={!usable || !location}
-          aria-disabled={busy || undefined}
+          aria-disabled={busy || settling === edition.id || undefined}
           onClick={() => void add()}
         >
           Add {count}
