@@ -88,7 +88,7 @@ const tile = (page: Page, start: string): Locator =>
     name: new RegExp(`^${start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   });
 const isBrowse = (url: string) =>
-  new URL(url).pathname === "/api/catalog/editions";
+  new URL(url).pathname === "/api/pokemon/catalog/editions";
 const filters = (page: Page) => page.getByRole("group", { name: "Filters" });
 const chip = (page: Page, name: string) =>
   filters(page).getByRole("button", { name, exact: true });
@@ -540,7 +540,7 @@ test.describe("desktop", () => {
     seedGallery();
     await signIn(page);
     let reads = 0;
-    await page.route("**/api/catalog/sets", (route) => {
+    await page.route("**/api/pokemon/catalog/sets", (route) => {
       reads += 1;
       return route.continue();
     });

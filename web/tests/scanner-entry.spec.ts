@@ -30,7 +30,9 @@ function watchImportPosts(page: Page): string[] {
   page.on("request", (request) => {
     if (
       request.method() === "POST" &&
-      new URL(request.url()).pathname.startsWith("/api/collection-imports")
+      new URL(request.url()).pathname.startsWith(
+        "/api/pokemon/collection-imports"
+      )
     )
       posts.push(request.url());
   });

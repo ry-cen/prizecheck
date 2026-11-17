@@ -78,4 +78,4 @@ export const setWillAccept = (editionId: string, body: SetWillAccept) =>
 // Each side's estimated total for a proposal being built or reviewed (#277): a budgeted price access, never a
 // suggested amount. Cash is not part of it.
 export const getTradeValue = (body: TradeValueRequest, signal?: AbortSignal) =>
-  request<TradeValue>('/api/trades/value', 'POST', body, signal);
+  request<TradeValue>('/api/pokemon/trades/value', 'POST', body, signal);

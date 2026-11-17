@@ -22,10 +22,10 @@ async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
 // The Want List's cost for the same scope as GET /api/want-list (decklist import #210): a price access under ADR 0006,
 // read separately so the page draws first. Show it only for the answer whose setting, revisions and digest it names.
 export const getWantListCost = (deckId?: string | null, signal?: AbortSignal) =>
-  read<WantListCost>(scoped('/api/want-list/cost', deckId), signal);
+  read<WantListCost>(scoped('/api/pokemon/want-list/cost', deckId), signal);
 // Buy on TCGplayer: the Mass Entry export of the combined total, or of one Deck's needs.
 export const getWantListMassEntry = (deckId?: string | null, signal?: AbortSignal) =>
-  read<WantListMassEntryView>(scoped('/api/want-list/exports/tcgplayer', deckId), signal);
+  read<WantListMassEntryView>(scoped('/api/pokemon/want-list/exports/tcgplayer', deckId), signal);
 // The text download, pinned to the view it was prepared from (409 once the inventory, a Deck List or the setting moved).
 export const wantListMassEntryDownloadHref = (view: WantListMassEntryView) =>
-  `/api/want-list/exports/tcgplayer.txt?${view.deck_id ? `deck=${encodeURIComponent(view.deck_id)}&` : ''}owner_revision=${view.owner_revision}&settings_revision=${view.settings_revision}&deck_lists=${view.deck_lists_digest}`;
+  `/api/pokemon/want-list/exports/tcgplayer.txt?${view.deck_id ? `deck=${encodeURIComponent(view.deck_id)}&` : ''}owner_revision=${view.owner_revision}&settings_revision=${view.settings_revision}&deck_lists=${view.deck_lists_digest}`;
