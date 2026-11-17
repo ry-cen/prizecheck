@@ -639,6 +639,9 @@ export function useInventoryActions({
               !op.noUndo && state.ownedResult
                 ? (state.ownedResult.undo_id ?? undefined)
                 : undefined,
+            // The Undo lookup below is still out: the toast stays until it answers, so the answer has a toast to
+            // attach Undo to. The answer sets its lifetime.
+            sticky: !op.noUndo && !!state.ownedResult,
           });
           live.current.reloadGallery();
           void live.current.reloadTree();
@@ -658,7 +661,9 @@ export function useInventoryActions({
                 ? newest
                 : null;
             setToast((current) =>
-              current?.id === id ? { ...current, entry: mine } : current
+              current?.id === id
+                ? { ...current, entry: mine, sticky: false }
+                : current
             );
           }
           return;
@@ -860,6 +865,8 @@ export function useInventoryActions({
         undoId: result.undoId,
         entry: null,
         unavailable: false,
+        // Stays until the Undo lookup below answers; the answer sets its lifetime.
+        sticky: true,
       });
       live.current.reloadGallery();
       void live.current.reloadTree();
@@ -867,7 +874,9 @@ export function useInventoryActions({
       const entries = await readUndo().catch(() => [] as UndoEntry[]);
       const mine = entries[0]?.id === result.undoId ? entries[0] : null;
       setToast((current) =>
-        current && current.id === id ? { ...current, entry: mine } : current
+        current && current.id === id
+          ? { ...current, entry: mine, sticky: false }
+          : current
       );
       return null;
     },

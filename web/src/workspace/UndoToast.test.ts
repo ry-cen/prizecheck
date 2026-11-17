@@ -146,3 +146,56 @@ test("a confirmation with no Undo leaves after its time and Collection forgets i
     vi.useRealTimers();
   }
 });
+
+test("a Collection toast waiting on its Undo lookup outlasts the lifetime, then keeps Undo or starts its own 5 s", async () => {
+  vi.useFakeTimers();
+  try {
+    state = {
+      id: 1,
+      message: "Moved 2 copies.",
+      entry: null,
+      unavailable: false,
+      sticky: true,
+    };
+    await render();
+    await act(async () => vi.advanceTimersByTime(TOAST_LIFETIME_MS * 3));
+    expect(element.textContent).toContain("Moved 2 copies.");
+    expect(superseded).not.toHaveBeenCalled();
+    // The lookup answers with an Undo record: the toast gains its action and stays.
+    state = {
+      ...state,
+      entry: {
+        id: "moved",
+        action: "move",
+        source_id: "a",
+        destination_id: "b",
+        source_count: 1,
+        expires_at: "later",
+      },
+      sticky: false,
+    };
+    await render();
+    expect(element.textContent).toContain("Undo");
+    await act(async () => vi.advanceTimersByTime(TOAST_LIFETIME_MS * 3));
+    expect(element.textContent).toContain("Moved 2 copies.");
+    // ...or with none: the 5 s starts from the answer.
+    state = {
+      id: 2,
+      message: "Moved 1 copy.",
+      entry: null,
+      unavailable: false,
+      sticky: true,
+    };
+    await render();
+    await act(async () => vi.advanceTimersByTime(TOAST_LIFETIME_MS * 3));
+    state = { ...state, sticky: false };
+    await render();
+    await act(async () => vi.advanceTimersByTime(TOAST_LIFETIME_MS - 1));
+    expect(element.textContent).toContain("Moved 1 copy.");
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(element.textContent).not.toContain("Moved 1 copy.");
+    expect(superseded).toHaveBeenCalledExactlyOnceWith(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});

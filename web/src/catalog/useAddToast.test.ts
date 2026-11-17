@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { undoDismissals } from "../inventoryUndoNotice";
 import { applyUndo, dismissUndo, listUndo } from "../inventoryUndo";
-import { ToastProvider, useToast } from "../ui/Toast";
+import { TOAST_LIFETIME_MS, ToastProvider, useToast } from "../ui/Toast";
 import { useAddToast, type AddedCards, type InlineUndo } from "./useAddToast";
 
 vi.mock("../inventoryUndo", () => ({
@@ -240,6 +240,25 @@ test("a failed Dismiss retries deletion without inventing an Undo offer", async 
       .click();
   });
   expect(dismissUndo).toHaveBeenCalledTimes(2);
+});
+
+test("a failed Dismiss with no Undo offer stays up past the lifetime: it has no action and no other copy", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(listUndo).mockRejectedValueOnce(new Error("503"));
+    vi.mocked(dismissUndo).mockRejectedValueOnce(new Error("503"));
+    await offer();
+    await act(async () => {
+      host
+        .querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!
+        .click();
+    });
+    expect(host.textContent).toContain("Couldn't dismiss");
+    await act(async () => vi.advanceTimersByTime(TOAST_LIFETIME_MS * 3));
+    expect(host.textContent).toContain("Couldn't dismiss");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("an incompatible Undo keeps its persistent Dismiss", async () => {
