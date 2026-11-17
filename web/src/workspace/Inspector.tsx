@@ -301,6 +301,9 @@ type InspectorProps = Omit<DetailsProps, "card" | "sheet" | "actions"> & {
   onMove: (opener: HTMLButtonElement) => void;
   onRemove: (opener: HTMLButtonElement) => void;
   actionsDisabled?: boolean;
+  /** More than one copy is selected: the selection bar is the one place to act on a selection, so the aside
+   * shows the card's details without Move… or Remove…. */
+  actionsHidden?: boolean;
 };
 
 /** The desktop inspector column. Its space is reserved; while nothing is selected it holds a quiet
@@ -312,6 +315,7 @@ export function Inspector({
   onMove,
   onRemove,
   actionsDisabled,
+  actionsHidden,
   ...rest
 }: InspectorProps) {
   return (
@@ -329,12 +333,14 @@ export function Inspector({
             card={card}
             {...rest}
             actions={
-              <CardActions
-                card={card}
-                onMove={onMove}
-                onRemove={onRemove}
-                disabled={actionsDisabled}
-              />
+              actionsHidden ? undefined : (
+                <CardActions
+                  card={card}
+                  onMove={onMove}
+                  onRemove={onRemove}
+                  disabled={actionsDisabled}
+                />
+              )
             }
           />
         ) : (

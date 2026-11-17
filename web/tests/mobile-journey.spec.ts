@@ -78,7 +78,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
     await tiles.nth(1).tap();
     await expect(strip).toContainText("2 copies selected");
     await strip.getByRole("button", { name: "Actions" }).tap();
-    await strip.getByRole("button", { name: "Move…" }).tap();
+    await strip.getByRole("button", { name: "Move…", exact: true }).tap();
     const move = page.getByRole("dialog", { name: "Move 2 copies" });
     // Destinations are labelled by full path, so exact "Unsorted" is the top-level leaf, never "Box / Unsorted".
     await move.getByRole("button", { name: "Unsorted", exact: true }).tap();

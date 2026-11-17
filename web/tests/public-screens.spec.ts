@@ -461,7 +461,7 @@ test.describe("desktop", () => {
       .click();
     const strip = page.getByRole("region", { name: "Selection" });
     await strip.getByRole("button", { name: "Actions" }).click();
-    await strip.getByRole("button", { name: "Inventory Removal…" }).click();
+    await strip.getByRole("button", { name: "Remove…" }).click();
     await expect(page.locator("dialog:modal")).toHaveCount(1);
 
     await page.goBack();
