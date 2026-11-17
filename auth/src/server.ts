@@ -37,6 +37,8 @@ const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 const apiOrigin = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 const internalSecret = process.env.INTERNAL_AUTH_SECRET || "";
+// The Riftbound backend's origin. Empty or unset (the default) leaves /api/riftbound switched off.
+const riftboundOrigin = (process.env.RIFTBOUND_API_ORIGIN || "").trim();
 const publicReadLimiter = new PublicReadLimiter();
 const PUBLIC_ART_PATH = /^\/api\/public\/(?:art|edition-art)\/[^/]+\/[^/]+$/;
 const EDITION_ART_PATH = /^\/api\/public\/edition-art\/[^/]+\/[^/]+$/;
@@ -548,6 +550,52 @@ const server = createServer(async (request, response) => {
         betterRequest(origin, request, "/api/auth/sign-out", "{}")
       );
       return relay(response, result);
+    }
+    // Riftbound's own public prefix (ADR 0023, 2026-11-16 amendment). Handled before the generic /api/ branch so a
+    // /api/riftbound path can never reach the Pokémon upstream.
+    if (path === "/api/riftbound" || path.startsWith("/api/riftbound/")) {
+      // Off unless a Riftbound upstream is configured: no session lookup, no upstream contact.
+      if (!riftboundOrigin || path === "/api/riftbound")
+        return json(response, 404, { error: "Not found" });
+      if (
+        request.method !== "GET" &&
+        request.method !== "HEAD" &&
+        !sameOrigin(request)
+      )
+        return json(response, 403, { error: "Origin required" });
+      // Every Riftbound path needs a session; there are no public Riftbound routes.
+      if (!(await session(request)))
+        return json(response, 401, { error: "Authentication required" });
+      const body =
+        request.method === "GET" || request.method === "HEAD"
+          ? ""
+          : await readBody(request);
+      // Deliberately NO identity is forwarded: no x-internal-user, x-internal-time, x-internal-signature or budget
+      // headers, nothing signed with INTERNAL_AUTH_SECRET (Pokémon's key), and no Riftbound key is read or created.
+      // Only content-type is passed on, so any incoming x-internal-* header is dropped. The Riftbound backend therefore
+      // answers 401 until the separate identity-propagation decision lands (#531).
+      const headers: Record<string, string> = {};
+      if (body.length > 0)
+        headers["content-type"] =
+          request.headers["content-type"] || "application/json";
+      // /api/riftbound/<rest> becomes /api/<rest>; the query string is kept.
+      const rewritten =
+        "/api" +
+        path.slice("/api/riftbound".length) +
+        new URL(request.url || "/", origin).search;
+      const upstream = await fetch(`${riftboundOrigin}${rewritten}`, {
+        method: request.method,
+        headers,
+        body: body.length > 0 ? body : undefined,
+      });
+      const text = await upstream.text();
+      response.writeHead(upstream.status, {
+        "content-type":
+          upstream.headers.get("content-type") || "application/json",
+        "cache-control": "no-store",
+      });
+      response.end(text);
+      return;
     }
     if (path.startsWith("/api/")) {
       if (

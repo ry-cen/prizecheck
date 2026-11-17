@@ -190,5 +190,17 @@ class ProxyConfigTest(unittest.TestCase):
         self.assertNotIn('real_ip_recursive', CONFIG)
 
 
+    def test_the_riftbound_prefix_rides_the_gateway_location_and_no_deploy_file_names_its_setting(self):
+        # /api/riftbound/* needs no proxy change: the gateway location already matches it. The gateway's setting stays out of
+        # every deploy file until the owner enables the route (ADR 0023, 2026-11-16 amendment).
+        self.assertIn(GATEWAY, CONFIG)
+        self.assertTrue(re.match(r'^/(api|auth)/', '/api/riftbound/catalog/sets'))
+        root = Path(__file__).resolve().parents[2]
+        files = [*(root/'deploy').rglob('*'), *root.glob('compose*.yml'), *root.glob('docker-compose*.yml'), *root.glob('.env*')]
+        for file in files:
+            if file.is_file():
+                self.assertNotIn('RIFTBOUND_API_ORIGIN', file.read_text(errors='ignore'), str(file))
+
+
 if __name__ == '__main__':
     unittest.main()
