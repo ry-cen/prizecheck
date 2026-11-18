@@ -78,6 +78,15 @@ const VIEWS = [
   { value: "list", label: "List" },
 ] as const;
 
+/** The search parameter that holds the Deck List layout the collector picked, so Back, Forward and a reload keep it. */
+const LAYOUT_PARAM = "layout";
+
+/** The layout an address names; null when it names none or one that doesn't exist (the default for the width applies). */
+export function layoutInAddress(search: string): DeckView | null {
+  const value = new URLSearchParams(search).get(LAYOUT_PARAM);
+  return VIEWS.find((view) => view.value === value)?.value ?? null;
+}
+
 /**
  * The deck builder (#176): opening a Deck on the Decks page shows its Deck List as the main area, with every
  * copy's ownership state and the cost, in Spread, Stacked and List, and the card library in a column on the right
@@ -118,12 +127,22 @@ export function DeckBuilderPage({
   const [notice, setNotice] = useState("");
   const [readFailed, setReadFailed] = useState(false);
   const [readNotice, setReadNotice] = useState("");
-  const [view, setView] = useState<DeckView>(() =>
+  // The layout is the address's (`?layout=`); until one is picked, Stacked on a phone and Spread elsewhere.
+  const [defaultView] = useState<DeckView>(() =>
     window.matchMedia(MOBILE_QUERY).matches ? "stacked" : "spread"
   );
   // The phone's tab: null until the first read picks it, then whatever the collector chooses.
   const [chosenPane, setPane] = useState<Pane | null>(null);
   const url = new URL(address, window.location.origin);
+  const view = layoutInAddress(url.search) ?? defaultView;
+  // Picking a layout rewrites the current entry, so Back from the Want List (or a reload) finds the same layout.
+  const chooseView = (next: DeckView) => {
+    const to = new URL(url);
+    to.searchParams.set(LAYOUT_PARAM, next);
+    const target = to.pathname + to.search;
+    if (target === url.pathname + url.search) return;
+    onNavigate(target, { replace: true, preserveScroll: true });
+  };
   const editionId = url.searchParams.get("edition");
   const copy = url.searchParams.get("copy");
   const ordinal = copy === null ? null : Number(copy);
@@ -710,7 +729,7 @@ export function DeckBuilderPage({
           label="Deck List view"
           options={VIEWS}
           value={view}
-          onChange={setView}
+          onChange={chooseView}
         />
       </div>
       <DeckListBody

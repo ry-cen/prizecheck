@@ -49,11 +49,14 @@ vi.mock("./TradeWantsPanel", () => ({
   WillAcceptSelect: () => null,
   WillAcceptRadios: () => null,
 }));
+const costRead = vi.hoisted(() => ({
+  load: { kind: "unavailable" } as { kind: string },
+}));
 vi.mock("./WantListCost", async () => {
   const { createContext } = await import("react");
   return {
     WantListCostContext: createContext(null),
-    useWantListCost: () => null,
+    useWantListCost: () => costRead.load,
     useTotalCostSuffix: () => "",
     CostSummary: () => null,
     LineCost: () => null,
@@ -174,6 +177,8 @@ beforeEach(() => {
   window.history.replaceState(null, "", `/decks/want-list?deck=${deck}`);
   vi.mocked(getWantList).mockResolvedValue(list);
   answer = response(false);
+  costRead.load = { kind: "unavailable" };
+  trade.state = { kind: "failed" };
 });
 afterEach(() => vi.unstubAllGlobals());
 const cases: {
@@ -578,3 +583,51 @@ it.each(["rows", "tiles"] as const)(
     }
   }
 );
+
+// The restore of a history position (restorePageScroll) keeps its wait open while the page says it is still loading.
+it.each([
+  {
+    name: "prices are being checked",
+    arrange: () => (costRead.load = { kind: "checking" }),
+    loading: true,
+  },
+  {
+    name: "Trade Wants are loading",
+    arrange: () => (trade.state = { kind: "loading" }),
+    loading: true,
+  },
+  {
+    name: "Friends' cards are being read",
+    arrange: () => (answer = response(true)),
+    loading: true,
+  },
+  { name: "everything has arrived", arrange: () => {}, loading: false },
+])("the Want List says it is loading while $name: $loading", async (test) => {
+  test.arrange();
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(h(WantListView, { onOpenDeck: vi.fn(), onNavigate: vi.fn() }))
+    );
+    expect(host.querySelector("[data-page-loading]") !== null).toBe(
+      test.loading
+    );
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("the Want List says it is loading while its own read is in flight", async () => {
+  vi.mocked(getWantList).mockReturnValue(new Promise(() => {}));
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(h(WantListView, { onOpenDeck: vi.fn(), onNavigate: vi.fn() }))
+    );
+    expect(host.querySelector("[data-page-loading]")).not.toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+  }
+});

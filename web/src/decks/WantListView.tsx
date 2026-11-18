@@ -176,7 +176,11 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
 
   if (load.kind === "loading")
     return (
-      <p role="status" className="m-0 text-body text-text-muted">
+      <p
+        role="status"
+        data-page-loading=""
+        className="m-0 text-body text-text-muted"
+      >
         Loading the Want List…
       </p>
     );
@@ -213,9 +217,17 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const pending = friends.kind === "ready" && friends.pending;
   const shownView: View = hasFriends ? view : "buy";
 
+  // Prices, Friends' cards and Trade Wants arrive after the Want List draws and change the page's height. Saying so
+  // keeps a history position being restored (restorePageScroll) until they are in, however long that takes.
+  const settling =
+    cost.kind === "checking" || trade.state.kind === "loading" || pending;
+
   if (list.decks.length === 0)
     return (
-      <div className="flex min-w-0 flex-col gap-4">
+      <div
+        data-page-loading={settling ? "" : undefined}
+        className="flex min-w-0 flex-col gap-4"
+      >
         <p className="m-0 text-body text-text-muted">
           No Decks yet. Create one on My Decks, and the Want List shows what it
           still needs.
@@ -261,6 +273,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
 
   const page = (
     <div
+      data-page-loading={settling ? "" : undefined}
       className={`flex min-w-0 flex-col gap-4 ${shownScope ? "phone:gap-3" : ""} ${shownScope || shownView === "friends" ? "w-full max-w-[960px] self-center" : ""}`}
       aria-busy={!current}
     >

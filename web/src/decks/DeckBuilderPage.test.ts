@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
-import { DeckBuilderPage } from "./DeckBuilderPage";
+import { DeckBuilderPage, layoutInAddress } from "./DeckBuilderPage";
 import {
   getDeck,
   setTargetFormat,
@@ -282,13 +282,16 @@ async function mount(initial = fresh(1, "2", "2")) {
   await renderPage();
   expect(state.actions!.countReady).toBe(true);
 }
-async function renderPage(address = "/decks/deck") {
+async function renderPage(
+  address = "/decks/deck",
+  onNavigate: (to: string, options?: object) => void = () => {}
+) {
   await act(async () =>
     root!.render(
       createElement(DeckBuilderPage, {
         deckId: "deck",
         address,
-        onNavigate() {},
+        onNavigate,
         onCloseCard() {},
         onAllDecks() {},
         onReplaceList() {},
@@ -782,4 +785,56 @@ test("the next notice is announced afresh: by the banner when the sheet is close
   state.editNotice = { id: 2, text: "Not saved again.", retry: () => {} };
   await renderPage();
   expect(banner()!.getAttribute("role")).toBe("alert");
+});
+
+test("layoutInAddress reads only the three layouts", () => {
+  expect(layoutInAddress("")).toBeNull();
+  expect(layoutInAddress("?layout=list")).toBe("list");
+  expect(layoutInAddress("?edition=e&layout=stacked")).toBe("stacked");
+  expect(layoutInAddress("?layout=spread")).toBe("spread");
+  expect(layoutInAddress("?layout=")).toBeNull();
+  expect(layoutInAddress("?layout=LIST")).toBeNull();
+  expect(layoutInAddress("?layout=grid")).toBeNull();
+});
+
+const checkedLayout = () =>
+  host.querySelector('[role="radiogroup"] [role="radio"][aria-checked="true"]')
+    ?.textContent;
+
+test("the Deck List layout comes from the address, and a bad one reads as the default", async () => {
+  await mount();
+  await renderPage("/decks/deck?layout=list");
+  expect(checkedLayout()).toBe("List");
+  await renderPage("/decks/deck?layout=stacked");
+  expect(checkedLayout()).toBe("Stacked");
+  await renderPage("/decks/deck?layout=nonsense");
+  expect(checkedLayout()).toBe("Spread");
+  await renderPage("/decks/deck");
+  expect(checkedLayout()).toBe("Spread");
+});
+
+test("picking a layout replaces the address, keeping the rest of it, and adds no history entry", async () => {
+  await mount();
+  const navigate = vi.fn();
+  await renderPage("/decks/deck", navigate);
+  const choose = (name: string) =>
+    Array.from(host.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find(
+      (radio) => radio.textContent === name
+    )!;
+  await act(async () => choose("List").click());
+  expect(navigate).toHaveBeenLastCalledWith("/decks/deck?layout=list", {
+    replace: true,
+    preserveScroll: true,
+  });
+  await renderPage("/decks/deck?layout=list&edition=e&copy=2", navigate);
+  await act(async () => choose("Stacked").click());
+  expect(navigate).toHaveBeenLastCalledWith(
+    "/decks/deck?layout=stacked&edition=e&copy=2",
+    { replace: true, preserveScroll: true }
+  );
+  // The layout already shown is not written again.
+  navigate.mockClear();
+  await renderPage("/decks/deck?layout=list", navigate);
+  await act(async () => choose("List").click());
+  expect(navigate).not.toHaveBeenCalled();
 });
