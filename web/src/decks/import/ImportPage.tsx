@@ -47,6 +47,13 @@ type FocusNext = "heading" | "textArea" | "nameField" | null;
 /** Where focus goes once the next review lands: past the fixed line, or back on its own action button. */
 type FocusAfter = { line: number; same: boolean } | null;
 
+const CHANGED_TEXT =
+  "Some cards changed in the catalog. The review is up to date now: check it and save again.";
+const CREATE_MAY_HAVE_TEXT =
+  "Creation may have completed. Press Create Deck again to check safely.";
+const REPLACE_MAY_HAVE_TEXT =
+  "Replacing may have completed. Press Replace Deck List again to check safely.";
+
 /**
  * Import a decklist (/decks/import, #212): paste a list, name the new Deck and choose its Target Format, then check
  * every line ("Check the list") and Create Deck. The server reads the paste and answers every review; the page keeps
@@ -132,7 +139,7 @@ export function ImportPage({
     : draftIsUnapplied({ text, picks: picks.size, drops: drops.size })
       ? "unapplied"
       : "none";
-  const { dialog: leaveDialog } = usePasteLeaveGuard(
+  const { dialog: leaveDialog, settle } = usePasteLeaveGuard(
     () => (applied.current ? "none" : held.current),
     publication
       ? { kind: "copy" }
@@ -140,6 +147,21 @@ export function ImportPage({
         ? { kind: "replace", deckName: replace.name }
         : { kind: "new" }
   );
+
+  /** A save that landed: opens the saved Deck, unless the collector is answering the leave question, which then decides. */
+  function landed(open: () => void) {
+    applied.current = true;
+    if (mounted.current) settle({ kind: "landed", open });
+  }
+
+  /**
+   * A save that failed. If the collector is still here, the open leave question (if any) says so with `message`; if
+   * they already left, their pasted list is gone, so a toast that stays says that, in `left`.
+   */
+  function failed(message: string, left: string) {
+    if (mounted.current) settle({ kind: "failed", message });
+    else toast.show({ message: left, sticky: true });
+  }
 
   // A step starts at the top, with focus where the collector goes next.
   useLayoutEffect(() => {
@@ -321,32 +343,41 @@ export function ImportPage({
         idempotency_key: attempt.key,
       });
       pendingSave.current = null;
-      applied.current = true;
       offerUndo(toast, result, review.totals.cards, onAllDecks);
-      if (mounted.current) onOpenDeck(result.deck_id);
+      landed(() => onOpenDeck(result.deck_id));
     } catch (cause) {
       if (cause instanceof DeckError && cause.status < 500) {
         pendingSave.current = null;
+        let message = CHANGED_TEXT;
         if (
           cause.code === "LOCATION_NAME_CONFLICT" ||
           cause.code === "INVALID_LOCATION_NAME"
-        ) {
-          setNameMessage(
+        )
+          message =
             cause.code === "LOCATION_NAME_CONFLICT"
               ? "Choose a different Deck name."
-              : "Enter a valid Deck name."
-          );
-          backToPaste("nameField");
-        } else {
-          setSaveMessage(
-            "Some cards changed in the catalog. The review is up to date now: check it and save again."
-          );
-          state.retry();
+              : "Enter a valid Deck name.";
+        if (mounted.current) {
+          if (message === CHANGED_TEXT) {
+            setSaveMessage(message);
+            state.retry();
+          } else {
+            setNameMessage(message);
+            backToPaste("nameField");
+          }
         }
-      } else
-        setSaveMessage(
-          "Creation may have completed. Press Create Deck again to check safely."
+        failed(
+          message,
+          // A copy has no pasted list: what the collector loses is the changes they made in the review.
+          `Your Deck wasn't created. ${publication ? "Your review changes weren't kept." : "Your pasted list wasn't kept."}`
         );
+      } else {
+        if (mounted.current) setSaveMessage(CREATE_MAY_HAVE_TEXT);
+        failed(
+          CREATE_MAY_HAVE_TEXT,
+          "Creating your Deck may not have finished. Check All Decks."
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -356,8 +387,7 @@ export function ImportPage({
   async function saveReplace(answer: ImportReplace) {
     // Nothing listed before and nothing now: there is no batch to send.
     if (answer.changes.length === 0) {
-      applied.current = true;
-      onOpenDeck(answer.deck_id);
+      landed(() => onOpenDeck(answer.deck_id));
       return;
     }
     setSaving(true);
@@ -380,28 +410,34 @@ export function ImportPage({
         changes: answer.changes,
       });
       pendingSave.current = null;
-      applied.current = true;
       offerReplaceUndo(toast, answer, result);
-      if (mounted.current) onOpenDeck(answer.deck_id);
+      landed(() => onOpenDeck(answer.deck_id));
     } catch (cause) {
       if (cause instanceof DeckError && cause.status < 500) {
         pendingSave.current = null;
         // A deleted Deck: its builder says so.
-        if (cause.status === 404) {
-          applied.current = true;
-          if (mounted.current) onOpenDeck(answer.deck_id);
-        } else {
-          setSaveMessage(
+        if (cause.status === 404) landed(() => onOpenDeck(answer.deck_id));
+        else {
+          const message =
             cause.code === "STALE_DECK_LIST"
               ? STALE_REPLACE_TEXT
-              : "Some cards changed in the catalog. The review is up to date now: check it and save again."
+              : CHANGED_TEXT;
+          if (mounted.current) {
+            setSaveMessage(message);
+            state.retry();
+          }
+          failed(
+            message,
+            `${replace?.name}'s Deck List wasn't replaced. Your pasted list wasn't kept.`
           );
-          state.retry();
         }
-      } else
-        setSaveMessage(
-          "Replacing may have completed. Press Replace Deck List again to check safely."
+      } else {
+        if (mounted.current) setSaveMessage(REPLACE_MAY_HAVE_TEXT);
+        failed(
+          REPLACE_MAY_HAVE_TEXT,
+          `Replacing ${replace?.name}'s Deck List may not have finished. Open ${replace?.name} to check.`
         );
+      }
     } finally {
       setSaving(false);
     }

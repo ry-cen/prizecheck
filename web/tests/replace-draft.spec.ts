@@ -101,20 +101,51 @@ test.afterEach(() => {
   for (const release of releases.splice(0)) release();
 });
 
-/** Holds the Replace save at the network until `release()`, then lets it through, or answers `status` instead. */
-async function holdSave(page: Page, status?: number) {
+/**
+ * Holds a save at the network until `release()`, then lets it through, or answers `status` (with the API's error code)
+ * instead. The Replace save by default; `url` picks another, such as Create Deck's.
+ */
+async function holdSave(
+  page: Page,
+  {
+    status,
+    code,
+    url = SAVE,
+  }: { status?: number; code?: string; url?: RegExp } = {}
+) {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   releases.push(() => release());
   const keys: string[] = [];
-  await page.route(SAVE, async (route) => {
+  await page.route(url, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
     keys.push(route.request().postDataJSON().idempotency_key);
     await gate;
-    if (status) await route.fulfill({ status, json: { detail: "down" } });
+    if (status)
+      await route.fulfill({
+        status,
+        json: { detail: code ? { code } : "down" },
+      });
     else await route.continue();
   });
   return { release, keys };
 }
+
+const failed = (page: Page) =>
+  page.getByRole("dialog", { name: "Your list didn't save" });
+const SAVED = `Replaced ${DECK}'s Deck List.`;
+/** The question the browser's Back or a tab raises while the save is held. */
+async function leaveWhileSaving(page: Page, via: "browser Back" | "shell tab") {
+  // The review step has no back link: the page behind it is reached by the browser's Back or a tab.
+  if (via === "browser Back") await page.goBack();
+  else
+    await tabs(page)
+      .getByRole("link", { name: "Catalog", exact: true })
+      .click();
+  await expect(saving(page)).toBeVisible();
+}
+const landedResponse = (page: Page) =>
+  page.waitForResponse((response) => SAVE.test(response.url()));
 
 /** Pastes PASTE on the Replace screen, opens the review and presses Replace Deck List. */
 async function startSave(page: Page, id: string) {
@@ -342,7 +373,7 @@ for (const [label, viewport] of [
       expect(await warns(page)).toBe(false);
     });
 
-    test("a Replace that is still saving asks before leaving: Stay keeps the page and lands in the Deck, and Leave stays where the collector went when the save lands", async ({
+    test("B1: a Replace that is still saving asks before leaving and warns that a failure loses the paste; Stay keeps the page, and the save then lands in the Deck", async ({
       page,
     }) => {
       seedCatalog();
@@ -352,85 +383,194 @@ for (const [label, viewport] of [
       await startSave(page, id);
       expect(await warns(page)).toBe(true);
 
-      await tabs(page)
-        .getByRole("link", { name: "Catalog", exact: true })
-        .click();
-      await expect(saving(page)).toBeVisible();
+      await leaveWhileSaving(page, "browser Back");
       await expect(saving(page)).toContainText(
-        `Leave now and you won't see whether it replaced ${DECK}'s Deck List.`
+        `If you leave and it doesn't save, your pasted list for ${DECK} is lost.`
       );
       await expectPageChecks(page, "the still-saving question");
       await expect(
         saving(page).getByRole("button", { name: "Stay" })
       ).toBeFocused();
       await saving(page).getByRole("button", { name: "Stay" }).click();
+      await expect(saving(page)).toBeHidden();
       await expect(page).toHaveURL(new RegExp(`/decks/${id}/replace$`));
       hold.release();
       await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
-      await expect(asking(page)).toHaveCount(0);
-      await expect(notifications(page)).toContainText(
-        `Replaced ${DECK}'s Deck List.`
-      );
-
-      // Leaving anyway: the save lands behind the collector and doesn't pull them back to the Deck.
-      await page.unroute(SAVE);
-      const second = await holdSave(page);
-      await replaceList(page, id);
-      await decklist(page).fill("4 Nest Ball SVI 181\n");
-      await page.getByRole("button", { name: "Review 1 line" }).click();
-      const sent = page.waitForRequest((request) => SAVE.test(request.url()));
-      const landed = page.waitForResponse((response) =>
-        SAVE.test(response.url())
-      );
-      await page.getByRole("button", { name: "Replace Deck List" }).click();
-      await sent;
-      await tabs(page)
-        .getByRole("link", { name: "Catalog", exact: true })
-        .click();
-      await saving(page).getByRole("button", { name: "Leave" }).click();
-      await expect(page).toHaveURL(/\/catalog/);
-      second.release();
-      await landed;
-      await expect(notifications(page)).toContainText(
-        `Replaced ${DECK}'s Deck List.`
-      );
-      await expect(page).toHaveURL(/\/catalog/);
+      await expect(notifications(page)).toContainText(SAVED);
+      await expect(
+        notifications(page).getByRole("button", { name: "Undo" })
+      ).toBeVisible();
+      await expect(saving(page)).toHaveCount(0);
     });
 
-    test("a Replace that fails while the collector stays keeps the review, the message and the same retry key", async ({
+    test("B2: a save that lands while the question is open doesn't take the page away; Stay then opens the saved Deck", async ({
       page,
     }) => {
       seedCatalog();
       await signIn(page);
       const id = await deckBuilder(page);
-      const hold = await holdSave(page, 500);
+      const hold = await holdSave(page);
       await startSave(page, id);
-      await tabs(page)
-        .getByRole("link", { name: "Catalog", exact: true })
-        .click();
-      await saving(page).getByRole("button", { name: "Stay" }).click();
+      await leaveWhileSaving(page, "browser Back");
+      const answered = landedResponse(page);
       hold.release();
-      await expect(page.getByRole("region", { name: "Save" })).toContainText(
+      await answered;
+      // The Undo toast is offered just before the page would have moved on, so once it shows, the move has been decided.
+      await expect(notifications(page)).toContainText(SAVED);
+      await expect(saving(page)).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/decks/${id}/replace$`));
+      await saving(page).getByRole("button", { name: "Stay" }).click();
+      await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
+      await expect(saving(page)).toHaveCount(0);
+    });
+
+    for (const via of ["browser Back", "shell tab"] as const)
+      test(`B3: Leave on a question the save landed under goes where the ${via} went, with no second question`, async ({
+        page,
+      }) => {
+        seedCatalog();
+        await signIn(page);
+        const id = await deckBuilder(page);
+        const hold = await holdSave(page);
+        await startSave(page, id);
+        await leaveWhileSaving(page, via);
+        const answered = landedResponse(page);
+        hold.release();
+        await answered;
+        await expect(notifications(page)).toContainText(SAVED);
+        await expect(saving(page)).toBeVisible();
+        await saving(page).getByRole("button", { name: "Leave" }).click();
+        await expect(page).toHaveURL(
+          via === "browser Back" ? new RegExp(`/decks/${id}$`) : /\/catalog/
+        );
+        await expect(saving(page)).toHaveCount(0);
+        await expect(asking(page)).toHaveCount(0);
+      });
+
+    test("B4: a save that fails under the question says so; Keep editing keeps the review, and the retry sends the same key", async ({
+      page,
+    }) => {
+      seedCatalog();
+      await signIn(page);
+      const id = await deckBuilder(page);
+      const hold = await holdSave(page, { status: 500 });
+      await startSave(page, id);
+      await leaveWhileSaving(page, "shell tab");
+      hold.release();
+      await expect(failed(page)).toBeVisible();
+      await expect(failed(page)).toContainText(
         "Replacing may have completed. Press Replace Deck List again to check safely."
       );
+      await expect(failed(page)).toContainText(
+        "Discard your pasted list, or keep editing to try again."
+      );
+      await expectPageChecks(page, "the didn't-save question");
+      await expect(
+        failed(page).getByRole("button", { name: "Keep editing" })
+      ).toBeFocused();
+      await failed(page).getByRole("button", { name: "Keep editing" }).click();
+      await expect(failed(page)).toBeHidden();
       await expect(page).toHaveURL(new RegExp(`/decks/${id}/replace$`));
       await expect(
         page.getByRole("heading", { name: "Check the list", level: 1 })
       ).toBeVisible();
-      // Not saving any more, but the review is still unapplied: leaving still asks.
+
+      await page.unroute(SAVE);
+      const retry = page.waitForRequest((request) => SAVE.test(request.url()));
+      await page.getByRole("button", { name: "Replace Deck List" }).click();
+      expect((await retry).postDataJSON().idempotency_key).toBe(hold.keys[0]);
+      await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
+    });
+
+    test("B5: a save the catalog refuses under the question says so; Discard goes on, and Replace list… opens empty", async ({
+      page,
+    }) => {
+      seedCatalog();
+      await signIn(page);
+      const id = await deckBuilder(page);
+      const hold = await holdSave(page, {
+        status: 409,
+        code: "STALE_DECK_LIST",
+      });
+      await startSave(page, id);
+      await leaveWhileSaving(page, "browser Back");
+      hold.release();
+      await expect(failed(page)).toBeVisible();
+      await expect(failed(page)).toContainText(
+        "This Deck's list changed after you checked it."
+      );
+      await failed(page).getByRole("button", { name: "Discard" }).click();
+      await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
+      await expect(failed(page)).toHaveCount(0);
+      await page.unroute(SAVE);
+      await replaceList(page, id);
+      await expect(decklist(page)).toHaveValue("");
+    });
+
+    test("B6: a save that fails after the collector left shows a toast that stays, and doesn't move them", async ({
+      page,
+    }) => {
+      seedCatalog();
+      await signIn(page);
+      const id = await deckBuilder(page);
+      const hold = await holdSave(page, { status: 500 });
+      await startSave(page, id);
+      await page.clock.install();
+      await leaveWhileSaving(page, "shell tab");
+      await saving(page).getByRole("button", { name: "Leave" }).click();
+      await expect(page).toHaveURL(/\/catalog/);
+      hold.release();
+      const sticky = notifications(page).getByText(
+        `Replacing ${DECK}'s Deck List may not have finished. Open ${DECK} to check.`
+      );
+      await expect(sticky).toBeVisible();
+      await page.clock.runFor(6_000);
+      await expect(sticky).toBeVisible();
+      await expect(page).toHaveURL(/\/catalog/);
+    });
+
+    test("B7: a save that lands after the collector left shows the Undo toast and doesn't move them", async ({
+      page,
+    }) => {
+      seedCatalog();
+      await signIn(page);
+      const id = await deckBuilder(page);
+      const hold = await holdSave(page);
+      await startSave(page, id);
+      await leaveWhileSaving(page, "shell tab");
+      await saving(page).getByRole("button", { name: "Leave" }).click();
+      await expect(page).toHaveURL(/\/catalog/);
+      const answered = landedResponse(page);
+      hold.release();
+      await answered;
+      await expect(notifications(page)).toContainText(SAVED);
+      await expect(
+        notifications(page).getByRole("button", { name: "Undo" })
+      ).toBeVisible();
+      await expect(page).toHaveURL(/\/catalog/);
+    });
+
+    test("a save that fails with no question open keeps the message and the review, and the guard asks about the paste again", async ({
+      page,
+    }) => {
+      seedCatalog();
+      await signIn(page);
+      const id = await deckBuilder(page);
+      const hold = await holdSave(page, { status: 500 });
+      await startSave(page, id);
+      hold.release();
+      await expect(page.getByRole("region", { name: "Save" })).toContainText(
+        "Replacing may have completed. Press Replace Deck List again to check safely."
+      );
+      await expect(failed(page)).toHaveCount(0);
       await tabs(page)
         .getByRole("link", { name: "Catalog", exact: true })
         .click();
       await expect(asking(page)).toBeVisible();
       await asking(page).getByRole("button", { name: "Keep editing" }).click();
-
-      await page.unroute(SAVE);
-      const retry = page.waitForRequest((request) => SAVE.test(request.url()));
-      await page.getByRole("button", { name: "Replace Deck List" }).click();
-      const again = (await retry).postDataJSON().idempotency_key;
-      expect(again).toBe(hold.keys[0]);
-      await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
-      await expect(asking(page)).toHaveCount(0);
+      await expect(
+        page.getByRole("heading", { name: "Check the list", level: 1 })
+      ).toBeVisible();
     });
 
     test("Copy to my Decks names the review changes, and leaves silently until there is one", async ({
@@ -474,6 +614,49 @@ for (const [label, viewport] of [
       await copyAsking.getByRole("button", { name: "Discard" }).click();
       await expect(page).toHaveURL(/\/catalog/);
     });
+
+    for (const [status, code, toast] of [
+      [
+        409,
+        "CATALOG_CHANGED",
+        "Your Deck wasn't created. Your review changes weren't kept.",
+      ],
+      [
+        500,
+        undefined,
+        "Creating your Deck may not have finished. Check All Decks.",
+      ],
+    ] as const)
+      test(`B8: Create Deck from a copy that is still saving warns that the review changes are lost, and a ${status} after Leave shows a toast that stays, without a word about pasting`, async ({
+        page,
+      }) => {
+        const world = copyWorld();
+        await signIn(page);
+        await page.goto(`${ORIGIN}/decks/import?publication=${world.copy}`);
+        await page.getByRole("button", { name: "Review 3 lines" }).click();
+        await page.getByRole("button", { name: "Fix" }).click();
+        await page.getByRole("button", { name: "Drop line" }).click();
+        const create = /\/api\/decks\/import$/;
+        const hold = await holdSave(page, { status, code, url: create });
+        const sent = page.waitForRequest(
+          (request) => create.test(request.url()) && request.method() === "POST"
+        );
+        await page.getByRole("button", { name: "Create Deck" }).click();
+        await sent;
+        await tabs(page)
+          .getByRole("link", { name: "Catalog", exact: true })
+          .click();
+        await expect(saving(page)).toContainText(
+          "If you leave and it doesn't save, your review changes are lost."
+        );
+        await saving(page).getByRole("button", { name: "Leave" }).click();
+        await expect(page).toHaveURL(/\/catalog/);
+        hold.release();
+        const sticky = notifications(page).getByText(toast);
+        await expect(sticky).toBeVisible();
+        await expect(sticky).not.toContainText(/paste/i);
+        await expect(page).toHaveURL(/\/catalog/);
+      });
 
     test("Import a decklist asks the same way for a pasted list, and a Deck name alone is not one", async ({
       page,

@@ -8,6 +8,7 @@ import {
   usePasteLeaveGuard,
   type Flow,
   type Pending,
+  type Settle,
 } from "./PasteLeaveGuard";
 
 // The page's leave guard is the shell's registry; here it is a stand-in that keeps the registered guard.
@@ -28,10 +29,12 @@ vi.mock("../../ui/ScrollArea", () => ({
 let root: Root;
 let host: HTMLElement;
 let pending: Pending = "none";
+let settle: (outcome: Settle) => void = () => undefined;
 
 function Page({ flow }: { flow: Flow }) {
-  const { dialog } = usePasteLeaveGuard(() => pending, flow);
-  return React.createElement("main", null, dialog);
+  const guard = usePasteLeaveGuard(() => pending, flow);
+  settle = guard.settle;
+  return React.createElement("main", null, guard.dialog);
 }
 
 async function show(flow: Flow) {
@@ -145,7 +148,7 @@ it("says the list is still saving while a save is pending: Stay keeps the page, 
   await act(async () => registered.guard?.ask(leave));
   expect(dialog()?.textContent).toContain("Your list is still saving");
   expect(dialog()?.textContent).toContain(
-    "Leave now and you won't see whether it replaced Garden practice's Deck List."
+    "If you leave and it doesn't save, your pasted list for Garden practice is lost."
   );
   expect(dialog()?.textContent).not.toMatch(/discard/i);
   await act(async () => button("Stay")?.click());
@@ -161,7 +164,7 @@ it("keeps the question it was asked with even if the page's state changes while 
   await show({ kind: "new" });
   await act(async () => registered.guard?.ask(vi.fn()));
   expect(dialog()?.textContent).toContain(
-    "Leave now and you won't see whether it saved."
+    "If you leave and it doesn't save, your pasted list is lost."
   );
   pending = "unapplied";
   await act(async () =>
@@ -189,4 +192,111 @@ it("asks the browser to warn on a reload or close while a draft is unapplied or 
   // The page is gone, so its warning is too.
   expect(warns()).toBe(false);
   root = createRoot(host);
+});
+
+/** Shows the page with a save pending and asks to leave, so the saving question is open. */
+async function ask(flow: Flow, leave = vi.fn()) {
+  pending = "saving";
+  await show(flow);
+  await act(async () => registered.guard?.ask(leave));
+  return leave;
+}
+
+it("U1: a save that lands with no question open opens the saved Deck once", async () => {
+  await show(REPLACE);
+  const opened = vi.fn();
+  await act(async () => settle({ kind: "landed", open: opened }));
+  expect(opened).toHaveBeenCalledTimes(1);
+});
+
+it("U2: a save that lands under the saving question keeps it open, in the same words; Stay opens the Deck once, and Leave goes on without opening it", async () => {
+  const leave = await ask(REPLACE);
+  const opened = vi.fn();
+  const words = dialog()?.textContent;
+  await act(async () => settle({ kind: "landed", open: opened }));
+  expect(opened).not.toHaveBeenCalled();
+  expect(dialog()?.hasAttribute("open")).toBe(true);
+  expect(dialog()?.textContent).toBe(words);
+  await act(async () => button("Stay")?.click());
+  expect(opened).toHaveBeenCalledTimes(1);
+  expect(leave).not.toHaveBeenCalled();
+  expect(dialog()?.hasAttribute("open")).toBeFalsy();
+
+  const again = await ask(REPLACE);
+  const openedAgain = vi.fn();
+  await act(async () => settle({ kind: "landed", open: openedAgain }));
+  await act(async () => button("Leave")?.click());
+  expect(again).toHaveBeenCalledTimes(1);
+  expect(openedAgain).not.toHaveBeenCalled();
+  // Escape and the close button are Stay too.
+  const third = await ask(REPLACE);
+  const openedThird = vi.fn();
+  await act(async () => settle({ kind: "landed", open: openedThird }));
+  await act(async () =>
+    dialog()?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    )
+  );
+  expect(openedThird).toHaveBeenCalledTimes(1);
+  expect(third).not.toHaveBeenCalled();
+});
+
+it("U3: a save that fails under the saving question turns it into 'Your list didn't save' with the page's message; Discard leaves, and Keep editing does neither", async () => {
+  const leave = await ask(REPLACE);
+  await act(async () => settle({ kind: "failed", message: "X happened." }));
+  expect(dialog()?.hasAttribute("open")).toBe(true);
+  expect(dialog()?.textContent).toContain("Your list didn't save");
+  expect(dialog()?.textContent).toContain("X happened.");
+  expect(dialog()?.textContent).toContain(
+    "Discard your pasted list, or keep editing to try again."
+  );
+  expect(button("Stay")).toBeUndefined();
+  await act(async () => button("Keep editing")?.click());
+  expect(leave).not.toHaveBeenCalled();
+  expect(dialog()?.hasAttribute("open")).toBeFalsy();
+
+  const again = await ask(REPLACE);
+  await act(async () => settle({ kind: "failed", message: "X happened." }));
+  await act(async () => button("Discard")?.click());
+  expect(again).toHaveBeenCalledTimes(1);
+});
+
+it("U4: a failure with no question open does nothing", async () => {
+  await show(REPLACE);
+  await act(async () => settle({ kind: "failed", message: "X happened." }));
+  expect(dialog()?.hasAttribute("open")).toBeFalsy();
+  expect(host.textContent).not.toContain("X happened.");
+});
+
+it("U5: every flow has its own words for the saving and the failed question", async () => {
+  const cases: [Flow, string, string, string][] = [
+    [
+      REPLACE,
+      "If you leave and it doesn't save, your pasted list for Garden practice is lost.",
+      "Your list didn't save",
+      "Discard your pasted list, or keep editing to try again.",
+    ],
+    [
+      { kind: "new" },
+      "If you leave and it doesn't save, your pasted list is lost.",
+      "Your list didn't save",
+      "Discard your pasted list, or keep editing to try again.",
+    ],
+    [
+      { kind: "copy" },
+      "If you leave and it doesn't save, your review changes are lost.",
+      "Your copy didn't save",
+      "Discard your review changes, or keep editing to try again.",
+    ],
+  ];
+  for (const [flow, savingBody, failedTitle, failedBody] of cases) {
+    await ask(flow);
+    expect(dialog()?.textContent).toContain("Your list is still saving");
+    expect(dialog()?.textContent).toContain(savingBody);
+    await act(async () => settle({ kind: "failed", message: "Nope." }));
+    expect(dialog()?.textContent).toContain(failedTitle);
+    expect(dialog()?.textContent).toContain("Nope.");
+    expect(dialog()?.textContent).toContain(failedBody);
+    await act(async () => button("Keep editing")?.click());
+  }
 });
