@@ -31,6 +31,10 @@ Every native HTML page carries `cache-control: no-store`, `referrer-policy: no-r
 
 Only sha256 hashes of the code and the token are stored. Nothing logs a code, verifier, token, header or body.
 
+## Known issue: consent POST Origin under `no-referrer`
+
+The gateway's native pages send `referrer-policy: no-referrer`, so a real browser's consent form POST carries `Origin: null`, and the gateway's strict Origin check would reject it with 403. Proposed fix, not made: `same-origin`. It needs owner approval. The simulator stub (`mobile/native-fixture.mjs`) already uses `same-origin`.
+
 ## Run it locally against the OAuth fake
 
 The OAuth fake (`auth/testing/oauth-fake`) answers for Google and Discord and refuses to load unless `PUBLIC_ORIGIN` is loopback. With a migrated disposable database (`python3 scripts/local_test_db.py doctor` and `docs/agents/local-testing.md` say how to get one):
