@@ -74,6 +74,26 @@ const BULBASAUR_TILE = "Bulbasaur, MEG 001, Mega Evolution, Normal";
 const REVERSE_TILE = "Bulbasaur, MEG 001, Mega Evolution, Reverse Holo";
 const SWITCH_TILE = "Switch, MEG 130";
 const card = (page: Page) => page.getByRole("dialog");
+const searchField = (page: Page) =>
+  page.getByRole("searchbox", { name: "Search the catalog" });
+const scrollY = (page: Page) => page.evaluate(() => window.scrollY);
+/** Moves to another Catalog address inside the app, as a link or a pasted address would, with a Back to return by. */
+const goTo = (page: Page, href: string) =>
+  page.evaluate((href) => {
+    window.history.pushState({}, "", href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, href);
+/** The Printing and Edition ids of the gallery's nth tile, read once the gallery shows. */
+async function nthCard(page: Page, n: number) {
+  const items = results(page).getByRole("listitem");
+  await expect(items).toHaveCount(60);
+  const edition = (await items.nth(n).getAttribute("data-edition-id"))!;
+  const [{ printing }] = await sql(
+    "SELECT printing_id AS printing FROM catalog_edition WHERE id=$1",
+    [edition]
+  );
+  return { edition, printing: printing as string };
+}
 
 for (const viewport of [
   { width: 1280, height: 800, touch: false },
@@ -216,6 +236,121 @@ for (const viewport of [
       await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
     });
 
+    test("Back from a card that came from the address, with the results still loading, puts focus on the search field at once and on the tile when it arrives, never scrolling", async ({
+      page,
+    }) => {
+      seedGallery();
+      await signIn(page);
+      await page.goto(`${ORIGIN}/catalog`);
+      const { edition, printing } = await nthCard(page, 30);
+      let release = () => {};
+      const held = new Promise<void>((resolve) => (release = resolve));
+      await page.route("**/api/catalog/editions*", async (route) => {
+        // The card's own Editions load at once; only the results list waits.
+        if (!new URL(route.request().url()).searchParams.has("printing_id"))
+          await held;
+        await route.continue();
+      });
+      await page.reload();
+      await goTo(page, `/catalog?card=${printing}&edition=${edition}`);
+      await expect(card(page)).toBeVisible();
+      await page.goBack();
+      await expect(card(page)).toHaveCount(0);
+      // Before the results arrive: on the page, not lost, and not scrolled.
+      await expect(searchField(page)).toBeFocused();
+      await expect.poll(() => scrollY(page)).toBe(0);
+      release();
+      await expect(
+        results(page).locator(`[data-edition-id="${edition}"] button`)
+      ).toBeFocused();
+      await expect.poll(() => scrollY(page)).toBe(0);
+    });
+
+    test("Back from a card with the Set lookup failed leaves focus on the search field beside Retry, not on the page body", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      const bulbasaur = await ids("me01-001");
+      await page.route("**/api/catalog/sets", (route) =>
+        route.fulfill({ status: 500, body: "" })
+      );
+      await page.goto(`${ORIGIN}/catalog`);
+      await goTo(page, "/catalog?set=base1");
+      await expect(
+        page.getByRole("button", { name: "Retry", exact: true })
+      ).toBeVisible();
+      await goTo(
+        page,
+        `/catalog?set=base1&card=${bulbasaur.printing}&edition=${bulbasaur.edition}`
+      );
+      await expect(card(page)).toBeVisible();
+      await page.goBack();
+      await expect(card(page)).toHaveCount(0);
+      await expect(searchField(page)).toBeFocused();
+      await expect(
+        page.getByRole("button", { name: "Retry", exact: true })
+      ).toBeVisible();
+    });
+
+    test("Back from a card when the first results fail leaves focus on the search field, before and after the failure settles", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      const bulbasaur = await ids("me01-001");
+      let release = () => {};
+      const held = new Promise<void>((resolve) => (release = resolve));
+      await page.route("**/api/catalog/editions*", async (route) => {
+        if (new URL(route.request().url()).searchParams.has("printing_id"))
+          return route.continue();
+        await held;
+        await route.fulfill({ status: 500, body: "" });
+      });
+      await page.goto(`${ORIGIN}/catalog`);
+      await goTo(
+        page,
+        `/catalog?card=${bulbasaur.printing}&edition=${bulbasaur.edition}`
+      );
+      await expect(card(page)).toBeVisible();
+      await page.goBack();
+      await expect(card(page)).toHaveCount(0);
+      await expect(searchField(page)).toBeFocused();
+      release();
+      await expect(
+        page.getByRole("button", { name: "Retry", exact: true })
+      ).toBeVisible();
+      await expect(searchField(page)).toBeFocused();
+    });
+
+    test("Back after stepping past the viewport focuses the stepped tile without moving the page, and Escape scrolls it into view", async ({
+      page,
+    }) => {
+      seedGallery();
+      await signIn(page);
+      await page.goto(`${ORIGIN}/catalog`);
+      const items = results(page).getByRole("listitem");
+      await expect(items).toHaveCount(60);
+      const stepped = (await items.nth(24).getAttribute("data-edition-id"))!;
+      const steppedTile = results(page).locator(
+        `[data-edition-id="${stepped}"] button`
+      );
+      for (const close of ["back", "escape"] as const) {
+        await press(items.nth(0).getByRole("button"));
+        await expect(card(page)).toBeVisible();
+        for (let step = 0; step < 24; step++)
+          await press(card(page).getByRole("button", { name: /^Next/ }));
+        const before = await scrollY(page);
+        if (close === "back") await page.goBack();
+        else await page.keyboard.press("Escape");
+        await expect(card(page)).toHaveCount(0);
+        await expect(steppedTile).toBeFocused();
+        if (close === "back")
+          await expect.poll(() => scrollY(page)).toBe(before);
+        else await expect(steppedTile).toBeInViewport();
+      }
+    });
+
     test("a card entered from a shared link closes onto the results line when its tile isn't in the results", async ({
       page,
     }) => {
@@ -226,11 +361,12 @@ for (const viewport of [
         `${ORIGIN}/catalog?q=Switch&card=${bulbasaur.printing}&edition=${bulbasaur.edition}`
       );
       await expect(card(page)).toBeVisible();
+      // The results are in (their line is mounted), and none of them is this card.
+      const line = results(page).getByText(/^Showing \d+ of \d+ cards$/);
+      await expect(line).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(card(page)).toHaveCount(0);
-      await expect(
-        results(page).getByText(/^Showing \d+ of \d+ cards$/)
-      ).toBeFocused();
+      await expect(line).toBeFocused();
     });
 
     test("the Catalog page, its card dialog, the report form and My card reports say nothing about metadata", async ({

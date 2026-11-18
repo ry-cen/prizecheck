@@ -236,9 +236,23 @@ export function CatalogGallery({
     ? browse.editions.findIndex((edition) => edition.edition_id === anchorId)
     : -1;
   const [wantsNext, setWantsNext] = useState(false);
-  // A card that has closed and whose tile focus should return to once the results allow it: the Edition it showed, or
-  // null for one that closed before its Edition was known (a Printing-only link whose details hadn't arrived).
-  const closedOn = useRef<{ editionId: string | null } | null>(null);
+  // A card that has just closed, until the effect below has decided where focus goes: the Edition it showed (null for
+  // one that closed before its Edition was known, a Printing-only link whose details hadn't arrived), and whether
+  // the page may scroll to that tile. `scroll` is true only when the dialog itself closed a card the collector
+  // opened from a tile here (Escape, the close button); Back, Forward and cards that came from the address never
+  // scroll.
+  const closedOn = useRef<{ editionId: string | null; scroll: boolean } | null>(
+    null
+  );
+  // On the Catalog page the dialog asks the address to close the card; this says the close began in the dialog.
+  const closingFromDialog = useRef(false);
+  // A tile that wasn't in the results when its card closed, and the element focus was put on meanwhile: when the tile
+  // arrives for the same query, and focus is still on that element, focus moves to it.
+  const pendingTile = useRef<{
+    editionId: string;
+    fallback: HTMLElement;
+    query: typeof query;
+  } | null>(null);
   const hintId = useId();
   const sentinel = useRef<HTMLDivElement>(null);
   const canLoad = browse.nextCursor !== null && !browse.errorMore;
@@ -607,47 +621,60 @@ export function CatalogGallery({
       stepTo(index + 1);
     }
   }, [wantsNext, card, index, editionsShown.length, browse.errorMore, stepTo]);
-  // Closing the popup after stepping returns focus to the tile of the card it showed (the Dialog itself returns it
-  // to the tile that opened it); the browser scrolls that tile into view.
-  // A card opened from the address (a reload, a shared link) can close before the results have loaded, so its tile
-  // isn't there yet: the return waits for them, and then only takes focus that is still lost, so it never pulls
-  // focus from a control the collector has moved on to.
-  const waitingForTile = useRef(false);
+  // Closing the popup returns focus at once, whatever the results are doing. The Dialog itself has already returned it
+  // to the tile that opened the card (without scrolling); this follows the card the popup last showed, so after
+  // stepping it is that card's tile. With no tile (a shared link to a card the results don't list, results still on
+  // their way, or none at all) focus that was left on the page goes to the results line, or the search field when
+  // there is none, and a tile that arrives later takes it from there.
   const resultsLoading = browse.loading || browse.loadingMore;
+  const lookUp = (editionId: string) =>
+    tiles.current?.querySelector<HTMLElement>(
+      `[data-edition-id="${CSS.escape(editionId)}"] button`
+    ) ?? null;
   useEffect(() => {
     if (card) {
-      waitingForTile.current = false;
+      // Opening a card ends any return that was still waiting.
+      closedOn.current = null;
+      pendingTile.current = null;
       return;
     }
     const closed = closedOn.current;
     if (!closed) return;
-    const tile = closed.editionId
-      ? tiles.current?.querySelector<HTMLElement>(
-          `[data-edition-id="${CSS.escape(closed.editionId)}"] button`
-        )
-      : null;
-    if (!tile && resultsLoading) {
-      waitingForTile.current = true;
+    closedOn.current = null;
+    const tile = closed.editionId ? lookUp(closed.editionId) : null;
+    if (tile) {
+      if (tile !== document.activeElement)
+        tile.focus(closed.scroll ? undefined : { preventScroll: true });
       return;
     }
-    const waited = waitingForTile.current;
-    closedOn.current = null;
-    waitingForTile.current = false;
-    if (waited && !isLost(document.activeElement)) return;
-    // A tile that arrives late can be far from the viewport: take focus without scrolling the page to it.
-    if (tile && tile !== document.activeElement)
-      tile.focus(waited ? { preventScroll: true } : undefined);
-    // No tile to return to (a shared link to a card the search doesn't list, or to a Printing that closed before its
-    // Edition was known): the dialog's own return found nothing either, so focus would be left on the page body. The
-    // results line says where the collector is; without one (the results didn't load) the search field is the stable
-    // place.
-    else if (!tile && isLost(document.activeElement)) {
-      const fallback =
-        resultsLine.current ??
-        galleryRoot.current?.querySelector<HTMLElement>('input[type="search"]');
-      fallback?.focus({ preventScroll: true });
+    // Focus is somewhere the collector put it: leave it.
+    if (!isLost(document.activeElement)) return;
+    const fallback =
+      resultsLine.current ??
+      galleryRoot.current?.querySelector<HTMLElement>('input[type="search"]');
+    if (!fallback) return;
+    fallback.focus({ preventScroll: true });
+    if (closed.editionId && resultsLoading)
+      pendingTile.current = { editionId: closed.editionId, fallback, query };
+  }, [card]);
+  // The late tile: only while focus is still on the element it was parked on and the query hasn't changed, and never
+  // scrolling the page to it.
+  useEffect(() => {
+    const pending = pendingTile.current;
+    if (!pending) return;
+    if (
+      document.activeElement !== pending.fallback ||
+      pending.query !== query
+    ) {
+      pendingTile.current = null;
+      return;
     }
-  }, [card, resultsLoading, browse.editions]);
+    const tile = lookUp(pending.editionId);
+    if (tile) {
+      pendingTile.current = null;
+      tile.focus({ preventScroll: true });
+    } else if (!resultsLoading) pendingTile.current = null;
+  }, [browse.editions, resultsLoading, query]);
 
   // Infinite scroll: a sentinel after the last tile asks for the next page as it nears the window (or the dialog's
   // body). Observing again after each page (the length changes) asks once more while the sentinel is still in reach.
@@ -690,6 +717,7 @@ export function CatalogGallery({
     if (!routed) return;
     if (link) {
       opener.current = null;
+      closingFromDialog.current = false;
       setCard(link);
       shown.current = {
         printingId: link.printingId,
@@ -700,6 +728,8 @@ export function CatalogGallery({
       return;
     }
     if (!active) {
+      closingFromDialog.current = false;
+      pendingTile.current = null;
       if (card) {
         closedOn.current = null;
         setWantsNext(false);
@@ -711,10 +741,16 @@ export function CatalogGallery({
     }
     if (!routeCard) {
       if (card) {
-        closedOn.current = { editionId: anchor ?? card.editionId };
+        // A close the dialog asked for, of a card opened from a tile here, scrolls to its tile; Back and Forward
+        // never do.
+        closedOn.current = {
+          editionId: anchor ?? card.editionId,
+          scroll: closingFromDialog.current && opener.current !== null,
+        };
         setWantsNext(false);
         setCard(null);
       }
+      closingFromDialog.current = false;
       shown.current = null;
       setAnchor(null);
       return;
@@ -723,6 +759,7 @@ export function CatalogGallery({
       routeCard.printingId !== shown.current?.printingId ||
       routeCard.editionId !== shown.current?.editionId
     ) {
+      closingFromDialog.current = false;
       setCard({
         printingId: routeCard.printingId,
         editionId: routeCard.editionId,
@@ -1096,10 +1133,13 @@ export function CatalogGallery({
         request={card}
         onClose={() => {
           if (routed) {
+            closingFromDialog.current = true;
             onCardRoute?.(null, "close");
             return;
           }
-          closedOn.current = card ? { editionId: card.editionId } : null;
+          closedOn.current = card
+            ? { editionId: card.editionId, scroll: opener.current !== null }
+            : null;
           setWantsNext(false);
           setCard(null);
         }}

@@ -3,7 +3,7 @@ import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { CatalogGallery } from "./CatalogGallery";
-import type { CatalogCard } from "./catalogUrl";
+import type { CatalogCard, CatalogView } from "./catalogUrl";
 import { ToastProvider } from "../ui/Toast";
 
 const json = (value: unknown) => new Response(JSON.stringify(value));
@@ -44,6 +44,8 @@ let GATE: Promise<void> | null = null;
 let PRINTING_GATE: Promise<void> | null = null;
 /** True: the results list answers "unavailable", so the page has no results line. */
 let UNAVAILABLE = false;
+/** True: the Set lookup fails, so a Catalog address naming a Set never lets its results start. */
+let SETS_FAIL = false;
 const PRINTINGS: Record<string, { name: string; editions: string[] }> = {
   [P1]: { name: "Switch", editions: [E1, E3] },
   [P2]: { name: "Potion", editions: [E2] },
@@ -118,8 +120,10 @@ function stubBrowser() {
           owner_revision: 1,
         });
       }
-      if (url.pathname.includes("/sets"))
+      if (url.pathname.includes("/sets")) {
+        if (SETS_FAIL) return new Response("", { status: 500 });
         return json({ available: true, sets: [] });
+      }
       return json({
         available: true,
         revision: 1,
@@ -132,7 +136,10 @@ function stubBrowser() {
   );
 }
 
-async function mount(initial: CatalogCard | null | undefined) {
+async function mount(
+  initial: CatalogCard | null | undefined,
+  initialView?: CatalogView
+) {
   stubBrowser();
   const host = document.createElement("div");
   document.body.append(host);
@@ -141,6 +148,7 @@ async function mount(initial: CatalogCard | null | undefined) {
   const render = (props: {
     routeCard?: CatalogCard | null;
     active?: boolean;
+    view?: CatalogView;
   }) =>
     act(async () =>
       root.render(
@@ -154,13 +162,15 @@ async function mount(initial: CatalogCard | null | undefined) {
             undoToast: true,
             stick: "page",
             routeCard: props.routeCard,
+            view: props.view ?? initialView,
+            onViewChange: props.view || initialView ? () => {} : undefined,
             onCardRoute:
               props.routeCard === undefined ? undefined : onCardRoute,
           })
         )
       )
     );
-  await render({ routeCard: initial });
+  await render({ routeCard: initial, view: initialView });
   const dialog = () => host.querySelector<HTMLDialogElement>("dialog[open]");
   const tile = (id: string) =>
     host.querySelector<HTMLButtonElement>(`[data-edition-id="${id}"] button`)!;
@@ -181,6 +191,7 @@ afterEach(() => {
   GATE = null;
   PRINTING_GATE = null;
   UNAVAILABLE = false;
+  SETS_FAIL = false;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -374,12 +385,16 @@ test("a card that closes before the results have loaded does not pull focus from
   const g = await mount({ printingId: P1, editionId: E1 });
   try {
     await g.render({ routeCard: null });
-    const search = g.host.querySelector<HTMLInputElement>(
-      'input[type="search"]'
-    )!;
-    search.focus();
+    // Focus went to the search field when the card closed; the collector then moves it to another control.
+    expect(document.activeElement).toBe(
+      g.host.querySelector('input[type="search"]')
+    );
+    const elsewhere = [
+      ...g.host.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((b) => b.textContent === "Standard")!;
+    elsewhere.focus();
     await act(async () => release());
-    expect(document.activeElement).toBe(search);
+    expect(document.activeElement).toBe(elsewhere);
   } finally {
     await g.done();
   }
@@ -418,4 +433,81 @@ test("a card that closes when the results never load leaves focus on the search 
   } finally {
     await g.done();
   }
+});
+
+const search = (g: { host: HTMLElement }) =>
+  g.host.querySelector<HTMLInputElement>('input[type="search"]');
+
+test("a card that closes while the results are still loading puts focus on the search field at once, before they arrive", async () => {
+  let release = () => {};
+  GATE = new Promise<void>((resolve) => (release = resolve));
+  const g = await mount({ printingId: P1, editionId: E1 });
+  try {
+    await g.render({ routeCard: null });
+    expect(g.dialog()).toBeNull();
+    expect(document.activeElement).toBe(search(g));
+    await act(async () => release());
+    expect(document.activeElement).toBe(g.tile(E1));
+  } finally {
+    await g.done();
+  }
+});
+
+test("a tile that arrives after the query changed does not take focus", async () => {
+  let release = () => {};
+  GATE = new Promise<void>((resolve) => (release = resolve));
+  const view: CatalogView = {
+    q: "",
+    format: null,
+    kind: null,
+    setId: null,
+    owned: false,
+    mode: null,
+  };
+  const g = await mount({ printingId: P1, editionId: E1 }, view);
+  try {
+    await g.render({ routeCard: null, view });
+    expect(document.activeElement).toBe(search(g));
+    // Filtering to owned cards is a new query: the parked return no longer applies.
+    await g.render({ routeCard: null, view: { ...view, owned: true } });
+    await act(async () => release());
+    expect(document.activeElement).toBe(search(g));
+  } finally {
+    await g.done();
+  }
+});
+
+test("a failed Set lookup, which leaves the results loading for good, still puts focus on the search field", async () => {
+  SETS_FAIL = true;
+  const view: CatalogView = {
+    q: "",
+    format: null,
+    kind: null,
+    setId: "base",
+    owned: false,
+    mode: null,
+  };
+  const g = await mount({ printingId: P1, editionId: E1 }, view);
+  try {
+    expect(g.dialog()).not.toBeNull();
+    await g.render({ routeCard: null, view });
+    expect(g.dialog()).toBeNull();
+    expect(g.host.querySelector('[aria-label="Catalog results"]')).toBeNull();
+    expect(document.activeElement).toBe(search(g));
+    expect(document.activeElement).not.toBe(document.body);
+  } finally {
+    await g.done();
+  }
+});
+
+test("resolving the results after the page is gone throws nothing and moves no focus", async () => {
+  let release = () => {};
+  GATE = new Promise<void>((resolve) => (release = resolve));
+  const g = await mount({ printingId: P1, editionId: E1 });
+  await g.render({ routeCard: null });
+  expect(document.activeElement).toBe(search(g));
+  await g.done();
+  const before = document.activeElement;
+  await act(async () => release());
+  expect(document.activeElement).toBe(before);
 });
