@@ -58,21 +58,20 @@ export function TargetFormatControl({
 }: Props) {
   const status = result ? statusOf(result.status) : null;
   const label = formatLabel(value);
-  // What the status line says, and when it says it anew. Its words are the Format and its standing, and they change
-  // only when the Format does (a deliberate change, whose result arrives after `result` has been null) or the standing
-  // does (an edit made the Deck legal or not legal). Ordinary edits that leave the standing as it was, even ones that
-  // change the issue count, and the moments a Deck List edit is on its way, leave the line exactly as it is: it is
-  // never blanked and redrawn, so an edit isn't followed by a second announcement. The result button's own name always
-  // carries the current count.
+  // What the status line says, and when it says it anew. Its words are the Format and its standing, with no issue
+  // count, so what it holds is never out of date: they change only when the Format does (a deliberate change, whose
+  // result arrives after `result` has been null) or the standing does (an edit made the Deck legal or not legal).
+  // Ordinary edits that leave the standing as it was, even ones that change the issue count, and the moments a Deck
+  // List edit is on its way, leave the line exactly as it is: it is never blanked and redrawn, so an edit isn't followed
+  // by a second announcement. The count is on the result button (its name and its text), always current.
+  // An edit that flips the standing does announce the new one beside the edit's own message: an intentional exception
+  // to one announcement per edit (owner decision, m12 s4), since it is the one fact an edit can change about the Deck.
   const standing = result && status ? `${value}:${result.status}` : null;
   const [said, setSaid] = useState<{ standing: string; text: string } | null>(
     null
   );
   if (result && status && standing !== null && said?.standing !== standing)
-    setSaid({
-      standing,
-      text: `${label}: ${status.text}${words(result)}`,
-    });
+    setSaid({ standing, text: `${label}: ${status.text}` });
   return (
     <div
       role="group"

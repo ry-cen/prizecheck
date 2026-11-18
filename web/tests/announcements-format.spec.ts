@@ -15,7 +15,7 @@ import {
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner } from "./support/sign-in";
 
-// The Deck's format summary ("Standard: Not legal, 1 issue", the status line in the Target Format control) and the
+// The Deck's format summary ("Standard: Not legal", the status line in the Target Format control) and the
 // announcement of a Deck List edit (desktop). The summary says the Format and the Deck's standing, and speaks only when
 // the Format or the standing changes: a deliberate Target Format change says its result once, an edit that tips the Deck
 // between legal and not legal says so once beside the edit's own message, and every other edit, including one that
@@ -153,7 +153,7 @@ test("an edit says its own message, and the format summary only when the Deck's 
     [
       "Remove one",
       "Removed 1 Rare Candy.",
-      /^Standard: Not legal, /,
+      /^Standard: Not legal$/,
       /Not legal/,
     ],
     ["Remove one", "Removed 1 Rare Candy.", null, /Not legal/],
@@ -174,7 +174,14 @@ test("an edit says its own message, and the format summary only when the Deck's 
       expect(said.find((text) => /^Standard: /.test(text))).toMatch(summary);
     // Nothing else is spoken: every addition to a live region is one of these.
     expect(said).toHaveLength(summary ? 2 : 1);
-    // The status line itself carries the standing it last said, never blank.
+    // The status line carries the Format and standing only, never blank and never a count that could go out of date; the
+    // result button's name is where the current count is.
+    await expect(control.getByRole("status")).toHaveText(
+      /Legal/.test(String(after)) && !/Not legal/.test(String(after))
+        ? "Standard: Legal"
+        : "Standard: Not legal"
+    );
+    await expect(control.getByRole("status")).not.toHaveText(/\d/);
     expect(
       (await snapshot(page)).filter((text) => /^Standard: /.test(text)).length
     ).toBe(1);
@@ -203,6 +210,6 @@ test("a deliberate Target Format change says its result once", async ({
   await settle(page);
   const said = await since(page, mark);
   expect(said).toEqual([
-    expect.stringMatching(/^Gym Leader Challenge: Not legal, /),
+    expect.stringMatching(/^Gym Leader Challenge: Not legal$/),
   ]);
 });
