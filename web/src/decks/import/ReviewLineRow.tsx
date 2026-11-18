@@ -15,8 +15,13 @@ import {
 } from "./importModel";
 import { LineResolver } from "./LineResolver";
 
+/** A fieldset with no look of its own, dimmed while it is disabled. */
+export const LOCKABLE = "m-0 min-w-0 border-0 p-0 disabled:opacity-60";
+
 type Props = {
   line: ReviewLine;
+  /** A save is in flight: nothing that changes what is saved can be pressed until it ends. */
+  locked?: boolean;
   /** Which panel is open under this line, if any. */
   open: "fix" | "edition" | null;
   onToggle: (kind: "fix" | "edition") => void;
@@ -35,6 +40,7 @@ type Props = {
  */
 export function ReviewLineRow({
   line,
+  locked = false,
   open,
   onToggle,
   onPick,
@@ -84,12 +90,18 @@ export function ReviewLineRow({
           )}
         </div>
         {line.status === "dropped" ? (
-          <Button ref={actionRef} variant="quiet" onClick={onRestore}>
+          <Button
+            ref={actionRef}
+            variant="quiet"
+            disabled={locked}
+            onClick={onRestore}
+          >
             Restore
           </Button>
         ) : flagged ? (
           <Button
             ref={actionRef}
+            disabled={locked}
             aria-expanded={open === "fix"}
             onClick={() => onToggle("fix")}
           >
@@ -99,6 +111,7 @@ export function ReviewLineRow({
           <Button
             ref={actionRef}
             variant="quiet"
+            disabled={locked}
             aria-expanded={open === "edition"}
             onClick={() => onToggle("edition")}
           >
@@ -106,16 +119,21 @@ export function ReviewLineRow({
           </Button>
         )}
       </div>
+      {/* An open panel is locked as a whole: a disabled fieldset disables every control inside it. */}
       {open === "fix" && flagged && (
-        <LineResolver line={line} onPick={onPick} onDrop={onDrop} />
+        <fieldset disabled={locked} className={LOCKABLE}>
+          <LineResolver line={line} onPick={onPick} onDrop={onDrop} />
+        </fieldset>
       )}
-      {open === "edition" &&
-        line.printing &&
-        (energy ? (
-          <EnergyChooser line={line} onPick={onPick} onEdition={onEdition} />
-        ) : (
-          <EditionChooser line={line} onEdition={onEdition} />
-        ))}
+      {open === "edition" && line.printing && (
+        <fieldset disabled={locked} className={LOCKABLE}>
+          {energy ? (
+            <EnergyChooser line={line} onPick={onPick} onEdition={onEdition} />
+          ) : (
+            <EditionChooser line={line} onEdition={onEdition} />
+          )}
+        </fieldset>
+      )}
     </li>
   );
 }

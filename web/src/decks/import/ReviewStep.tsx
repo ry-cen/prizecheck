@@ -17,7 +17,7 @@ import {
   type Pick,
 } from "./importModel";
 import { OWNED_OPTIONS, type OwnedCards } from "./ownedCards";
-import { ReviewLineRow } from "./ReviewLineRow";
+import { LOCKABLE, ReviewLineRow } from "./ReviewLineRow";
 import type { ImportReviewState } from "./useImportReview";
 
 export type OpenPanel = { line: number; kind: "fix" | "edition" } | null;
@@ -140,15 +140,18 @@ export function ReviewStep({
             <p id={ownedLabelId} className="m-0 text-meta text-text-muted">
               Owned cards
             </p>
-            <Segmented
-              mode="choice"
-              label="Owned cards"
-              labelledBy={ownedLabelId}
-              describedBy={`${explainerId} ${countingId}`}
-              options={OWNED_OPTIONS}
-              value={owned}
-              onChange={onOwned}
-            />
+            {/* The setting changes what would be saved, so it waits while a save is in flight. */}
+            <fieldset disabled={saving} className={LOCKABLE}>
+              <Segmented
+                mode="choice"
+                label="Owned cards"
+                labelledBy={ownedLabelId}
+                describedBy={`${explainerId} ${countingId}`}
+                options={OWNED_OPTIONS}
+                value={owned}
+                onChange={onOwned}
+              />
+            </fieldset>
             <p id={explainerId} className="m-0 text-meta text-text-muted">
               {explainer}
             </p>
@@ -196,6 +199,7 @@ export function ReviewStep({
                   <ReviewLineRow
                     key={line.line}
                     line={line}
+                    locked={saving}
                     open={open?.line === line.line ? open.kind : null}
                     onToggle={(kind) => onToggle(line.line, kind)}
                     onPick={(pick) => onPick(line.line, pick)}
@@ -258,7 +262,10 @@ export function ReviewStep({
             )}
           </p>
         )}
-        <Button onClick={onBack}>Back to paste</Button>
+        {/* The list is being saved: going back to edit it would change what the save no longer reads. */}
+        <Button onClick={onBack} disabled={saving}>
+          Back to paste
+        </Button>
         <Button
           ref={createButtonRef}
           variant="primary"

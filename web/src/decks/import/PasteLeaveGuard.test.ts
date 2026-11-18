@@ -30,10 +30,12 @@ let root: Root;
 let host: HTMLElement;
 let pending: Pending = "none";
 let settle: (outcome: Settle) => void = () => undefined;
+let left: () => boolean = () => false;
 
 function Page({ flow }: { flow: Flow }) {
   const guard = usePasteLeaveGuard(() => pending, flow);
   settle = guard.settle;
+  left = guard.left;
   return React.createElement("main", null, guard.dialog);
 }
 
@@ -299,4 +301,37 @@ it("U5: every flow has its own words for the saving and the failed question", as
     expect(dialog()?.textContent).toContain(failedBody);
     await act(async () => button("Keep editing")?.click());
   }
+});
+
+it("U6: once Leave is accepted the page counts as gone: a save settling before it unmounts opens nothing, and a new attempt to leave clears it", async () => {
+  const leave = await ask(REPLACE);
+  expect(left()).toBe(false);
+  await act(async () => button("Leave")?.click());
+  expect(leave).toHaveBeenCalledTimes(1);
+  expect(left()).toBe(true);
+  const opened = vi.fn();
+  await act(async () => settle({ kind: "landed", open: opened }));
+  expect(opened).not.toHaveBeenCalled();
+  await act(async () => settle({ kind: "failed", message: "Nope." }));
+  expect(dialog()?.hasAttribute("open")).toBeFalsy();
+  // The traversal didn't happen (another guard said no): the next try to leave starts again.
+  registered.guard?.blocks();
+  expect(left()).toBe(false);
+});
+
+it("U7: a save that fails under the question moves focus to Keep editing and puts the details in a polite status, announced once", async () => {
+  await ask(REPLACE);
+  const status = () => dialog()?.querySelector('[role="status"]');
+  expect(status()?.textContent).toBe("");
+  // Tab to Leave while the save is pending.
+  button("Leave")?.focus();
+  expect(document.activeElement).toBe(button("Leave"));
+  await act(async () => settle({ kind: "failed", message: "Nope." }));
+  expect(document.activeElement).toBe(button("Keep editing"));
+  expect(status()?.textContent).toContain("Nope.");
+  expect(status()?.getAttribute("aria-live") ?? "polite").toBe("polite");
+  // The saving words are not in the status.
+  await act(async () => button("Keep editing")?.click());
+  await ask(REPLACE);
+  expect(status()?.textContent).toBe("");
 });

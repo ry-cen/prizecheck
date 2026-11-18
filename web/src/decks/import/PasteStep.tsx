@@ -22,6 +22,8 @@ type Props = {
   canReview: boolean;
   onReview: () => void;
   onAllDecks: () => void;
+  /** A save is in flight: the pasted text can't change under it. */
+  locked?: boolean;
   textAreaRef: Ref<HTMLTextAreaElement>;
   nameRef: Ref<HTMLInputElement>;
   /** The page heading; "Import a decklist" by default. */
@@ -53,6 +55,7 @@ export function PasteStep({
   canReview,
   onReview,
   onAllDecks,
+  locked = false,
   textAreaRef,
   nameRef,
   heading = "Import a decklist",
@@ -101,6 +104,7 @@ export function PasteStep({
             rows={16}
             spellCheck={false}
             value={text}
+            readOnly={locked}
             onChange={(event) => onText(event.target.value)}
           />
           <p

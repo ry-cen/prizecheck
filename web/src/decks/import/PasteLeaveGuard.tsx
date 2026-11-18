@@ -131,7 +131,12 @@ function wordsFor(mode: Mode, flow: Flow, message: string): Words {
 export function usePasteLeaveGuard(
   pending: () => Pending,
   flow: Flow
-): { dialog: ReactNode; settle: (outcome: Settle) => void } {
+): {
+  dialog: ReactNode;
+  settle: (outcome: Settle) => void;
+  /** Whether the collector has accepted Leave: the page is on its way out, so a save settling now treats them as gone. */
+  left: () => boolean;
+} {
   const check = useRef(pending);
   check.current = pending;
   const [view, setView] = useState<{ mode: Mode; message: string } | null>(
@@ -142,6 +147,11 @@ export function usePasteLeaveGuard(
   const leaveRef = useRef<() => void>(() => undefined);
   const stayRef = useRef<() => void>(() => undefined);
   const returnTo = useRef<HTMLElement | null>(null);
+  // Set the moment Leave is accepted, before the dialog closes or the router moves, so a response that overtakes the
+  // navigation is handled as if the page had already gone. Cleared by the next attempt to leave (the first one may have
+  // been stopped by another guard).
+  const leavingRef = useRef(false);
+  const keepRef = useRef<HTMLButtonElement>(null);
 
   const show = useCallback((mode: Mode, message = "") => {
     modeRef.current = mode;
@@ -155,8 +165,12 @@ export function usePasteLeaveGuard(
   // Read through refs only, so it is made once.
   const guard = useMemo<LeaveGuard>(
     () => ({
-      blocks: () => check.current() !== "none",
+      blocks: () => {
+        leavingRef.current = false;
+        return check.current() !== "none";
+      },
       ask: (leave) => {
+        leavingRef.current = false;
         leaveRef.current = leave;
         // Asked again while a question is already settled on (Back with it open): it keeps its words.
         if (modeRef.current === "failed" || modeRef.current === "landed")
@@ -188,6 +202,8 @@ export function usePasteLeaveGuard(
 
   const settle = useCallback(
     (outcome: Settle) => {
+      // Leave was accepted: the page is going, and the collector's choice decides where.
+      if (leavingRef.current) return;
       if (outcome.kind === "failed") {
         if (modeRef.current === "saving") show("failed", outcome.message);
         return;
@@ -212,9 +228,17 @@ export function usePasteLeaveGuard(
   }
   function leave() {
     if (modeRef.current === null) return;
+    leavingRef.current = true;
     close();
     leaveRef.current();
   }
+
+  // A save that fails under the question turns it into "didn't save": focus moves to Keep editing, which the dialog's
+  // own opening focus can't do because the dialog is already open.
+  const failedNow = view?.mode === "failed";
+  useEffect(() => {
+    if (failedNow) keepRef.current?.focus();
+  }, [failedNow]);
 
   const words = wordsFor(view?.mode ?? "unapplied", flow, view?.message ?? "");
   const dialog = (
@@ -226,9 +250,18 @@ export function usePasteLeaveGuard(
       returnFocus={returnTo}
     >
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">{words.body}</div>
+        {/* The failure's details are a polite status: this region is always there, so filling it is announced once. */}
+        <div role="status" className="flex flex-col gap-2">
+          {failedNow ? words.body : null}
+        </div>
+        {!failedNow && <div className="flex flex-col gap-2">{words.body}</div>}
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button data-autofocus variant="secondary" onClick={stay}>
+          <Button
+            ref={keepRef}
+            data-autofocus
+            variant="secondary"
+            onClick={stay}
+          >
             {words.keep}
           </Button>
           <Button variant="danger" onClick={leave}>
@@ -238,5 +271,5 @@ export function usePasteLeaveGuard(
       </div>
     </Dialog>
   );
-  return { dialog, settle };
+  return { dialog, settle, left: () => leavingRef.current };
 }

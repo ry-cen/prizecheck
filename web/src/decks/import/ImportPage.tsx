@@ -139,7 +139,11 @@ export function ImportPage({
     : draftIsUnapplied({ text, picks: picks.size, drops: drops.size })
       ? "unapplied"
       : "none";
-  const { dialog: leaveDialog, settle } = usePasteLeaveGuard(
+  const {
+    dialog: leaveDialog,
+    settle,
+    left,
+  } = usePasteLeaveGuard(
     () => (applied.current ? "none" : held.current),
     publication
       ? { kind: "copy" }
@@ -148,10 +152,13 @@ export function ImportPage({
         : { kind: "new" }
   );
 
+  /** The collector is no longer here: the page unmounted, or they accepted Leave and it is about to. */
+  const gone = () => !mounted.current || left();
+
   /** A save that landed: opens the saved Deck, unless the collector is answering the leave question, which then decides. */
   function landed(open: () => void) {
     applied.current = true;
-    if (mounted.current) settle({ kind: "landed", open });
+    if (!gone()) settle({ kind: "landed", open });
   }
 
   /**
@@ -159,7 +166,7 @@ export function ImportPage({
    * they already left, their pasted list is gone, so a toast that stays says that, in `left`.
    */
   function failed(message: string, left: string) {
-    if (mounted.current) settle({ kind: "failed", message });
+    if (!gone()) settle({ kind: "failed", message });
     else toast.show({ message: left, sticky: true });
   }
 
@@ -357,7 +364,7 @@ export function ImportPage({
             cause.code === "LOCATION_NAME_CONFLICT"
               ? "Choose a different Deck name."
               : "Enter a valid Deck name.";
-        if (mounted.current) {
+        if (!gone()) {
           if (message === CHANGED_TEXT) {
             setSaveMessage(message);
             state.retry();
@@ -372,7 +379,7 @@ export function ImportPage({
           `Your Deck wasn't created. ${publication ? "Your review changes weren't kept." : "Your pasted list wasn't kept."}`
         );
       } else {
-        if (mounted.current) setSaveMessage(CREATE_MAY_HAVE_TEXT);
+        if (!gone()) setSaveMessage(CREATE_MAY_HAVE_TEXT);
         failed(
           CREATE_MAY_HAVE_TEXT,
           "Creating your Deck may not have finished. Check All Decks."
@@ -415,14 +422,20 @@ export function ImportPage({
     } catch (cause) {
       if (cause instanceof DeckError && cause.status < 500) {
         pendingSave.current = null;
-        // A deleted Deck: its builder says so.
-        if (cause.status === 404) landed(() => onOpenDeck(answer.deck_id));
-        else {
+        // A deleted Deck: its builder says so, to a collector who stayed. One who left hears it as a toast.
+        if (cause.status === 404) {
+          if (gone())
+            toast.show({
+              message: `${replace?.name}'s Deck List wasn't replaced. Your pasted list wasn't kept.`,
+              sticky: true,
+            });
+          else landed(() => onOpenDeck(answer.deck_id));
+        } else {
           const message =
             cause.code === "STALE_DECK_LIST"
               ? STALE_REPLACE_TEXT
               : CHANGED_TEXT;
-          if (mounted.current) {
+          if (!gone()) {
             setSaveMessage(message);
             state.retry();
           }
@@ -432,7 +445,7 @@ export function ImportPage({
           );
         }
       } else {
-        if (mounted.current) setSaveMessage(REPLACE_MAY_HAVE_TEXT);
+        if (!gone()) setSaveMessage(REPLACE_MAY_HAVE_TEXT);
         failed(
           REPLACE_MAY_HAVE_TEXT,
           `Replacing ${replace?.name}'s Deck List may not have finished. Open ${replace?.name} to check.`
@@ -523,6 +536,7 @@ export function ImportPage({
         canReview={canReview}
         onReview={startReview}
         onAllDecks={onAllDecks}
+        locked={saving}
         textAreaRef={textArea}
         nameRef={nameField}
         {...(replace
