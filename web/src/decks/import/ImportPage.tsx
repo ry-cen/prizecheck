@@ -34,6 +34,7 @@ import {
   ReplaceReviewDestination,
   WillBecomeSurplus,
 } from "./ReplaceParts";
+import { pasteIsUnapplied, usePasteLeaveGuard } from "./PasteLeaveGuard";
 import { ReviewStep, type OpenPanel } from "./ReviewStep";
 import { useImportReview } from "./useImportReview";
 
@@ -84,6 +85,8 @@ export function ImportPage({
   );
   const [updated, setUpdated] = useState(false);
   const defaulted = useRef(false);
+  // Set once a save has landed (or there was nothing to save), so the page that follows it isn't asked about.
+  const applied = useRef(false);
 
   const pendingSave = useRef<{ payloadKey: string; key: string } | null>(null);
   const previousChoices = useRef<Choices>({
@@ -108,6 +111,15 @@ export function ImportPage({
   );
   const toast = useToast();
   const review = state.review;
+
+  // A pasted list that hasn't been applied is asked about before an in-app leave, and warned about on a reload.
+  const held = useRef(false);
+  held.current =
+    !saving && pasteIsUnapplied({ text, picks: picks.size, drops: drops.size });
+  const { dialog: leaveDialog } = usePasteLeaveGuard(
+    () => held.current && !applied.current,
+    replace?.name ?? null
+  );
 
   // A step starts at the top, with focus where the collector goes next.
   useLayoutEffect(() => {
@@ -289,6 +301,7 @@ export function ImportPage({
         idempotency_key: attempt.key,
       });
       pendingSave.current = null;
+      applied.current = true;
       offerUndo(toast, result, review.totals.cards, onAllDecks);
       onOpenDeck(result.deck_id);
     } catch (cause) {
@@ -323,6 +336,7 @@ export function ImportPage({
   async function saveReplace(answer: ImportReplace) {
     // Nothing listed before and nothing now: there is no batch to send.
     if (answer.changes.length === 0) {
+      applied.current = true;
       onOpenDeck(answer.deck_id);
       return;
     }
@@ -346,14 +360,17 @@ export function ImportPage({
         changes: answer.changes,
       });
       pendingSave.current = null;
+      applied.current = true;
       offerReplaceUndo(toast, answer, result);
       onOpenDeck(answer.deck_id);
     } catch (cause) {
       if (cause instanceof DeckError && cause.status < 500) {
         pendingSave.current = null;
         // A deleted Deck: its builder says so.
-        if (cause.status === 404) onOpenDeck(answer.deck_id);
-        else {
+        if (cause.status === 404) {
+          applied.current = true;
+          onOpenDeck(answer.deck_id);
+        } else {
           setSaveMessage(
             cause.code === "STALE_DECK_LIST"
               ? STALE_REPLACE_TEXT
@@ -372,102 +389,108 @@ export function ImportPage({
 
   if (step === "review" && review)
     return (
-      <ReviewStep
-        review={review}
-        state={state}
-        destination={
-          replace ? (
-            <ReplaceReviewDestination name={replace.name} />
-          ) : (
-            <p className="m-0 text-body">
-              New Deck <strong className="font-semibold">{name}</strong> ·
-              Target Format{" "}
-              <strong className="font-semibold">
-                {formatLabel(targetFormat)}
-              </strong>
-            </p>
-          )
-        }
-        sidePanel={
-          replace && review.replace ? (
-            <WillBecomeSurplus
-              rows={review.replace.surplus}
-              name={replace.name}
-            />
-          ) : undefined
-        }
-        saveLabel={replace ? "Replace Deck List" : "Create Deck"}
-        saveBlocked={saveBlocked}
-        owned={owned}
-        onOwned={(next) => {
-          setSaveMessage("");
-          setOwned(next);
-        }}
-        filter={filter}
-        onFilter={setFilter}
-        open={open}
-        onToggle={(line, kind) =>
-          setOpen((previous) =>
-            previous?.line === line && previous.kind === kind
-              ? null
-              : { line, kind }
-          )
-        }
-        onPick={pick}
-        onDrop={drop}
-        onRestore={restore}
-        onEdition={chooseEdition}
-        actionRef={(line) => (element) => {
-          if (element) actionButtons.current.set(line, element);
-          else actionButtons.current.delete(line);
-        }}
-        headingRef={heading}
-        createButtonRef={createButton}
-        saving={saving}
-        saveMessage={saveMessage}
-        onBack={() => backToPaste(publication ? "nameField" : "textArea")}
-        onCreate={() => void save()}
-      />
+      <>
+        <ReviewStep
+          review={review}
+          state={state}
+          destination={
+            replace ? (
+              <ReplaceReviewDestination name={replace.name} />
+            ) : (
+              <p className="m-0 text-body">
+                New Deck <strong className="font-semibold">{name}</strong> ·
+                Target Format{" "}
+                <strong className="font-semibold">
+                  {formatLabel(targetFormat)}
+                </strong>
+              </p>
+            )
+          }
+          sidePanel={
+            replace && review.replace ? (
+              <WillBecomeSurplus
+                rows={review.replace.surplus}
+                name={replace.name}
+              />
+            ) : undefined
+          }
+          saveLabel={replace ? "Replace Deck List" : "Create Deck"}
+          saveBlocked={saveBlocked}
+          owned={owned}
+          onOwned={(next) => {
+            setSaveMessage("");
+            setOwned(next);
+          }}
+          filter={filter}
+          onFilter={setFilter}
+          open={open}
+          onToggle={(line, kind) =>
+            setOpen((previous) =>
+              previous?.line === line && previous.kind === kind
+                ? null
+                : { line, kind }
+            )
+          }
+          onPick={pick}
+          onDrop={drop}
+          onRestore={restore}
+          onEdition={chooseEdition}
+          actionRef={(line) => (element) => {
+            if (element) actionButtons.current.set(line, element);
+            else actionButtons.current.delete(line);
+          }}
+          headingRef={heading}
+          createButtonRef={createButton}
+          saving={saving}
+          saveMessage={saveMessage}
+          onBack={() => backToPaste(publication ? "nameField" : "textArea")}
+          onCreate={() => void save()}
+        />
+        {leaveDialog}
+      </>
     );
   return (
-    <PasteStep
-      text={text}
-      onText={typeText}
-      name={name}
-      onName={(next) => {
-        setName(next);
-        setNameMessage("");
-        pendingSave.current = null;
-      }}
-      nameMessage={nameMessage}
-      targetFormat={targetFormat}
-      onTargetFormat={setTargetFormat}
-      state={state}
-      canReview={canReview}
-      onReview={startReview}
-      onAllDecks={onAllDecks}
-      textAreaRef={textArea}
-      nameRef={nameField}
-      {...(replace
-        ? {
-            heading: `Replace ${replace.name}'s list`,
-            back: {
-              label: replace.name,
-              href: `/decks/${encodeURIComponent(replace.deckId)}`,
-              onClick: () => onOpenDeck(replace.deckId),
-            },
-            destination: <ReplacePasteDestination name={replace.name} />,
-          }
-        : {})}
-      {...(publication
-        ? {
-            heading: "Copy to my Decks",
-            intro:
-              "Copy a Published Deck into a new Deck of your own. You'll check every card before anything is saved.",
-            source: <CopySource state={state} updated={updated} />,
-          }
-        : {})}
-    />
+    <>
+      <PasteStep
+        text={text}
+        onText={typeText}
+        name={name}
+        onName={(next) => {
+          setName(next);
+          setNameMessage("");
+          pendingSave.current = null;
+        }}
+        nameMessage={nameMessage}
+        targetFormat={targetFormat}
+        onTargetFormat={setTargetFormat}
+        state={state}
+        canReview={canReview}
+        onReview={startReview}
+        onAllDecks={onAllDecks}
+        textAreaRef={textArea}
+        nameRef={nameField}
+        {...(replace
+          ? {
+              heading: `Replace ${replace.name}'s list`,
+              back: {
+                label: replace.name,
+                href: `/decks/${encodeURIComponent(replace.deckId)}`,
+                onClick: () => onOpenDeck(replace.deckId),
+              },
+              destination: <ReplacePasteDestination name={replace.name} />,
+            }
+          : {})}
+        {...(publication
+          ? {
+              heading: "Copy to my Decks",
+              intro:
+                "Copy a Published Deck into a new Deck of your own. You'll check every card before anything is saved.",
+              source: <CopySource state={state} updated={updated} />,
+            }
+          : {})}
+      />
+      {leaveDialog}
+    </>
   );
 }
 
