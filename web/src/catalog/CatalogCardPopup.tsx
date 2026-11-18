@@ -105,7 +105,7 @@ type Props = {
   /** Catalog keeps a failure reachable when its Add row closed during the request. */
   onAddFailed?: (message: string) => void;
   renderAddFeedback?: AddFeedbackRenderer;
-  /** A metadata report was sent: My metadata reports reads again. */
+  /** A metadata report was sent: My card reports reads again. */
   onReported: () => void;
   /** A Borrow Request reviewed from this popup was sent, so the popup closed for the composer: the card to open again.
    * Returns true when it did. The popup then puts focus back on that lender's control and says the request was sent. */
@@ -341,7 +341,7 @@ export function CatalogCardPopup({
               <button
                 type="button"
                 className={REPORT_LINK}
-                aria-label="Report Printing metadata"
+                aria-label="Report Printing details"
                 aria-expanded={
                   report?.kind === "metadata" && report.editionId === null
                 }
@@ -349,7 +349,7 @@ export function CatalogCardPopup({
                   toggleReport({ kind: "metadata", editionId: null })
                 }
               >
-                Printing metadata
+                Printing details
               </button>
               <span aria-hidden="true">·</span>
               <button

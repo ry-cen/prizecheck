@@ -172,7 +172,7 @@ for (const viewport of [
       const card = page.getByRole("dialog");
       await card.getByRole("button", { name: "Report this Edition" }).click();
       const note = card
-        .getByRole("region", { name: "Report card metadata" })
+        .getByRole("region", { name: "Report card details" })
         .getByLabel("Note");
       await note.fill("The price match looks wrong");
       const length = await historyLength(page);
@@ -308,7 +308,7 @@ for (const viewport of [
       );
       const card = page.getByRole("dialog", { name: "Bulbasaur" });
       await expect(
-        card.getByRole("region", { name: "Report card metadata" })
+        card.getByRole("region", { name: "Report card details" })
       ).toBeVisible();
       await expect
         .poll(() => here(page))
@@ -316,7 +316,7 @@ for (const viewport of [
       await page.reload();
       await expect(card).toBeVisible();
       await expect(
-        card.getByRole("region", { name: "Report card metadata" })
+        card.getByRole("region", { name: "Report card details" })
       ).toHaveCount(0);
     });
   });

@@ -41,7 +41,7 @@ type Props = {
 /**
  * Catalog (#173, spec "Catalog"): the Edition gallery (catalog/CatalogGallery) with its card popup (#174), and no
  * sidebar. The page header holds the Browse / Add to a Location switch (#175): Add mode puts the gallery's add bar
- * on top and a quick + on every tile, and the queue is kept when the collector switches back to Browse. My metadata
+ * on top and a quick + on every tile, and the queue is kept when the collector switches back to Browse. My card
  * reports opens from the page header, since nothing can sit below an endless gallery (the spec's "at the foot of the
  * page" predates infinite scroll). The page stays mounted while the collector is elsewhere, so the mode, search,
  * filters, queue, loaded rows and scroll are kept.
@@ -199,7 +199,7 @@ export function CatalogPage({
                 setReportsOpen(true);
               }}
             >
-              My metadata reports
+              My card reports
             </Button>
           </div>
         </div>
@@ -221,8 +221,8 @@ export function CatalogPage({
       <Dialog
         open={reportsOpen}
         onClose={() => setReportsOpen(false)}
-        title="My metadata reports"
-        closeLabel="Close my metadata reports"
+        title="My card reports"
+        closeLabel="Close my card reports"
         size="wide"
         returnFocus={reportsButton}
       >

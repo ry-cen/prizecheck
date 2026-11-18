@@ -995,7 +995,7 @@ for (const viewport of [
         `${ORIGIN}/catalog?${new URLSearchParams({ printing: edition.printing_id, edition: edition.edition_id })}`
       );
       await expect(
-        page.getByRole("region", { name: "Report card metadata" })
+        page.getByRole("region", { name: "Report card details" })
       ).toBeVisible();
       // The report link becomes the card's address (`card` and `edition`); `printing` is gone.
       await expect(page).toHaveURL(

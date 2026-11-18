@@ -21,8 +21,10 @@ type Props = Omit<
   owned: number;
   /** The owned badge's text, by default "×N". The deck builder's library shows free of owned instead. */
   badge?: string;
-  /** Keep ownership above controls overlaid on the bottom of the art. */
-  ownedBadgePosition?: "bottom-right" | "top-right";
+  /** Where the owned badge sits. "bottom-right" (the default) and "top-right" are over the art, "top-right" keeping
+   * ownership above controls overlaid on its bottom. "names" puts it at the end of the Names line's first line, off
+   * the art, so it can't cover anything printed on the card (Catalog). */
+  ownedBadgePosition?: "bottom-right" | "top-right" | "names";
   /** Catalog's Add mode only: while the tile also has queued copies, the badge reads "×N owned", so the owned count
    * isn't mistaken for the queued count beside it. Without queued copies, or with an explicit `badge`, nothing
    * changes. */
@@ -91,6 +93,15 @@ export function EditionTile({
     ...(flag ? [flag.label] : []),
     ...(queued > 0 ? [`${queued} to add`] : []),
   ];
+  const badgeText =
+    badge ??
+    (labelOwned && queued > 0 ? (
+      <>
+        <span>×{owned}</span> <span className="ml-1">owned</span>
+      </>
+    ) : (
+      `×${owned}`
+    ));
   return (
     <button
       {...button}
@@ -100,7 +111,11 @@ export function EditionTile({
       aria-label={facts.join(", ")}
       title={facts.join(" · ")}
     >
-      <span aria-hidden="true" className={`${ART} ${QUEUED_ART} relative`}>
+      <span
+        aria-hidden="true"
+        data-tile-art=""
+        className={`${ART} ${QUEUED_ART} relative`}
+      >
         <EditionArt imageUrl={imageUrl} dark={owned <= 0} />
         <span
           className={
@@ -109,18 +124,12 @@ export function EditionTile({
               : "contents"
           }
         >
-          {owned > 0 && (
+          {owned > 0 && ownedBadgePosition !== "names" && (
             <span
+              data-owned-badge=""
               className={`pointer-events-none ${ownedBadgePosition === "top-right" ? "order-2 ml-auto shrink-0" : "absolute right-1 bottom-1"} box-border flex h-5 min-w-5 items-center justify-center rounded-round border-2 border-solid border-bg bg-accent px-1 text-caption font-semibold leading-none text-on-accent tabular-nums`}
             >
-              {badge ??
-                (labelOwned && queued > 0 ? (
-                  <>
-                    <span>×{owned}</span> <span className="ml-1">owned</span>
-                  </>
-                ) : (
-                  `×${owned}`
-                ))}
+              {badgeText}
             </span>
           )}
           {flag && (
@@ -136,7 +145,21 @@ export function EditionTile({
         aria-hidden="true"
         className="box-border block h-(--tile-names-height) overflow-hidden pt-1"
       >
-        <span className={`${LINE} text-caption leading-4`}>{name}</span>
+        {ownedBadgePosition === "names" && owned > 0 ? (
+          <span className="flex h-4 items-center gap-1">
+            <span className={`${LINE} min-w-0 flex-1 text-caption leading-4`}>
+              {name}
+            </span>
+            <span
+              data-owned-badge=""
+              className="box-border flex h-4 min-w-4 shrink-0 items-center justify-center rounded-round bg-accent px-1 text-micro font-semibold leading-none text-on-accent tabular-nums"
+            >
+              {badgeText}
+            </span>
+          </span>
+        ) : (
+          <span className={`${LINE} text-caption leading-4`}>{name}</span>
+        )}
         <span
           className={`${LINE} text-micro leading-3.5 text-text-subtle tabular-nums`}
         >

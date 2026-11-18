@@ -3,7 +3,7 @@
 // whose Format Standing is unknown, EditionTile's printed code, owned badge and darkened artwork, newest set first,
 // infinite scroll (its end, Retry after a failed page, a stale cursor starting again from page one), the status line's
 // three states, the page keeping its state across a tab switch, the CardPopup a tile opens (#174; its own behaviour is
-// in catalog-popup.spec.ts), My metadata reports in the header, and the shared page check at 1280×800 and 375×812 with
+// in catalog-popup.spec.ts), My card reports in the header, and the shared page check at 1280×800 and 375×812 with
 // the dialogs open as well as closed. The collector flows that predate the gallery are in catalog-search.spec.ts.
 import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
@@ -404,13 +404,13 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
     await expect(details).toBeHidden();
     await expect(bulbasaur).toBeFocused();
-    // My metadata reports opens from the page header: nothing sits below an endless gallery.
-    const reports = page.getByRole("button", { name: "My metadata reports" });
+    // My card reports opens from the page header: nothing sits below an endless gallery.
+    const reports = page.getByRole("button", { name: "My card reports" });
     await reports.click();
     await expect(
       page
-        .getByRole("dialog", { name: "My metadata reports" })
-        .getByRole("region", { name: "My metadata reports" })
+        .getByRole("dialog", { name: "My card reports" })
+        .getByRole("region", { name: "My card reports" })
     ).toBeVisible();
     await expectPageChecks(page, "Catalog, my metadata reports open");
     await page.keyboard.press("Escape");
@@ -617,9 +617,9 @@ test.describe("phone", () => {
     await expect(details).toContainText("Regulation mark I");
     await expectPageChecks(page, "Catalog on a phone, card popup open");
     await details.getByRole("button", { name: "Close card details" }).tap();
-    await page.getByRole("button", { name: "My metadata reports" }).tap();
+    await page.getByRole("button", { name: "My card reports" }).tap();
     await expect(
-      page.getByRole("dialog", { name: "My metadata reports" })
+      page.getByRole("dialog", { name: "My card reports" })
     ).toBeVisible();
     await expectPageChecks(
       page,

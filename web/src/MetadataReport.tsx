@@ -13,7 +13,7 @@ export type ReportableEdition = { id: string; label: string };
 
 const reportErrors: Record<string, string> = {
   REPORT_LIMIT:
-    "You have too many open metadata reports. Wait for the maintainer to review some.",
+    "You have too many open card reports. Wait for the maintainer to review some.",
   INVALID_PROPOSAL:
     "One of the proposed values is not allowed. Check the formats and try again.",
   EDITION_REQUIRED: "Choose the Edition this report is about.",
@@ -115,8 +115,8 @@ export function MetadataReport({
   }
 
   return (
-    <section aria-label="Report card metadata" className="metadata-report">
-      <h4 className="mb-1">Report card metadata for {printingName}</h4>
+    <section aria-label="Report card details" className="metadata-report">
+      <h4 className="mb-1">Report card details for {printingName}</h4>
       <p className="mb-3 text-text-muted">
         Reports go to the maintainer. They never change a card by themselves.
       </p>
@@ -254,7 +254,7 @@ export function MyMetadataReports({ refreshKey = 0 }: { refreshKey?: number }) {
         setReports(rows);
         setMessage("");
       })
-      .catch(() => setMessage("Unable to load your metadata reports."));
+      .catch(() => setMessage("Unable to load your card reports."));
   }, [refreshKey]);
 
   async function answer(id: string) {
@@ -273,8 +273,8 @@ export function MyMetadataReports({ refreshKey = 0 }: { refreshKey?: number }) {
   }
 
   return (
-    <section aria-label="My metadata reports">
-      <h3>My metadata reports</h3>
+    <section aria-label="My card reports">
+      <h3>My card reports</h3>
       {reports.length ? (
         <ul>
           {reports.map((report) => (
@@ -315,7 +315,7 @@ export function MyMetadataReports({ refreshKey = 0 }: { refreshKey?: number }) {
           ))}
         </ul>
       ) : (
-        <p>No metadata reports yet.</p>
+        <p>No card reports yet.</p>
       )}
       {message && <p role="status">{message}</p>}
     </section>

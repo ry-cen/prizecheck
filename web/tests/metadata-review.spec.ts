@@ -190,7 +190,7 @@ test.describe("collector report and approval", () => {
       .getByRole("button", { name: /^Normal/ })
       .click();
     await popup.getByRole("button", { name: "Report this Edition" }).click();
-    const form = page.getByRole("region", { name: "Report card metadata" });
+    const form = page.getByRole("region", { name: "Report card details" });
     await form.getByLabel("What needs fixing").selectOption("marketplace");
     await form.getByLabel("Correct product number").fill("4321");
     await form.getByLabel("Correct price variant").fill("normal");
@@ -200,11 +200,11 @@ test.describe("collector report and approval", () => {
     await expect(form.getByRole("status")).toContainText(
       "Submitted for maintainer review; nothing changes until approved."
     );
-    // My metadata reports opens from Catalog's header (#173).
+    // My card reports opens from Catalog's header (#173).
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Furret" })).toBeHidden();
-    await page.getByRole("button", { name: "My metadata reports" }).click();
-    const mine = page.getByRole("region", { name: "My metadata reports" });
+    await page.getByRole("button", { name: "My card reports" }).click();
+    const mine = page.getByRole("region", { name: "My card reports" });
     await expect(mine).toContainText("pending");
     await expect(mine).toContainText("product id 4321");
 
@@ -215,10 +215,10 @@ test.describe("collector report and approval", () => {
         .rows[0].n
     ).toBe(outboxBefore);
 
-    // Escape closes My metadata reports (#173). A collector can neither see nor call the review surface.
+    // Escape closes My card reports (#173). A collector can neither see nor call the review surface.
     await page.keyboard.press("Escape");
     await expect(
-      page.getByRole("dialog", { name: "My metadata reports" })
+      page.getByRole("dialog", { name: "My card reports" })
     ).toBeHidden();
     await page.getByRole("button", { name: "Account" }).click();
     await expect(
@@ -313,9 +313,9 @@ test.describe("collector report and approval", () => {
     await setMaintainer(false);
     await page.reload();
     await page.getByRole("link", { name: "Catalog", exact: true }).click();
-    await page.getByRole("button", { name: "My metadata reports" }).click();
+    await page.getByRole("button", { name: "My card reports" }).click();
     await expect(
-      page.getByRole("region", { name: "My metadata reports" })
+      page.getByRole("region", { name: "My card reports" })
     ).toContainText("approved");
   });
 });
@@ -664,8 +664,8 @@ test("a request for information round-trips through the collector back to the ma
   await setMaintainer(false);
   await page.reload();
   await page.getByRole("link", { name: "Catalog", exact: true }).click();
-  await page.getByRole("button", { name: "My metadata reports" }).click();
-  const mine = page.getByRole("region", { name: "My metadata reports" });
+  await page.getByRole("button", { name: "My card reports" }).click();
+  const mine = page.getByRole("region", { name: "My card reports" });
   await expect(mine).toContainText("needs info");
   await expect(mine).toContainText("Which listing did you mean?");
   await mine

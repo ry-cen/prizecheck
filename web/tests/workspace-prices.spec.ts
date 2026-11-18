@@ -382,10 +382,10 @@ test.describe("desktop", () => {
         url.searchParams.get("edition") === ids.normal &&
         !url.searchParams.has("printing")
     );
-    const report = page.getByRole("region", { name: "Report card metadata" });
+    const report = page.getByRole("region", { name: "Report card details" });
     await expect(report).toBeVisible();
     await expect(
-      report.getByRole("heading", { name: "Report card metadata for Furret" })
+      report.getByRole("heading", { name: "Report card details for Furret" })
     ).toBeVisible();
     const target = report
       .locator("label", { hasText: "What needs fixing" })
@@ -398,7 +398,7 @@ test.describe("desktop", () => {
     // Reload keeps the card open without reopening its one-use report form.
     await page.reload();
     await expect(
-      page.getByRole("region", { name: "Report card metadata" })
+      page.getByRole("region", { name: "Report card details" })
     ).toHaveCount(0);
   });
 });

@@ -253,7 +253,7 @@ for (const phone of [false, true]) {
           page.getByRole("radiogroup", { name: "Catalog mode" })
         ).toBeVisible();
         await expect(
-          page.getByRole("button", { name: "My metadata reports" })
+          page.getByRole("button", { name: "My card reports" })
         ).toBeVisible();
         const name =
           artwork === "missing"

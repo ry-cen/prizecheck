@@ -57,3 +57,23 @@ test("an explicit badge is never replaced", async () => {
   await render({ queued: 1, labelOwned: true, badge: "3 free" });
   expect(badge()).toBe("3 free");
 });
+
+const art = () => host.querySelector("[data-tile-art]")!;
+const ownedBadge = () => host.querySelector("[data-owned-badge]");
+
+test("by default and at the top right the owned badge sits on the artwork", async () => {
+  await render({});
+  expect(art().contains(ownedBadge())).toBe(true);
+  await render({ ownedBadgePosition: "top-right" });
+  expect(art().contains(ownedBadge())).toBe(true);
+});
+
+test("on the Names line the owned badge is off the artwork, shares the text of the others and never shows without copies", async () => {
+  await render({ ownedBadgePosition: "names", queued: 1, labelOwned: true });
+  expect(ownedBadge()).not.toBeNull();
+  expect(art().contains(ownedBadge())).toBe(false);
+  expect(ownedBadge()!.textContent).toBe("×2 owned");
+  expect(host.querySelectorAll("[data-owned-badge]")).toHaveLength(1);
+  await render({ ownedBadgePosition: "names", owned: 0 });
+  expect(ownedBadge()).toBeNull();
+});

@@ -240,7 +240,7 @@ test.describe("desktop", () => {
     await footerEdition.click();
     await expect(footerEdition).toHaveAttribute("aria-expanded", "true");
     const report = research.getByRole("region", {
-      name: "Report card metadata",
+      name: "Report card details",
     });
     await expect(report).toBeVisible();
     await expect(
@@ -261,10 +261,10 @@ test.describe("desktop", () => {
       "Catalog, card popup with the missing-Edition report open"
     );
     await research
-      .getByRole("button", { name: "Report Printing metadata" })
+      .getByRole("button", { name: "Report Printing details" })
       .click();
     await expect(
-      research.getByRole("button", { name: "Report Printing metadata" })
+      research.getByRole("button", { name: "Report Printing details" })
     ).toHaveAttribute("aria-expanded", "true");
     await expect(report).toBeVisible();
 
@@ -374,7 +374,7 @@ test.describe("desktop", () => {
     const card = page.getByRole("dialog", { name: "Bulbasaur" });
     await expect(editions(page)).toHaveCount(3);
     await card.getByRole("button", { name: "Report this Edition" }).click();
-    const report = card.getByRole("region", { name: "Report card metadata" });
+    const report = card.getByRole("region", { name: "Report card details" });
     const note = report.getByLabel("Note");
     const reported = report.getByLabel("Card Edition");
     await expect(reported.locator("option:checked")).toHaveText("Normal");
@@ -514,7 +514,7 @@ test.describe("phone", () => {
     // The report forms open inside the sheet, and pass the page check there too.
     await card.getByRole("button", { name: "Report this Edition" }).tap();
     await expect(
-      card.getByRole("region", { name: "Report card metadata" })
+      card.getByRole("region", { name: "Report card details" })
     ).toBeVisible();
     await expectPageChecks(
       page,

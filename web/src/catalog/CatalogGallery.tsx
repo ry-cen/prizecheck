@@ -216,6 +216,8 @@ export function CatalogGallery({
     [q, format, kind, browseSetId, owned]
   );
   const tiles = useRef<HTMLUListElement>(null);
+  // The results line ("Showing 60 of 471 cards"): where focus goes when a closed card's tile isn't in the results.
+  const resultsLine = useRef<HTMLParagraphElement>(null);
   const browse = useCatalogBrowse(query, active, tiles, setResolved);
   const { loadMore, noteAdded } = browse;
   const setLookupFailed = !setResolved && failedSet === setId;
@@ -605,15 +607,35 @@ export function CatalogGallery({
   }, [wantsNext, card, index, editionsShown.length, browse.errorMore, stepTo]);
   // Closing the popup after stepping returns focus to the tile of the card it showed (the Dialog itself returns it
   // to the tile that opened it); the browser scrolls that tile into view.
+  // A card opened from the address (a reload, a shared link) can close before the results have loaded, so its tile
+  // isn't there yet: the return waits for them, and then only takes focus that is still lost, so it never pulls
+  // focus from a control the collector has moved on to.
+  const waitingForTile = useRef(false);
+  const resultsLoading = browse.loading || browse.loadingMore;
   useEffect(() => {
-    if (card || !closedOn.current) return;
+    if (card) {
+      waitingForTile.current = false;
+      return;
+    }
+    if (!closedOn.current) return;
     const id = closedOn.current;
-    closedOn.current = null;
     const tile = tiles.current?.querySelector<HTMLElement>(
       `[data-edition-id="${CSS.escape(id)}"] button`
     );
+    if (!tile && resultsLoading) {
+      waitingForTile.current = true;
+      return;
+    }
+    const waited = waitingForTile.current;
+    closedOn.current = null;
+    waitingForTile.current = false;
+    if (waited && !isLost(document.activeElement)) return;
     if (tile && tile !== document.activeElement) tile.focus();
-  }, [card]);
+    // No tile to return to (a shared link to a card the search doesn't list): the dialog's own return found nothing
+    // either, so focus would be left on the page body. The results line says where the collector is.
+    else if (!tile && isLost(document.activeElement))
+      resultsLine.current?.focus({ preventScroll: true });
+  }, [card, resultsLoading, browse.editions]);
 
   // Infinite scroll: a sentinel after the last tile asks for the next page as it nears the window (or the dialog's
   // body). Observing again after each page (the length changes) asks once more while the sentinel is still in reach.
@@ -971,7 +993,11 @@ export function CatalogGallery({
       )}
       {first?.available && (!searchError || browse.errorMore) && (
         <section aria-label="Catalog results" className="flex flex-col gap-3">
-          <p className="m-0 text-meta text-text-subtle">
+          <p
+            ref={resultsLine}
+            tabIndex={-1}
+            className="m-0 text-meta text-text-subtle"
+          >
             {browse.editions.length === 0
               ? NO_MATCH
               : `Showing ${browse.editions.length.toLocaleString()} of ${(first.matches ?? browse.editions.length).toLocaleString()} cards`}
@@ -1122,6 +1148,15 @@ export function CatalogGallery({
   );
 }
 
+/** Focus is nowhere: on the page body, on nothing, or on a control left inside a dialog that has closed. */
+function isLost(element: Element | null) {
+  return (
+    !element ||
+    element === document.body ||
+    element.closest("dialog:not([open])") !== null
+  );
+}
+
 /** One gallery tile: an EditionTile with its price and, under a format chip, a "?" for an unknown standing. */
 function CatalogTile({
   edition,
@@ -1147,7 +1182,7 @@ function CatalogTile({
       variant={variantLabel(edition.descriptor)}
       imageUrl={edition.image_url}
       owned={edition.owned}
-      ownedBadgePosition={adding ? "top-right" : "bottom-right"}
+      ownedBadgePosition="names"
       labelOwned={adding}
       flag={
         unknown

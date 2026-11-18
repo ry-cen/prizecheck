@@ -38,6 +38,8 @@ const row = (edition: string, printing: string, name: string) => ({
 });
 const TWO = [row(E1, P1, "Switch"), row(E2, P2, "Potion")];
 let ROWS = TWO;
+/** While set, the results list (not a card's own Editions) waits for it, so a card can close before the results land. */
+let GATE: Promise<void> | null = null;
 const PRINTINGS: Record<string, { name: string; editions: string[] }> = {
   [P1]: { name: "Switch", editions: [E1, E3] },
   [P2]: { name: "Potion", editions: [E2] },
@@ -89,6 +91,7 @@ function stubBrowser() {
         return json({ locations: [] });
       if (url.pathname.endsWith("/editions")) {
         const only = url.searchParams.get("printing_id");
+        if (!only && GATE) await GATE;
         return json({
           available: true,
           matches: ROWS.length,
@@ -159,6 +162,7 @@ async function mount(initial: CatalogCard | null | undefined) {
 
 afterEach(() => {
   ROWS = TWO;
+  GATE = null;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -307,6 +311,57 @@ test("after a pick, › still steps on from the tile the card was opened from", 
       { printingId: P2, editionId: E2 },
       "replace"
     );
+  } finally {
+    await g.done();
+  }
+});
+
+test("the route going null with no tile for the card leaves focus on the results line, not the page body", async () => {
+  // E3 is Switch's Holo Edition: its card opens, but the results hold only E1 and E2.
+  const g = await mount({ printingId: P1, editionId: E3 });
+  try {
+    expect(g.dialog()).not.toBeNull();
+    expect(g.host.querySelector(`[data-edition-id="${E3}"]`)).toBeNull();
+    await g.render({ routeCard: null });
+    expect(g.dialog()).toBeNull();
+    const line = g.host.querySelector<HTMLElement>(
+      '[aria-label="Catalog results"] > p'
+    );
+    expect(line?.textContent).toMatch(/^Showing 2 of 2 cards$/);
+    expect(document.activeElement).toBe(line);
+  } finally {
+    await g.done();
+  }
+});
+
+test("a card that closes before the results have loaded returns focus to its tile once they do, and leaves later focus alone", async () => {
+  let release = () => {};
+  GATE = new Promise<void>((resolve) => (release = resolve));
+  const g = await mount({ printingId: P1, editionId: E1 });
+  try {
+    expect(g.dialog()).not.toBeNull();
+    expect(g.host.querySelector(`[data-edition-id="${E1}"]`)).toBeNull();
+    await g.render({ routeCard: null });
+    expect(g.dialog()).toBeNull();
+    await act(async () => release());
+    expect(document.activeElement).toBe(g.tile(E1));
+  } finally {
+    await g.done();
+  }
+});
+
+test("a card that closes before the results have loaded does not pull focus from a control the collector moved to", async () => {
+  let release = () => {};
+  GATE = new Promise<void>((resolve) => (release = resolve));
+  const g = await mount({ printingId: P1, editionId: E1 });
+  try {
+    await g.render({ routeCard: null });
+    const search = g.host.querySelector<HTMLInputElement>(
+      'input[type="search"]'
+    )!;
+    search.focus();
+    await act(async () => release());
+    expect(document.activeElement).toBe(search);
   } finally {
     await g.done();
   }
