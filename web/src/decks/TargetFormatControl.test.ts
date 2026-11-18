@@ -76,15 +76,15 @@ test("a Deck List edit on its way doesn't blank or redraw the status line", asyn
   root = createRoot(host);
   render({ result: check("not_legal", 3) });
   const { line, heard, stop } = listen();
-  expect(line.textContent).toBe("Standard: Not legal, 3 issues");
+  expect(line.textContent).toBe("Standard: Not legal");
   // The page marks the control busy while an edit is sent, then settles with the same result.
   render({ result: check("not_legal", 3), busy: true });
-  expect(line.textContent).toBe("Standard: Not legal, 3 issues");
+  expect(line.textContent).toBe("Standard: Not legal");
   render({ result: check("not_legal", 3), busy: false });
   await flush();
   stop();
   expect(heard).toEqual([]);
-  expect(line.textContent).toBe("Standard: Not legal, 3 issues");
+  expect(line.textContent).toBe("Standard: Not legal");
 });
 
 test("an edit that only changes the issue count says nothing, and the button still names the current count", async () => {
@@ -96,12 +96,42 @@ test("an edit that only changes the issue count says nothing, and the button sti
   await flush();
   stop();
   expect(heard).toEqual([]);
-  expect(line.textContent).toBe("Standard: Not legal, 3 issues");
+  expect(line.textContent).toBe("Standard: Not legal");
   expect(
     host
       .querySelector("button[aria-label$='result']")!
       .getAttribute("aria-label")
   ).toBe("Not legal, 2 issues. Show the Standard result");
+});
+
+/** Every string the control exposes: its text, and its names, labels and titles. */
+function exposed() {
+  return [
+    host.textContent ?? "",
+    ...[...host.querySelectorAll("[aria-label], [title]")].flatMap((el) => [
+      el.getAttribute("aria-label") ?? "",
+      el.getAttribute("title") ?? "",
+    ]),
+  ].join("\n");
+}
+
+test("after an edit that only changes the count, no exposed text still shows the old count", async () => {
+  root = createRoot(host);
+  render({ result: check("not_legal", 3) });
+  expect(exposed()).toContain("3 issues");
+  render({ result: check("not_legal", 2), busy: true });
+  render({ result: check("not_legal", 2), busy: false });
+  await flush();
+  const text = exposed();
+  expect(text).not.toContain("3 issues");
+  expect(text).toContain("2 issues");
+  // The count is said once, by the result button; the status line has no number to go out of date.
+  expect(text.match(/\d+ issues?/g)).toHaveLength(1);
+  expect(host.querySelector("[role='status']")!.textContent).not.toMatch(/\d/);
+  render({ result: check("not_legal", 1), busy: false });
+  await flush();
+  expect(exposed()).not.toMatch(/[23] issues/);
+  expect(exposed()).toContain("1 issue");
 });
 
 test("an edit that changes the Deck's standing says the new standing once", async () => {
@@ -131,7 +161,7 @@ test("a deliberate Target Format change says its result once, after it settles",
   });
   await flush();
   stop();
-  expect(heard).toEqual(["Expanded: Not legal, 2 issues"]);
+  expect(heard).toEqual(["Expanded: Not legal"]);
 });
 
 test("changing Format and back says each result", async () => {
