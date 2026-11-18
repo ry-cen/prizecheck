@@ -1,7 +1,8 @@
 # Every English set with at least one card in the TCGdex crawl of 2026-10-10 (GET /v2/en/cards, 23,736 records),
 # leaving out the digital-only Pokémon TCG Pocket series (tcgp), which the catalog import skips (api/app/catalog.py
 # EXCLUDED_SERIES). Sets listed by a series but holding no cards (jumbo, rc, sp, wp) are not imported and not listed.
-# It is the same list as card_attributes.CardAttributeRules.ACE_SPEC_SETTLED_SETS.
+# It includes every set in card_attributes.CardAttributeRules.ACE_SPEC_SETTLED_SETS, plus sets whose ACE SPEC status
+# is not yet settled (me06).
 #
 # api/tests/test_format_rules.py checks that every format rules file in this directory gives each set here either a
 # legal-from date ([[sets]]) or an explicit exclusion ([[excluded_sets]]). When a catalog import brings in a new set,
@@ -86,6 +87,7 @@ me02.5	me	Ascended Heroes
 me03	me	Perfect Order
 me04	me	Chaos Rising
 me05	me	Pitch Black
+me06	me	Delta Reign
 mee	me	Mega Evolution Energy
 mep	me	MEP Black Star Promos
 miscp	misc	Miscellaneous Promos

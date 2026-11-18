@@ -41,7 +41,7 @@ AS_OF = date(2026, 10, 11)  # the rules files' date
 ROOT_MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
 # Legal everywhere (Bulbasaur me01-001); Items with a Trainer Type (both Rare Candy, Scoop Up Net); a Trainer whose
 # source gives no Trainer Type (Switch); a Supporter; a Basic Energy; a card whose set the rules don't record, unknown in
-# Standard (fixture-me06-3); cards not legal in Standard (Giratina-EX bw6-124, Scoop Up Net swsh2-165).
+# Standard (fixture-me07-3); cards not legal in Standard (Giratina-EX bw6-124, Scoop Up Net swsh2-165).
 CARDS = (BULBASAUR_ME, CANDY_ME, CANDY_SV, SWITCH_ME, SUPPORTER, ENERGY_SV, SCOOP_UP_NET, DELTA_POKEMON, EX_BW)
 # Sixty-one more Printings in a set the rules don't record, so a walk of the whole catalog has a second page.
 FILLERS = tuple(card(id=f"fixture-zz-{i}", name=f"Zubat {i:02d}", localId=str(i), category="Pokemon",
@@ -66,17 +66,17 @@ client = TestClient(app)
 def seed_gallery():
     """Browser fixture (web/tests/catalog-gallery.spec.ts): CARDS and FILLERS through the importer, 70 Printings with
     one Edition each. Bulbasaur has artwork. The spec runs on today's date, so it relies only on standings no date
-    changes: Giratina-EX (bw6) is not legal in Standard, and the Delta Reign and Fixture Zubats cards are unknown there
+    changes: Giratina-EX (bw6) is not legal in Standard, and the Delta Future and Fixture Zubats cards are unknown there
     because the rules don't record their sets."""
     reset_catalog()
     bulbasaur = {**BULBASAUR_ME, "image": "https://assets.tcgdex.net/en/me/me01/001"}
     # Eras for the set picker's folders (web/tests/catalog-gallery.spec.ts). The dates are the ones the rules files give
-    # (so the gallery order is the same), me06 has none, and fixturezz has no series: it lands in the last folder.
+    # (so the gallery order is the same), me07 has none, and fixturezz has no series: it lands in the last folder.
     mega, sv, swsh, bw = ("mega", "Mega Evolution"), ("sv", "Scarlet & Violet"), ("swsh", "Sword & Shield"), ("bw", "Black & White")
     run(DatedRecords({"me01": date(2025, 9, 26), "sv01": date(2023, 3, 31), "sv02": date(2023, 6, 9),
                       "swsh2": date(2020, 5, 1), "bw6": date(2012, 8, 15)},
                      bulbasaur, *(record for record in CARDS if record is not BULBASAUR_ME), *FILLERS,
-                     series={"me01": mega, "me06": mega, "sv01": sv, "sv02": sv, "swsh2": swsh, "bw6": bw}))
+                     series={"me01": mega, "me07": mega, "sv01": sv, "sv02": sv, "swsh2": swsh, "bw6": bw}))
 
 
 def seed_popup():
@@ -211,7 +211,7 @@ def test_smart_search_reads_a_known_set_and_number_otherwise_a_name_search_and_m
 def test_each_filter_narrows_the_rows():
     seed(*CARDS)
     user = collector()
-    # Newest set first (rules-file dates here): Mega Evolution, then Dragons Exalted, then Delta Reign, which has no date.
+    # Newest set first (rules-file dates here): Mega Evolution, then Dragons Exalted, then Delta Future, which has no date.
     assert [row[0] for row in names(user, kind="pokemon")] == ["Bulbasaur", "Giratina-EX", "Fixture Pokémon"]
     assert [row[0] for row in names(user, kind="supporter")] == ["Fixture Supporter"]
     assert [row[0] for row in names(user, kind="item")] == ["Rare Candy", "Rare Candy", "Scoop Up Net"]
@@ -233,7 +233,7 @@ def test_each_filter_narrows_the_rows():
     sets = call("GET", "/api/catalog/sets", user).json()
     assert sets["available"] is True
     assert [(entry["set_id"], entry["printings"]) for entry in sets["sets"]] == [
-        ("me06", 1), ("bw6", 1), ("me01", 3), ("sv02", 1), ("swsh2", 1), ("sv01", 2)]  # A-Z by set name
+        ("me07", 1), ("bw6", 1), ("me01", 3), ("sv02", 1), ("swsh2", 1), ("sv01", 2)]  # A-Z by set name
 
 
 def test_a_format_filter_hides_only_not_legal_cards_and_keeps_unknown_ones():

@@ -73,8 +73,8 @@ def test_a_deck_that_is_not_legal_is_refused_with_its_result_and_nothing_is_writ
 
 def test_an_unknown_result_is_refused_too():
     catalog()
-    # me06 has no legal date in the Standard rules, so the result is unknown, never legal.
-    owner, deck = deck_with([("me01-001", 1), ("fixture-me06-3", 4), ("sv02-278", 55)])
+    # me07 has no legal date in the Standard rules, so the result is unknown, never legal.
+    owner, deck = deck_with([("me01-001", 1), ("fixture-me07-3", 4), ("sv02-278", 55)])
     target, result = refusal(publish(owner, deck))
     assert (target, result["status"]) == ("standard", "unknown")
     assert {issue["code"] for issue in result["issues"]} == {"set_date_not_recorded"}

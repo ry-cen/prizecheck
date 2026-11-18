@@ -46,7 +46,7 @@ def test_black_and_white_cards_are_expanded_legal_without_a_regulation_mark():
     run(Records(*CARDS))
     owner, deck = deck_with([("bw7-137", 1), ("bw6-124", 1), ("bw1-1", 1), ("bw1-105", 57)])
     result = checked(owner, deck)
-    assert (result["status"], result["issues"], result["rules_version"]) == ("legal", [], "2 (2026-10-11)")
+    assert (result["status"], result["issues"], result["rules_version"]) == ("legal", [], "3 (2026-11-18)")
     statuses = {result["format"]: result["status"] for result in every_format(owner, deck)}
     assert (statuses["standard"], statuses["expanded"]) == ("not_legal", "legal")
     before = checked(owner, deck, "2026-04-09")

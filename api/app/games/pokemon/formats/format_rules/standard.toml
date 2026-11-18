@@ -18,8 +18,8 @@
 
 format = "standard"
 name = "Standard"
-revision = 1
-published = 2026-10-11
+revision = 2
+published = 2026-11-18
 covers_from = 2025-04-11  # The 2025 rotation (F out) took effect at in-person events on 2025-04-11.
 
 # How a printing enters the card pool. "mark_and_set": a legal regulation mark on the date AND a set whose legal-from
@@ -286,6 +286,13 @@ id = "me05"
 name = "Pitch Black"
 released = 2026-07-17
 legal_from = 2026-07-31
+basis = "second_friday"
+
+[[sets]]
+id = "me06"
+name = "Delta Reign"
+released = 2026-11-06
+legal_from = 2026-11-20
 basis = "second_friday"
 
 # 30th Celebration: TCGdex records no regulation marks, so its cards check as unknown whatever this date says.

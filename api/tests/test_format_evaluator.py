@@ -13,6 +13,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 
+from app.games.pokemon.catalog.card_identity import card_identity_key
 from app.games.pokemon.catalog.card_attributes import UNKNOWN, CardAttributes
 from app.games.pokemon.formats.format_evaluator import (ACE_SPEC_LIMIT, ACE_SPEC_NOT_ALLOWED, ATTRIBUTE_UNKNOWN, BANNED,
                                   BEFORE_RULES_COVERAGE, COPY_LIMIT, DECK_SIZE, FORMATS, NO_BASIC_POKEMON,
@@ -349,10 +350,78 @@ def test_the_standard_rules_file_rotates_g_and_dates_its_sets():
     assert check(deck(heroes, basic_set="me01", basic_mark="I"), date(2026, 3, 6), rules).status == "legal"
     assert check(deck(line("Rare Candy", 4, set_id="sm1", mark=None), basic_set="me01", basic_mark="I"), DAY,
                  rules).status == "not_legal"
-    assert check(deck(line("Delta Card", 4, set_id="me06", mark="J"), basic_set="me01", basic_mark="I"), DAY,
+    assert check(deck(line("Unlisted Card", 4, set_id="me07", mark="J"), basic_set="me01", basic_mark="I"), DAY,
                  rules).status == "unknown"
     assert check(deck(energy(4, "Fairy Energy", set_id="xy1"), basic_set="me01", basic_mark="I"), DAY,
                  rules).status == "unknown"
+
+
+# Mega Evolution-Delta Reign (me06) is legal in Standard from 2026-11-20, two weeks after its 2026-11-06 release.
+DELTA_REIGN_FIRST_DAY, DELTA_REIGN_EVE = date(2026, 11, 20), date(2026, 11, 19)
+
+
+def test_delta_reign_cards_are_legal_in_standard_from_2026_11_20():
+    rules = format_rules("standard")
+    mega = line("Delta Reign Pokémon", 4, set_id="me06", mark="J", kind="pokemon")
+    lines = deck(mega, basic_set="me01", basic_mark="I")
+    assert issues(check(lines, DELTA_REIGN_EVE, rules)) == {
+        (NOT_IN_CARD_POOL, "Delta Reign (me06) not legal in Standard until 2026-11-20", "card", "not_legal",
+         edition(mega))}
+    assert check(lines, DELTA_REIGN_FIRST_DAY, rules).status == "legal"
+
+
+def test_the_two_halves_of_legendary_pyroduct_share_one_four_copy_limit():
+    rules = format_rules("standard")
+    key = card_identity_key("Legendary Pyroduct")
+    # TCGdex carries the same name on both printings (me06-094 and me06-095), so they map to one key.
+    tcgdex_names = {"094": "Legendary Pyroduct", "095": "Legendary Pyroduct"}
+    assert {card_identity_key(name) for name in tcgdex_names.values()} == {key}
+    identity = uuid5(NAMESPACE_URL, key)
+
+    def halves(first, second, ace_spec=False):
+        raw = CardAttributes("J", "trainer", False, (), False, ace_spec, False, False)
+        return tuple(ResolvedLine(uuid4(), quantity, identity, key, PrintingFacts(uuid4(), "me06", raw, number))
+                     for quantity, number in ((first, "094"), (second, "095")))
+
+    left, right = halves(2, 2)
+    legal = check(deck(left, right, basic_set="me01", basic_mark="I"), DELTA_REIGN_FIRST_DAY, rules)
+    assert legal.status == "legal" and not [issue for issue in legal.issues if issue.code == COPY_LIMIT]
+    left, right = halves(3, 2)
+    result = check(deck(left, right, basic_set="me01", basic_mark="I"), DELTA_REIGN_FIRST_DAY, rules)
+    assert result.status == "not_legal"
+    assert issues(result) == {(COPY_LIMIT, "more than 4 copies of Legendary Pyroduct (5)", "card", "not_legal",
+                               tuple(sorted((left.edition_id, right.edition_id), key=str)))}
+    left, right = halves(2, 2)
+    early = check(deck(left, right, basic_set="me01", basic_mark="I"), DELTA_REIGN_EVE, rules)
+    assert {(issue.code, issue.effect) for issue in early.issues} == {(NOT_IN_CARD_POOL, "not_legal")}
+    assert {edition_id for issue in early.issues for edition_id in issue.lines} == {left.edition_id, right.edition_id}
+
+
+def test_a_delta_reign_trainer_with_unsettled_ace_spec_status_is_unknown_not_over_the_copy_limit():
+    # CardAttributeRules derives no ACE SPEC status for a me06 Trainer without ACE SPEC rarity or name, so the
+    # printing's ace_spec is None. Four copies could break the one-ACE-SPEC limit: a gap, never a copy-limit issue.
+    rules = format_rules("standard")
+    identity = uuid5(NAMESPACE_URL, card_identity_key("Legendary Pyroduct"))
+    raw = CardAttributes("J", "trainer", False, (), False, None, False, False)
+    left, right = (ResolvedLine(uuid4(), 2, identity, "Legendary Pyroduct", PrintingFacts(uuid4(), "me06", raw, number))
+                   for number in ("094", "095"))
+    result = check(deck(left, right, basic_set="me01", basic_mark="I"), DELTA_REIGN_FIRST_DAY, rules)
+    assert result.status == "unknown"
+    assert {issue.code for issue in result.issues} == {ATTRIBUTE_UNKNOWN}
+    assert {issue.reason for issue in result.issues} == {"ACE SPEC status unknown"}
+
+
+def test_a_delta_reign_reprint_keeps_the_legality_a_trainer_inherits_and_a_pokemon_does_not():
+    rules = format_rules("standard")
+    # me06 129 is the real Delta Reign Pokémon Catcher; the older printing is synthetic (me01, no number).
+    catcher, groups = reprinted("Pokémon Catcher", 4, printing("me06", "129", mark="J"),
+                                printing("me01", None, mark="I"))
+    assert check(deck(catcher, basic_set="me01", basic_mark="I"), DELTA_REIGN_EVE, rules, groups).status == "legal"
+    mega, mega_groups = reprinted("Delta Reign Pokémon", 4, printing("me06", "10", mark="J", kind="pokemon"),
+                                  printing("me01", None, mark="I", kind="pokemon"))
+    result = check(deck(mega, basic_set="me01", basic_mark="I"), DELTA_REIGN_EVE, rules, mega_groups)
+    assert result.status == "not_legal"
+    assert {issue.lines for issue in result.issues} == {edition(mega)}
 
 
 def test_the_next_rule_date_ends_a_results_window():
@@ -742,7 +811,7 @@ def test_the_expanded_rules_file_holds_the_pool_edges_and_bans():
     assert [status(set_id, mark="D") for set_id in ("swsh1", "swshp", "fut2020", "cel25", "2022swsh", "sv01",
                                                     "me05")] == ["legal"] * 7
     assert [status(set_id) for set_id in ("swsh12.5", "2023sv", "2024sv", "30th")] == ["unknown"] * 4
-    assert [status(set_id) for set_id in ("cel25cc", "30th-c", "me06")] == ["unknown"] * 3
+    assert [status(set_id) for set_id in ("cel25cc", "30th-c", "me07")] == ["unknown"] * 3
     assert [status("smp", number) for number in ("SM01", "SM157", "SM158")] == ["unknown", "unknown", "legal"]
     assert (status("30th", mark="J", on=date(2026, 9, 24)), status("30th", mark="J")) == ("not_legal", "legal")
     # Bans name TCGdex collector numbers; a reprint of a banned printing is banned too.
@@ -979,7 +1048,7 @@ def test_the_glc_rules_file_holds_its_bans_groups_and_pool():
     assert (result(at("30th", "1", "Fixture", "pokemon"), on=date(2026, 9, 24)).status,
             result(at("30th", "1", "Fixture", "pokemon")).status) == ("not_legal", "legal")
     assert [result(at(set_id, "1", "Fixture")).status for set_id in ("cel25cc", "30th-c", "mfb", "2023sv", "base1",
-                                                                     "me06")] == [
+                                                                     "me07")] == [
         "unknown", "unknown", "unknown", "unknown", "not_legal", "unknown"]
     assert {issue.code for issue in result(at("sv02", "172", "Boss's Orders"), at("xy2", "90", "Lysandre")).issues} == {
         COPY_LIMIT}

@@ -229,7 +229,7 @@ test.describe("desktop", () => {
       "false"
     );
     await search(page).fill("fixture p");
-    const unknown = tile(page, "Fixture Pokémon, me06 3");
+    const unknown = tile(page, "Fixture Pokémon, me07 3");
     await expect(unknown).toHaveAccessibleName(/Standard legality unknown$/);
     await expect(unknown).toContainText("?");
     await expectPageChecks(page, "Catalog, Standard, an unknown card");
@@ -364,13 +364,13 @@ test.describe("desktop", () => {
     await expect(picker.getByRole("button", { expanded: true })).toHaveText([
       /^Mega Evolution\s*1 set$/,
     ]);
-    await expect(folderSets("Mega Evolution")).toHaveText([/^Delta Reign/]);
+    await expect(folderSets("Mega Evolution")).toHaveText([/^Delta Future/]);
     await folderSets("Mega Evolution").first().click();
     await expect(picker).toBeHidden();
-    await expect(chip(page, "Set: Delta Reign")).toBeFocused();
+    await expect(chip(page, "Set: Delta Future")).toBeFocused();
 
     // Reopened, only the chosen set's folder is open.
-    await chip(page, "Set: Delta Reign").click();
+    await chip(page, "Set: Delta Future").click();
     await expect(picker.getByRole("button", { expanded: true })).toHaveText([
       /^Mega Evolution\s*2 sets$/,
     ]);
@@ -378,7 +378,7 @@ test.describe("desktop", () => {
       4
     );
     await expect(
-      picker.getByRole("button", { name: /^Delta Reign/ })
+      picker.getByRole("button", { name: /^Delta Future/ })
     ).toHaveAttribute("aria-pressed", "true");
     await picker.getByRole("button", { name: "Close set picker" }).click();
   });
