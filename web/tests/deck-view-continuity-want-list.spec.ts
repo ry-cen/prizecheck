@@ -94,73 +94,82 @@ for (const viewport of [
   { name: "desktop", width: 1280, height: 800, phone: false },
   { name: "phone", width: 375, height: 812, phone: true },
 ]) {
-  // @slow (wall-clock): the Trade Wants wait 5.1 s of real time, past the 5 s restore window.
-  test(
-    `${viewport.name}: Back to a Want List whose Trade Wants come late keeps the place left`,
-    { tag: "@slow" },
-    async ({ page }) => {
-      await page.setViewportSize({
-        width: viewport.width,
-        height: viewport.height,
-      });
-      await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-        route.abort()
-      );
-      await pool.query("DELETE FROM auth_send_event");
-      await startAsNewOwner(pool);
-      await signInAsOwner(page, "/decks");
-      const { iono, other } = editions();
-      for (const name of ["Practice", "Weekend"]) {
-        const deck = await createDeck(page, name);
-        await setLine(page, deck, iono, 4);
-        await setLine(page, deck, other, 3);
-      }
-      await api(page, "PUT", `/api/trade-wants/${iono}`, { quantity: "2" });
-      await api(page, "PUT", `/api/trade-wants/${other}`, { quantity: "1" });
-      let returning = false;
-      // The Trade Wants take longer than the 5 s the restore keeps retrying a position (RESTORE_WINDOW_MS).
-      await page.route("**/api/trade-wants", async (route) => {
-        if (returning && route.request().method() === "GET")
-          await new Promise((resolve) => setTimeout(resolve, 5100));
-        await route.continue();
-      });
-      try {
-        const firstCost = page.waitForResponse(
-          (response) =>
-            new URL(response.url()).pathname === "/api/want-list/cost"
-        );
-        await page.goto(`${ORIGIN}/decks/want-list`);
-        await firstCost;
-        const wants = page.getByRole("region", {
-          name: "Trade Wants",
-          exact: true,
-        });
-        await expect(
-          wants.getByRole("list", { name: "Your Trade Wants" })
-        ).toBeVisible();
-        await expect(page.getByText(/\$0\.25 each/).first()).toBeVisible();
-        await wants.scrollIntoViewIfNeeded();
-        await page.evaluate(() => window.scrollBy(0, 200));
-        const saved = await page.evaluate(() => window.scrollY);
-        expect(saved).toBeGreaterThan(viewport.height);
-        await page
-          .getByRole("navigation", { name: "Main views" })
-          .getByRole("link", { name: "Catalog", exact: true })
-          .click();
-        await expect(page).toHaveURL(/\/catalog/);
-        returning = true;
-        await page.goBack();
-        await expect(page).toHaveURL(/\/decks\/want-list/);
-        await expect(
-          wants.getByRole("list", { name: "Your Trade Wants" })
-        ).toBeVisible({ timeout: 15_000 });
-        await expect(page.getByText(/\$0\.25 each/).first()).toBeVisible();
-        await expect
-          .poll(() => page.evaluate(() => window.scrollY))
-          .toBe(saved);
-      } finally {
-        returning = false;
-      }
+  test(`${viewport.name}: Back to a Want List whose Trade Wants come late keeps the place left`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({
+      width: viewport.width,
+      height: viewport.height,
+    });
+    await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+      route.abort()
+    );
+    await pool.query("DELETE FROM auth_send_event");
+    await startAsNewOwner(pool);
+    await signInAsOwner(page, "/decks");
+    await page.clock.install();
+    const { iono, other } = editions();
+    for (const name of ["Practice", "Weekend"]) {
+      const deck = await createDeck(page, name);
+      await setLine(page, deck, iono, 4);
+      await setLine(page, deck, other, 3);
     }
-  );
+    await api(page, "PUT", `/api/trade-wants/${iono}`, { quantity: "2" });
+    await api(page, "PUT", `/api/trade-wants/${other}`, { quantity: "1" });
+    let returning = false;
+    let release!: () => void;
+    let held!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const heldSeen = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    // The Trade Wants stay unanswered past the restore's wait (RESTORE_WINDOW_MS), which the page clock jumps over.
+    await page.route("**/api/trade-wants", async (route) => {
+      if (returning && route.request().method() === "GET") {
+        held();
+        await gate;
+      }
+      await route.continue();
+    });
+    try {
+      const firstCost = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/want-list/cost"
+      );
+      await page.goto(`${ORIGIN}/decks/want-list`);
+      await firstCost;
+      const wants = page.getByRole("region", {
+        name: "Trade Wants",
+        exact: true,
+      });
+      await expect(
+        wants.getByRole("list", { name: "Your Trade Wants" })
+      ).toBeVisible();
+      await expect(page.getByText(/\$0\.25 each/).first()).toBeVisible();
+      await wants.scrollIntoViewIfNeeded();
+      await page.evaluate(() => window.scrollBy(0, 200));
+      const saved = await page.evaluate(() => window.scrollY);
+      expect(saved).toBeGreaterThan(viewport.height);
+      await page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("link", { name: "Catalog", exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/catalog/);
+      returning = true;
+      await page.goBack();
+      await expect(page).toHaveURL(/\/decks\/want-list/);
+      await heldSeen;
+      // Prices are in, so no price timer is left to jump over; only the Trade Wants are missing.
+      await expect(page.getByText(/\$0\.25 each/).first()).toBeVisible();
+      await page.clock.fastForward(6000);
+      release();
+      await expect(
+        wants.getByRole("list", { name: "Your Trade Wants" })
+      ).toBeVisible();
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(saved);
+    } finally {
+      release();
+    }
+  });
 }

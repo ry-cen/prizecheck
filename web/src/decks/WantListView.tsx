@@ -218,9 +218,16 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const shownView: View = hasFriends ? view : "buy";
 
   // Prices, Friends' cards and Trade Wants arrive after the Want List draws and change the page's height. Saying so
-  // keeps a history position being restored (restorePageScroll) until they are in, however long that takes.
+  // keeps a history position being restored (restorePageScroll) until they are in, however long that takes. The
+  // Friends' read is loading from mount until its first answer or failure, and again while a refresh is in flight; a
+  // failure (`notice`) settles it.
+  const friendsReading =
+    friendRequests.notice === null &&
+    (friends.kind === "none" || friends.pending);
   const settling =
-    cost.kind === "checking" || trade.state.kind === "loading" || pending;
+    cost.kind === "checking" ||
+    trade.state.kind === "loading" ||
+    friendsReading;
 
   if (list.decks.length === 0)
     return (

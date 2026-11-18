@@ -631,3 +631,66 @@ it("the Want List says it is loading while its own read is in flight", async () 
     await act(async () => root.unmount());
   }
 });
+
+// The Friends' cards read has its own lifecycle: loading from mount until its first answer or failure, loading again
+// while a refresh is in flight, and settled on any terminal outcome.
+it.each([
+  {
+    name: "a remount with no answer yet",
+    read: () => ({
+      friends: { kind: "none" } as const,
+      pending: pendingApi({ kind: "loading", deckId: deck }, vi.fn()),
+    }),
+    loading: true,
+  },
+  {
+    name: "a first read that failed",
+    read: () => ({
+      friends: { kind: "none" } as const,
+      pending: pendingApi({ kind: "failed", deckId: deck }, vi.fn()),
+    }),
+    loading: false,
+  },
+  {
+    name: "a first answer with no Friends",
+    read: () => ({
+      friends: {
+        kind: "ready",
+        hasFriends: false,
+        pending: false,
+        byCard: new Map(),
+      } as const,
+      pending: pendingApi(ready(), vi.fn()),
+    }),
+    loading: false,
+  },
+  {
+    name: "a refresh in flight after an answer",
+    read: () => response(true, ready()),
+    loading: true,
+  },
+  {
+    name: "a refresh that failed after an answer",
+    read: () => response(true, ready(true)),
+    loading: false,
+  },
+])(
+  "the Want List loading marker follows the Friends' read: $name",
+  async (test) => {
+    answer = test.read();
+    const host = document.createElement("div"),
+      root = createRoot(host);
+    try {
+      await act(async () =>
+        root.render(
+          h(WantListView, { onOpenDeck: vi.fn(), onNavigate: vi.fn() })
+        )
+      );
+      expect(host.querySelector("[data-page-loading]") !== null).toBe(
+        test.loading
+      );
+    } finally {
+      await act(async () => root.unmount());
+    }
+  }
+);
