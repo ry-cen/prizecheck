@@ -160,7 +160,7 @@ test("the consent page carries the contract's text, headers, Allow form and Canc
       )
     );
     assert.equal(page.headers["cache-control"], "no-store");
-    assert.equal(page.headers["referrer-policy"], "no-referrer");
+    assert.equal(page.headers["referrer-policy"], "same-origin");
     assert.equal(page.headers["x-content-type-options"], "nosniff");
     assert.equal(
       page.headers["content-security-policy"],
@@ -168,6 +168,17 @@ test("the consent page carries the contract's text, headers, Allow form and Canc
     );
     assert.equal(page.headers["content-type"], "text/html; charset=utf-8");
     assert.doesNotMatch(page.text, /<script/);
+  } finally {
+    await stub.close();
+  }
+});
+
+test("approving with Origin: null is still refused with a 403 and no code", async () => {
+  const stub = await boot();
+  try {
+    const { posted } = await approve(stub, pkce(), "null");
+    assert.equal(posted.status, 403);
+    assert.doesNotMatch(posted.headers.location ?? "", /code=/);
   } finally {
     await stub.close();
   }
