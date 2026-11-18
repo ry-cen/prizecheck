@@ -69,6 +69,66 @@ const replaceList = async (page: Page, id: string) => {
   ).toBeVisible();
 };
 
+/** Replaces the catalog and publishes copy_world's Decks for another owner (copy-to-my-decks.spec.ts). */
+function copyWorld(): { prefix: string; copy: string } {
+  const prefix = `Copy ${randomUUID().slice(0, 8)}`;
+  const output = execFileSync(
+    ".venv/bin/python",
+    [
+      "-c",
+      `import json, sys
+from test_deck_import_copy import copy_world
+print(json.dumps(copy_world(sys.argv[1])))`,
+      prefix,
+    ],
+    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+  );
+  return {
+    prefix,
+    ...JSON.parse(output.toString().trim().split("\n").at(-1)!),
+  };
+}
+
+const SAVE = /\/api\/decks\/[^/]+\/deck-list\/changes$/;
+const saving = (page: Page) =>
+  page.getByRole("dialog", { name: "Your list is still saving" });
+const notifications = (page: Page) =>
+  page.getByRole("region", { name: "Notifications" });
+
+// A held save is let go when its test ends, pass or fail, so closing the page never waits on it.
+const releases: Array<() => void> = [];
+test.afterEach(() => {
+  for (const release of releases.splice(0)) release();
+});
+
+/** Holds the Replace save at the network until `release()`, then lets it through, or answers `status` instead. */
+async function holdSave(page: Page, status?: number) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  releases.push(() => release());
+  const keys: string[] = [];
+  await page.route(SAVE, async (route) => {
+    keys.push(route.request().postDataJSON().idempotency_key);
+    await gate;
+    if (status) await route.fulfill({ status, json: { detail: "down" } });
+    else await route.continue();
+  });
+  return { release, keys };
+}
+
+/** Pastes PASTE on the Replace screen, opens the review and presses Replace Deck List. */
+async function startSave(page: Page, id: string) {
+  await replaceList(page, id);
+  await decklist(page).fill(PASTE);
+  await page.getByRole("button", { name: "Review 1 line" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Check the list", level: 1 })
+  ).toBeVisible();
+  const sent = page.waitForRequest((request) => SAVE.test(request.url()));
+  await page.getByRole("button", { name: "Replace Deck List" }).click();
+  await sent;
+}
+
 const decklist = (page: Page) => page.getByLabel("Decklist");
 const asking = (page: Page) =>
   page.getByRole("dialog", { name: "Discard this pasted list?" });
@@ -280,6 +340,139 @@ for (const [label, viewport] of [
       await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
       await expect(asking(page)).toHaveCount(0);
       expect(await warns(page)).toBe(false);
+    });
+
+    test("a Replace that is still saving asks before leaving: Stay keeps the page and lands in the Deck, and Leave stays where the collector went when the save lands", async ({
+      page,
+    }) => {
+      seedCatalog();
+      await signIn(page);
+      const id = await deckBuilder(page);
+      const hold = await holdSave(page);
+      await startSave(page, id);
+      expect(await warns(page)).toBe(true);
+
+      await tabs(page)
+        .getByRole("link", { name: "Catalog", exact: true })
+        .click();
+      await expect(saving(page)).toBeVisible();
+      await expect(saving(page)).toContainText(
+        `Leave now and you won't see whether it replaced ${DECK}'s Deck List.`
+      );
+      await expectPageChecks(page, "the still-saving question");
+      await expect(
+        saving(page).getByRole("button", { name: "Stay" })
+      ).toBeFocused();
+      await saving(page).getByRole("button", { name: "Stay" }).click();
+      await expect(page).toHaveURL(new RegExp(`/decks/${id}/replace$`));
+      hold.release();
+      await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
+      await expect(asking(page)).toHaveCount(0);
+      await expect(notifications(page)).toContainText(
+        `Replaced ${DECK}'s Deck List.`
+      );
+
+      // Leaving anyway: the save lands behind the collector and doesn't pull them back to the Deck.
+      await page.unroute(SAVE);
+      const second = await holdSave(page);
+      await replaceList(page, id);
+      await decklist(page).fill("4 Nest Ball SVI 181\n");
+      await page.getByRole("button", { name: "Review 1 line" }).click();
+      const sent = page.waitForRequest((request) => SAVE.test(request.url()));
+      const landed = page.waitForResponse((response) =>
+        SAVE.test(response.url())
+      );
+      await page.getByRole("button", { name: "Replace Deck List" }).click();
+      await sent;
+      await tabs(page)
+        .getByRole("link", { name: "Catalog", exact: true })
+        .click();
+      await saving(page).getByRole("button", { name: "Leave" }).click();
+      await expect(page).toHaveURL(/\/catalog/);
+      second.release();
+      await landed;
+      await expect(notifications(page)).toContainText(
+        `Replaced ${DECK}'s Deck List.`
+      );
+      await expect(page).toHaveURL(/\/catalog/);
+    });
+
+    test("a Replace that fails while the collector stays keeps the review, the message and the same retry key", async ({
+      page,
+    }) => {
+      seedCatalog();
+      await signIn(page);
+      const id = await deckBuilder(page);
+      const hold = await holdSave(page, 500);
+      await startSave(page, id);
+      await tabs(page)
+        .getByRole("link", { name: "Catalog", exact: true })
+        .click();
+      await saving(page).getByRole("button", { name: "Stay" }).click();
+      hold.release();
+      await expect(page.getByRole("region", { name: "Save" })).toContainText(
+        "Replacing may have completed. Press Replace Deck List again to check safely."
+      );
+      await expect(page).toHaveURL(new RegExp(`/decks/${id}/replace$`));
+      await expect(
+        page.getByRole("heading", { name: "Check the list", level: 1 })
+      ).toBeVisible();
+      // Not saving any more, but the review is still unapplied: leaving still asks.
+      await tabs(page)
+        .getByRole("link", { name: "Catalog", exact: true })
+        .click();
+      await expect(asking(page)).toBeVisible();
+      await asking(page).getByRole("button", { name: "Keep editing" }).click();
+
+      await page.unroute(SAVE);
+      const retry = page.waitForRequest((request) => SAVE.test(request.url()));
+      await page.getByRole("button", { name: "Replace Deck List" }).click();
+      const again = (await retry).postDataJSON().idempotency_key;
+      expect(again).toBe(hold.keys[0]);
+      await expect(page).toHaveURL(new RegExp(`/decks/${id}$`));
+      await expect(asking(page)).toHaveCount(0);
+    });
+
+    test("Copy to my Decks names the review changes, and leaves silently until there is one", async ({
+      page,
+    }) => {
+      const world = copyWorld();
+      await signIn(page);
+      await page.goto(`${ORIGIN}/decks/import?publication=${world.copy}`);
+      await expect(
+        page.getByRole("heading", { name: "Copy to my Decks", level: 1 })
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Review 3 lines" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Check the list", level: 1 })
+      ).toBeVisible();
+      expect(await warns(page)).toBe(false);
+
+      // The withdrawn card is the one line that needs the collector: dropping it is a change made in the review.
+      await page.getByRole("button", { name: "Fix" }).click();
+      await page.getByRole("button", { name: "Drop line" }).click();
+      const copyAsking = page.getByRole("dialog", {
+        name: "Discard your review changes?",
+      });
+      await tabs(page)
+        .getByRole("link", { name: "Catalog", exact: true })
+        .click();
+      await expect(copyAsking).toBeVisible();
+      await expect(copyAsking).toContainText(
+        "The cards you picked or removed while checking this list won't be kept."
+      );
+      await expect(copyAsking).not.toContainText(/paste/i);
+      await expect(asking(page)).toHaveCount(0);
+      await expectPageChecks(page, "the copy's discard question");
+      await copyAsking.getByRole("button", { name: "Keep editing" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Check the list", level: 1 })
+      ).toBeVisible();
+      await tabs(page)
+        .getByRole("link", { name: "Catalog", exact: true })
+        .click();
+      await copyAsking.getByRole("button", { name: "Discard" }).click();
+      await expect(page).toHaveURL(/\/catalog/);
     });
 
     test("Import a decklist asks the same way for a pasted list, and a Deck name alone is not one", async ({

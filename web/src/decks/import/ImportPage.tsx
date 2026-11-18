@@ -34,7 +34,11 @@ import {
   ReplaceReviewDestination,
   WillBecomeSurplus,
 } from "./ReplaceParts";
-import { pasteIsUnapplied, usePasteLeaveGuard } from "./PasteLeaveGuard";
+import {
+  draftIsUnapplied,
+  usePasteLeaveGuard,
+  type Pending,
+} from "./PasteLeaveGuard";
 import { ReviewStep, type OpenPanel } from "./ReviewStep";
 import { useImportReview } from "./useImportReview";
 
@@ -87,6 +91,14 @@ export function ImportPage({
   const defaulted = useRef(false);
   // Set once a save has landed (or there was nothing to save), so the page that follows it isn't asked about.
   const applied = useRef(false);
+  // Whether the collector is still on this page: a save that lands after they left doesn't take them anywhere.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const pendingSave = useRef<{ payloadKey: string; key: string } | null>(null);
   const previousChoices = useRef<Choices>({
@@ -112,13 +124,21 @@ export function ImportPage({
   const toast = useToast();
   const review = state.review;
 
-  // A pasted list that hasn't been applied is asked about before an in-app leave, and warned about on a reload.
-  const held = useRef(false);
-  held.current =
-    !saving && pasteIsUnapplied({ text, picks: picks.size, drops: drops.size });
+  // A draft that hasn't been saved, or a save that hasn't finished, is asked about before an in-app leave and warned
+  // about on a reload. Leaving mid-save would hide whether it worked, and a failure would lose the draft and its retry.
+  const held = useRef<Pending>("none");
+  held.current = saving
+    ? "saving"
+    : draftIsUnapplied({ text, picks: picks.size, drops: drops.size })
+      ? "unapplied"
+      : "none";
   const { dialog: leaveDialog } = usePasteLeaveGuard(
-    () => held.current && !applied.current,
-    replace?.name ?? null
+    () => (applied.current ? "none" : held.current),
+    publication
+      ? { kind: "copy" }
+      : replace
+        ? { kind: "replace", deckName: replace.name }
+        : { kind: "new" }
   );
 
   // A step starts at the top, with focus where the collector goes next.
@@ -303,7 +323,7 @@ export function ImportPage({
       pendingSave.current = null;
       applied.current = true;
       offerUndo(toast, result, review.totals.cards, onAllDecks);
-      onOpenDeck(result.deck_id);
+      if (mounted.current) onOpenDeck(result.deck_id);
     } catch (cause) {
       if (cause instanceof DeckError && cause.status < 500) {
         pendingSave.current = null;
@@ -362,14 +382,14 @@ export function ImportPage({
       pendingSave.current = null;
       applied.current = true;
       offerReplaceUndo(toast, answer, result);
-      onOpenDeck(answer.deck_id);
+      if (mounted.current) onOpenDeck(answer.deck_id);
     } catch (cause) {
       if (cause instanceof DeckError && cause.status < 500) {
         pendingSave.current = null;
         // A deleted Deck: its builder says so.
         if (cause.status === 404) {
           applied.current = true;
-          onOpenDeck(answer.deck_id);
+          if (mounted.current) onOpenDeck(answer.deck_id);
         } else {
           setSaveMessage(
             cause.code === "STALE_DECK_LIST"
