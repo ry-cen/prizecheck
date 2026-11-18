@@ -40,6 +40,10 @@ const TWO = [row(E1, P1, "Switch"), row(E2, P2, "Potion")];
 let ROWS = TWO;
 /** While set, the results list (not a card's own Editions) waits for it, so a card can close before the results land. */
 let GATE: Promise<void> | null = null;
+/** While set, a Printing's own details wait for it, so a Printing-only card can close before its Edition is known. */
+let PRINTING_GATE: Promise<void> | null = null;
+/** True: the results list answers "unavailable", so the page has no results line. */
+let UNAVAILABLE = false;
 const PRINTINGS: Record<string, { name: string; editions: string[] }> = {
   [P1]: { name: "Switch", editions: [E1, E3] },
   [P2]: { name: "Potion", editions: [E2] },
@@ -74,7 +78,8 @@ function stubBrowser() {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
       const printing = /\/printings\/([^/?]+)/.exec(url.pathname)?.[1];
-      if (printing && PRINTINGS[printing])
+      if (printing && PRINTINGS[printing]) {
+        if (PRINTING_GATE) await PRINTING_GATE;
         return json({
           printing: {
             id: printing,
@@ -87,11 +92,22 @@ function stubBrowser() {
             })),
           },
         });
+      }
       if (url.pathname.includes("location-tree"))
         return json({ locations: [] });
       if (url.pathname.endsWith("/editions")) {
         const only = url.searchParams.get("printing_id");
         if (!only && GATE) await GATE;
+        if (!only && UNAVAILABLE)
+          return json({
+            available: false,
+            matches: 0,
+            search: { mode: "all" },
+            editions: [],
+            next_cursor: null,
+            catalog_revision: 1,
+            owner_revision: 1,
+          });
         return json({
           available: true,
           matches: ROWS.length,
@@ -163,6 +179,8 @@ async function mount(initial: CatalogCard | null | undefined) {
 afterEach(() => {
   ROWS = TWO;
   GATE = null;
+  PRINTING_GATE = null;
+  UNAVAILABLE = false;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -362,6 +380,41 @@ test("a card that closes before the results have loaded does not pull focus from
     search.focus();
     await act(async () => release());
     expect(document.activeElement).toBe(search);
+  } finally {
+    await g.done();
+  }
+});
+
+test("a Printing-only card that closes before its Edition is known leaves focus on the results line, not the page body", async () => {
+  let release = () => {};
+  PRINTING_GATE = new Promise<void>((resolve) => (release = resolve));
+  const g = await mount({ printingId: P1, editionId: null });
+  try {
+    expect(g.dialog()).not.toBeNull();
+    await g.render({ routeCard: null });
+    expect(g.dialog()).toBeNull();
+    await act(async () => release());
+    const line = g.host.querySelector<HTMLElement>(
+      '[aria-label="Catalog results"] > p'
+    );
+    expect(line).not.toBeNull();
+    expect(document.activeElement).toBe(line);
+  } finally {
+    await g.done();
+  }
+});
+
+test("a card that closes when the results never load leaves focus on the search field, not the page body", async () => {
+  UNAVAILABLE = true;
+  const g = await mount({ printingId: P1, editionId: E1 });
+  try {
+    expect(g.dialog()).not.toBeNull();
+    expect(g.host.querySelector('[aria-label="Catalog results"]')).toBeNull();
+    await g.render({ routeCard: null });
+    expect(g.dialog()).toBeNull();
+    expect(document.activeElement).toBe(
+      g.host.querySelector('input[type="search"]')
+    );
   } finally {
     await g.done();
   }

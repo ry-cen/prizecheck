@@ -236,7 +236,9 @@ export function CatalogGallery({
     ? browse.editions.findIndex((edition) => edition.edition_id === anchorId)
     : -1;
   const [wantsNext, setWantsNext] = useState(false);
-  const closedOn = useRef<string | null>(null);
+  // A card that has closed and whose tile focus should return to once the results allow it: the Edition it showed, or
+  // null for one that closed before its Edition was known (a Printing-only link whose details hadn't arrived).
+  const closedOn = useRef<{ editionId: string | null } | null>(null);
   const hintId = useId();
   const sentinel = useRef<HTMLDivElement>(null);
   const canLoad = browse.nextCursor !== null && !browse.errorMore;
@@ -617,11 +619,13 @@ export function CatalogGallery({
       waitingForTile.current = false;
       return;
     }
-    if (!closedOn.current) return;
-    const id = closedOn.current;
-    const tile = tiles.current?.querySelector<HTMLElement>(
-      `[data-edition-id="${CSS.escape(id)}"] button`
-    );
+    const closed = closedOn.current;
+    if (!closed) return;
+    const tile = closed.editionId
+      ? tiles.current?.querySelector<HTMLElement>(
+          `[data-edition-id="${CSS.escape(closed.editionId)}"] button`
+        )
+      : null;
     if (!tile && resultsLoading) {
       waitingForTile.current = true;
       return;
@@ -630,11 +634,19 @@ export function CatalogGallery({
     closedOn.current = null;
     waitingForTile.current = false;
     if (waited && !isLost(document.activeElement)) return;
-    if (tile && tile !== document.activeElement) tile.focus();
-    // No tile to return to (a shared link to a card the search doesn't list): the dialog's own return found nothing
-    // either, so focus would be left on the page body. The results line says where the collector is.
-    else if (!tile && isLost(document.activeElement))
-      resultsLine.current?.focus({ preventScroll: true });
+    // A tile that arrives late can be far from the viewport: take focus without scrolling the page to it.
+    if (tile && tile !== document.activeElement)
+      tile.focus(waited ? { preventScroll: true } : undefined);
+    // No tile to return to (a shared link to a card the search doesn't list, or to a Printing that closed before its
+    // Edition was known): the dialog's own return found nothing either, so focus would be left on the page body. The
+    // results line says where the collector is; without one (the results didn't load) the search field is the stable
+    // place.
+    else if (!tile && isLost(document.activeElement)) {
+      const fallback =
+        resultsLine.current ??
+        galleryRoot.current?.querySelector<HTMLElement>('input[type="search"]');
+      fallback?.focus({ preventScroll: true });
+    }
   }, [card, resultsLoading, browse.editions]);
 
   // Infinite scroll: a sentinel after the last tile asks for the next page as it nears the window (or the dialog's
@@ -699,7 +711,7 @@ export function CatalogGallery({
     }
     if (!routeCard) {
       if (card) {
-        closedOn.current = anchor ?? card.editionId;
+        closedOn.current = { editionId: anchor ?? card.editionId };
         setWantsNext(false);
         setCard(null);
       }
@@ -1087,7 +1099,7 @@ export function CatalogGallery({
             onCardRoute?.(null, "close");
             return;
           }
-          closedOn.current = card?.editionId ?? null;
+          closedOn.current = card ? { editionId: card.editionId } : null;
           setWantsNext(false);
           setCard(null);
         }}

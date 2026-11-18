@@ -17,6 +17,9 @@ function python(code: string) {
     env: { ...process.env, PYTHONPATH: "api:api/tests" },
   });
 }
+/** 70 Printings: enough for a scrolling gallery. */
+const seedGallery = () =>
+  python("from test_catalog_browse import seed_gallery\nseed_gallery()");
 /** Bulbasaur Normal and Reverse Holo, Rare Candy, Switch, Professor's Research. */
 const seedPopup = () =>
   python("from test_catalog_browse import seed_popup\nseed_popup()");
@@ -68,19 +71,9 @@ const more = (page: Page, words: string) =>
   });
 const BULBASAUR = "Bulbasaur MEG 001 Normal";
 const BULBASAUR_TILE = "Bulbasaur, MEG 001, Mega Evolution, Normal";
+const REVERSE_TILE = "Bulbasaur, MEG 001, Mega Evolution, Reverse Holo";
 const SWITCH_TILE = "Switch, MEG 130";
 const card = (page: Page) => page.getByRole("dialog");
-
-/** What has focus, in words: its accessible label or text, or the tag name. */
-const focused = (page: Page) =>
-  page.evaluate(() => {
-    const el = document.activeElement;
-    if (!el) return "none";
-    return (
-      el.getAttribute("aria-label") ||
-      (el.tagName === "BODY" ? "BODY" : (el.textContent ?? "").slice(0, 60))
-    );
-  });
 
 for (const viewport of [
   { width: 1280, height: 800, touch: false },
@@ -176,15 +169,51 @@ for (const viewport of [
       await expect(card(page)).toBeVisible();
       await card(page).getByRole("button", { name: /^Next/ }).click();
       await expect(card(page)).toBeVisible();
-      const shown = card(page).getByRole("heading", { level: 2 });
-      const name = (await shown.textContent()) ?? "";
+      await expect(
+        card(page)
+          .getByRole("group", { name: "Editions" })
+          .getByRole("button", {
+            pressed: true,
+          })
+      ).toContainText("Reverse Holo");
       await page.goBack();
       await expect(card(page)).toHaveCount(0);
-      // The Dialog's own return goes to the opener; the gallery then follows the card the popup last showed. Either
-      // way focus is on a tile in the results, never the page body.
-      expect(await focused(page)).not.toBe("BODY");
-      await expect(results(page).locator("button:focus")).toHaveCount(1);
-      expect(name).not.toBe("");
+      // The gallery follows the card the popup last showed, as Escape does.
+      await expect(tile(page, REVERSE_TILE)).toBeFocused();
+    });
+
+    test("a card closed before the results load takes focus on its tile when they arrive, without scrolling the page to it", async ({
+      page,
+    }) => {
+      seedGallery();
+      await signIn(page);
+      await page.goto(`${ORIGIN}/catalog`);
+      const items = results(page).getByRole("listitem");
+      await expect(items).toHaveCount(60);
+      const edition = (await items.nth(30).getAttribute("data-edition-id"))!;
+      const [{ printing }] = await sql(
+        "SELECT printing_id AS printing FROM catalog_edition WHERE id=$1",
+        [edition]
+      );
+      let release = () => {};
+      const held = new Promise<void>((resolve) => (release = resolve));
+      await page.route("**/api/catalog/editions*", async (route) => {
+        // The card's own Editions load at once; only the results list waits.
+        if (!new URL(route.request().url()).searchParams.has("printing_id"))
+          await held;
+        await route.continue();
+      });
+      await page.goto(`${ORIGIN}/catalog?card=${printing}&edition=${edition}`);
+      await expect(card(page)).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(card(page)).toHaveCount(0);
+      release();
+      const late = results(page).locator(
+        `[data-edition-id="${edition}"] button`
+      );
+      await expect(late).toBeFocused();
+      // The tile is far below the first screen, and the page stays where it was.
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
     });
 
     test("a card entered from a shared link closes onto the results line when its tile isn't in the results", async ({
