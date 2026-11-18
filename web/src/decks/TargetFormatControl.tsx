@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { ChevronDown } from "lucide-react";
 import type { FormatCheck } from "../format_checks_generated";
 import { Icon } from "../ui/Icon";
@@ -58,6 +58,21 @@ export function TargetFormatControl({
 }: Props) {
   const status = result ? statusOf(result.status) : null;
   const label = formatLabel(value);
+  // What the status line says, and when it says it anew. Its words are the Format and its standing, and they change
+  // only when the Format does (a deliberate change, whose result arrives after `result` has been null) or the standing
+  // does (an edit made the Deck legal or not legal). Ordinary edits that leave the standing as it was, even ones that
+  // change the issue count, and the moments a Deck List edit is on its way, leave the line exactly as it is: it is
+  // never blanked and redrawn, so an edit isn't followed by a second announcement. The result button's own name always
+  // carries the current count.
+  const standing = result && status ? `${value}:${result.status}` : null;
+  const [said, setSaid] = useState<{ standing: string; text: string } | null>(
+    null
+  );
+  if (result && status && standing !== null && said?.standing !== standing)
+    setSaid({
+      standing,
+      text: `${label}: ${status.text}${words(result)}`,
+    });
   return (
     <div
       role="group"
@@ -109,11 +124,10 @@ export function TargetFormatControl({
           "Checking…"
         )}
       </button>
-      {/* Says the new result once a change settles; the button's own text changes silently. */}
+      {/* Says the result when the Format or the Deck's standing changes; the button's own text changes silently. Not
+          tied to `busy`, so it is not cleared and drawn again around an ordinary edit. */}
       <span role="status" className="sr-only">
-        {result && status && !busy
-          ? `${label}: ${status.text}${words(result)}`
-          : ""}
+        {said?.text ?? ""}
       </span>
     </div>
   );

@@ -10,6 +10,13 @@ import {
 import { api, createDeck, ORIGIN, seedCatalog, setLine } from "./support/loans";
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner } from "./support/sign-in";
+import {
+  heard,
+  settle,
+  since,
+  snapshot,
+  watch,
+} from "./support/live-announcements";
 
 // One announcement per action (Opus m11 F3). A screen reader speaks a polite region when its words change, so each
 // add, remove or load must change exactly one live region with words, never a bare number, and a price summary must not
@@ -21,101 +28,6 @@ import { signInAsOwner } from "./support/sign-in";
 const PHONE = { width: 375, height: 812 };
 const DESKTOP = { width: 1280, height: 800 };
 const BARE_NUMBER = /^[\s\d.,]+$/;
-
-/** Starts recording on this page now and on every page it loads next. */
-async function watch(page: Page) {
-  await page.addInitScript(recorder);
-  await page.evaluate(recorder);
-}
-
-function recorder() {
-  const selector = '[aria-live], [role="status"], [role="alert"], output';
-  const clean = (text: string | null) =>
-    (text ?? "").replace(/\s+/g, " ").trim();
-  const updates: string[] = [];
-  const spoken = (region: Element) => {
-    // The nearest aria-live decides: "off" silences the region and what is inside it.
-    if (region.closest("[aria-live]")?.getAttribute("aria-live") === "off")
-      return false;
-    // A modal dialog makes the rest of the page inert, so nothing outside it is spoken.
-    const modal = [...document.querySelectorAll("dialog[open]")].at(-1);
-    return !modal || modal.contains(region);
-  };
-  // What a screen reader says for a live region is the text added to it (not what stays), and a region that appears with
-  // words in it.
-  new MutationObserver((records) => {
-    const added = new Map<Element, string[]>();
-    const note = (region: Element | null, text: string) => {
-      if (!region || !text || !spoken(region)) return;
-      added.set(region, [...(added.get(region) ?? []), text]);
-    };
-    for (const record of records) {
-      if (record.type === "characterData")
-        note(
-          (record.target.parentElement ?? null)?.closest(selector) ?? null,
-          clean(record.target.textContent)
-        );
-      else
-        record.addedNodes.forEach((node) => {
-          const el = node instanceof Element ? node : node.parentElement;
-          const inside = (record.target as Element).closest?.(selector);
-          if (inside) note(inside, clean(node.textContent));
-          else if (node instanceof Element) {
-            if (node.matches(selector)) note(node, clean(node.textContent));
-            node
-              .querySelectorAll(selector)
-              .forEach((region) => note(region, clean(region.textContent)));
-          } else if (el) note(el.closest(selector), clean(node.textContent));
-        });
-    }
-    for (const texts of added.values()) updates.push(clean(texts.join(" ")));
-    document.documentElement.dataset.liveUpdates = JSON.stringify(updates);
-  }).observe(document.documentElement, {
-    childList: true,
-    characterData: true,
-    subtree: true,
-  });
-  document.documentElement.dataset.liveUpdates = "[]";
-}
-
-const heard = (page: Page) =>
-  page.evaluate(
-    () =>
-      JSON.parse(
-        document.documentElement.dataset.liveUpdates ?? "[]"
-      ) as string[]
-  );
-
-/** The text of every live region a script would find, leaving out the ones switched off (a silenced toast). */
-const snapshot = (page: Page) =>
-  page.evaluate(() =>
-    [
-      ...document.querySelectorAll(
-        '[aria-live], [role="status"], [role="alert"]'
-      ),
-    ]
-      .filter(
-        (el) => el.closest("[aria-live]")?.getAttribute("aria-live") !== "off"
-      )
-      .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
-      .filter(Boolean)
-  );
-
-/** Everything heard since `mark` (a count from `heard`). */
-async function since(page: Page, mark: number) {
-  return (await heard(page)).slice(mark);
-}
-
-/** Lets a step's late announcements land: call it once the step's last visible effect is on screen, and two more
- * frames have drawn. */
-async function settle(page: Page) {
-  await page.evaluate(
-    () =>
-      new Promise<void>((done) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => done()))
-      )
-  );
-}
 
 function seedPopup() {
   execFileSync(
@@ -559,14 +471,6 @@ for (const surface of ["copy sheet on a phone", "library popup on a desktop"]) {
 // Deck card in the toast, and a failed change in the sheet's notice line or the page's banner.
 const CHANGES = /\/api\/decks\/[^/]+\/deck-list\/changes/;
 
-/** What was said since `mark`, leaving out the Deck's legality summary ("Standard: Not legal, 3 issues"), which the
- * desktop page redraws after every change: a result of the edit, and not the words about the edit that these cases are
- * about. */
-const spokenSince = async (page: Page, mark: number) =>
-  (await since(page, mark)).filter(
-    (text) => !/^(Standard|Expanded|GLC): /.test(text)
-  );
-
 for (const surface of ["phone copy sheet", "desktop Deck card"]) {
   const phone = surface.startsWith("phone");
   async function open(collectors: {
@@ -644,21 +548,17 @@ for (const surface of ["phone copy sheet", "desktop Deck card"]) {
 
     let mark = (await heard(page)).length;
     await ui.add();
-    await expect
-      .poll(async () => await spokenSince(page, mark))
-      .toHaveLength(1);
+    await expect.poll(async () => await since(page, mark)).toHaveLength(1);
     await settle(page);
-    expect(await spokenSince(page, mark)).toEqual([
+    expect(await since(page, mark)).toEqual([
       expect.stringMatching(/^Added 1 Iono\./),
     ]);
 
     mark = (await heard(page)).length;
     await ui.undo();
-    await expect
-      .poll(async () => (await spokenSince(page, mark)).length)
-      .toBe(1);
+    await expect.poll(async () => (await since(page, mark)).length).toBe(1);
     await settle(page);
-    expect(await spokenSince(page, mark)).toEqual([
+    expect(await since(page, mark)).toEqual([
       expect.stringMatching(/^Undo may not have finished/),
     ]);
 
@@ -667,14 +567,12 @@ for (const surface of ["phone copy sheet", "desktop Deck card"]) {
     await ui.undo();
     await reached;
     await settle(page);
-    expect(await spokenSince(page, mark)).toEqual([]);
+    expect(await since(page, mark)).toEqual([]);
 
     release();
-    await expect
-      .poll(async () => (await spokenSince(page, mark)).length)
-      .toBe(1);
+    await expect.poll(async () => (await since(page, mark)).length).toBe(1);
     await settle(page);
-    const outcome = await spokenSince(page, mark);
+    const outcome = await since(page, mark);
     expect(outcome).toEqual([expect.stringMatching(/^Undone: Added 1 Iono\./)]);
     expect(outcome.filter((text) => /^Added 1 /.test(text))).toEqual([]);
   });
