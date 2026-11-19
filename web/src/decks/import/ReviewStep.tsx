@@ -137,9 +137,18 @@ export function ReviewStep({
           </dl>
           <div className="flex flex-col gap-1">
             {/* The visible label names the radio group, and the explainer and the counting describe it. */}
-            <p id={ownedLabelId} className="m-0 text-meta text-text-muted">
-              Owned cards
-            </p>
+            <div className="flex flex-wrap items-baseline gap-2">
+              <p id={ownedLabelId} className="m-0 text-meta text-text-muted">
+                Owned cards
+              </p>
+              {/* The options below can't be pressed while the save runs but look as they did, so this says why. It is
+                  sight only: the save bar's status is what is announced. */}
+              {saving && (
+                <span aria-hidden="true" className="text-meta text-text-muted">
+                  Saving…
+                </span>
+              )}
+            </div>
             {/* The setting changes what would be saved, so it waits while a save is in flight. */}
             <fieldset disabled={saving} className={LOCKABLE}>
               <Segmented
@@ -247,6 +256,8 @@ export function ReviewStep({
             </>
           ) : saveBlocked !== null ? (
             <strong className="text-warning">{saveBlocked}</strong>
+          ) : saving ? (
+            "Saving…"
           ) : (
             `Ready · ${plural(Number(totals.cards), "card")} · ${plural(review.deck_list.length, "Deck List line")}`
           )}

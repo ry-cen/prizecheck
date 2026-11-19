@@ -667,13 +667,13 @@ for (const [label, viewport] of [
       await expect(decklist(page)).not.toHaveAttribute("readonly", "");
     });
 
-    test("B13: a locked review keeps its text at full strength and passes the page checks: the Edition panel's instruction, the owned-cards explainer, and the controls that are disabled", async ({
+    test("B13: a locked review keeps its text at full strength and passes the page checks, says it is saving beside the Owned cards setting and in the save bar, and says no more once the save has failed", async ({
       page,
     }) => {
       seedCatalog();
       await signIn(page);
       const id = await deckBuilder(page);
-      const hold = await holdSave(page);
+      const hold = await holdSave(page, { status: 500 });
       await replaceList(page, id);
       await decklist(page).fill(PASTE);
       await page.getByRole("button", { name: "Review 1 line" }).click();
@@ -707,6 +707,17 @@ for (const [label, viewport] of [
       expect(await drawn(instruction)).toBe(1);
       expect(await drawn(explainer)).toBe(1);
 
+      const cue = page
+        .getByText("Owned cards", { exact: true })
+        .locator("..")
+        .getByText("Saving…", { exact: true });
+      const bar = page
+        .getByRole("region", { name: "Save" })
+        .getByRole("status")
+        .first();
+      await expect(cue).toHaveCount(0);
+      await expect(bar).toContainText("Ready");
+
       const sent = page.waitForRequest((request) => SAVE.test(request.url()));
       await page.getByRole("button", { name: "Replace Deck List" }).click();
       await sent;
@@ -717,10 +728,21 @@ for (const [label, viewport] of [
       ).toBeDisabled();
       expect(await drawn(instruction)).toBe(1);
       expect(await drawn(explainer)).toBe(1);
+      // The Owned cards options look the same, so the page says why they don't answer; the save bar agrees.
+      await expect(cue).toBeVisible();
+      await expect(cue).toHaveAttribute("aria-hidden", "true");
+      await expect(bar).toHaveText("Saving…");
       await expectPageChecks(
         page,
         "the locked review with its Edition panel open"
       );
+
+      hold.release();
+      await expect(page.getByRole("region", { name: "Save" })).toContainText(
+        "Replacing may have completed."
+      );
+      await expect(cue).toHaveCount(0);
+      await expect(bar).toContainText("Ready");
     });
 
     test("B12: a save that fails under the question moves focus to Keep editing and announces the details once", async ({
