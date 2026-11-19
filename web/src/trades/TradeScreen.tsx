@@ -985,7 +985,7 @@ export function TradeScreen({
         aria-label={`Confirm swap with ${name}`}
         className="rounded-panel border border-border bg-surface p-4 phone:p-3"
       >
-        <h2 className="m-0 text-heading">Confirm swap</h2>
+        <h2 className="m-0 text-heading font-semibold">Confirm swap</h2>
         <div className="flex flex-col gap-4 phone:gap-2">
           {gets && (
             <div className="flex flex-col gap-1">

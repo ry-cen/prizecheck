@@ -39,7 +39,7 @@ type Load =
     };
 
 const LINK =
-  "inline-flex h-control items-center gap-1 rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:h-control-phone";
+  "inline-flex h-control items-center gap-1 rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:-ml-2 phone:h-control-phone";
 
 // How long the search waits after the last keystroke before it reads again.
 const SEARCH_DELAY_MS = 300;

@@ -71,7 +71,10 @@ export function TradeTermsRow({
         onClick={() => setOpen(true)}
         className={`grid min-h-tap min-w-0 flex-1 basis-44 grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-control border-0 bg-transparent p-0 text-left font-sans text-text focus-visible:outline-2 focus-visible:outline-accent ${fullWidthPhoneName ? "phone:grid-cols-[2rem_minmax(0,1fr)] phone:gap-y-1" : "phone:grid-cols-[3rem_minmax(0,1fr)]"}`}
       >
-        <TradeThumbnail url={card.image_url} />
+        <TradeThumbnail
+          url={card.image_url}
+          className={fullWidthPhoneName ? "phone:order-2" : ""}
+        />
         <span
           className={`flex min-w-0 flex-col gap-1 ${fullWidthPhoneName ? "phone:contents" : ""}`}
         >
@@ -79,13 +82,13 @@ export function TradeTermsRow({
             id={`${id}-name`}
             ref={nameRef}
             lang={fullWidthPhoneName ? "en" : undefined}
-            className={`text-body font-semibold wrap-anywhere ${fullWidthPhoneName ? "phone:order-3 phone:col-span-2 phone:wrap-normal phone:break-normal phone:hyphens-auto" : ""} ${fullWidthPhoneName && smallerName ? "phone:text-control" : ""}`}
+            className={`text-body font-semibold wrap-anywhere ${fullWidthPhoneName ? "phone:order-1 phone:col-span-2 phone:wrap-normal phone:break-normal phone:hyphens-auto" : ""} ${fullWidthPhoneName && smallerName ? "phone:text-control" : ""}`}
           >
             {card.name}
           </span>
           <span
             id={`${id}-edition`}
-            className={`text-meta text-text-muted tabular-nums wrap-anywhere ${fullWidthPhoneName ? "phone:order-2" : ""}`}
+            className={`text-meta text-text-muted tabular-nums wrap-anywhere ${fullWidthPhoneName ? "phone:order-3" : ""}`}
           >
             {lineEdition(card)}
           </span>
@@ -130,12 +133,18 @@ export function TradeTermsRow({
 }
 
 /** A short missing-art label fits a thumbnail; the popup still offers the full artwork treatment. */
-function TradeThumbnail({ url }: { url: string | null }) {
+function TradeThumbnail({
+  url,
+  className = "",
+}: {
+  url: string | null;
+  className?: string;
+}) {
   const art = useArtRetry(url);
   return (
     <span
       aria-hidden="true"
-      className="flex aspect-(--tile-aspect) w-full items-center justify-center overflow-hidden rounded-card bg-surface-raised text-center text-caption text-text-muted"
+      className={`flex aspect-(--tile-aspect) w-full items-center justify-center overflow-hidden rounded-card bg-surface-raised text-center text-caption text-text-muted ${className}`}
     >
       {art.waiting ? null : url && art.show ? (
         <img

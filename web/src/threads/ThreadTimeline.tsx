@@ -305,7 +305,7 @@ function ThreadTimelineContent({
       className="flex min-w-0 flex-col gap-3 border-t border-border pt-4"
     >
       <div className="flex items-center justify-between gap-3">
-        <h2 ref={title} tabIndex={-1} className="text-heading">
+        <h2 ref={title} tabIndex={-1} className="text-heading font-semibold">
           Chat and changes
         </h2>
         {moderation && (
