@@ -39,6 +39,8 @@ import {
 } from "./GalleryControls";
 import {
   activeFilterCount,
+  borrowedKey,
+  holdingKey,
   NO_FILTERS,
   plural,
   queryToParams,
@@ -496,7 +498,13 @@ export function Workspace({
     // Once the listing is read again: the source Holding while it has copies, else the destination's, when this
     // view lists it (All owned does, a Location doesn't).
     moveFallback.current = {
-      key: `${destinationId}:${subject.holding.holding.edition_id}`,
+      key: subject.holding.borrowed
+        ? borrowedKey(
+            subject.holding.borrowed.loanId,
+            destinationId,
+            subject.holding.holding.edition_id
+          )
+        : holdingKey(destinationId, subject.holding.holding.edition_id),
       revision: gallery.ownerRevision,
     };
   }

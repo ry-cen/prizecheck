@@ -1,9 +1,11 @@
 // m13 s5: the Borrowed list has an address of its own (?borrowed=1 on the Collection address), so reload, Back,
 // Forward and a pasted link bring it back, a return through the Collection tab doesn't, and its Back keeps the
 // listing's scroll.
+import { randomUUID } from "node:crypto";
 import { expect, test } from "./support/collectors";
 import {
   ORIGIN,
+  api,
   befriend,
   hold,
   lendHandedOver,
@@ -21,12 +23,14 @@ const SIZES = [
 
 type Collectors = Parameters<Parameters<typeof test>[2]>[0]["collectors"];
 
-/** Ash holds `copies` of one card in Unsorted and borrows two Iono from Misty. Returns Unsorted's id. */
+/** Ash holds `copies` of one card in Unsorted and borrows `lent` Iono from Misty (into Unsorted). With `ownIono`,
+ * Ash also owns one Iono in a Box of his own, so Move can put each kind where the other sits. */
 async function setup(
   page: Page,
   collectors: Collectors,
   size: (typeof SIZES)[number],
-  copies: number
+  copies: number,
+  { lent = 2, ownIono = false } = {}
 ) {
   await page.setViewportSize(size.viewport);
   const ids = seedCatalog();
@@ -41,8 +45,20 @@ async function setup(
   const home = await unsorted(page);
   await hold(page, home, ids["PAL 172"], copies);
   await befriend(page, lender);
-  await lendHandedOver(lender, page, [[ids["PAL 185"], 2]]);
-  return home;
+  let box = "";
+  if (ownIono) {
+    box = (
+      await api(page, "POST", "/api/location-tree", {
+        name: "M13 Box",
+        parent_id: null,
+        parent_version: null,
+        idempotency_key: randomUUID(),
+      })
+    ).location.id as string;
+    await hold(page, box, ids["PAL 185"], 1);
+  }
+  const loan = await lendHandedOver(lender, page, [[ids["PAL 185"], lent]]);
+  return { home, box, loan, iono: ids["PAL 185"] };
 }
 
 const borrowedDialog = (page: Page) =>
@@ -67,7 +83,7 @@ for (const size of SIZES) {
     page,
     collectors,
   }) => {
-    const home = await setup(page, collectors, size, 1);
+    const { home } = await setup(page, collectors, size, 1);
     const dialog = borrowedDialog(page);
     const cards = page.getByRole("region", { name: "Cards" });
 
@@ -114,7 +130,7 @@ for (const size of SIZES) {
     page,
     collectors,
   }) => {
-    const home = await setup(page, collectors, size, 1);
+    const { home } = await setup(page, collectors, size, 1);
     const tab = (name: string) =>
       page.getByRole("link", { name, exact: true }).first();
     await page.goto(`${ORIGIN}/collection?location=${home}&q=Boss`);
@@ -144,7 +160,7 @@ for (const size of SIZES) {
     page,
     collectors,
   }) => {
-    const home = await setup(page, collectors, size, 90);
+    const { home } = await setup(page, collectors, size, 90);
     await page.goto(`${ORIGIN}/collection?location=${home}`);
     await expect(
       page.getByRole("region", { name: "Cards" }).getByRole("button").first()
@@ -167,3 +183,157 @@ for (const size of SIZES) {
     await expect.poll(scroll).toBe(scrolled);
   });
 }
+
+const scroll = (page: Page) => page.evaluate(() => window.scrollY);
+const cards = (page: Page) => page.getByRole("region", { name: "Cards" });
+/** A tab link. A modal sheet or list holds the tabs inert, so a collector leaves it by history; the test presses
+ * the link itself, which is what a pointer does when nothing covers it. */
+const tab = (page: Page, name: string) =>
+  page.getByRole("link", { name, exact: true }).first();
+const press = (page: Page, name: string) =>
+  tab(page, name).evaluate((link) => (link as HTMLElement).click());
+
+for (const size of SIZES) {
+  test(`a Collection tab return keeps the listing's scroll though the Borrowed list was open at ${size.name}`, async ({
+    page,
+    collectors,
+  }) => {
+    const { home } = await setup(page, collectors, size, 90);
+    await page.goto(`${ORIGIN}/collection?location=${home}`);
+    await expect(cards(page).getByRole("button").first()).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect.poll(() => scroll(page)).toBe(600);
+    await openBorrowed(page, size.phone);
+    const saved = await scroll(page);
+    expect(saved).toBeGreaterThanOrEqual(194);
+    await press(page, "Catalog");
+    await expect(page).toHaveURL(/\/catalog/);
+    await tab(page, "Collection").click();
+    await expect(page).toHaveURL(/\/collection/);
+    await expect(cards(page).getByRole("button").first()).toBeVisible();
+    expect(params(page).has("borrowed")).toBe(false);
+    expect(params(page).get("location")).toBe(home);
+    await expect(borrowedDialog(page)).toHaveCount(0);
+    await expect
+      .poll(async () => Math.abs((await scroll(page)) - saved))
+      .toBeLessThanOrEqual(2);
+  });
+
+  test(`a card's overlay survives a tab return with its scroll at ${size.name}`, async ({
+    page,
+    collectors,
+  }) => {
+    const { home } = await setup(page, collectors, size, 90);
+    await page.goto(`${ORIGIN}/collection?location=${home}`);
+    await expect(cards(page).getByRole("button").first()).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect.poll(() => scroll(page)).toBe(600);
+    const tile = cards(page).getByRole("button").nth(14);
+    await tile.click();
+    await expect(page).toHaveURL(/[?&]card=/);
+    const saved = await scroll(page);
+    const address = page.url();
+    // Away to Catalog and back: the tab returns to the same address, and the page to the same place.
+    await press(page, "Catalog");
+    await expect(page).toHaveURL(/\/catalog/);
+    await tab(page, "Collection").click();
+    await expect(page).toHaveURL(address);
+    await expect(cards(page).getByRole("button").first()).toBeVisible();
+    await expect
+      .poll(async () => Math.abs((await scroll(page)) - saved))
+      .toBeLessThanOrEqual(2);
+  });
+
+  test(`a reload on the Borrowed address reopens it and Back closes it at ${size.name}`, async ({
+    page,
+    collectors,
+  }) => {
+    const { home } = await setup(page, collectors, size, 90);
+    await page.goto(`${ORIGIN}/collection?location=${home}`);
+    await expect(cards(page).getByRole("button").first()).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect.poll(() => scroll(page)).toBe(600);
+    await openBorrowed(page, size.phone);
+    await page.reload();
+    await expect(borrowedDialog(page)).toBeVisible();
+    expect(params(page).get("borrowed")).toBe("1");
+    // History positions live in the page's memory, so a reload starts the entries before it at the top, for a card's
+    // overlay as for this list; Back still closes the list over the same Location.
+    await page.goBack();
+    await expect(borrowedDialog(page)).toHaveCount(0);
+    expect(params(page).has("borrowed")).toBe(false);
+    expect(params(page).get("location")).toBe(home);
+  });
+}
+
+test("Back from a card's sheet restores the listing's scroll", async ({
+  page,
+  collectors,
+}) => {
+  const { home } = await setup(page, collectors, SIZES[1], 90);
+  await page.goto(`${ORIGIN}/collection?location=${home}`);
+  await expect(cards(page).getByRole("button").first()).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 600));
+  await expect.poll(() => scroll(page)).toBe(600);
+  await cards(page).getByRole("button").nth(14).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  const saved = await scroll(page);
+  expect(saved).toBeGreaterThan(0);
+  await page.goBack();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(params(page).has("card")).toBe(false);
+  await expect
+    .poll(async () => Math.abs((await scroll(page)) - saved))
+    .toBeLessThanOrEqual(2);
+});
+
+test.describe("the aside follows a moved copy of either kind", () => {
+  test.use({ viewport: SIZES[0].viewport });
+  const aside = (page: Page) =>
+    page.getByRole("complementary", { name: "Card details" });
+
+  async function moveFirst(page: Page, tile: RegExp, destination: string) {
+    await cards(page).getByRole("button", { name: tile }).first().click();
+    await aside(page)
+      .getByRole("button", { name: "Move…", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Move 1 copy" });
+    await dialog
+      .getByRole("button", { name: destination, exact: true })
+      .click();
+    await dialog.getByRole("button", { name: "Move 1 copy" }).click();
+    await expect(dialog).toHaveCount(0);
+  }
+
+  test("the last Borrowed Copy moves where an owned copy of the card sits: the aside shows the borrowed one", async ({
+    page,
+    collectors,
+  }) => {
+    const { box, loan, iono } = await setup(page, collectors, SIZES[0], 1, {
+      lent: 1,
+      ownIono: true,
+    });
+    await page.goto(`${ORIGIN}/collection`);
+    await moveFirst(page, /Iono.*borrowed from Misty W/, "M13 Box");
+    await expect(aside(page)).toContainText("Iono");
+    await expect(aside(page)).toContainText("borrowed from Misty W");
+    await expect(aside(page)).toContainText("M13 Box");
+    expect(params(page).get("card")).toBe(`borrowed:${loan}:${box}:${iono}`);
+  });
+
+  test("the last owned copy moves where a Borrowed Copy of the card sits: the aside shows the owned one", async ({
+    page,
+    collectors,
+  }) => {
+    const { home, box, iono } = await setup(page, collectors, SIZES[0], 1, {
+      lent: 1,
+      ownIono: true,
+    });
+    await page.goto(`${ORIGIN}/collection`);
+    await moveFirst(page, /^Iono(?!.*borrowed)/, "Unsorted");
+    await expect(aside(page)).toContainText("Iono");
+    await expect(aside(page)).not.toContainText("borrowed from");
+    expect(params(page).get("card")).toBe(`${home}:${iono}`);
+    expect(box).not.toBe(home);
+  });
+});

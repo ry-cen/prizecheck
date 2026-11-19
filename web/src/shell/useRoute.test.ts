@@ -46,3 +46,49 @@ test("reload keeps the current entry's position and its overlay ownership", asyn
   expect(window.history.state.prizecheckOverlayParent).toBe("/decks/want-list");
   expect(window.history.state.prizecheckScroll).toBe(3621);
 });
+
+async function visit(to: string, y: number, options = {}) {
+  vi.stubGlobal("scrollY", y);
+  await act(async () => route.navigate(to, options));
+}
+test("a tab return keeps the listing's scroll though the Borrowed list was open when it left", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  window.history.replaceState({ prizecheckEntry: "start" }, "", "/collection");
+  await mount();
+  await visit("/collection?location=X", 0);
+  vi.stubGlobal("scrollY", 194);
+  await visit("/collection?location=X&borrowed=1", 194, {
+    overlay: true,
+    preserveScroll: true,
+  });
+  await visit("/catalog", 194);
+  await visit("/collection?location=X", 0);
+  expect(route.scrollFor("/collection")).toBe(194);
+});
+test("a saved address for another Location, another card or a Borrowed list with another Location scrolls to the top", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  window.history.replaceState({ prizecheckEntry: "start" }, "", "/collection");
+  await mount();
+  await visit("/collection?location=X&borrowed=1", 300);
+  await visit("/catalog", 300);
+  await visit("/collection?location=Y", 0);
+  expect(route.scrollFor("/collection")).toBe(0);
+  await visit("/collection?card=A", 250);
+  await visit("/catalog", 250);
+  await visit("/collection?card=B", 0);
+  expect(route.scrollFor("/collection")).toBe(0);
+});
+test("a Back-restored entry's own position still wins", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  window.history.replaceState({ prizecheckEntry: "start" }, "", "/collection");
+  await mount();
+  await visit("/collection?location=X", 400);
+  await visit("/catalog", 400);
+  await act(async () => window.history.back());
+  await act(async () => {
+    window.dispatchEvent(
+      new PopStateEvent("popstate", { state: window.history.state })
+    );
+  });
+  expect(route.scrollFor("/collection")).toBe(400);
+});

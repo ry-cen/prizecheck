@@ -41,7 +41,7 @@ import {
   withoutTrailingSlash,
   type PageId,
 } from "./shell/routes";
-import { useRoute } from "./shell/useRoute";
+import { useRoute, withoutListOverlays } from "./shell/useRoute";
 import { DeadEnd } from "./public/DeadEnd";
 import { LandingPage } from "./public/LandingPage";
 import { LoadingScreen } from "./public/LoadingScreen";
@@ -100,14 +100,6 @@ function safeDestination(): string {
   return url.origin === location.origin
     ? `${canonicalPath(url.pathname)}${url.search}${url.hash}`
     : DEFAULT_PATH;
-}
-
-/** The Collection tab returns to the Location and search last shown, but never reopens the Borrowed list. */
-function withoutBorrowed(address: string): string {
-  const url = new URL(address, "http://prizecheck.invalid");
-  if (!url.searchParams.has("borrowed")) return address;
-  url.searchParams.delete("borrowed");
-  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function App() {
@@ -475,7 +467,7 @@ function App() {
   }
   const tabAddress = (id: PageId) =>
     id === "collection"
-      ? withoutBorrowed(collectionAddress.current)
+      ? withoutListOverlays(collectionAddress.current)
       : id === "catalog"
         ? catalogAddress.current
         : pageDef(id).path;

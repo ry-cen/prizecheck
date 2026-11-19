@@ -10,6 +10,14 @@ import {
 
 /** Session-only history positions: keep recent entries without growing with every navigation. */
 const SCROLL_CACHE_LIMIT = 128;
+/** An address without the parameters that open a list overlay over a page without changing the listing under it
+ * (the Collection's Borrowed list). Two addresses that differ only by such a parameter show the same page. */
+export function withoutListOverlays(address: string): string {
+  const url = new URL(address, "http://prizecheck.invalid");
+  if (!url.searchParams.has("borrowed")) return address;
+  url.searchParams.delete("borrowed");
+  return `${url.pathname}${url.search}${url.hash}`;
+}
 function save<K, V>(cache: Map<K, V>, key: K, value: V): void {
   cache.delete(key);
   cache.set(key, value);
@@ -282,7 +290,9 @@ export function useRoute(): Route {
   const scrollFor = useCallback(
     (at: string) =>
       positions.get(entry) ??
-      (PAGES.some((page) => page.path === at) && addresses.get(at) === address
+      (PAGES.some((page) => page.path === at) &&
+      withoutListOverlays(addresses.get(at) ?? "") ===
+        withoutListOverlays(address)
         ? (scrolls.get(at) ?? 0)
         : 0),
     [scrolls, entry, address]
