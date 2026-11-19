@@ -102,6 +102,14 @@ function safeDestination(): string {
     : DEFAULT_PATH;
 }
 
+/** The Collection tab returns to the Location and search last shown, but never reopens the Borrowed list. */
+function withoutBorrowed(address: string): string {
+  const url = new URL(address, "http://prizecheck.invalid");
+  if (!url.searchParams.has("borrowed")) return address;
+  url.searchParams.delete("borrowed");
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 function App() {
   const lastUserId = useRef<string | null>(null);
   const { path, address, entry, navigate, closeOverlay, scrollFor, focusFor } =
@@ -467,7 +475,7 @@ function App() {
   }
   const tabAddress = (id: PageId) =>
     id === "collection"
-      ? collectionAddress.current
+      ? withoutBorrowed(collectionAddress.current)
       : id === "catalog"
         ? catalogAddress.current
         : pageDef(id).path;

@@ -286,6 +286,9 @@ export function Workspace({
   // A Move that leaves copies of the card behind keeps the desktop aside open on it: the card the Move was started
   // from, until the Move's dialog has closed. A phone's sheet closes after a Move, as it always has.
   const keepCard = useRef<{ key: string; ordinal: number } | null>(null);
+  const moveFallback = useRef<{ key: string; revision: number | null } | null>(
+    null
+  );
   const selection = useSelection({
     holdings: gallery.holdings,
     byKey: gallery.byKey,
@@ -316,6 +319,8 @@ export function Workspace({
       const shown = card ?? kept;
       const key = card?.holding.key ?? kept?.key;
       const next = collectionHref(view, query, key, shown?.ordinal);
+      // The address may already name the card (a reloaded page): it is still this Move that owns it.
+      if (kept) inspectedInUrl.current = kept.key;
       if (next === address) return;
       if (key) inspectedInUrl.current = key;
       onNavigate(next, { replace: true, preserveScroll: true });
@@ -365,9 +370,24 @@ export function Workspace({
     const holding = route.card ? gallery.byKey.get(route.card) : undefined;
     // Forget what the inspector wrote once the address no longer names that card.
     if (route.card !== inspectedInUrl.current) inspectedInUrl.current = null;
+    // A Move's follow-up: the source Holding wins while it has copies once the listing is read again (its owner
+    // revision is new); the old listing still holds it, so only then is the fallback dropped.
+    const moved = moveFallback.current;
+    if (moved && holding && gallery.ownerRevision !== moved.revision)
+      moveFallback.current = null;
     if (params.has("card") && !holding) {
       if (!mobile && route.card && route.card === inspectedInUrl.current) {
-        // The inspected card left the listing (a Move or a removal): that is the collector's own action.
+        // The inspected card left the listing (a Move or a removal): that is the collector's own action. The
+        // moved copies' new Holding takes its place when this view still lists it.
+        moveFallback.current = null;
+        if (moved && gallery.byKey.has(moved.key)) {
+          inspectedInUrl.current = moved.key;
+          onNavigate(collectionHref(view, query, moved.key), {
+            replace: true,
+            preserveScroll: true,
+          });
+          return;
+        }
         inspectedInUrl.current = null;
         onNavigate(collectionHref(view, query), {
           replace: true,
@@ -472,12 +492,13 @@ export function Workspace({
     if (mobile) return;
     const subject = sheetActionCard.current ?? selection.inspected;
     if (!subject) return;
-    const leaving =
-      destinationId === subject.holding.holding.location_id
-        ? 0
-        : (selection.selected.get(subject.holding.key)?.count ?? 0);
-    if (subject.holding.copies - leaving < 1) return;
     keepCard.current = { key: subject.holding.key, ordinal: 0 };
+    // Once the listing is read again: the source Holding while it has copies, else the destination's, when this
+    // view lists it (All owned does, a Location doesn't).
+    moveFallback.current = {
+      key: `${destinationId}:${subject.holding.holding.edition_id}`,
+      revision: gallery.ownerRevision,
+    };
   }
   function confirmMove(destinationId: string) {
     keepDetailsAfter(destinationId);
@@ -486,6 +507,7 @@ export function Workspace({
   function cancelInventoryDialog(forced = false) {
     if (actions.busy && !forced) return;
     keepCard.current = null;
+    moveFallback.current = null;
     actions.closeDialog(forced);
     const restore = sheetAction.current;
     // Only a sheet or aside action restores a selection or returns focus; a selection-bar dialog has
@@ -852,6 +874,7 @@ export function Workspace({
             setDrawerOpen(false);
             onNavigate(collectionHref(view, query, undefined, 0, true), {
               overlay: true,
+              preserveScroll: true,
             });
           },
         }}

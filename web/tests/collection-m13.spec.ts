@@ -145,6 +145,7 @@ for (const size of SIZES) {
       // A long gallery draws only the tiles near the window.
       if (copies <= 12) await expect(tiles(page)).toHaveCount(copies);
       else await expect(tiles(page).first()).toBeVisible();
+      return source;
     }
 
     async function moveOneFromPanel(page: Page, copiesBefore: number) {
@@ -221,12 +222,31 @@ for (const size of SIZES) {
       await moveOneFromPanel(page, 2);
       await expect(panel(page)).toContainText("1 copy here");
       await moveOneFromPanel(page, 1);
-      // No copy remains in Source binder: the aside empties and the address drops the card.
+      // The last copy left Source binder but is still in All owned, in Destination binder: the aside follows it.
+      await expect(panel(page)).toContainText(CARD);
+      await expect(panel(page)).toContainText("3 copies here");
+      await expect(panel(page)).toContainText("Destination binder");
+      await expect(page).toHaveURL(/[?&]card=/);
+      await expect(page.locator("#ws-heading")).toBeFocused();
+    });
+
+    test("in a Location, moving the last copy out closes the desktop aside", async ({
+      page,
+    }) => {
+      test.skip(size.phone, "a phone's sheet closes after a Move");
+      const source = await seed(page, 1);
+      await page.goto(
+        new URL(`/collection?location=${source}`, page.url()).href
+      );
+      await expect(tiles(page)).toHaveCount(1);
+      await openCard(page);
+      await moveOneFromPanel(page, 1);
+      // The copy is no longer in this Location: nothing of the card is left to show here.
+      await expect(tiles(page)).toHaveCount(0);
       await expect(aside(page)).toContainText(
         "Select a card to see its details."
       );
       await expect(page).not.toHaveURL(/[?&]card=/);
-      await expect(page.locator("#ws-heading")).toBeFocused();
     });
 
     test("a phone's sheet closes after a Move and the toast's Undo can be pressed", async ({
