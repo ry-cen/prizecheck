@@ -150,7 +150,7 @@ const tile = (page: Page, prefix: string) =>
   cards(page).getByRole("button", {
     name: new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   });
-const REPORT = "Report a problem with this card's data";
+const REPORT = "Report card details";
 
 /** Records every price request's Edition ids and the peak number in flight. */
 async function recordPrices(page: Page) {

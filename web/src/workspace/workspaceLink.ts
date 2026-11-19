@@ -6,13 +6,16 @@ export function collectionAddress(search: string) {
     query: params.get("q") || "",
     card: params.get("card"),
     copy: Number(params.get("copy") || 0),
+    /** The Borrowed list is open (its own address, so reload, Back and a pasted link bring it back). */
+    borrowed: params.get("borrowed") === "1",
   };
 }
 export function collectionHref(
   location: string,
   query = "",
   card?: string,
-  copy = 0
+  copy = 0,
+  borrowed = false
 ): string {
   const params = new URLSearchParams();
   if (location !== "all") params.set("location", location);
@@ -21,6 +24,7 @@ export function collectionHref(
     params.set("card", card);
     if (copy) params.set("copy", String(copy));
   }
+  if (borrowed && !card) params.set("borrowed", "1");
   return `/collection${params.size ? `?${params}` : ""}`;
 }
 export function workspaceHref(locationId: string): string {

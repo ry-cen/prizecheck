@@ -206,26 +206,28 @@ export function MoveDialog({
             onChange={(event) => setQuery(event.target.value)}
           />
           <ScrollArea className={LIST_BOX} viewportClassName="p-1" bothAxes>
-            {needle ? (
-              matches.length ? (
-                <ul aria-label="Matching locations" className={LIST}>
-                  {matches.map((node) => (
-                    <li key={node.id}>
-                      {leafButton(node, index.path(node.id), 0)}
-                    </li>
-                  ))}
-                </ul>
+            <div role="group" aria-label="Destination">
+              {needle ? (
+                matches.length ? (
+                  <ul aria-label="Matching locations" className={LIST}>
+                    {matches.map((node) => (
+                      <li key={node.id}>
+                        {leafButton(node, index.path(node.id), 0)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="m-0 p-2 text-meta text-text-muted">
+                    No Location or Deck that can hold cards matches “
+                    {query.trim()}”.
+                  </p>
+                )
               ) : (
-                <p className="m-0 p-2 text-meta text-text-muted">
-                  No Location or Deck that can hold cards matches “
-                  {query.trim()}”.
-                </p>
-              )
-            ) : (
-              <ul aria-label="Locations" className={LIST}>
-                {index.children(null).map((node) => branch(node, 0))}
-              </ul>
-            )}
+                <ul aria-label="Locations" className={LIST}>
+                  {index.children(null).map((node) => branch(node, 0))}
+                </ul>
+              )}
+            </div>
           </ScrollArea>
           <div
             className="flex flex-col gap-1 text-meta tabular-nums"

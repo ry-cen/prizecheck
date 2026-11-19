@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import { Camera as CameraIcon, Menu as MenuIcon, Plus } from "lucide-react";
 import { useAddToast, type AddedCards } from "../catalog/useAddToast";
@@ -19,6 +20,7 @@ import { LendOfferDialog } from "../loans/LendOfferDialog";
 import { LentOutDialog } from "../loans/LentOutDialog";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
+import { useToastClearance } from "../ui/Toast";
 import { SearchField } from "../ui/SearchField";
 import { PhoneHeaderActions } from "../shell/HeaderActions";
 import { openScanner } from "../shell/openScanner";
@@ -118,7 +120,6 @@ export function Workspace({
   const [lentOpen, setLentOpen] = useState(false);
   // Friends' copies in the collector's Locations (#254): the tree's Borrowed entry.
   const [borrowedCopies, setBorrowedCopies] = useState("0");
-  const [borrowedOpen, setBorrowedOpen] = useState(false);
   // Lend to a Friend… (#258): the selected copies being offered, or null while the dialog is closed.
   const [lending, setLending] = useState<LendRow[] | null>(null);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
@@ -131,6 +132,8 @@ export function Workspace({
     new URL(lastAddress.current, window.location.origin).search
   );
   const view = route.location;
+  // The Borrowed list's own address (?borrowed=1): reload, Back, Forward and a pasted link bring it back.
+  const borrowedOpen = active && route.borrowed;
   const setView = (next: WorkspaceView) => {
     if (next !== view) onNavigate(collectionHref(next, query));
   };
@@ -265,6 +268,9 @@ export function Workspace({
   const narrowed =
     searchText.trim() !== "" || activeFilterCount(prefs.filters) > 0;
   const mobile = useMediaQuery(MOBILE_QUERY);
+  // The toast host and the bars under it stand over the page: the last row scrolls clear of them (a phone's shell
+  // clears them itself, and this page's own bottom padding adds to that).
+  const toastClearance = useToastClearance();
   // The card keys the desktop inspector wrote to the address. A missing card whose key it wrote is the
   // collector's own action (a Move, an Inventory Removal) and is dropped without a notice.
   const inspectedInUrl = useRef<string | null>(null);
@@ -277,6 +283,9 @@ export function Workspace({
   const asideRouted = useRef(false);
   const keepAsideCard = useRef(false);
   const asideReturn = useRef<HTMLButtonElement | null>(null);
+  // A Move that leaves copies of the card behind keeps the desktop aside open on it: the card the Move was started
+  // from, until the Move's dialog has closed. A phone's sheet closes after a Move, as it always has.
+  const keepCard = useRef<{ key: string; ordinal: number } | null>(null);
   const selection = useSelection({
     holdings: gallery.holdings,
     byKey: gallery.byKey,
@@ -303,14 +312,12 @@ export function Workspace({
     onInspect: (card) => {
       if (!active || mobile) return;
       if (card === null && keepAsideCard.current) return;
-      const next = collectionHref(
-        view,
-        query,
-        card?.holding.key,
-        card?.ordinal
-      );
+      const kept = card === null ? keepCard.current : null;
+      const shown = card ?? kept;
+      const key = card?.holding.key ?? kept?.key;
+      const next = collectionHref(view, query, key, shown?.ordinal);
       if (next === address) return;
-      if (card) inspectedInUrl.current = card.holding.key;
+      if (key) inspectedInUrl.current = key;
       onNavigate(next, { replace: true, preserveScroll: true });
     },
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
@@ -414,7 +421,6 @@ export function Workspace({
     setSettingsFor(null);
     setAdding(null);
     setLentOpen(false);
-    setBorrowedOpen(false);
     setLending(null);
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
@@ -460,8 +466,26 @@ export function Workspace({
     if (kind === "move") actions.openMove();
     else actions.openRemoval();
   }
+  // The Move is about to run: when copies of the card shown remain in its Location afterwards, its details stay.
+  function keepDetailsAfter(destinationId: string) {
+    keepCard.current = null;
+    if (mobile) return;
+    const subject = sheetActionCard.current ?? selection.inspected;
+    if (!subject) return;
+    const leaving =
+      destinationId === subject.holding.holding.location_id
+        ? 0
+        : (selection.selected.get(subject.holding.key)?.count ?? 0);
+    if (subject.holding.copies - leaving < 1) return;
+    keepCard.current = { key: subject.holding.key, ordinal: 0 };
+  }
+  function confirmMove(destinationId: string) {
+    keepDetailsAfter(destinationId);
+    actions.confirmMove(destinationId);
+  }
   function cancelInventoryDialog(forced = false) {
     if (actions.busy && !forced) return;
+    keepCard.current = null;
     actions.closeDialog(forced);
     const restore = sheetAction.current;
     // Only a sheet or aside action restores a selection or returns focus; a selection-bar dialog has
@@ -473,7 +497,9 @@ export function Workspace({
     endSheetAction();
   }
   useEffect(() => {
-    if (actions.dialog || !sheetAction.current) return;
+    if (actions.dialog) return;
+    keepCard.current = null;
+    if (!sheetAction.current) return;
     // Completion must schedule a commit even if the reload already removed the routed details.
     setSheetActionDone(true);
     if (!asideAction.current) selection.closeDetails();
@@ -824,7 +850,9 @@ export function Workspace({
           copies: borrowedCopies,
           onOpen: () => {
             setDrawerOpen(false);
-            setBorrowedOpen(true);
+            onNavigate(collectionHref(view, query, undefined, 0, true), {
+              overlay: true,
+            });
           },
         }}
       />
@@ -928,7 +956,10 @@ export function Workspace({
             marquee). The bottom padding on a phone keeps the selection strip off the last row. */}
         <main
           ref={marqueeArea}
-          className="box-border flex min-w-0 flex-col select-none px-(--layout-gutter) pt-7 pb-12 phone:pt-5 phone:pb-24"
+          className="box-border flex min-w-0 flex-col select-none px-(--layout-gutter) pt-7 pb-[max(calc(12*var(--spacing)),calc(var(--ws-toast-clearance)+var(--space-6)+var(--space-4)))] phone:pt-5 phone:pb-24"
+          style={
+            { "--ws-toast-clearance": `${toastClearance}px` } as CSSProperties
+          }
           aria-labelledby="ws-heading"
         >
           <div
@@ -1247,8 +1278,8 @@ export function Workspace({
         returnFocus={actions.actionsButton}
       />
       <BorrowedDialog
-        open={active && borrowedOpen}
-        onClose={() => setBorrowedOpen(false)}
+        open={borrowedOpen}
+        onClose={() => onCloseCard(collectionHref(view, query))}
         index={index}
         onMoved={() => void loadTree()}
         returnFocus={mobile ? drawerOpener : undefined}
@@ -1276,7 +1307,7 @@ export function Workspace({
           busy={actions.busy}
           progress={actions.progress}
           error={actions.dialogError}
-          onConfirm={actions.confirmMove}
+          onConfirm={confirmMove}
           onCancel={cancelInventoryDialog}
           returnFocus={sheetAction.current ? sheetActionOpener : undefined}
         />

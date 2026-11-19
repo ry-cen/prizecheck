@@ -221,7 +221,7 @@ export function CardDetails({
           className="inline-flex min-h-(--target-pointer) items-center text-accent underline underline-offset-2 hover:text-accent-strong phone:min-h-tap"
           href={metadataReportHref(holding.printing_id, holding.edition_id)}
         >
-          Report a problem with this card's data
+          Report card details
         </a>
       </div>
     </div>
