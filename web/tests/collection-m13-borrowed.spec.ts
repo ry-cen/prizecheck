@@ -228,7 +228,21 @@ for (const size of SIZES) {
     await expect(cards(page).getByRole("button").first()).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 600));
     await expect.poll(() => scroll(page)).toBe(600);
-    const tile = cards(page).getByRole("button").nth(14);
+    // A tile that began below the fold: were the scroll lost, it would be out of the viewport after the return.
+    const tiles = cards(page).getByRole("button");
+    const viewportHeight = page.viewportSize()!.height;
+    let label = "";
+    for (let i = 0; i < (await tiles.count()) && !label; i++) {
+      const box = await tiles.nth(i).boundingBox();
+      if (
+        box &&
+        box.y > viewportHeight - 600 &&
+        box.y + box.height < viewportHeight
+      )
+        label = (await tiles.nth(i).getAttribute("aria-label")) ?? "";
+    }
+    expect(label).not.toBe("");
+    const tile = cards(page).getByRole("button", { name: label, exact: true });
     await tile.click();
     await expect(page).toHaveURL(/[?&]card=/);
     const saved = await scroll(page);
@@ -238,7 +252,14 @@ for (const size of SIZES) {
     await expect(page).toHaveURL(/\/catalog/);
     await tab(page, "Collection").click();
     await expect(page).toHaveURL(address);
-    await expect(cards(page).getByRole("button").first()).toBeVisible();
+    // The card's details are back: the aside on a desktop, the sheet on a phone.
+    const details = size.phone
+      ? page.getByRole("dialog", { name: "Boss's Orders", exact: true })
+      : page.getByRole("complementary", { name: "Card details" });
+    await expect(details).toBeVisible();
+    await expect(details).toContainText("Boss's Orders");
+    // Before anything is clicked, so no auto-scroll can hide a lost position: the same tile is in view.
+    await expect(tile).toBeInViewport();
     await expect
       .poll(async () => Math.abs((await scroll(page)) - saved))
       .toBeLessThanOrEqual(2);
@@ -259,6 +280,7 @@ for (const size of SIZES) {
     expect(params(page).get("borrowed")).toBe("1");
     // History positions live in the page's memory, so a reload starts the entries before it at the top, for a card's
     // overlay as for this list; Back still closes the list over the same Location.
+    // The scroll position is intentionally not asserted here (an open low item, owner-waived).
     await page.goBack();
     await expect(borrowedDialog(page)).toHaveCount(0);
     expect(params(page).has("borrowed")).toBe(false);
