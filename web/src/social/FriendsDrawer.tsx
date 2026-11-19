@@ -692,7 +692,7 @@ function FriendsDialog({
           <div>
             <Button
               variant="quiet"
-              className="-ml-3 phone:-ml-4"
+              className="-ml-3 phone:-ml-4 focus-visible:-outline-offset-2"
               onClick={() => {
                 close();
                 onPrivacy();

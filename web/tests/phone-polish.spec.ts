@@ -148,3 +148,42 @@ test("Friends links line up with their content on phone", async ({
   await expectTouchTarget(link, ["height"]);
   expect(await left(link)).toBeGreaterThanOrEqual(0);
 });
+
+for (const width of [320, 375]) {
+  test(`The Privacy and blocked focus outline stays inside the drawer's clip at ${width}px`, async ({
+    collectors,
+  }) => {
+    const { page } = await setup(collectors, {
+      ...PHONE_SIZE,
+      viewport: { width, height: 812 },
+    });
+    await page.goto(`${ORIGIN}/decks`);
+    await openFriends(page);
+    const privacy = page
+      .getByRole("dialog", { name: "Friends" })
+      .getByRole("button", { name: "Privacy and blocked" });
+    await expect(privacy).toBeVisible();
+    // Reach it by keyboard so :focus-visible applies.
+    await privacy.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(privacy).toBeFocused();
+    const { outlineLeft, clipLeft, style } = await privacy.evaluate((el) => {
+      const css = getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      let clip = el.parentElement;
+      while (clip && getComputedStyle(clip).overflowX === "visible")
+        clip = clip.parentElement;
+      return {
+        style: css.outlineStyle,
+        // An outline reaches `offset + width` past the border box; a negative offset pulls it inside.
+        outlineLeft:
+          box.left -
+          (parseFloat(css.outlineOffset) + parseFloat(css.outlineWidth)),
+        clipLeft: clip!.getBoundingClientRect().left,
+      };
+    });
+    expect(style).not.toBe("none");
+    expect(outlineLeft).toBeGreaterThanOrEqual(clipLeft);
+  });
+}
