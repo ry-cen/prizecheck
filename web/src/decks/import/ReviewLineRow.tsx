@@ -15,8 +15,13 @@ import {
 } from "./importModel";
 import { LineResolver } from "./LineResolver";
 
-/** A fieldset with no look of its own, dimmed while it is disabled. */
-export const LOCKABLE = "m-0 min-w-0 border-0 p-0 disabled:opacity-60";
+/**
+ * A fieldset with no look of its own. Disabled, it dims nothing: the words in it keep their colour (a faded block of
+ * text fell below 4.5:1), and the controls show it themselves. Pointer events are off for their buttons, so no hover look
+ * suggests they can be pressed.
+ */
+export const LOCKABLE =
+  "m-0 min-w-0 border-0 p-0 disabled:[&_button]:pointer-events-none";
 
 type Props = {
   line: ReviewLine;

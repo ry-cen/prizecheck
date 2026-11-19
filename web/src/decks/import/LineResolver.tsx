@@ -11,7 +11,7 @@ import { printingText, searchStart, type Pick } from "./importModel";
 
 /** A choice button inside a resolver: 30 px tall on desktop, 44 px on a phone. */
 export const ROW =
-  "box-border flex min-h-control w-full cursor-pointer items-center rounded-control border border-border bg-bg px-2 py-1 text-left font-sans text-control text-text wrap-anywhere hover:bg-surface-raised phone:min-h-tap";
+  "box-border flex min-h-control w-full cursor-pointer items-center rounded-control border border-border bg-bg px-2 py-1 text-left font-sans text-control text-text wrap-anywhere hover:bg-surface-raised disabled:cursor-default disabled:text-text-muted disabled:hover:bg-bg phone:min-h-tap";
 
 type Row = {
   printing_id: string;

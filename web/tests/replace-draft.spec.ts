@@ -667,6 +667,62 @@ for (const [label, viewport] of [
       await expect(decklist(page)).not.toHaveAttribute("readonly", "");
     });
 
+    test("B13: a locked review keeps its text at full strength and passes the page checks: the Edition panel's instruction, the owned-cards explainer, and the controls that are disabled", async ({
+      page,
+    }) => {
+      seedCatalog();
+      await signIn(page);
+      const id = await deckBuilder(page);
+      const hold = await holdSave(page);
+      await replaceList(page, id);
+      await decklist(page).fill(PASTE);
+      await page.getByRole("button", { name: "Review 1 line" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Check the list", level: 1 })
+      ).toBeVisible();
+      await page
+        .getByRole("listitem")
+        .filter({ hasText: "Iono" })
+        .getByRole("button", { name: "Edition" })
+        .click();
+      const panel = page.getByRole("group", { name: /^Edition for / });
+      const instruction = panel.getByText(
+        "Choose the Edition for these cards:"
+      );
+      const explainer = page.getByText(/^Also uses cards you own/);
+      await expect(instruction).toBeVisible();
+
+      /** The opacity the text is really drawn at: its own, times every ancestor's. */
+      const drawn = (text: typeof instruction) =>
+        text.evaluate((element) => {
+          let opacity = 1;
+          for (
+            let node: Element | null = element;
+            node;
+            node = node.parentElement
+          )
+            opacity *= Number(getComputedStyle(node).opacity);
+          return opacity;
+        });
+      expect(await drawn(instruction)).toBe(1);
+      expect(await drawn(explainer)).toBe(1);
+
+      const sent = page.waitForRequest((request) => SAVE.test(request.url()));
+      await page.getByRole("button", { name: "Replace Deck List" }).click();
+      await sent;
+      // The panel's choices are disabled, and the words around them are not dimmed.
+      await expect(panel.getByRole("button").first()).toBeDisabled();
+      await expect(
+        page.getByRole("radio", { name: "Exact printings" })
+      ).toBeDisabled();
+      expect(await drawn(instruction)).toBe(1);
+      expect(await drawn(explainer)).toBe(1);
+      await expectPageChecks(
+        page,
+        "the locked review with its Edition panel open"
+      );
+    });
+
     test("B12: a save that fails under the question moves focus to Keep editing and announces the details once", async ({
       page,
     }) => {
