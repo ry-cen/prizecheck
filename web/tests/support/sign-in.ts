@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { Pool } from "pg";
+import { FAKE_SIGN_IN_FAILED, pollFakeSignIn } from "./fake-sign-in-wait";
 
 // Browser journeys sign in through the OAuth test fake (auth/testing/oauth-fake), which the gate loads into every stack's
 // gateway: the start route redirects to the fake consent page, which forwards to the real callback with the chosen
@@ -22,6 +23,8 @@ export type FakeSignIn = {
   /** The database the gateway uses, for clearing its rate limits (default DATABASE_URL). */
   databaseUrl?: string;
 };
+
+const FAKE_SIGN_IN_DEADLINE_MS = 30_000;
 
 function origin(): string {
   return process.env.TEST_ORIGIN || "http://localhost:5173";
@@ -70,12 +73,27 @@ export async function fakeSignIn(
     );
   };
   if (!sanitized) return walk();
+  // Playwright's URL waiters log every URL they see and add it to their error, and the runner records that raw message
+  // as a step error before any catch runs. So this path uses no waiter: it reads page.url() (a local read) and decides
+  // on the pathname alone, with a fixed message. The start address carries only the identity, never a code or state.
   try {
-    await walk();
+    await page.goto(start.href, { waitUntil: "commit" });
   } catch {
-    // Playwright's message would carry the consent or callback URL, with its code and state.
-    throw new Error("Fake sign-in did not complete");
+    throw new Error(FAKE_SIGN_IN_FAILED);
   }
+  const began = Date.now();
+  for (;;) {
+    const poll = pollFakeSignIn(
+      page.url(),
+      Date.now() - began,
+      FAKE_SIGN_IN_DEADLINE_MS
+    );
+    if (poll.state === "failed") throw new Error(poll.message);
+    if (poll.state === "done") break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  // The load wait's timeout message names no URL.
+  await page.waitForLoadState("load").catch(() => undefined);
 }
 
 /** The old Collection addresses the app rewrites to /collection (web/src/shell/routes.ts canonicalPath). */
