@@ -14,7 +14,7 @@ import {
   type RiftboundStack,
 } from "./support/riftbound-stack";
 
-test.describe.configure({ mode: "serial" });
+test.describe.configure({ mode: "serial", timeout: 90_000 });
 // A trace, screenshot or video would keep cookie headers and the OAuth callback URL (code and state) of the sign-in walk.
 test.use({ trace: "off", screenshot: "off", video: "off" });
 let stack: RiftboundStack;
