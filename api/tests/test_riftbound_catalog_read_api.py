@@ -16,15 +16,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.ops.operation_counts import counter
+from riftbound_catalog_seed import FINISHES, seed, wipe  # noqa: F401
 from test_riftbound_catalog_track import admin, databases, fresh  # noqa: F401
 
 CONTRACT = Path(__file__).parent / 'riftbound_contract'
 APP_DIR = Path(__file__).resolve().parents[1] / 'app'
 RB_SECRET, POKEMON_SECRET = 'synthetic-riftbound-secret', 'synthetic-pokemon-secret'
-FINISHES = {'normal': {'finish': 'normal'}, 'foil': {'finish': 'foil'},
-            'unspecified': {'kind': 'unspecified', 'label': 'Unspecified Variant'}}
-
-
 @pytest.fixture(scope='module')
 def entry():
     previous = counter.set_writer(None)
@@ -40,46 +37,6 @@ def signed(method, path, *, user='synthetic-user', secret=RB_SECRET, stamp=None,
     message = f"{method}\n{path}\n{hashlib.sha256(body).hexdigest()}\n{user}\n{stamp}".encode()
     return {'x-internal-user': user, 'x-internal-time': str(stamp),
             'x-internal-signature': hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()}
-
-
-def wipe(url):
-    with psycopg.connect(url) as conn:
-        conn.execute('''TRUNCATE catalog_generation_edition, catalog_generation_printing, catalog_generation,
-            catalog_edition, catalog_printing_display, catalog_printing, catalog_identity, catalog_review CASCADE''')
-        # CASCADE also empties catalog_state through its generation reference; put the singleton row back.
-        conn.execute('INSERT INTO catalog_state(singleton,active_generation) VALUES (true,NULL) ON CONFLICT DO NOTHING')
-        conn.execute('UPDATE catalog_state SET active_generation=NULL,revision=0 WHERE singleton')
-
-
-def seed(url, cards, *, activate=True):
-    """Insert one generation of cards [(name, number, set_id, set_name, finishes, flags)]; return (generation, {key: ids})."""
-    gen, made = uuid4(), {}
-    with psycopg.connect(url) as conn:
-        conn.execute('INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256) VALUES (%s,1,%s,%s)',
-                     (gen, b'synthetic', 'synthetic'))
-        for card in cards:
-            name, number, set_id, set_name, finishes, flags = (*card, {})[:6] if len(card) == 5 else card
-            identity = conn.execute('INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s) RETURNING id',
-                                    (str(uuid4()), name)).fetchone()[0]
-            source_id = str(9000001 + uuid4().int % 1000000000)
-            printing = conn.execute("INSERT INTO catalog_printing(source,source_id,identity_id) VALUES ('tcgcsv',%s,%s) RETURNING id",
-                                    (source_id, identity)).fetchone()[0]
-            conn.execute('''INSERT INTO catalog_generation_printing(generation_id,printing_id,source_id,set_id,set_name,
-                collector_number,display_name,search_name,source_fingerprint,basic_energy,tombstoned)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'synthetic','not_applicable',%s)''',
-                         (gen, printing, source_id, set_id, set_name, number, name, name.lower(), flags.get('tombstoned', False)))
-            ids = []
-            for finish in finishes:
-                descriptor = FINISHES[finish]
-                edition = conn.execute('''INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
-                    VALUES (%s,%s,%s) RETURNING id''', (printing, json.dumps(descriptor, sort_keys=True), json.dumps(descriptor))).fetchone()[0]
-                conn.execute('INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id,active) VALUES (%s,%s,%s,%s)',
-                             (gen, edition, printing, flags.get('active', True)))
-                ids.append(str(edition))
-            made[(name, number)] = {'printing': str(printing), 'editions': ids}
-        if activate:
-            conn.execute('UPDATE catalog_state SET active_generation=%s,revision=revision+1 WHERE singleton', (gen,))
-    return gen, made
 
 
 class Client:
@@ -403,3 +360,28 @@ def test_riftbound_openapi_snapshot(entry):
 
 def test_riftbound_route_table_snapshot(entry):
     assert route_table(entry.app) == json.loads((CONTRACT / 'routes.json').read_text())
+
+
+def test_browser_scenarios_match_the_connected_spec(rb):
+    from riftbound_catalog_seed import scenario
+    with psycopg.connect(rb.url) as conn:
+        assert conn.execute('SELECT count(*) FROM catalog_generation').fetchone()[0] == 0  # freshly wiped
+    scenario(rb.url, 'populated')
+    first = rb.get('/api/catalog/editions').json()
+    assert (first['total'], first['pages'], first['catalog_empty']) == (29, 2, False)
+    assert first['editions'][0]['name'] == 'Alpha Sprite' and len(first['editions']) == 24
+    assert len(rb.get('/api/catalog/editions', page=2).json()['editions']) == 5
+    made = scenario(rb.url, 'unaccepted')['editions']
+    with psycopg.connect(rb.url) as conn:
+        assert conn.execute('SELECT count(*) FROM catalog_generation').fetchone()[0] == 1
+        assert conn.execute('SELECT active_generation FROM catalog_state').fetchone()[0] is None
+    assert len(made) == 28
+    for name in ('unaccepted', 'empty'):
+        if name == 'empty':
+            assert scenario(rb.url, 'empty') == {'editions': {}}
+        page = rb.get('/api/catalog/editions').json()
+        assert (page['catalog_empty'], page['total']) == (True, 0)
+        if name == 'empty':
+            assert rb.get('/api/catalog/sets').json() == []
+    with pytest.raises(ValueError):
+        scenario(rb.url, 'nope')
