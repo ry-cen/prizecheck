@@ -46,7 +46,7 @@ jobs:
         run: bash mobile/boot-simulator.sh
       - run: npm ci
       - run: npm run ios:sync
-      - name: Compile unsigned app and UI tests through Swift Package Manager
+      - name: Compile ad-hoc signed app and UI tests through Swift Package Manager
         run: |
           set -o pipefail
           mkdir -p .scratch
@@ -54,6 +54,6 @@ jobs:
             -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .scratch/ios-derived \
-            CODE_SIGNING_ALLOWED=NO build-for-testing | tee .scratch/ios-build.log
+            CODE_SIGN_IDENTITY=- build-for-testing | tee .scratch/ios-build.log
       - name: Install, launch and exercise real simulator UI and bridge
         run: bash mobile/validate-simulator.sh
