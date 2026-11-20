@@ -127,4 +127,8 @@ A local-only candidate adds diagnostics to find where the native sign-in test st
 
 Local reproduction with headless Chromium against the committed stub: with the consent page's `referrer-policy: no-referrer`, the form POST arrives with `Origin: null` and fails the stub's exact-Origin check with 403. With only the referrer policy changed to `same-origin`, the POST carries the exact Origin and gets 303.
 
-Fixture-only fix: the simulator stub's native pages now send `referrer-policy: same-origin`; the exact-Origin and nonce checks are unchanged, and a test pins that `Origin: null` is still refused. The gateway is not changed (see the known issue in `NATIVE_SIGN_IN.md`). No hosted run of this fix has happened yet, so this records no pass.
+Fixture-only fix: the simulator stub's native pages now send `referrer-policy: same-origin`; the exact-Origin and nonce checks are unchanged, and a test pins that `Origin: null` is still refused. When this fixture-only fix was made (`af88637c`), the gateway was not changed. The gateway's own fix is the later "Fixed" note in `NATIVE_SIGN_IN.md`. [Run 44254633525](https://github.com/ry-cen/prizecheck/actions/runs/44254633525) at `af88637c` then exercised the fixed stub: 5 of 6 tests passed. The native test got past consent (`approve_post` 303, `token` 200, `callback_code`, `token_http status=200`) and failed at `keychain_save status=-34018`.
+
+### Simulator ad-hoc signing (candidate, not run)
+
+Hosted run 44254633525 at `af88637c` logged `keychain_save status=-34018` and the UI showed "Unable to sign in": the unsigned build (`CODE_SIGNING_ALLOWED=NO`) cannot use the Keychain. The workflow build and `validate-simulator.sh` test invocation now pass `CODE_SIGN_IDENTITY=-` (ad-hoc, no team, certificate, account or secret) instead, and the script prints the app's signature and entitlements after `simctl install`. No hosted or simulator run of this change has happened yet, so this records no pass.

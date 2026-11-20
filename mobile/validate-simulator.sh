@@ -34,6 +34,9 @@ else
 fi
 xcrun simctl bootstatus "$simulator_id" -b
 xcrun simctl install "$simulator_id" .scratch/ios-derived/Build/Products/Debug-iphonesimulator/App.app
+echo "== app signature and entitlements (ad-hoc values, no secrets) =="
+codesign -dv --entitlements - .scratch/ios-derived/Build/Products/Debug-iphonesimulator/App.app 2>&1 \
+  | grep -E '^(Identifier|Signature|TeamIdentifier|Authority)=|application-identifier|keychain-access-groups|get-task-allow|<key>|<string>' || true
 xcrun simctl launch "$simulator_id" app.prizecheck.prototype
 node mobile/fixture-browser.mjs > .scratch/ios-fixture.log 2>&1 &
 fixture_pid=$!
@@ -77,5 +80,5 @@ xcodebuild -project mobile/ios/App/App.xcodeproj -scheme FixtureValidation \
   -configuration Debug -destination "platform=iOS Simulator,id=$simulator_id" \
   -derivedDataPath .scratch/ios-derived -resultBundlePath .scratch/ios-ui.xcresult \
   -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1 \
-  CODE_SIGNING_ALLOWED=NO test-without-building | tee .scratch/ios-ui.log
+  CODE_SIGN_IDENTITY=- test-without-building | tee .scratch/ios-ui.log
 xcrun xcresulttool get test-results summary --path .scratch/ios-ui.xcresult
