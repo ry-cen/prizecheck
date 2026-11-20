@@ -10,5 +10,10 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.tsx", "src/**/*.ts", "vite.config.ts"]
+  "include": [
+    "src/**/*.tsx",
+    "src/**/*.ts",
+    "vite.config.ts",
+    "vite-ios.config.ts"
+  ]
 }

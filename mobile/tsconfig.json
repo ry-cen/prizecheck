@@ -1,0 +1,9 @@
+{
+  "extends": "../web/tsconfig.json",
+  "include": [
+    "../capacitor.config.ts",
+    "../web/vite-ios.config.ts",
+    "../web/src/shell/ios/**/*.ts",
+    "../web/src/shell/ios/**/*.tsx"
+  ]
+}
