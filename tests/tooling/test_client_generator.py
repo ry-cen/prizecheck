@@ -243,8 +243,17 @@ class Emitters(unittest.TestCase):
             self.assertTrue(callable(module.render), name)
             self.assertTrue((ROOT / module.TARGET).exists(), name)
         self.assertEqual(len(set(targets)), len(targets))
-        on_disk = {f'web/src/{path.name}' for path in (ROOT / 'web/src').glob('*generated.ts')}
+        on_disk = {str(path.relative_to(ROOT)) for path in (ROOT / 'web/src').rglob('*generated.ts')}
         self.assertEqual(set(targets), on_disk)
+
+    def test_riftbound_client_reads_the_riftbound_contract_through_its_prefix(self):
+        module = load('generate_riftbound_catalog_client')
+        text = (ROOT / module.TARGET).read_text()
+        for needle in ("RIFTBOUND_API_PREFIX = '/api/riftbound'", '/catalog/editions', 'AbortSignal',
+                       "credentials: 'same-origin'", "'RIFTBOUND_CATALOG_REQUEST_FAILED'"):
+            self.assertIn(needle, text)
+        self.assertNotIn("'/api/catalog", text)
+        self.assertTrue(callable(module.load_openapi))
 
     def test_no_emitter_carries_its_own_schema_traversal(self):
         for name in everything.emitter_names():
@@ -268,6 +277,11 @@ class WriteOrCheck(unittest.TestCase):
         self.assertIsNone(gen.write_or_check(self.module, {'text': 'one\n'}, check=False))
         self.assertEqual((Path(self.directory.name) / 'out_generated.ts').read_text(), 'one\n')
         self.assertIsNone(gen.write_or_check(self.module, {'text': 'one\n'}, check=True))
+
+    def test_an_emitter_can_supply_its_own_contract(self):
+        self.module.load_openapi = lambda: {'text': 'own\n'}
+        self.assertIsNone(gen.write_or_check(self.module, {'text': 'shared\n'}, check=False))
+        self.assertEqual((Path(self.directory.name) / 'out_generated.ts').read_text(), 'own\n')
 
     def test_check_names_a_stale_file_and_the_script_that_fixes_it(self):
         self.assertIn('out_generated.ts is stale', gen.write_or_check(self.module, {'text': 'one\n'}, check=True))
