@@ -163,6 +163,16 @@ def check(out, web_root, public, private, extra, build_output=''):
     for page in public + private:
         if not manifest.get(page, {}).get('isDynamicEntry'):
             problems.append(f'{page} has no chunk of its own; something imports it statically')
+    # The Riftbound fixture entry is dev-only. No released chunk (including lazy/private ones) may contain it.
+    riftbound_root = os.path.realpath(web_root / 'src/games/riftbound') + os.sep
+    for record in manifest.values():
+        file = record.get('file', '')
+        if file.endswith('.js'):
+            modules = chunk_sources(out, file)
+            if modules is None:
+                problems.append(f'no source map for {file}')
+            elif any(source.startswith(riftbound_root) for source in modules):
+                problems.append(f'local-only Riftbound module is in production chunk {file}')
     entry_keys = closure(manifest, MAIN_ENTRY, problems)
     scanner_keys = closure(manifest, SCANNER_ENTRY, problems)
     # (route, chunk keys, forbidden modules, whether the ONNX runtime package is forbidden)

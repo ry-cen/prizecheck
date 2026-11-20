@@ -58,6 +58,14 @@ def run_check(directory, records, **kwargs):
 
 
 class BundleBoundaryTest(unittest.TestCase):
+    def test_local_riftbound_is_excluded_even_from_private_lazy_chunks(self):
+        for key in ('index.html', 'scan.html', WORKSPACE):
+            records = clean(**{key: {'sources': ['src/games/riftbound/local/fixtures.ts']}})
+            with tempfile.TemporaryDirectory() as directory:
+                result = run_check(directory, records)
+                self.assertFalse(result['ok'])
+                self.assertTrue(any('local-only Riftbound module' in p for p in result['problems']))
+
     def test_a_clean_split_passes(self):
         with tempfile.TemporaryDirectory() as directory:
             result = run_check(directory, clean())
