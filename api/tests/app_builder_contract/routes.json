@@ -864,6 +864,14 @@
     "<class 'app.games.pokemon.publications.models.DiscoveryPage'>"
   ],
   [
+    "/api/public/robots.txt",
+    ["GET"],
+    "robots",
+    "app.games.pokemon.publications.discovery",
+    "robots",
+    "None"
+  ],
+  [
     "/api/public/sitemap.xml",
     ["GET"],
     "sitemap",
