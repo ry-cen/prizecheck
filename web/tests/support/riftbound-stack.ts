@@ -31,6 +31,8 @@ export type RiftboundStack = {
   origin: string;
   entry: string;
   databaseUrl: string;
+  /** The validated DSN of the database the gateway signs in against (the stack's own, not a raw DATABASE_URL). */
+  authDatabaseUrl: string;
   relay: {
     mode: RelayMode;
     calls: number;
@@ -366,7 +368,7 @@ export async function startRiftboundStack(): Promise<RiftboundStack> {
         const failed = await runAll(mine);
         if (failed.length)
           throw new TeardownError(
-            `Riftbound stack: teardown failed (${failed.join(", ")})`
+            `${error instanceof StackError ? error.message : "Riftbound stack: start-up failed"}; Riftbound stack: teardown failed (${failed.join(", ")})`
           );
         throw error;
       }
@@ -398,6 +400,7 @@ export async function startRiftboundStack(): Promise<RiftboundStack> {
       origin: up.origin,
       entry: up.entry,
       databaseUrl,
+      authDatabaseUrl: adminDsn,
       relay,
       seed: (scenario) =>
         JSON.parse(

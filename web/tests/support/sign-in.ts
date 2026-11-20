@@ -19,6 +19,8 @@ export type FakeSignIn = {
   origin?: string;
   /** Report a failed walk without the callback URL, code, state or cookies (default false: Playwright's own message). */
   sanitized?: boolean;
+  /** The database the gateway uses, for clearing its rate limits (default DATABASE_URL). */
+  databaseUrl?: string;
 };
 
 function origin(): string {
@@ -30,8 +32,10 @@ function origin(): string {
  * which would soon pass the sign-in start limit (60 per hour) and, on a public stack, the creation limits: clear them
  * first, as the email journeys cleared auth_send_event.
  */
-async function prepareFakeSignIn(page: Page) {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+async function prepareFakeSignIn(page: Page, databaseUrl?: string) {
+  const pool = new Pool({
+    connectionString: databaseUrl ?? process.env.DATABASE_URL,
+  });
   try {
     await pool.query("DELETE FROM auth_rate_event");
   } finally {
@@ -49,9 +53,10 @@ export async function fakeSignIn(
     next,
     origin: at,
     sanitized = false,
+    databaseUrl,
   }: FakeSignIn = {}
 ): Promise<void> {
-  await prepareFakeSignIn(page);
+  await prepareFakeSignIn(page, databaseUrl);
   const start = new URL(`/auth/sign-in/${provider}`, at ?? origin());
   if (next) start.searchParams.set("next", next);
   start.searchParams.set("fake_identity", identity);

@@ -48,4 +48,22 @@ describe("the Riftbound stack's database address", () => {
       expect(error!.message).not.toContain("db.example");
     }
   });
+
+  it("names no part of an unsupported parameter, even one with an encoded =", () => {
+    for (const query of [
+      "?token%3Dhunter2=abc",
+      "?api_key=hunter2",
+      "?sslmode=disable&x%3Dhunter2=1",
+    ]) {
+      let message = "";
+      try {
+        canonicalDsn(base + query);
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toBe("unsupported database URL parameter");
+      for (const leak of ["token", "api_key", "hunter2", "abc", "x="])
+        expect(message).not.toContain(leak);
+    }
+  });
 });
