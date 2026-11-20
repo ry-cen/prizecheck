@@ -8,6 +8,8 @@ new helper module from it.
 
 An emitter module defines ``TARGET`` (the file under the repository root) and ``render(openapi) -> str``, and ends with
 ``if __name__ == "__main__": client_generator.main(__name__)``. ``scripts/generate_all_clients.py`` runs every emitter.
+An emitter for another app may also define ``load_openapi()``; ``write_or_check`` then renders that document instead of
+the shared one.
 """
 import json
 import sys
@@ -24,6 +26,19 @@ def load_openapi():
     """The FastAPI app's OpenAPI document (the generated clients' only input)."""
     from app.main import app  # noqa: E402
 
+    return app.openapi()
+
+
+def load_riftbound_openapi():
+    """The Riftbound entry's OpenAPI document. Importing it rebinds the process-wide operation counter writer, so the
+    previous writer is put back whatever happens (Pokémon's output is unchanged)."""
+    from app.core.ops.operation_counts import counter  # noqa: E402
+
+    previous = counter.set_writer(None)
+    try:
+        from app.riftbound_main import app  # noqa: E402
+    finally:
+        counter.set_writer(previous)
     return app.openapi()
 
 
@@ -166,7 +181,8 @@ def main(module_name, argv=None):
 def write_or_check(module, openapi, check):
     """Writes ``module``'s file (returning None), or checks it (returning a message when stale)."""
     target = ROOT / module.TARGET
-    content = module.render(openapi)
+    document = module.load_openapi() if hasattr(module, "load_openapi") else openapi
+    content = module.render(document)
     if not check:
         target.write_text(content)
         return None
