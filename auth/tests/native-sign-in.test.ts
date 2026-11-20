@@ -420,7 +420,7 @@ describe("start", () => {
     expect(response.headers.get("content-security-policy")).toBe(
       "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' prizecheck-native:; base-uri 'none'; frame-ancestors 'none'"
     );
-    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     const html = await response.text();
     expect(html).toContain("<h1>Sign in to Prizecheck</h1>");
@@ -445,6 +445,7 @@ describe("start", () => {
       approvePath(challenge, state)
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
   });
 });
 
@@ -476,7 +477,7 @@ describe("approve page", () => {
     expect(response.headers.get("content-security-policy")).toContain(
       "form-action 'self' prizecheck-native:"
     );
-    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     const html = await response.text();
     expect(html).toContain("Allow the app to read your Collection?");
@@ -585,6 +586,26 @@ describe("approve", () => {
       expect(response.headers.get("content-type")).toContain("text/html");
     }
     expect(await grants(on)).toBe(before);
+  });
+
+  it("still refuses an Origin: null approve POST that is otherwise valid, and issues no code", async () => {
+    const { challenge, state } = pkce();
+    const jar = await webSignIn(on, "owner", challenge, state);
+    const nonce = await nonceOf(on, jar, challenge, state);
+    const before = await grants(on);
+    const response = await postApprove(
+      on,
+      jar,
+      { challenge, state, nonce },
+      { origin: "null" }
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("location")).toBeNull();
+    expect(await grants(on)).toBe(before);
+    // The same session, nonce, challenge and state pass with the exact Origin.
+    const allowed = await postApprove(on, jar, { challenge, state, nonce });
+    expect(allowed.status).toBe(303);
+    expect(await grants(on)).toBe(before + 1);
   });
 
   it("refuses a missing session, a missing, stale, other-session or other-challenge nonce", async () => {
