@@ -27,13 +27,13 @@ The callback is `prizecheck-native://auth/callback`. challenge and state are 43 
 5. `GET /api/collection` with `Authorization: Bearer <token>` and no cookie is forwarded as that collector, signed like a cookie session. With the switch on, any other request that carries an `Authorization` header is `401 {"error":"Authentication required"}`; there is no fallback to the cookie.
 6. `POST /auth/native/sign-out` with the bearer revokes that credential and always answers 204.
 
-Every native HTML page carries `cache-control: no-store`, `referrer-policy: no-referrer`, `x-content-type-options: nosniff` and `content-security-policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self' prizecheck-native:; base-uri 'none'; frame-ancestors 'none'`. The `form-action` list names the app's callback scheme because CSP Level 3 applies `form-action` to the redirect that follows a form post: with `'self'` alone, WebKit or Chromium can block the `303` from `POST /auth/native/approve` to `prizecheck-native://auth/callback`. This replaces the `form-action 'self'` in the original brief; no other directive or header changed.
+Every native HTML page carries `cache-control: no-store`, `referrer-policy: same-origin`, `x-content-type-options: nosniff` and `content-security-policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self' prizecheck-native:; base-uri 'none'; frame-ancestors 'none'`. The `form-action` list names the app's callback scheme because CSP Level 3 applies `form-action` to the redirect that follows a form post: with `'self'` alone, WebKit or Chromium can block the `303` from `POST /auth/native/approve` to `prizecheck-native://auth/callback`. This replaces the `form-action 'self'` in the original brief; no other directive or header changed.
 
 Only sha256 hashes of the code and the token are stored. Nothing logs a code, verifier, token, header or body.
 
-## Known issue: consent POST Origin under `no-referrer`
+## Fixed: consent POST Origin and the referrer policy
 
-The gateway's native pages send `referrer-policy: no-referrer`, so a real browser's consent form POST carries `Origin: null`, and the gateway's strict Origin check would reject it with 403. Proposed fix, not made: `same-origin`. It needs owner approval. The simulator stub (`mobile/native-fixture.mjs`) already uses `same-origin`.
+With `referrer-policy: no-referrer` on the HTML pages, a real browser's consent form POST carried `Origin: null` and the gateway's exact-Origin check refused it with 403. The gateway's HTML pages now send `same-origin`, so the form POST carries the exact `PUBLIC_ORIGIN`. The `302`/`303` redirects still send `no-referrer`, JSON responses are unchanged (they set no referrer policy), and the Origin check is unchanged: a test pins that `Origin: null` is still refused. The simulator stub (`mobile/native-fixture.mjs`) already used `same-origin`.
 
 ## Run it locally against the OAuth fake
 

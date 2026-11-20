@@ -89,7 +89,7 @@ const PAGE_HEADERS = {
   "cache-control": "no-store",
   "content-security-policy":
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' prizecheck-native:; base-uri 'none'; frame-ancestors 'none'",
-  "referrer-policy": "no-referrer",
+  "referrer-policy": "same-origin",
   "x-content-type-options": "nosniff",
 };
 
