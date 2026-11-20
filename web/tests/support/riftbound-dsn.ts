@@ -32,11 +32,9 @@ export function approvedParts(raw: string) {
   if (!LOOPBACK.has(url.hostname))
     throw new DsnRejected("the database host is not loopback");
   for (const key of url.searchParams.keys()) {
-    const name = key.toLowerCase();
-    if (TARGET_PARAMS.has(name) || name !== "sslmode")
-      throw new DsnRejected(
-        `the database address carries a "${name}" parameter`
-      );
+    // One fixed message: a key can carry anything, an encoded "=" included, and must never reach a diagnostic.
+    if (TARGET_PARAMS.has(key.toLowerCase()) || key.toLowerCase() !== "sslmode")
+      throw new DsnRejected("unsupported database URL parameter");
   }
   return {
     username: url.username,

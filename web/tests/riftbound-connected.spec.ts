@@ -18,15 +18,27 @@ test.describe.configure({ mode: "serial", timeout: 90_000 });
 // A trace, screenshot or video would keep cookie headers and the OAuth callback URL (code and state) of the sign-in walk.
 test.use({ trace: "off", screenshot: "off", video: "off" });
 let stack: RiftboundStack;
+let noSnapshot: string | undefined;
 test.beforeAll(async () => {
   test.setTimeout(180_000);
+  // Playwright's automatic page snapshot (error-context.md) is taken whatever the trace and screenshot settings say, and
+  // the fake consent page's Continue link holds the callback URL, code and state. Off for this file's tests.
+  noSnapshot = process.env.PLAYWRIGHT_NO_COPY_PROMPT;
+  process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
   stack = await startRiftboundStack();
 });
 test.afterAll(async () => {
+  if (noSnapshot === undefined) delete process.env.PLAYWRIGHT_NO_COPY_PROMPT;
+  else process.env.PLAYWRIGHT_NO_COPY_PROMPT = noSnapshot;
   await stack?.stop();
 });
 test.beforeEach(() => {
   stack.relay.mode = "sign";
+});
+// Second guard: a failed test leaves the page on a blank document, so no page capture can hold a consent or callback URL.
+test.afterEach(async ({ page }, info) => {
+  if (info.status !== info.expectedStatus)
+    await page.goto("about:blank").catch(() => undefined);
 });
 
 type Seen = { path: string; status: number };
@@ -36,7 +48,11 @@ const API = "/api/riftbound/catalog/";
 
 /** Signs in through the stack's own gateway, then leaves the page on a blank document with Pokémon sentinels stored. */
 async function signIn(page: Page) {
-  await fakeSignIn(page, { origin: stack.origin, sanitized: true });
+  await fakeSignIn(page, {
+    origin: stack.origin,
+    sanitized: true,
+    databaseUrl: stack.authDatabaseUrl,
+  });
   await page.goto(`${stack.origin}/auth/session`);
   await page.evaluate(() => {
     localStorage.setItem(
@@ -173,6 +189,9 @@ for (const width of [1280, 390]) {
       // Game-scoped state.
       expect(seen.length).toBeGreaterThan(0);
       for (const s of seen) expect(s.path.startsWith(API), s.path).toBe(true);
+      expect(seen.requests.length).toBeGreaterThan(0);
+      for (const path of seen.requests)
+        expect(path.startsWith(API), path).toBe(true);
       const paths = seen.map((s) => s.path);
       expect(paths).toContain(API + "sets");
       expect(paths).toContain(API + "editions");
