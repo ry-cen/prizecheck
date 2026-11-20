@@ -35,12 +35,8 @@ test.afterAll(async () => {
 test.beforeEach(() => {
   stack.relay.mode = "sign";
 });
-// Second guard: a failed test leaves the page on a blank document, so no page capture can hold a consent or callback URL.
-test.afterEach(async ({ page }, info) => {
-  if (info.status !== info.expectedStatus)
-    await page.goto("about:blank").catch(() => undefined);
-});
-
+// No afterEach navigation: the snapshot suppression above stays on through cleanup (afterEach runs before the context
+// closes and before the recorder's final snapshot), and an about:blank goto could race the OAuth redirect.
 type Seen = { path: string; status: number };
 /** Responses by path and status; `requests` holds the paths asked for, answered or not. */
 type Observed = Seen[] & { requests: string[] };
