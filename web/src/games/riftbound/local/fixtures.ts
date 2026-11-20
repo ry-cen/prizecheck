@@ -116,6 +116,7 @@ export function fixtureReader(scenario: Scenario = "normal"): CatalogReader {
   const rows = scenario === "empty" ? [] : editions;
   return {
     scope: "riftbound",
+    facets: true,
     sets: (signal) => read(sets, signal, "sets"),
     list: (q: Query, signal) => {
       const search = q.search.trim().toLowerCase();

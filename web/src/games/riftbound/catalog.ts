@@ -9,10 +9,10 @@ export type Edition = {
   set: CatalogSet;
   number: string;
   domain: Domain | null;
-  type: CardType;
+  type: CardType | null;
   finish: string;
   art: string | null;
-  orientation: "portrait" | "landscape";
+  orientation: "portrait" | "landscape" | null;
 };
 export type Query = {
   search: string;
@@ -26,12 +26,26 @@ export type Page = {
   total: number;
   pages: number;
   catalogEmpty: boolean;
+  /** The page actually returned; when absent the view uses the query page. */
+  page?: number;
 };
 export interface CatalogReader {
   readonly scope: "riftbound";
+  /** false: domain and type are not served; absent means true. */
+  readonly facets?: boolean;
   sets(signal: AbortSignal): Promise<CatalogSet[]>;
   list(query: Query, signal: AbortSignal): Promise<Page>;
   detail(id: string, signal: AbortSignal): Promise<Edition | null>;
+}
+export type ReadFailure = "denied" | "invalid" | "unavailable";
+export class CatalogReadError extends Error {
+  constructor(public kind: ReadFailure) {
+    super(kind);
+    this.name = "CatalogReadError";
+  }
+}
+export function failureKind(error: unknown): ReadFailure {
+  return error instanceof CatalogReadError ? error.kind : "unavailable";
 }
 export const emptyQuery: Query = {
   search: "",
