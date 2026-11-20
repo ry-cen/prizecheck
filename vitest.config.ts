@@ -5,6 +5,7 @@ export default defineConfig({
       "auth/tests/**/*.test.ts",
       "web/src/shell/**/*.test.ts",
       "web/src/shell/**/*.test.tsx",
+      "web/src/games/riftbound/**/*.test.ts",
       "web/src/catalog/**/*.test.ts",
       "web/src/decks/**/*.test.ts",
       "web/src/loans/**/*.test.ts",
