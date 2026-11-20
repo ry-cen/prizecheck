@@ -15,6 +15,8 @@ export type FakeSignIn = {
   provider?: "google" | "discord";
   /** Passed to the start route as `next`; the gateway checks it. */
   next?: string;
+  /** The origin to sign in at, for a spec that runs its own gateway (default TEST_ORIGIN). */
+  origin?: string;
 };
 
 function origin(): string {
@@ -39,10 +41,10 @@ async function prepareFakeSignIn(page: Page) {
 /** Walks start, fake consent and callback in the browser; resolves once the browser has left the fake. */
 export async function fakeSignIn(
   page: Page,
-  { identity = "owner", provider = "google", next }: FakeSignIn = {}
+  { identity = "owner", provider = "google", next, origin: at }: FakeSignIn = {}
 ): Promise<void> {
   await prepareFakeSignIn(page);
-  const start = new URL(`/auth/sign-in/${provider}`, origin());
+  const start = new URL(`/auth/sign-in/${provider}`, at ?? origin());
   if (next) start.searchParams.set("next", next);
   start.searchParams.set("fake_identity", identity);
   await page.goto(start.href, { waitUntil: "commit" });
