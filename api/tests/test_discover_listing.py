@@ -44,7 +44,7 @@ TODAY = date(2026, 10, 11)
 LEGAL = (("me01-001", 1), ("me01-125", 4), ("me01-130", 4), ("sv02-278", 51))
 OVER = (("me01-001", 1), ("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv05-157", 1), ("sv05-162", 1),
         ("sv02-278", 52))
-UNKNOWN = (("fixture-me06-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52))
+UNKNOWN = (("fixture-me07-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52))
 ROTATING = (("me01-001", 1), ("sv01-172", 4), ("me01-125", 4), ("sv02-278", 51))
 # A Basic Pokémon ex legal in Standard: the featured card of a deck that holds it, over a Pokémon with more copies.
 SPROUT_EX = card(id="fixture-me01-904", name="Fixture Sprout ex", localId="904", category="Pokemon",

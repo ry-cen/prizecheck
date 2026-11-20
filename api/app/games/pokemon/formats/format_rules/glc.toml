@@ -19,8 +19,8 @@
 
 format = "glc"
 name = "Gym Leader Challenge"
-revision = 1
-published = 2026-10-11
+revision = 2
+published = 2026-11-18
 # GLC Update 1.6 took effect on 2025-04-24; every later change (Dimension Valley) is on the ban list with its date.
 covers_from = 2025-04-24
 
@@ -1057,6 +1057,14 @@ id = "me05"
 name = "Pitch Black"
 released = 2026-07-17
 legal_from = 2026-07-31
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "me06"
+name = "Delta Reign"
+released = 2026-11-06
+legal_from = 2026-11-20
 basis = "second_friday"
 legal_by = "set"
 

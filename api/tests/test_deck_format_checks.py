@@ -7,7 +7,7 @@ rules are the real Standard rules file. Every check passes an explicit ``as_of``
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
-from app.games.pokemon.formats.format_evaluator import FORMATS
+from app.games.pokemon.formats.format_evaluator import FORMATS, format_rules
 
 from test_card_attributes import (ACE_SPEC_ENERGY, ACE_SPEC_SV, BULBASAUR_ME, ENERGY_SEARCH, ENERGY_SV, RARE_CANDY_ME,
                                   SWITCH_ME, card, edition_of)
@@ -24,10 +24,10 @@ RESEARCH_JUNIPER = card(id="fixture-sv01-901", name="Professor's Research (Profe
 RESEARCH_MAGNOLIA = card(id="fixture-sv01-902", name="Professor's Research (Professor Magnolia)", localId="902",
                          category="Trainer", set={"id": "sv01", "name": "Scarlet & Violet"}, regulationMark="H",
                          rarity="Common")
-# me06 Delta Reign was unreleased on 2026-10-11, so the rules record no legal date for it. A Pokémon, because a me06
+# me07 (a made-up set after Delta Reign) has no legal date in the rules. A Pokémon, because a me07
 # Trainer's ACE SPEC status is unknown too.
-DELTA_POKEMON = card(id="fixture-me06-3", name="Fixture Pokémon", localId="3", category="Pokemon",
-                     set={"id": "me06", "name": "Delta Reign"}, regulationMark="J", stage="Basic", rarity="Common",
+DELTA_POKEMON = card(id="fixture-me07-3", name="Fixture Pokémon", localId="3", category="Pokemon",
+                     set={"id": "me07", "name": "Delta Future"}, regulationMark="J", stage="Basic", rarity="Common",
                      types=["Fire"])
 FUTURE_MARK = card(id="fixture-me05-901", name="Fixture Future Trainer", localId="901", category="Trainer",
                    set={"id": "me05", "name": "Pitch Black"}, regulationMark="K", rarity="Common")
@@ -93,8 +93,8 @@ def test_a_legal_deck_is_standard_legal():
     assert [result["format"] for result in results] == list(FORMATS)
     assert [{**result, "computed_at": None} for result in results[:2]] == [
         {"format": name, "status": "legal", "issues": [], "rules_version": version, "evaluated_on": "2026-10-11",
-         "notes": [], "computed_at": None} for name, version in (("standard", "1 (2026-10-11)"),
-                                                                  ("expanded", "2 (2026-10-11)"))]
+         "notes": [], "computed_at": None} for name, version in (("standard", format_rules("standard").version),
+                                                                  ("expanded", format_rules("expanded").version))]
     # Four Rare Candy and four Switch break Gym Leader Challenge's one-copy rule.
     assert (results[2]["status"], {issue["code"] for issue in results[2]["issues"]}) == ("not_legal", {"copy_limit"})
     # Naming the Target Format answers the same result, reused from the save.
@@ -117,12 +117,12 @@ def test_a_deck_over_its_copy_and_ace_spec_limits_is_not_legal():
 def test_an_unrecorded_set_and_an_unknown_mark_make_a_deck_unknown():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck = deck_with([("fixture-me06-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52)])
+    owner, deck = deck_with([("fixture-me07-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52)])
     result = standard(owner, deck, "2026-10-11")
     assert result["status"] == "unknown"
     assert issues(result) == {
-        ("set_date_not_recorded", "set legality date not recorded for me06", "card", "unknown",
-         lines("fixture-me06-3")),
+        ("set_date_not_recorded", "set legality date not recorded for me07", "card", "unknown",
+         lines("fixture-me07-3")),
         ("regulation_mark_not_in_rules", "regulation mark K not in rules", "card", "unknown",
          lines("fixture-me05-901"))}
 
@@ -151,7 +151,8 @@ def test_checks_default_to_today_and_a_future_date_carries_a_note():
     future = (after + timedelta(days=400)).isoformat()
     [ahead] = format_checks(owner, deck, f"?format=standard&as_of={future}")["results"]
     assert ahead["evaluated_on"] == future and ahead["status"] == "legal"
-    assert ahead["notes"] == [f"{future} is in the future: rules published after this rules file (2026-10-11) are "
+    published_on = format_rules("standard").published.isoformat()
+    assert ahead["notes"] == [f"{future} is in the future: rules published after this rules file ({published_on}) are "
                               "unknown, so this result assumes no later rule changes."]
     assert date.fromisoformat(future) > after
 

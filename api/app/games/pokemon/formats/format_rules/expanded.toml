@@ -17,8 +17,8 @@
 
 format = "expanded"
 name = "Expanded"
-revision = 2
-published = 2026-10-11
+revision = 3
+published = 2026-11-18
 # The Perfect Order ban change took effect on 2026-04-10. From then on every ban change is read from a primary source;
 # before it, unbans are not known, so earlier checks are unknown.
 covers_from = 2026-04-10
@@ -1132,6 +1132,14 @@ id = "me05"
 name = "Pitch Black"
 released = 2026-07-17
 legal_from = 2026-07-31
+basis = "second_friday"
+legal_by = "mark"
+
+[[sets]]
+id = "me06"
+name = "Delta Reign"
+released = 2026-11-06
+legal_from = 2026-11-20
 basis = "second_friday"
 legal_by = "mark"
 

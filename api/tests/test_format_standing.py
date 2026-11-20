@@ -42,10 +42,10 @@ from test_expanded_format_checks import NET_REPRINT, SCOOP_UP_NET
 from test_reprint_groups import CANDY_ME, CANDY_SV
 
 ROOT = Path(__file__).resolve().parents[2]
-AS_OF = date(2026, 10, 11)      # the rules files' date
+AS_OF = date(2026, 10, 11)      # a fixed evaluation day
 # Legal everywhere (me01-001); legal in Standard only through its Reprint Group (sv01-191, mark G rotated, with me01-125);
 # banned in Expanded (swsh2-165) and banned there as its identical reprint (fixture-sv01-905); unknown, in a set the
-# rules don't record (fixture-me06-3); a Rule Box card and an ACE SPEC, which Gym Leader Challenge excludes.
+# rules don't record (fixture-me07-3); a Rule Box card and an ACE SPEC, which Gym Leader Challenge excludes.
 CARDS = (BULBASAUR_ME, CANDY_ME, CANDY_SV, SCOOP_UP_NET, NET_REPRINT, DELTA_POKEMON, EX_BW, ACE_SPEC_BW, SWITCH_ME,
          ENERGY_SV)
 
@@ -137,8 +137,8 @@ def test_stored_standings_match_the_evaluator_for_a_legal_a_banned_a_reprint_and
     assert stored["fixture-sv01-905"]["expanded"][1] == [
         {"code": "banned", "reason": "banned in Expanded as an identical reprint of Scoop Up Net (swsh2 165)",
          "effect": "not_legal"}]
-    assert stored["fixture-me06-3"]["standard"] == (
-        "unknown", [{"code": "set_date_not_recorded", "reason": "set legality date not recorded for me06",
+    assert stored["fixture-me07-3"]["standard"] == (
+        "unknown", [{"code": "set_date_not_recorded", "reason": "set legality date not recorded for me07",
                      "effect": "unknown"}])
     assert (status["bw6-124"]["glc"], status["bw7-137"]["glc"]) == ("not_legal", "not_legal")
     # Every stored standing, status and issues, is what a Deck's format check says about the card on the same day.

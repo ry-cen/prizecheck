@@ -12,9 +12,9 @@ from app.games.pokemon.catalog.card_attributes import CardAttributeRules
 from app.games.pokemon.formats.format_evaluator import FORMATS, RULES_DIR, FormatRulesError, format_rules, load_rules, second_friday_after
 
 # Editing a rules file changes its digest: bump its `revision`, set `published`, and pin the new pair here.
-PINNED_RULES = {"standard": (1, "bc0d234758d673925a6da168317a4ecfef28d9fbafc297b4e1c50ba7026aff98"),
-                "expanded": (2, "6151d5e9612ea3c58ea9fc8fe99836d160357d2949758158a96960daabfbc431"),
-                "glc": (1, "4315377a8f58f031935bf9bab311b5ddd1f30c926f0d50e75fa19d4014f84f3d")}
+PINNED_RULES = {"standard": (2, "ec5be087887914d68c59751e91e9fd04cfb0e596d84c780570ccc11951a66bbe"),
+                "expanded": (3, "9f8d8f9894e8340867ad85fbf1e482c4f12ffb6c1c166dbe90244e8e2fc6031f"),
+                "glc": (2, "7eb41b7c03b6f256316301ea81d6d2cef1d96577e0e8635b825fd2d211a6c4f5")}
 
 
 def imported_sets() -> set[str]:
@@ -33,8 +33,8 @@ def test_every_rules_file_parses_and_is_pinned():
 
 def test_every_imported_set_has_a_legal_from_date_or_an_exclusion():
     imported = imported_sets()
-    assert len(imported) == 201
-    assert imported == set(CardAttributeRules.ACE_SPEC_SETTLED_SETS)
+    assert len(imported) == 202
+    assert imported >= set(CardAttributeRules.ACE_SPEC_SETTLED_SETS)  # me06 is imported but its ACE SPEC status is not settled
     for name in FORMATS:
         rules = format_rules(name)
         listed = rules.sets.keys() | rules.excluded.keys() | rules.unsettled_sets.keys()
@@ -77,9 +77,9 @@ def test_standard_rules_hold_the_settled_facts():
     assert (limits.deck_size, limits.copies, limits.basic_energy_exempt, limits.ace_spec_per_deck,
             limits.radiant_per_deck, limits.prism_star_per_name) == (60, 4, True, 1, 1, 1)
     assert rules.pokemon_reprint_inheritance is False and rules.basic_energy_always_legal is True
-    assert {set_id: rules.sets[set_id].legal_from for set_id in ("sv09", "me02.5", "me03", "me04", "me05")} == {
+    assert {set_id: rules.sets[set_id].legal_from for set_id in ("sv09", "me02.5", "me03", "me04", "me05", "me06")} == {
         "sv09": date(2025, 4, 11), "me02.5": date(2026, 3, 6), "me03": date(2026, 4, 10),
-        "me04": date(2026, 6, 5), "me05": date(2026, 7, 31)}
+        "me04": date(2026, 6, 5), "me05": date(2026, 7, 31), "me06": date(2026, 11, 20)}
     assert set(rules.unsettled) == {"Fairy Energy"}
     assert rules.bans == {}  # No card is banned in Standard.
 
@@ -106,7 +106,7 @@ EXPANDED_BANS = {
 def test_expanded_rules_hold_the_settled_facts():
     rules = format_rules("expanded")
     assert (rules.name, rules.pool, rules.covers_from, rules.version) == (
-        "Expanded", "by_set", date(2026, 4, 10), "2 (2026-10-11)")
+        "Expanded", "by_set", date(2026, 4, 10), "3 (2026-11-18)")
     # Official "cannot be in the same deck" rulings (2020), not a shared copy count.
     assert [group.names for group in rules.exclusive_groups] == [
         ("Boss's Orders", "Lysandre"), ("Professor's Research", "Professor Sycamore", "Professor Juniper")]
@@ -123,15 +123,16 @@ def test_expanded_rules_hold_the_settled_facts():
             "2011bw", "2021swsh", "tk-bw-e", "tk-bw-z", "tk-sm-l", "tk-sm-r"} <= by_set
     assert {"swsh1", "swshp", "cel25", "fut2020", "2022swsh", "2023sv", "2024sv", "sv01", "svp", "me01", "mep",
             "30th"} <= by_mark
-    assert len(by_set) == 69 and len(by_mark) == 56
+    assert len(by_set) == 69 and len(by_mark) == 57
     assert set(rules.unsettled_sets) == {"cel25cc", "30th-c"}
     assert {"col1", "hgss4", "hgssp", "miscp", "tk-hs-g", "tk-dp-l", "tk-ex-p", "base1"} <= set(rules.excluded)
     assert [(entry.prefix, entry.first, entry.last) for entry in rules.unsettled_printings["smp"]] == [("SM", 1, 157)]
     assert set(rules.bans) == EXPANDED_BANS
     assert {ban.banned_from for ban in rules.bans.values()} == {date(2026, 4, 10)}
     assert all(ban.lifted_on is None for ban in rules.bans.values())
-    assert {set_id: rules.sets[set_id].legal_from for set_id in ("me02.5", "me04", "me05", "30th")} == {
-        "me02.5": date(2026, 3, 6), "me04": date(2026, 6, 5), "me05": date(2026, 7, 31), "30th": date(2026, 9, 25)}
+    assert {set_id: rules.sets[set_id].legal_from for set_id in ("me02.5", "me04", "me05", "me06", "30th")} == {
+        "me02.5": date(2026, 3, 6), "me04": date(2026, 6, 5), "me05": date(2026, 7, 31), "me06": date(2026, 11, 20),
+        "30th": date(2026, 9, 25)}
     assert rules.unsettled == {}
 
 
@@ -150,7 +151,7 @@ GLC_BANS = {
 def test_glc_rules_hold_the_settled_facts():
     rules = format_rules("glc")
     assert (rules.name, rules.pool, rules.covers_from, rules.version) == (
-        "Gym Leader Challenge", "by_set", date(2025, 4, 24), "1 (2026-10-11)")
+        "Gym Leader Challenge", "by_set", date(2025, 4, 24), "2 (2026-11-18)")
     assert rules.exclusive_groups == ()  # One shared copy per group already keeps them apart.
     assert rules.marks == {}
     limits = rules.limits
@@ -162,7 +163,7 @@ def test_glc_rules_hold_the_settled_facts():
         ("Boss's Orders", "Lysandre"), ("Professor's Research", "Professor Sycamore", "Professor Juniper")]
     # Expanded's dated sets, all admitted by set, except the products Expanded admits only by an unrecorded mark.
     mark_only = {"mfb", "2022swsh", "2023sv", "2024sv"}
-    assert {set_rule.legal_by for set_rule in rules.sets.values()} == {"set"} and len(rules.sets) == 121
+    assert {set_rule.legal_by for set_rule in rules.sets.values()} == {"set"} and len(rules.sets) == 122
     assert set(rules.sets) == set(format_rules("expanded").sets) - mark_only
     assert set(rules.unsettled_sets) == {"cel25cc", "30th-c"} | mark_only
     assert set(rules.excluded) == set(format_rules("expanded").excluded)
@@ -181,8 +182,8 @@ STANDARD = (RULES_DIR / "standard.toml").read_text()
 
 
 @pytest.mark.parametrize("old, new, message", [
-    ("revision = 1\n", "revision = 1\nedition = 2\n", "unknown key edition"),
-    ("published = 2026-10-11\n", "", "missing published"),
+    ("revision = 2\n", "revision = 2\nedition = 2\n", "unknown key edition"),
+    ("published = 2026-11-18\n", "", "missing published"),
     ('id = "sv02"', 'id = "sv01"', "sv01 listed twice"),
     ('"swsh1", ', '"swsh1", "sv01", ', "sv01 listed twice"),
     ("legal_from = 2023-06-23", "legal_from = 2023-06-30", "second Friday after 2023-06-09 is 2023-06-23"),
@@ -201,7 +202,7 @@ STANDARD = (RULES_DIR / "standard.toml").read_text()
      "number: expected non-empty text"),
     ("bans = []", 'bans = [{ set = "sv01 ", number = "1", name = "X", banned_from = 2026-01-02 }]',
      "must not have surrounding whitespace"),
-    ("published = 2026-10-11", "published = 2026-10-11T00:00:00", "published: expected a date"),
+    ("published = 2026-11-18", "published = 2026-11-18T00:00:00", "published: expected a date"),
     ('pool = "mark_and_set"', 'pool = "anything"', "pool: expected one of"),
     ('mark = "H"', 'mark = "h"', "one upper-case letter"),
     ("[limits]", "[limits", "not a TOML file"),

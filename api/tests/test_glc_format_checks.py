@@ -35,7 +35,7 @@ def test_a_single_type_deck_with_basic_energy_in_any_quantity_is_glc_legal():
     run(Records(*CARDS))
     owner, deck = deck_with([("fixture-me01-911", 1), ("fixture-me01-913", 1), ("sv02-278", 58)])
     result = checked(owner, deck)
-    assert (result["status"], result["issues"], result["rules_version"]) == ("legal", [], "1 (2026-10-11)")
+    assert (result["status"], result["issues"], result["rules_version"]) == ("legal", [], "2 (2026-11-18)")
 
 
 def test_two_pokemon_types_a_rule_box_pokemon_or_an_ace_spec_make_a_glc_deck_not_legal():

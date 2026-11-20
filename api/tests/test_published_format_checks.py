@@ -37,7 +37,7 @@ from test_published_cost import (USER, body_of, generation, publish, rewrite_sna
 LEGAL = (("me01-001", 1), ("me01-125", 4), ("me01-130", 4), ("sv02-278", 51))
 OVER = (("me01-001", 1), ("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv05-157", 1), ("sv05-162", 1),
         ("sv02-278", 52))
-UNKNOWN = (("fixture-me06-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52))
+UNKNOWN = (("fixture-me07-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52))
 ROTATING = (("me01-001", 1), ("sv01-172", 4), ("me01-125", 4), ("sv02-278", 51))
 NO_BASIC = (("me01-125", 1), ("me01-130", 1), ("sv02-278", 58))
 ON = "?as_of=2026-10-11"  # These snapshots are Standard: the answer is the Target Format only (app redesign #183).
@@ -168,7 +168,8 @@ def test_results_follow_a_rotation_without_republishing(store, monkeypatch):
     assert standard(token, query="?as_of=2026-04-09")["status"] == "legal"
     assert standard(token, query="?as_of=2026-04-10")["status"] == "not_legal"
     ahead = standard(token, query="?as_of=2026-12-01")
-    assert ahead["notes"] == ["2026-12-01 is in the future: rules published after this rules file (2026-10-11) are "
+    published_on = format_evaluator.format_rules("standard").published.isoformat()
+    assert ahead["notes"] == [f"2026-12-01 is in the future: rules published after this rules file ({published_on}) are "
                               "unknown, so this result assumes no later rule changes."]
     assert standard(token, query="?as_of=2025-04-10")["issues"][0]["code"] == "before_rules_coverage"
 
