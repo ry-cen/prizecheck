@@ -29,3 +29,8 @@ export function viewHash(view: View): string {
     })
   );
 }
+export function supportedView(view: View, reader: { facets?: boolean }): View {
+  return reader.facets === false && (view.query.domain || view.query.type)
+    ? { ...view, query: { ...view.query, domain: "", type: "" } }
+    : view;
+}

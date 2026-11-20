@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-export type ReadState<T> = { key: string; value?: T; failed?: boolean };
+export type ReadState<T> = {
+  key: string;
+  value?: T;
+  failed?: boolean;
+  error?: unknown;
+};
 /** Keyed render + cleanup guard: even a reader ignoring abort cannot publish a superseded response. No shared cache. */
 export function useRead<T>(
   key: string,
@@ -19,8 +24,8 @@ export function useRead<T>(
       (value) => {
         if (current) setState({ key, value });
       },
-      () => {
-        if (current) setState({ key, failed: true });
+      (error) => {
+        if (current) setState({ key, failed: true, error });
       }
     );
     return () => {

@@ -10,16 +10,21 @@ import { ROOT, ART, LINE } from "../../ui/CopyTile";
 import { PageHeader } from "../../shell/PageHeader";
 import { ScrollArea } from "../../ui/ScrollArea";
 import {
+  failureKind,
   listKey,
   type CatalogReader,
   type Edition,
   type Query,
 } from "./catalog";
-import { parseView, viewHash, type View } from "./navigation";
+import { parseView, supportedView, viewHash, type View } from "./navigation";
 import { useRead } from "./read";
 
+const place = (e: Edition) => [e.set.code, e.number].filter(Boolean).join(" ");
+
 export function RiftboundApp({ reader }: { reader: CatalogReader }) {
-  const [view, setView] = useState(() => parseView(location.hash));
+  const [view, setView] = useState(() =>
+    supportedView(parseView(location.hash), reader)
+  );
   const [picking, setPicking] = useState(false);
   const picker = useRef<HTMLButtonElement>(null);
   const catalogHeading = useRef<HTMLHeadingElement>(null);
@@ -39,7 +44,7 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
   useEffect(() => {
     const update = () => {
       pendingDismissal.current = false;
-      setView(parseView(location.hash));
+      setView(supportedView(parseView(location.hash), reader));
     };
     window.addEventListener("popstate", update);
     window.addEventListener("hashchange", update);
@@ -47,7 +52,7 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
       window.removeEventListener("popstate", update);
       window.removeEventListener("hashchange", update);
     };
-  }, []);
+  }, [reader]);
   function navigate(next: View, replace = false, detail = false) {
     if (viewHash(next) === viewHash(view)) return;
     history[replace ? "replaceState" : "pushState"](
@@ -80,6 +85,7 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
     active && !!view.edition
   );
   const rows = listing.value?.editions ?? [];
+  const shown = listing.value?.page ?? view.query.page;
   const index = rows.findIndex((e) => e.id === view.edition);
   function filter(patch: Partial<Query>) {
     navigate(
@@ -185,34 +191,38 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
             viewportClassName="flex min-w-0 items-center gap-1.5"
             viewportProps={{ role: "group", "aria-label": "Filters" }}
           >
-            <Chip
-              selected={!view.query.domain}
-              onChange={() => filter({ domain: "" })}
-            >
-              Any domain
-            </Chip>
-            {["Fury", "Calm"].map((domain) => (
-              <Chip
-                key={domain}
-                selected={view.query.domain === domain}
-                onChange={(on) => filter({ domain: on ? domain : "" })}
-              >
-                {domain}
-              </Chip>
-            ))}
-            <span
-              aria-hidden="true"
-              className="mx-1 h-4 w-px shrink-0 bg-border"
-            />
-            {["Unit", "Spell", "Battlefield"].map((type) => (
-              <Chip
-                key={type}
-                selected={view.query.type === type}
-                onChange={(on) => filter({ type: on ? type : "" })}
-              >
-                {type}
-              </Chip>
-            ))}
+            {reader.facets !== false && (
+              <>
+                <Chip
+                  selected={!view.query.domain}
+                  onChange={() => filter({ domain: "" })}
+                >
+                  Any domain
+                </Chip>
+                {["Fury", "Calm"].map((domain) => (
+                  <Chip
+                    key={domain}
+                    selected={view.query.domain === domain}
+                    onChange={(on) => filter({ domain: on ? domain : "" })}
+                  >
+                    {domain}
+                  </Chip>
+                ))}
+                <span
+                  aria-hidden="true"
+                  className="mx-1 h-4 w-px shrink-0 bg-border"
+                />
+                {["Unit", "Spell", "Battlefield"].map((type) => (
+                  <Chip
+                    key={type}
+                    selected={view.query.type === type}
+                    onChange={(on) => filter({ type: on ? type : "" })}
+                  >
+                    {type}
+                  </Chip>
+                ))}
+              </>
+            )}
             <PickerChip
               active={!!view.query.set}
               buttonRef={picker}
@@ -223,7 +233,20 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
             </PickerChip>
           </ScrollArea>
           {listing.failed ? (
-            <Failure retry={listing.retry}>Cards couldn't be loaded.</Failure>
+            failureKind(listing.error) === "denied" ? (
+              <Failure retry={listing.retry}>
+                Sign in to see the Catalog.
+              </Failure>
+            ) : failureKind(listing.error) === "invalid" ? (
+              <Failure
+                label="Clear search"
+                retry={() => filter({ search: "" })}
+              >
+                That search is too long. Try a shorter one.
+              </Failure>
+            ) : (
+              <Failure retry={listing.retry}>Cards couldn't be loaded.</Failure>
+            )
           ) : !listing.value ? (
             <p role="status">Loading cards…</p>
           ) : listing.value.catalogEmpty ? (
@@ -245,7 +268,7 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
               className="flex flex-col gap-3"
             >
               <p className="m-0 text-meta text-text-subtle">
-                {listing.value.total} Editions · Page {view.query.page} of{" "}
+                {listing.value.total} Editions · Page {shown} of{" "}
                 {listing.value.pages}
               </p>
               <ul
@@ -261,7 +284,7 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
                     <button
                       type="button"
                       className={`${ROOT} w-full`}
-                      aria-label={`${e.name}, ${e.set.code} ${e.number}, ${e.finish}`}
+                      aria-label={`${e.name}, ${place(e)}, ${e.finish}`}
                       onClick={(event) => open(e.id, event.currentTarget)}
                     >
                       <span aria-hidden="true" className={`${ART} relative`}>
@@ -277,7 +300,7 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
                         <span
                           className={`${LINE} text-micro leading-3.5 text-text-subtle`}
                         >
-                          {e.set.code} {e.number} · {e.finish}
+                          {place(e)} · {e.finish}
                         </span>
                       </span>
                     </button>
@@ -286,22 +309,22 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
               </ul>
               <div className="flex items-center gap-3">
                 <Button
-                  disabled={view.query.page <= 1}
+                  disabled={shown <= 1}
                   onClick={() =>
                     navigate({
                       ...view,
-                      query: { ...view.query, page: view.query.page - 1 },
+                      query: { ...view.query, page: shown - 1 },
                     })
                   }
                 >
                   Previous page
                 </Button>
                 <Button
-                  disabled={view.query.page >= listing.value.pages}
+                  disabled={shown >= listing.value.pages}
                   onClick={() =>
                     navigate({
                       ...view,
-                      query: { ...view.query, page: view.query.page + 1 },
+                      query: { ...view.query, page: shown + 1 },
                     })
                   }
                 >
@@ -332,7 +355,11 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
         returnFocus={picker}
       >
         {sets.failed ? (
-          <Failure retry={sets.retry}>Sets couldn't be loaded.</Failure>
+          <Failure retry={sets.retry}>
+            {failureKind(sets.error) === "denied"
+              ? "Sign in to see sets."
+              : "Sets couldn't be loaded."}
+          </Failure>
         ) : !sets.value ? (
           <p role="status">Loading sets…</p>
         ) : (
@@ -375,7 +402,9 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
       >
         {detail.failed ? (
           <Failure retry={detail.retry}>
-            Card details couldn't be loaded.
+            {failureKind(detail.error) === "denied"
+              ? "Sign in to see this card."
+              : "Card details couldn't be loaded."}
           </Failure>
         ) : detail.value === undefined ? (
           <p role="status">Loading card details…</p>
@@ -386,7 +415,11 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
             <p>
               {edition.set.name} · {edition.number}
             </p>
-            <p>{[edition.domain, edition.type].filter(Boolean).join(" · ")}</p>
+            {[edition.domain, edition.type].some(Boolean) && (
+              <p>
+                {[edition.domain, edition.type].filter(Boolean).join(" · ")}
+              </p>
+            )}
             <p>{edition.finish}</p>
           </div>
         )}
@@ -397,14 +430,16 @@ export function RiftboundApp({ reader }: { reader: CatalogReader }) {
 function Failure({
   children,
   retry,
+  label = "Retry",
 }: {
   children: React.ReactNode;
   retry: () => void;
+  label?: string;
 }) {
   return (
     <div role="alert" className="flex items-center gap-3 text-body">
       <p>{children}</p>
-      <Button onClick={retry}>Retry</Button>
+      <Button onClick={retry}>{label}</Button>
     </div>
   );
 }
