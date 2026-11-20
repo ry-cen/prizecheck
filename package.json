@@ -22,7 +22,8 @@
     "local:status": "python3 scripts/local_admission.py status",
     "test:db": "python3 scripts/local_test_db.py",
     "test:fast": "npm run guardrails",
-    "test:scanner-models": "vitest run web/src/scanner/recognize/pipeline.models.test.ts web/src/scanner/recognize/numbers.local.test.ts web/src/scanner/vision/vision.local.test.ts"
+    "test:scanner-models": "vitest run web/src/scanner/recognize/pipeline.models.test.ts web/src/scanner/recognize/numbers.local.test.ts web/src/scanner/vision/vision.local.test.ts",
+    "dev:riftbound": "vite --config web/vite.config.ts --open /src/games/riftbound/local/index.html"
   },
   "dependencies": {
     "better-auth": "^1.7.6",
