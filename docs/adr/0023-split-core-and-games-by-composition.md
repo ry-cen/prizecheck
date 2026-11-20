@@ -66,3 +66,21 @@ _Not decided here._
 - The test harness layout for the databases (the other half of IM-14).
 - Generation promotion (#563 C8).
 - Provisioning, credentials and live database access each need the owner's separate approval.
+
+**Amendment (2026-11-16, #534): Riftbound's public prefix.** Ryan approved on 2026-11-16: "Riftbound gets its own `/api/riftbound` prefix through the existing gateway; Pokémon's URLs stay unchanged. Identity and key setup are separate."
+
+_Decided._
+
+- Riftbound's public prefix is `/api/riftbound`, served by the existing gateway. Every Pokémon URL stays as it is.
+- The gateway maps `/api/riftbound/<rest>` to the Riftbound backend's `/api/<rest>`. The route is off unless the gateway setting `RIFTBOUND_API_ORIGIN` is set, answers 404 when off, and is configured nowhere in deploy files. Details: [public-routing.md](../planning/riftbound-backend/public-routing.md).
+- The gateway forwards no identity to the Riftbound backend yet, so that backend answers 401.
+
+_Still not decided._
+
+- Identity propagation (#531, IM-16): how the signed user reaches the Riftbound backend.
+- Key provisioning: creating, storing and rotating `RIFTBOUND_INTERNAL_AUTH_SECRET`.
+- The generated web client and the frontend adapter.
+- D4 facets (domain, type, orientation).
+- Deployment and production enablement.
+
+This supersedes the first line under "Not decided here" in the 2026-11-09 amendment, "Public URL prefixes and gateway routing", for the Riftbound prefix and its gateway routing only.

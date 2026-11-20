@@ -37,6 +37,10 @@ const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 const apiOrigin = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 const internalSecret = process.env.INTERNAL_AUTH_SECRET || "";
+// The Riftbound backend's origin, taken from RIFTBOUND_API_ORIGIN as `new URL(...).origin`, so a trailing slash or a path
+// in the setting never changes the upstream path. Empty, unset or unparsable (the default) leaves /api/riftbound
+// switched off, without a crash.
+const riftboundOrigin = originOf(process.env.RIFTBOUND_API_ORIGIN);
 const publicReadLimiter = new PublicReadLimiter();
 const PUBLIC_ART_PATH = /^\/api\/public\/(?:art|edition-art)\/[^/]+\/[^/]+$/;
 const EDITION_ART_PATH = /^\/api\/public\/edition-art\/[^/]+\/[^/]+$/;
@@ -114,6 +118,47 @@ function importLimit(method: string | undefined, path: string) {
 
 class BudgetExceeded extends Error {}
 class PayloadTooLarge extends Error {}
+
+function originOf(value: string | undefined): string {
+  try {
+    const url = new URL((value || "").trim());
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.origin
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+// The /api/riftbound namespace is decided twice, on the raw request target and on the normalised path (the URL parser
+// resolves dot segments and reads a backslash as a slash). A target that the two readings place differently, or a raw
+// target in the namespace that carries a dot segment (raw or percent-encoded), an encoded slash or a backslash, is
+// answered 404 before any other check, so a Riftbound-looking target never reaches the Pokémon upstream and a
+// Pokémon-looking one never reaches Riftbound.
+// An absolute-form target (`http://host/api/...`) is read the same way, on the raw path after its authority, cut out by
+// string parsing that neither decodes nor normalises. Riftbound routes are origin-form only: an absolute-form target
+// that is in the namespace on either reading is refused whatever it contains. Other absolute-form targets, and `*` and
+// authority-form targets, are not looked at and are handled as before.
+const RIFTBOUND_RAW = /^\/api\/riftbound(?:[/\\]|$)/;
+const ABSOLUTE_FORM = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*/;
+function riftboundTargetRefused(request: IncomingMessage, path: string) {
+  const target = request.url || "/";
+  const authority = ABSOLUTE_FORM.exec(target);
+  const raw = (authority ? target.slice(authority[0].length) : target).split(
+    /[?#]/,
+    1
+  )[0];
+  const rawIn = RIFTBOUND_RAW.test(raw);
+  const pathIn =
+    path === "/api/riftbound" || path.startsWith("/api/riftbound/");
+  if (rawIn !== pathIn) return true;
+  if (!rawIn) return false;
+  if (authority) return true;
+  return (
+    /%2f|%5c|\\/i.test(raw) ||
+    raw.split("/").some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))
+  );
+}
 
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, {
@@ -293,6 +338,8 @@ const server = createServer(async (request, response) => {
   const received = performance.now();
   const path = new URL(request.url || "/", origin).pathname;
   try {
+    if (riftboundTargetRefused(request, path))
+      return json(response, 404, { error: "Not found" });
     if (path === "/auth/request-code" && request.method === "POST") {
       if (!emailSignIn) return json(response, 404, { error: "Not found" });
       if (!sameOrigin(request))
@@ -548,6 +595,59 @@ const server = createServer(async (request, response) => {
         betterRequest(origin, request, "/api/auth/sign-out", "{}")
       );
       return relay(response, result);
+    }
+    // Riftbound's own public prefix (ADR 0023, 2026-11-16 amendment). Handled before the generic /api/ branch so a
+    // /api/riftbound path can never reach the Pokémon upstream; riftboundTargetRefused above has already refused any
+    // target whose raw and normalised readings disagree about the namespace.
+    if (path === "/api/riftbound" || path.startsWith("/api/riftbound/")) {
+      // Off unless a Riftbound upstream is configured: no session lookup, no upstream contact.
+      // The bare prefix, with or without a trailing slash, is not a route.
+      if (
+        !riftboundOrigin ||
+        path === "/api/riftbound" ||
+        path === "/api/riftbound/"
+      )
+        return json(response, 404, { error: "Not found" });
+      if (
+        request.method !== "GET" &&
+        request.method !== "HEAD" &&
+        !sameOrigin(request)
+      )
+        return json(response, 403, { error: "Origin required" });
+      // Every Riftbound path needs a session; there are no public Riftbound routes.
+      if (!(await session(request)))
+        return json(response, 401, { error: "Authentication required" });
+      const body =
+        request.method === "GET" || request.method === "HEAD"
+          ? ""
+          : // Bytes, not characters, against the gateway's standard 16 KiB limit (413 past it).
+            await readBytes(request, 16_384);
+      // Deliberately NO identity is forwarded: no x-internal-user, x-internal-time, x-internal-signature or budget
+      // headers, nothing signed with INTERNAL_AUTH_SECRET (Pokémon's key), and no Riftbound key is read or created.
+      // Only content-type is passed on, so any incoming x-internal-* header is dropped. The Riftbound backend therefore
+      // answers 401 until the separate identity-propagation decision lands (#531).
+      const headers: Record<string, string> = {};
+      if (body.length > 0)
+        headers["content-type"] =
+          request.headers["content-type"] || "application/json";
+      // /api/riftbound/<rest> becomes /api/<rest>; the query string is kept.
+      const rewritten =
+        "/api" +
+        path.slice("/api/riftbound".length) +
+        new URL(request.url || "/", origin).search;
+      const upstream = await fetch(`${riftboundOrigin}${rewritten}`, {
+        method: request.method,
+        headers,
+        body: body.length > 0 ? body : undefined,
+      });
+      const text = await upstream.text();
+      response.writeHead(upstream.status, {
+        "content-type":
+          upstream.headers.get("content-type") || "application/json",
+        "cache-control": "no-store",
+      });
+      response.end(text);
+      return;
     }
     if (path.startsWith("/api/")) {
       if (
