@@ -42,8 +42,8 @@ Each read runs in one `REPEATABLE READ` transaction, so `total` and `catalog_emp
 
 ## Remaining gates before the frontend connects
 
-1. Gateway routing and the public URL prefix (ADR 0023 leaves both undecided).
-2. Identity propagation (#531, IM-16): how the signed user and Handle writes reach this backend.
+1. Gateway routing is settled: the gateway maps `/api/riftbound/<rest>` to this backend's `/api/<rest>`, off unless `RIFTBOUND_API_ORIGIN` is set (ADR 0023, 2026-11-16 amendment; [public-routing.md](public-routing.md)).
+2. Identity propagation (#531, IM-16), the remaining gate: the gateway forwards no identity yet, so every Catalog read through it answers 401. How the signed user and Handle writes reach this backend is not decided.
 3. Key provisioning: creating, storing and rotating `RIFTBOUND_INTERNAL_AUTH_SECRET`, and the Riftbound database role and URL on a real host (owner approval).
 4. A generated web client for the Riftbound OpenAPI, and a thin adapter from `snake_case` fields and `finish` keys to the `CatalogReader` shape in `web/src/games/riftbound/catalog.ts` (on the #660 frontend branch, not yet on `dev`).
 5. D4 facets (domain, type, orientation): not decided, so not served.

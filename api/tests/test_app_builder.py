@@ -1,4 +1,4 @@
-"""Compare against untouched origin/dev 1bac580100876c5c16e08e21045759a26f5dcaec.
+"""Compare against untouched origin/dev beca4d3142a9ab7f17c63f036265ff66329740ae.
 
 The two snapshots were captured before extraction, using the same serialization
 below. They include endpoint/model identity as well as route registration order.

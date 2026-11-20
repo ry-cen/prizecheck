@@ -1,7 +1,8 @@
 """Riftbound Catalog read routes: sets, a paged Edition list and one Edition.
 
-Internal app paths only; the public prefix and gateway mapping are not decided (ADR 0023). Grounding for every relation
-and column is in docs/planning/riftbound-backend/catalog-read-api.md.
+Internal app paths only. The gateway serves them at /api/riftbound/catalog/... when RIFTBOUND_API_ORIGIN is set (off by
+default; ADR 0023, 2026-11-16 amendment); it forwards no identity yet, so this backend answers 401 there (#531). Grounding
+for every relation and column is in docs/planning/riftbound-backend/catalog-read-api.md.
 
 An Edition is visible only when the active accepted generation (``catalog_state.active_generation``) lists it with
 ``catalog_generation_edition.active`` and its Printing is not ``catalog_generation_printing.tombstoned``: the rule the
