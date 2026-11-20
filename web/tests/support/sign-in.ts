@@ -17,6 +17,8 @@ export type FakeSignIn = {
   next?: string;
   /** The origin to sign in at, for a spec that runs its own gateway (default TEST_ORIGIN). */
   origin?: string;
+  /** Report a failed walk without the callback URL, code, state or cookies (default false: Playwright's own message). */
+  sanitized?: boolean;
 };
 
 function origin(): string {
@@ -41,19 +43,34 @@ async function prepareFakeSignIn(page: Page) {
 /** Walks start, fake consent and callback in the browser; resolves once the browser has left the fake. */
 export async function fakeSignIn(
   page: Page,
-  { identity = "owner", provider = "google", next, origin: at }: FakeSignIn = {}
+  {
+    identity = "owner",
+    provider = "google",
+    next,
+    origin: at,
+    sanitized = false,
+  }: FakeSignIn = {}
 ): Promise<void> {
   await prepareFakeSignIn(page);
   const start = new URL(`/auth/sign-in/${provider}`, at ?? origin());
   if (next) start.searchParams.set("next", next);
   start.searchParams.set("fake_identity", identity);
-  await page.goto(start.href, { waitUntil: "commit" });
-  await page.waitForURL(
-    (url) =>
-      url.pathname !== "/auth/__fake-oauth/consent" &&
-      !url.pathname.startsWith("/api/auth/") &&
-      !url.pathname.startsWith("/auth/")
-  );
+  const walk = async () => {
+    await page.goto(start.href, { waitUntil: "commit" });
+    await page.waitForURL(
+      (url) =>
+        url.pathname !== "/auth/__fake-oauth/consent" &&
+        !url.pathname.startsWith("/api/auth/") &&
+        !url.pathname.startsWith("/auth/")
+    );
+  };
+  if (!sanitized) return walk();
+  try {
+    await walk();
+  } catch {
+    // Playwright's message would carry the consent or callback URL, with its code and state.
+    throw new Error("Fake sign-in did not complete");
+  }
 }
 
 /** The old Collection addresses the app rewrites to /collection (web/src/shell/routes.ts canonicalPath). */

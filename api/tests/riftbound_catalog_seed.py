@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import psycopg
 
+LOOPBACK = ('127.0.0.1', 'localhost', '::1')
+
 FINISHES = {'normal': {'finish': 'normal'}, 'foil': {'finish': 'foil'},
             'unspecified': {'kind': 'unspecified', 'label': 'Unspecified Variant'}}
 
@@ -76,16 +78,29 @@ def scenario(url: str, name: str) -> dict:
     return {'editions': {f'{card}|{number}': made[(card, number)]['editions'] for card, number in made}}
 
 
-def checked_url(environ=os.environ) -> str:
+def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, prefix: str = 'tcg_rb_') -> str:
+    """The database URL, once the database it really reaches is the exact one the stack created.
+
+    A URL can retarget itself through its query (host, hostaddr, dbname...), so no query parameter is accepted. The
+    connection is then asked which database and server it is on, and that must be `expected` on loopback."""
+    if not expected.startswith(prefix):
+        raise SystemExit('refusing: the expected database is not a tcg_rb_* name')
     url = environ['RIFTBOUND_DATABASE_URL']
     parsed = urlparse(url)
-    if parsed.hostname not in ('127.0.0.1', 'localhost', '::1') or not parsed.path.lstrip('/').startswith('tcg_rb_'):
-        raise SystemExit('refusing: the seed acts only on a loopback database named tcg_rb_*')
+    if parsed.scheme not in ('postgresql', 'postgres') or parsed.query or parsed.params:
+        raise SystemExit('refusing: the database URL must be a plain PostgreSQL URL with no parameters')
+    if parsed.hostname not in LOOPBACK or parsed.path.lstrip('/') != expected:
+        raise SystemExit('refusing: the database URL does not name the expected loopback database')
+    with connect(url) as conn:
+        name, address = conn.execute('SELECT current_database(), host(inet_server_addr())').fetchone()
+    if name != expected or address not in (None, '127.0.0.1', '::1'):
+        raise SystemExit('refusing: the connection does not reach the expected loopback database')
     return url
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('name', choices=SCENARIOS)
+    parser.add_argument('--database', required=True, help='the exact database the stack created')
     args = parser.parse_args()
-    print(json.dumps(scenario(checked_url(), args.name)))
+    print(json.dumps(scenario(checked_url(args.database), args.name)))

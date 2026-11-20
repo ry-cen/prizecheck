@@ -15,6 +15,8 @@ import {
 } from "./support/riftbound-stack";
 
 test.describe.configure({ mode: "serial" });
+// A trace, screenshot or video would keep cookie headers and the OAuth callback URL (code and state) of the sign-in walk.
+test.use({ trace: "off", screenshot: "off", video: "off" });
 let stack: RiftboundStack;
 test.beforeAll(async () => {
   test.setTimeout(180_000);
@@ -28,11 +30,13 @@ test.beforeEach(() => {
 });
 
 type Seen = { path: string; status: number };
+/** Responses by path and status; `requests` holds the paths asked for, answered or not. */
+type Observed = Seen[] & { requests: string[] };
 const API = "/api/riftbound/catalog/";
 
 /** Signs in through the stack's own gateway, then leaves the page on a blank document with Pokémon sentinels stored. */
 async function signIn(page: Page) {
-  await fakeSignIn(page, { origin: stack.origin });
+  await fakeSignIn(page, { origin: stack.origin, sanitized: true });
   await page.goto(`${stack.origin}/auth/session`);
   await page.evaluate(() => {
     localStorage.setItem(
@@ -48,9 +52,13 @@ const storage = (page: Page) =>
     local: Object.fromEntries(Object.entries(localStorage)),
     session: Object.fromEntries(Object.entries(sessionStorage)),
   }));
-/** Records /api/ responses from now on. */
-function observe(page: Page): Seen[] {
-  const seen: Seen[] = [];
+/** Records /api/ requests and responses from now on. */
+function observe(page: Page): Observed {
+  const seen = Object.assign([] as Seen[], { requests: [] as string[] });
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/")) seen.requests.push(url.pathname);
+  });
   page.on("response", (response) => {
     const url = new URL(response.url());
     if (url.pathname.startsWith("/api/"))
@@ -67,6 +75,7 @@ const results = (page: Page) =>
 const items = (page: Page) => results(page).getByRole("listitem");
 const editionRequests = (seen: Seen[]) =>
   seen.filter((s) => s.path === API + "editions");
+const asked = (seen: Observed) => seen.requests.includes(API + "editions");
 
 for (const width of [1280, 390]) {
   test.describe(`at ${width}`, () => {
@@ -113,12 +122,10 @@ for (const width of [1280, 390]) {
       await page
         .getByRole("button", { name: "Next page", exact: true })
         .click();
+      // In-app navigation: the entry this click pushed is already game-scoped, read before anything else settles.
+      expect(await page.evaluate(() => history.state?.game)).toBe("riftbound");
       await expect(items(page)).toHaveCount(5);
       await expect(page.getByText("Page 2 of 2")).toBeVisible();
-      // In-app navigation: the history entry is already game-scoped.
-      await expect
-        .poll(() => page.evaluate(() => history.state?.game))
-        .toBe("riftbound");
       await page.goBack();
       await expect(items(page)).toHaveCount(24);
 
@@ -247,6 +254,7 @@ for (const width of [1280, 390]) {
         0
       );
       await expect(page.getByText("Cards couldn't be loaded.")).toHaveCount(0);
+      expect(asked(seen)).toBe(true);
       expect(editionRequests(seen).map((s) => s.status)).toContain(401);
       expect(stack.relay.calls).toBe(calls);
     });
@@ -258,14 +266,16 @@ for (const width of [1280, 390]) {
       stack.relay.mode = "unsigned";
       await signIn(page);
       const calls = stack.relay.calls;
+      const logged = stack.relay.upstream.length; // only entries after this belong to the Catalog opened below
       const seen = observe(page);
       await open(page);
       await expect(
         page.getByRole("alert").getByText("Sign in to see the Catalog.")
       ).toBeVisible();
+      expect(asked(seen)).toBe(true);
       expect(editionRequests(seen).map((s) => s.status)).toContain(401);
       expect(stack.relay.calls).toBeGreaterThan(calls);
-      expect(stack.relay.upstream).toContainEqual({
+      expect(stack.relay.upstream.slice(logged)).toContainEqual({
         method: "GET",
         path: "/api/catalog/editions",
         status: 401,
@@ -310,14 +320,19 @@ for (const width of [1280, 390]) {
     }) => {
       stack.seed("populated");
       await signIn(page);
+      const seen = observe(page);
       await open(page);
       await expect(items(page)).toHaveCount(24);
+      seen.length = 0; // from here only the reload under the abort counts
+      seen.requests.length = 0;
       const pattern = "**/api/riftbound/catalog/editions**";
       await page.route(pattern, (route) => route.abort("failed"));
       await page.reload();
       await expect(
         page.getByRole("alert").getByText("Cards couldn't be loaded.")
       ).toBeVisible();
+      expect(asked(seen)).toBe(true); // the page asked, and the abort stopped any answer
+      expect(editionRequests(seen)).toEqual([]);
       await page.unroute(pattern);
       await page.getByRole("button", { name: "Retry", exact: true }).click();
       await expect(items(page)).toHaveCount(24);
