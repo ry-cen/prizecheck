@@ -1,3 +1,4 @@
+import type { UndoEntry } from "../inventoryUndo";
 import {
   BorrowedMoveError,
   type BorrowedMoveItem,
@@ -328,4 +329,29 @@ export function unsupportedUndoFailure(copies: number, place: string): Failure {
     reloadTree: true,
     retrySame: true,
   };
+}
+
+/** What an offered Undo would undo; unnamed Locations are omitted. */
+export function undoOfferText(
+  entry: Pick<
+    UndoEntry,
+    "action" | "source_id" | "destination_id" | "source_count"
+  >,
+  name: (locationId: string) => string | null,
+  which: "last" | "earlier"
+): string {
+  const word = entry.action === "remove" ? "Inventory Removal" : entry.action;
+  const source = entry.source_id ? name(entry.source_id) : null;
+  const destination = entry.destination_id ? name(entry.destination_id) : null;
+  const from =
+    entry.action === "add"
+      ? ""
+      : source
+        ? ` from ${source}`
+        : entry.source_count > 1
+          ? ` from ${entry.source_count} locations`
+          : "";
+  const to =
+    entry.action !== "remove" && destination ? ` to ${destination}` : "";
+  return `You can still undo your ${which} ${word}${from}${to}.`;
 }

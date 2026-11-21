@@ -331,7 +331,7 @@ for (const entryPoint of ["Catalog", "Collection popup"] as const) {
         .getByRole("button", { name: "Collection", exact: true })
         .click();
       await expect(toastText(page)).toHaveText(
-        "The earlier Add can be undone."
+        "You can still undo your last add to Unsorted."
       );
       await expect(undo).toBeVisible();
       await undo.click();
@@ -477,7 +477,7 @@ test("Undo feedback still shows after a newer sign-out notice", async ({
   ).toBeVisible();
   await page.reload();
   await expect(toastText(page)).toHaveText(
-    "The earlier Inventory Removal can be undone."
+    "You can still undo your last Inventory Removal from Signout binder."
   );
   let held!: Route, arrived!: () => void;
   const incoming = new Promise<void>((resolve) => {
@@ -579,7 +579,7 @@ test("a bar Add whose Undo list failed is still dismissed for good", async ({
     .getByRole("button", { name: "Collection", exact: true })
     .click();
   expect((await listed).ok()).toBeTruthy();
-  await expect(page.getByText("The earlier Add can be undone.")).toHaveCount(0);
+  await expect(page.getByText(/^You can still undo your last /)).toHaveCount(0);
 });
 
 test.describe("desktop", () => {
@@ -875,7 +875,7 @@ test.describe("desktop", () => {
 
     await page.getByRole("button", { name: "Dismiss Undo" }).click();
     await expect(toast(page)).toHaveText(
-      "Dismissed. The earlier Move can be undone."
+      `Dismissed. You can still undo your earlier move from Alpha ${s} to First ${s}.`
     );
     await page.getByRole("button", { name: "Undo", exact: true }).click();
     await expect(toast(page)).toHaveText("Undo restored 1 copy to 1 location.");
@@ -1972,5 +1972,45 @@ test("Collection restores each Location's scroll on Back and Forward", async ({
       B: { saved: savedB, restored: restoredB },
     }),
     contentType: "application/json",
+  });
+});
+
+test.describe("restored Undo on a phone", () => {
+  test.use({
+    viewport: { width: 375, height: 812 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  test("a restored Undo names its Location at phone size", async ({ page }) => {
+    promoteCatalog({ "card-1": "Phone Abra" });
+    await signIn(page);
+    const leaf = await createLocation(page, "Phone binder", null);
+    await addCopies(page, leaf, await editionOf("card-1"), 2);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(2);
+    await tiles(page).first().click();
+    await page
+      .getByRole("dialog", { name: "Phone Abra", exact: true })
+      .getByRole("button", { name: "Remove…", exact: true })
+      .click();
+    await page
+      .getByRole("dialog", {
+        name: "Remove 1 copy from your Collection",
+        exact: true,
+      })
+      .getByRole("button", { name: "Remove 1 copy", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Undo", exact: true })
+    ).toBeVisible();
+    await page.reload();
+    await expect(toastText(page)).toHaveText(
+      "You can still undo your last Inventory Removal from Phone binder."
+    );
+    await expect(
+      page
+        .getByRole("region", { name: "Notifications" })
+        .getByRole("button", { name: "Undo", exact: true })
+    ).toBeVisible();
   });
 });
