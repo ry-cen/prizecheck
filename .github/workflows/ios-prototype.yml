@@ -1,7 +1,7 @@
 name: iOS prototype simulator
 on:
   pull_request:
-    branches: [dev]
+    branches: [dev, feature/ios-shell-signin-prototype]
     types: [opened, synchronize, reopened]
     paths:
       - ".github/workflows/ios-prototype.yml"
@@ -19,11 +19,13 @@ jobs:
     if: >-
       github.repository == 'ry-cen/prizecheck' &&
       github.event.repository.private == false &&
-      github.event.pull_request.number == 671 &&
-      github.head_ref == 'feature/ios-shell-signin-prototype' &&
+      (
+        (github.event.pull_request.number == 671 && github.head_ref == 'feature/ios-shell-signin-prototype' && github.base_ref == 'dev') ||
+        (github.event.pull_request.number == 676 && github.head_ref == 'feature/ios-native-sign-in' && github.base_ref == 'feature/ios-shell-signin-prototype')
+      ) &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: macos-15-intel
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
@@ -40,9 +42,11 @@ jobs:
           xcodebuild -version
           xcrun swift --version
           xcrun simctl list runtimes
+      - name: Start simulator boot early
+        run: bash mobile/boot-simulator.sh
       - run: npm ci
       - run: npm run ios:sync
-      - name: Compile unsigned app and UI tests through Swift Package Manager
+      - name: Compile ad-hoc signed app and UI tests through Swift Package Manager
         run: |
           set -o pipefail
           mkdir -p .scratch
@@ -50,6 +54,6 @@ jobs:
             -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .scratch/ios-derived \
-            CODE_SIGNING_ALLOWED=NO build-for-testing | tee .scratch/ios-build.log
+            CODE_SIGN_IDENTITY=- build-for-testing | tee .scratch/ios-build.log
       - name: Install, launch and exercise real simulator UI and bridge
         run: bash mobile/validate-simulator.sh

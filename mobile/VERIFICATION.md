@@ -54,13 +54,13 @@ The initial Capacitor add attempt from `mobile/` failed because it is not an npm
 - API tests, operations suite, full application gate and scanner real-model execution: not run for this slice. No API tests were changed.
 - GitHub CI and independent review are separate acceptance evidence; local results do not approve this implementation.
 
-This list was first written before any macOS work. The continuation below added the PR #671-only simulator workflow; no runner or account permissions were changed.
+This list was first written before any macOS work. The continuation below added the simulator workflow for PRs #671 and #676 only; no runner or account permissions were changed.
 
 ## Simulator validation continuation
 
 The continuation rechecked the same clean Linux worktree and PR head `2c326ed4d6d6df9a4cd3fc72a673b3c2cb912be1`; no competing iOS T3 owner was active. Repository metadata confirmed PUBLIC visibility, existing ADMIN access, Actions enabled, allowed actions and existing `workflow` OAuth scope. GitHub's standard-runner reference lists `macos-15-intel` as free for public repositories; its installed-image manifest includes Xcode 26.3, above Capacitor 8's minimum Xcode 26.0. No permissions, billing or account settings were changed.
 
-A PR #671/branch-only simulator workflow, shared XCTest scheme/target, four real UI scenarios and a loopback-only runner script were added. The script explicitly installs and launches the built app; the hosted job separates compile from UI execution, logs the exact head and toolchain, and uploads no artifacts or caches. Runtime outcomes belong to the exact-head Actions logs and PR evidence, not to these definitions.
+A simulator workflow for PRs #671 and #676 only, shared XCTest scheme/target, four real UI scenarios and a loopback-only runner script were added. The script explicitly installs and launches the built app; the hosted job separates compile from UI execution, logs the exact head and toolchain, and uploads no artifacts or caches. Runtime outcomes belong to the exact-head Actions logs and PR evidence, not to these definitions.
 
 Local continuation checks: 13 protocol/UI tests plus one loopback HTTP contract test passed, as did TypeScript/generated-contract checks, shell syntax and scheme XML parsing. The two new jsdom tests cover a populated getLaunchUrl on startup and appStateChange expiry without advancing the polling timer. These are mocked callback tests, not native evidence.
 
@@ -110,3 +110,25 @@ A new `testCollectionShowMoreAndRefresh` UI scenario was added, and the existing
 [Run 43859035800](https://github.com/ry-cen/prizecheck/actions/runs/43859035800) at `68aa863b` passed **5 of 5, with 0 failed and 0 skipped**, on the iPhone 17 simulator (iOS 26.2). The job took about 16 minutes against its 25-minute timeout. Linux Verify for that PR head passed 2,988 unit tests and 678 tooling tests, with three historical migration tests skipped in the shallow checkout.
 
 The next commit waits for Collection tiles instead of checking them at once. The pull request records the hosted result for that head. Native 30-minute expiry, so the session-ended message reached by expiry, is still unit-tested only.
+
+### Hosted run 44036494533 — bd0a89ca
+
+[Run 44036494533](https://github.com/ry-cen/prizecheck/actions/runs/44036494533) at `bd0a89ca` reported `TEST BUILD SUCCEEDED`. The five demo tests passed: `testAppCancellationAfterNativeResume` 78 s, `testBrowserCancellationAndError` 55 s, `testColdBrowserReturn` 39 s, `testCollectionShowMoreAndRefresh` 38 s and `testWarmBrowserReturnRecoveryAndSignOut` 69 s. The native sign-in test was cancelled by the 25-minute job timeout after 19 s, so it has no result.
+
+XCTest runs classes in alphabetical order, so the native class ran last. It is renamed `AuthNativeSignInUITests` to run first; the timeout and runner are unchanged.
+
+### Native sign-in stage diagnostics (candidate, not run)
+
+A local-only candidate adds diagnostics to find where the native sign-in test stops after **Allow**. It changes no behaviour. A Debug build logs one line per stage to the `app.prizecheck.prototype` subsystem, category `native-stage`, with fixed labels and integer codes only. The native stub prints one allowlisted `route`, `method` and `status` line per response. The native test prints `native-ui-state=` and `native-auth-sheet=` when the first card does not appear, and `validate-simulator.sh` prints the stub and stage logs before it cleans up. None of this has run on a simulator or on a hosted runner.
+
+### Hosted run 44153531511 — 72c96337 (native sign-in did not reach the app)
+
+[Run 44153531511](https://github.com/ry-cen/prizecheck/actions/runs/44153531511) at `72c96337`: 5 of 6 tests passed; the native sign-in test failed. The stub logged `native-fixture route=approve_post method=POST status=403` and nothing after it. The app logged only `signin_begin`; the UI state was `sign_in_button` with the auth sheet in the foreground.
+
+Local reproduction with headless Chromium against the committed stub: with the consent page's `referrer-policy: no-referrer`, the form POST arrives with `Origin: null` and fails the stub's exact-Origin check with 403. With only the referrer policy changed to `same-origin`, the POST carries the exact Origin and gets 303.
+
+Fixture-only fix: the simulator stub's native pages now send `referrer-policy: same-origin`; the exact-Origin and nonce checks are unchanged, and a test pins that `Origin: null` is still refused. When this fixture-only fix was made (`af88637c`), the gateway was not changed. The gateway's own fix is the later "Fixed" note in `NATIVE_SIGN_IN.md`. [Run 44254633525](https://github.com/ry-cen/prizecheck/actions/runs/44254633525) at `af88637c` then exercised the fixed stub: 5 of 6 tests passed. The native test got past consent (`approve_post` 303, `token` 200, `callback_code`, `token_http status=200`) and failed at `keychain_save status=-34018`.
+
+### Simulator ad-hoc signing (candidate, not run)
+
+Hosted run 44254633525 at `af88637c` logged `keychain_save status=-34018` and the UI showed "Unable to sign in": the unsigned build (`CODE_SIGNING_ALLOWED=NO`) cannot use the Keychain. The workflow build and `validate-simulator.sh` test invocation now pass `CODE_SIGN_IDENTITY=-` (ad-hoc, no team, certificate, account or secret) instead, and the script prints the app's signature and entitlements after `simctl install`. No hosted or simulator run of this change has happened yet, so this records no pass.
