@@ -667,3 +667,60 @@ test("the row ignores a stale result even when it carries a retry", async () => 
     expect(button("Undo").getAttribute("aria-disabled")).toBeNull();
   }, true);
 });
+
+test.each([
+  ["a matching Edition", "e", [], []],
+  ["a pick", "e", ["f"], ["f"]],
+  ["a pick back to the first", "e", ["f", "e"], ["f", "e"]],
+  ["an unknown Edition", "missing", [], ["e"]],
+  ["no Edition", null, [], ["e"]],
+])(
+  "onEditionShown reports the Edition shown: %s",
+  async (_name, editionId, picks, expected) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const shown = vi.fn();
+    try {
+      await act(async () =>
+        root.render(
+          h(
+            ToastProvider,
+            null,
+            h(CatalogCardPopup, {
+              request: { printingId: "p", editionId, row: null, report: null },
+              onClose: vi.fn(),
+              onEditionShown: shown,
+              position: null,
+              canPrevious: false,
+              canNext: false,
+              onPrevious: vi.fn(),
+              onNext: vi.fn(),
+              pendingFor: () => ({ current: null }),
+              location: null,
+              onLocation: vi.fn(),
+              alsoOffer: null,
+              onAdded: async () => null,
+              onReported: vi.fn(),
+            })
+          )
+        )
+      );
+      // `picks` are the Editions pressed after the first resolution; `expected` what is reported.
+      for (const id of picks) {
+        const button = [
+          ...host.querySelectorAll<HTMLButtonElement>("button[aria-pressed]"),
+        ].find((b) =>
+          b.textContent?.includes(id === "e" ? "Normal" : "Reverse")
+        )!;
+        await act(async () => button.click());
+      }
+      expect(shown.mock.calls.map(([id]) => id)).toEqual(expected);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  }
+);

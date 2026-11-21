@@ -105,6 +105,77 @@ it("closes pushed sheets through Back and replaces directly opened sheets", asyn
   }
 });
 
+it("closeOverlay goes back once until the next popstate", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/catalog?q=Abra");
+  let route!: Route;
+  function View() {
+    route = useRoute();
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+  try {
+    await act(async () => root.render(createElement(View)));
+    await act(async () =>
+      route.navigate("/catalog?q=Abra&card=one", { overlay: true })
+    );
+    await act(async () => route.closeOverlay("/catalog?q=Abra"));
+    await act(async () => route.closeOverlay("/catalog?q=Abra"));
+    expect(back).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await act(async () =>
+      route.navigate("/catalog?q=Abra&card=two", { overlay: true })
+    );
+    await act(async () => route.closeOverlay("/catalog?q=Abra"));
+    expect(back).toHaveBeenCalledTimes(2);
+  } finally {
+    await act(async () => root.unmount());
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("a guard-blocked Back clears the pending close so a later close still goes back", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/catalog");
+  let route!: Route;
+  let blocked = false;
+  function View() {
+    route = useRoute();
+    useLeaveGuard({ blocks: () => blocked, ask: vi.fn() });
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+  try {
+    await act(async () => root.render(createElement(View)));
+    const parent = window.history.state;
+    await act(async () =>
+      route.navigate("/catalog?card=one", { overlay: true })
+    );
+    const pushed = route.entry;
+    await act(async () => route.closeOverlay("/catalog"));
+    expect(back).toHaveBeenCalledTimes(1);
+    blocked = true;
+    await act(async () => {
+      window.history.replaceState(parent, "", "/catalog");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(window.location.search).toBe("?card=one");
+    expect(window.history.state.prizecheckEntry).toBe(pushed);
+    expect(window.history.state.prizecheckOverlayParent).toBe("/catalog");
+    await act(async () => route.closeOverlay("/catalog"));
+    expect(back).toHaveBeenCalledTimes(2);
+  } finally {
+    await act(async () => root.unmount());
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
 it("evicts old history positions after many distinct visits", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   window.history.replaceState(null, "", "/decks/old");
