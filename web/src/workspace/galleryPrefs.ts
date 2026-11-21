@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { scopedPrefix, type GameId } from "../gameScope";
 import type { ElementalType } from "../collection_generated";
 import {
@@ -110,8 +110,26 @@ function readPrefs(userId: string, game: GameId): GalleryPrefs {
  * listing request already uses them, and every change is written back. When storage is unavailable
  * (private mode, quota) they last only for this visit. */
 export function useGalleryPrefs(userId: string, game: GameId = "pokemon") {
-  const [prefs, setPrefs] = useState<GalleryPrefs>(() =>
-    readPrefs(userId, game)
+  const scope = prefsStorageKey(userId, game);
+  const [state, setState] = useState(() => ({
+    scope,
+    prefs: readPrefs(userId, game),
+  }));
+  // A different game or user is a different stored record: load it before anything renders or is written for
+  // it, so the previous scope's preferences are never saved under the new key.
+  let current = state;
+  if (state.scope !== scope) {
+    current = { scope, prefs: readPrefs(userId, game) };
+    setState(current);
+  }
+  const prefs = current.prefs;
+  const setPrefs = useCallback(
+    (next: GalleryPrefs | ((previous: GalleryPrefs) => GalleryPrefs)) =>
+      setState((s) => ({
+        ...s,
+        prefs: typeof next === "function" ? next(s.prefs) : next,
+      })),
+    []
   );
   useEffect(() => {
     try {

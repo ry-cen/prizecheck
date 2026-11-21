@@ -9,7 +9,11 @@ import {
   forgetAddQueues,
 } from "./catalog/useStoredAddQueue";
 import { GAME_IDS, scopedPrefix } from "./gameScope";
-import { prefsStorageKey } from "./workspace/galleryPrefs";
+import {
+  prefsStorageKey,
+  useGalleryPrefs,
+  type GalleryPrefs,
+} from "./workspace/galleryPrefs";
 import {
   moveActivityKey,
   moveLockName,
@@ -20,6 +24,7 @@ import { createOperation } from "./workspace/moveOperation";
 import {
   ownerRevisionChannelName,
   sharedRevision,
+  useStaleCollection,
 } from "./workspace/useStaleCollection";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -185,30 +190,16 @@ test("signing out clears every game's add queue", () => {
   expect(GAME_IDS).toContain("riftbound");
 });
 
-test("two tabs: a revision posted by one game is ignored by the other", async () => {
-  const name = (g: "pokemon" | "riftbound") =>
-    ownerRevisionChannelName("u1", g);
-  const poster = new BroadcastChannel(name("riftbound"));
-  const pokemonTab = new BroadcastChannel(name("pokemon"));
-  const riftboundTab = new BroadcastChannel(name("riftbound"));
-  const seen: Record<string, (number | null)[]> = { p: [], r: [] };
-  pokemonTab.onmessage = (e) => seen.p.push(sharedRevision(e.data, "pokemon"));
-  riftboundTab.onmessage = (e) =>
-    seen.r.push(sharedRevision(e.data, "riftbound"));
-  poster.postMessage({ revision: 7, game: "riftbound" });
-  await new Promise((r) => setTimeout(r, 50));
-  expect(seen.p).toEqual([]); // different channel
-  expect(seen.r).toEqual([7]);
-  // Even on a shared channel, a message naming another game is ignored.
+test("a revision message naming another game is ignored by the receiver", () => {
   expect(
     sharedRevision({ revision: 7, game: "riftbound" }, "pokemon")
   ).toBeNull();
   expect(
     sharedRevision({ revision: 7, game: "pokemon" }, "riftbound")
   ).toBeNull();
-  poster.close();
-  pokemonTab.close();
-  riftboundTab.close();
+  expect(sharedRevision({ revision: 7, game: "riftbound" }, "riftbound")).toBe(
+    7
+  );
 });
 
 test("a legacy channel message without game still reaches Pokémon", () => {
@@ -247,4 +238,121 @@ test("a Deck event for the other game with the same deckId does not fire", async
   );
   expect(calls).toEqual(["default", "riftbound", "default"]);
   await act(async () => root.unmount());
+});
+
+async function mount(render: () => ReturnType<typeof createElement>) {
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  await act(async () => root.render(render()));
+  return {
+    rerender: (next: () => ReturnType<typeof createElement>) =>
+      act(async () => root.render(next())),
+    unmount: () => act(async () => root.unmount()),
+  };
+}
+
+test("switching game on a mounted gallery loads the new game's preferences and overwrites neither", async () => {
+  const pokemon = { sort: "set-desc", display: { names: true } };
+  const riftbound = { sort: "quantity-desc", display: { prices: true } };
+  const pokemonKey = prefsStorageKey("u1");
+  const riftboundKey = prefsStorageKey("u1", "riftbound");
+  localStorage.setItem(pokemonKey, JSON.stringify(pokemon));
+  localStorage.setItem(riftboundKey, JSON.stringify(riftbound));
+  const seen: GalleryPrefs[] = [];
+  const Probe = ({ game }: { game: "pokemon" | "riftbound" }) => {
+    const [prefs] = useGalleryPrefs("u1", game);
+    seen.push(prefs);
+    return null;
+  };
+  const view = await mount(() => createElement(Probe, { game: "pokemon" }));
+  const fromPokemon = seen.at(-1)!;
+  await view.rerender(() => createElement(Probe, { game: "riftbound" }));
+  const fromRiftbound = seen.at(-1)!;
+  expect(fromRiftbound).not.toEqual(fromPokemon);
+  expect(fromRiftbound.sort).toBe("quantity-desc");
+  expect(fromRiftbound.display.prices).toBe(true);
+  expect(fromRiftbound.display.names).toBe(false);
+  expect(JSON.parse(localStorage.getItem(pokemonKey)!).sort).toBe("set-desc");
+  expect(JSON.parse(localStorage.getItem(riftboundKey)!).sort).toBe(
+    "quantity-desc"
+  );
+  expect(JSON.parse(localStorage.getItem(riftboundKey)!).display.prices).toBe(
+    true
+  );
+  // No render between the switch and its load ever showed the old game's values for the new game.
+  await view.rerender(() => createElement(Probe, { game: "pokemon" }));
+  expect(seen.at(-1)).toEqual(fromPokemon);
+  await view.unmount();
+  localStorage.clear();
+});
+
+test("the revision hook sends, counts and probes for the game it is on", async () => {
+  const listen = (name: string) => {
+    const got: unknown[] = [];
+    const channel = new BroadcastChannel(name);
+    channel.onmessage = (e) => got.push(e.data);
+    return { got, channel };
+  };
+  const pokemonSide = listen(ownerRevisionChannelName("u1", "pokemon"));
+  const riftboundSide = listen(ownerRevisionChannelName("u1", "riftbound"));
+  const riftboundRead = vi.fn(async () => ({ owner_revision: 4 }));
+  const base = {
+    userId: "u1",
+    galleryStatus: "ready" as const,
+    byKey: new Map(),
+    galleryKey: "k",
+    reloadGallery: () => {},
+    treeReady: true,
+    reloadTree: () => {},
+    selected: new Set() as never,
+    clearSelection: () => {},
+    busy: false,
+  };
+  const Probe = (props: {
+    game: "pokemon" | "riftbound";
+    revision: number;
+    active: boolean;
+  }) => {
+    const common = {
+      ...base,
+      galleryRevision: props.revision,
+      treeRevision: props.revision,
+      active: props.active,
+    };
+    useStaleCollection(
+      props.game === "pokemon"
+        ? { ...common, game: "pokemon" }
+        : { ...common, game: "riftbound", readRevision: riftboundRead }
+    );
+    return null;
+  };
+  const wait = () => new Promise((r) => setTimeout(r, 50));
+  const view = await mount(() =>
+    createElement(Probe, { game: "pokemon", revision: 5, active: true })
+  );
+  await wait();
+  expect(pokemonSide.got).toEqual([{ revision: 5, game: "pokemon" }]);
+  expect(riftboundSide.got).toEqual([]);
+
+  // Switch game: the counter starts over, so a lower revision is still sent, and it carries the new game.
+  await view.rerender(() =>
+    createElement(Probe, { game: "riftbound", revision: 3, active: true })
+  );
+  await wait();
+  expect(riftboundSide.got).toEqual([{ revision: 3, game: "riftbound" }]);
+  expect(pokemonSide.got).toHaveLength(1);
+
+  // Coming back to the shown Collection reads through the game's own reader.
+  await view.rerender(() =>
+    createElement(Probe, { game: "riftbound", revision: 3, active: false })
+  );
+  await view.rerender(() =>
+    createElement(Probe, { game: "riftbound", revision: 3, active: true })
+  );
+  await wait();
+  expect(riftboundRead).toHaveBeenCalled();
+  expect(riftboundSide.got.at(-1)).toEqual({ revision: 4, game: "riftbound" });
+  await view.unmount();
+  pokemonSide.channel.close();
+  riftboundSide.channel.close();
 });

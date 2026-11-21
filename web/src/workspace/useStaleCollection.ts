@@ -52,11 +52,16 @@ export function sharedRevision(
     : null;
 }
 
-type Options = {
+/** Reads the owner revision for one game. Pokémon's is the default; another game must supply its own. */
+export type ReadRevision = () => Promise<{ owner_revision: number }>;
+
+type GameOptions =
+  | { game?: "pokemon"; readRevision?: ReadRevision }
+  | { game: Exclude<GameId, "pokemon">; readRevision: ReadRevision };
+
+type BaseOptions = {
   /** The signed-in user. Tabs share revisions on a channel named for them. */
   userId: string;
-  /** Which game's collection this is; another game's revisions never reach it. */
-  game?: GameId;
   galleryRevision: number | null;
   galleryStatus: GalleryStatus;
   /** The gallery's Holdings by key (GalleryData.byKey). */
@@ -82,6 +87,8 @@ type Options = {
   /** The same for the Location tree. */
   refreshTree?: (mayLand: () => boolean) => void | Promise<void>;
 };
+
+type Options = BaseOptions & GameOptions;
 
 type PendingNote = { snapshot: Selection; key: string; revision: number };
 
@@ -112,8 +119,19 @@ export function useStaleCollection({
   idle = false,
   refreshGallery,
   refreshTree,
+  readRevision,
 }: Options) {
   const [latest, setLatest] = useState<number | null>(null);
+  // Another game starts from nothing: a revision seen for the old scope says nothing about the new.
+  const scope = game;
+  const [seenScope, setSeenScope] = useState(scope);
+  if (seenScope !== scope) {
+    setSeenScope(scope);
+    setLatest(null);
+  }
+  const reader = useRef<ReadRevision | undefined>(undefined);
+  reader.current =
+    readRevision ?? (game === "pokemon" ? getCollectionRevision : undefined);
   const [note, setNote] = useState("");
   const channel = useRef<BroadcastChannel | null>(null);
   const posted = useRef(0);
@@ -161,21 +179,25 @@ export function useStaleCollection({
   };
 
   /** Records a revision. `share` posts it to the other tabs; revisions they sent are not echoed. */
-  const observe = useCallback((revision: number, share: boolean) => {
-    setLatest((previous) =>
-      previous === null || revision > previous ? revision : previous
-    );
-    if (share && revision > posted.current) {
-      posted.current = revision;
-      channel.current?.postMessage({ revision, game });
-    }
-  }, []);
+  const observe = useCallback(
+    (revision: number, share: boolean) => {
+      setLatest((previous) =>
+        previous === null || revision > previous ? revision : previous
+      );
+      if (share && revision > posted.current) {
+        posted.current = revision;
+        channel.current?.postMessage({ revision, game });
+      }
+    },
+    [game]
+  );
 
   // Declared first so the channel exists before the first revision is shared.
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
     const shared = new BroadcastChannel(ownerRevisionChannelName(userId, game));
     channel.current = shared;
+    posted.current = 0;
     shared.onmessage = (event: MessageEvent) => {
       const revision = sharedRevision(event.data, game);
       if (revision !== null) observe(revision, false);
@@ -199,8 +221,10 @@ export function useStaleCollection({
     let inFlight = false;
     const probe = () => {
       if (inFlight || document.visibilityState !== "visible") return;
+      const read = reader.current;
+      if (!read) return;
       inFlight = true;
-      getCollectionRevision()
+      read()
         .then((result) => {
           if (alive && Number.isSafeInteger(result.owner_revision))
             observe(result.owner_revision, true);
@@ -262,7 +286,14 @@ export function useStaleCollection({
     };
     // A failed read still settles: a change already seen refreshes, or shows the banner. The next focus or
     // return tries the read again.
-    getCollectionRevision().then(
+    const read = reader.current;
+    if (!read) {
+      settle(null);
+      return () => {
+        alive = false;
+      };
+    }
+    read().then(
       (result) => {
         if (alive)
           settle(
