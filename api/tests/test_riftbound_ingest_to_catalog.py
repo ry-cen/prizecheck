@@ -8,13 +8,15 @@ with a request signed by a per-run generated secret. No network is used.
 Lifecycle semantics observed, which differ from "held / retired / tombstoned" as one might first assume:
 
 * A held *group* (failed, suspicious or not pulled) keeps its previously accepted Printings and Editions visible.
-* A held *product* (duplicate number, token scope, display change, missing from source) is carried when it was
-  accepted before, so it stays visible, and a never-accepted held product never becomes visible.
+* A held *product* (duplicate number, token scope, missing from source) is carried when it was accepted before, so
+  it stays visible, and a never-accepted held product never becomes visible.
 * The writer never retires: `catalog_generation_printing.tombstoned` is always false and
   `catalog_generation_edition.active` always true (`lifecycle.py`: "no automatic retirement"). A product that vanishes
   from the source stays visible with a `missing_from_source` review. The 404-after-retirement behaviour of the read API
   is therefore covered only by `test_riftbound_catalog_read_api.py`, with seeded rows; the ingest path cannot reach it.
-* A display change on an accepted product is a review only: the catalog keeps the accepted name.
+* A display change on an accepted product holds only the *proposed display fields*: the catalog keeps the accepted
+  name, number and set name and records a `display_change` review. The Printing is still processed in that pull
+  (`plan.py:368`), so a supported finish in the same pull can still be added.
 * A changed price set adds Editions (a new finish) and a new product adds a Printing; those are the accepted changes.
 """
 import secrets
@@ -35,16 +37,6 @@ from test_riftbound_migrate import ROOT, migrate
 GROUPS = envelope([{'groupId': 902, 'name': 'Synthetic Set 902', 'categoryId': 89},
                    {'groupId': 901, 'name': 'Synthetic Set 901', 'categoryId': 89},
                    {'groupId': 900, 'name': 'Synthetic Set 900', 'categoryId': 89}])
-TABLES = ('catalog_generation_edition, catalog_generation_printing, catalog_generation, catalog_edition, '
-          'catalog_printing_display, catalog_printing, catalog_identity, catalog_review, catalog_run, '
-          'riftbound_group_snapshot, riftbound_identity_evidence')
-
-
-def wipe(url):
-    with psycopg.connect(url) as conn:
-        conn.execute(f'TRUNCATE {TABLES} CASCADE')
-        conn.execute('INSERT INTO catalog_state(singleton,active_generation) VALUES (true,NULL) ON CONFLICT DO NOTHING')
-        conn.execute('UPDATE catalog_state SET active_generation=NULL,revision=0 WHERE singleton')
 
 
 class Api:
@@ -78,8 +70,9 @@ def connect_api(entry, monkeypatch, url):  # noqa: F811
     return Api(entry.app, secret)
 
 
-@pytest.fixture(scope='module')
+@pytest.fixture
 def migrated(databases):  # noqa: F811
+    """A fresh disposable database per test, migrated with the real Riftbound track; `databases` drops it."""
     url = databases()
     migrate(ROOT, url)
     return url
@@ -87,10 +80,8 @@ def migrated(databases):  # noqa: F811
 
 @pytest.fixture
 def writer_conn(migrated):
-    wipe(migrated)
     with psycopg.connect(migrated) as conn:
         yield conn
-    wipe(migrated)
 
 
 @pytest.fixture
@@ -171,7 +162,7 @@ def test_a_first_accepted_pull_is_listed_searched_filtered_and_found_by_id(api, 
 
 def test_a_mixed_pull_shows_accepted_changes_and_never_a_held_candidate(api, writer_conn, migrated):
     first = writer.apply_run(writer_conn, first_pull())
-    before = {e['name']: e['id'] for e in api.get('/api/catalog/editions')['editions']}
+    before = {e['id']: (e['name'], e['set']['id'], e['number'], e['finish']) for e in api.get('/api/catalog/editions')['editions']}
     second = writer.apply_run(writer_conn, pulls(
         (900, [product(9000001, '001', 900, 'Synthetic Alpha'), product(9000002, '002', 900, 'Synthetic Beta'),
                product(9000003, '003', 900, 'Synthetic Gamma Renamed'),  # a display change on an accepted product
@@ -203,8 +194,10 @@ def test_a_mixed_pull_shows_accepted_changes_and_never_a_held_candidate(api, wri
     for hidden in ('held', 'theta', 'iota', 'renamed', 'never', '007', '021'):
         assert api.get('/api/catalog/editions', q=hidden)['total'] == 0, hidden
     assert api.get('/api/catalog/editions', set='902')['total'] == 0
-    for name, edition_id in before.items():  # an Edition shown before keeps its id and stays reachable by id
-        assert api.status(f'/api/catalog/editions/{edition_id}') == 200, name
+    assert len(before) == 7  # both of Alpha's finishes are tracked, each by its own Edition id
+    for edition_id, shown in before.items():  # an Edition shown before keeps its id and stays reachable by id
+        detail = api.get(f'/api/catalog/editions/{edition_id}')
+        assert (detail['name'], detail['set']['id'], detail['number'], detail['finish']) == shown
 
     with psycopg.connect(migrated) as conn:
         assert conn.execute("SELECT count(*) FROM catalog_printing WHERE source_id IN ('9000007','9000008','9000021')").fetchone()[0] == 0
