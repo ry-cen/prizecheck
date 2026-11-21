@@ -100,6 +100,7 @@ export function LentOutDialog({
       </ul>
     );
 
+  if (!open) body = null;
   return (
     <Dialog
       open={open}

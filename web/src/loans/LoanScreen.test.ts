@@ -245,6 +245,14 @@ for (const role of ["lender", "borrower"] as const) {
             JSON.stringify(vi.mocked(startReturn).mock.calls[0])
           );
         }
+        expect(
+          host.querySelector('[role="alert"]')?.textContent?.trim() ?? ""
+        ).toBe("");
+        if (lost)
+          expect(host.querySelector('[role="status"]')?.textContent).toContain(
+            "It was sent."
+          );
+        else expect(host.textContent).not.toContain("It was sent.");
         expect(startReturn).toHaveBeenCalledTimes(lost ? 2 : 1);
         expect(JSON.parse(packets[0]).account_id).toBe("A");
         if (lost) expect(packets[1]).toBe(packets[0]);
