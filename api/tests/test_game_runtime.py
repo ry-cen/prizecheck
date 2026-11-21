@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.testclient import TestClient
 
 import app.deck_deletion as deck_deletion
@@ -94,12 +94,29 @@ def test_core_routes_resolve_their_runtime_from_the_app():
     assert checked >= 20
 
 
+def verifier_declarations(route):
+    """Every place a route's dependency graph declares a verifier, counted one by one, whatever the cache setting."""
+    return [call for call in calls_in(route.dependant) if call in VERIFIERS]
+
+
 # 2
 def test_no_route_verifies_twice():
     for app in (pokemon_app, riftbound_app):
         for route in routes_of(app):
-            verifiers = [call for call in calls_in(route.dependant) if call in VERIFIERS]
-            assert len(set(verifiers)) <= 1, (route.path, verifiers)
+            declared = verifier_declarations(route)
+            assert len(declared) <= 1, (route.path, declared)
+
+
+def test_a_repeated_verifier_declaration_is_caught_even_when_it_would_run_twice():
+    uncached = APIRouter(dependencies=[Depends(core_runtime.verified_user)])
+    uncached.add_api_route('/twice', lambda user=Depends(core_runtime.verified_user, use_cache=False): user)
+    cached = APIRouter(dependencies=[Depends(core_runtime.verified_user)])
+    cached.add_api_route('/once', lambda user=Depends(core_runtime.verified_user): user)
+    single = APIRouter()
+    single.add_api_route('/single', lambda user=Depends(core_runtime.verified_user): user)
+    app = bare_app((uncached, cached, single))
+    found = {route.path: len(verifier_declarations(route)) for route in routes_of(app) if route.path.startswith('/')}
+    assert found['/twice'] == 2 and found['/once'] == 2 and found['/single'] == 1
 
 
 # 3
@@ -165,8 +182,10 @@ def spy_on_connections(monkeypatch):
 
 
 # 6
+@pytest.mark.parametrize('exits_first', ['pokemon_exits_first', 'riftbound_exits_first'])
 @pytest.mark.parametrize('first', ['pokemon_first', 'riftbound_first'])
-def test_two_games_in_one_process(first, fresh, monkeypatch):  # noqa: F811
+def test_two_games_in_one_process(first, exits_first, fresh, monkeypatch):  # noqa: F811
+    exits_first = exits_first.removesuffix('_exits_first')
     rb_url, pk_url = fresh[0], os.environ['DATABASE_URL']
     monkeypatch.setenv('INTERNAL_AUTH_SECRET', 'pk-test')
     monkeypatch.setenv('RIFTBOUND_INTERNAL_AUTH_SECRET', 'rb-test')
@@ -194,27 +213,50 @@ def test_two_games_in_one_process(first, fresh, monkeypatch):  # noqa: F811
         response = client.get(path, headers=signed('GET', path, user=who, secret=secret))
         return response
 
-    with TestClient(apps['pokemon']) as pk:
-        with TestClient(apps['riftbound']) as rb:
-            for _ in range(3):
-                tree = get(pk, 'pokemon', '/api/location-tree', who=user, secret='pk-test')
-                assert tree.status_code == 200 and 'PK shelf' in tree.text and 'RB shelf' not in tree.text
-                assert set(opened) == {pk_url}
-                tree = get(rb, 'riftbound', '/api/location-tree', who=user, secret='rb-test')
-                assert tree.status_code == 200 and 'RB shelf' in tree.text and 'PK shelf' not in tree.text
-                assert set(opened) == {rb_url}
-                mine = get(rb, 'riftbound', '/api/location-tree', who=other, secret='rb-test')
-                assert mine.status_code == 200 and 'V shelf' in mine.text and str(location) not in mine.text
-                assert get(pk, 'pokemon', '/api/moves/undo', who=user, secret='pk-test').status_code == 200
-                assert set(opened) == {pk_url}
-                assert get(rb, 'riftbound', '/api/moves/undo', who=user, secret='rb-test').status_code == 200
-                assert set(opened) == {rb_url}
-                assert get(rb, 'riftbound', '/api/location-tree', who=user, secret='pk-test').status_code == 401
-                assert get(pk, 'pokemon', '/api/location-tree', who=user, secret='rb-test').status_code == 401
-                assert not opened
-        # The Riftbound app has shut down and stopped its counter; Pokémon's requests still count on its own.
+    own_url, own_secret = {'pokemon': pk_url, 'riftbound': rb_url}, {'pokemon': 'pk-test', 'riftbound': 'rb-test'}
+    shelf = {'pokemon': 'PK shelf', 'riftbound': 'RB shelf'}
+    clients = {game: TestClient(apps[game]) for game in ('pokemon', 'riftbound')}
+    open_clients = []
+    try:
+        for game in ('pokemon', 'riftbound'):
+            clients[game].__enter__()  # starts that app's lifespan
+            open_clients.append(game)
+        pk, rb = clients['pokemon'], clients['riftbound']
+        for _ in range(3):
+            tree = get(pk, 'pokemon', '/api/location-tree', who=user, secret='pk-test')
+            assert tree.status_code == 200 and 'PK shelf' in tree.text and 'RB shelf' not in tree.text
+            assert set(opened) == {pk_url}
+            tree = get(rb, 'riftbound', '/api/location-tree', who=user, secret='rb-test')
+            assert tree.status_code == 200 and 'RB shelf' in tree.text and 'PK shelf' not in tree.text
+            assert set(opened) == {rb_url}
+            mine = get(rb, 'riftbound', '/api/location-tree', who=other, secret='rb-test')
+            assert mine.status_code == 200 and 'V shelf' in mine.text and str(location) not in mine.text
+            assert get(pk, 'pokemon', '/api/moves/undo', who=user, secret='pk-test').status_code == 200
+            assert set(opened) == {pk_url}
+            assert get(rb, 'riftbound', '/api/moves/undo', who=user, secret='rb-test').status_code == 200
+            assert set(opened) == {rb_url}
+            assert get(rb, 'riftbound', '/api/location-tree', who=user, secret='pk-test').status_code == 401
+            assert get(pk, 'pokemon', '/api/location-tree', who=user, secret='rb-test').status_code == 401
+            assert not opened
+        # One app shuts down, whichever was built first; its lifespan stops its own counter and nothing else's.
+        gone, survivor = exits_first, ('riftbound' if exits_first == 'pokemon' else 'pokemon')
+        clients[gone].__exit__(None, None, None)
+        open_clients.remove(gone)
+        assert apps[gone].state.game_runtime.counter.flush()
+        gone_total = recorders[gone].total
         for _ in range(2):
-            assert get(pk, 'pokemon', '/api/location-tree', who=user, secret='pk-test').status_code == 200
+            tree = get(clients[survivor], survivor, '/api/location-tree', who=user, secret=own_secret[survivor])
+            assert tree.status_code == 200 and shelf[survivor] in tree.text and shelf[gone] not in tree.text
+            assert set(opened) == {own_url[survivor]}
+            assert get(clients[survivor], survivor, '/api/moves/undo', who=user, secret=own_secret[survivor]).status_code == 200
+            assert set(opened) == {own_url[survivor]}
+        assert get(clients[survivor], survivor, '/api/location-tree', who=user, secret=own_secret[gone]).status_code == 401
+        assert not opened
+        assert apps[survivor].state.game_runtime.counter.flush()
+        assert recorders[survivor].total.requests == sent[survivor] and recorders[gone].total == gone_total
+    finally:
+        for game in open_clients:
+            clients[game].__exit__(None, None, None)
     for game in ('pokemon', 'riftbound'):
         assert apps[game].state.game_runtime.counter.flush()
         assert recorders[game].total.requests == sent[game], game
