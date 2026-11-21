@@ -35,20 +35,25 @@ final class FixtureUITests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         if awaitPrompt {
             // iOS may ask "Open in app?" for the custom URL scheme, and on a slow runner the prompt can
-            // appear well after a fixed 3 s window. Wait on state, bounded at 20 s: stop as soon as an
-            // Open button exists in Safari or SpringBoard, or the app is already in the foreground.
-            // A timeout is not a failure here; the foreground assertion below reports the real one.
-            let settled = NSPredicate { _, _ in
-                self.safari.buttons["Open"].exists
-                    || springboard.buttons["Open"].exists
-                    || self.app.state == .runningForeground
-            }
-            let promptOrForeground = XCTNSPredicateExpectation(predicate: settled, object: nil)
-            _ = XCTWaiter().wait(for: [promptOrForeground], timeout: 20)
-            if safari.buttons["Open"].exists {
-                safari.buttons["Open"].tap()
-            } else if springboard.buttons["Open"].exists {
-                springboard.buttons["Open"].tap()
+            // appear well after a fixed 3 s window. Poll on the test's own (main) thread for at most 20 s:
+            // tap an Open button only once it is hittable (Safari's first, then SpringBoard's), and stop
+            // early if the app is already in the foreground. When nothing is hittable, block up to 1 s
+            // on Safari's Open button rather than sleeping. A timeout is not a failure here; the
+            // foreground assertion below reports the real one.
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline {
+                let safariOpen = safari.buttons["Open"]
+                let springboardOpen = springboard.buttons["Open"]
+                if safariOpen.exists && safariOpen.isHittable {
+                    safariOpen.tap()
+                    break
+                }
+                if springboardOpen.exists && springboardOpen.isHittable {
+                    springboardOpen.tap()
+                    break
+                }
+                if app.state == .runningForeground { break }
+                _ = safariOpen.waitForExistence(timeout: 1)
             }
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
             return
