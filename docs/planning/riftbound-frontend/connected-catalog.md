@@ -1,6 +1,6 @@
 # Connected Riftbound Catalog: local proof (#661)
 
-A local proof, not production identity (#531) and not a launch. It stacks on the unmerged #677 refresh branch.
+A local proof, not production identity (#531) and not a launch. It builds on `dev`: the #677 refresh landed through #682, and the per-game runtime seam (#685) and P-STATE (#684) are on `dev` too.
 
 **Chain.** Catalog page → generated client (`web/src/games/riftbound/catalog_generated.ts`, from the Riftbound OpenAPI by `scripts/generate_riftbound_catalog_client.py`) → `/api/riftbound/catalog/...` → the gateway (session required, path rewritten to `/api/...`) → `app.riftbound_main` → the Riftbound database. `npm run check:client` fails when the generated file is stale.
 

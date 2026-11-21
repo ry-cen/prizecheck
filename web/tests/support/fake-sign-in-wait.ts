@@ -41,8 +41,11 @@ export function pollFakeSignIn(
   return { state: "pending" };
 }
 
-/** What the in-page function gets: the start address and the wall-clock time after which it must not navigate. */
-export type StartNavigationArg = { href: string; notAfterEpochMs: number };
+/**
+ * What the in-page function gets: the start address and the age, on the blank document's own monotonic clock
+ * (`performance.now()`), after which it must not navigate.
+ */
+export type StartNavigationArg = { href: string; notAfterDocMs: number };
 
 /** The slice of Playwright's Page the sanitized walk uses, so a test can stand in a mock. */
 export type FakeSignInPage = {
@@ -61,21 +64,21 @@ export type FakeSignInPage = {
 /**
  * Page-side: schedule the navigation and return at once, so the call is never cut off by the document changing.
  * A timed-out page.evaluate can stay active (Playwright gives evaluate no timeout, and it can wait for a frame context
- * that arrives late), so the function refuses to navigate once `notAfterEpochMs` has passed, both when it starts and
- * when the scheduled step fires. It must stay self-contained: Playwright serializes it into the page.
+ * that arrives late), so the function refuses to navigate once the blank document's age reaches `notAfterDocMs`, both
+ * when it starts and when the scheduled step fires. The age is `performance.now()`, a monotonic clock tied to that
+ * document, so a wall clock moving backwards cannot extend it, and a late start sees a large age. It must stay
+ * self-contained: Playwright serializes it into the page.
  */
 export function startNavigationInPage(arg: StartNavigationArg): void {
-  if (Date.now() >= arg.notAfterEpochMs) return;
+  if (performance.now() >= arg.notAfterDocMs) return;
   setTimeout(() => {
-    if (Date.now() < arg.notAfterEpochMs) window.location.assign(arg.href);
+    if (performance.now() < arg.notAfterDocMs) window.location.assign(arg.href);
   }, 0);
 }
 
 export type FakeSignInClock = {
   /** Monotonic milliseconds: deadlines are measured on this. */
   now(): number;
-  /** Wall-clock epoch milliseconds, only to hand the page a cut-off it can compare with its own Date.now(). */
-  wallNow(): number;
   sleep(ms: number): Promise<void>;
   /** Runs `fn` after `ms` unless the returned function cancels it first. */
   after(ms: number, fn: () => void): () => void;
@@ -83,7 +86,6 @@ export type FakeSignInClock = {
 
 const realClock: FakeSignInClock = {
   now: () => performance.now(),
-  wallNow: () => Date.now(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   after: (ms, fn) => {
     const timer = setTimeout(fn, ms);
@@ -92,15 +94,17 @@ const realClock: FakeSignInClock = {
 };
 
 /**
- * Starts `work` only if budget remains, then settles with it or rejects with the fixed message once `ms` has passed;
- * any rejection of `work` is fixed text too. With no budget nothing is dispatched.
+ * Starts `work` only if budget remains before the absolute monotonic `deadlineAt`, then settles with it or rejects with
+ * the fixed message once the deadline passes; any rejection of `work` is fixed text too. With no budget nothing is
+ * dispatched, and a result that settles after the deadline but before the expiry timer runs is refused.
  */
 async function within<T>(
   work: () => Promise<T>,
-  ms: number,
+  deadlineAt: number,
   clock: FakeSignInClock
 ): Promise<T> {
   const failed = () => new Error(FAKE_SIGN_IN_FAILED);
+  const ms = deadlineAt - clock.now();
   if (ms <= 0) throw failed();
   // Detach the loser of the race so a late rejection of `work` is never unhandled.
   const guarded = work().catch(() => {
@@ -112,7 +116,9 @@ async function within<T>(
     cancel = clock.after(ms, () => reject(failed()));
   });
   try {
-    return await Promise.race([guarded, expiry]);
+    const result = await Promise.race([guarded, expiry]);
+    if (clock.now() >= deadlineAt) throw failed();
+    return result;
   } finally {
     cancel();
   }
@@ -133,7 +139,8 @@ export async function walkFakeSignInSanitized(
   clock: FakeSignInClock = realClock
 ): Promise<void> {
   const began = clock.now();
-  const remaining = () => deadlineMs - (clock.now() - began);
+  const deadlineAt = began + deadlineMs;
+  const remaining = () => deadlineAt - clock.now();
   // Start from a blank page, so a leftover app address is never read as "the walk has finished".
   await within(
     () =>
@@ -141,19 +148,21 @@ export async function walkFakeSignInSanitized(
         waitUntil: "commit",
         timeout: Math.max(1, remaining()),
       }),
-    remaining(),
+    deadlineAt,
     clock
   );
+  // The blank document was created when goto committed; its age is measured from here on its own monotonic clock.
+  const blankAt = clock.now();
   await within(
     () => {
-      // The cut-off is the wall-clock time at which this walk's whole budget ends.
-      const notAfterEpochMs = clock.wallNow() + remaining();
+      // The cut-off is the blank document's age at which this walk's whole budget ends.
+      const notAfterDocMs = clock.now() - blankAt + remaining();
       return page.evaluate(startNavigationInPage, {
         href: startHref,
-        notAfterEpochMs,
+        notAfterDocMs,
       });
     },
-    remaining(),
+    deadlineAt,
     clock
   );
   for (;;) {
@@ -167,7 +176,7 @@ export async function walkFakeSignInSanitized(
   // The load wait's own timeout message names no URL; it is replaced anyway.
   await within(
     () => page.waitForLoadState("load", { timeout: Math.max(1, remaining()) }),
-    remaining(),
+    deadlineAt,
     clock
   );
 }

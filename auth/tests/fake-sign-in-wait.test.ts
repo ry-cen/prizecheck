@@ -75,7 +75,6 @@ function fakeClock(): FakeSignInClock & { t: number; sleeps: number[] } {
   const clock = {
     t: 0,
     now: () => clock.t,
-    wallNow: () => 1_000_000 + clock.t,
     sleeps: [] as number[],
     sleep: (ms: number) => {
       clock.sleeps.push(ms);
@@ -129,7 +128,7 @@ describe("the sanitized fake sign-in walk", () => {
     const evaluate = calls.find((c) => c.method === "evaluate");
     expect(evaluate?.args).toEqual([
       startNavigationInPage,
-      { href: startHref, notAfterEpochMs: 1_000_000 + 30_000 },
+      { href: startHref, notAfterDocMs: 30_000 },
     ]);
     expect(JSON.stringify(calls)).not.toMatch(/MARKER_|code=|state=/);
   });
@@ -148,7 +147,13 @@ describe("the sanitized fake sign-in walk", () => {
         location: { assign: (href: string) => assigned.push(href) },
       };
       g.setTimeout = (fn: () => void) => scheduled.push(fn);
-      g.Date = { now: nowMs };
+      // The wall clock is rolled back to zero: the page must read only performance.now().
+      g.Date = { now: () => 0 };
+      const perf = Object.getOwnPropertyDescriptor(globalThis, "performance");
+      Object.defineProperty(globalThis, "performance", {
+        configurable: true,
+        value: { now: nowMs },
+      });
       return {
         assigned,
         scheduled,
@@ -156,15 +161,16 @@ describe("the sanitized fake sign-in walk", () => {
           g.window = saved.window;
           g.setTimeout = saved.setTimeout;
           g.Date = saved.Date;
+          if (perf) Object.defineProperty(globalThis, "performance", perf);
         },
       };
     }
 
-    it("schedules the navigation and returns, then navigates while the cut-off has not passed", () => {
+    it("schedules the navigation and returns, then navigates while the document is younger than the cut-off, even with the wall clock rolled back", () => {
       let now = 100;
       const page = inPage(() => now);
       try {
-        startNavigationInPage({ href: startHref, notAfterEpochMs: 200 });
+        startNavigationInPage({ href: startHref, notAfterDocMs: 200 });
         expect(page.assigned).toEqual([]);
         now = 199;
         page.scheduled[0]();
@@ -178,10 +184,10 @@ describe("the sanitized fake sign-in walk", () => {
       let now = 200;
       const page = inPage(() => now);
       try {
-        startNavigationInPage({ href: startHref, notAfterEpochMs: 200 });
+        startNavigationInPage({ href: startHref, notAfterDocMs: 200 });
         expect(page.scheduled).toEqual([]);
         now = 100;
-        startNavigationInPage({ href: startHref, notAfterEpochMs: 200 });
+        startNavigationInPage({ href: startHref, notAfterDocMs: 200 });
         now = 200;
         page.scheduled[0]();
         expect(page.assigned).toEqual([]);
@@ -270,7 +276,7 @@ describe("the sanitized fake sign-in walk", () => {
     expect(clock.t).toBe(250);
   });
 
-  it("hands a hung evaluate a cut-off, so a late evaluation cannot navigate after expiry", async () => {
+  it("hands a hung evaluate a document-age cut-off, so a late evaluation cannot navigate after expiry even with the wall clock rolled back", async () => {
     const clock = fakeClock();
     let late: (() => void) | undefined;
     const assigned: string[] = [];
@@ -285,17 +291,27 @@ describe("the sanitized fake sign-in walk", () => {
               setTimeout: g.setTimeout,
               Date: g.Date,
             };
+            const perf = Object.getOwnPropertyDescriptor(
+              globalThis,
+              "performance"
+            );
             g.window = {
               location: { assign: (href: string) => assigned.push(href) },
             };
             g.setTimeout = (step: () => void) => step();
-            g.Date = { now: () => clock.wallNow() };
+            g.Date = { now: () => 0 }; // rolled back
+            // The blank document was created at clock time 0, so its age is the clock's time.
+            Object.defineProperty(globalThis, "performance", {
+              configurable: true,
+              value: { now: () => clock.t },
+            });
             try {
               fn(arg);
             } finally {
               g.window = saved.window;
               g.setTimeout = saved.setTimeout;
               g.Date = saved.Date;
+              if (perf) Object.defineProperty(globalThis, "performance", perf);
             }
           };
         }),
@@ -309,9 +325,38 @@ describe("the sanitized fake sign-in walk", () => {
     expect(assigned).toEqual([]);
   });
 
-  it("measures the deadline on the monotonic clock, not the wall clock", async () => {
+  it("refuses a step that settles after the deadline but before the expiry timer runs", async () => {
+    const lateLoad = {
+      waitForLoadState: async () => {
+        clock.t += 1500; // resolves 500 ms past a 1000 ms budget
+      },
+    };
     const clock = fakeClock();
-    clock.wallNow = () => 0; // a wall clock jumping backwards must not extend the walk
+    const { page } = mockPage(lateLoad);
+    const message = await messageOf(
+      walkFakeSignInSanitized(page, startHref, 1000, clock)
+    );
+    expect(message).toBe(FAKE_SIGN_IN_FAILED);
+    expectClean(message);
+  });
+
+  it("refuses a late goto or evaluate the same way", async () => {
+    for (const method of ["goto", "evaluate"] as const) {
+      const clock = fakeClock();
+      const { page } = mockPage({
+        [method]: async () => {
+          clock.t += 1500;
+        },
+      });
+      const message = await messageOf(
+        walkFakeSignInSanitized(page, startHref, 1000, clock)
+      );
+      expect(message).toBe(FAKE_SIGN_IN_FAILED);
+    }
+  });
+
+  it("measures the deadline on the monotonic clock only", async () => {
+    const clock = fakeClock();
     const { page } = mockPage({ urls: [consent] } as Partial<FakeSignInPage>);
     const message = await messageOf(
       walkFakeSignInSanitized(page, startHref, 300, clock)
