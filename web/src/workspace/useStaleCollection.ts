@@ -42,10 +42,13 @@ export function sharedRevision(
   data: unknown,
   game: GameId = "pokemon"
 ): number | null {
-  const message = data as { revision?: unknown; game?: unknown } | null;
-  const tag = message && "game" in message ? message.game : "pokemon";
+  // A BroadcastChannel can deliver any structured-clone value; only a plain object can carry a revision.
+  if (typeof data !== "object" || data === null || Array.isArray(data))
+    return null;
+  const message = data as { revision?: unknown; game?: unknown };
+  const tag = "game" in message ? message.game : "pokemon";
   if (tag !== game) return null;
-  const revision = message?.revision;
+  const revision = message.revision;
   return typeof revision === "number" &&
     Number.isSafeInteger(revision) &&
     revision > 0

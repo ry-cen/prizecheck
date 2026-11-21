@@ -257,6 +257,22 @@ test("a legacy channel message without game still reaches Pokémon", () => {
   for (const game of [null, undefined, 0, 1, "", "Pokemon", {}, "riftbound"])
     expect(sharedRevision({ revision: 7, game }, "pokemon")).toBeNull();
   expect(sharedRevision({ revision: 7, game: null }, "riftbound")).toBeNull();
+  // Primitives and arrays are ignored, never thrown on, as they were before game tags existed.
+  for (const payload of [
+    "invalid message",
+    "",
+    7,
+    0,
+    true,
+    false,
+    undefined,
+    [7],
+    [{ revision: 7 }],
+  ]) {
+    expect(() => sharedRevision(payload)).not.toThrow();
+    expect(sharedRevision(payload)).toBeNull();
+    expect(sharedRevision(payload, "riftbound")).toBeNull();
+  }
   expect(sharedRevision({ revision: 7, game: "pokemon" })).toBe(7);
   expect(sharedRevision({ revision: 0 })).toBeNull();
   expect(sharedRevision(null)).toBeNull();
