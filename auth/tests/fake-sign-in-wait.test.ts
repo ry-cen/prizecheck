@@ -71,11 +71,14 @@ const startHref =
 const leak = `Navigation is interrupted by another navigation to "${callback}" ${consent}`;
 
 /** A fake clock whose sleep advances time, so deadlines run instantly. */
-function fakeClock(): FakeSignInClock & { t: number } {
+function fakeClock(): FakeSignInClock & { t: number; sleeps: number[] } {
   const clock = {
     t: 0,
     now: () => clock.t,
+    wallNow: () => 1_000_000 + clock.t,
+    sleeps: [] as number[],
     sleep: (ms: number) => {
+      clock.sleeps.push(ms);
       clock.t += ms;
       return Promise.resolve();
     },
@@ -124,26 +127,68 @@ describe("the sanitized fake sign-in walk", () => {
     const goto = calls.filter((c) => c.method === "goto");
     expect(goto.map((c) => c.args[0])).toEqual(["about:blank"]);
     const evaluate = calls.find((c) => c.method === "evaluate");
-    expect(evaluate?.args).toEqual([startNavigationInPage, startHref]);
+    expect(evaluate?.args).toEqual([
+      startNavigationInPage,
+      { href: startHref, notAfterEpochMs: 1_000_000 + 30_000 },
+    ]);
     expect(JSON.stringify(calls)).not.toMatch(/MARKER_|code=|state=/);
   });
 
-  it("schedules the page-side navigation and returns", () => {
-    const assigned: string[] = [];
-    const scheduled: (() => void)[] = [];
-    const g = globalThis as Record<string, unknown>;
-    const saved = { window: g.window, setTimeout: g.setTimeout };
-    g.window = { location: { assign: (href: string) => assigned.push(href) } };
-    g.setTimeout = (fn: () => void) => scheduled.push(fn);
-    try {
-      startNavigationInPage(startHref);
-      expect(assigned).toEqual([]);
-      scheduled[0]();
-      expect(assigned).toEqual([startHref]);
-    } finally {
-      g.window = saved.window;
-      g.setTimeout = saved.setTimeout;
+  describe("the page-side navigation", () => {
+    function inPage(nowMs: () => number) {
+      const assigned: string[] = [];
+      const scheduled: (() => void)[] = [];
+      const g = globalThis as Record<string, unknown>;
+      const saved = {
+        window: g.window,
+        setTimeout: g.setTimeout,
+        Date: g.Date,
+      };
+      g.window = {
+        location: { assign: (href: string) => assigned.push(href) },
+      };
+      g.setTimeout = (fn: () => void) => scheduled.push(fn);
+      g.Date = { now: nowMs };
+      return {
+        assigned,
+        scheduled,
+        restore: () => {
+          g.window = saved.window;
+          g.setTimeout = saved.setTimeout;
+          g.Date = saved.Date;
+        },
+      };
     }
+
+    it("schedules the navigation and returns, then navigates while the cut-off has not passed", () => {
+      let now = 100;
+      const page = inPage(() => now);
+      try {
+        startNavigationInPage({ href: startHref, notAfterEpochMs: 200 });
+        expect(page.assigned).toEqual([]);
+        now = 199;
+        page.scheduled[0]();
+        expect(page.assigned).toEqual([startHref]);
+      } finally {
+        page.restore();
+      }
+    });
+
+    it("never navigates when it starts after the cut-off, or when its scheduled step fires after it", () => {
+      let now = 200;
+      const page = inPage(() => now);
+      try {
+        startNavigationInPage({ href: startHref, notAfterEpochMs: 200 });
+        expect(page.scheduled).toEqual([]);
+        now = 100;
+        startNavigationInPage({ href: startHref, notAfterEpochMs: 200 });
+        now = 200;
+        page.scheduled[0]();
+        expect(page.assigned).toEqual([]);
+      } finally {
+        page.restore();
+      }
+    });
   });
 
   it("turns every initiation, load and deadline failure into the fixed message", async () => {
@@ -191,5 +236,87 @@ describe("the sanitized fake sign-in walk", () => {
       .map((c) => (c.args.at(-1) as { timeout: number }).timeout);
     expect(timeouts[0]).toBe(1000);
     expect(timeouts[1]).toBe(700);
+  });
+
+  it("dispatches nothing when the budget is zero", async () => {
+    const { page, calls } = mockPage();
+    const message = await messageOf(
+      walkFakeSignInSanitized(page, startHref, 0, fakeClock())
+    );
+    expect(message).toBe(FAKE_SIGN_IN_FAILED);
+    expect(calls).toEqual([]);
+  });
+
+  it("dispatches nothing further once the budget is spent by an earlier step", async () => {
+    const clock = fakeClock();
+    const { page, calls } = mockPage({
+      goto: async (...args) => {
+        calls.push({ method: "goto", args });
+        clock.t += 1000;
+      },
+    });
+    const message = await messageOf(
+      walkFakeSignInSanitized(page, startHref, 1000, clock)
+    );
+    expect(message).toBe(FAKE_SIGN_IN_FAILED);
+    expect(calls.map((c) => c.method)).toEqual(["goto"]);
+  });
+
+  it("never sleeps past the deadline", async () => {
+    const clock = fakeClock();
+    const { page } = mockPage({ urls: [consent] } as Partial<FakeSignInPage>);
+    await messageOf(walkFakeSignInSanitized(page, startHref, 250, clock));
+    expect(clock.sleeps).toEqual([100, 100, 50]);
+    expect(clock.t).toBe(250);
+  });
+
+  it("hands a hung evaluate a cut-off, so a late evaluation cannot navigate after expiry", async () => {
+    const clock = fakeClock();
+    let late: (() => void) | undefined;
+    const assigned: string[] = [];
+    const { page } = mockPage({
+      evaluate: (fn, arg) =>
+        new Promise<never>(() => {
+          // The page context arrives only after the walk has given up.
+          late = () => {
+            const g = globalThis as Record<string, unknown>;
+            const saved = {
+              window: g.window,
+              setTimeout: g.setTimeout,
+              Date: g.Date,
+            };
+            g.window = {
+              location: { assign: (href: string) => assigned.push(href) },
+            };
+            g.setTimeout = (step: () => void) => step();
+            g.Date = { now: () => clock.wallNow() };
+            try {
+              fn(arg);
+            } finally {
+              g.window = saved.window;
+              g.setTimeout = saved.setTimeout;
+              g.Date = saved.Date;
+            }
+          };
+        }),
+    });
+    const message = await messageOf(
+      walkFakeSignInSanitized(page, startHref, 1000, clock)
+    );
+    expect(message).toBe(FAKE_SIGN_IN_FAILED);
+    clock.t += 5000; // the walk has expired
+    late?.();
+    expect(assigned).toEqual([]);
+  });
+
+  it("measures the deadline on the monotonic clock, not the wall clock", async () => {
+    const clock = fakeClock();
+    clock.wallNow = () => 0; // a wall clock jumping backwards must not extend the walk
+    const { page } = mockPage({ urls: [consent] } as Partial<FakeSignInPage>);
+    const message = await messageOf(
+      walkFakeSignInSanitized(page, startHref, 300, clock)
+    );
+    expect(message).toBe(FAKE_SIGN_IN_FAILED);
+    expect(clock.t).toBe(300);
   });
 });
