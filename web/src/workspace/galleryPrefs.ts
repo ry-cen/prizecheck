@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { scopedPrefix, type GameId } from "../gameScope";
+import { useEffect, useState } from "react";
+import { scopedPrefix, useFixedGame, type GameId } from "../gameScope";
 import type { ElementalType } from "../collection_generated";
 import {
   CATEGORY_OPTIONS,
@@ -108,28 +108,12 @@ function readPrefs(userId: string, game: GameId): GalleryPrefs {
 
 /** The signed-in user's gallery preferences. They are read before the first render, so the first
  * listing request already uses them, and every change is written back. When storage is unavailable
- * (private mode, quota) they last only for this visit. */
+ * (private mode, quota) they last only for this visit. `game` is fixed for this instance (see
+ * `useFixedGame`). */
 export function useGalleryPrefs(userId: string, game: GameId = "pokemon") {
-  const scope = prefsStorageKey(userId, game);
-  const [state, setState] = useState(() => ({
-    scope,
-    prefs: readPrefs(userId, game),
-  }));
-  // A different game or user is a different stored record: load it before anything renders or is written for
-  // it, so the previous scope's preferences are never saved under the new key.
-  let current = state;
-  if (state.scope !== scope) {
-    current = { scope, prefs: readPrefs(userId, game) };
-    setState(current);
-  }
-  const prefs = current.prefs;
-  const setPrefs = useCallback(
-    (next: GalleryPrefs | ((previous: GalleryPrefs) => GalleryPrefs)) =>
-      setState((s) => ({
-        ...s,
-        prefs: typeof next === "function" ? next(s.prefs) : next,
-      })),
-    []
+  useFixedGame(game, "useGalleryPrefs");
+  const [prefs, setPrefs] = useState<GalleryPrefs>(() =>
+    readPrefs(userId, game)
   );
   useEffect(() => {
     try {
@@ -141,6 +125,6 @@ export function useGalleryPrefs(userId: string, game: GameId = "pokemon") {
     } catch {
       /* Preferences stay in memory for this visit. */
     }
-  }, [userId, game, prefs]);
+  }, [userId, prefs]);
   return [prefs, setPrefs] as const;
 }

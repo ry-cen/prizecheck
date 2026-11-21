@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type GameId } from "../gameScope";
+import { scopedPrefix, useFixedGame, type GameId } from "../gameScope";
 import { getCollectionRevision } from "../collection_generated";
 import type { GalleryHolding, GalleryStatus } from "./galleryModel";
 import { returnRefreshDue } from "./collectionIdle";
@@ -34,7 +34,7 @@ export const ownerRevisionChannelName = (
 ) =>
   game === "pokemon"
     ? `prizecheck-owner-revision:${userId}`
-    : `prizecheck-owner-revision:${game}:${userId}`;
+    : `${scopedPrefix(game, "owner-revision")}${userId}`;
 
 /** The revision in a channel message meant for `game`, or null. A message with no `game` comes from an
  * older tab and counts as Pokémon's. */
@@ -100,7 +100,10 @@ type PendingNote = { snapshot: Selection; key: string; revision: number };
  *
  * Revisions come from three places: every gallery page and tree this tab reads, a revision-only
  * read when the tab regains focus or becomes visible, and the other tabs of this user in this
- * browser, which share each revision they read on a BroadcastChannel. */
+ * browser, which share each revision they read on a BroadcastChannel.
+ *
+ * `game` is fixed for this instance; key the caller by game. A new `readRevision` for the same game takes
+ * effect after its render commits. */
 export function useStaleCollection({
   userId,
   game = "pokemon",
@@ -121,9 +124,10 @@ export function useStaleCollection({
   refreshTree,
   readRevision,
 }: Options) {
+  useFixedGame(game, "useStaleCollection");
   const [latest, setLatest] = useState<number | null>(null);
-  // The reader is handed to the effects below only once a game switch has committed, so a render that is
-  // still pending (a suspended or transitioned switch) never makes the visible game read another game's revision.
+  // The reader is published from a commit-phase effect, so a render that never commits cannot change what the
+  // probes read. A new `readRevision` for the same game takes effect after its render commits.
   const readerRef = useRef(readRevision);
   useEffect(() => {
     readerRef.current = readRevision;
@@ -140,16 +144,6 @@ export function useStaleCollection({
   // appear: a change seen meanwhile is refreshed away instead. Set while rendering, so no frame shows the banner.
   const [checking, setChecking] = useState(false);
   const [wasShown, setWasShown] = useState(active);
-  // Another game starts from nothing: a revision seen for the old scope says nothing about the new.
-  const scope = game;
-  const [seenScope, setSeenScope] = useState(scope);
-  if (seenScope !== scope) {
-    setSeenScope(scope);
-    setLatest(null);
-    // A return probe pending for the old game is cancelled by the switch; it must not leave the banner hidden.
-    setChecking(false);
-  }
-
   if (active !== wasShown) {
     setWasShown(active);
     setChecking(active && idle);
@@ -189,25 +183,24 @@ export function useStaleCollection({
   };
 
   /** Records a revision. `share` posts it to the other tabs; revisions they sent are not echoed. */
-  const observe = useCallback(
-    (revision: number, share: boolean) => {
-      setLatest((previous) =>
-        previous === null || revision > previous ? revision : previous
+  const observe = useCallback((revision: number, share: boolean) => {
+    setLatest((previous) =>
+      previous === null || revision > previous ? revision : previous
+    );
+    if (share && revision > posted.current) {
+      posted.current = revision;
+      // game is fixed for this instance (useFixedGame).
+      channel.current?.postMessage(
+        game === "pokemon" ? { revision } : { revision, game }
       );
-      if (share && revision > posted.current) {
-        posted.current = revision;
-        channel.current?.postMessage({ revision, game });
-      }
-    },
-    [game]
-  );
+    }
+  }, []);
 
   // Declared first so the channel exists before the first revision is shared.
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
     const shared = new BroadcastChannel(ownerRevisionChannelName(userId, game));
     channel.current = shared;
-    posted.current = 0;
     shared.onmessage = (event: MessageEvent) => {
       const revision = sharedRevision(event.data, game);
       if (revision !== null) observe(revision, false);
@@ -216,7 +209,7 @@ export function useStaleCollection({
       shared.close();
       if (channel.current === shared) channel.current = null;
     };
-  }, [userId, game, observe]);
+  }, [userId, observe]);
 
   useEffect(() => {
     if (galleryRevision !== null) observe(galleryRevision, true);
