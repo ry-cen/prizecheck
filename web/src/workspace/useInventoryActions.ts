@@ -41,6 +41,7 @@ import {
   partialMoveFailure,
   unsupportedUndoFailure,
   trimOldest,
+  undoOfferText,
   type ActionTarget,
   type CardLabel,
   type LendRow,
@@ -60,12 +61,8 @@ import type { SelectionState } from "./useSelection";
 /** The fewest names and paths kept after trimming; see the labels effect. */
 const LABEL_CACHE_FLOOR = 1_000;
 
-/** An Undo record's action as the toast names it. */
-const ACTION_NAMES: Record<UndoEntry["action"], string> = {
-  move: "Move",
-  remove: "Inventory Removal",
-  add: "Add",
-};
+/** Maximum wait for Location names before offering the same Undo without them. */
+export const RESTORE_TREE_WAIT_MS = 3_000;
 
 /** The success and Undo toast. `entry` is the newest Undo record, or null when none is offered. */
 export type ToastState = {
@@ -276,14 +273,16 @@ export function useInventoryActions({
     }
   }, [holdings, status, labels, paths]);
 
-  const place = useCallback(
+  const placeName = useCallback(
     (id: string) => {
       const tree = live.current.index;
-      return tree.byId.has(id)
-        ? tree.path(id)
-        : (paths.get(id) ?? "Unknown location");
+      return tree.byId.has(id) ? tree.path(id) : (paths.get(id) ?? null);
     },
     [paths]
+  );
+  const place = useCallback(
+    (id: string) => placeName(id) ?? "Unknown location",
+    [placeName]
   );
   const card = useCallback(
     (sourceId: string, editionId: string) => {
@@ -335,6 +334,46 @@ export function useInventoryActions({
     return { since, mine, free: () => mine() && host() };
   }, [kit, userId]);
 
+  const treeLoaded = index.byId.size > 0;
+  const pendingRestore = useRef<{
+    entry: UndoEntry;
+    turn: ReturnType<typeof startTurn>;
+    timer?: number;
+  } | null>(null);
+  const offerRestore = useCallback(
+    (fallback = false) => {
+      const pending = pendingRestore.current;
+      if (!pending || (!fallback && live.current.index.byId.size === 0)) return;
+      pendingRestore.current = null;
+      window.clearTimeout(pending.timer);
+      const { entry, turn } = pending;
+      const expiry = Date.parse(entry.expires_at);
+      if (
+        !turn.free() ||
+        busyRef.current ||
+        operation.current?.op.noUndo ||
+        undoDismissals.blocks(entry.id) ||
+        entry.id === toastLive.current?.entry?.id ||
+        !Number.isFinite(expiry) ||
+        expiry <= Date.now()
+      )
+        return;
+      showToast(
+        {
+          message: undoOfferText(
+            entry,
+            fallback ? () => null : placeName,
+            "last"
+          ),
+          entry,
+          unavailable: false,
+        },
+        turn.since
+      );
+    },
+    [placeName, showToast]
+  );
+
   /** A tile that holds focus unmounts when the gallery reloads or the selection clears: move focus
    * to a stable control first. Tiles carry data-gallery-tile, not a class, since #164 moved them onto
    * the kit's CopyTile. */
@@ -378,22 +417,27 @@ export function useInventoryActions({
           !Number.isFinite(Date.parse(entry.expires_at))
         )
           return;
-        showToast(
-          {
-            message: `The earlier ${ACTION_NAMES[entry.action]} can be undone.`,
-            entry,
-            unavailable: false,
-          },
-          turn.since
-        );
+        pendingRestore.current = { entry, turn };
+        if (live.current.index.byId.size === 0)
+          pendingRestore.current.timer = window.setTimeout(
+            () => offerRestore(true),
+            RESTORE_TREE_WAIT_MS
+          );
+        offerRestore();
       })
       .catch(() => {
         /* A failed list read must not interrupt Collection. */
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(pendingRestore.current?.timer);
+      pendingRestore.current = null;
     };
-  }, [active, userId, readUndo, showToast, startTurn]);
+  }, [active, userId, readUndo, offerRestore, startTurn]);
+
+  useEffect(() => {
+    if (treeLoaded) offerRestore();
+  }, [treeLoaded, offerRestore]);
 
   const runLocked = useCallback(
     async (
@@ -990,7 +1034,7 @@ export function useInventoryActions({
         showToast(
           {
             message: next
-              ? `Dismissed. The earlier ${ACTION_NAMES[next.action]} can be undone.`
+              ? `Dismissed. ${undoOfferText(next, placeName, "earlier")}`
               : "Dismissed. There is no earlier action to undo.",
             entry: next,
             unavailable: false,
@@ -1006,7 +1050,7 @@ export function useInventoryActions({
       busyRef.current = false;
       setBusy(false);
     }
-  }, [showToast, readUndo, startTurn]);
+  }, [showToast, readUndo, startTurn, placeName]);
 
   // Persist Dismiss so a reload cannot offer the same record again.
   const closeToast = useCallback(async () => {

@@ -113,7 +113,10 @@ vi.mock("../collection_generated", async (original) => ({
   ...(await original<typeof import("../collection_generated")>()),
   moveBorrowedCopies: vi.fn(),
 }));
-import { useInventoryActions } from "./useInventoryActions";
+import {
+  RESTORE_TREE_WAIT_MS,
+  useInventoryActions,
+} from "./useInventoryActions";
 import { listUndo } from "../inventoryUndo";
 import {
   commitMoveWithoutUndo,
@@ -196,6 +199,16 @@ function sessionResponse(userId = "A") {
   );
 }
 let disk: Storage, witness: Storage;
+const TREE = indexLocations([
+  {
+    id: "source",
+    name: "Binder",
+    kind: "storage",
+    parent_id: null,
+    version: 1,
+    depth: 0,
+  },
+]);
 function options(userId = "A"): Parameters<typeof useInventoryActions>[0] {
   return {
     userId,
@@ -230,7 +243,7 @@ function options(userId = "A"): Parameters<typeof useInventoryActions>[0] {
     holdings: [],
     byKey: new Map(),
     status: "ready",
-    index: indexLocations([]),
+    index: TREE,
     reloadGallery: vi.fn(),
     reloadTree: vi.fn(),
   };
@@ -285,6 +298,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  vi.useRealTimers();
   host.unmount();
   vi.unstubAllGlobals();
 });
@@ -684,6 +698,11 @@ test.each(["remove", "move", "add"] as const)(
     await Promise.resolve();
     await Promise.resolve();
     const toast = render(opts).toast;
+    expect(toast?.message).toBe(
+      action === "remove"
+        ? "You can still undo your last Inventory Removal."
+        : `You can still undo your last ${action} to Binder.`
+    );
     expect(toast?.entry).toEqual(entry);
     expect(toast?.focus).toBeFalsy();
   }
@@ -1174,4 +1193,108 @@ test("restore and both Dismiss retry paths still carry a turn", async () => {
   vi.mocked(dismissUndo).mockRejectedValueOnce(new Error());
   await render(opts).closeToast();
   expect(render(opts).toast?.since).toBe(9);
+});
+
+async function waitingRestore(expiresIn = 600000) {
+  vi.useFakeTimers();
+  vi.stubGlobal("window", {
+    setTimeout,
+    clearTimeout,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
+  const entry = {
+    ...older,
+    expires_at: new Date(Date.now() + expiresIn).toISOString(),
+  };
+  vi.mocked(listUndo).mockResolvedValue([entry]);
+  const opts = { ...options(), index: indexLocations([]) };
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  return opts;
+}
+
+test("a restored Undo waits for the Location tree, then names its Location", async () => {
+  const opts = await waitingRestore();
+  expect(render(opts).toast).toBeNull();
+  const toast = render({ ...opts, index: TREE }).toast;
+  // The small host applies effect state on its next render.
+  expect(toast).toBeNull();
+  const named = render({ ...opts, index: TREE }).toast;
+  expect(named?.message).toBe("You can still undo your last add to Binder.");
+  expect(listUndo).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(RESTORE_TREE_WAIT_MS);
+  expect(render({ ...opts, index: TREE }).toast?.id).toBe(named?.id);
+});
+
+test.each(["failed", "slow"])(
+  "a %s tree falls back once after the bounded wait",
+  async () => {
+    const opts = await waitingRestore();
+    vi.advanceTimersByTime(RESTORE_TREE_WAIT_MS - 1);
+    expect(render(opts).toast).toBeNull();
+    vi.advanceTimersByTime(1);
+    const fallback = render(opts).toast;
+    expect(fallback?.message).toBe("You can still undo your last add.");
+    render({ ...opts, index: TREE });
+    expect(render({ ...opts, index: TREE }).toast).toEqual(fallback);
+  }
+);
+
+test.each(["leave", "account", "unmount", "notice", "expire"])(
+  "drops a waiting restore on %s",
+  async (change) => {
+    const opts = await waitingRestore(change === "expire" ? 1000 : 600000);
+    vi.mocked(listUndo).mockResolvedValue([]);
+    if (change === "leave") render({ ...opts, active: false });
+    if (change === "account") render({ ...opts, userId: "B" });
+    if (change === "unmount") host.unmount();
+    if (change === "notice") toastHost.version++;
+    vi.advanceTimersByTime(RESTORE_TREE_WAIT_MS);
+    if (change !== "unmount") {
+      const next = {
+        ...opts,
+        index: TREE,
+        userId: change === "account" ? "B" : "A",
+      };
+      render(next);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(render(next).toast).toBeNull();
+    } else expect(vi.getTimerCount()).toBe(0);
+  }
+);
+
+test("a restored Undo leaves out a Location it can't name", async () => {
+  vi.mocked(listUndo).mockResolvedValue([
+    {
+      ...older,
+      destination_id: "gone",
+      expires_at: new Date(Date.now() + 600000).toISOString(),
+    },
+  ]);
+  const opts = options();
+  render(opts);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(render(opts).toast?.message).toBe("You can still undo your last add.");
+});
+
+test("Dismiss names the earlier move's source Location", async () => {
+  const opts = await mountedOffer();
+  vi.mocked(listUndo).mockResolvedValue([
+    {
+      ...older,
+      id: "next",
+      action: "move",
+      source_id: "source",
+      source_count: 1,
+      destination_id: null,
+    },
+  ]);
+  await render(opts).dismiss();
+  expect(render(opts).toast?.message).toBe(
+    "Dismissed. You can still undo your earlier move from Binder."
+  );
 });
