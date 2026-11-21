@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { type GameId } from "../gameScope";
 import { getCollectionRevision } from "../collection_generated";
 import type { GalleryHolding, GalleryStatus } from "./galleryModel";
 import { returnRefreshDue } from "./collectionIdle";
@@ -26,9 +27,36 @@ export function isStale(
   return latest > Math.min(galleryRevision, treeRevision);
 }
 
+/** The BroadcastChannel tabs share revisions on. Pokémon keeps its original name. */
+export const ownerRevisionChannelName = (
+  userId: string,
+  game: GameId = "pokemon"
+) =>
+  game === "pokemon"
+    ? `prizecheck-owner-revision:${userId}`
+    : `prizecheck-owner-revision:${game}:${userId}`;
+
+/** The revision in a channel message meant for `game`, or null. A message with no `game` comes from an
+ * older tab and counts as Pokémon's. */
+export function sharedRevision(
+  data: unknown,
+  game: GameId = "pokemon"
+): number | null {
+  const message = data as { revision?: unknown; game?: unknown } | null;
+  if ((message?.game ?? "pokemon") !== game) return null;
+  const revision = message?.revision;
+  return typeof revision === "number" &&
+    Number.isSafeInteger(revision) &&
+    revision > 0
+    ? revision
+    : null;
+}
+
 type Options = {
   /** The signed-in user. Tabs share revisions on a channel named for them. */
   userId: string;
+  /** Which game's collection this is; another game's revisions never reach it. */
+  game?: GameId;
   galleryRevision: number | null;
   galleryStatus: GalleryStatus;
   /** The gallery's Holdings by key (GalleryData.byKey). */
@@ -68,6 +96,7 @@ type PendingNote = { snapshot: Selection; key: string; revision: number };
  * browser, which share each revision they read on a BroadcastChannel. */
 export function useStaleCollection({
   userId,
+  game = "pokemon",
   galleryRevision,
   galleryStatus,
   byKey,
@@ -138,29 +167,24 @@ export function useStaleCollection({
     );
     if (share && revision > posted.current) {
       posted.current = revision;
-      channel.current?.postMessage({ revision });
+      channel.current?.postMessage({ revision, game });
     }
   }, []);
 
   // Declared first so the channel exists before the first revision is shared.
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
-    const shared = new BroadcastChannel(`prizecheck-owner-revision:${userId}`);
+    const shared = new BroadcastChannel(ownerRevisionChannelName(userId, game));
     channel.current = shared;
     shared.onmessage = (event: MessageEvent) => {
-      const revision = (event.data as { revision?: unknown } | null)?.revision;
-      if (
-        typeof revision === "number" &&
-        Number.isSafeInteger(revision) &&
-        revision > 0
-      )
-        observe(revision, false);
+      const revision = sharedRevision(event.data, game);
+      if (revision !== null) observe(revision, false);
     };
     return () => {
       shared.close();
       if (channel.current === shared) channel.current = null;
     };
-  }, [userId, observe]);
+  }, [userId, game, observe]);
 
   useEffect(() => {
     if (galleryRevision !== null) observe(galleryRevision, true);

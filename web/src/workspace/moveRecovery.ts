@@ -1,4 +1,5 @@
 /** One writer across this account's workspace tabs. No fallback mutex for mixed Moves. */
+import { scopedPrefix, type GameId } from "../gameScope";
 import {
   PENDING_MOVE_MAX_AGE_MS,
   RecoveryBlocked,
@@ -6,10 +7,12 @@ import {
 } from "./moveOperation";
 export class MoveInAnotherTab extends Error {}
 export class MoveLocksUnavailable extends Error {}
-export const moveLockName = (owner: string) =>
-  `prizecheck:mixed-move:${encodeURIComponent(owner)}`;
-export const moveActivityKey = (owner: string) =>
-  `${moveLockName(owner)}:activity`;
+export const moveLockName = (owner: string, game: GameId = "pokemon") =>
+  game === "pokemon"
+    ? `prizecheck:mixed-move:${encodeURIComponent(owner)}`
+    : `${scopedPrefix(game, "mixed-move-lock")}${encodeURIComponent(owner)}`;
+export const moveActivityKey = (owner: string, game: GameId = "pokemon") =>
+  `${moveLockName(owner, game)}:activity`;
 export type MoveLocks = Pick<LockManager, "request" | "query">;
 function browserLocks(): MoveLocks | undefined {
   return typeof navigator === "undefined" ? undefined : navigator.locks;
@@ -17,12 +20,13 @@ function browserLocks(): MoveLocks | undefined {
 export async function withMoveWriter<T>(
   owner: string,
   work: () => Promise<T>,
-  locks = browserLocks()
+  locks = browserLocks(),
+  game: GameId = "pokemon"
 ): Promise<T> {
   if (!locks) throw new MoveLocksUnavailable();
   const announce = () => {
     try {
-      localStorage.setItem(moveActivityKey(owner), crypto.randomUUID());
+      localStorage.setItem(moveActivityKey(owner, game), crypto.randomUUID());
     } catch {
       /* The operation's own persistence check is authoritative. */
     }
@@ -30,7 +34,7 @@ export async function withMoveWriter<T>(
   let acquired = false;
   try {
     return await locks.request(
-      moveLockName(owner),
+      moveLockName(owner, game),
       { mode: "exclusive", ifAvailable: true },
       async (lock) => {
         if (!lock) throw new MoveInAnotherTab();
@@ -46,11 +50,12 @@ export async function withMoveWriter<T>(
 }
 export async function moveWriterBusy(
   owner: string,
-  locks = browserLocks()
+  locks = browserLocks(),
+  game: GameId = "pokemon"
 ): Promise<boolean> {
   if (!locks) return false;
   return !!(await locks.query()).held?.some(
-    (lock) => lock.name === moveLockName(owner)
+    (lock) => lock.name === moveLockName(owner, game)
   );
 }
 

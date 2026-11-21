@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { GAME_IDS, scopedPrefix, type GameId } from "../gameScope";
 import { browseEditions } from "../catalog_browse_generated";
 import { getLocationTree } from "../location_generated";
 import { EMPTY_QUEUE, minus, without, type AddQueue } from "./addQueue";
@@ -12,6 +13,8 @@ import { MAX_ADD, MAX_BATCH_EDITIONS } from "./catalogText";
 
 export const AddQueueAccount = createContext<string | null>(null);
 const PREFIX = "prizecheck:add-queue:";
+const queuePrefix = (game: GameId) =>
+  game === "pokemon" ? PREFIX : scopedPrefix(game, "add-queue");
 type Draft = {
   items: { editionId: string; printingId: string; quantity: number }[];
   target: string | null;
@@ -24,11 +27,14 @@ const empty = (): Draft => ({ items: [], target: null, uncertain: false });
 export function forgetAddQueues(account: string | null = null) {
   try {
     for (const key of Object.keys(sessionStorage))
-      if (
-        key.startsWith(PREFIX) &&
-        (!account || !key.startsWith(PREFIX + account + ":"))
-      )
-        sessionStorage.removeItem(key);
+      for (const game of GAME_IDS) {
+        const prefix = queuePrefix(game);
+        if (
+          key.startsWith(prefix) &&
+          (!account || !key.startsWith(prefix + account + ":"))
+        )
+          sessionStorage.removeItem(key);
+      }
   } catch {
     /* Storage off: the queue remains usable in memory. */
   }
@@ -94,10 +100,11 @@ function read(key: string): Draft {
 /** Only this account and gallery scope may influence the initial mode. */
 export function hasStoredAddQueue(
   account: string | null,
-  scope: string
+  scope: string,
+  game: GameId = "pokemon"
 ): boolean {
   if (!account) return false;
-  const draft = read(PREFIX + account + ":" + scope);
+  const draft = read(queuePrefix(game) + account + ":" + scope);
   return draft.items.length > 0 || draft.uncertain;
 }
 
@@ -178,9 +185,9 @@ function record(s: State): Draft | null {
 
 /** Held current and lost copies are capped to the visible queue after every queue change (I1).
  * Storage retains the visible queue and immutable replay command; legacy submissions without a command retain only their uncertainty marker. */
-export function useStoredAddQueue(scope: string) {
+export function useStoredAddQueue(scope: string, game: GameId = "pokemon") {
   const account = useContext(AddQueueAccount);
-  const key = account ? PREFIX + account + ":" + scope : null;
+  const key = account ? queuePrefix(game) + account + ":" + scope : null;
   const s = useRef<State>(initial());
   const [view, render] = useState(s.current);
   const mounted = useRef(false);
