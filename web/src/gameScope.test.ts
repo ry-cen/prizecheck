@@ -220,6 +220,23 @@ test("signing out clears every game's add queue", () => {
   expect(GAME_IDS).toContain("riftbound");
 });
 
+test("an account change clears every game's other-account queues, and one game's mount-time clear spares the other's", () => {
+  sessionStorage.setItem("prizecheck:add-queue:a:page", "p");
+  sessionStorage.setItem("prizecheck:riftbound:add-queue:b:page", "r");
+  forgetAddQueues("a", ["pokemon"]);
+  expect(sessionStorage.getItem("prizecheck:add-queue:a:page")).toBe("p");
+  expect(sessionStorage.getItem("prizecheck:riftbound:add-queue:b:page")).toBe(
+    "r"
+  );
+  forgetAddQueues("c", ["riftbound"]);
+  expect(sessionStorage.getItem("prizecheck:add-queue:a:page")).toBe("p");
+  expect(
+    sessionStorage.getItem("prizecheck:riftbound:add-queue:b:page")
+  ).toBeNull();
+  forgetAddQueues("c");
+  expect(sessionStorage.getItem("prizecheck:add-queue:a:page")).toBeNull();
+});
+
 test("a revision message naming another game is ignored by the receiver", () => {
   expect(
     sharedRevision({ revision: 7, game: "riftbound" }, "pokemon")
@@ -236,6 +253,11 @@ test("a legacy channel message without game still reaches Pokémon", () => {
   expect(sharedRevision({ revision: 5 })).toBe(5);
   expect(sharedRevision({ revision: 5 }, "pokemon")).toBe(5);
   expect(sharedRevision({ revision: 5 }, "riftbound")).toBeNull();
+  // A game tag that is present must name the receiver's own game; absence alone means Pokémon.
+  for (const game of [null, undefined, 0, 1, "", "Pokemon", {}, "riftbound"])
+    expect(sharedRevision({ revision: 7, game }, "pokemon")).toBeNull();
+  expect(sharedRevision({ revision: 7, game: null }, "riftbound")).toBeNull();
+  expect(sharedRevision({ revision: 7, game: "pokemon" })).toBe(7);
   expect(sharedRevision({ revision: 0 })).toBeNull();
   expect(sharedRevision(null)).toBeNull();
 });

@@ -1507,3 +1507,51 @@ test("A-1 hasStoredAddQueue never deletes another game's stored draft", () => {
   expect(hasStoredAddQueue("a", "page")).toBe(false);
   expect(sessionStorage.getItem("prizecheck:add-queue:a:page")).toBeNull();
 });
+
+test.each(["pokemon", "riftbound"] as const)(
+  "mounting the %s queue never deletes the other game's draft for another account",
+  async (game) => {
+    caught = null;
+    vi.mocked(browseEditions).mockClear();
+    sessionStorage.setItem("prizecheck:add-queue:a:page", pokemonDraft);
+    sessionStorage.setItem(
+      "prizecheck:riftbound:add-queue:b:page",
+      riftboundDraft
+    );
+    const root = createRoot(document.createElement("div"));
+    function Owner() {
+      useStoredAddQueue("page", game);
+      return null;
+    }
+    // Pokémon mounts as account "a" and Riftbound as account "b", each beside the other game's draft.
+    const account = game === "pokemon" ? "a" : "b";
+    await act(async () =>
+      root.render(h(AddQueueAccount.Provider, { value: account }, h(Owner)))
+    );
+    await pause();
+    expect(
+      sessionStorage.getItem("prizecheck:add-queue:a:page")
+    ).not.toBeNull();
+    expect(
+      sessionStorage.getItem("prizecheck:riftbound:add-queue:b:page")
+    ).toBe(riftboundDraft);
+    await act(async () => root.unmount());
+  }
+);
+
+test("a Pokémon mount still clears Pokémon queues that belong to another account", async () => {
+  sessionStorage.setItem("prizecheck:add-queue:old:page", pokemonDraft);
+  sessionStorage.setItem("prizecheck:add-queue:a:page", pokemonDraft);
+  const root = createRoot(document.createElement("div"));
+  function Owner() {
+    useStoredAddQueue("page");
+    return null;
+  }
+  await act(async () =>
+    root.render(h(AddQueueAccount.Provider, { value: "a" }, h(Owner)))
+  );
+  await pause();
+  expect(sessionStorage.getItem("prizecheck:add-queue:old:page")).toBeNull();
+  expect(sessionStorage.getItem("prizecheck:add-queue:a:page")).not.toBeNull();
+  await act(async () => root.unmount());
+});

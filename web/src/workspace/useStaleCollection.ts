@@ -36,14 +36,15 @@ export const ownerRevisionChannelName = (
     ? `prizecheck-owner-revision:${userId}`
     : `${scopedPrefix(game, "owner-revision")}${userId}`;
 
-/** The revision in a channel message meant for `game`, or null. A message with no `game` comes from an
- * older tab and counts as Pokémon's. */
+/** The revision in a channel message meant for `game`, or null. A message with no `game` field comes from an
+ * older tab and counts as Pokémon's; a `game` that is present but another game or malformed is never accepted. */
 export function sharedRevision(
   data: unknown,
   game: GameId = "pokemon"
 ): number | null {
   const message = data as { revision?: unknown; game?: unknown } | null;
-  if ((message?.game ?? "pokemon") !== game) return null;
+  const tag = message && "game" in message ? message.game : "pokemon";
+  if (tag !== game) return null;
   const revision = message?.revision;
   return typeof revision === "number" &&
     Number.isSafeInteger(revision) &&

@@ -29,10 +29,15 @@ type Draft = {
   pending?: AddCommand | null;
 };
 const empty = (): Draft => ({ items: [], target: null, uncertain: false });
-export function forgetAddQueues(account: string | null = null) {
+/** Drops stored queues of `games` (every game by default, as sign-out does) that belong to another account, or all of
+ * them when `account` is null. A mounted queue passes only its own game, so it never touches another game's drafts. */
+export function forgetAddQueues(
+  account: string | null = null,
+  games: readonly GameId[] = GAME_IDS
+) {
   try {
     for (const key of Object.keys(sessionStorage))
-      for (const game of GAME_IDS) {
+      for (const game of games) {
         const prefix = queuePrefix(game);
         if (
           key.startsWith(prefix) &&
@@ -241,7 +246,7 @@ export function useStoredAddQueue(scope: string, game: GameId = "pokemon") {
     mounted.current = true;
     let live = true;
     const restoreId = ++restoration.current;
-    forgetAddQueues(account);
+    forgetAddQueues(account, [game]);
     if (game !== "pokemon") {
       // Restoring validates against Pokémon's Catalog and Locations, which would drop another game's cards and
       // delete its draft. Until that game has its own readers the stored draft is left exactly as it is.
