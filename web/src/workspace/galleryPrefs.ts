@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { scopedPrefix, useFixedGame, type GameId } from "../gameScope";
 import type { ElementalType } from "../collection_generated";
 import {
   CATEGORY_OPTIONS,
@@ -30,8 +31,10 @@ export const DEFAULT_PREFS: GalleryPrefs = {
 /** The longest set id the listing accepts. */
 const MAX_SET_ID = 80;
 
-export const prefsStorageKey = (userId: string) =>
-  `prizecheck:workspace:preferences:v1:${userId}`;
+export const prefsStorageKey = (userId: string, game: GameId = "pokemon") =>
+  game === "pokemon"
+    ? `prizecheck:workspace:preferences:v1:${userId}`
+    : `${scopedPrefix(game, "workspace-preferences:v1")}${userId}`;
 
 const fields = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -93,9 +96,11 @@ export function mergePrefs(raw: string | null, prefs: GalleryPrefs): string {
   });
 }
 
-function readPrefs(userId: string): GalleryPrefs {
+function readPrefs(userId: string, game: GameId): GalleryPrefs {
   try {
-    return parsePrefs(window.localStorage.getItem(prefsStorageKey(userId)));
+    return parsePrefs(
+      window.localStorage.getItem(prefsStorageKey(userId, game))
+    );
   } catch {
     return DEFAULT_PREFS;
   }
@@ -103,12 +108,16 @@ function readPrefs(userId: string): GalleryPrefs {
 
 /** The signed-in user's gallery preferences. They are read before the first render, so the first
  * listing request already uses them, and every change is written back. When storage is unavailable
- * (private mode, quota) they last only for this visit. */
-export function useGalleryPrefs(userId: string) {
-  const [prefs, setPrefs] = useState<GalleryPrefs>(() => readPrefs(userId));
+ * (private mode, quota) they last only for this visit. `game` is fixed for this instance (see
+ * `useFixedGame`). */
+export function useGalleryPrefs(userId: string, game: GameId = "pokemon") {
+  useFixedGame(game, "useGalleryPrefs");
+  const [prefs, setPrefs] = useState<GalleryPrefs>(() =>
+    readPrefs(userId, game)
+  );
   useEffect(() => {
     try {
-      const key = prefsStorageKey(userId);
+      const key = prefsStorageKey(userId, game);
       window.localStorage.setItem(
         key,
         mergePrefs(window.localStorage.getItem(key), prefs)

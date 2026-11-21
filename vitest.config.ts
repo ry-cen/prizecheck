@@ -3,6 +3,7 @@ export default defineConfig({
   test: {
     include: [
       "auth/tests/**/*.test.ts",
+      "web/src/gameScope.test.ts",
       "web/src/shell/**/*.test.ts",
       "web/src/shell/**/*.test.tsx",
       "web/src/catalog/**/*.test.ts",

@@ -1,4 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  GAME_IDS,
+  scopedPrefix,
+  useFixedGame,
+  type GameId,
+} from "../gameScope";
 import { browseEditions } from "../catalog_browse_generated";
 import { getLocationTree } from "../location_generated";
 import { EMPTY_QUEUE, minus, without, type AddQueue } from "./addQueue";
@@ -12,6 +18,8 @@ import { MAX_ADD, MAX_BATCH_EDITIONS } from "./catalogText";
 
 export const AddQueueAccount = createContext<string | null>(null);
 const PREFIX = "prizecheck:add-queue:";
+const queuePrefix = (game: GameId) =>
+  game === "pokemon" ? PREFIX : scopedPrefix(game, "add-queue");
 type Draft = {
   items: { editionId: string; printingId: string; quantity: number }[];
   target: string | null;
@@ -21,19 +29,27 @@ type Draft = {
   pending?: AddCommand | null;
 };
 const empty = (): Draft => ({ items: [], target: null, uncertain: false });
-export function forgetAddQueues(account: string | null = null) {
+/** Drops stored queues of `games` (every game by default, as sign-out does) that belong to another account, or all of
+ * them when `account` is null. A mounted queue passes only its own game, so it never touches another game's drafts. */
+export function forgetAddQueues(
+  account: string | null = null,
+  games: readonly GameId[] = GAME_IDS
+) {
   try {
     for (const key of Object.keys(sessionStorage))
-      if (
-        key.startsWith(PREFIX) &&
-        (!account || !key.startsWith(PREFIX + account + ":"))
-      )
-        sessionStorage.removeItem(key);
+      for (const game of games) {
+        const prefix = queuePrefix(game);
+        if (
+          key.startsWith(prefix) &&
+          (!account || !key.startsWith(prefix + account + ":"))
+        )
+          sessionStorage.removeItem(key);
+      }
   } catch {
     /* Storage off: the queue remains usable in memory. */
   }
 }
-function read(key: string): Draft {
+function read(key: string, discard = true): Draft {
   try {
     const raw: unknown = JSON.parse(sessionStorage.getItem(key) ?? "null");
     if (!raw || typeof raw !== "object") throw Error();
@@ -82,10 +98,12 @@ function read(key: string): Draft {
       throw Error();
     return d;
   } catch {
-    try {
-      sessionStorage.removeItem(key);
-    } catch {
-      /* Storage off. */
+    if (discard) {
+      try {
+        sessionStorage.removeItem(key);
+      } catch {
+        /* Storage off. */
+      }
     }
     return empty();
   }
@@ -94,10 +112,15 @@ function read(key: string): Draft {
 /** Only this account and gallery scope may influence the initial mode. */
 export function hasStoredAddQueue(
   account: string | null,
-  scope: string
+  scope: string,
+  game: GameId = "pokemon"
 ): boolean {
   if (!account) return false;
-  const draft = read(PREFIX + account + ":" + scope);
+  // Another game's draft may use a shape this module does not know yet; never delete it here (M6 A3).
+  const draft = read(
+    queuePrefix(game) + account + ":" + scope,
+    game === "pokemon"
+  );
   return draft.items.length > 0 || draft.uncertain;
 }
 
@@ -178,9 +201,10 @@ function record(s: State): Draft | null {
 
 /** Held current and lost copies are capped to the visible queue after every queue change (I1).
  * Storage retains the visible queue and immutable replay command; legacy submissions without a command retain only their uncertainty marker. */
-export function useStoredAddQueue(scope: string) {
+export function useStoredAddQueue(scope: string, game: GameId = "pokemon") {
+  useFixedGame(game, "useStoredAddQueue");
   const account = useContext(AddQueueAccount);
-  const key = account ? PREFIX + account + ":" + scope : null;
+  const key = account ? queuePrefix(game) + account + ":" + scope : null;
   const s = useRef<State>(initial());
   const [view, render] = useState(s.current);
   const mounted = useRef(false);
@@ -194,7 +218,8 @@ export function useStoredAddQueue(scope: string) {
   const liveOwner = () => mounted.current && epochRef.current === epoch;
   const restoration = useRef(0);
   function persist() {
-    if (!key || !liveOwner()) return;
+    // Another game's draft is never rewritten here: this hook can only restore Pokémon's.
+    if (!key || !liveOwner() || game !== "pokemon") return;
     const draft = record(s.current);
     try {
       if (draft) sessionStorage.setItem(key, JSON.stringify(draft));
@@ -221,7 +246,19 @@ export function useStoredAddQueue(scope: string) {
     mounted.current = true;
     let live = true;
     const restoreId = ++restoration.current;
-    forgetAddQueues(account);
+    forgetAddQueues(account, [game]);
+    if (game !== "pokemon") {
+      // Restoring validates against Pokémon's Catalog and Locations, which would drop another game's cards and
+      // delete its draft. Until that game has its own readers the stored draft is left exactly as it is.
+      s.current = initial(empty());
+      s.current.phase = "failed";
+      s.current.notice = "Couldn't restore your queue. Reload to try again.";
+      render({ ...s.current });
+      return () => {
+        live = false;
+        mounted.current = false;
+      };
+    }
     s.current = initial(key ? read(key) : empty());
     render({ ...s.current });
     const draft = s.current.draft;
