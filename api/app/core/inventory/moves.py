@@ -13,8 +13,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.core.ops.api_errors import api_error
-from app.db import connect
-from app.identity import verified_user
+from app.core.game_runtime import GameRuntime, game_runtime, verified_user
 from app.core.inventory.idempotency import expire
 # Moved to inventory_core; other modules and branches still import these names from here.
 from app.inventory_core import (MAX_QUANTITY, REPLAY, UNDO_LIMIT, check_promises, first_non_leaf, is_deck, leaf, lock_owner,
@@ -98,8 +97,8 @@ def replayed(previous, undo_id=None) -> MoveResult:
 
 
 @router.post("/manifests", response_model=MoveManifest, status_code=201)
-def start_move(command: StartMove, user_id: str = Depends(verified_user)):
-    with connect() as conn, conn.transaction():
+def start_move(command: StartMove, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
+    with game.connect() as conn, conn.transaction():
         lock_owner(conn, user_id)
         if command.source_id is not None and not leaf(conn, user_id, command.source_id):
             api_error(404, "LOCATION_NOT_FOUND", source_id=command.source_id)
@@ -112,12 +111,12 @@ def start_move(command: StartMove, user_id: str = Depends(verified_user)):
 
 
 @router.put("/manifests/{manifest_id}/items", response_model=MoveManifest)
-def stage_items(manifest_id: UUID, command: StageItems, user_id: str = Depends(verified_user)):
+def stage_items(manifest_id: UUID, command: StageItems, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     given = [(item.source_id, item.edition_id) for item in command.items]
     if len(given) != len(set(given)):
         api_error(422, "DUPLICATE_MOVE_ITEM")
     parsed = [(item.source_id, item.edition_id, quantity(item.quantity), item.expected_version) for item in command.items]
-    with connect() as conn, conn.transaction():
+    with game.connect() as conn, conn.transaction():
         lock_owner(conn, user_id)
         row = manifest(conn, user_id, manifest_id)
         staged = []
@@ -150,8 +149,8 @@ def stage_items(manifest_id: UUID, command: StageItems, user_id: str = Depends(v
 
 
 @router.delete("/manifests/{manifest_id}", status_code=204)
-def cancel_move(manifest_id: UUID, user_id: str = Depends(verified_user)):
-    with connect() as conn, conn.transaction():
+def cancel_move(manifest_id: UUID, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
+    with game.connect() as conn, conn.transaction():
         lock_owner(conn, user_id)
         result = conn.execute("DELETE FROM move_manifest WHERE owner_id=%s AND id=%s", (user_id, manifest_id))
         if result.rowcount == 0:
@@ -159,26 +158,26 @@ def cancel_move(manifest_id: UUID, user_id: str = Depends(verified_user)):
 
 
 @router.post("/manifests/{manifest_id}/commit", response_model=MoveResult)
-def commit_move(manifest_id: UUID, command: CommitMove, user_id: str = Depends(verified_user)):
+def commit_move(manifest_id: UUID, command: CommitMove, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     if command.destination_id is None:
         api_error(422, "DESTINATION_REQUIRED")
-    return apply_selection(manifest_id, command, user_id)
+    return apply_selection(manifest_id, command, user_id, connect=game.connect)
 
 
 @router.post("/manifests/{manifest_id}/commit-without-undo", response_model=MoveResult)
 def commit_move_without_undo(manifest_id: UUID, command: CommitMoveWithoutUndo,
-                            user_id: str = Depends(verified_user)):
+                            user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     if command.destination_id is None:
         api_error(422, "DESTINATION_REQUIRED")
     return apply_selection(manifest_id, CommitMove(destination_id=command.destination_id,
-                           idempotency_key=command.idempotency_key), user_id, with_undo=False)
+                           idempotency_key=command.idempotency_key), user_id, connect=game.connect, with_undo=False)
 
 
 @router.post("/manifests/{manifest_id}/remove", response_model=MoveResult)
-def remove_inventory(manifest_id: UUID, command: CommitMove, user_id: str = Depends(verified_user)):
+def remove_inventory(manifest_id: UUID, command: CommitMove, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     if command.destination_id is not None:
         api_error(422, "REMOVAL_HAS_NO_DESTINATION")
-    return apply_selection(manifest_id, command, user_id)
+    return apply_selection(manifest_id, command, user_id, connect=game.connect)
 
 
 def first_flagged(conn, condition: str):
@@ -187,7 +186,7 @@ def first_flagged(conn, condition: str):
                         "ORDER BY source_id,edition_id LIMIT 1").fetchone()
 
 
-def apply_selection(manifest_id, command, user_id, *, with_undo=True):
+def apply_selection(manifest_id, command, user_id, *, connect, with_undo=True):
     destination = command.destination_id
     # The digest is unchanged from the single-source contract so earlier keys still replay.
     payload = {"action": "move" if destination else "remove", "manifest_id": str(manifest_id), "destination_id": str(destination)}
@@ -318,26 +317,26 @@ class UndoCommand(BaseModel):
 
 
 @router.get('/undo')
-def list_undo(user_id: str = Depends(verified_user)):
-    with connect() as conn:
+def list_undo(user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
+    with game.connect() as conn:
         return conn.execute("""SELECT id,action,source_id,destination_id,source_count,expires_at
           FROM inventory_undo WHERE owner_id=%s AND expires_at>clock_timestamp()
           ORDER BY created_at DESC,id DESC LIMIT 5""", (user_id,)).fetchall()
 
 
 @router.delete('/undo/{undo_id}', status_code=204)
-def dismiss_undo(undo_id: UUID, user_id: str = Depends(verified_user)):
-    with connect() as conn, conn.transaction():
+def dismiss_undo(undo_id: UUID, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
+    with game.connect() as conn, conn.transaction():
         lock_owner(conn, user_id)
         if not conn.execute('DELETE FROM inventory_undo WHERE owner_id=%s AND id=%s', (user_id, undo_id)).rowcount:
             api_error(404, 'UNDO_NOT_FOUND')
 
 
 @router.post('/undo/{undo_id}', response_model=MoveResult)
-def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(verified_user)):
+def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     digest = hashlib.sha256(f'undo:{undo_id}'.encode()).hexdigest()
     try:
-        with connect() as conn, conn.transaction():
+        with game.connect() as conn, conn.transaction():
             revision = lock_owner(conn, user_id)
             previous = conn.execute(REPLAY + ' AND mr.expires_at>now()', (user_id, command.idempotency_key)).fetchone()
             if previous:

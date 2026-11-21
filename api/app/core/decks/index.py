@@ -2,7 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
-import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 from app.location_tree import error
@@ -10,20 +10,20 @@ from app.borrowed_copies import borrowed_in
 from app.copy_allocation import held_for_line
 
 
-def deck_cursor_encode(user_id, revision, row):
+def deck_cursor_encode(user_id, revision, row, *, secret: Callable[[], bytes]):
     payload = json.dumps({'v': 1, 'u': user_id, 'r': revision,
                           'k': [row['sort_name'], str(row['id'])]}, separators=(',', ':')).encode()
-    mac = hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(), payload, hashlib.sha256).digest()
+    mac = hmac.new(secret(), payload, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(payload + mac).decode().rstrip('=')
 
 
-def deck_cursor_decode(token, user_id, revision):
+def deck_cursor_decode(token, user_id, revision, *, secret: Callable[[], bytes]):
     try:
         if len(token) > 2048:
             raise ValueError()
         raw = base64.urlsafe_b64decode(token + '=' * (-len(token) % 4))
         payload, mac = raw[:-32], raw[-32:]
-        expected = hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(), payload, hashlib.sha256).digest()
+        expected = hmac.new(secret(), payload, hashlib.sha256).digest()
         if not hmac.compare_digest(mac, expected):
             raise ValueError()
         data = json.loads(payload)

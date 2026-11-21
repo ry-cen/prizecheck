@@ -8,8 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.ops.api_errors import api_error
-from .db import connect
-from .identity import verified_user
+from app.core.game_runtime import GameRuntime, game_runtime, verified_user
 from .social import counts
 from .social.hidden_locations import hidden_by, own_hidden
 
@@ -253,8 +252,8 @@ def store_result(conn, user_id, key, digest, row, rows):
 
 
 @router.get("", response_model=TreeResponse)
-def tree(user_id: str = Depends(verified_user)):
-    with connect() as conn, conn.transaction():
+def tree(user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
+    with game.connect() as conn, conn.transaction():
         revision, rows = owner_and_rows(conn, user_id)
         copies = {row["location_id"]: row["copies"] for row in conn.execute(
             "SELECT location_id,sum(quantity)::text AS copies FROM holding WHERE owner_id=%s GROUP BY location_id", (user_id,)).fetchall()}
@@ -275,9 +274,9 @@ def tree(user_id: str = Depends(verified_user)):
 
 
 @router.post("", response_model=LocationCommandResult, status_code=201)
-def create_location(command: CreateLocation, user_id: str = Depends(verified_user)):
+def create_location(command: CreateLocation, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     name = cleaned_name(command.name)
-    with connect() as conn, conn.transaction():
+    with game.connect() as conn, conn.transaction():
         revision, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, command.model_dump(mode="json"))
         if previous:
@@ -304,11 +303,11 @@ def create_location(command: CreateLocation, user_id: str = Depends(verified_use
 
 
 @router.patch("/{location_id}", response_model=LocationCommandResult)
-def edit_location(location_id: UUID, command: EditLocation, user_id: str = Depends(verified_user)):
-    return apply_edit(location_id, command, user_id, deck=False)
+def edit_location(location_id: UUID, command: EditLocation, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
+    return apply_edit(location_id, command, user_id, deck=False, connect=game.connect)
 
 
-def apply_edit(location_id: UUID, command: EditLocation, user_id: str, *, deck: bool):
+def apply_edit(location_id: UUID, command: EditLocation, user_id: str, *, deck: bool, connect):
     """Rename and/or reparent one Location in one transaction.
 
     The Location command (deck=False) and the Deck command (deck=True, ``PATCH /api/decks/{id}``)
@@ -378,9 +377,9 @@ def apply_edit(location_id: UUID, command: EditLocation, user_id: str, *, deck: 
 
 
 @router.delete("/{location_id}", response_model=DeleteLocationResult)
-def delete_location(location_id: UUID, command: DeleteLocation, user_id: str = Depends(verified_user)):
+def delete_location(location_id: UUID, command: DeleteLocation, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     name = cleaned_name(command.name)
-    with connect() as conn, conn.transaction():
+    with game.connect() as conn, conn.transaction():
         revision, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key,
                                   {"action": "delete", "location_id": str(location_id), **command.model_dump(mode="json")})
@@ -411,13 +410,13 @@ def delete_location(location_id: UUID, command: DeleteLocation, user_id: str = D
 
 
 @router.put("/{location_id}/hidden", response_model=LocationHiddenResult)
-def set_location_hidden(location_id: UUID, command: SetLocationHidden, user_id: str = Depends(verified_user)):
+def set_location_hidden(location_id: UUID, command: SetLocationHidden, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     """Hide a Location from Friends, or show it again (social network #249). Any kind: an Organizational Location, a
     Storage Leaf, a Deck or Unsorted. Showing a Location inside a hidden one is refused (409 LOCATION_HIDDEN_BY_PARENT
     with ``hidden_by``, the nearest hidden Location above it); hiding one there is allowed, and it stays hidden when
     that Location is shown. Bumps the Location's version and never the inventory revision: nothing the collector counts
     changes. Idempotent."""
-    with connect() as conn, conn.transaction():
+    with game.connect() as conn, conn.transaction():
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key,
                                   {"action": "set_hidden", "location_id": str(location_id), **command.model_dump(mode="json")})
@@ -442,14 +441,14 @@ def set_location_hidden(location_id: UUID, command: SetLocationHidden, user_id: 
 
 
 @router.put("/{location_id}/for-trade", response_model=LocationForTradeResult)
-def set_location_for_trade(location_id: UUID, command: SetLocationForTrade, user_id: str = Depends(verified_user)):
+def set_location_for_trade(location_id: UUID, command: SetLocationForTrade, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     """Mark a Location For trade, or not (Trading #267). Any kind but a Deck: a Deck is refused either way (409
     DECK_NOT_FOR_TRADE), and one inside a marked Location stays off the Trade List. Un-marking a Location inside a
     marked one is refused (409 LOCATION_FOR_TRADE_BY_PARENT with ``for_trade_by``, the nearest marked Location above
     it); marking one there is allowed, and it stays For trade when that Location is un-marked. Independent of hiding.
     Bumps the Location's version and never the inventory revision, and reserves nothing: nothing the collector counts
     changes. Idempotent."""
-    with connect() as conn, conn.transaction():
+    with game.connect() as conn, conn.transaction():
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key,
                                   {"action": "set_for_trade", "location_id": str(location_id), **command.model_dump(mode="json")})

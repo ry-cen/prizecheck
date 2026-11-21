@@ -8,6 +8,7 @@ from app.core.decks.index import deck_cursor_decode, deck_cursor_encode
 from app.core.inventory.cursors import cursor_key, encode_cursor
 from app.core.publications.discovery import cursor_decode, cursor_encode
 from app.games.pokemon.catalog.catalog_search import _decode_cursor, _encode_cursor
+from app.games.pokemon.runtime import POKEMON
 
 
 ENDPOINTS = ('collection', 'decks', 'discovery', 'catalog_search')
@@ -26,15 +27,15 @@ def cursors(monkeypatch):
     discovery_key = ['2026-11-08T12:00:00+00:00', 'a' * 32]
     return {
         'collection': (
-            encode_cursor(context, ['pikachu', str(row_id)]),
+            encode_cursor(context, ['pikachu', str(row_id)], secret=POKEMON.cursor_secret),
             # Pin the shared decoder before any consumer adds its key-shape checks.
-            lambda token: cursor_key(token, context),
+            lambda token: cursor_key(token, context, secret=POKEMON.cursor_secret),
             ['pikachu', str(row_id)],
             400,
         ),
         'decks': (
-            deck_cursor_encode(user, revision, {'sort_name': 'pikachu', 'id': row_id}),
-            lambda token: deck_cursor_decode(token, user, revision),
+            deck_cursor_encode(user, revision, {'sort_name': 'pikachu', 'id': row_id}, secret=POKEMON.cursor_secret),
+            lambda token: deck_cursor_decode(token, user, revision, secret=POKEMON.cursor_secret),
             ('pikachu', row_id),
             400,
         ),

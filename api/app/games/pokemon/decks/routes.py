@@ -2,6 +2,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from app.db import connect
 from app.identity import verified_user
+from app.games.pokemon.runtime import POKEMON
 from app.core.inventory.holdings import parse_quantity
 from app.location_tree import (owner_and_rows, replay, check_name, store_result, error, node_model,
                                apply_edit, cleaned_name, LocationCommandResult)
@@ -45,7 +46,7 @@ def create_deck(command: CreateDeck, user_id: str = Depends(verified_user)):
 
 @router.patch('/{deck_id}', response_model=LocationCommandResult)
 def edit_deck(deck_id: UUID, command: EditDeck, user_id: str = Depends(verified_user)):
-    return apply_edit(deck_id, command, user_id, deck=True)
+    return apply_edit(deck_id, command, user_id, deck=True, connect=connect)
 
 
 @router.get('', response_model=DeckIndex)
@@ -55,7 +56,7 @@ def deck_index(cursor: str | None = None, user_id: str = Depends(verified_user))
         revision = conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE', (user_id,)).fetchone()['revision']
         if created:
             conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,'Unsorted','storage_leaf')", (uuid4(),user_id))
-        key = deck_cursor_decode(cursor, user_id, revision) if cursor else None
+        key = deck_cursor_decode(cursor, user_id, revision, secret=POKEMON.cursor_secret) if cursor else None
         after = 'AND (lower(name),id) > (%s,%s)' if key else ''
         page = conn.execute(f"""SELECT id,name,kind,parent_id,version,lower(name) AS sort_name
           FROM location WHERE owner_id=%s AND kind='deck' {after}
@@ -70,7 +71,7 @@ def deck_index(cursor: str | None = None, user_id: str = Depends(verified_user))
         summaries = index_summaries(conn, user_id, [row['id'] for row in page[:30]])
         return DeckIndex(decks=[DeckIndexEntry(**row,depth=depths[row['id']],**summaries[row['id']]) for row in page[:30]],
                          owner_revision=revision,
-                         next_cursor=deck_cursor_encode(user_id, revision, page[29]) if len(page)>30 else None)
+                         next_cursor=deck_cursor_encode(user_id, revision, page[29], secret=POKEMON.cursor_secret) if len(page)>30 else None)
 
 
 def index_summaries(conn, user_id: str, deck_ids: list[UUID]) -> dict[UUID, dict]:

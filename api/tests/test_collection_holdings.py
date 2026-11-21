@@ -172,9 +172,10 @@ def test_a_cursor_carries_its_anchor_so_the_next_page_does_not_reread_it():
     assert [row['edition_id'] for row in second.json()['holdings']] == editions[PAGE:]
     # A cursor in the earlier shape (the anchor's Edition and Location only), correctly signed, is refused.
     from app.core.inventory.cursors import encode_cursor
+    from app.games.pokemon.runtime import POKEMON
     context = ['collection-holdings', owner, None, 'name-asc', '', '', None, None, None,
                first['owner_revision'], [catalog_revision, attribute_revision]]
-    legacy = listing(owner, cursor=encode_cursor(context, [anchor['edition_id'], anchor['location_id']]))
+    legacy = listing(owner, cursor=encode_cursor(context, [anchor['edition_id'], anchor['location_id']], secret=POKEMON.cursor_secret))
     assert legacy.status_code == 400 and legacy.json()['detail']['code'] == 'INVALID_CURSOR', legacy.text
 
 

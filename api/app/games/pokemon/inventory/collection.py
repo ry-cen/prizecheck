@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from app.core.game_runtime import GameRuntime, game_runtime
 from app.core.inventory import collection as reads
 from app.core.inventory.collection import (CollectionPage, CollectionRevision, CollectionSetList, CollectionTotals,
                                            Distribution, HoldingSort, views)
@@ -74,13 +75,15 @@ class CollectionHoldingPage(BaseModel):
 def collection(name: str=Query(default='',max_length=120),set_id: str=Query(default='',max_length=80),
                collector_number: str=Query(default='',max_length=40),
                sort: Literal['name','quantity']='name',location_id: UUID | None=None,
-               cursor: str | None=Query(default=None,max_length=2048),user_id: str=Depends(verified_user)):
-    return reads.collection(name, set_id, collector_number, sort, location_id, cursor, user_id)
+               cursor: str | None=Query(default=None,max_length=2048),user_id: str=Depends(verified_user),
+               game: GameRuntime=Depends(game_runtime)):
+    return reads.collection(name, set_id, collector_number, sort, location_id, cursor, user_id,
+                            connect=game.connect, cursor_secret=game.cursor_secret)
 
 
 @router.get('/editions/{edition_id}',response_model=Distribution)
-def distribution(edition_id: UUID,user_id: str=Depends(verified_user)):
-    return reads.distribution(edition_id, user_id)
+def distribution(edition_id: UUID,user_id: str=Depends(verified_user),game: GameRuntime=Depends(game_runtime)):
+    return reads.distribution(edition_id, user_id, connect=game.connect)
 
 
 @router.get('/holdings', response_model=CollectionHoldingPage)
@@ -92,9 +95,11 @@ def collection_holdings(location_id: UUID | None = None,
                         trainer_type: TrainerType | None = None,
                         elemental_type: ElementalType | None = None,
                         cursor: str | None = Query(default=None, max_length=4096),
-                        user_id: str = Depends(verified_user)):
+                        user_id: str = Depends(verified_user),
+                        game: GameRuntime = Depends(game_runtime)):
     conditions, params = facet_conditions(category, trainer_type, elemental_type)
     page = reads.collection_holdings(location_id, sort, name, set_id, cursor, user_id,
+                                     connect=game.connect, cursor_secret=game.cursor_secret,
                                      facet_columns=FACET_COLUMNS, facet_joins=FACET_JOINS,
                                      facet_conditions=conditions, facet_params=params,
                                      facet_context=[category, trainer_type, elemental_type])
@@ -102,14 +107,15 @@ def collection_holdings(location_id: UUID | None = None,
 
 
 @router.get('/sets', response_model=CollectionSetList)
-def collection_sets(location_id: UUID | None = None, user_id: str = Depends(verified_user)):
+def collection_sets(location_id: UUID | None = None, user_id: str = Depends(verified_user),
+                    game: GameRuntime = Depends(game_runtime)):
     """The sets of the cards in All owned or one Storage Leaf, once each, for the workspace Set filter.
     Search and filters don't narrow it, so every choice stays offered."""
-    return reads.collection_sets(location_id, user_id)
+    return reads.collection_sets(location_id, user_id, connect=game.connect)
 
 
 @router.get('/revision', response_model=CollectionRevision)
-def collection_revision(user_id: str = Depends(verified_user)):
+def collection_revision(user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     """The owner revision alone: one row, no lock. The workspace reads it when a tab regains focus to
     notice changes made elsewhere."""
-    return reads.collection_revision(user_id)
+    return reads.collection_revision(user_id, connect=game.connect)

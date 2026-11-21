@@ -17,8 +17,7 @@ from pydantic import BaseModel, Field
 
 from app.core.ops.api_errors import api_error
 from app.core.art.urls import route_address
-from app.db import connect
-from app.identity import verified_user
+from app.core.game_runtime import GameRuntime, game_runtime, verified_user
 from app.core.inventory.idempotency import expire
 from app.inventory_core import MAX_QUANTITY, REPLAY, leaf, lock_owner, quantity, record_undo, undo_id_for
 
@@ -99,10 +98,10 @@ def digest(command: AddHolding) -> str:
 
 
 @router.post("", response_model=AddResult)
-def add_holding(command: AddHolding, user_id: str = Depends(verified_user)):
+def add_holding(command: AddHolding, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     quantity = parse_quantity(command.quantity)
     request_digest = digest(command)
-    with connect() as conn, conn.transaction():
+    with game.connect() as conn, conn.transaction():
         # The owner lock serializes all inventory commands for this collector.
         conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
         owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE", (user_id,)).fetchone()
@@ -160,7 +159,7 @@ def add_holding(command: AddHolding, user_id: str = Depends(verified_user)):
 
 
 @router.post("/batch", response_model=BatchAddResult)
-def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
+def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     """Adds every item's copies to one Storage Leaf or Deck, all or nothing, under the owner lock: one owner revision,
     and one Inventory Undo record of the ``add`` kind that takes exactly these copies out again. The same key and items
     (in any order) replay the result; other items under that key answer IDEMPOTENCY_KEY_REUSED. An item that names no
@@ -177,7 +176,7 @@ def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
     copies = sum(amount for _, amount in items)
     undo_id = undo_id_for(user_id, command.idempotency_key)
     try:
-        with connect() as conn, conn.transaction():
+        with game.connect() as conn, conn.transaction():
             revision = lock_owner(conn, user_id)
             expire(conn, user_id)
             previous = conn.execute(REPLAY, (user_id, command.idempotency_key)).fetchone()
@@ -234,9 +233,9 @@ def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
 def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, max_length=1024),
                   name: str=Query(default='',max_length=120),set_id: str=Query(default='',max_length=80),
                   collector_number: str=Query(default='',max_length=40),sort: Literal['name','quantity']='name',
-                  user_id: str = Depends(verified_user)):
+                  user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     from app.core.inventory.cursors import decode_cursor, encode_cursor
-    with connect() as conn, conn.transaction():
+    with game.connect() as conn, conn.transaction():
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
         owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()
         leaf = conn.execute("""SELECT id,name,kind FROM location WHERE id=%s AND owner_id=%s""",
@@ -249,7 +248,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
         revision = owner["revision"] if owner else 1
         name=name.strip().lower(); set_id=set_id.strip().lower(); collector_number=collector_number.strip().lower()
         context=[user_id,str(location_id),name,set_id,collector_number,sort,revision,state['revision']]
-        key=decode_cursor(cursor,context) if cursor else None
+        key=decode_cursor(cursor,context,secret=game.cursor_secret) if cursor else None
         params=[state['active_generation'],user_id,location_id]
         filters=''
         if name:
@@ -289,4 +288,4 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
                              descriptor=row["descriptor"], image_url=route_address(row["printing_id"], row["art_source"], upgrade=row["art_upgrade"], reference_only=row["art_reference"]),
                              location_id=row["location_id"], location_name=row["location_name"]) for row in page]
         return LeafHoldings(holdings=views, owner_revision=revision, catalog_revision=state["revision"],
-                            next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>48 else None)
+                            next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])],secret=game.cursor_secret) if len(rows)>48 else None)
