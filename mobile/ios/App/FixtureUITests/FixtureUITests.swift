@@ -36,10 +36,11 @@ final class FixtureUITests: XCTestCase {
         if awaitPrompt {
             // iOS may ask "Open in app?" for the custom URL scheme, and on a slow runner the prompt can
             // appear well after a fixed 3 s window. Poll on the test's own (main) thread for at most 20 s:
-            // tap an Open button only once it is hittable (Safari's first, then SpringBoard's), and stop
-            // early if the app is already in the foreground. When nothing is hittable, block up to 1 s
-            // on Safari's Open button rather than sleeping. A timeout is not a failure here; the
-            // foreground assertion below reports the real one.
+            // tap an Open button only once it is hittable (Safari's first, then SpringBoard's). When
+            // nothing is hittable, block up to 1 s (or the time left) in the app's own foreground wait,
+            // which returns early once the app is in the foreground and otherwise holds the full wait
+            // instead of re-querying or sleeping. A timeout is not a failure here; the foreground
+            // assertion below reports the real one.
             let deadline = Date().addingTimeInterval(20)
             while Date() < deadline {
                 let safariOpen = safari.buttons["Open"]
@@ -52,8 +53,8 @@ final class FixtureUITests: XCTestCase {
                     springboardOpen.tap()
                     break
                 }
-                if app.state == .runningForeground { break }
-                _ = safariOpen.waitForExistence(timeout: 1)
+                let t = min(1, deadline.timeIntervalSinceNow)
+                if t > 0, app.wait(for: .runningForeground, timeout: t) { break }
             }
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
             return
