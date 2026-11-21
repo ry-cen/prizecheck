@@ -7,7 +7,9 @@ import ast
 import hashlib
 import hmac
 import json
+import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -98,16 +100,45 @@ def rb(fresh, entry, monkeypatch):  # noqa: F811
     monkeypatch.setenv('RIFTBOUND_INTERNAL_AUTH_SECRET', RB_SECRET)
     monkeypatch.setenv('INTERNAL_AUTH_SECRET', POKEMON_SECRET)
     monkeypatch.setenv('DATABASE_URL', 'postgresql://unused.invalid/pokemon')  # must never be opened
-    previous = counter.set_writer(None)
-    wipe(url)
-    try:
+    with writer_off(url):
         yield Client(entry.app, url)
-    finally:
+
+
+@contextmanager
+def writer_off(url):
+    """Keep the shared request-count writer off around a Catalog database, and always drain and restore it afterwards,
+    even when either wipe raises, so a failed wipe cannot leave the process-wide writer disabled for later tests."""
+    previous = counter.set_writer(None)
+    try:
         wipe(url)
+        try:
+            yield
+        finally:
+            wipe(url)
+    finally:
         restore_counter(previous)
 
 
-PATHS = ['/api/catalog/sets', '/api/catalog/editions', f'/api/catalog/editions/{uuid4()}']
+@pytest.mark.parametrize('failing_wipes', [{1}, {2}, {1, 2}])
+def test_writer_off_restores_the_writer_when_a_wipe_raises(monkeypatch, failing_wipes):
+    sentinel, calls = object(), []
+    original = counter.set_writer(sentinel)
+    try:
+        def flaky(url):
+            calls.append(url)
+            if len(calls) in failing_wipes:
+                raise RuntimeError('synthetic wipe failure')
+        monkeypatch.setattr(sys.modules[__name__], 'wipe', flaky)
+        with pytest.raises(RuntimeError, match='synthetic wipe failure'):
+            with writer_off('synthetic-url'):
+                assert counter._writer is None
+        assert counter._writer is sentinel
+    finally:
+        counter.set_writer(original)
+
+
+ABSENT_EDITION = '6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f'  # a fixed synthetic id, so pytest ids match across xdist workers
+PATHS = ['/api/catalog/sets', '/api/catalog/editions', f'/api/catalog/editions/{ABSENT_EDITION}']
 
 
 @pytest.mark.parametrize('path', PATHS)
