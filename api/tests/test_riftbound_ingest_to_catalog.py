@@ -84,13 +84,24 @@ def writer_conn(migrated):
         yield conn
 
 
+def restore_counter(previous):
+    """Drain the counts these Riftbound requests queued while the writer is still off, then put the writer back.
+
+    `record` queues even with no writer and the background thread reads the writer only when it drains, so restoring
+    first could write Riftbound request counts to another database (operation_counts.py `flush`, as test_operation_counts does).
+    """
+    assert counter.flush(), 'queued request counts were not drained'
+    assert counter._queue.unfinished_tasks == 0 and counter._queue.empty()
+    counter.set_writer(previous)
+
+
 @pytest.fixture
 def api(entry, monkeypatch, migrated, writer_conn):  # noqa: F811
     previous = counter.set_writer(None)
     try:
         yield connect_api(entry, monkeypatch, migrated)
     finally:
-        counter.set_writer(previous)
+        restore_counter(previous)
 
 
 def pulls(*specs):
@@ -130,7 +141,7 @@ def test_a_freshly_migrated_database_with_no_accepted_pull_is_empty(entry, monke
         assert api.get('/api/catalog/sets') == []
         assert api.get('/api/catalog/editions') == {'editions': [], 'total': 0, 'pages': 1, 'catalog_empty': True}
     finally:
-        counter.set_writer(previous)
+        restore_counter(previous)
 
 
 def test_a_first_accepted_pull_is_listed_searched_filtered_and_found_by_id(api, writer_conn, migrated):
