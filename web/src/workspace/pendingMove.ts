@@ -1,9 +1,12 @@
 /** Account-scoped recovery, following the Scan Tray: IDs and quantities only, never names or art.
  * Each operation has its own key so concurrent tabs cannot overwrite another operation's recovery. */
+import { scopedPrefix, type GameId } from "../gameScope";
 import { RecoveryBlocked, type HeldOperation } from "./moveOperation";
 
-export const pendingMovePrefix = (owner: string) =>
-  `prizecheck:mixed-move:v1:${encodeURIComponent(owner)}:`;
+export const pendingMovePrefix = (owner: string, game: GameId = "pokemon") =>
+  game === "pokemon"
+    ? `prizecheck:mixed-move:v1:${encodeURIComponent(owner)}:`
+    : `${scopedPrefix(game, "mixed-move:v1")}${encodeURIComponent(owner)}:`;
 type StoragePort = Pick<
   Storage,
   "getItem" | "setItem" | "removeItem" | "key" | "length"
@@ -198,9 +201,10 @@ function knownTerminal(held: HeldOperation): boolean {
 export function pendingMoves(
   owner: string,
   storage: StoragePort = localStorage,
-  witness: StoragePort = sessionStorage
+  witness: StoragePort = sessionStorage,
+  game: GameId = "pokemon"
 ) {
-  const prefix = pendingMovePrefix(owner);
+  const prefix = pendingMovePrefix(owner, game);
   const key = (held: HeldOperation) => prefix + held.op.id;
   const witnessKey = prefix + "witness";
   const established = new Set<string>();

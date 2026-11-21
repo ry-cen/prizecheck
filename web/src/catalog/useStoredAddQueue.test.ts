@@ -1,8 +1,22 @@
 // @vitest-environment jsdom
-import { act, createElement as h } from "react";
+import {
+  Component,
+  Suspense,
+  act,
+  createElement as h,
+  startTransition,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, expect, test, vi } from "vitest";
-import { AddQueueAccount, useStoredAddQueue } from "./useStoredAddQueue";
+import {
+  AddQueueAccount,
+  hasStoredAddQueue,
+  useStoredAddQueue,
+} from "./useStoredAddQueue";
+import type { GameId } from "../gameScope";
 import { bump } from "./addQueue";
 import type { BrowseEdition } from "../catalog_browse_generated";
 import { browseEditions } from "../catalog_browse_generated";
@@ -1286,4 +1300,210 @@ test("S1 Clear restores editions, finishes, counts and the stored destination ex
   expect([...queue.queue]).toEqual(before);
   expect(queue.chosen).toBe("box");
   await close();
+});
+
+test("a saved Riftbound draft is neither validated against Pokémon's clients nor changed", async () => {
+  const stored = JSON.stringify({
+    items: [{ editionId: "rift-1", printingId: "rift-p", quantity: 2 }],
+    target: "rift-box",
+    uncertain: false,
+  });
+  const key = "prizecheck:riftbound:add-queue:a:page";
+  sessionStorage.setItem(key, stored);
+  vi.mocked(browseEditions).mockClear();
+  vi.mocked(getLocationTree).mockClear();
+  // Pokémon's clients would find nothing, which is what used to drop the cards and delete the draft.
+  vi.mocked(browseEditions).mockResolvedValue({
+    available: true,
+    editions: [],
+    next_cursor: null,
+  } as unknown as Awaited<ReturnType<typeof browseEditions>>);
+  vi.mocked(getLocationTree).mockResolvedValue({
+    locations: [],
+  } as unknown as Awaited<ReturnType<typeof getLocationTree>>);
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  function Probe() {
+    queue = useStoredAddQueue("page", "riftbound");
+    return null;
+  }
+  await act(async () =>
+    root.render(h(AddQueueAccount.Provider, { value: "a" }, h(Probe)))
+  );
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+  });
+  expect(browseEditions).not.toHaveBeenCalled();
+  expect(getLocationTree).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(key)).toBe(stored);
+  await act(async () => root.unmount());
+  expect(sessionStorage.getItem(key)).toBe(stored);
+});
+
+// One game per hook instance: a switch is a keyed remount (see useFixedGame).
+let caught: Error | null = null;
+class Boundary extends Component<
+  { children?: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    caught = error;
+    return { error };
+  }
+  render() {
+    return this.state.error ? null : this.props.children;
+  }
+}
+let held: Promise<void> | null = null;
+let releaseHeld: () => void = () => {};
+let suspendedRenders = 0;
+function Gate({ game }: { game: GameId }) {
+  if (game === "riftbound" && held) {
+    suspendedRenders++;
+    throw held;
+  }
+  return null;
+}
+let committedQueues: { game: GameId; ready: boolean }[] = [];
+function QueueOwner({ game }: { game: GameId }) {
+  const q = useStoredAddQueue("page", game);
+  useLayoutEffect(() => {
+    committedQueues.push({ game, ready: q.ready });
+  });
+  return null;
+}
+function mountSwitchable(mode: "keyed" | "unkeyed", gated: boolean) {
+  let setGame!: (g: GameId) => void;
+  function App() {
+    const [game, set] = useState<GameId>("pokemon");
+    setGame = set;
+    return h(
+      AddQueueAccount.Provider,
+      { value: "a" },
+      h(
+        Boundary,
+        null,
+        h(
+          Suspense,
+          { fallback: null },
+          h(QueueOwner, mode === "keyed" ? { key: game, game } : { game }),
+          gated ? h(Gate, { game }) : null
+        )
+      )
+    );
+  }
+  const root = createRoot(document.createElement("div"));
+  return {
+    mount: () => act(async () => root.render(h(App))),
+    switchTo: async (g: GameId, transition = false) => {
+      if (transition) act(() => startTransition(() => setGame(g)));
+      else await act(async () => setGame(g));
+    },
+    unmount: () => act(async () => root.unmount()),
+  };
+}
+const pokemonDraft = JSON.stringify({
+  items: [{ editionId: "one", printingId: "printing", quantity: 2 }],
+  target: null,
+  uncertain: false,
+});
+const riftboundDraft = JSON.stringify({
+  items: [{ editionId: "rift-1", printingId: "rift-p", quantity: 1 }],
+  target: "rift-box",
+  uncertain: false,
+});
+const pause = (ms = 50) => new Promise((r) => setTimeout(r, ms));
+
+test("R2-1b a keyed switch from Pokémon to Riftbound leaves the Riftbound draft untouched", async () => {
+  caught = null;
+  vi.mocked(browseEditions).mockClear();
+  vi.mocked(getLocationTree).mockClear();
+  sessionStorage.setItem("prizecheck:add-queue:a:page", pokemonDraft);
+  sessionStorage.setItem(
+    "prizecheck:riftbound:add-queue:a:page",
+    riftboundDraft
+  );
+  const view = mountSwitchable("keyed", false);
+  await view.mount();
+  await pause();
+  await view.switchTo("riftbound");
+  await pause();
+  const printings = vi
+    .mocked(browseEditions)
+    .mock.calls.map(
+      ([filter]) => (filter as { printing_id: string }).printing_id
+    );
+  expect(printings.length).toBeGreaterThan(0);
+  expect(new Set(printings)).toEqual(new Set(["printing"]));
+  expect(sessionStorage.getItem("prizecheck:riftbound:add-queue:a:page")).toBe(
+    riftboundDraft
+  );
+  await view.unmount();
+  expect(sessionStorage.getItem("prizecheck:riftbound:add-queue:a:page")).toBe(
+    riftboundDraft
+  );
+});
+
+test.each(["keyed", "unkeyed"] as const)(
+  "R3-4 a Pokémon restore that resolves during a suspended switch still makes the visible queue ready (%s)",
+  async (mode) => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    caught = null;
+    committedQueues = [];
+    suspendedRenders = 0;
+    vi.mocked(browseEditions).mockReset();
+    let resolveBrowse!: (v: Awaited<ReturnType<typeof browseEditions>>) => void;
+    vi.mocked(browseEditions).mockImplementation(
+      () => new Promise((r) => (resolveBrowse = r))
+    );
+    sessionStorage.setItem("prizecheck:add-queue:a:page", pokemonDraft);
+    const view = mountSwitchable(mode, true);
+    await view.mount();
+    await pause();
+    held = new Promise<void>((resolve) => {
+      releaseHeld = () => {
+        held = null;
+        resolve();
+      };
+    });
+    await view.switchTo("riftbound", true);
+    await pause();
+    if (mode === "keyed") expect(suspendedRenders).toBeGreaterThan(0);
+    else expect(caught).not.toBeNull();
+    resolveBrowse({
+      available: true,
+      editions: [edition],
+      next_cursor: null,
+    } as unknown as Awaited<ReturnType<typeof browseEditions>>);
+    await pause();
+    if (mode === "keyed") {
+      expect(
+        committedQueues.filter((c) => c.game === "pokemon").at(-1)?.ready
+      ).toBe(true);
+    } else {
+      expect((caught as Error | null)?.message).toContain("useStoredAddQueue");
+      expect(sessionStorage.getItem("prizecheck:add-queue:a:page")).toBe(
+        pokemonDraft
+      );
+      expect(
+        sessionStorage.getItem("prizecheck:riftbound:add-queue:a:page")
+      ).toBeNull();
+    }
+    releaseHeld();
+    await pause();
+    await view.unmount();
+    vi.mocked(browseEditions).mockReset();
+  }
+);
+
+test("A-1 hasStoredAddQueue never deletes another game's stored draft", () => {
+  sessionStorage.setItem("prizecheck:riftbound:add-queue:a:page", "{not json");
+  sessionStorage.setItem("prizecheck:add-queue:a:page", "{not json");
+  expect(hasStoredAddQueue("a", "page", "riftbound")).toBe(false);
+  expect(sessionStorage.getItem("prizecheck:riftbound:add-queue:a:page")).toBe(
+    "{not json"
+  );
+  expect(hasStoredAddQueue("a", "page")).toBe(false);
+  expect(sessionStorage.getItem("prizecheck:add-queue:a:page")).toBeNull();
 });
