@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.ops.operation_counts import counter
+from riftbound_counts import restore_counter
 from test_riftbound_catalog_track import admin, databases, fresh  # noqa: F401
 
 CONTRACT = Path(__file__).parent / 'riftbound_contract'
@@ -103,7 +104,7 @@ def rb(fresh, entry, monkeypatch):  # noqa: F811
         yield Client(entry.app, url)
     finally:
         wipe(url)
-        counter.set_writer(previous)
+        restore_counter(previous)
 
 
 PATHS = ['/api/catalog/sets', '/api/catalog/editions', f'/api/catalog/editions/{uuid4()}']

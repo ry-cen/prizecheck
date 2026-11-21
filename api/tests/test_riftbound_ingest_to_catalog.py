@@ -30,6 +30,7 @@ from app.games.riftbound.catalog import plan, writer
 from app.games.riftbound.catalog.assess import assess_pull, listed_groups
 from test_core_baseline import admin, databases  # noqa: F401
 from test_riftbound_catalog_assess import envelope
+from riftbound_counts import restore_counter
 from test_riftbound_catalog_plan import price, product
 from test_riftbound_catalog_read_api import entry, signed  # noqa: F401
 from test_riftbound_migrate import ROOT, migrate
@@ -82,17 +83,6 @@ def migrated(databases):  # noqa: F811
 def writer_conn(migrated):
     with psycopg.connect(migrated) as conn:
         yield conn
-
-
-def restore_counter(previous):
-    """Drain the counts these Riftbound requests queued while the writer is still off, then put the writer back.
-
-    `record` queues even with no writer and the background thread reads the writer only when it drains, so restoring
-    first could write Riftbound request counts to another database (operation_counts.py `flush`, as test_operation_counts does).
-    """
-    assert counter.flush(), 'queued request counts were not drained'
-    assert counter._queue.unfinished_tasks == 0 and counter._queue.empty()
-    counter.set_writer(previous)
 
 
 @pytest.fixture
