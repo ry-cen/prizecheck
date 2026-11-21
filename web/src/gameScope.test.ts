@@ -26,7 +26,7 @@ import {
   sharedRevision,
   useStaleCollection,
 } from "./workspace/useStaleCollection";
-import { createElement } from "react";
+import { Suspense, createElement, startTransition, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 
@@ -355,4 +355,117 @@ test("the revision hook sends, counts and probes for the game it is on", async (
   await view.unmount();
   pokemonSide.channel.close();
   riftboundSide.channel.close();
+});
+
+test("a suspended switch to another game never makes the visible game read or send its revision", async () => {
+  const pokemonSide = new BroadcastChannel(
+    ownerRevisionChannelName("u1", "pokemon")
+  );
+  const got: unknown[] = [];
+  pokemonSide.onmessage = (e) => got.push(e.data);
+  const riftboundRead = vi.fn(async () => ({ owner_revision: 99 }));
+  const pokemonRead = vi.fn(async () => ({ owner_revision: 5 }));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const common = {
+    userId: "u1",
+    galleryStatus: "ready" as const,
+    byKey: new Map(),
+    galleryKey: "k",
+    reloadGallery: () => {},
+    treeReady: true,
+    reloadTree: () => {},
+    selected: new Set() as never,
+    clearSelection: () => {},
+    busy: false,
+    galleryRevision: null,
+    treeRevision: null,
+  };
+  function Hook({ game }: { game: "pokemon" | "riftbound" }) {
+    useStaleCollection(
+      game === "pokemon"
+        ? { ...common, game, readRevision: pokemonRead }
+        : { ...common, game, readRevision: riftboundRead }
+    );
+    return null;
+  }
+  function Gate({ game }: { game: "pokemon" | "riftbound" }) {
+    if (game === "riftbound") throw gate;
+    return null;
+  }
+  let setGame!: (g: "pokemon" | "riftbound") => void;
+  function App() {
+    const [game, set] = useState<"pokemon" | "riftbound">("pokemon");
+    setGame = (g) => startTransition(() => set(g));
+    return createElement(
+      Suspense,
+      { fallback: null },
+      createElement(Hook, { game }),
+      createElement(Gate, { game })
+    );
+  }
+  Object.defineProperty(document, "visibilityState", {
+    value: "visible",
+    configurable: true,
+  });
+  const view = await mount(() => createElement(App));
+  act(() => setGame("riftbound")); // suspended: Pokémon stays on screen
+  // Outside act: act would wait for the suspended render this test needs to leave pending.
+  window.dispatchEvent(new Event("focus"));
+  await new Promise((r) => setTimeout(r, 50));
+  expect(riftboundRead).not.toHaveBeenCalled();
+  expect(pokemonRead).toHaveBeenCalled();
+  expect(got).toEqual([{ revision: 5, game: "pokemon" }]);
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  await view.unmount();
+  pokemonSide.close();
+});
+
+test("a game switch during a pending return probe still lets a newer revision show the banner", async () => {
+  const channel = new BroadcastChannel(
+    ownerRevisionChannelName("u1", "riftbound")
+  );
+  const never = () => new Promise<{ owner_revision: number }>(() => {});
+  const common = {
+    userId: "u1",
+    galleryStatus: "ready" as const,
+    byKey: new Map(),
+    galleryKey: "k",
+    reloadGallery: () => {},
+    treeReady: true,
+    reloadTree: () => {},
+    selected: new Set() as never,
+    clearSelection: () => {},
+    busy: false,
+    galleryRevision: 3,
+    treeRevision: 3,
+    idle: true,
+  };
+  let stale = false;
+  function Hook(props: { game: "pokemon" | "riftbound"; active: boolean }) {
+    const { game, active } = props;
+    stale = useStaleCollection(
+      game === "pokemon"
+        ? { ...common, active, game, readRevision: never }
+        : { ...common, active, game, readRevision: never }
+    ).stale;
+    return null;
+  }
+  const view = await mount(() =>
+    createElement(Hook, { game: "pokemon", active: false })
+  );
+  await view.rerender(() =>
+    createElement(Hook, { game: "pokemon", active: true })
+  ); // the return probe starts and never answers
+  await view.rerender(() =>
+    createElement(Hook, { game: "riftbound", active: true })
+  );
+  await act(async () => {
+    channel.postMessage({ revision: 10, game: "riftbound" });
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  expect(stale).toBe(true);
+  await view.unmount();
+  channel.close();
 });

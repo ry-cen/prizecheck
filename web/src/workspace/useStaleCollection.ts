@@ -122,16 +122,16 @@ export function useStaleCollection({
   readRevision,
 }: Options) {
   const [latest, setLatest] = useState<number | null>(null);
-  // Another game starts from nothing: a revision seen for the old scope says nothing about the new.
-  const scope = game;
-  const [seenScope, setSeenScope] = useState(scope);
-  if (seenScope !== scope) {
-    setSeenScope(scope);
-    setLatest(null);
-  }
-  const reader = useRef<ReadRevision | undefined>(undefined);
-  reader.current =
-    readRevision ?? (game === "pokemon" ? getCollectionRevision : undefined);
+  // The reader is handed to the effects below only once a game switch has committed, so a render that is
+  // still pending (a suspended or transitioned switch) never makes the visible game read another game's revision.
+  const readerRef = useRef(readRevision);
+  useEffect(() => {
+    readerRef.current = readRevision;
+  });
+  const pickReader = () =>
+    game === "pokemon"
+      ? (readerRef.current ?? getCollectionRevision)
+      : readerRef.current;
   const [note, setNote] = useState("");
   const channel = useRef<BroadcastChannel | null>(null);
   const posted = useRef(0);
@@ -140,6 +140,16 @@ export function useStaleCollection({
   // appear: a change seen meanwhile is refreshed away instead. Set while rendering, so no frame shows the banner.
   const [checking, setChecking] = useState(false);
   const [wasShown, setWasShown] = useState(active);
+  // Another game starts from nothing: a revision seen for the old scope says nothing about the new.
+  const scope = game;
+  const [seenScope, setSeenScope] = useState(scope);
+  if (seenScope !== scope) {
+    setSeenScope(scope);
+    setLatest(null);
+    // A return probe pending for the old game is cancelled by the switch; it must not leave the banner hidden.
+    setChecking(false);
+  }
+
   if (active !== wasShown) {
     setWasShown(active);
     setChecking(active && idle);
@@ -221,7 +231,7 @@ export function useStaleCollection({
     let inFlight = false;
     const probe = () => {
       if (inFlight || document.visibilityState !== "visible") return;
-      const read = reader.current;
+      const read = pickReader();
       if (!read) return;
       inFlight = true;
       read()
@@ -286,7 +296,7 @@ export function useStaleCollection({
     };
     // A failed read still settles: a change already seen refreshes, or shows the banner. The next focus or
     // return tries the read again.
-    const read = reader.current;
+    const read = pickReader();
     if (!read) {
       settle(null);
       return () => {

@@ -201,7 +201,8 @@ export function useStoredAddQueue(scope: string, game: GameId = "pokemon") {
   const liveOwner = () => mounted.current && epochRef.current === epoch;
   const restoration = useRef(0);
   function persist() {
-    if (!key || !liveOwner()) return;
+    // Another game's draft is never rewritten here: this hook can only restore Pokémon's.
+    if (!key || !liveOwner() || game !== "pokemon") return;
     const draft = record(s.current);
     try {
       if (draft) sessionStorage.setItem(key, JSON.stringify(draft));
@@ -229,6 +230,18 @@ export function useStoredAddQueue(scope: string, game: GameId = "pokemon") {
     let live = true;
     const restoreId = ++restoration.current;
     forgetAddQueues(account);
+    if (game !== "pokemon") {
+      // Restoring validates against Pokémon's Catalog and Locations, which would drop another game's cards and
+      // delete its draft. Until that game has its own readers the stored draft is left exactly as it is.
+      s.current = initial(empty());
+      s.current.phase = "failed";
+      s.current.notice = "Couldn't restore your queue. Reload to try again.";
+      render({ ...s.current });
+      return () => {
+        live = false;
+        mounted.current = false;
+      };
+    }
     s.current = initial(key ? read(key) : empty());
     render({ ...s.current });
     const draft = s.current.draft;
@@ -288,7 +301,7 @@ export function useStoredAddQueue(scope: string, game: GameId = "pokemon") {
       live = false;
       mounted.current = false;
     };
-  }, [key, account]);
+  }, [key, account, game]);
   function clear() {
     if (!liveOwner()) return;
     ++restoration.current;

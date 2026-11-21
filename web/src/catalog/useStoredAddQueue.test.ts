@@ -1287,3 +1287,41 @@ test("S1 Clear restores editions, finishes, counts and the stored destination ex
   expect(queue.chosen).toBe("box");
   await close();
 });
+
+test("a saved Riftbound draft is neither validated against Pokémon's clients nor changed", async () => {
+  const stored = JSON.stringify({
+    items: [{ editionId: "rift-1", printingId: "rift-p", quantity: 2 }],
+    target: "rift-box",
+    uncertain: false,
+  });
+  const key = "prizecheck:riftbound:add-queue:a:page";
+  sessionStorage.setItem(key, stored);
+  vi.mocked(browseEditions).mockClear();
+  vi.mocked(getLocationTree).mockClear();
+  // Pokémon's clients would find nothing, which is what used to drop the cards and delete the draft.
+  vi.mocked(browseEditions).mockResolvedValue({
+    available: true,
+    editions: [],
+    next_cursor: null,
+  } as unknown as Awaited<ReturnType<typeof browseEditions>>);
+  vi.mocked(getLocationTree).mockResolvedValue({
+    locations: [],
+  } as unknown as Awaited<ReturnType<typeof getLocationTree>>);
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  function Probe() {
+    queue = useStoredAddQueue("page", "riftbound");
+    return null;
+  }
+  await act(async () =>
+    root.render(h(AddQueueAccount.Provider, { value: "a" }, h(Probe)))
+  );
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+  });
+  expect(browseEditions).not.toHaveBeenCalled();
+  expect(getLocationTree).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(key)).toBe(stored);
+  await act(async () => root.unmount());
+  expect(sessionStorage.getItem(key)).toBe(stored);
+});
