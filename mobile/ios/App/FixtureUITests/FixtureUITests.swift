@@ -30,12 +30,33 @@ final class FixtureUITests: XCTestCase {
         XCTAssertTrue(safari.links["Continue to sample Collection"].waitForExistence(timeout: 45))
     }
 
-    private func returnFromBrowser(_ label: String) {
+    private func returnFromBrowser(_ label: String, awaitPrompt: Bool = false) {
         safari.links[label].tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if awaitPrompt {
+            // iOS may ask "Open in app?" for the custom URL scheme, and on a slow runner the prompt can
+            // appear well after a fixed 3 s window. Wait on state, bounded at 20 s: stop as soon as an
+            // Open button exists in Safari or SpringBoard, or the app is already in the foreground.
+            // A timeout is not a failure here; the foreground assertion below reports the real one.
+            let settled = NSPredicate { _, _ in
+                self.safari.buttons["Open"].exists
+                    || springboard.buttons["Open"].exists
+                    || self.app.state == .runningForeground
+            }
+            let promptOrForeground = XCTNSPredicateExpectation(predicate: settled, object: nil)
+            _ = XCTWaiter().wait(for: [promptOrForeground], timeout: 20)
+            if safari.buttons["Open"].exists {
+                safari.buttons["Open"].tap()
+            } else if springboard.buttons["Open"].exists {
+                springboard.buttons["Open"].tap()
+            }
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
+            return
+        }
         // iOS may ask for confirmation before opening a custom URL scheme.
         let open = safari.buttons["Open"]
         if open.waitForExistence(timeout: 3) { open.tap() }
-        let systemOpen = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Open"]
+        let systemOpen = springboard.buttons["Open"]
         if systemOpen.exists { systemOpen.tap() }
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
     }
@@ -66,10 +87,10 @@ final class FixtureUITests: XCTestCase {
 
     func testBrowserCancellationAndError() {
         openBrowser()
-        returnFromBrowser("Cancel sign-in")
+        returnFromBrowser("Cancel sign-in", awaitPrompt: true)
         XCTAssertTrue(app.staticTexts["Sign-in cancelled."].waitForExistence(timeout: 15))
         openBrowser()
-        returnFromBrowser("Simulate sign-in failure")
+        returnFromBrowser("Simulate sign-in failure", awaitPrompt: true)
         XCTAssertTrue(app.staticTexts["Unable to sign in. Please try again."].waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["Sign out"].exists)
     }
