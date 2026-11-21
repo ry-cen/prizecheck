@@ -3,7 +3,7 @@ import base64
 import hashlib
 import hmac
 import json
-import os
+from collections.abc import Callable
 from decimal import Decimal
 from uuid import UUID
 
@@ -12,18 +12,18 @@ from fastapi import HTTPException
 from app.core.ops.api_errors import api_error as fail
 
 
-def encode_cursor(context, key):
+def encode_cursor(context, key, *, secret: Callable[[], bytes]):
     data=json.dumps({'context':context,'key':key},separators=(',',':')).encode()
-    signature=hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(),data,hashlib.sha256).digest()
+    signature=hmac.new(secret(),data,hashlib.sha256).digest()
     return base64.urlsafe_b64encode(data+signature).decode().rstrip('=')
 
 
-def cursor_key(token,context):
+def cursor_key(token,context,*,secret: Callable[[], bytes]):
     """The key of a cursor signed for this context. 409 when only a revision moved; otherwise 400 INVALID_CURSOR."""
     try:
         raw=base64.urlsafe_b64decode(token+'='*(-len(token)%4))
         data,signature=raw[:-32],raw[-32:]
-        if not hmac.compare_digest(signature,hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(),data,hashlib.sha256).digest()):
+        if not hmac.compare_digest(signature,hmac.new(secret(),data,hashlib.sha256).digest()):
             raise ValueError
         payload=json.loads(data)
         old=payload['context']
@@ -35,9 +35,9 @@ def cursor_key(token,context):
     except (ValueError,KeyError,TypeError,UnicodeDecodeError): fail(400,'INVALID_CURSOR')
 
 
-def decode_cursor(token,context):
+def decode_cursor(token,context,*,secret: Callable[[], bytes]):
     """The Collection page cursor: [sort value, Edition id]."""
-    key=cursor_key(token,context)
+    key=cursor_key(token,context,secret=secret)
     try:
         if not isinstance(key,list) or len(key)!=2: raise ValueError
         UUID(key[1])

@@ -20,8 +20,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from .location_tree import cleaned_name, error, owner_and_rows, replay
-from .db import connect
-from .identity import verified_user
+from app.core.game_runtime import GameRuntime, game_runtime, verified_user
 from .inventory_core import MAX_QUANTITY
 from .social import counts
 
@@ -63,10 +62,10 @@ def unsorted_leaf(conn, user_id: str, rows, deck_id: UUID) -> UUID:
 
 
 @router.delete('/{deck_id}', response_model=DeleteDeckResult)
-def delete_deck(deck_id: UUID, command: DeleteDeck, user_id: str = Depends(verified_user)):
+def delete_deck(deck_id: UUID, command: DeleteDeck, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
     name = cleaned_name(command.name)
     try:
-        with connect() as conn, conn.transaction():
+        with game.connect() as conn, conn.transaction():
             # The owner lock (owner_and_rows) comes first and serializes this with every inventory and Deck List command
             # and with every publication command, which take it first too (publications.mutate).
             revision, rows = owner_and_rows(conn, user_id)

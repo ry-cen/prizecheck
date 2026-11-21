@@ -1,7 +1,7 @@
 """The local Riftbound Catalog read API against a disposable migrated Riftbound database with synthetic rows.
 
-The entry (app.riftbound_main) is imported through a fixture that puts the process-wide operation counter writer back,
-so building it here cannot rebind Pokémon's writer for other tests in the same process.
+The entry (app.riftbound_main) is imported through a fixture that asserts the process-wide operation counter writer is
+unchanged, so building it here cannot rebind Pokémon's writer. Requests count on the entry's own counter, guarded here.
 """
 import ast
 import hashlib
@@ -17,8 +17,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.ops.operation_counts import counter
-from riftbound_counts import restore_counter
+from riftbound_counts import counter, process_counter, restore_counter
 from test_riftbound_catalog_track import admin, databases, fresh  # noqa: F401
 
 CONTRACT = Path(__file__).parent / 'riftbound_contract'
@@ -30,11 +29,10 @@ FINISHES = {'normal': {'finish': 'normal'}, 'foil': {'finish': 'foil'},
 
 @pytest.fixture(scope='module')
 def entry():
-    previous = counter.set_writer(None)
-    try:
-        import app.riftbound_main as module
-    finally:
-        counter.set_writer(previous)
+    before = process_counter._writer
+    import app.riftbound_main as module
+    assert process_counter._writer is before
+    assert module.app.state.game_runtime.counter is counter is not process_counter
     return module
 
 

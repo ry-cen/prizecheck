@@ -1,5 +1,12 @@
-"""Test-only helper shared by the Riftbound API tests that make requests while the request-count writer is off."""
-from app.core.ops.operation_counts import counter
+"""Test-only helper shared by the Riftbound API tests that make requests while the request-count writer is off.
+
+``counter`` is the Riftbound entry's own counter (``RIFTBOUND.counter``); ``process_counter`` is Pokémon's process-wide
+one, which importing the Riftbound entry must leave alone.
+"""
+from app.core.ops.operation_counts import counter as process_counter  # noqa: F401
+from app.games.riftbound.runtime import RIFTBOUND
+
+counter = RIFTBOUND.counter
 
 
 def restore_counter(previous):

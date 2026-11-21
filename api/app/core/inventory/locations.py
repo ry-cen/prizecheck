@@ -4,8 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.db import connect
-from app.identity import verified_user
+from app.core.game_runtime import GameRuntime, game_runtime, verified_user
 
 router = APIRouter()
 
@@ -23,8 +22,8 @@ class LocationsResponse(BaseModel):
 
 
 @router.get("/api/locations", response_model=LocationsResponse)
-def locations(user_id: str = Depends(verified_user)):
-    with connect() as conn:
+def locations(user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
+    with game.connect() as conn:
         with conn.transaction():
             # One transaction protects onboarding against repeated tabs/requests.
             created = conn.execute("INSERT INTO inventory_owner (user_id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING user_id", (user_id,)).fetchone()
@@ -39,8 +38,8 @@ def locations(user_id: str = Depends(verified_user)):
 
 
 @router.get("/api/locations/{location_id}", response_model=Location)
-def location(location_id: UUID, user_id: str = Depends(verified_user)):
-    with connect() as conn:
+def location(location_id: UUID, user_id: str = Depends(verified_user), game: GameRuntime = Depends(game_runtime)):
+    with game.connect() as conn:
         row = conn.execute(
             "SELECT id, name, kind, parent_id, version FROM location WHERE id = %s AND owner_id = %s",
             (location_id, user_id),

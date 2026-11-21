@@ -3,6 +3,7 @@
 The game supplies facet columns, joins, predicates and cursor context at each listing call.
 Catalog relation shapes follow docs/planning/shared-core/catalog-data-contract.md.
 """
+from collections.abc import Callable
 from typing import Literal
 from uuid import UUID
 
@@ -10,7 +11,6 @@ from pydantic import BaseModel
 
 from app.core.ops.api_errors import api_error as fail
 from app.core.art.urls import route_address
-from app.db import connect
 from app.core.inventory.holdings import HoldingView
 from app.core.inventory.location_paths import LOCATION_PATHS
 from app.social import counts
@@ -58,7 +58,7 @@ def views(rows, model=HoldingView):
              'image_url':route_address(row['printing_id'],row['art_source'],upgrade=row['art_upgrade'],reference_only=row['art_reference'])}) for row in rows]
 
 
-def collection(name, set_id, collector_number, sort, location_id, cursor, user_id):
+def collection(name, set_id, collector_number, sort, location_id, cursor, user_id, *, connect, cursor_secret: Callable[[], bytes]):
     with connect() as conn, conn.transaction():
         # A repeatable snapshot binds metadata, totals, and revisions to one view.
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
@@ -67,7 +67,7 @@ def collection(name, set_id, collector_number, sort, location_id, cursor, user_i
         revision=owner['revision'] if owner else 1
         name=name.strip().lower(); set_id=set_id.strip().lower(); collector_number=collector_number.strip().lower()
         context=[user_id,str(location_id) if location_id else None,name,set_id,collector_number,sort,revision,state['revision']]
-        key=decode_cursor(cursor,context) if cursor else None
+        key=decode_cursor(cursor,context,secret=cursor_secret) if cursor else None
         scope=''; params=[state['active_generation'],user_id]
         if location_id:
             if not conn.execute('SELECT 1 FROM location WHERE owner_id=%s AND id=%s',(user_id,location_id)).fetchone():
@@ -98,11 +98,11 @@ def collection(name, set_id, collector_number, sort, location_id, cursor, user_i
           GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id,art.low_image_url,art.stored_upgrade_url,art.reference_only,psc.set_code)
           SELECT * FROM totals {after} ORDER BY {order} LIMIT 31""",params).fetchall()
         page=rows[:30]
-        next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>30 else None
+        next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])],secret=cursor_secret) if len(rows)>30 else None
         return CollectionPage(entries=views(page,CollectionEntry),owner_revision=revision,catalog_revision=state['revision'],next_cursor=next_cursor)
 
 
-def distribution(edition_id, user_id):
+def distribution(edition_id, user_id, *, connect):
     with connect() as conn:
         state=conn.execute('SELECT active_generation FROM catalog_state WHERE singleton').fetchone()
         rows=conn.execute(f"""SELECT {COLUMNS},h.quantity,h.version,h.location_id,l.name AS location_name
@@ -207,7 +207,7 @@ class CollectionTotals(BaseModel):
     copies: str
 
 
-def collection_holdings(location_id, sort, name, set_id, cursor, user_id, *,
+def collection_holdings(location_id, sort, name, set_id, cursor, user_id, *, connect, cursor_secret: Callable[[], bytes],
                         facet_columns, facet_joins, facet_conditions, facet_params, facet_context):
     with connect() as conn, conn.transaction():
         # One repeatable snapshot binds rows, totals and both revisions.
@@ -244,7 +244,7 @@ def collection_holdings(location_id, sort, name, set_id, cursor, user_id, *,
         after, after_params = '', []
         if cursor:
             carried = anchor_columns(keys)
-            key = cursor_key(cursor, context)
+            key = cursor_key(cursor, context, secret=cursor_secret)
             try:
                 if not isinstance(key, list) or len(key) != len(carried):
                     raise ValueError
@@ -273,7 +273,7 @@ def collection_holdings(location_id, sort, name, set_id, cursor, user_id, *,
             lent = str(sum(counts.lent_counts(conn, user_id, None).values()) if whole else 0)
             totals = CollectionTotals(holdings=counted['holdings'], editions=counted['editions'],
                                       copies=str(counted['copies']))
-        next_cursor = (encode_cursor(context, [anchor_json(page[-1][column]) for column in anchor_columns(keys)])
+        next_cursor = (encode_cursor(context, [anchor_json(page[-1][column]) for column in anchor_columns(keys)], secret=cursor_secret)
                        if len(rows) > HOLDING_PAGE_SIZE else None)
         return dict(snapshot=listing_snapshot(revision, state['revision'], attributes['revision']), holdings=page,
                     owner_revision=revision, catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals,
@@ -290,7 +290,7 @@ class CollectionSetList(BaseModel):
     owner_revision: int
 
 
-def collection_sets(location_id, user_id):
+def collection_sets(location_id, user_id, *, connect):
     """The sets of the cards in All owned or one Storage Leaf, once each, for the workspace Set filter.
     Search and filters don't narrow it, so every choice stays offered."""
     with connect() as conn, conn.transaction():
@@ -317,7 +317,7 @@ class CollectionRevision(BaseModel):
     owner_revision: int
 
 
-def collection_revision(user_id):
+def collection_revision(user_id, *, connect):
     """The owner revision alone: one row, no lock. The workspace reads it when a tab regains focus to
     notice changes made elsewhere."""
     with connect() as conn:

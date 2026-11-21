@@ -15,6 +15,7 @@ from fastapi import HTTPException
 
 from app.core.inventory import collection as reads, cursors
 from app.games.pokemon.inventory import borrowed_gallery, collection
+from app.games.pokemon.runtime import POKEMON
 from test_api_contract import route_table
 from test_collection_holding_filters import card, listing
 from test_holdings import add, call, fixture
@@ -39,8 +40,8 @@ def legacy_token(context, key):
 
 def test_pre_extraction_cursor_bytes_and_carried_values_stay_compatible(monkeypatch):
     monkeypatch.setenv('INTERNAL_AUTH_SECRET', 'collection-cursor-fixture')
-    assert cursors.cursor_key(OLD_TOKEN, OLD_CONTEXT) == OLD_KEY
-    assert cursors.encode_cursor(OLD_CONTEXT, OLD_KEY) == OLD_TOKEN
+    assert cursors.cursor_key(OLD_TOKEN, OLD_CONTEXT, secret=POKEMON.cursor_secret) == OLD_KEY
+    assert cursors.encode_cursor(OLD_CONTEXT, OLD_KEY, secret=POKEMON.cursor_secret) == OLD_TOKEN
     assert cursors.anchor_value('edition_total', OLD_KEY[0]) == 12
     assert cursors.anchor_value('edition_id', OLD_KEY[2]) == UUID(OLD_KEY[2])
 
@@ -58,7 +59,7 @@ def test_old_cursor_keeps_context_and_revision_errors(monkeypatch, slot, value, 
     context = list(OLD_CONTEXT)
     context[slot] = value
     with pytest.raises(HTTPException) as error:
-        cursors.cursor_key(OLD_TOKEN, context)
+        cursors.cursor_key(OLD_TOKEN, context, secret=POKEMON.cursor_secret)
     assert (error.value.status_code, error.value.detail) == (status, {'code': code})
 
 
@@ -95,7 +96,8 @@ def test_core_executes_supplied_sql_without_an_implicit_facet_join():
     owner, _, leaf, _, edition, _ = fixture()
     assert add(owner, leaf, edition, '3').status_code == 200
     # A SQL probe, not a game implementation: no ca relation or Pokémon response fields are supplied.
-    page = reads.collection_holdings(None, 'quantity-desc', ' PIKA ', ' base ', None, owner,
+    page = reads.collection_holdings(None, 'quantity-desc', ' PIKA ', ' base ', None, owner, connect=POKEMON.connect,
+                                     cursor_secret=POKEMON.cursor_secret,
                                      facet_columns='42 AS facet_probe', facet_joins='',
                                      facet_conditions=' AND h.quantity=%s', facet_params=[3],
                                      facet_context=[None, None, None])

@@ -77,8 +77,8 @@ def listing(conn, monkeypatch, owner, *, domains=(), requested=None, cursor=None
 
         def transaction(self):
             return conn.transaction()
-    monkeypatch.setattr(inventory, 'connect', lambda: nullcontext(Connection()))
     return inventory.collection_holdings(None, 'name-asc', '', '', cursor, owner,
+        connect=lambda: nullcontext(Connection()), cursor_secret=lambda: b'synthetic-riftbound-cursor',
         facet_columns=("ARRAY['DomainA','DomainB']::text[] AS domains" if domains else
                        "ARRAY[]::text[] AS domains"), facet_joins='',
         facet_conditions='' if requested is None else ' AND %s=ANY(%s::text[])',

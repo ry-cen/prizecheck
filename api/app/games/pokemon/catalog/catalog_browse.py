@@ -65,6 +65,7 @@ from ..formats import format_evaluator as evaluator
 from . import name_search, set_codes
 from ..formats import format_standing
 from app.core.inventory.cursors import anchor_json, anchor_value, cursor_key, encode_cursor
+from app.games.pokemon.runtime import POKEMON
 from app.core.inventory.holdings import fail
 from app.core.art.urls import route_address
 from app.games.pokemon.art.urls import art_url
@@ -425,7 +426,7 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
     order = NUMBER_ORDER if set_id or search.mode == "set_number" else NAME_ORDER
     anchor = None
     if cursor:
-        carried = cursor_key(cursor, context)
+        carried = cursor_key(cursor, context, secret=POKEMON.cursor_secret)
         try:
             if not isinstance(carried, list) or len(carried) != len(order):
                 raise ValueError
@@ -473,7 +474,7 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
         printings = conn.execute("""SELECT count(*) AS n FROM catalog_generation_printing
           WHERE generation_id=%s AND NOT tombstoned""", (generation,)).fetchone()["n"]
         matches = conn.execute(f"SELECT count(*) AS n FROM ({listed}) listed", params).fetchone()["n"]
-    next_cursor = (encode_cursor(context, [anchor_json(page[-1][column]) for column in order])
+    next_cursor = (encode_cursor(context, [anchor_json(page[-1][column]) for column in order], secret=POKEMON.cursor_secret)
                    if len(rows) > PAGE_SIZE else None)
     return BrowsePage(available=True, catalog_revision=state["revision"], owner_revision=revision,
                       last_success=state["last_success"], search=search, editions=editions, next_cursor=next_cursor,

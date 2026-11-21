@@ -25,12 +25,11 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.ops.operation_counts import counter
 from app.games.riftbound.catalog import plan, writer
 from app.games.riftbound.catalog.assess import assess_pull, listed_groups
 from test_core_baseline import admin, databases  # noqa: F401
 from test_riftbound_catalog_assess import envelope
-from riftbound_counts import restore_counter
+from riftbound_counts import counter, restore_counter
 from test_riftbound_catalog_plan import price, product
 from test_riftbound_catalog_read_api import entry, signed  # noqa: F401
 from test_riftbound_migrate import ROOT, migrate
