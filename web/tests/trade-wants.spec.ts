@@ -491,7 +491,7 @@ test.describe("on a desktop", () => {
     await page.goto(`${ORIGIN}/decks/want-list`);
     // The catalog is small, so the first page is answered with a cursor and the second page is another search's rows.
     await page.route(
-      (url) => url.pathname === "/api/catalog/editions",
+      (url) => url.pathname === "/api/pokemon/catalog/editions",
       async (route) => {
         const url = new URL(route.request().url());
         if (url.searchParams.has("cursor")) {
@@ -542,7 +542,7 @@ test.describe("on a desktop", () => {
     let release!: () => void;
     const released = new Promise<void>((resolve) => (release = resolve));
     await page.route(
-      (url) => url.pathname === "/api/catalog/editions",
+      (url) => url.pathname === "/api/pokemon/catalog/editions",
       async (route) => {
         const url = new URL(route.request().url());
         if (url.searchParams.has("cursor")) {
@@ -582,7 +582,8 @@ test.describe("on a desktop", () => {
     // Release the held page, wait for it to arrive and for a frame to render, then check it was dropped.
     const stale = page.waitForResponse(
       (r) =>
-        r.url().includes("/api/catalog/editions") && r.url().includes("cursor=")
+        r.url().includes("/api/pokemon/catalog/editions") &&
+        r.url().includes("cursor=")
     );
     release();
     await stale;

@@ -12,7 +12,7 @@ export class PriceError extends Error {
   constructor(public status: number, public code: string) { super(code); }
 }
 export async function getEditionPrices(editionIds: string[], signal?: AbortSignal): Promise<PricesResponse> {
-  const response = await fetch('/api/prices/editions', { method: 'POST', credentials: 'same-origin', signal,
+  const response = await fetch('/api/pokemon/prices/editions', { method: 'POST', credentials: 'same-origin', signal,
     headers: { 'content-type': 'application/json' }, body: JSON.stringify({ edition_ids: editionIds }) });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));

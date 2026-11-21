@@ -157,7 +157,7 @@ const total = (page: Page, name: "You get" | "You give") =>
 
 const NOTICE = "only records the cash amount you agree on";
 const PARTIAL = "Estimated $0.50 for 1 of 2 cards";
-const VALUE_URL = `${ORIGIN}/api/trades/value`;
+const VALUE_URL = `${ORIGIN}/api/pokemon/trades/value`;
 
 /** The whole story, with every collector at `contextOptions`' size (the test's own page is set by its describe). */
 async function story(
@@ -190,7 +190,8 @@ async function story(
   await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
   const answered = page.waitForResponse(
     (r) =>
-      r.url().endsWith("/api/trades/value") && r.request().method() === "POST"
+      r.url().endsWith("/api/pokemon/trades/value") &&
+      r.request().method() === "POST"
   );
   await show(page, "Cards");
   await tile(

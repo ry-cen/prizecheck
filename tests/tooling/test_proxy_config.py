@@ -17,6 +17,9 @@ CONFIG = re.sub(r'#.*', '', (Path(__file__).resolve().parents[2]/'deploy/docker/
 PLAIN = re.sub(r'\bif \([^\n]*?\) \{[^{}]*\}', '', CONFIG)
 DIRECTIVE = re.compile(r'^\s*([a-z0-9_]+)\s+([^;{}]*);', re.MULTILINE)
 START = 'location = /api/collection-imports {'
+# The same route under the per-game prefix the gateway serves beside the old path (docs/planning/pokemon-api-prefix.md).
+POKEMON_START = 'location = /api/pokemon/collection-imports {'
+STARTS = (START, POKEMON_START)
 GATEWAY = 'location ~ ^/(api|auth)/ {'
 CRAWLER_FILES = {'location = /robots.txt {': '/api/public/robots.txt', 'location = /sitemap.xml {': '/api/public/sitemap.xml'}
 
@@ -73,17 +76,24 @@ COEP = 'Cross-Origin-Embedder-Policy "require-corp" always'
 class ProxyConfigTest(unittest.TestCase):
     def test_only_the_collection_import_start_route_takes_more_than_64k(self):
         sizes = [value.strip() for name, value in DIRECTIVE.findall(CONFIG) if name == 'client_max_body_size']
-        self.assertEqual(sizes, ['64k', '5m'])
-        self.assertIn(('client_max_body_size', '5m'), block(START))
-        self.assertEqual(CONFIG.count(START), 1)
+        # The start route's two paths (the old one and its /api/pokemon twin) are the only 5m locations.
+        self.assertEqual(sizes, ['64k', '5m', '5m'])
+        for opening in STARTS:
+            self.assertIn(('client_max_body_size', '5m'), block(opening))
+            self.assertEqual(CONFIG.count(opening), 1)
 
     def test_the_start_route_forwards_as_the_gateway_location_does(self):
-        start = [directive for directive in block(START) if directive[0] != 'client_max_body_size']
-        self.assertEqual(start, block(GATEWAY))
-        self.assertIn(('proxy_pass', '$gateway'), start)
-        for opening in (START, GATEWAY):
+        for opening in STARTS:
+            start = [directive for directive in block(opening) if directive[0] != 'client_max_body_size']
+            self.assertEqual(start, block(GATEWAY), opening)
+            self.assertIn(('proxy_pass', '$gateway'), start)
             self.assertNotIn('add_header', [name for name, _ in block(opening)])
-        self.assertIn(('proxy_set_header', 'X-Internal-User ""'), start)
+            self.assertIn(('proxy_set_header', 'X-Internal-User ""'), start)
+        self.assertNotIn('add_header', [name for name, _ in block(GATEWAY)])
+
+    def test_the_pokemon_start_route_is_exact_and_matches_the_old_ones_directives(self):
+        # An exact location, so only the start route itself gets 5m, never /api/pokemon/collection-imports/<id>/changes.
+        self.assertEqual(block(POKEMON_START), block(START))
 
     def test_assets_mjs_served_as_javascript(self):
         mjs = block(MJS)
@@ -175,7 +185,7 @@ class ProxyConfigTest(unittest.TestCase):
         self.assertEqual(CONFIG.count(SCANNER), 1)
 
     def test_the_gateway_gets_the_client_address_from_nginx(self):
-        for opening in (START, GATEWAY):
+        for opening in (*STARTS, GATEWAY):
             self.assertIn(('proxy_set_header', 'X-Real-IP $remote_addr'), block(opening))
             self.assertIn(('proxy_set_header', 'X-Forwarded-For ""'), block(opening))
             self.assertIn(('proxy_set_header', 'X-PrizeCheck-Client-IP ""'), block(opening))

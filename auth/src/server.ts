@@ -22,6 +22,7 @@ import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { ipContext } from "./ipContext.js";
 import { safeNext } from "./nextPath.js";
+import { pokemonUpstream } from "./pokemonRoutes.js";
 import { PublicReadLimiter } from "./publicReads.js";
 import { sessionBody } from "./sessionView.js";
 import {
@@ -336,7 +337,15 @@ async function budgetedSession(request: IncomingMessage) {
 const server = createServer(async (request, response) => {
   // Monotonic receipt time, before any body read or session lookup: budgeted routes spend their three seconds from here.
   const received = performance.now();
-  const path = new URL(request.url || "/", origin).pathname;
+  // /api/pokemon is decided on the raw request target (auth/src/pokemonRoutes.ts), which never throws: a moved route is
+  // handled below as its old /api twin, anything else under the prefix is a 404 before any session lookup, limiter or
+  // upstream call, and before the target is parsed again.
+  const moved = pokemonUpstream(request.url || "/", request.method);
+  if (moved === null) return json(response, 404, { error: "Not found" });
+  const requested = new URL(request.url || "/", origin);
+  // Everything below sees the upstream path, so a /api/pokemon request is handled exactly as its old /api twin.
+  const path = moved ? new URL(moved, origin).pathname : requested.pathname;
+  const upstreamUrl = moved ? moved : request.url;
   try {
     if (riftboundTargetRefused(request, path))
       return json(response, 404, { error: "Not found" });
@@ -744,7 +753,7 @@ const server = createServer(async (request, response) => {
         headers["content-type"] =
           request.headers["content-type"] || "application/json";
       try {
-        const upstream = await fetch(`${apiOrigin}${request.url}`, {
+        const upstream = await fetch(`${apiOrigin}${upstreamUrl}`, {
           method: request.method,
           headers,
           body: body.length > 0 ? body : undefined,

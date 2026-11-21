@@ -295,11 +295,14 @@ test.describe("desktop", () => {
     const sent: { changes: Record<string, unknown>[] }[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    await page.route("**/api/collection-imports/*/changes", async (route) => {
-      sent.push(route.request().postDataJSON());
-      if (sent.length === 1) await gate;
-      await route.continue();
-    });
+    await page.route(
+      "**/api/pokemon/collection-imports/*/changes",
+      async (route) => {
+        sent.push(route.request().postDataJSON());
+        if (sent.length === 1) await gate;
+        await route.continue();
+      }
+    );
     // The first click is sent; the next two come while it is saving. Each control shows its pending state at once.
     await group(page, "Main 2 rows").click();
     await group(page, "For Trade 1 row").click();

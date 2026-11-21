@@ -254,6 +254,80 @@ class Emitters(unittest.TestCase):
             self.assertNotIn("'$ref'", source, name)
 
 
+class PokemonPrefix(unittest.TestCase):
+    """The moved routes are called under /api/pokemon; every other path, and the OpenAPI contract, stay as they are."""
+
+    def test_a_quoted_moved_route_gets_the_prefix_on_a_segment_boundary(self):
+        rewrite = gen.pokemon_paths
+        self.assertEqual(rewrite("fetch('/api/want-list')"), "fetch('/api/pokemon/want-list')")
+        self.assertEqual(rewrite("fetch('/api/want-list' + x)"), "fetch('/api/pokemon/want-list' + x)")
+        self.assertEqual(rewrite("`/api/catalog/editions${suffix}`"), "`/api/pokemon/catalog/editions${suffix}`")
+        self.assertEqual(rewrite('"/api/collection-imports?x=1"'), '"/api/pokemon/collection-imports?x=1"')
+        self.assertEqual(rewrite("'/api/admin/card-identities?printing_id=1'"),
+                         "'/api/pokemon/admin/card-identities?printing_id=1'")
+        self.assertEqual(rewrite("'/api/prices/editions'"), "'/api/pokemon/prices/editions'")
+
+    def test_everything_else_is_left_alone(self):
+        for text in ("'/api/catalogue'", "'/api/want-listing'", "'/api/collection'", "'/api/collection/borrowed'",
+                     "'/api/scanner/index'", "'/api/trades/list'", "'/api/admin/operations'", "'/api/holdings/1'",
+                     "'/api/decks/1/cost'", "'/api/public/decks/x'", "'/api/prices/other'", "'/api/pokemon/catalog'",
+                     "// GET /api/want-list is the route", "'/api/health'"):
+            self.assertEqual(gen.pokemon_paths(text), text, text)
+
+    def test_assemble_applies_it_to_the_whole_file_text(self):
+        self.assertEqual(gen.assemble(["// head", "fetch('/api/catalog/sets')"], "\n"),
+                         "// head\nfetch('/api/pokemon/catalog/sets')\n")
+
+    def test_the_route_lists_are_the_gateways(self):
+        server = (ROOT / 'auth/src/pokemonRoutes.ts').read_text()
+        trees = re.search(r'export const POKEMON_TREES = \[(.*?)\];', server, re.S).group(1)
+        exact = re.search(r'export const POKEMON_EXACT[^=]*= \{(.*?)\};', server, re.S).group(1)
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', trees)), gen.POKEMON_TREES)
+        self.assertEqual(tuple(re.findall(r'^\s*"([^"]+)":', exact, re.M)), gen.POKEMON_EXACT)
+
+    def test_every_moved_route_is_an_api_route(self):
+        import json
+        routes = {path for _, path, _ in json.loads((ROOT / 'api/tests/api_contract/routes.json').read_text())}
+        for route in gen.POKEMON_TREES:
+            self.assertTrue(any(path == f'/api/{route}' or path.startswith(f'/api/{route}/') for path in routes), route)
+        for route in gen.POKEMON_EXACT:
+            self.assertIn(f'/api/{route}', routes)
+
+    def test_a_template_substitution_ends_a_path_and_an_exact_route_takes_no_subpath(self):
+        self.assertEqual(gen.pokemon_paths("`/api/want-list${query}`"), "`/api/pokemon/want-list${query}`")
+        self.assertEqual(gen.pokemon_paths("`/api/prices/editions${query}`"), "`/api/pokemon/prices/editions${query}`")
+        self.assertEqual(gen.pokemon_paths("'/api/prices/editions/1'"), "'/api/prices/editions/1'")
+        self.assertEqual(gen.pokemon_paths("'/api/trades/value/accept'"), "'/api/trades/value/accept'")
+        self.assertEqual(gen.pokemon_paths("'/api/admin/reprint-groups/decisions'"), "'/api/pokemon/admin/reprint-groups/decisions'")
+        self.assertEqual(gen.pokemon_paths("'/api/admin/reprint-groups'"), "'/api/admin/reprint-groups'")
+
+    def test_no_committed_client_calls_a_moved_route_by_its_old_path(self):
+        pattern = re.compile(r"""['"`]/api/(?:%s)(?=[/?'"`$])""" % '|'.join(map(re.escape, gen.POKEMON_ROUTES)))
+        for path in sorted((ROOT / 'web/src').glob('*generated.ts')):
+            self.assertIsNone(pattern.search(path.read_text()), path.name)
+        for name, expected in (('want_list', "'/api/pokemon/want-list'"), ('prices', "'/api/pokemon/prices/editions'"),
+                               ('trades', "'/api/pokemon/trades/value'"),
+                               ('collection_import', '`/api/pokemon/collection-imports?'),
+                               ('catalog_browse', '`/api/pokemon/catalog/editions'),
+                               ('reconciliation', "'/api/pokemon/holdings/reassign'"),
+                               ('metadata', "'/api/pokemon/admin/reprint-groups/decisions'"),
+                               ('want_list_cost', "'/api/pokemon/want-list/cost'")):
+            self.assertIn(expected, generated(name), name)
+        self.assertIn("'/api/pokemon/admin/catalog-runs'", (ROOT / 'web/src/generated.ts').read_text())
+
+    def test_unmoved_routes_keep_their_paths(self):
+        self.assertIn("'/api/trades/list'", generated('trades'))
+        self.assertIn("'/api/trade-wants'", generated('trades'))
+        self.assertIn("'/api/locations'", (ROOT / 'web/src/generated.ts').read_text())
+        self.assertNotIn('/api/pokemon', generated('scanner'))
+        self.assertNotIn('/api/pokemon', generated('decks'))
+
+    def test_the_emitters_still_assert_the_upstream_path_in_the_contract(self):
+        source = (SCRIPTS / 'generate_catalog_browse_client.py').read_text()
+        self.assertIn('assert "/api/catalog/editions" in openapi["paths"]', source)
+        self.assertNotIn('/api/pokemon', source)
+
+
 class WriteOrCheck(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
