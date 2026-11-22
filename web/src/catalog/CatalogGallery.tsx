@@ -233,6 +233,9 @@ export function CatalogGallery({
     : -1;
   const [wantsNext, setWantsNext] = useState(false);
   const closedOn = useRef<string | null>(null);
+  // Set when the collector closes the card (not Back or Forward), so only that close may scroll the tile into view.
+  const closedByUser = useRef(false);
+  const closeScrolls = useRef(true);
   const hintId = useId();
   const sentinel = useRef<HTMLDivElement>(null);
   const canLoad = browse.nextCursor !== null && !browse.errorMore;
@@ -591,15 +594,19 @@ export function CatalogGallery({
     }
   }, [wantsNext, card, index, editionsShown.length, browse.errorMore, stepTo]);
   // Closing the popup after stepping returns focus to the tile of the card it showed (the Dialog itself returns it
-  // to the tile that opened it); the browser scrolls that tile into view.
+  // to the tile that opened it); the browser scrolls that tile into view when the collector closed the card. Back and
+  // Forward leave the scroll where the shell restored it, so they only move focus.
   useEffect(() => {
     if (card || !closedOn.current) return;
     const id = closedOn.current;
     closedOn.current = null;
+    const scrolls = closeScrolls.current;
+    closeScrolls.current = true;
     const tile = tiles.current?.querySelector<HTMLElement>(
       `[data-edition-id="${CSS.escape(id)}"] button`
     );
-    if (tile && tile !== document.activeElement) tile.focus();
+    if (tile && tile !== document.activeElement)
+      tile.focus(scrolls ? undefined : { preventScroll: true });
   }, [card]);
 
   // Infinite scroll: a sentinel after the last tile asks for the next page as it nears the window (or the dialog's
@@ -665,6 +672,8 @@ export function CatalogGallery({
     if (!routeCard) {
       if (card) {
         closedOn.current = anchor ?? card.editionId;
+        closeScrolls.current = closedByUser.current;
+        closedByUser.current = false;
         setWantsNext(false);
         setCard(null);
       }
@@ -686,6 +695,7 @@ export function CatalogGallery({
         report: null,
       });
       shown.current = routeCard;
+      closedByUser.current = false;
       setAnchor(routeCard.editionId);
     }
   }, [active, routeCard?.printingId, routeCard?.editionId, link]);
@@ -1014,6 +1024,7 @@ export function CatalogGallery({
         request={card}
         onClose={() => {
           if (routed) {
+            closedByUser.current = true;
             onCardRoute?.(null, "close");
             return;
           }

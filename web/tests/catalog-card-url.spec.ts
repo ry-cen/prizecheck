@@ -159,6 +159,34 @@ for (const viewport of [
       await expect(page).toHaveURL(/\/collection$/);
     });
 
+    test("Back after stepping to an off-screen card keeps the restored scroll and focuses that card's tile", async ({
+      page,
+    }) => {
+      seedGallery();
+      await signIn(page);
+      await page.goto(`${ORIGIN}/collection`);
+      await page.goto(`${ORIGIN}/catalog`);
+      const items = results(page).getByRole("listitem");
+      await expect(items).toHaveCount(60);
+      const first = items.nth(0).getByRole("button");
+      const stepped = items.nth(30).getByRole("button");
+      const scroll = await page.evaluate(() => window.scrollY);
+      const catalog = here(page);
+      await press(first);
+      const card = page.getByRole("dialog");
+      await expect(card).toBeVisible();
+      const next = card.getByRole("button", { name: "Next card" });
+      for (let step = 0; step < 30; step += 1) await press(next);
+      await expect(stepped).not.toBeInViewport();
+
+      await page.goBack();
+      await expect(card).toHaveCount(0);
+      expect(here(page)).toBe(catalog);
+      await expect(stepped).toBeFocused();
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scroll);
+      await expect(stepped).not.toBeInViewport();
+    });
+
     test("picking an Edition and stepping replace the address", async ({
       page,
     }) => {
