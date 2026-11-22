@@ -272,6 +272,8 @@ async function story(
 
     // S3. Ask to trade from the card popup.
     await page.goto(`${ORIGIN}/catalog`);
+    // Back must return to these exact addresses: the Catalog, then the open card.
+    const catalogUrl = page.url();
     await results(page)
       .getByRole("button", { name: /^Arven, SVI/ })
       .first()
@@ -284,6 +286,8 @@ async function story(
     await expect(offering).toContainText("Ash K");
     await expect(offering).toContainText("×3");
     await expect(offering).not.toContainText(ashPlace);
+    await expect(page).toHaveURL(/[?&]card=/);
+    const cardUrl = page.url();
     await popup
       .getByRole("button", { name: /^Ask Ash K to trade Arven \(SVI 166\)$/ })
       .click();
@@ -296,15 +300,13 @@ async function story(
     await show(page, "Proposal");
     await expect(group(page, "Arven (SVI 166) you get")).toContainText("1");
     await page.goBack();
-    await expect(page).toHaveURL(
-      /\/catalog\?card=[0-9a-f-]{36}&edition=[0-9a-f-]{36}$/
-    );
+    await expect(page).toHaveURL(cardUrl);
     await expect(page.getByRole("dialog", { name: "Arven" })).toBeVisible();
     await expect(
       page.getByRole("dialog", { name: "Discard this proposal to Ash K?" })
     ).toHaveCount(0);
     await page.goBack();
-    await expect(page).not.toHaveURL(/[?&]card=/);
+    await expect(page).toHaveURL(catalogUrl);
     await expect(page.getByRole("dialog")).toHaveCount(0);
 
     // S4. Find trades, with the two-way row.
