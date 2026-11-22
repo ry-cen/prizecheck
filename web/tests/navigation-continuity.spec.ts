@@ -289,8 +289,12 @@ for (const viewport of [DESKTOP, PHONE]) {
       held = true;
       await page.goBack();
       if (slow) {
+        // The delayed read is the precondition: once it is held the page has no Deck to show and says so. Waiting
+        // on the read first keeps a Back that never asked for it from being reported as a missing loading line.
+        await expect
+          .poll(() => reads.length, { timeout: RESTORE_WINDOW_MS })
+          .toBeGreaterThan(0);
         await expect(page.getByText("Loading Deck…")).toBeVisible();
-        await expect.poll(() => reads.length).toBeGreaterThan(0);
         // Hold the read until after the restore window (5 s) that used to end the restore, measured on the
         // page's own clock; this is a deadline, not a sleep.
         const deadline =
