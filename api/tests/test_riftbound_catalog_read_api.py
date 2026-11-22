@@ -426,35 +426,56 @@ def test_the_seed_command_acts_only_on_the_exact_loopback_database_it_was_told(r
     from riftbound_catalog_seed import checked_url
     parts = conninfo_to_dict(rb.url)  # the harness hands over a keyword string; the seed takes a URL
     name = parts['dbname']
-    good = f"postgresql://{parts['user']}:{quote(parts['password'], safe='')}@{parts['host']}:{parts['port']}/{name}"
+    host = f"[{parts['host']}]" if ':' in parts['host'] else parts['host']  # an IPv6 authority needs brackets
+    authority = f"{quote(parts['user'], safe='')}:{quote(parts['password'], safe='')}@{host}:{parts['port']}"
+    good = f"postgresql://{authority}/{name}"
     env = {'RIFTBOUND_DATABASE_URL': good}
-    checked = checked_url(name, env, prefix='')  # a real connection reports the name
-    assert conninfo_to_dict(checked) == conninfo_to_dict(good)
+    checked = conninfo_to_dict(checked_url(name, env, prefix=''))  # a real connection reports the name
+    assert checked['hostaddr'] in ('127.0.0.1', '::1')  # the checked connection and the writes use one numeric address
+    assert {key: checked[key] for key in ('user', 'password', 'host', 'port', 'dbname')} == {
+        key: parts[key] for key in ('user', 'password', 'host', 'port', 'dbname')}
     with pytest.raises(SystemExit):  # the pattern alone is not enough: the effective name must be the one given
         checked_url('tcg_rb_other', env)
     with pytest.raises(SystemExit):
         checked_url(name, env)  # the harness database is not a tcg_rb_* database
-    for url in (good + '?dbname=other', good + '?host=db.example.test', good + '?hostaddr=10.0.0.5',
-                good.replace('@127.0.0.1', '@db.example.test'), good.replace('@127.0.0.1', '@10.0.0.5'),
-                good.replace(f"{parts['host']}:{parts['port']}", f"{parts['host']}:{parts['port']},evil.example:{parts['port']}"),
-                good + '#options=-c%20search_path%3Devil', good + '#host=evil.example',
-                good.replace(f":{parts['port']}/", f":{parts['port']},{parts['port']}/"),
-                good.replace(f"{parts['host']}:", f"{parts['host']},{parts['host']}:")):
-
-        def never(_):
-            raise AssertionError('connected before the URL was refused')
-        with pytest.raises(SystemExit):
-            checked_url(name, {'RIFTBOUND_DATABASE_URL': url}, connect=never, prefix='')
-
     for key in ('PGHOSTADDR', 'PGSERVICE'):  # a libpq variable that redirects the target is refused before connecting
         with pytest.raises(SystemExit):
             checked_url(name, {**env, key: 'x'}, prefix='')
+
+    def never(_):
+        raise AssertionError('connected before the URL was refused')
 
     def reporting(database):  # a connection whose server says it is another database
         class Result:
             fetchone = staticmethod(lambda: (database,))
         return lambda url: nullcontext(type('Conn', (), {'execute': staticmethod(lambda query: Result)}))
-    url = {'RIFTBOUND_DATABASE_URL': 'postgresql://u:p@127.0.0.1:5432/tcg_rb_x'}
-    assert conninfo_to_dict(checked_url('tcg_rb_x', url, reporting('tcg_rb_x'))) == conninfo_to_dict(url['RIFTBOUND_DATABASE_URL'])
+    base = 'postgresql://u:p@127.0.0.1:5432/tcg_rb_x'  # fixed inputs: nothing here depends on the harness host
+    for url in (base + '?dbname=other', base + '?host=db.example.test', base + '?hostaddr=10.0.0.5',
+                'postgresql://u:p@db.example.test:5432/tcg_rb_x', 'postgresql://u:p@10.0.0.5:5432/tcg_rb_x',
+                'postgresql://u:p@127.0.0.1:5432,evil.example:5432/tcg_rb_x', base + '#options=-c%20search_path%3Devil',
+                base + '#host=evil.example', 'postgresql://u:p@127.0.0.1:5432,5433/tcg_rb_x',
+                'postgresql://u:p@127.0.0.1,127.0.0.1:5432/tcg_rb_x', 'postgresql://u:p@[::1]:5432,[::1]:5432/tcg_rb_x',
+                'postgresql://u:p@127.0.0.1:5432/tcg_rb_y'):
+        with pytest.raises(SystemExit):
+            checked_url('tcg_rb_x', {'RIFTBOUND_DATABASE_URL': url}, connect=never)
+    for url, address in ((base, '127.0.0.1'), ('postgresql://u:p@[::1]:5432/tcg_rb_x', '::1')):
+        found = conninfo_to_dict(checked_url('tcg_rb_x', {'RIFTBOUND_DATABASE_URL': url}, reporting('tcg_rb_x')))
+        assert found['hostaddr'] == address and found['dbname'] == 'tcg_rb_x'
     with pytest.raises(SystemExit):
-        checked_url('tcg_rb_x', url, reporting('postgres'))
+        checked_url('tcg_rb_x', {'RIFTBOUND_DATABASE_URL': base}, reporting('postgres'))
+
+    # localhost is looked up once and pinned: every address must be loopback, and the connection gets one numeric one.
+    named = {'RIFTBOUND_DATABASE_URL': 'postgresql://u:p@localhost:5432/tcg_rb_x'}
+
+    def resolving(*addresses):
+        return lambda host, port, **kw: [(2, 1, 6, '', (address, 0)) for address in addresses]
+    pinned = conninfo_to_dict(checked_url('tcg_rb_x', named, reporting('tcg_rb_x'), getaddrinfo=resolving('::1', '127.0.0.1')))
+    assert pinned['host'] == 'localhost' and pinned['hostaddr'] == '127.0.0.1'
+    for addresses in (('10.0.0.5',), ('127.0.0.1', '10.0.0.5'), ()):
+        with pytest.raises(SystemExit):
+            checked_url('tcg_rb_x', named, never, getaddrinfo=resolving(*addresses))
+
+    def unresolvable(*args, **kwargs):
+        raise OSError('no such host')
+    with pytest.raises(SystemExit):
+        checked_url('tcg_rb_x', named, never, getaddrinfo=unresolvable)
