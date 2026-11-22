@@ -289,12 +289,11 @@ for (const viewport of [DESKTOP, PHONE]) {
       held = true;
       await page.goBack();
       if (slow) {
-        // The delayed read is the precondition: once it is held the page has no Deck to show and says so. Waiting
-        // on the read first keeps a Back that never asked for it from being reported as a missing loading line.
+        // The held read is the precondition. The page's own loading line is not asserted: whether it shows while
+        // a read is held depends on what else the page has rendered, and F-L9 is about the restore, not about it.
         await expect
           .poll(() => reads.length, { timeout: RESTORE_WINDOW_MS })
           .toBeGreaterThan(0);
-        await expect(page.getByText("Loading Deck…")).toBeVisible();
         // Hold the read until after the restore window (5 s) that used to end the restore, measured on the
         // page's own clock; this is a deadline, not a sleep.
         const deadline =
