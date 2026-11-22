@@ -16,6 +16,10 @@ import { join } from "node:path";
 import { Pool } from "pg";
 import { canonicalDsn, DsnRejected } from "./riftbound-dsn";
 import {
+  NotVerificationDatabase,
+  requireVerificationDatabase,
+} from "./verification-database";
+import {
   dropDatabase,
   launch,
   waitForServer,
@@ -128,8 +132,15 @@ export async function startRiftboundStack(): Promise<RiftboundStack> {
       );
   };
   try {
-    const adminUrl = process.env.DATABASE_URL;
-    if (!adminUrl) throw fail("database", "no stack database configured");
+    let adminUrl: string;
+    try {
+      // Before any connection: the stack signs in against, and clears rate limits in, only the verification worker's own database.
+      adminUrl = requireVerificationDatabase(process.env.DATABASE_URL);
+    } catch (error) {
+      if (error instanceof NotVerificationDatabase)
+        throw new StackError(`Riftbound stack: ${error.message}`);
+      throw fail("database", "unreadable address");
+    }
     let adminDsn: string;
     try {
       adminDsn = canonicalDsn(adminUrl); // loopback, no query: nothing in it can retarget the connection

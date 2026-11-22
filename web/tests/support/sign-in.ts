@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { Pool } from "pg";
 import { walkFakeSignInSanitized } from "./fake-sign-in-wait";
+import { requireVerificationDatabase } from "./verification-database";
 
 // Browser journeys sign in through the OAuth test fake (auth/testing/oauth-fake), which the gate loads into every stack's
 // gateway: the start route redirects to the fake consent page, which forwards to the real callback with the chosen
@@ -36,6 +37,9 @@ function origin(): string {
  * first, as the email journeys cleared auth_send_event.
  */
 async function prepareFakeSignIn(page: Page, databaseUrl?: string) {
+  // An explicit database (the Riftbound stack's gateway database) must be this worker's verification database; the default
+  // stays the stack's own DATABASE_URL, as before.
+  if (databaseUrl !== undefined) requireVerificationDatabase(databaseUrl);
   const pool = new Pool({
     connectionString: databaseUrl ?? process.env.DATABASE_URL,
   });
