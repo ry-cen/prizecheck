@@ -9,6 +9,7 @@ import {
 } from "vitest";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { connect } from "node:net";
+import { createServer, type Server } from "node:http";
 import { safeNext } from "../src/nextPath.js";
 import { nativeSignInEnabled } from "../src/native.js";
 import {
@@ -16,7 +17,11 @@ import {
   walkSignIn,
   type Jar,
 } from "../testing/oauth-fake/walk.js";
-import { startGateway, type TestGateway } from "./support/oauth-gateway.js";
+import {
+  freePort,
+  startGateway,
+  type TestGateway,
+} from "./support/oauth-gateway.js";
 
 // Native iOS sign-in (opt-in, nonprod only), through the real gateway, the OAuth test fake and a disposable database.
 // The `on` gateway runs in local-public mode so two collectors can sign in; the `off` gateway is the default one.
@@ -24,18 +29,43 @@ import { startGateway, type TestGateway } from "./support/oauth-gateway.js";
 vi.setConfig({ testTimeout: 60_000 });
 let on: TestGateway;
 let off: TestGateway;
+// A recording Riftbound upstream for the `on` gateway (RIFTBOUND_API_ORIGIN), so the tests can show what reaches it.
+let riftbound: Server;
+const riftboundSeen: { method: string; url: string }[] = [];
 // Every secret a test handles, so the last test can prove none of them reached a log.
 const secrets: string[] = [];
 beforeAll(async () => {
+  riftbound = createServer((request, response) => {
+    riftboundSeen.push({
+      method: request.method || "",
+      url: request.url || "",
+    });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ from: "riftbound" }));
+  });
+  const riftboundPort = await freePort();
+  await new Promise<void>((resolve) =>
+    riftbound.listen(riftboundPort, "127.0.0.1", resolve)
+  );
   [on, off] = await Promise.all([
     startGateway({
-      env: { NATIVE_SIGN_IN: "on", SIGNUP_MODE: "local-public" },
+      env: {
+        NATIVE_SIGN_IN: "on",
+        SIGNUP_MODE: "local-public",
+        RIFTBOUND_API_ORIGIN: `http://127.0.0.1:${riftboundPort}`,
+      },
     }),
     startGateway(),
   ]);
 }, 90_000);
 afterAll(async () => {
-  await Promise.all([on?.stop(), off?.stop()]);
+  await Promise.all([
+    on?.stop(),
+    off?.stop(),
+    new Promise((resolve) =>
+      riftbound ? riftbound.close(resolve) : resolve(0)
+    ),
+  ]);
 }, 30_000);
 // Every request comes from one address, so the tests would share the hourly limits; the limit tests seed their own.
 beforeEach(async () => {
@@ -1042,6 +1072,41 @@ describe("bearer", () => {
       headers: { cookie: cookieHeader(walk.jar) },
     });
     expect(cookieOnly.status).toBe(200);
+  });
+
+  it("refuses Authorization on /api/riftbound/* with 401 before any upstream contact, and still proxies the cookie alone", async () => {
+    const token = await issueToken(on, "owner");
+    const walk = await walkSignIn(on.base, "/auth/sign-in/google", "owner");
+    const cookie = cookieHeader(walk.jar);
+    riftboundSeen.length = 0;
+    const apiBefore = on.apiRequests.length;
+    for (const path of [
+      "/api/riftbound/cards?q=a",
+      "/api/riftbound/collection",
+    ]) {
+      // A valid native bearer is never accepted, with or without a valid web session.
+      for (const headers of [
+        { authorization: `Bearer ${token}`, cookie },
+        { authorization: `Bearer ${token}` },
+        { authorization: "Bearer junk", cookie },
+      ]) {
+        const response = await fetch(on.base + path, { headers });
+        expect(response.status, path).toBe(401);
+        expect(await response.json()).toEqual({
+          error: "Authentication required",
+        });
+      }
+    }
+    expect(riftboundSeen).toEqual([]);
+    expect(on.apiRequests.length).toBe(apiBefore);
+    // The same request without Authorization proxies as before.
+    const plain = await fetch(on.base + "/api/riftbound/cards?q=a", {
+      headers: { cookie },
+    });
+    expect(plain.status).toBe(200);
+    expect(await plain.json()).toEqual({ from: "riftbound" });
+    expect(riftboundSeen).toEqual([{ method: "GET", url: "/api/cards?q=a" }]);
+    expect(on.apiRequests.length).toBe(apiBefore);
   });
 
   it("refuses an expired, revoked or unknown credential", async () => {
