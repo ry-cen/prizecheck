@@ -71,6 +71,7 @@ import { useGalleryData } from "./useGalleryData";
 import { PendingMoveNotice } from "./PendingMoveNotice";
 import { useInventoryActions } from "./useInventoryActions";
 import { useOwnedSets } from "./useOwnedSets";
+import { writesInspectorClear } from "./inspectorAddress";
 import { useSelection } from "./useSelection";
 import { useStaleCollection } from "./useStaleCollection";
 import { collectionAddress, collectionHref } from "./workspaceLink";
@@ -267,6 +268,12 @@ export function Workspace({
   // The card keys the desktop inspector wrote to the address. A missing card whose key it wrote is the
   // collector's own action (a Move, an Inventory Removal) and is dropped without a notice.
   const inspectedInUrl = useRef<string | null>(null);
+  // The history entry this page last rendered for. Two entries can show the same Holding (All owned, then its
+  // Location), so the card key alone cannot say whether an address is the one the inspector wrote: a scope change
+  // that arrives with a different entry is a history traversal (or a new page), never the collector's own edit.
+  const renderedEntry = useRef<string | null>(null);
+  const currentEntry = (): string | null =>
+    window.history.state?.prizecheckEntry ?? null;
   const selection = useSelection({
     holdings: gallery.holdings,
     byKey: gallery.byKey,
@@ -292,9 +299,18 @@ export function Workspace({
     // The desktop inspector is a side panel: its address writes replace the entry and never add one.
     onInspect: (card, change) => {
       if (!active || mobile) return;
-      // Back or Forward to another Location's entry changes the scope too. That entry's address names its own
-      // card, not the one this inspector wrote: clear the local selection and leave the address alone.
-      if (!card && change?.scopeChange && route.card !== inspectedInUrl.current)
+      // Back or Forward to another entry changes the scope too. That entry's address names its own card, not the
+      // one this inspector wrote: clear the local selection and leave the address alone.
+      if (
+        !card &&
+        !writesInspectorClear({
+          scopeChange: !!change?.scopeChange,
+          addressCard: route.card ?? null,
+          writtenCard: inspectedInUrl.current,
+          entry: currentEntry(),
+          renderedEntry: renderedEntry.current,
+        })
+      )
         return;
       const next = collectionHref(
         view,
@@ -309,6 +325,10 @@ export function Workspace({
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
     active,
+  });
+  // After the selection's own effects (declared first, so they run first) have seen this render's entry.
+  useEffect(() => {
+    renderedEntry.current = currentEntry();
   });
   const previousMobile = useRef(mobile);
   const pendingInspectorResync = useRef(false);

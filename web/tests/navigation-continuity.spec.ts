@@ -186,6 +186,43 @@ test.describe("the desktop inspector's address", () => {
     expect(searchOf(page.url()).get("card")).toBe(cardInA);
   });
 
+  test("Back from a Location to All owned keeps the card both entries show", async ({
+    page,
+    collectors,
+  }) => {
+    promoteCatalog({ "card-1": "Same Abra" });
+    await startAsNewOwner(collectors.pool);
+    await signInAsOwner(page, "/collection");
+    const leaf = await createLocation(page, "Same card binder");
+    await addCopies(page, leaf, await editionOf("card-1"), 2);
+    await page.goto(`${ORIGIN}/collection`);
+    await expect(tiles(page)).toHaveCount(2);
+    await tiles(page).nth(1).click();
+    await expect.poll(() => searchOf(page.url()).has("card")).toBe(true);
+    const inspector = page.getByRole("complementary", { name: "Card details" });
+    const named = await inspector.getByRole("heading").first().innerText();
+    const inAll = searchOf(page.url());
+
+    await page
+      .getByRole("complementary", { name: "Sidebar" })
+      .getByRole("navigation", { name: "Locations" })
+      .getByRole("button", { name: "Same card binder", exact: true })
+      .click();
+    await expect.poll(() => searchOf(page.url()).get("location")).toBe(leaf);
+    await expect(tiles(page)).toHaveCount(2);
+    await tiles(page).nth(1).click();
+    await expect.poll(() => searchOf(page.url()).has("card")).toBe(true);
+    // Both entries show one Holding, so they share its card key.
+    expect(searchOf(page.url()).get("card")).toBe(inAll.get("card"));
+
+    await page.goBack();
+    await expect.poll(() => searchOf(page.url()).has("location")).toBe(false);
+    await expect(tiles(page)).toHaveCount(2);
+    await expect(inspector).toContainText(named);
+    expect(searchOf(page.url()).get("card")).toBe(inAll.get("card"));
+    expect(searchOf(page.url()).get("copy")).toBe(inAll.get("copy"));
+  });
+
   test("a desktop Move of the inspected card drops card without a notice", async ({
     page,
     collectors,
