@@ -214,7 +214,7 @@ test.describe("desktop", () => {
     );
     const bar = addBar(page);
     await expect(bar).toContainText("Adding to");
-    await expect(bar).toContainText("Tap + on cards, then add them together.");
+    await expect(bar).toContainText("Use + on cards, then add them together.");
     const picker = bar.getByRole("combobox", { name: "Location to add to" });
     await expect(picker.locator("option:checked")).toHaveText("Unsorted");
     await expect(bar.getByRole("button", { name: "Clear" })).toBeDisabled();
@@ -275,7 +275,7 @@ test.describe("desktop", () => {
     await bar.getByRole("button", { name: "Add 4 cards" }).click();
     await expect(toast(page)).toHaveText("Added 4 cards to Trade box.");
     await expect(undo(page)).toBeVisible();
-    await expect(bar).toContainText("Tap + on cards, then add them together.");
+    await expect(bar).toContainText("Use + on cards, then add them together.");
     expect(await warns(page)).toBe(false);
     await expect(
       tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal")
