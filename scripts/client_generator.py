@@ -30,15 +30,10 @@ def load_openapi():
 
 
 def load_riftbound_openapi():
-    """The Riftbound entry's OpenAPI document. Importing it rebinds the process-wide operation counter writer, so the
-    previous writer is put back whatever happens (Pokémon's output is unchanged)."""
-    from app.core.ops.operation_counts import counter  # noqa: E402
+    """The Riftbound entry's OpenAPI document. Its runtime owns its own request counter, so importing it leaves
+    Pokémon's process-wide counter alone."""
+    from app.riftbound_main import app  # noqa: E402
 
-    previous = counter.set_writer(None)
-    try:
-        from app.riftbound_main import app  # noqa: E402
-    finally:
-        counter.set_writer(previous)
     return app.openapi()
 
 
