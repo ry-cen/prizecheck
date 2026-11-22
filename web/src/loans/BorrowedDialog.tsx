@@ -1,5 +1,5 @@
 import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
-import { PendingLoanNotice } from "./PendingLoanNotice";
+import { PendingLoanNotice, useRecoveryActions } from "./PendingLoanNotice";
 import { refusalError, type FlowOutcome } from "./loanIntents";
 import { resultText, signInAs } from "./loanText";
 import { closeLoanRequest, PendingLoanRequest } from "./PendingLoanRequest";
@@ -85,6 +85,8 @@ export function BorrowedDialog({
   const fence = durable.fence;
   const { blockerFor, accountName } = useLoanRecovery();
   const guard = useFlowGuard();
+  // Owned here, not by the notice: the outcome must land even after the blocker clears or the dialog closes.
+  const recovery = useRecoveryActions((o) => outcome(o, "recovery"));
   const blocker = blockerFor("move_borrowed");
   const retained = fence.pending;
   const frozen = busy || retained || !!blocker;
@@ -104,6 +106,7 @@ export function BorrowedDialog({
   // Each opening starts afresh; a refusal that reads the list again keeps its message.
   useEffect(() => {
     if (!open || fence.command.current) return;
+    recovery.reset();
     setBusy(false);
     setMoving(null);
     setMessage("");
@@ -383,7 +386,7 @@ export function BorrowedDialog({
             view={blocker}
             autoFocus
             visible={open}
-            onOutcome={(o) => outcome(o, "recovery")}
+            actions={recovery}
           />
         )}
       </div>

@@ -1,6 +1,6 @@
 import { useNoteLoansChanged } from "../inbox/Inbox";
 import { useFlowGuard, useLoanRecovery, useDurableSend } from "./LoanRecovery";
-import { PendingLoanNotice } from "./PendingLoanNotice";
+import { PendingLoanNotice, useRecoveryActions } from "./PendingLoanNotice";
 import { refusalError, type FlowOutcome } from "./loanIntents";
 import { threadIdOf } from "./loanAttempt";
 import { resultText, signInAs } from "./loanText";
@@ -101,6 +101,8 @@ export function LendOfferDialog({
   const { blockerFor, accountName } = useLoanRecovery();
   const guard = useFlowGuard();
   const noteLoansChanged = useNoteLoansChanged();
+  // Owned here, not by the notice: the outcome must land even after the blocker clears or the dialog closes.
+  const recovery = useRecoveryActions((o) => outcome(o, false));
   const blocker = blockerFor("lend_offer");
   const retained = fence.pending;
   const frozen = busy || retained || !!blocker;
@@ -127,6 +129,7 @@ export function LendOfferDialog({
 
   useEffect(() => {
     if (!open || fence.command.current) return;
+    recovery.reset();
     setBusy(false);
     setFriendId("");
     setReturnBy("");
@@ -256,7 +259,7 @@ export function LendOfferDialog({
               view={blocker}
               autoFocus
               visible={open}
-              onOutcome={(o) => outcome(o, false)}
+              actions={recovery}
             />
           )}
           <ul

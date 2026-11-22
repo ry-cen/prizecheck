@@ -246,3 +246,113 @@ it("Lend to a Friend: a confirmed recovery's note goes when the dialog closes", 
   expect(alerts()).toEqual([]);
   expect(host.textContent).not.toContain("It was sent.");
 });
+
+/**
+ * Ports whose lock holds its answer back after the call finishes. The store has removed the intent and told its
+ * subscribers by then, so React can commit the blocker's removal before the lock's promise resolves.
+ */
+function slowRelease(f: ReturnType<typeof fixture>) {
+  const inner = f.ports.locks!;
+  const locks = {
+    request: ((
+      name: string,
+      options: LockOptions,
+      cb: LockGrantedCallback<unknown>
+    ) =>
+      inner.request(name, options, async (lock) => {
+        const result = await cb(lock);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return result;
+      })) as LockManager["request"],
+  };
+  return { ...f.ports, locks };
+}
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Presses a button outside act, so React commits on its own schedule while the lock is still held. */
+async function pressUnbatched(text: string, whileHeld: () => void = () => {}) {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", false);
+  try {
+    button(text).click();
+    await sleep(50);
+    whileHeld();
+    await sleep(300);
+  } finally {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  }
+}
+
+it.each([true, false])(
+  "Borrowed: onMoved runs once when the blocker clears before the lock is released (still open=%s)",
+  async (stayOpen) => {
+    const f = fixture(),
+      tab = createTabContext(),
+      onMoved = vi.fn();
+    await lostMove(f, tab);
+    const render = borrowed({ ...f, ports: slowRelease(f) }, tab, onMoved);
+    await act(async () => root.render(render(true)));
+    await pressUnbatched("Send it again", () => {
+      // The blocker is already gone from the dialog while the lock is still held.
+      expect(
+        [...host.querySelectorAll("button")].some(
+          (b) => b.textContent === "Send it again"
+        )
+      ).toBe(false);
+      if (!stayOpen) root.render(render(false));
+    });
+    expect(onMoved).toHaveBeenCalledTimes(1);
+    if (stayOpen) {
+      expect(statuses()).toContain("It was sent.");
+      expect(alerts()).toEqual([]);
+    } else {
+      await act(async () => {});
+      expect(statuses()).toEqual([]);
+    }
+  }
+);
+
+it.each([true, false])(
+  "Lend to a Friend: onLoansChanged runs once when the blocker clears before the lock is released (still open=%s)",
+  async (stayOpen) => {
+    const f = fixture(),
+      tab = createTabContext(),
+      onLoansChanged = vi.fn();
+    await lostIntent(f, tab, {
+      kind: "lend_offer",
+      scope: "lend_offer",
+      path: OFFER,
+      fields: { borrower_id: "friend", copies: [], return_by: null },
+    });
+    const ports = slowRelease(f);
+    const render = (open: boolean) =>
+      h(LoanRecoveryProvider, {
+        accountId: "A",
+        accountName: "Ana",
+        ports,
+        tab,
+        children: h(LendOfferDialog, {
+          open,
+          rows: [],
+          onClose: vi.fn(),
+          onSent: vi.fn(),
+          onLoansChanged,
+          onOpenLoan: vi.fn(),
+        }),
+      });
+    await act(async () => root.render(render(true)));
+    await pressUnbatched("Send it again", () => {
+      expect(
+        [...host.querySelectorAll("button")].some(
+          (b) => b.textContent === "Send it again"
+        )
+      ).toBe(false);
+      if (!stayOpen) root.render(render(false));
+    });
+    expect(onLoansChanged).toHaveBeenCalledTimes(1);
+    if (stayOpen) expect(statuses()).toContain("It was sent.");
+    else {
+      await act(async () => {});
+      expect(statuses()).toEqual([]);
+    }
+  }
+);
