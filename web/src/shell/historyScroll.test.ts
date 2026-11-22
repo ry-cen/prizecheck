@@ -138,6 +138,47 @@ it("closeOverlay goes back once until the next popstate", async () => {
   }
 });
 
+it("closeOverlay keeps its pending Back across a replacement of the same entry", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/catalog?q=Abra");
+  let route!: Route;
+  function View() {
+    route = useRoute();
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+  try {
+    await act(async () => root.render(createElement(View)));
+    await act(async () =>
+      route.navigate("/catalog?q=Abra&card=one", { overlay: true })
+    );
+    await act(async () => route.closeOverlay("/catalog?q=Abra"));
+    await act(async () =>
+      route.navigate("/catalog?q=Abra&card=one&edition=two", {
+        replace: true,
+        overlay: true,
+        preserveScroll: true,
+      })
+    );
+    await act(async () => route.closeOverlay("/catalog?q=Abra"));
+    expect(back).toHaveBeenCalledTimes(1);
+    // Once that Back lands, a later overlay closes with its own Back again.
+    await act(async () => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await act(async () =>
+      route.navigate("/catalog?q=Abra&card=two", { overlay: true })
+    );
+    await act(async () => route.closeOverlay("/catalog?q=Abra"));
+    expect(back).toHaveBeenCalledTimes(2);
+  } finally {
+    await act(async () => root.unmount());
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
 it("a guard-blocked Back clears the pending close so a later close still goes back", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   window.history.replaceState(null, "", "/catalog");

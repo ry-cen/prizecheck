@@ -139,7 +139,9 @@ export function useRoute(): Route {
   const addresses = useRef(new Map<string, string>()).current;
   // Approval belongs to these exact registrations, never to an unconditional next popstate.
   const leaving = useRef<Set<RegisteredGuard> | null>(null);
-  // The pushed overlay entry whose Back is already on its way; cleared by the next popstate or navigation.
+  // The pushed overlay entry whose Back is already on its way; cleared when that Back lands (popstate) or a new
+  // entry is pushed. Replacing the same entry's address (an Edition or view normalization) keeps it, so a second
+  // close cannot ask for a second Back and pop two entries.
   const closing = useRef<string | null>(null);
 
   useEffect(() => {
@@ -186,7 +188,7 @@ export function useRoute(): Route {
       } = {}
     ) => {
       const go = () => {
-        closing.current = null;
+        if (!replace) closing.current = null;
         save(scrolls, current.current, window.scrollY);
         save(addresses, current.current, currentAddress.current);
         save(positions, currentEntry.current, window.scrollY);
