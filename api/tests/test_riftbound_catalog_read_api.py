@@ -428,22 +428,25 @@ def test_the_seed_command_acts_only_on_the_exact_loopback_database_it_was_told(r
     name = parts['dbname']
     good = f"postgresql://{parts['user']}:{quote(parts['password'], safe='')}@{parts['host']}:{parts['port']}/{name}"
     env = {'RIFTBOUND_DATABASE_URL': good}
-    assert checked_url(name, env, prefix='') == good  # a real connection reports the name and a loopback address
+    assert checked_url(name, env, prefix='') == good  # a real connection reports the name
     with pytest.raises(SystemExit):  # the pattern alone is not enough: the effective name must be the one given
         checked_url('tcg_rb_other', env)
     with pytest.raises(SystemExit):
         checked_url(name, env)  # the harness database is not a tcg_rb_* database
     for url in (good + '?dbname=other', good + '?host=db.example.test', good + '?hostaddr=10.0.0.5',
-                good.replace('@127.0.0.1', '@db.example.test')):
+                good.replace('@127.0.0.1', '@db.example.test'), good.replace('@127.0.0.1', '@10.0.0.5')):
         with pytest.raises(SystemExit):
             checked_url(name, {'RIFTBOUND_DATABASE_URL': url}, prefix='')
 
-    def reporting(database, address):  # a connection whose server says it is elsewhere
+    for key in ('PGHOSTADDR', 'PGSERVICE'):  # a libpq variable that redirects the target is refused before connecting
+        with pytest.raises(SystemExit):
+            checked_url(name, {**env, key: 'x'}, prefix='')
+
+    def reporting(database):  # a connection whose server says it is another database
         class Result:
-            fetchone = staticmethod(lambda: (database, address))
+            fetchone = staticmethod(lambda: (database,))
         return lambda url: nullcontext(type('Conn', (), {'execute': staticmethod(lambda query: Result)}))
     url = {'RIFTBOUND_DATABASE_URL': 'postgresql://u:p@127.0.0.1:5432/tcg_rb_x'}
-    assert checked_url('tcg_rb_x', url, reporting('tcg_rb_x', '127.0.0.1')) == url['RIFTBOUND_DATABASE_URL']
-    for database, address in (('postgres', '127.0.0.1'), ('tcg_rb_x', '10.0.0.5')):
-        with pytest.raises(SystemExit):
-            checked_url('tcg_rb_x', url, reporting(database, address))
+    assert checked_url('tcg_rb_x', url, reporting('tcg_rb_x')) == url['RIFTBOUND_DATABASE_URL']
+    with pytest.raises(SystemExit):
+        checked_url('tcg_rb_x', url, reporting('postgres'))

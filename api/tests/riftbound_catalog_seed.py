@@ -82,9 +82,13 @@ def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, pref
     """The database URL, once the database it really reaches is the exact one the stack created.
 
     A URL can retarget itself through its query (host, hostaddr, dbname...), so no query parameter is accepted. The
-    connection is then asked which database and server it is on, and that must be `expected` on loopback."""
+    connection is then asked which database it is on, and that must be `expected`. The server's own address is not
+    checked: a loopback-published container (the CI service) reports its bridge address, not 127.0.0.1. The target is
+    pinned by the URL's loopback host instead, and by refusing the libpq variables that would redirect it."""
     if not expected.startswith(prefix):
         raise SystemExit('refusing: the expected database is not a tcg_rb_* name')
+    if any(environ.get(key) for key in ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE')):
+        raise SystemExit('refusing: the environment redirects the PostgreSQL connection')
     url = environ['RIFTBOUND_DATABASE_URL']
     parsed = urlparse(url)
     if parsed.scheme not in ('postgresql', 'postgres') or parsed.query or parsed.params:
@@ -92,9 +96,9 @@ def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, pref
     if parsed.hostname not in LOOPBACK or parsed.path.lstrip('/') != expected:
         raise SystemExit('refusing: the database URL does not name the expected loopback database')
     with connect(url) as conn:
-        name, address = conn.execute('SELECT current_database(), host(inet_server_addr())').fetchone()
-    if name != expected or address not in (None, '127.0.0.1', '::1'):
-        raise SystemExit('refusing: the connection does not reach the expected loopback database')
+        (name,) = conn.execute('SELECT current_database()').fetchone()
+    if name != expected:
+        raise SystemExit('refusing: the connection does not reach the expected database')
     return url
 
 
