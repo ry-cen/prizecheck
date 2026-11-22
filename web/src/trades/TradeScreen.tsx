@@ -961,7 +961,9 @@ export function TradeScreen({
             The swap can't be undone.
           </p>
           <p className="m-0 text-meta text-text-muted">
-            Your destination, picks and Deck switches are private.
+            {switchesTicked
+              ? "Your destination, picks and Deck switches are private."
+              : "Your destination and picks are private."}
           </p>
           <p role="alert" className="m-0 text-meta text-danger empty:hidden">
             {dialogMessage}

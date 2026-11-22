@@ -425,7 +425,7 @@ it("S2-08: keeps compact phone terms together and every consent fact before the 
     "Arrives in Unsorted: 1 Arven (SVI 166)",
     "Only confirm after the physical swap",
     "The swap can't be undone.",
-    "Your destination, picks and Deck switches are private.",
+    "Your destination and picks are private.",
   ]) {
     const paragraph = [...disclosure.querySelectorAll("p")].find((p) =>
       p.textContent!.includes(text)
@@ -443,6 +443,8 @@ it("S2-08: keeps compact phone terms together and every consent fact before the 
     "Only confirm after the physical swap. The swap can't be undone."
   );
   expect(disclosure.textContent).not.toContain("Deck switches you ticked");
+  // No Deck switches are offered, so the privacy line does not name them.
+  expect(disclosure.textContent).not.toContain("Deck switches are private");
   expect(confirmSwap).not.toHaveBeenCalled();
 });
 
@@ -772,6 +774,9 @@ it("names ticked Deck switches only when they are shown", async () => {
   expect(disclosure.textContent).toContain(
     "The Deck switches you ticked happen when you confirm."
   );
+  expect(disclosure.textContent).toContain(
+    "Your destination, picks and Deck switches are private."
+  );
   const checkbox = disclosure.querySelector(
     'input[type="checkbox"]'
   ) as HTMLInputElement;
@@ -780,4 +785,9 @@ it("names ticked Deck switches only when they are shown", async () => {
   expect(disclosure.textContent).toContain(
     "Only confirm after the physical swap. The swap can't be undone."
   );
+  // Offered but none ticked: the privacy line leaves Deck switches out too.
+  expect(disclosure.textContent).toContain(
+    "Your destination and picks are private."
+  );
+  expect(disclosure.textContent).not.toContain("Deck switches are private");
 });
