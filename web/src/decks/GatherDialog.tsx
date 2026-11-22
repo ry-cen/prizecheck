@@ -207,145 +207,149 @@ export function GatherDialog({
       returnFocus={returnFocus}
       bodyClassName="flex flex-col gap-3"
     >
-      {load.kind === "loading" ? (
-        <p role="status" className="m-0 text-body text-text-muted">
-          Finding where your cards are…
-        </p>
-      ) : load.kind === "failed" ? (
+      {open && (
         <>
-          <p role="status" className="m-0 text-body text-text-muted">
-            The Pick List couldn't be loaded. Check your connection and try
-            again.
-          </p>
-          <Button className="self-start" onClick={() => void read()}>
-            Retry
-          </Button>
-        </>
-      ) : rows.length === 0 ? (
-        <p className="m-0 text-body text-text-muted">
-          Every copy you own for this Deck List is already in this Deck.
-        </p>
-      ) : (
-        <>
-          <p className="m-0 text-meta text-text-muted">
-            {copiesText(allCopies)} from {locationsText(allSources)}. Loose
-            storage comes first, from the fewest Locations; another Deck only
-            when nothing else has the card.
-          </p>
-          <ul
-            aria-label="Cards to gather"
-            className="m-0 flex list-none flex-col p-0"
-          >
-            {rows.map((row) => {
-              const line = lineOf(row.edition_id);
-              const name = line?.line.name ?? "Card";
-              const edition = line ? editionText(line) : "";
-              const choice = choiceOf(row);
-              const takes = takesFor(row, choice);
-              const copies = rowCopies(takes);
-              return (
-                <li
-                  key={row.edition_id}
-                  className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 border-b border-border py-3 last:border-b-0"
-                >
-                  <label className="inline-flex size-control cursor-pointer items-center justify-center phone:size-tap">
-                    <input
-                      id={`${idBase}-pick-${row.edition_id}`}
-                      type="checkbox"
-                      className="m-0 size-4 accent-accent"
-                      aria-label={`Pick ${name}${edition ? `, ${edition}` : ""}`}
-                      checked={picked.has(row.edition_id)}
-                      onChange={(event) => {
-                        const on = event.currentTarget.checked;
-                        setPicked((current) => {
-                          const next = new Set(current);
-                          if (on) next.add(row.edition_id);
-                          else next.delete(row.edition_id);
-                          return next;
-                        });
-                      }}
-                    />
-                  </label>
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <p className="m-0 text-body font-medium wrap-anywhere">
-                      {name}
-                    </p>
-                    {edition && (
-                      <p className="m-0 text-meta text-text-muted wrap-anywhere">
-                        {edition}
-                      </p>
-                    )}
-                    <Select
-                      label={`Source for ${name}`}
-                      labelHidden
-                      value={choice}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        setChoices((current) =>
-                          new Map(current).set(row.edition_id, value)
-                        );
-                      }}
+          {load.kind === "loading" ? (
+            <p role="status" className="m-0 text-body text-text-muted">
+              Finding where your cards are…
+            </p>
+          ) : load.kind === "failed" ? (
+            <>
+              <p role="status" className="m-0 text-body text-text-muted">
+                The Pick List couldn't be loaded. Check your connection and try
+                again.
+              </p>
+              <Button className="self-start" onClick={() => void read()}>
+                Retry
+              </Button>
+            </>
+          ) : rows.length === 0 ? (
+            <p className="m-0 text-body text-text-muted">
+              Every copy you own for this Deck List is already in this Deck.
+            </p>
+          ) : (
+            <>
+              <p className="m-0 text-meta text-text-muted">
+                {copiesText(allCopies)} from {locationsText(allSources)}. Copies
+                outside your Decks come first, from as few Locations as
+                possible; another Deck only when nothing else has the card.
+              </p>
+              <ul
+                aria-label="Cards to gather"
+                className="m-0 flex list-none flex-col p-0"
+              >
+                {rows.map((row) => {
+                  const line = lineOf(row.edition_id);
+                  const name = line?.line.name ?? "Card";
+                  const edition = line ? editionText(line) : "";
+                  const choice = choiceOf(row);
+                  const takes = takesFor(row, choice);
+                  const copies = rowCopies(takes);
+                  return (
+                    <li
+                      key={row.edition_id}
+                      className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 border-b border-border py-3 last:border-b-0"
                     >
-                      {offersSuggestion(row) && (
-                        <option value={SUGGESTED}>
-                          {suggestionOption(row)}
-                        </option>
-                      )}
-                      {row.sources.map((source) => (
-                        <option
-                          key={source.location_id}
-                          value={source.location_id}
-                        >
-                          {sourceOption(source)}
-                        </option>
-                      ))}
-                    </Select>
-                    <p className="m-0 text-meta text-text-muted wrap-anywhere">
-                      {copiesText(copies)}: {takesText(takes)}
-                    </p>
-                    {takes
-                      .filter((take) => take.shortBy > 0n)
-                      .map((take) => (
-                        <p
-                          key={take.source.location_id}
-                          className="m-0 flex items-start gap-1 text-meta text-warning wrap-anywhere"
-                        >
-                          <Icon icon={TriangleAlert} />
-                          Leaves {sourceLabel(take.source)}{" "}
-                          {take.shortBy.toString()} short
+                      <label className="inline-flex size-control cursor-pointer items-center justify-center phone:size-tap">
+                        <input
+                          id={`${idBase}-pick-${row.edition_id}`}
+                          type="checkbox"
+                          className="m-0 size-4 accent-accent"
+                          aria-label={`Pick ${name}${edition ? `, ${edition}` : ""}`}
+                          checked={picked.has(row.edition_id)}
+                          onChange={(event) => {
+                            const on = event.currentTarget.checked;
+                            setPicked((current) => {
+                              const next = new Set(current);
+                              if (on) next.add(row.edition_id);
+                              else next.delete(row.edition_id);
+                              return next;
+                            });
+                          }}
+                        />
+                      </label>
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <p className="m-0 text-body font-medium wrap-anywhere">
+                          {name}
                         </p>
-                      ))}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                        {edition && (
+                          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                            {edition}
+                          </p>
+                        )}
+                        <Select
+                          label={`Source for ${name}`}
+                          labelHidden
+                          value={choice}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            setChoices((current) =>
+                              new Map(current).set(row.edition_id, value)
+                            );
+                          }}
+                        >
+                          {offersSuggestion(row) && (
+                            <option value={SUGGESTED}>
+                              {suggestionOption(row)}
+                            </option>
+                          )}
+                          {row.sources.map((source) => (
+                            <option
+                              key={source.location_id}
+                              value={source.location_id}
+                            >
+                              {sourceOption(source)}
+                            </option>
+                          ))}
+                        </Select>
+                        <p className="m-0 text-meta text-text-muted wrap-anywhere">
+                          {copiesText(copies)}: {takesText(takes)}
+                        </p>
+                        {takes
+                          .filter((take) => take.shortBy > 0n)
+                          .map((take) => (
+                            <p
+                              key={take.source.location_id}
+                              className="m-0 flex items-start gap-1 text-meta text-warning wrap-anywhere"
+                            >
+                              <Icon icon={TriangleAlert} />
+                              Leaves {sourceLabel(take.source)}{" "}
+                              {take.shortBy.toString()} short
+                            </p>
+                          ))}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+          {error && (
+            <p role="alert" className="m-0 text-body text-warning">
+              {error}
+            </p>
+          )}
+          {rows.length > 0 && (
+            <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-border bg-surface px-4 py-3">
+              <Button
+                disabled={pickedRows.length === 0}
+                aria-disabled={busy || undefined}
+                onClick={() => void confirm(pickedRows)}
+              >
+                {pickedRows.length
+                  ? `Confirm ${pickedRows.length} picked`
+                  : "Confirm picked"}
+              </Button>
+              <Button
+                variant="primary"
+                aria-disabled={busy || undefined}
+                onClick={() => void confirm(rows)}
+              >
+                Confirm all
+              </Button>
+            </div>
+          )}
         </>
-      )}
-      {error && (
-        <p role="alert" className="m-0 text-body text-warning">
-          {error}
-        </p>
-      )}
-      {rows.length > 0 && (
-        <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-border bg-surface px-4 py-3">
-          <Button
-            disabled={pickedRows.length === 0}
-            aria-disabled={busy || undefined}
-            onClick={() => void confirm(pickedRows)}
-          >
-            {pickedRows.length
-              ? `Confirm ${pickedRows.length} picked`
-              : "Confirm picked"}
-          </Button>
-          <Button
-            variant="primary"
-            aria-disabled={busy || undefined}
-            onClick={() => void confirm(rows)}
-          >
-            Confirm all
-          </Button>
-        </div>
       )}
     </Dialog>
   );

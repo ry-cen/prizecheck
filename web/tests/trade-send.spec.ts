@@ -428,8 +428,9 @@ async function story(
     const swapRow = ash.page.locator(`a[href="${new URL(swap).pathname}"]`);
     const giftRow = ash.page.locator(`a[href="${new URL(gift).pathname}"]`);
     await expect(swapRow).toContainText("Misty W");
-    await expect(swapRow).toContainText("You give 1 · You get 1");
-    await expect(giftRow).toContainText("You give 0 · You get 2");
+    await expect(swapRow).toContainText("You give 1 Arven · You get 1 Iono");
+    await expect(swapRow).not.toContainText("You give 1 · You get 1");
+    await expect(giftRow).toContainText("You get 2 Iono");
     await expect(
       ash.page.locator(`a[data-thread="${incoming.thread_id}"]`)
     ).toContainText("Proposal");

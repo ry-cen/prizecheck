@@ -8,41 +8,84 @@ import {
   resultText,
   signInAs,
 } from "./loanText";
+export type RecoveryActions = ReturnType<typeof useRecoveryActions>;
+
+/**
+ * Runs a recovery step and hands its outcome on. A dialog that must act on the outcome (refresh its list, tell
+ * Collection) owns this hook, so the outcome still lands after the store clears the blocker and the notice below
+ * it goes away, or after the dialog closes.
+ */
+export function useRecoveryActions(onOutcome: (o: FlowOutcome) => void) {
+  const { store } = useLoanRecovery();
+  const guard = useFlowGuard();
+  const running = useRef(false);
+  const latest = useRef(onOutcome);
+  latest.current = onOutcome;
+  const [busy, setBusy] = useState(false),
+    [said, setSaid] = useState<{ operationId: string; text: string } | null>(
+      null
+    );
+  return {
+    busy,
+    /** What the last step said, only while `view` is the operation it was about. */
+    messageFor(view: IntentView): string | null {
+      return said && said.operationId === view.operationId ? said.text : null;
+    },
+    reset() {
+      setSaid(null);
+    },
+    async act(view: IntentView, action: "replay" | "cancel" | "check") {
+      if (running.current) return;
+      const tok = guard.capture(),
+        binding = store.bind();
+      if (!binding) {
+        setSaid({
+          operationId: view.operationId,
+          text: RECOVERY_TEXT.not_saved,
+        });
+        return;
+      }
+      running.current = true;
+      setBusy(true);
+      const outcome = await store[action](binding, view.operationId);
+      running.current = false;
+      if (!guard.live(tok)) return;
+      setBusy(false);
+      const text = resultText(outcome);
+      setSaid(text ? { operationId: view.operationId, text } : null);
+      latest.current(outcome);
+    },
+  };
+}
+
 export function PendingLoanNotice({
   view,
   onOutcome,
+  actions,
   autoFocus = false,
+  visible = true,
 }: {
   view: IntentView;
-  onOutcome: (o: FlowOutcome) => void;
+  /** Used when no `actions` are given; the notice then owns the step and goes with the blocker. */
+  onOutcome?: (o: FlowOutcome) => void;
+  /** The recovery steps of a component that outlives the blocker. */
+  actions?: RecoveryActions;
   autoFocus?: boolean;
+  /**
+   * False while the dialog around it is closed: nothing shows.
+   */
+  visible?: boolean;
 }) {
-  const { store, accountName } = useLoanRecovery();
-  const guard = useFlowGuard();
+  const { accountName } = useLoanRecovery();
+  const own = useRecoveryActions(onOutcome ?? (() => {}));
+  const { busy, messageFor, act: run } = actions ?? own;
+  const message = messageFor(view);
+  const act = (action: "replay" | "cancel" | "check") => run(view, action);
   const first = useRef<HTMLButtonElement>(null);
-  const running = useRef(false);
-  const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState<string | null>(null);
   useEffect(() => {
-    if (autoFocus) first.current?.focus();
-  }, []);
-  async function act(action: "replay" | "cancel" | "check") {
-    if (running.current) return;
-    const tok = guard.capture(),
-      binding = store.bind();
-    if (!binding) {
-      setMessage(RECOVERY_TEXT.not_saved);
-      return;
-    }
-    running.current = true;
-    setBusy(true);
-    const outcome = await store[action](binding, view.operationId);
-    running.current = false;
-    if (!guard.live(tok)) return;
-    setBusy(false);
-    setMessage(resultText(outcome));
-    onOutcome(outcome);
-  }
+    if (autoFocus && visible) first.current?.focus();
+  }, [visible]);
+  if (!visible) return null;
   const unknown = view.state === "unknown" && !view.waitingAccount;
   return (
     <div role="status" className="flex flex-col gap-2">

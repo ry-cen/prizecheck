@@ -34,12 +34,21 @@ const EVENTS: Record<string, string> = {
   more_time_approved: "Agreed to more time",
   more_time_declined: "Kept the return date",
 };
-export function itemState(item: Pick<ThreadItem, "state" | "kind">): string {
+export function itemState(
+  item: Pick<ThreadItem, "state" | "kind" | "other"> & {
+    waiting?: string | null;
+  }
+): string {
+  if (item.kind === "trade" && item.state === "confirming")
+    return item.waiting === "confirm_swap"
+      ? `${item.other.display_name} confirmed the swap`
+      : !item.waiting
+        ? `Waiting for ${item.other.display_name} to confirm the swap`
+        : "Agreed";
   return (
     {
       offered: item.kind === "trade" ? "Proposal" : "Lend offer",
       agreed: "Agreed",
-      confirming: "Swap confirmations",
       done: "Swapped",
       requested: "Borrow Request",
       accepted: "Agreed",
@@ -130,11 +139,15 @@ export function agreementText(
       ? `Lending ${summary.you_give}`
       : `Borrowing ${summary.you_get}`;
   }
-  return `You give ${summary.you_give} · You get ${summary.you_get}${
-    summary.cash
-      ? ` · ${summary.cash.payer === "you" ? "You pay" : "They pay"} $${(Number(summary.cash.cents) / 100).toFixed(2)}`
-      : ""
-  }`;
+  const cash = cashText(row);
+  return `You give ${summary.you_give} · You get ${summary.you_get}${cash ? ` · ${cash}` : ""}`;
+}
+
+export function cashText(row: Pick<ThreadItem, "summary">): string {
+  const cash = row.summary.cash;
+  return cash
+    ? `${cash.payer === "you" ? "You pay" : "They pay"} $${(Number(cash.cents) / 100).toFixed(2)}`
+    : "";
 }
 
 export function currentCardsText(
