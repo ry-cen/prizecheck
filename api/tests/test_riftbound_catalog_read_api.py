@@ -428,15 +428,23 @@ def test_the_seed_command_acts_only_on_the_exact_loopback_database_it_was_told(r
     name = parts['dbname']
     good = f"postgresql://{parts['user']}:{quote(parts['password'], safe='')}@{parts['host']}:{parts['port']}/{name}"
     env = {'RIFTBOUND_DATABASE_URL': good}
-    assert checked_url(name, env, prefix='') == good  # a real connection reports the name
+    checked = checked_url(name, env, prefix='')  # a real connection reports the name
+    assert conninfo_to_dict(checked) == conninfo_to_dict(good)
     with pytest.raises(SystemExit):  # the pattern alone is not enough: the effective name must be the one given
         checked_url('tcg_rb_other', env)
     with pytest.raises(SystemExit):
         checked_url(name, env)  # the harness database is not a tcg_rb_* database
     for url in (good + '?dbname=other', good + '?host=db.example.test', good + '?hostaddr=10.0.0.5',
-                good.replace('@127.0.0.1', '@db.example.test'), good.replace('@127.0.0.1', '@10.0.0.5')):
+                good.replace('@127.0.0.1', '@db.example.test'), good.replace('@127.0.0.1', '@10.0.0.5'),
+                good.replace(f"{parts['host']}:{parts['port']}", f"{parts['host']}:{parts['port']},evil.example:{parts['port']}"),
+                good + '#options=-c%20search_path%3Devil', good + '#host=evil.example',
+                good.replace(f":{parts['port']}/", f":{parts['port']},{parts['port']}/"),
+                good.replace(f"{parts['host']}:", f"{parts['host']},{parts['host']}:")):
+
+        def never(_):
+            raise AssertionError('connected before the URL was refused')
         with pytest.raises(SystemExit):
-            checked_url(name, {'RIFTBOUND_DATABASE_URL': url}, prefix='')
+            checked_url(name, {'RIFTBOUND_DATABASE_URL': url}, connect=never, prefix='')
 
     for key in ('PGHOSTADDR', 'PGSERVICE'):  # a libpq variable that redirects the target is refused before connecting
         with pytest.raises(SystemExit):
@@ -447,6 +455,6 @@ def test_the_seed_command_acts_only_on_the_exact_loopback_database_it_was_told(r
             fetchone = staticmethod(lambda: (database,))
         return lambda url: nullcontext(type('Conn', (), {'execute': staticmethod(lambda query: Result)}))
     url = {'RIFTBOUND_DATABASE_URL': 'postgresql://u:p@127.0.0.1:5432/tcg_rb_x'}
-    assert checked_url('tcg_rb_x', url, reporting('tcg_rb_x')) == url['RIFTBOUND_DATABASE_URL']
+    assert conninfo_to_dict(checked_url('tcg_rb_x', url, reporting('tcg_rb_x'))) == conninfo_to_dict(url['RIFTBOUND_DATABASE_URL'])
     with pytest.raises(SystemExit):
         checked_url('tcg_rb_x', url, reporting('postgres'))

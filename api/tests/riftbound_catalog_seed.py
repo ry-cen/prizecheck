@@ -6,10 +6,10 @@ snapshot, not the ingestion acceptance workflow. As a command it acts only on a 
 import argparse
 import json
 import os
-from urllib.parse import urlparse
 from uuid import uuid4
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 LOOPBACK = ('127.0.0.1', 'localhost', '::1')
 
@@ -79,27 +79,38 @@ def scenario(url: str, name: str) -> dict:
 
 
 def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, prefix: str = 'tcg_rb_') -> str:
-    """The database URL, once the database it really reaches is the exact one the stack created.
+    """A connection string for the one database the stack created, built from libpq's own reading of the URL.
 
-    A URL can retarget itself through its query (host, hostaddr, dbname...), so no query parameter is accepted. The
-    connection is then asked which database it is on, and that must be `expected`. The server's own address is not
-    checked: a loopback-published container (the CI service) reports its bridge address, not 127.0.0.1. The target is
-    pinned by the URL's loopback host instead, and by refusing the libpq variables that would redirect it."""
+    Python's URL parser and libpq's disagree (a comma-separated host list, text after `#`), so the URL is parsed with
+    libpq's parser and the effective parameters are checked: only user, password, host, port and dbname, exactly one
+    loopback host, at most one numeric port, and a dbname that is exactly `expected`. The connection check and every
+    write then use a string rebuilt from those parameters, never the original text. The server's own address is not
+    checked: a loopback-published container (the CI service) reports its bridge address, not 127.0.0.1."""
     if not expected.startswith(prefix):
         raise SystemExit('refusing: the expected database is not a tcg_rb_* name')
     if any(environ.get(key) for key in ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE')):
         raise SystemExit('refusing: the environment redirects the PostgreSQL connection')
     url = environ['RIFTBOUND_DATABASE_URL']
-    parsed = urlparse(url)
-    if parsed.scheme not in ('postgresql', 'postgres') or parsed.query or parsed.params:
-        raise SystemExit('refusing: the database URL must be a plain PostgreSQL URL with no parameters')
-    if parsed.hostname not in LOOPBACK or parsed.path.lstrip('/') != expected:
-        raise SystemExit('refusing: the database URL does not name the expected loopback database')
-    with connect(url) as conn:
+    if not url.startswith(('postgresql://', 'postgres://')):
+        raise SystemExit('refusing: the database URL must be a PostgreSQL URL')
+    try:
+        params = conninfo_to_dict(url)
+    except psycopg.ProgrammingError:
+        raise SystemExit('refusing: the database URL is not readable') from None
+    if set(params) - {'user', 'password', 'host', 'port', 'dbname'}:
+        raise SystemExit('refusing: the database URL must carry no parameters')
+    if params.get('host') not in LOOPBACK:  # a host list ("a,b") is not in LOOPBACK
+        raise SystemExit('refusing: the database URL does not name exactly one loopback host')
+    if 'port' in params and not (params['port'].isascii() and params['port'].isdigit()):
+        raise SystemExit('refusing: the database URL does not name exactly one port')
+    if params.get('dbname') != expected:
+        raise SystemExit('refusing: the database URL does not name the expected database')
+    checked = make_conninfo(**params)
+    with connect(checked) as conn:
         (name,) = conn.execute('SELECT current_database()').fetchone()
     if name != expected:
         raise SystemExit('refusing: the connection does not reach the expected database')
-    return url
+    return checked
 
 
 if __name__ == '__main__':
