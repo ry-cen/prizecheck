@@ -290,8 +290,12 @@ export function Workspace({
       else onNavigate(next, { preserveScroll: true, overlay: true });
     },
     // The desktop inspector is a side panel: its address writes replace the entry and never add one.
-    onInspect: (card) => {
+    onInspect: (card, change) => {
       if (!active || mobile) return;
+      // Back or Forward to another Location's entry changes the scope too. That entry's address names its own
+      // card, not the one this inspector wrote: clear the local selection and leave the address alone.
+      if (!card && change?.scopeChange && route.card !== inspectedInUrl.current)
+        return;
       const next = collectionHref(
         view,
         query,

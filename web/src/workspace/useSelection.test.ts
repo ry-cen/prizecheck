@@ -351,6 +351,7 @@ function inspectHarness(initial: { mobile: boolean; scope?: string }) {
   let byKey = new Map(holdings.map((row) => [row.key, row]));
   let scope = initial.scope ?? "all";
   const reports: Array<{ key: string; ordinal: number } | null> = [];
+  const scopeChanges: boolean[] = [];
   let selection!: SelectionState;
   const root = createRoot(document.createElement("div"));
   function Host() {
@@ -360,8 +361,10 @@ function inspectHarness(initial: { mobile: boolean; scope?: string }) {
       status: "ready",
       scope,
       mobile: initial.mobile,
-      onInspect: (card) =>
-        reports.push(card && { key: card.holding.key, ordinal: card.ordinal }),
+      onInspect: (card, change) => {
+        reports.push(card && { key: card.holding.key, ordinal: card.ordinal });
+        scopeChanges.push(!!change?.scopeChange);
+      },
     });
     return null;
   }
@@ -382,6 +385,7 @@ function inspectHarness(initial: { mobile: boolean; scope?: string }) {
     a,
     b,
     reports,
+    scopeChanges,
     click,
     render,
     get selection() {
@@ -482,6 +486,30 @@ test("reconcile dropping the inspected Holding reports null", () => {
     h.click(h.a, 0);
     h.setHoldings([h.b]);
     expect(h.reports).toEqual([{ key: "leaf:a", ordinal: 0 }, null]);
+  } finally {
+    h.unmount();
+  }
+});
+
+test("the clear a scope change causes is reported as a scope change, a deselect is not", () => {
+  const h = inspectHarness({ mobile: false });
+  try {
+    h.click(h.a, 0);
+    h.click(h.a, 0);
+    h.click(h.b, 1);
+    h.setScope("other");
+    expect(h.reports).toEqual([
+      { key: "leaf:a", ordinal: 0 },
+      null,
+      { key: "leaf:b", ordinal: 1 },
+      null,
+    ]);
+    expect(h.scopeChanges).toEqual([false, false, false, true]);
+    expect(h.selection.inspected).toBeNull();
+    // A later clear is the collector's own again.
+    h.click(h.a, 2);
+    h.click(h.a, 2);
+    expect(h.scopeChanges.slice(-2)).toEqual([false, false]);
   } finally {
     h.unmount();
   }

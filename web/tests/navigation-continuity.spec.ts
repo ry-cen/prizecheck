@@ -150,6 +150,42 @@ test.describe("the desktop inspector's address", () => {
     expect(await page.evaluate(() => history.length)).toBe(before);
   });
 
+  test("Back to another Location's entry keeps the card its address names", async ({
+    page,
+    collectors,
+  }) => {
+    promoteCatalog({ "card-1": "Back Abra", "card-2": "Back Zubat" });
+    await startAsNewOwner(collectors.pool);
+    await signInAsOwner(page, "/collection");
+    const first = await createLocation(page, "Back binder A");
+    const second = await createLocation(page, "Back binder B");
+    await addCopies(page, first, await editionOf("card-1"), 1);
+    await addCopies(page, second, await editionOf("card-2"), 1);
+    await page.goto(`${ORIGIN}/collection?location=${first}`);
+    await expect(tiles(page)).toHaveCount(1);
+    await tiles(page).first().click();
+    await expect.poll(() => searchOf(page.url()).has("card")).toBe(true);
+    const inspector = page.getByRole("complementary", { name: "Card details" });
+    const named = await inspector.getByRole("heading").first().innerText();
+    const cardInA = searchOf(page.url()).get("card");
+
+    await page
+      .getByRole("complementary", { name: "Sidebar" })
+      .getByRole("navigation", { name: "Locations" })
+      .getByRole("button", { name: "Back binder B", exact: true })
+      .click();
+    await expect.poll(() => searchOf(page.url()).get("location")).toBe(second);
+    await expect(tiles(page)).toHaveCount(1);
+    await tiles(page).first().click();
+    await expect.poll(() => searchOf(page.url()).has("card")).toBe(true);
+
+    await page.goBack();
+    await expect.poll(() => searchOf(page.url()).get("location")).toBe(first);
+    await expect(tiles(page)).toHaveCount(1);
+    await expect(inspector).toContainText(named);
+    expect(searchOf(page.url()).get("card")).toBe(cardInA);
+  });
+
   test("a desktop Move of the inspected card drops card without a notice", async ({
     page,
     collectors,

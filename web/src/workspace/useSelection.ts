@@ -43,8 +43,12 @@ type Options = {
   routeDetails?: { key: string; ordinal: number } | null;
   onDetails?: (card: Inspected | null) => void;
   /** Desktop only: the inspected card changed (a click, a drag's end, a clear or a refresh dropping it). */
-  onInspect?: (card: Inspected | null) => void;
+  onInspect?: (card: Inspected | null, change?: InspectChange) => void;
 };
+
+/** Why the inspected card changed. `scopeChange` is the clear a changed listing causes: it cleans up local state,
+ * and the address it would drop the card from may belong to a different history entry. */
+export type InspectChange = { scopeChange: boolean };
 
 export type SelectionState = {
   selected: Selection;
@@ -96,6 +100,7 @@ export function useSelection({
   // The last inspected card reported, as "<key>:<ordinal>", and whether a marquee drag is between start and end.
   const reported = useRef<string | null>(null);
   const dragging = useRef(false);
+  const clearingForScope = useRef(false);
   const anchor = useRef<{ key: string; ordinal: number } | null>(null);
   const marqueeBase = useRef<Selection>(EMPTY_SELECTION);
   const shown = useRef(active);
@@ -158,7 +163,9 @@ export function useSelection({
     const id = card ? `${card.holding.key}:${card.ordinal}` : null;
     if (id === reported.current) return;
     reported.current = id;
-    inspectCallback.current?.(card);
+    inspectCallback.current?.(card, {
+      scopeChange: clearingForScope.current,
+    });
   }
 
   const clear = useCallback(() => {
@@ -231,7 +238,12 @@ export function useSelection({
 
   // Changing what the gallery lists (Location, search, filters) clears the selection; sorting doesn't.
   useEffect(() => {
-    clear();
+    clearingForScope.current = true;
+    try {
+      clear();
+    } finally {
+      clearingForScope.current = false;
+    }
     setDetails(null);
   }, [scope, clear]);
 
