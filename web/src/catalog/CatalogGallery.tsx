@@ -1,4 +1,4 @@
-import type { CatalogView } from "./catalogUrl";
+import type { CatalogCard, CatalogView } from "./catalogUrl";
 import { getCatalogSets } from "../catalog_browse_generated";
 import {
   QUEUE_CLEARED,
@@ -85,6 +85,13 @@ type Props = {
   /** A card to open at once (the inspector's metadata report link). onLinkOpened clears it. */
   link?: CardRequest | null;
   onLinkOpened?: () => void;
+  /** Catalog page only: the card the address names (null: none). Undefined: no address (Collection's Add cards). */
+  routeCard?: CatalogCard | null;
+  /** Catalog page only: write the open card to the address. */
+  onCardRoute?: (
+    card: CatalogCard | null,
+    how: "open" | "replace" | "close"
+  ) => void;
   /** A metadata report was sent from the popup. */
   onReported?: () => void;
 };
@@ -116,6 +123,8 @@ export function CatalogGallery({
   link,
   onLinkOpened,
   onReported,
+  routeCard,
+  onCardRoute,
 }: Props) {
   const [localText, setLocalText] = useState("");
   const [localFormat, setLocalFormat] = useState<BrowseFormat | null>(null);
@@ -215,13 +224,18 @@ export function CatalogGallery({
   const [card, setCard] = useState<CardRequest | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   // The popup's place among the loaded tiles, found by Edition: the list can be replaced under it (a restart).
-  const index = card?.editionId
-    ? browse.editions.findIndex(
-        (edition) => edition.edition_id === card.editionId
-      )
+  // On the Catalog page the address owns the card, so the place to step from is kept apart: an Edition picked in the
+  // popup changes the address without moving it.
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const anchorId = routeCard !== undefined ? anchor : card?.editionId;
+  const index = anchorId
+    ? browse.editions.findIndex((edition) => edition.edition_id === anchorId)
     : -1;
   const [wantsNext, setWantsNext] = useState(false);
   const closedOn = useRef<string | null>(null);
+  // Set when the collector closes the card (not Back or Forward), so only that close may scroll the tile into view.
+  const closedByUser = useRef(false);
+  const closeScrolls = useRef(true);
   const hintId = useId();
   const sentinel = useRef<HTMLDivElement>(null);
   const canLoad = browse.nextCursor !== null && !browse.errorMore;
@@ -516,7 +530,31 @@ export function CatalogGallery({
     [noteAdded, queueToast, recovery]
   );
 
+  // On the Catalog page the address is the source of truth: the card is only ever set from it (the sync effect below).
+  const routed = routeCard !== undefined;
+  const route = useRef({ routed, routeCard, onCardRoute });
+  route.current = { routed, routeCard, onCardRoute };
+  // The card and Edition the address is known to name, so an echo of the gallery's own write is not re-adopted.
+  const shown = useRef<CatalogCard | null>(null);
   const show = useCallback((edition: BrowseEdition) => {
+    if (route.current.routed) {
+      const target = {
+        printingId: edition.printing_id,
+        editionId: edition.edition_id,
+      };
+      // The address says where stepping starts once it lands (the sync effect). When the target is what it already
+      // names, nothing lands, so move on here; a refused write never moves it.
+      if (
+        shown.current?.printingId === target.printingId &&
+        shown.current.editionId === target.editionId
+      )
+        setAnchor(target.editionId);
+      route.current.onCardRoute?.(
+        target,
+        route.current.routeCard ? "replace" : "open"
+      );
+      return;
+    }
     setCard({
       printingId: edition.printing_id,
       editionId: edition.edition_id,
@@ -556,15 +594,19 @@ export function CatalogGallery({
     }
   }, [wantsNext, card, index, editionsShown.length, browse.errorMore, stepTo]);
   // Closing the popup after stepping returns focus to the tile of the card it showed (the Dialog itself returns it
-  // to the tile that opened it); the browser scrolls that tile into view.
+  // to the tile that opened it); the browser scrolls that tile into view when the collector closed the card. Back and
+  // Forward leave the scroll where the shell restored it, so they only move focus.
   useEffect(() => {
     if (card || !closedOn.current) return;
     const id = closedOn.current;
     closedOn.current = null;
+    const scrolls = closeScrolls.current;
+    closeScrolls.current = true;
     const tile = tiles.current?.querySelector<HTMLElement>(
       `[data-edition-id="${CSS.escape(id)}"] button`
     );
-    if (tile && tile !== document.activeElement) tile.focus();
+    if (tile && tile !== document.activeElement)
+      tile.focus(scrolls ? undefined : { preventScroll: true });
   }, [card]);
 
   // Infinite scroll: a sentinel after the last tile asks for the next page as it nears the window (or the dialog's
@@ -597,11 +639,66 @@ export function CatalogGallery({
 
   // A card asked for from outside (the inspector's report link) opens at once.
   useEffect(() => {
-    if (!link) return;
+    if (routed || !link) return;
     opener.current = null;
     setCard(link);
     onLinkOpened?.();
-  }, [link, onLinkOpened]);
+  }, [routed, link, onLinkOpened]);
+  // Catalog page: open, switch or close the card to match the address. Every change of the open card comes through
+  // here, from the gallery's own writes, Back and Forward, a reload or a shared link.
+  useLayoutEffect(() => {
+    if (!routed) return;
+    if (link) {
+      opener.current = null;
+      setCard(link);
+      shown.current = {
+        printingId: link.printingId,
+        editionId: link.editionId,
+      };
+      setAnchor(link.editionId);
+      onLinkOpened?.();
+      return;
+    }
+    if (!active) {
+      if (card) {
+        closedOn.current = null;
+        setWantsNext(false);
+        setCard(null);
+      }
+      shown.current = null;
+      setAnchor(null);
+      return;
+    }
+    if (!routeCard) {
+      if (card) {
+        closedOn.current = anchor ?? card.editionId;
+        closeScrolls.current = closedByUser.current;
+        closedByUser.current = false;
+        setWantsNext(false);
+        setCard(null);
+      }
+      shown.current = null;
+      setAnchor(null);
+      return;
+    }
+    if (
+      routeCard.printingId !== shown.current?.printingId ||
+      routeCard.editionId !== shown.current?.editionId
+    ) {
+      setCard({
+        printingId: routeCard.printingId,
+        editionId: routeCard.editionId,
+        row:
+          browse.editions.find(
+            (edition) => edition.edition_id === routeCard.editionId
+          ) ?? null,
+        report: null,
+      });
+      shown.current = routeCard;
+      closedByUser.current = false;
+      setAnchor(routeCard.editionId);
+    }
+  }, [active, routeCard?.printingId, routeCard?.editionId, link]);
 
   // An earlier add's notice belongs to the Location it was for.
   const targetId = target?.id;
@@ -926,10 +1023,26 @@ export function CatalogGallery({
       <CatalogCardPopup
         request={card}
         onClose={() => {
+          if (routed) {
+            closedByUser.current = true;
+            onCardRoute?.(null, "close");
+            return;
+          }
           closedOn.current = card?.editionId ?? null;
           setWantsNext(false);
           setCard(null);
         }}
+        onEditionShown={
+          routed
+            ? (editionId) => {
+                if (!card) return;
+                // A fallback from a missing Edition is where stepping starts; a pick leaves it where it was.
+                if (index < 0) setAnchor(editionId);
+                shown.current = { printingId: card.printingId, editionId };
+                onCardRoute?.(shown.current, "replace");
+              }
+            : undefined
+        }
         position={
           index >= 0 && first?.matches != null
             ? { index, total: Math.max(first.matches, editionsShown.length) }

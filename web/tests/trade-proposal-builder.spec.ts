@@ -510,6 +510,20 @@ async function story(
   await expect(lists(page).get).toHaveText("Nothing yet");
   await expect(lists(page).give).toHaveText("Nothing yet");
 
+  // Back from the builder returns to the entry the collector left: the Catalog with Arven's card open (its address
+  // names the card and Edition). One more Back closes the card and leaves the Catalog.
+  const backOnArven = async () => {
+    await expect(page).toHaveURL(
+      /\/catalog\?card=[0-9a-f-]{36}&edition=[0-9a-f-]{36}$/
+    );
+    await expect(page.getByRole("dialog", { name: "Arven" })).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await page.goBack();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page).not.toHaveURL(/\/catalog\?card=/);
+    await page.goForward();
+    await expect(page.getByRole("dialog", { name: "Arven" })).toBeVisible();
+  };
   // 11: Ask to trade opens the builder with the card in You get. Leaving untouched asks nothing; one more tap does.
   const askArven = async () => {
     await page.goto(`${ORIGIN}/catalog`);
@@ -551,8 +565,7 @@ async function story(
   await expect(findLink).toHaveAttribute("href", "/trades/find");
   await checkPanes(page, `the proposal builder from Ask to trade at ${width}`);
   await page.goBack();
-  await expect(page).toHaveURL(`${ORIGIN}/catalog`);
-  await expect(dialog).toHaveCount(0);
+  await backOnArven();
   await askArven();
   await show(page, "Cards");
   await tile(theirList, "get", BOSS).click();
@@ -560,7 +573,7 @@ async function story(
   await page.goBack();
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Discard", exact: true }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+  await backOnArven();
 }
 
 test.describe("desktop", () => {

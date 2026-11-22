@@ -428,6 +428,9 @@ async function story(
 
     // C: Ask to trade in the card popup opens Brock's builder with the card in You get.
     await page.goto(`${ORIGIN}/catalog`);
+    // Back must return to these exact addresses: the Catalog, then the open card.
+    let catalogUrl = page.url();
+    let cardUrl = "";
     await results(page)
       .getByRole("button", { name: /^Iono, PAF/ })
       .click();
@@ -441,6 +444,9 @@ async function story(
     // The popup's Add row names Misty's own Locations; the Friends' part names none of Brock's.
     await expect(offering).not.toContainText(secret);
     const askBrock = async () => {
+      await expect(popup).toBeVisible();
+      await expect(page).toHaveURL(/[?&]card=/);
+      cardUrl = page.url();
       await popup
         .getByRole("button", {
           name: /^Ask Brock T to trade Iono \(PAF 0?80\)$/,
@@ -476,10 +482,19 @@ async function story(
     const discard = page.getByRole("dialog", {
       name: "Discard this proposal to Brock T?",
     });
+    const backOnIono = async () => {
+      await expect(page).toHaveURL(cardUrl);
+      await expect(page.getByRole("dialog", { name: "Iono" })).toBeVisible();
+      await expect(discard).toHaveCount(0);
+      await page.goBack();
+      await expect(page).toHaveURL(catalogUrl);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    };
     await page.goBack();
-    await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+    await backOnIono();
     await expect(discard).toHaveCount(0);
     // One more card makes leaving ask first.
+    catalogUrl = page.url();
     await results(page)
       .getByRole("button", { name: /^Iono, PAF/ })
       .click();
@@ -493,7 +508,7 @@ async function story(
     await page.goBack();
     await expect(discard).toBeVisible();
     await discard.getByRole("button", { name: "Discard", exact: true }).click();
-    await expect(page).toHaveURL(`${ORIGIN}/catalog`);
+    await backOnIono();
 
     // A card no Friend offers has no Ask to trade.
     await results(page)

@@ -74,6 +74,9 @@ export type AddFeedbackRenderer = (
 type Props = {
   request: CardRequest | null;
   onClose: () => void;
+  /** The Edition now shown, once the card's details are ready and it differs from the last one reported (or from
+   * the request's own Edition): a pick, or the fallback from a missing or unknown Edition. */
+  onEditionShown?: (editionId: string) => void;
   /** "‹ N / M ›" (index from 0), or null for a card opened on its own. */
   position: { index: number; total: number } | null;
   canPrevious: boolean;
@@ -152,6 +155,7 @@ export function CatalogCardPopup({
   onReported,
   renderAddFeedback,
   returnFocus,
+  onEditionShown,
 }: Props) {
   const open = request !== null;
   // The popup outlives its keyed AddRows, so delayed failures follow the currently open modal.
@@ -175,9 +179,11 @@ export function CatalogCardPopup({
     report: null,
   });
   const focusReport = useRef(false);
+  const reported = useRef<string | null>(request?.editionId ?? null);
   if (card.key !== cardKey) {
     // A new card: start from the request (React's "adjusting state when a prop changes").
     focusReport.current = request?.report != null;
+    reported.current = request?.editionId ?? null;
     setCard({
       key: cardKey,
       selectedId: request?.editionId ?? null,
@@ -201,6 +207,14 @@ export function CatalogCardPopup({
     editions.find((edition) => edition.active) ??
     editions[0] ??
     null;
+  const shownId = selected?.id ?? null;
+  const shownCallback = useRef(onEditionShown);
+  shownCallback.current = onEditionShown;
+  useEffect(() => {
+    if (!ready || shownId === null || shownId === reported.current) return;
+    reported.current = shownId;
+    shownCallback.current?.(shownId);
+  }, [cardKey, shownId, ready !== null]);
   const where = useCopiesWhere(selected?.id ?? null, whereVersion);
   const row = ready?.rows[0] ?? request?.row ?? null;
   const name = ready?.printing.name ?? request?.row?.name ?? "Card details";

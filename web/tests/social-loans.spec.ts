@@ -537,6 +537,7 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
     .click();
   await expect(composer).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page).not.toHaveURL(/[?&](card|edition)=/);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
@@ -712,3 +713,58 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   ).toBeVisible();
   await expect.poll(() => draftKeys(page)).toEqual([]);
 });
+
+for (const viewport of [DESKTOP, PHONE]) {
+  test.describe(`Review from an open Catalog card at ${viewport.width}`, () => {
+    test.use({ viewport, hasTouch: viewport.width === PHONE.width });
+    test("the composer keeps focus once the card's Back lands, and Escape returns focus to the card's tile", async ({
+      page,
+      collectors,
+    }) => {
+      test.slow();
+      const ids = seedCatalog();
+      const misty = await collectors.signIn({ next: "/loans" });
+      await nameCollector(misty.page, "Misty W");
+      await hold(misty.page, await unsorted(misty.page), ids["PAL 185"], 1);
+      await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+        route.abort()
+      );
+      await signInAsOwner(page, "/collection");
+      await nameCollector(page, "Ash K");
+      await befriend(page, misty.page);
+
+      await page.goto(`${ORIGIN}/catalog`);
+      const iono = page
+        .getByRole("region", { name: "Catalog results" })
+        .getByRole("button", { name: /^Iono, PAL 185/ });
+      const press = (locator: Locator) =>
+        viewport.width === PHONE.width ? locator.tap() : locator.click();
+      await press(iono);
+      const popup = page.getByRole("dialog");
+      await expect(page).toHaveURL(/[?&]card=/);
+      await press(
+        popup.getByRole("button", { name: "Ask to borrow Iono from Misty W" })
+      );
+      await press(
+        popup.getByRole("button", {
+          name: "Review Borrow Request to Misty W",
+        })
+      );
+      const composer = page.getByRole("dialog", {
+        name: "Borrow Request to Misty W",
+      });
+      await expect(composer).toBeVisible();
+      // (a) the card's deferred Back has landed: the address lost `card` and `edition`.
+      await expect(page).not.toHaveURL(/[?&](card|edition)=/);
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      // (b) none of the focus restorers took focus from the composer.
+      expect(
+        await composer.evaluate((d) => d.contains(document.activeElement))
+      ).toBe(true);
+      // (c) Escape closes it and gives focus back to the card's tile.
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(iono).toBeFocused();
+    });
+  });
+}
