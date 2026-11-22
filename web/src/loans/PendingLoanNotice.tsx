@@ -22,19 +22,27 @@ export function useRecoveryActions(onOutcome: (o: FlowOutcome) => void) {
   const latest = useRef(onOutcome);
   latest.current = onOutcome;
   const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState<string | null>(null);
+    [said, setSaid] = useState<{ operationId: string; text: string } | null>(
+      null
+    );
   return {
     busy,
-    message,
+    /** What the last step said, only while `view` is the operation it was about. */
+    messageFor(view: IntentView): string | null {
+      return said && said.operationId === view.operationId ? said.text : null;
+    },
     reset() {
-      setMessage(null);
+      setSaid(null);
     },
     async act(view: IntentView, action: "replay" | "cancel" | "check") {
       if (running.current) return;
       const tok = guard.capture(),
         binding = store.bind();
       if (!binding) {
-        setMessage(RECOVERY_TEXT.not_saved);
+        setSaid({
+          operationId: view.operationId,
+          text: RECOVERY_TEXT.not_saved,
+        });
         return;
       }
       running.current = true;
@@ -43,7 +51,8 @@ export function useRecoveryActions(onOutcome: (o: FlowOutcome) => void) {
       running.current = false;
       if (!guard.live(tok)) return;
       setBusy(false);
-      setMessage(resultText(outcome));
+      const text = resultText(outcome);
+      setSaid(text ? { operationId: view.operationId, text } : null);
       latest.current(outcome);
     },
   };
@@ -69,7 +78,8 @@ export function PendingLoanNotice({
 }) {
   const { accountName } = useLoanRecovery();
   const own = useRecoveryActions(onOutcome ?? (() => {}));
-  const { busy, message, act: run } = actions ?? own;
+  const { busy, messageFor, act: run } = actions ?? own;
+  const message = messageFor(view);
   const act = (action: "replay" | "cancel" | "check") => run(view, action);
   const first = useRef<HTMLButtonElement>(null);
   useEffect(() => {

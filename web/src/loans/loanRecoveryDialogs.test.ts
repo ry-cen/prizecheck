@@ -356,3 +356,104 @@ it.each([true, false])(
     }
   }
 );
+
+const OLD_MESSAGE = "It was sent.";
+
+it("Borrowed: a recovery's message does not follow a later request's notice", async () => {
+  const f = fixture(),
+    tab = createTabContext(),
+    onMoved = vi.fn();
+  await lostMove(f, tab);
+  await act(async () => root.render(borrowed(f, tab, onMoved)(true)));
+  await act(async () => {
+    button("Send it again").click();
+  });
+  await flush();
+  expect(statuses()).toContain(OLD_MESSAGE);
+  // Same dialog, still open: another Move loses its answer.
+  await act(async () => {
+    button("Move…").click();
+  });
+  const select = host.querySelector("select")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLSelectElement.prototype,
+      "value"
+    )!.set!.call(select, "box");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  f.server.loseNextAnswer = true;
+  await act(async () => {
+    button("Move").click();
+  });
+  await flush();
+  expect(statuses().join(" ")).toContain(
+    "Your Move of borrowed cards may not have finished."
+  );
+  expect(host.textContent).not.toContain(OLD_MESSAGE);
+});
+
+it("Lend to a Friend: a recovery's message does not follow a later request's notice", async () => {
+  const f = fixture(),
+    tab = createTabContext();
+  vi.mocked(getFriends).mockResolvedValue({
+    friends: [
+      { collector_id: "friend", handle: "misty", display_name: "Misty" },
+    ],
+  } as never);
+  await lostIntent(f, tab, {
+    kind: "lend_offer",
+    scope: "lend_offer",
+    path: OFFER,
+    fields: { borrower_id: "friend", copies: [], return_by: null },
+  });
+  await act(async () =>
+    root.render(
+      h(LoanRecoveryProvider, {
+        accountId: "A",
+        accountName: "Ana",
+        ports: f.ports,
+        tab,
+        children: h(LendOfferDialog, {
+          open: true,
+          rows: [
+            {
+              key: "k",
+              locationId: "old-box",
+              editionId: "card",
+              count: 1,
+              card: "Iono",
+            },
+          ],
+          onClose: vi.fn(),
+          onSent: vi.fn(),
+          onLoansChanged: vi.fn(),
+          onOpenLoan: vi.fn(),
+        }),
+      })
+    )
+  );
+  await flush();
+  await act(async () => {
+    button("Send it again").click();
+  });
+  await flush();
+  expect(statuses()).toContain(OLD_MESSAGE);
+  const select = host.querySelector("select")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLSelectElement.prototype,
+      "value"
+    )!.set!.call(select, "friend");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  f.server.loseNextAnswer = true;
+  await act(async () => {
+    button("Send offer of 1 card").click();
+  });
+  await flush();
+  expect(statuses().join(" ")).toContain(
+    "Your Lend Offer may not have been sent."
+  );
+  expect(host.textContent).not.toContain(OLD_MESSAGE);
+});
