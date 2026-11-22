@@ -169,14 +169,24 @@ for (const viewport of [
       const items = results(page).getByRole("listitem");
       await expect(items).toHaveCount(60);
       const first = items.nth(0).getByRole("button");
-      const stepped = items.nth(30).getByRole("button");
       const scroll = await page.evaluate(() => window.scrollY);
       const catalog = here(page);
       await press(first);
       const card = page.getByRole("dialog");
       await expect(card).toBeVisible();
       const next = card.getByRole("button", { name: "Next card" });
-      for (let step = 0; step < 30; step += 1) await press(next);
+      // Each step lands through the address, so wait for it: a tap while the last step is still on its way
+      // would repeat that step and stop short of the tile this test is about.
+      for (let step = 0; step < 30; step += 1) {
+        const before = here(page);
+        await press(next);
+        await expect.poll(() => here(page)).not.toBe(before);
+      }
+      const steppedEdition = new URL(page.url()).searchParams.get("edition");
+      expect(steppedEdition).not.toBeNull();
+      const stepped = results(page).locator(
+        `[data-edition-id="${steppedEdition}"] button`
+      );
       await expect(stepped).not.toBeInViewport();
 
       await page.goBack();
