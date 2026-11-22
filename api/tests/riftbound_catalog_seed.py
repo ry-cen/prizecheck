@@ -4,8 +4,10 @@ The seed writes the accepted generation straight into catalog_state.active_gener
 snapshot, not the ingestion acceptance workflow. As a command it acts only on a loopback database named tcg_rb_*.
 """
 import argparse
+import ipaddress
 import json
 import os
+import socket
 from uuid import uuid4
 
 import psycopg
@@ -78,13 +80,33 @@ def scenario(url: str, name: str) -> dict:
     return {'editions': {f'{card}|{number}': made[(card, number)]['editions'] for card, number in made}}
 
 
-def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, prefix: str = 'tcg_rb_') -> str:
+def loopback_address(host: str, getaddrinfo=socket.getaddrinfo) -> str:
+    """One numeric loopback address for `host`, resolved once; SystemExit unless every address it resolves to is loopback.
+
+    A name is looked up again by each connection, so the checked connection and the writes could reach different
+    servers. The caller pins the returned address as `hostaddr`."""
+    try:
+        found = {str(ipaddress.ip_address(host))}
+    except ValueError:
+        try:
+            found = {str(ipaddress.ip_address(info[4][0].split('%')[0]))
+                     for info in getaddrinfo(host, None, type=socket.SOCK_STREAM)}
+        except (OSError, ValueError):
+            raise SystemExit('refusing: the database host does not resolve to a loopback address') from None
+    if not found or not all(ipaddress.ip_address(address).is_loopback for address in found):
+        raise SystemExit('refusing: the database host does not resolve to a loopback address')
+    return sorted(found)[0]
+
+
+def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, prefix: str = 'tcg_rb_',
+                getaddrinfo=socket.getaddrinfo) -> str:
     """A connection string for the one database the stack created, built from libpq's own reading of the URL.
 
     Python's URL parser and libpq's disagree (a comma-separated host list, text after `#`), so the URL is parsed with
     libpq's parser and the effective parameters are checked: only user, password, host, port and dbname, exactly one
     loopback host, at most one numeric port, and a dbname that is exactly `expected`. The connection check and every
-    write then use a string rebuilt from those parameters, never the original text. The server's own address is not
+    write then use a string rebuilt from those parameters plus one numeric loopback `hostaddr` (the host is resolved here, once, and
+    every address it resolves to must be loopback), never the original text. The server's own address is not
     checked: a loopback-published container (the CI service) reports its bridge address, not 127.0.0.1."""
     if not expected.startswith(prefix):
         raise SystemExit('refusing: the expected database is not a tcg_rb_* name')
@@ -105,7 +127,7 @@ def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, pref
         raise SystemExit('refusing: the database URL does not name exactly one port')
     if params.get('dbname') != expected:
         raise SystemExit('refusing: the database URL does not name the expected database')
-    checked = make_conninfo(**params)
+    checked = make_conninfo(**params, hostaddr=loopback_address(params['host'], getaddrinfo))
     with connect(checked) as conn:
         (name,) = conn.execute('SELECT current_database()').fetchone()
     if name != expected:
