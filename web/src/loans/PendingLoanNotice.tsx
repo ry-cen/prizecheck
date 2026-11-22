@@ -12,10 +12,16 @@ export function PendingLoanNotice({
   view,
   onOutcome,
   autoFocus = false,
+  visible = true,
 }: {
   view: IntentView;
   onOutcome: (o: FlowOutcome) => void;
   autoFocus?: boolean;
+  /**
+   * False while the dialog around it is closed: nothing shows, but the notice stays mounted so a check already
+   * running still hands its outcome on.
+   */
+  visible?: boolean;
 }) {
   const { store, accountName } = useLoanRecovery();
   const guard = useFlowGuard();
@@ -24,8 +30,8 @@ export function PendingLoanNotice({
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState<string | null>(null);
   useEffect(() => {
-    if (autoFocus) first.current?.focus();
-  }, []);
+    if (autoFocus && visible) first.current?.focus();
+  }, [visible]);
   async function act(action: "replay" | "cancel" | "check") {
     if (running.current) return;
     const tok = guard.capture(),
@@ -43,6 +49,7 @@ export function PendingLoanNotice({
     setMessage(resultText(outcome));
     onOutcome(outcome);
   }
+  if (!visible) return null;
   const unknown = view.state === "unknown" && !view.waitingAccount;
   return (
     <div role="status" className="flex flex-col gap-2">

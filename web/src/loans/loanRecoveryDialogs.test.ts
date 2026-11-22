@@ -1,0 +1,248 @@
+// @vitest-environment jsdom
+import { act, createElement as h } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { BorrowedDialog } from "./BorrowedDialog";
+import { LendOfferDialog } from "./LendOfferDialog";
+import { LoanRecoveryProvider } from "./LoanRecovery";
+import { fixture, deferred } from "./testing/loanFakes";
+import { createLoanIntentStore, createTabContext } from "./loanIntents";
+import { indexLocations } from "../workspace/locationTree";
+
+vi.mock("../social_generated", async (original) => ({
+  ...(await original<typeof import("../social_generated")>()),
+  getBorrowed: vi.fn(),
+  getFriends: vi.fn(),
+}));
+import { getBorrowed, getFriends } from "../social_generated";
+
+const MOVE = "/api/loans/borrowed/move";
+const OFFER = "/api/loans/offers";
+const box = {
+  id: "box",
+  name: "Box",
+  kind: "storage",
+  parent_id: null,
+  version: 1,
+  depth: 0,
+};
+const card = {
+  loan_id: "loan",
+  edition_id: "card",
+  name: "Iono",
+  set_code: "PAL",
+  set_name: "Paldea Evolved",
+  collector_number: "185",
+  descriptor: {},
+  image_url: null,
+  location_id: "old-box",
+  location_name: "Old box",
+  copies: "1",
+  lender: "Misty W.",
+};
+
+let host: HTMLDivElement;
+let root: Root;
+let descriptors: (PropertyDescriptor | undefined)[];
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const proto = HTMLDialogElement.prototype;
+  descriptors = ["showModal", "close"].map((name) =>
+    Object.getOwnPropertyDescriptor(proto, name)
+  );
+  Object.defineProperty(proto, "showModal", {
+    configurable: true,
+    value() {
+      this.open = true;
+    },
+  });
+  Object.defineProperty(proto, "close", {
+    configurable: true,
+    value() {
+      this.open = false;
+    },
+  });
+  vi.mocked(getBorrowed).mockResolvedValue({ cards: [card], copies: "1" });
+  vi.mocked(getFriends).mockResolvedValue({ friends: [] } as never);
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  host.remove();
+  ["showModal", "close"].forEach((name, i) => {
+    const descriptor = descriptors[i];
+    if (descriptor)
+      Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+    else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
+  });
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
+
+const flush = () => act(async () => {});
+const button = (text: string) =>
+  [...host.querySelectorAll("button")].find((b) => b.textContent === text)!;
+const statuses = () =>
+  [...host.querySelectorAll('[role="status"]')]
+    .map((e) => e.textContent?.trim())
+    .filter(Boolean);
+const alerts = () =>
+  [...host.querySelectorAll('[role="alert"]')]
+    .map((e) => e.textContent?.trim())
+    .filter(Boolean);
+
+/** A saved intent whose answer was lost, so the dialog opens on a recovery notice. */
+async function lostIntent(
+  f: ReturnType<typeof fixture>,
+  tab: ReturnType<typeof createTabContext>,
+  draft: Parameters<ReturnType<typeof createLoanIntentStore>["send"]>[1]
+) {
+  const store = createLoanIntentStore("A", f.ports, tab);
+  try {
+    f.server.loseNextAnswer = true;
+    expect((await store.send(store.bind()!, draft)).kind).toBe("pending");
+  } finally {
+    store.dispose();
+  }
+}
+const lostMove = (
+  f: ReturnType<typeof fixture>,
+  tab: ReturnType<typeof createTabContext>
+) =>
+  lostIntent(f, tab, {
+    kind: "move_borrowed",
+    scope: "move_borrowed",
+    path: MOVE,
+    fields: {
+      loan_id: "loan",
+      edition_id: "card",
+      from_location_id: "old-box",
+      to_location_id: "box",
+      quantity: "1",
+    },
+  });
+
+function borrowed(
+  f: ReturnType<typeof fixture>,
+  tab: ReturnType<typeof createTabContext>,
+  onMoved: () => void
+) {
+  return (open: boolean) =>
+    h(LoanRecoveryProvider, {
+      accountId: "A",
+      accountName: "Ana",
+      ports: f.ports,
+      tab,
+      children: h(BorrowedDialog, {
+        open,
+        onClose: vi.fn(),
+        onMoved,
+        index: indexLocations([box]),
+      }),
+    });
+}
+
+it("Borrowed: a recovery that finishes after the dialog closed still refreshes Collection", async () => {
+  const f = fixture(),
+    tab = createTabContext(),
+    onMoved = vi.fn();
+  await lostMove(f, tab);
+  const render = borrowed(f, tab, onMoved);
+  await act(async () => root.render(render(true)));
+  const gate = deferred();
+  f.server.gate = (path) => (path === MOVE ? gate.promise : undefined);
+  await act(async () => {
+    button("Send it again").click();
+  });
+  expect(onMoved).not.toHaveBeenCalled();
+  await act(async () => root.render(render(false)));
+  expect(statuses()).toEqual([]);
+  await act(async () => {
+    gate.resolve();
+  });
+  await flush();
+  expect(onMoved).toHaveBeenCalledTimes(1);
+  expect(statuses()).toEqual([]);
+  expect(alerts()).toEqual([]);
+});
+
+it("Borrowed: a confirmed recovery says it was sent in a status, not an alert", async () => {
+  const f = fixture(),
+    tab = createTabContext(),
+    onMoved = vi.fn();
+  await lostMove(f, tab);
+  await act(async () => root.render(borrowed(f, tab, onMoved)(true)));
+  await act(async () => {
+    button("Send it again").click();
+  });
+  await flush();
+  expect(onMoved).toHaveBeenCalledTimes(1);
+  expect(statuses()).toContain("It was sent.");
+  expect(alerts()).toEqual([]);
+});
+
+it("Borrowed: an ordinary Move that lands does not say it was sent", async () => {
+  const f = fixture(),
+    tab = createTabContext(),
+    onMoved = vi.fn();
+  await act(async () => root.render(borrowed(f, tab, onMoved)(true)));
+  await flush();
+  await act(async () => {
+    button("Move…").click();
+  });
+  const select = host.querySelector("select")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLSelectElement.prototype,
+      "value"
+    )!.set!.call(select, "box");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await act(async () => {
+    button("Move").click();
+  });
+  await flush();
+  expect(f.server.effects.get("A")).toBe(1);
+  expect(onMoved).toHaveBeenCalledTimes(1);
+  expect(host.textContent).not.toContain("It was sent.");
+  expect(statuses().filter((t) => !t!.startsWith("Loading"))).toEqual([]);
+  expect(alerts()).toEqual([]);
+});
+
+it("Lend to a Friend: a confirmed recovery's note goes when the dialog closes", async () => {
+  const f = fixture(),
+    tab = createTabContext();
+  await lostIntent(f, tab, {
+    kind: "lend_offer",
+    scope: "lend_offer",
+    path: OFFER,
+    fields: { borrower_id: "friend", copies: [], return_by: null },
+  });
+  const render = (open: boolean) =>
+    h(LoanRecoveryProvider, {
+      accountId: "A",
+      accountName: "Ana",
+      ports: f.ports,
+      tab,
+      children: h(LendOfferDialog, {
+        open,
+        rows: [],
+        onClose: vi.fn(),
+        onSent: vi.fn(),
+        onLoansChanged: vi.fn(),
+        onOpenLoan: vi.fn(),
+      }),
+    });
+  await act(async () => root.render(render(true)));
+  await act(async () => {
+    button("Send it again").click();
+  });
+  await flush();
+  expect(statuses()).toContain("It was sent.");
+  await act(async () => root.render(render(false)));
+  expect(statuses()).toEqual([]);
+  expect(alerts()).toEqual([]);
+  expect(host.textContent).not.toContain("It was sent.");
+});

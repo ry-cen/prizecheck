@@ -95,7 +95,7 @@ it.each([
           .filter(Boolean);
       if (!initiallyOpen) expect(liveText()).toEqual([]);
       await act(async () => root.render(render(true)));
-      expect(host.querySelector('[role="status"]')?.textContent).toContain(
+      expect(liveText().join(" ")).toContain(
         kind === "lent" ? "Loading lent cards…" : "Loading borrowed cards…"
       );
       const recovery = () =>

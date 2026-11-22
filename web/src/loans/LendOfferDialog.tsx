@@ -255,6 +255,7 @@ export function LendOfferDialog({
             <PendingLoanNotice
               view={blocker}
               autoFocus
+              visible={open}
               onOutcome={(o) => outcome(o, false)}
             />
           )}
@@ -330,7 +331,7 @@ export function LendOfferDialog({
             role="status"
             className="m-0 text-meta text-text-muted empty:hidden"
           >
-            {notice}
+            {open ? notice : ""}
           </p>
           {retained && (
             <PendingLoanRequest

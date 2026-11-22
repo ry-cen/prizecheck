@@ -79,6 +79,8 @@ export function BorrowedDialog({
   const [copies, setCopies] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  // A neutral note: a recovery check confirmed the Move was sent.
+  const [notice, setNotice] = useState("");
   const durable = useDurableSend();
   const fence = durable.fence;
   const { blockerFor, accountName } = useLoanRecovery();
@@ -105,6 +107,7 @@ export function BorrowedDialog({
     setBusy(false);
     setMoving(null);
     setMessage("");
+    setNotice("");
   }, [open]);
 
   useEffect(() => {
@@ -146,9 +149,12 @@ export function BorrowedDialog({
     setDestination("");
     setCopies(Number(card.copies));
     setMessage("");
+    setNotice("");
   }
 
-  function outcome(o: FlowOutcome) {
+  /** `source` says whether the answer came from the Move itself or from a recovery check that confirmed it. */
+  function outcome(o: FlowOutcome, source: "send" | "recovery") {
+    setNotice("");
     if (o.kind === "done" || o.kind === "voided") onMoved();
     if (o.kind === "done") {
       focusNext.current = { to: "row", key: moving ?? "" };
@@ -156,7 +162,8 @@ export function BorrowedDialog({
       // Keep the row focus request until the fresh list is ready.
       setLoad({ kind: "loading" });
       setAttempt((n) => n + 1);
-      setMessage(resultText(o) ?? "");
+      setMessage("");
+      if (source === "recovery") setNotice(resultText(o) ?? "");
     } else if ((o.kind === "pending" || o.kind === "voided") && o.refusal) {
       const cause = refusalError(o.refusal);
       setMessage(moveMessage(cause));
@@ -187,6 +194,7 @@ export function BorrowedDialog({
     } satisfies Omit<MoveBorrowed, "account_id" | "idempotency_key">;
     setBusy(true);
     setMessage("");
+    setNotice("");
     const o = await durable.send({
       kind: "move_borrowed",
       scope: "move_borrowed",
@@ -195,7 +203,7 @@ export function BorrowedDialog({
     });
     if (!guard.live(tok)) return;
     setBusy(false);
-    if (o) outcome(o);
+    if (o) outcome(o, "send");
   }
 
   let body;
@@ -359,6 +367,9 @@ export function BorrowedDialog({
             {message}
           </p>
         )}
+        <p role="status" className="m-0 text-body text-text-muted empty:hidden">
+          {open ? notice : ""}
+        </p>
         {body}
         {retained && (
           <PendingLoanRequest
@@ -367,8 +378,13 @@ export function BorrowedDialog({
             onRetry={() => {}}
           />
         )}
-        {open && blocker && !busy && (
-          <PendingLoanNotice view={blocker} autoFocus onOutcome={outcome} />
+        {blocker && !busy && (
+          <PendingLoanNotice
+            view={blocker}
+            autoFocus
+            visible={open}
+            onOutcome={(o) => outcome(o, "recovery")}
+          />
         )}
       </div>
     </Dialog>
