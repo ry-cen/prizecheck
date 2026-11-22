@@ -21,7 +21,7 @@ jobs:
       github.event.repository.private == false &&
       (
         (github.event.pull_request.number == 671 && github.head_ref == 'feature/ios-shell-signin-prototype' && github.base_ref == 'dev') ||
-        (github.event.pull_request.number == 676 && github.head_ref == 'feature/ios-native-sign-in' && github.base_ref == 'feature/ios-shell-signin-prototype')
+        (github.event.pull_request.number == 676 && github.head_ref == 'feature/ios-native-sign-in' && github.base_ref == 'dev')
       ) &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: macos-15-intel
