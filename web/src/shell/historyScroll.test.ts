@@ -138,6 +138,47 @@ it("closeOverlay goes back once until the next popstate", async () => {
   }
 });
 
+it("closing a card after an Edition change goes back once to the page that opened it", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/catalog?q=Furret");
+  let route!: Route;
+  function View() {
+    route = useRoute();
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  const back = vi.spyOn(window.history, "back");
+  try {
+    await act(async () => root.render(createElement(View)));
+    const length = window.history.length;
+    await act(async () =>
+      route.navigate("/catalog?q=Furret&card=a&edition=one", {
+        overlay: true,
+        preserveScroll: true,
+      })
+    );
+    await act(async () =>
+      route.navigate("/catalog?q=Furret&card=a&edition=two", {
+        replace: true,
+        overlay: true,
+        preserveScroll: true,
+      })
+    );
+    expect(window.history.length).toBe(length + 1);
+    await act(async () => route.closeOverlay("/catalog?q=Furret"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(route.address).toBe("/catalog?q=Furret");
+    expect(window.location.search).toBe("?q=Furret");
+  } finally {
+    await act(async () => root.unmount());
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
 it("closeOverlay keeps its pending Back across a replacement of the same entry", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   window.history.replaceState(null, "", "/catalog?q=Abra");
