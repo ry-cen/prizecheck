@@ -346,7 +346,7 @@ test.describe("desktop", () => {
     const from = await center(tiles(page).first());
     const destination = page
       .getByRole("complementary", { name: "Sidebar" })
-      .getByRole("button", { name: "0 Area destination", exact: true });
+      .getByRole("link", { name: "0 Area destination", exact: true });
     const to = await center(destination);
     await page.mouse.move(from.x, from.y);
     await page.mouse.down();
@@ -617,7 +617,7 @@ test.describe("desktop", () => {
       .getByRole("complementary", { name: "Sidebar" })
       .getByRole("navigation", { name: "Locations" });
     await nav
-      .getByRole("button", { name: `Alpha ${suffix}`, exact: true })
+      .getByRole("link", { name: `Alpha ${suffix}`, exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       `Alpha ${suffix}`
@@ -625,7 +625,7 @@ test.describe("desktop", () => {
     await expect(bar(page)).toHaveCount(0);
     await tiles(page).nth(0).click();
     await expect(bar(page)).toContainText("1 copy selected");
-    await nav.getByRole("button", { name: "All owned", exact: true }).click();
+    await nav.getByRole("link", { name: "All owned", exact: true }).click();
     await expect(tiles(page)).toHaveCount(3);
     await expect(pressed(page)).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
@@ -899,7 +899,7 @@ test.describe("desktop", () => {
       .getByRole("complementary", { name: "Sidebar" })
       .getByRole("navigation", { name: "Locations" });
     await nav.getByRole("button", { name: shelf, exact: true }).click();
-    await nav.getByRole("button", { name: "Binder 2", exact: true }).click();
+    await nav.getByRole("link", { name: "Binder 2", exact: true }).click();
     await expect(tiles(page)).toHaveCount(2);
     await expect(panel).toHaveText("Select a card to see its details.");
     await tiles(page).nth(1).click();

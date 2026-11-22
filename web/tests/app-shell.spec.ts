@@ -132,7 +132,7 @@ async function editionOf(sourceId: string): Promise<string> {
 const mainViews = (page: Page) =>
   page.getByRole("navigation", { name: "Main views" });
 const tab = (page: Page, name: string) =>
-  mainViews(page).getByRole("button", { name, exact: true });
+  mainViews(page).getByRole("link", { name, exact: true });
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 const account = (page: Page) => page.getByRole("button", { name: "Account" });
 /** The shell's phone header: the banner holding the wordmark (the desktop header is hidden on a phone). */
@@ -290,7 +290,7 @@ test.describe("desktop", () => {
     page,
   }) => {
     await signIn(page);
-    await expect(mainViews(page).getByRole("button")).toHaveText([
+    await expect(mainViews(page).getByRole("link")).toHaveText([
       "Collection",
       "Decks",
       "Catalog",
@@ -413,7 +413,7 @@ test.describe("desktop", () => {
     await page
       .getByRole("complementary", { name: "Sidebar" })
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name: `Keep ${s}`, exact: true })
+      .getByRole("link", { name: `Keep ${s}`, exact: true })
       .click();
     await expect(counts(page, "123 copies · 2 editions")).toBeVisible();
 
@@ -475,7 +475,7 @@ test.describe("desktop", () => {
     await expect(
       page
         .getByRole("complementary", { name: "Sidebar" })
-        .getByRole("button", { name: `Keep ${s}`, exact: true })
+        .getByRole("link", { name: `Keep ${s}`, exact: true })
     ).toHaveAttribute("aria-current", "page");
 
     // Reload restores the Location and search; selection stays local to this visit.
@@ -607,7 +607,7 @@ test.describe("phone", () => {
     try {
       await page.reload();
       await expect(heading(page)).toHaveText("All owned");
-      await expect(mainViews(page).getByRole("button")).toHaveText([
+      await expect(mainViews(page).getByRole("link")).toHaveText([
         "Collection",
         "Decks",
         "Catalog",
@@ -740,7 +740,7 @@ test.describe("phone", () => {
 
     await drawer
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name: `0 Drawer ${s}`, exact: true })
+      .getByRole("link", { name: `0 Drawer ${s}`, exact: true })
       .tap();
     await expect(drawer).toBeHidden();
     await expect(heading(page)).toHaveText(`0 Drawer ${s}`);
@@ -1453,7 +1453,7 @@ test("App forwards Collection Location and search addresses through the Shell on
   await page.reload();
   await page
     .getByRole("navigation", { name: "Locations" })
-    .getByRole("button", { name, exact: true })
+    .getByRole("link", { name, exact: true })
     .click();
   await expect(heading(page)).toHaveText(name);
   await expect(page).toHaveURL(`${ORIGIN}/collection?location=${id}`);

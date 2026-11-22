@@ -133,7 +133,7 @@ test("protected destination restores the rendered view after sign-in, reload, an
   ).toBeVisible();
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Collection", exact: true })
+    .getByRole("link", { name: "Collection", exact: true })
     .click();
   await expect(page).toHaveURL(`${origin}/collection`);
   await page.goBack();
@@ -275,12 +275,12 @@ test("direct Collection deep link is preserved when signing in without an explic
   await expect(
     page
       .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: "Collection", exact: true })
+      .getByRole("link", { name: "Collection", exact: true })
   ).toHaveAttribute("aria-current", "page");
   await page.reload();
   await expect(
     page
       .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: "Collection", exact: true })
+      .getByRole("link", { name: "Collection", exact: true })
   ).toHaveAttribute("aria-current", "page");
 });

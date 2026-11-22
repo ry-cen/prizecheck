@@ -233,7 +233,7 @@ async function openInWorkspace(page: Page, name: string) {
   await expect(heading(page)).toHaveText("All owned");
   await page
     .getByRole("navigation", { name: "Locations" })
-    .getByRole("button", { name, exact: true })
+    .getByRole("link", { name, exact: true })
     .click();
   await expect(heading(page)).toHaveText(name);
 }
@@ -390,7 +390,7 @@ test("an open Deck's banner shows its cost and coverage and links to the deck bu
 
   await page
     .getByRole("navigation", { name: "Locations" })
-    .getByRole("button", { name: deck.name, exact: true })
+    .getByRole("link", { name: deck.name, exact: true })
     .click();
   await expect(heading(page)).toHaveText(deck.name);
   const cost = costOf(page);
@@ -415,7 +415,7 @@ test("an open Deck's banner shows its cost and coverage and links to the deck bu
 
   await page
     .getByRole("navigation", { name: "Locations" })
-    .getByRole("button", { name: "All owned", exact: true })
+    .getByRole("link", { name: "All owned", exact: true })
     .click();
   await expect(heading(page)).toHaveText("All owned");
   await expect(costOf(page)).toHaveCount(0);
@@ -640,7 +640,7 @@ test("a Collection link opens that Deck once, under a banner that links to the d
   await expect(
     page
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name: second.name, exact: true })
+      .getByRole("link", { name: second.name, exact: true })
   ).toHaveAttribute("aria-current", "page");
   await expect(costOf(page)).toContainText("$0.00 · No cards");
   const link = banner(page).getByRole("link", {
@@ -720,7 +720,7 @@ test("a link to a folder opens All owned, and a link to its child Deck opens the
   await expect(heading(page)).toHaveText(deck.name);
   const nav = page.getByRole("navigation", { name: "Locations" });
   await expect(
-    nav.getByRole("button", { name: deck.name, exact: true })
+    nav.getByRole("link", { name: deck.name, exact: true })
   ).toHaveAttribute("aria-current", "page");
   await expect(
     nav.getByRole("button", { name: folderName, exact: true })

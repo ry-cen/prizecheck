@@ -146,7 +146,7 @@ for (const viewport of [DESKTOP, PHONE]) {
     ).toBeVisible();
     await page
       .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: /^Loans/ })
+      .getByRole("link", { name: /^Loans/ })
       .click();
     await page.locator(`a[href="/loans/${loan.thread_id}"]`).click();
     await expect(page).toHaveURL(`${ORIGIN}/loans/${loan.thread_id}`);

@@ -121,7 +121,7 @@ promote({'card-1':'Correction Pikachu'})`,
       await page
         .getByRole("complementary", { name: "Sidebar" })
         .getByRole("navigation", { name: "Locations" })
-        .getByRole("button", { name: location, exact: true })
+        .getByRole("link", { name: location, exact: true })
         .click();
       await expect(
         page.getByRole("heading", { level: 1, name: location })

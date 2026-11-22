@@ -73,7 +73,7 @@ for (const [label, size] of [
       await page
         .getByRole("navigation", { name: "Main views" })
         .filter({ visible: true })
-        .getByRole("button", { name: "Collection", exact: true })
+        .getByRole("link", { name: "Collection", exact: true })
         .click();
       await expect(page).toHaveURL(`${ORIGIN}/collection`);
       await expect(

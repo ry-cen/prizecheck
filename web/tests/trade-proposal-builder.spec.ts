@@ -24,6 +24,52 @@ import { expectTouchTarget } from "./support/touch-target";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
+// Headless shell can leave native background tabs uncommitted (even before its
+// page event). Observe the trusted DOM event after React's handler instead:
+// the browser receives the exact anchor's default action, with no app interception.
+async function expectNativeActivation(
+  page: Page,
+  href: string | null,
+  click: () => Promise<unknown>,
+  type: "click" | "auxclick" = "click"
+) {
+  await page.bringToFront();
+  const [activation] = await Promise.all([
+    page.evaluate(
+      (type) =>
+        new Promise((resolve) => {
+          document.addEventListener(
+            type,
+            (event) => {
+              const target = event.target;
+              resolve({
+                href:
+                  target instanceof Element
+                    ? target.closest("a")?.getAttribute("href")
+                    : null,
+                defaultPrevented: event.defaultPrevented,
+                trusted: event.isTrusted,
+                button: event.button,
+                controlOrMeta: event.ctrlKey || event.metaKey,
+              });
+            },
+            { once: true }
+          );
+        }),
+      type
+    ),
+    click(),
+  ]);
+  expect(href).not.toBeNull();
+  expect(activation).toEqual({
+    href,
+    defaultPrevented: false,
+    trusted: true,
+    button: type === "auxclick" ? 1 : 0,
+    controlOrMeta: type === "click",
+  });
+}
+
 type Editions = Record<
   | "PAL 185"
   | "PAL 254"
@@ -147,7 +193,7 @@ const results = (page: Page) =>
 const tradesTab = (page: Page) =>
   page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Trades", exact: true });
+    .getByRole("link", { name: "Trades", exact: true });
 const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 
@@ -1030,6 +1076,41 @@ for (const viewport of [
     test.use({ viewport });
     for (const counter of [false, true]) {
       const builder = counter ? "Counter" : "new proposal";
+      if (viewport.width === 1280) {
+        test(`${builder}: a modified tab click keeps native activation and edits without asking`, async ({
+          page,
+          collectors,
+        }) => {
+          const { address, dialog } = await discardBuilder(
+            page,
+            collectors,
+            counter
+          );
+          await editDiscardCards(page, counter);
+          const collection = page
+            .getByRole("navigation", { name: "Main views" })
+            .getByRole("link", { name: "Collection", exact: true });
+          const href = await collection.getAttribute("href");
+          await expect(collection).toHaveAttribute("href", "/collection");
+          await expectNativeActivation(page, href, () =>
+            collection.click({ modifiers: ["ControlOrMeta"] })
+          );
+          await expect(page).toHaveURL(address);
+          await expect(group(page, "Arven (SVI 166) you get")).toContainText(
+            counter ? "2" : "1"
+          );
+          await expect(dialog).toHaveCount(0);
+          await page.bringToFront();
+          await collection.focus();
+          await collection.press("Enter");
+          await expect(dialog).toBeVisible();
+          await dialog
+            .getByRole("button", { name: "Keep editing", exact: true })
+            .click();
+          await expect(collection).toBeFocused();
+          await expect(page).toHaveURL(address);
+        });
+      }
       test(`${builder}: real reload dismissal keeps edits and acceptance discards them`, async ({
         page,
         collectors,
@@ -1101,7 +1182,7 @@ for (const viewport of [
           await expect(lists(page).get).toHaveText("Nothing yet");
           await page
             .getByRole("navigation", { name: "Main views" })
-            .getByRole("button", { name: "Collection", exact: true })
+            .getByRole("link", { name: "Collection", exact: true })
             .click();
           await expect(dialog).toBeVisible();
           await dialog
@@ -1116,7 +1197,7 @@ for (const viewport of [
         } else {
           await page
             .getByRole("navigation", { name: "Main views" })
-            .getByRole("button", { name: "Collection", exact: true })
+            .getByRole("link", { name: "Collection", exact: true })
             .click();
           await expect(page).toHaveURL(`${ORIGIN}/collection`);
           await expect(dialog).toHaveCount(0);
@@ -1137,7 +1218,7 @@ for (const viewport of [
             if (direction === "Forward") {
               await page
                 .getByRole("navigation", { name: "Main views" })
-                .getByRole("button", { name: "Collection", exact: true })
+                .getByRole("link", { name: "Collection", exact: true })
                 .click();
               await expect(page).toHaveURL(`${ORIGIN}/collection`);
               await page.goBack();
@@ -1304,7 +1385,7 @@ for (const viewport of [
           });
           const outside = page
             .getByRole("navigation", { name: "Main views" })
-            .getByRole("button", { name: /^Trades(?:,|$)/ });
+            .getByRole("link", { name: /^Trades(?:,|$)/ });
           let target: Locator;
           try {
             await send.click();

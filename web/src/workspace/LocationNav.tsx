@@ -1,3 +1,4 @@
+import { isPlainClick } from "../shell/appLink";
 import React from "react";
 import {
   ChevronDown,
@@ -27,6 +28,7 @@ type Props = {
   view: WorkspaceView;
   expanded: ReadonlySet<string>;
   onToggle: (folderId: string) => void;
+  hrefFor: (view: WorkspaceView) => string;
   onChoose: (view: WorkspaceView) => void;
   /** Distinguishes element ids when the tree renders twice (sidebar and drawer). */
   idPrefix: string;
@@ -115,6 +117,7 @@ export function LocationNav({
   expanded,
   onToggle,
   onChoose,
+  hrefFor,
   idPrefix,
   onAddChild,
   onOpenSettings,
@@ -200,58 +203,91 @@ export function LocationNav({
         </button>
       );
     const toolClass = `${TOOL_SIDEBAR} ${active ? "bg-surface-selected" : "bg-surface-raised [@media(hover:hover)]:opacity-0 group-hover/entry:opacity-100 group-has-[:focus-visible]/entry:opacity-100"}`;
+    const rowContents = (
+      <>
+        <span
+          className="inline-flex w-3 shrink-0 justify-center text-text-subtle"
+          aria-hidden="true"
+        >
+          {folder && (
+            <Icon icon={open ? ChevronDown : ChevronRight} size={12} />
+          )}
+        </span>
+        <span className="min-w-0 truncate">{node.name}</span>
+        {hidden && (
+          <span
+            className="inline-flex shrink-0 text-text-subtle"
+            title={hidden}
+            data-testid="hidden-mark"
+          >
+            <Icon icon={EyeOff} size={12} />
+          </span>
+        )}
+        {forTrade && (
+          <span
+            className="min-w-0 shrink-[999] truncate text-meta text-text-subtle phone:shrink-0 phone:whitespace-nowrap"
+            title={forTrade}
+            aria-hidden="true"
+            data-testid="for-trade-mark"
+          >
+            For trade
+          </span>
+        )}
+      </>
+    );
     return (
       <li key={node.id}>
         <div className="group/entry relative flex min-w-0 items-center">
-          <button
-            type="button"
-            id={`${idPrefix}-row-${node.id}`}
-            className={rowClass({
-              touch,
-              current: active,
-              folder,
-              droppable,
-              over: droppable && drop?.over === node.id,
-              tools: tools as 0 | 1 | 2,
-            })}
-            data-drop-target={droppable ? node.id : undefined}
-            style={indent(level)}
-            title={path}
-            aria-expanded={folder ? open : undefined}
-            aria-controls={folder && open ? listId : undefined}
-            aria-current={active ? "page" : undefined}
-            aria-describedby={describedBy}
-            onClick={() => (folder ? onToggle(node.id) : onChoose(node.id))}
-          >
-            <span
-              className="inline-flex w-3 shrink-0 justify-center text-text-subtle"
-              aria-hidden="true"
+          {folder ? (
+            <button
+              type="button"
+              id={`${idPrefix}-row-${node.id}`}
+              className={rowClass({
+                touch,
+                current: active,
+                folder,
+                droppable,
+                over: droppable && drop?.over === node.id,
+                tools: tools as 0 | 1 | 2,
+              })}
+              data-drop-target={droppable ? node.id : undefined}
+              style={indent(level)}
+              title={path}
+              aria-current={active ? "page" : undefined}
+              aria-describedby={describedBy}
+              aria-expanded={open}
+              aria-controls={open ? listId : undefined}
+              onClick={() => onToggle(node.id)}
             >
-              {folder && (
-                <Icon icon={open ? ChevronDown : ChevronRight} size={12} />
-              )}
-            </span>
-            <span className="min-w-0 truncate">{node.name}</span>
-            {hidden && (
-              <span
-                className="inline-flex shrink-0 text-text-subtle"
-                title={hidden}
-                data-testid="hidden-mark"
-              >
-                <Icon icon={EyeOff} size={12} />
-              </span>
-            )}
-            {forTrade && (
-              <span
-                className="min-w-0 shrink-[999] truncate text-meta text-text-subtle phone:shrink-0 phone:whitespace-nowrap"
-                title={forTrade}
-                aria-hidden="true"
-                data-testid="for-trade-mark"
-              >
-                For trade
-              </span>
-            )}
-          </button>
+              {rowContents}
+            </button>
+          ) : (
+            <a
+              href={hrefFor(node.id)}
+              draggable={false}
+              id={`${idPrefix}-row-${node.id}`}
+              className={`${rowClass({
+                touch,
+                current: active,
+                folder,
+                droppable,
+                over: droppable && drop?.over === node.id,
+                tools: tools as 0 | 1 | 2,
+              })} no-underline`}
+              data-drop-target={droppable ? node.id : undefined}
+              style={indent(level)}
+              title={path}
+              aria-current={active ? "page" : undefined}
+              aria-describedby={describedBy}
+              onClick={(event) => {
+                if (!isPlainClick(event)) return;
+                event.preventDefault();
+                onChoose(node.id);
+              }}
+            >
+              {rowContents}
+            </a>
+          )}
           {hiddenId && (
             <span id={hiddenId} hidden>
               {hidden}
@@ -295,24 +331,29 @@ export function LocationNav({
     >
       <ul className={LIST}>
         <li>
-          <button
-            type="button"
+          <a
+            href={hrefFor("all")}
+            draggable={false}
             id={`${idPrefix}-all`}
-            className={rowClass({
+            className={`${rowClass({
               touch,
               current: view === "all",
               folder: false,
               droppable: false,
               over: false,
               tools: 0,
-            })}
+            })} no-underline`}
             style={indent(0)}
             aria-current={view === "all" ? "page" : undefined}
-            onClick={() => onChoose("all")}
+            onClick={(event) => {
+              if (!isPlainClick(event)) return;
+              event.preventDefault();
+              onChoose("all");
+            }}
           >
             <span className="inline-flex w-3 shrink-0" aria-hidden="true" />
             <span className="min-w-0 truncate">All owned</span>
-          </button>
+          </a>
         </li>
         {listEntry("Lent out", lent)}
         {listEntry("Borrowed", borrowed)}

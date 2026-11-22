@@ -273,7 +273,7 @@ test.describe("desktop", () => {
     await expectAccessible(page, "names, prices and filters");
 
     await sidebar(page)
-      .getByRole("button", { name: `0 Access ${s}`, exact: true })
+      .getByRole("link", { name: `0 Access ${s}`, exact: true })
       .click();
     await expect(tiles(page)).toHaveCount(4);
     await tiles(page).nth(0).click();
@@ -366,7 +366,7 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
 
     await sidebar(page)
-      .getByRole("button", { name: `0 Deck ${s}`, exact: true })
+      .getByRole("link", { name: `0 Deck ${s}`, exact: true })
       .click();
     await expect(
       page.getByRole("region", { name: "Estimated Deck Cost" })
@@ -501,7 +501,7 @@ test.describe("desktop", () => {
     await addCopies(page, live, await editionOf("card-1"), 3);
     await page.reload();
     await sidebar(page)
-      .getByRole("button", { name: `0 Live ${s}`, exact: true })
+      .getByRole("link", { name: `0 Live ${s}`, exact: true })
       .click();
     await expect(tiles(page)).toHaveCount(3);
 
@@ -559,7 +559,7 @@ test.describe("desktop", () => {
     await addCopies(page, deck, abra, 1);
     await page.reload();
     await sidebar(page)
-      .getByRole("button", { name: `0 Target ${s}`, exact: true })
+      .getByRole("link", { name: `0 Target ${s}`, exact: true })
       .click();
     await expect(tiles(page)).toHaveCount(3);
     await page.getByRole("button", { name: "Names", exact: true }).click();
@@ -571,7 +571,7 @@ test.describe("desktop", () => {
     await bar(page).getByRole("button", { name: "Actions" }).click();
 
     await sidebar(page)
-      .getByRole("button", { name: `0 Deck ${s}`, exact: true })
+      .getByRole("link", { name: `0 Deck ${s}`, exact: true })
       .click();
     await expect(
       page.getByRole("region", { name: "Estimated Deck Cost" })
@@ -645,7 +645,7 @@ test.describe("mobile", () => {
     await expectAccessible(page, "Locations drawer");
     await drawer
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name: `0 Phone ${s}`, exact: true })
+      .getByRole("link", { name: `0 Phone ${s}`, exact: true })
       .tap();
     await expect(tiles(page)).toHaveCount(3);
 
@@ -682,7 +682,7 @@ test.describe("mobile", () => {
     await page.getByRole("button", { name: "Open locations" }).tap();
     await drawer
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name: `0 Touch ${s}`, exact: true })
+      .getByRole("link", { name: `0 Touch ${s}`, exact: true })
       .tap();
     await expect(tiles(page)).toHaveCount(3);
 
@@ -896,14 +896,14 @@ collectorTest(
     await lender.page.goto(`${LOANS_ORIGIN}/collection`);
     const tab = lender.page
       .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: /^Loans/ });
+      .getByRole("link", { name: /^Loans/ });
     await expect(tab).toHaveAccessibleName(
       "Loans, 12 need you: 12 waiting on you, 0 with new messages"
     );
     await expect(
       lender.page
         .getByRole("navigation", { name: "Main views" })
-        .getByRole("button", { name: /^Trades/ })
+        .getByRole("link", { name: /^Trades/ })
     ).toHaveAccessibleName(
       "Trades, 12 need you: 12 waiting on you, 0 with new messages"
     );

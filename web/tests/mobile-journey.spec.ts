@@ -37,7 +37,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
     await signInAsOwner(page, "/collection");
     await page
       .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: "Decks", exact: true })
+      .getByRole("link", { name: "Decks", exact: true })
       .tap();
     const name = "Mobile private " + randomUUID().slice(0, 8);
     await page.getByLabel("Deck name").fill(name);

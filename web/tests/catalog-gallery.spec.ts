@@ -96,7 +96,7 @@ const status = (page: Page) => page.getByRole("main").getByRole("status");
 const mainTab = (page: Page, name: string) =>
   page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name, exact: true });
+    .getByRole("link", { name, exact: true });
 
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });

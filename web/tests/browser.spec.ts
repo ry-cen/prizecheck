@@ -17,7 +17,7 @@ test("owner signs in, sees Unsorted, follows safe destination, then signs out", 
   await expect(
     page
       .getByRole("navigation", { name: "Locations" })
-      .getByRole("button", { name: "Unsorted", exact: true })
+      .getByRole("link", { name: "Unsorted", exact: true })
       .first()
   ).toBeVisible();
   await page.reload();

@@ -152,7 +152,7 @@ async function forTradeBinder(
 const tradesTab = (page: Page) =>
   page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Trades", exact: true });
+    .getByRole("link", { name: "Trades", exact: true });
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 const noArtwork = (page: Page) =>
   page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => route.abort());
