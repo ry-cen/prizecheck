@@ -433,6 +433,50 @@ for (const viewport of [DESKTOP, PHONE]) {
   });
 }
 
+test.describe("Friends dialog opened from Collection on a phone", () => {
+  test.use({ viewport: PHONE, hasTouch: true });
+
+  test("Back from a Friend's page returns focus to Collection's Friends button", async ({
+    page,
+    collectors,
+  }) => {
+    promoteCatalog({ "card-1": "Phone Abra" });
+    const misty = await collectors.signIn({ next: "/decks" });
+    const handle = await nameCollector(misty.page, "Misty W");
+    await signInAsOwner(page, "/collection");
+    await nameCollector(page, "Ash K");
+    const mistyId = (await api(misty.page, "GET", "/auth/session")).userId;
+    const ashId = (await api(page, "GET", "/auth/session")).userId;
+    await api(page, "POST", "/api/social/friend-requests", {
+      collector_id: mistyId,
+      idempotency_key: randomUUID(),
+    });
+    await api(
+      misty.page,
+      "POST",
+      `/api/social/friend-requests/${ashId}/accept`,
+      { idempotency_key: randomUUID() }
+    );
+    await page.reload();
+    const friends = page
+      .getByRole("button", { name: "Friends", exact: true })
+      .filter({ visible: true })
+      .first();
+    await friends.click();
+    await page
+      .getByRole("dialog", { name: "Friends" })
+      .getByRole("button", { name: "Open Misty W's Collection" })
+      .click();
+    await expect(page).toHaveURL(`${ORIGIN}/friends/${handle}`);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Misty W" })
+    ).toBeFocused();
+    await page.goBack();
+    await expect(page).toHaveURL(`${ORIGIN}/collection`);
+    await expect(friends).toBeFocused();
+  });
+});
+
 for (const viewport of [DESKTOP, PHONE]) {
   test.describe(`unknown addresses at ${viewport.width}`, () => {
     test.use({ viewport, hasTouch: viewport.width === 375 });

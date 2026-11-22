@@ -1,3 +1,4 @@
+import { modalOpenerOf } from "../ui/modalOpener";
 import { RESTORE_WINDOW_MS } from "./restorePageScroll";
 
 /** The control that had focus when a history entry was left: the element itself, and how to find its remounted twin. */
@@ -8,16 +9,17 @@ export type SavedFocus = {
   name: string;
   /** A closing dialog can return to a persistent shell control outside the page. */
   outsidePage?: boolean;
+  /** The control that opened the modal dialog this focus was in, when it was in one. */
+  modalOpener?: Element;
 };
 
 export type PageEntryFocus = {
   kind: "heading";
   state: "pending" | "completed" | "cancelled";
   opener: Element | null;
-  /** Focus a closing modal dialog left outside the page on the request's first attempt; it counts like the opener. */
-  inherited: Element | null;
-  /** Set once the first attempt has been made; a later attach never gets a fresh exemption. */
-  attempted: boolean;
+  /** The opener of the modal dialog this navigation started in, or null when it started outside one. Focus the
+   * closing dialog returns there counts like `opener`; focus anywhere else still cancels. */
+  modalOpener: Element | null;
   historyFocus?: SavedFocus;
 };
 
@@ -39,12 +41,25 @@ export function createPageEntryFocus(): PageEntryFocus {
       if (next !== "pending") entryFocusCleanup.get(request)?.();
     },
     opener: document.activeElement,
-    inherited: null,
-    attempted: false,
+    modalOpener: null,
     historyFocus: document.activeElement
       ? modalHistoryFocus.get(document.activeElement)
       : undefined,
   };
+  const modalOpener = request.historyFocus?.modalOpener;
+  if (request.historyFocus && modalOpener) {
+    request.modalOpener = modalOpener;
+    // The dialog control saved on departure is about to disappear. Back returns to the dialog's own opener,
+    // named explicitly, even if the page hides it before the dialog could return focus to it.
+    Object.assign(request.historyFocus, {
+      element: modalOpener,
+      tag: modalOpener.tagName,
+      href: modalOpener.getAttribute("href"),
+      name: nameOf(modalOpener),
+      outsidePage: true,
+      modalOpener: undefined,
+    });
+  }
   return request;
 }
 
@@ -71,8 +86,11 @@ export function saveFocus(): SavedFocus | null {
     href: element.getAttribute("href"),
     name: nameOf(element),
   };
-  if (element.closest("dialog[open], [aria-modal='true']"))
+  const modalOpener = modalOpenerOf(element);
+  if (modalOpener) {
+    saved.modalOpener = modalOpener;
     modalHistoryFocus.set(element, saved);
+  }
   return saved;
 }
 
@@ -133,37 +151,13 @@ function focusPageEntry(
       return;
     }
     const active = document.activeElement;
-    const first = !request.attempted;
-    request.attempted = true;
-    // A navigation started inside a modal dialog: the dialog's close returns focus to its opener (outside the
-    // page) in the same commit. That focus is the navigation's own leftover, not the collector's choice. Focus
-    // inside a dialog that is still open is never taken.
-    if (
-      first &&
-      active &&
-      active !== document.body &&
-      !container.contains(active) &&
-      !active.closest("dialog[open], [aria-modal='true']") &&
-      !(request.opener?.isConnected && active === request.opener)
-    ) {
-      request.inherited = active;
-      // The dialog control saved on departure is about to disappear. Back should return to
-      // the same persistent opener the closing dialog returned focus to, before arrival focuses H1.
-      if (request.historyFocus && !request.opener?.isConnected) {
-        Object.assign(request.historyFocus, {
-          element: active,
-          tag: active.tagName,
-          href: active.getAttribute("href"),
-          name: nameOf(active),
-          outsidePage: true,
-        });
-      }
-    }
+    // Focus on the opener of the modal dialog this navigation started in is the dialog's own return, not the
+    // collector's choice. Nothing else is inferred: any other focus move cancels.
     if (
       active &&
       active !== document.body &&
       !(request.opener?.isConnected && active === request.opener) &&
-      active !== request.inherited
+      active !== request.modalOpener
     ) {
       cancel();
       return;
