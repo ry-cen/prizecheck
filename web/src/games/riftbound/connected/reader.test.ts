@@ -141,6 +141,49 @@ describe("connected reader", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
+  it("counts code points, as the API does, for the search limit", async () => {
+    const astral = "\u{1F409}"; // two UTF-16 code units, one code point
+    const at = stub(reply(body()));
+    await connectedReader().list(
+      { ...emptyQuery, search: astral.repeat(120) },
+      signal()
+    );
+    expect(at).toHaveBeenCalledTimes(1);
+    const over = stub();
+    const run = () =>
+      connectedReader().list(
+        { ...emptyQuery, search: astral.repeat(121) },
+        signal()
+      );
+    expect(await kind(run)).toBe("invalid");
+    expect(over).not.toHaveBeenCalled();
+    const ascii = stub(reply(body()));
+    await connectedReader().list(
+      { ...emptyQuery, search: "x".repeat(120) },
+      signal()
+    );
+    expect(ascii).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts code points for the set limit", async () => {
+    const astral = "\u{1F409}";
+    const fn = stub(reply(body()), reply(body()), reply(body()), reply(body()));
+    const reader = connectedReader();
+    await reader.list({ ...emptyQuery, set: astral.repeat(80) }, signal());
+    await reader.list({ ...emptyQuery, set: astral.repeat(81) }, signal());
+    await reader.list({ ...emptyQuery, set: "x".repeat(80) }, signal());
+    await reader.list({ ...emptyQuery, set: "x".repeat(81) }, signal());
+    const [a, b, c, d] = urls(fn);
+    expect(a).toBe(
+      `/api/riftbound/catalog/editions?set=${encodeURIComponent(astral.repeat(80))}&page=1`
+    );
+    expect(b).toBe("/api/riftbound/catalog/editions?page=1");
+    expect(c).toBe(
+      `/api/riftbound/catalog/editions?set=${"x".repeat(80)}&page=1`
+    );
+    expect(d).toBe("/api/riftbound/catalog/editions?page=1");
+  });
+
   it("maps statuses", async () => {
     const reader = connectedReader();
     const calls: Record<string, () => Promise<unknown>> = {

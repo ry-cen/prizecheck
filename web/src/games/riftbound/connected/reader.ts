@@ -70,6 +70,12 @@ async function guarded<T>(run: () => Promise<T>, signal: AbortSignal) {
 }
 
 const hasNul = (value: string) => value.includes("\u0000");
+// The API counts Unicode code points (Pydantic max_length), not UTF-16 code units, so an astral character is one.
+const length = (value: string) => {
+  let count = 0;
+  for (const _ of value) count += 1;
+  return count;
+};
 
 export function connectedReader(): CatalogReader {
   return {
@@ -87,10 +93,10 @@ export function connectedReader(): CatalogReader {
     list: (query: Query, signal): Promise<Page> =>
       guarded(async () => {
         const search = query.search.replaceAll("\u0000", "").trim();
-        if (search.length > MAX_SEARCH) throw new CatalogReadError("invalid");
+        if (length(search) > MAX_SEARCH) throw new CatalogReadError("invalid");
         const set =
           query.set.length > 0 &&
-          query.set.length <= MAX_SET &&
+          length(query.set) <= MAX_SET &&
           !hasNul(query.set)
             ? query.set
             : undefined;
