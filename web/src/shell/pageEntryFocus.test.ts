@@ -2,7 +2,7 @@
 import { act, createElement as h, useLayoutEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { restorePageFocus } from "./restorePageFocus";
+import { createPageEntryFocus, restorePageFocus } from "./restorePageFocus";
 import { useRoute, type Route } from "./useRoute";
 
 for (const late of [false, true])
@@ -326,4 +326,48 @@ it("Back restores the originating Deck link after its descriptive price facts re
     host.remove();
     vi.unstubAllGlobals();
   }
+});
+
+it("heading focus is not taken from an open modal dialog that holds focus", async () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const modal = document.createElement("div");
+  modal.setAttribute("aria-modal", "true");
+  const inside = document.createElement("button");
+  modal.append(inside);
+  document.body.append(modal);
+  // The navigation was started from the page; a modal dialog opened since holds focus on the first attempt.
+  const request = createPageEntryFocus();
+  inside.focus();
+  const stop = restorePageFocus(page, request);
+  page.innerHTML = "<h1>Friend</h1>";
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(document.activeElement).toBe(inside);
+  stop();
+  modal.remove();
+  page.remove();
+});
+
+it("a re-attached request gets no fresh exemption for focus the collector moved outside the page", async () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const outside = document.createElement("button");
+  const moved = document.createElement("button");
+  document.body.append(outside, moved);
+  outside.focus();
+  const request = createPageEntryFocus();
+  // First attach: the leftover focus is the navigation's own, so the request stays pending.
+  restorePageFocus(page, request)();
+  expect(request.state).toBe("pending");
+  // The collector moves focus elsewhere before the Shell effect reruns.
+  moved.focus();
+  const stop = restorePageFocus(page, request);
+  expect(request.state).toBe("cancelled");
+  page.innerHTML = "<h1>Friend</h1>";
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(document.activeElement).toBe(moved);
+  stop();
+  outside.remove();
+  moved.remove();
+  page.remove();
 });

@@ -1,3 +1,4 @@
+import { modalOpenerOf } from "../ui/modalOpener";
 import { RESTORE_WINDOW_MS } from "./restorePageScroll";
 
 /** The control that had focus when a history entry was left: the element itself, and how to find its remounted twin. */
@@ -6,13 +7,23 @@ export type SavedFocus = {
   tag: string;
   href: string | null;
   name: string;
+  /** A closing dialog can return to a persistent shell control outside the page. */
+  outsidePage?: boolean;
+  /** The control that opened the modal dialog this focus was in, when it was in one. */
+  modalOpener?: Element;
 };
 
 export type PageEntryFocus = {
   kind: "heading";
   state: "pending" | "completed" | "cancelled";
   opener: Element | null;
+  /** The opener of the modal dialog this navigation started in, or null when it started outside one. Focus the
+   * closing dialog returns there counts like `opener`; focus anywhere else still cancels. */
+  modalOpener: Element | null;
+  historyFocus?: SavedFocus;
 };
+
+const modalHistoryFocus = new WeakMap<Element, SavedFocus>();
 
 const entryFocusCleanup = new WeakMap<PageEntryFocus, () => void>();
 
@@ -30,7 +41,25 @@ export function createPageEntryFocus(): PageEntryFocus {
       if (next !== "pending") entryFocusCleanup.get(request)?.();
     },
     opener: document.activeElement,
+    modalOpener: null,
+    historyFocus: document.activeElement
+      ? modalHistoryFocus.get(document.activeElement)
+      : undefined,
   };
+  const modalOpener = request.historyFocus?.modalOpener;
+  if (request.historyFocus && modalOpener) {
+    request.modalOpener = modalOpener;
+    // The dialog control saved on departure is about to disappear. Back returns to the dialog's own opener,
+    // named explicitly, even if the page hides it before the dialog could return focus to it.
+    Object.assign(request.historyFocus, {
+      element: modalOpener,
+      tag: modalOpener.tagName,
+      href: modalOpener.getAttribute("href"),
+      name: nameOf(modalOpener),
+      outsidePage: true,
+      modalOpener: undefined,
+    });
+  }
   return request;
 }
 
@@ -51,16 +80,25 @@ const nameOf = (element: Element) => {
 export function saveFocus(): SavedFocus | null {
   const element = document.activeElement;
   if (!element || element === document.body) return null;
-  return {
+  const saved: SavedFocus = {
     element,
     tag: element.tagName,
     href: element.getAttribute("href"),
     name: nameOf(element),
   };
+  const modalOpener = modalOpenerOf(element);
+  if (modalOpener) {
+    saved.modalOpener = modalOpener;
+    modalHistoryFocus.set(element, saved);
+  }
+  return saved;
 }
 
 function find(container: HTMLElement, saved: SavedFocus): HTMLElement | null {
-  if (saved.element.isConnected && container.contains(saved.element))
+  if (
+    saved.element.isConnected &&
+    (container.contains(saved.element) || saved.outsidePage)
+  )
     return saved.element as HTMLElement;
   if (!saved.name) return null;
   const twins = [...container.querySelectorAll<HTMLElement>(saved.tag)].filter(
@@ -113,10 +151,13 @@ function focusPageEntry(
       return;
     }
     const active = document.activeElement;
+    // Focus on the opener of the modal dialog this navigation started in is the dialog's own return, not the
+    // collector's choice. Nothing else is inferred: any other focus move cancels.
     if (
       active &&
       active !== document.body &&
-      !(request.opener?.isConnected && active === request.opener)
+      !(request.opener?.isConnected && active === request.opener) &&
+      active !== request.modalOpener
     ) {
       cancel();
       return;

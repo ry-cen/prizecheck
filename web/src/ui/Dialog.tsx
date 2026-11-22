@@ -1,5 +1,6 @@
 import React, { useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { noteModalOpener } from "./modalOpener";
 import { focusableIn } from "./focusable";
 import { Icon } from "./Icon";
 import { ScrollArea } from "./ScrollArea";
@@ -108,6 +109,7 @@ export function Dialog({
       (document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null);
+    if (returnTo) noteModalOpener(dialog, returnTo);
     if (!dialog.open) dialog.showModal();
     const first =
       dialog.querySelector<HTMLElement>("[autofocus], [data-autofocus]") ??

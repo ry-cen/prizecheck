@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { noteModalOpener } from "../ui/modalOpener";
 import { afterEach, expect, it, vi } from "vitest";
 import { RESTORE_WINDOW_MS } from "./restorePageScroll";
 import {
@@ -322,4 +323,114 @@ it("restores the Deck link when its aria-hidden price facts change after Back", 
   } finally {
     stop();
   }
+});
+
+it("heading focus survives focus a closing dialog returned outside the page", async () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  const modal = document.createElement("dialog");
+  modal.setAttribute("open", "");
+  const inside = document.createElement("button");
+  modal.append(inside);
+  document.body.append(modal);
+  noteModalOpener(modal, outside);
+  inside.focus();
+  saveFocus();
+  const request = createPageEntryFocus();
+  // The dialog's close returned focus to its opener, outside the page, with no focusin after the attach.
+  modal.remove();
+  outside.focus();
+  const stop = restorePageFocus(page, request);
+  page.innerHTML = "<h1>Friend</h1>";
+  await flush();
+  expect(document.activeElement).toBe(page.firstChild);
+  stop();
+});
+
+it("a focusin elsewhere after the first attempt still cancels", async () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const outside = document.createElement("button");
+  const other = document.createElement("button");
+  document.body.append(outside, other);
+  outside.focus();
+  const stop = restorePageFocus(page, createPageEntryFocus());
+  other.focus();
+  page.innerHTML = "<h1>Friend</h1>";
+  await flush();
+  expect(document.activeElement).toBe(other);
+  stop();
+});
+
+it("Back restores a closing dialog's persistent opener after arrival focuses the heading", () => {
+  const shell = document.createElement("div");
+  const opener = document.createElement("button");
+  opener.textContent = "Friends";
+  const modal = document.createElement("dialog");
+  modal.setAttribute("open", "");
+  const inside = document.createElement("button");
+  inside.textContent = "Open Friend's Collection";
+  modal.append(inside);
+  const page = document.createElement("main");
+  shell.append(opener, modal, page);
+  document.body.append(shell);
+  noteModalOpener(modal, opener);
+  inside.focus();
+  const saved = saveFocus();
+  const request = createPageEntryFocus();
+  modal.remove();
+  opener.focus();
+  page.innerHTML = "<h1>Friend</h1>";
+  restorePageFocus(page, request)();
+  expect(document.activeElement).toBe(page.querySelector("h1"));
+  page.replaceChildren();
+  restorePageFocus(page, saved)();
+  expect(document.activeElement).toBe(opener);
+});
+
+it("Back restores the dialog's opener even when the page hid it before the dialog could return focus", () => {
+  const shell = document.createElement("div");
+  const opener = document.createElement("button");
+  opener.textContent = "Friends";
+  const modal = document.createElement("dialog");
+  modal.setAttribute("open", "");
+  const inside = document.createElement("button");
+  modal.append(inside);
+  const page = document.createElement("main");
+  shell.append(opener, modal, page);
+  document.body.append(shell);
+  noteModalOpener(modal, opener);
+  inside.focus();
+  const saved = saveFocus();
+  const request = createPageEntryFocus();
+  // A phone hides the opener on the new page: the closing dialog has nowhere to return focus.
+  modal.remove();
+  opener.hidden = true;
+  page.innerHTML = "<h1>Friend</h1>";
+  restorePageFocus(page, request)();
+  expect(document.activeElement).toBe(page.querySelector("h1"));
+  opener.hidden = false;
+  page.replaceChildren();
+  restorePageFocus(page, saved)();
+  expect(document.activeElement).toBe(opener);
+});
+
+it("focus moved before the first attempt cancels heading focus when the navigation started outside a modal", async () => {
+  const page = document.createElement("div");
+  document.body.append(page);
+  const started = document.createElement("button");
+  const moved = document.createElement("button");
+  document.body.append(started, moved);
+  started.focus();
+  const request = createPageEntryFocus();
+  // The collector moved focus to a control outside the page before the page could take it.
+  moved.focus();
+  const stop = restorePageFocus(page, request);
+  page.innerHTML = "<h1>Friend</h1>";
+  await flush();
+  expect(document.activeElement).toBe(moved);
+  expect(request.state).toBe("cancelled");
+  stop();
 });
