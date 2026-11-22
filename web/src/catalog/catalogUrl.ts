@@ -46,13 +46,15 @@ export type CatalogCard = { printingId: string; editionId: string | null };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isCatalogId = (value: string | null): value is string =>
   value !== null && UUID.test(value);
-/** The `card` (and `edition`) parameters, or null unless `card` is a well-formed id. */
+/** The id in the canonical lowercase form the API uses, or null unless it is a well-formed UUID. */
+export const canonicalCatalogId = (value: string | null): string | null =>
+  isCatalogId(value) ? value.toLowerCase() : null;
+/** The `card` (and `edition`) parameters, or null unless `card` is a well-formed id. Ids come back lowercase, as the API writes them. */
 export function parseCatalogCard(address: string): CatalogCard | null {
   const p = new URL(address, "http://localhost").searchParams;
-  const printingId = p.get("card");
-  if (!isCatalogId(printingId)) return null;
-  const editionId = p.get("edition");
-  return { printingId, editionId: isCatalogId(editionId) ? editionId : null };
+  const printingId = canonicalCatalogId(p.get("card"));
+  if (!printingId) return null;
+  return { printingId, editionId: canonicalCatalogId(p.get("edition")) };
 }
 /** The Catalog address for a view with a card open. Opens `catalogHref` unchanged: only this adds the card. */
 export function catalogCardHref(

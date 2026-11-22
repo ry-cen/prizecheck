@@ -50,17 +50,22 @@ it("ignores values above browse endpoint limits", () => {
 });
 
 const P = "0a1b2c3d-0000-4000-8000-00000000000a";
-const E = "0A1B2C3D-0000-4000-8000-00000000000B";
+const E = "0a1b2c3d-0000-4000-8000-00000000000b";
 describe("catalog card address", () => {
-  it("accepts UUIDs in either case", () => {
+  it("accepts UUIDs in either case and returns them lowercase", () => {
     expect(parseCatalogCard(`/catalog?card=${P}&edition=${E}`)).toEqual({
       printingId: P,
       editionId: E,
     });
     expect(parseCatalogCard(`/catalog?card=${P.toUpperCase()}`)).toEqual({
-      printingId: P.toUpperCase(),
+      printingId: P,
       editionId: null,
     });
+    expect(
+      parseCatalogCard(
+        `/catalog?card=${P.toUpperCase()}&edition=${E.toUpperCase()}`
+      )
+    ).toEqual({ printingId: P, editionId: E });
   });
   it.each(["abc", "", `${P}x`, ` ${P}`, `${P}${P}`])(
     "rejects the malformed card %j",

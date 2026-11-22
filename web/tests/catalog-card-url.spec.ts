@@ -297,6 +297,47 @@ for (const viewport of [
       expect(await historyLength(page)).toBe(length);
     });
 
+    test("a link in capitals opens the linked non-default Edition and settles on a lowercase address", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      const reverse = await ids(BULBASAUR, "reverse");
+      await page.goto(
+        `${ORIGIN}/catalog?card=${reverse.printing.toUpperCase()}&edition=${reverse.edition.toUpperCase()}`
+      );
+      await expect(popup(page)).toBeVisible();
+      await expect(editions(page).nth(1)).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      );
+      await expect
+        .poll(() => here(page))
+        .toBe(`/catalog?card=${reverse.printing}&edition=${reverse.edition}`);
+    });
+
+    test("a report link in capitals still presets the report to its Edition", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      const reverse = await ids(BULBASAUR, "reverse");
+      await page.goto(
+        `${ORIGIN}/catalog?printing=${reverse.printing.toUpperCase()}&edition=${reverse.edition.toUpperCase()}`
+      );
+      const card = popup(page);
+      await expect(
+        card.getByRole("region", { name: "Report card metadata" })
+      ).toBeVisible();
+      await expect(editions(page).nth(1)).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      );
+      await expect
+        .poll(() => here(page))
+        .toBe(`/catalog?card=${reverse.printing}&edition=${reverse.edition}`);
+    });
+
     test("the report link opens the report and becomes a card address", async ({
       page,
     }) => {

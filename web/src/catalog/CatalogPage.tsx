@@ -1,7 +1,7 @@
 import {
   catalogCardHref,
   catalogHref,
-  isCatalogId,
+  canonicalCatalogId,
   parseCatalogCard,
   parseCatalogView,
   type CatalogCard,
@@ -119,11 +119,13 @@ export function CatalogPage({
     const params = next.searchParams;
     let changed = false;
     // The inspector's report link: `printing` and `edition` open the card with the Edition's report form.
-    const printing = params.get("printing");
+    const printing = canonicalCatalogId(params.get("printing"));
     const link = readMetadataReportLink(next.href);
+    const linkPrinting = canonicalCatalogId(link?.printingId ?? null);
+    const linkEdition = canonicalCatalogId(link?.editionId ?? null);
     const report =
-      link && isCatalogId(link.printingId) && isCatalogId(link.editionId)
-        ? link
+      link && linkPrinting && linkEdition
+        ? { printingId: linkPrinting, editionId: linkEdition }
         : null;
     if (report)
       setLink({
@@ -132,22 +134,19 @@ export function CatalogPage({
         row: null,
         report: { kind: "metadata", editionId: report.editionId },
       });
-    let cardId = params.get("card");
-    let editionId = params.get("edition");
-    if (printing !== null) {
+    let cardId = canonicalCatalogId(params.get("card"));
+    let editionId = canonicalCatalogId(params.get("edition"));
+    if (params.has("printing")) {
       params.delete("printing");
       changed = true;
       // A `printing` alone is no link: it is only read beside an `edition`.
-      if (isCatalogId(printing) && params.has("edition")) {
+      if (printing && params.has("edition")) {
         cardId = printing;
         if (!report) editionId = null;
       }
     }
     // `edition` only means something beside a well-formed `card`.
-    if (!isCatalogId(cardId)) {
-      cardId = null;
-      editionId = null;
-    } else if (!isCatalogId(editionId)) editionId = null;
+    if (!cardId) editionId = null;
     if (cardId !== params.get("card") || editionId !== params.get("edition")) {
       params.delete("card");
       params.delete("edition");
