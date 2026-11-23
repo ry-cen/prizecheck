@@ -67,14 +67,15 @@ function RiftboundComposition({
   writer?: CollectionWriter;
   decks?: DeckReader & DeckWriter;
 }) {
+  // The Decks view needs the Collection beside it: the controls, the view and the route all follow this one adapter.
+  const decksAdapter = collection && decks ? { collection, decks } : undefined;
   const supports = useMemo(
     () => ({
       facets: reader.facets,
       collection: !!collection,
-      // The Decks view needs the Collection beside it.
-      decks: !!decks && !!collection,
+      decks: !!decksAdapter,
     }),
-    [reader.facets, collection, decks]
+    [reader.facets, collection, decksAdapter]
   );
   const [view, setView] = useState(() =>
     supportedView(parseView(location.hash), supports)
@@ -253,7 +254,7 @@ function RiftboundComposition({
               Collection
             </Button>
           )}
-          {decks && (
+          {decksAdapter && (
             <Button
               icon={Layers}
               variant="quiet"
@@ -490,13 +491,13 @@ function RiftboundComposition({
           }
         />
       )}
-      {decks && collection && !view.home && view.section === "decks" && (
+      {decksAdapter && !view.home && view.section === "decks" && (
         <DecksView
-          reader={decks}
-          writer={decks}
+          reader={decksAdapter.decks}
+          writer={decksAdapter.decks}
           inventoryRevision={revision}
           catalog={reader}
-          collection={collection}
+          collection={decksAdapter.collection}
           id={view.deck ?? ""}
           tab={view.deckTab ?? "deck"}
           navigate={(deck, deckTab = "deck") =>
@@ -529,7 +530,7 @@ function RiftboundComposition({
             Collection
           </button>
         )}
-        {decks && (
+        {decksAdapter && (
           <button
             className="flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent p-0 text-caption font-medium text-text-muted aria-[current=page]:text-accent-strong"
             aria-current={

@@ -174,6 +174,52 @@ describe("the Decks section follows the adapters supplied", () => {
   });
 });
 
+describe("the Decks controls follow the same adapters as the route", () => {
+  const decksButtons = () =>
+    ["Main navigation", "Mobile navigation"].map((name) =>
+      [...document.querySelectorAll(`nav[aria-label="${name}"] button`)].some(
+        (b) => b.textContent?.trim() === "Decks"
+      )
+    );
+  it("offers no Decks control with a Decks adapter but no Collection adapter", async () => {
+    const m = await mount("#riftbound:view=catalog", {
+      reader: fixtureReader(),
+      decks: deckFixture("a", "normal", "normal"),
+    });
+    try {
+      await settle();
+      expect(decksButtons()).toEqual([false, false]);
+    } finally {
+      await m.unmount();
+    }
+  });
+  it("offers no Decks control without a Decks adapter", async () => {
+    const m = await mount("#riftbound:view=catalog", {
+      reader: fixtureReader(),
+      collection: collectionFixtureReader("a"),
+    });
+    try {
+      await settle();
+      expect(decksButtons()).toEqual([false, false]);
+    } finally {
+      await m.unmount();
+    }
+  });
+  it("offers the Decks controls, desktop and mobile, when both adapters are supplied", async () => {
+    const m = await mount("#riftbound:view=catalog", {
+      reader: fixtureReader(),
+      collection: collectionFixtureReader("a"),
+      decks: deckFixture("a", "normal", "normal"),
+    });
+    try {
+      await settle();
+      expect(decksButtons()).toEqual([true, true]);
+    } finally {
+      await m.unmount();
+    }
+  });
+});
+
 describe("history entries carry the game", () => {
   const props = () => ({ reader: fixtureReader() });
   it("stamps a direct load, such as a Location opened in a new tab", async () => {
