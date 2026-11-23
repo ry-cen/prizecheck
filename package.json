@@ -26,7 +26,8 @@
     "build:ios": "tsc -p mobile/tsconfig.json && vite build --config web/vite-ios.config.ts",
     "ios:sync": "npm run build:ios && cap sync ios",
     "ios:fixture": "node mobile/fixture-browser.mjs",
-    "test:ios": "vitest run web/src/shell/ios && node --test mobile/fixture-browser.test.mjs"
+    "test:ios": "vitest run web/src/shell/ios && node --test mobile/fixture-browser.test.mjs",
+    "dev:riftbound": "vite --config web/vite.config.ts --open /src/games/riftbound/local/index.html"
   },
   "dependencies": {
     "better-auth": "^1.7.6",

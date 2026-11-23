@@ -18,15 +18,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from riftbound_counts import counter, process_counter, restore_counter
+from riftbound_catalog_seed import FINISHES, seed, wipe  # noqa: F401
 from test_riftbound_catalog_track import admin, databases, fresh  # noqa: F401
 
 CONTRACT = Path(__file__).parent / 'riftbound_contract'
 APP_DIR = Path(__file__).resolve().parents[1] / 'app'
 RB_SECRET, POKEMON_SECRET = 'synthetic-riftbound-secret', 'synthetic-pokemon-secret'
-FINISHES = {'normal': {'finish': 'normal'}, 'foil': {'finish': 'foil'},
-            'unspecified': {'kind': 'unspecified', 'label': 'Unspecified Variant'}}
-
-
 @pytest.fixture(scope='module')
 def entry():
     before = process_counter._writer
@@ -41,46 +38,6 @@ def signed(method, path, *, user='synthetic-user', secret=RB_SECRET, stamp=None,
     message = f"{method}\n{path}\n{hashlib.sha256(body).hexdigest()}\n{user}\n{stamp}".encode()
     return {'x-internal-user': user, 'x-internal-time': str(stamp),
             'x-internal-signature': hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()}
-
-
-def wipe(url):
-    with psycopg.connect(url) as conn:
-        conn.execute('''TRUNCATE catalog_generation_edition, catalog_generation_printing, catalog_generation,
-            catalog_edition, catalog_printing_display, catalog_printing, catalog_identity, catalog_review CASCADE''')
-        # CASCADE also empties catalog_state through its generation reference; put the singleton row back.
-        conn.execute('INSERT INTO catalog_state(singleton,active_generation) VALUES (true,NULL) ON CONFLICT DO NOTHING')
-        conn.execute('UPDATE catalog_state SET active_generation=NULL,revision=0 WHERE singleton')
-
-
-def seed(url, cards, *, activate=True):
-    """Insert one generation of cards [(name, number, set_id, set_name, finishes, flags)]; return (generation, {key: ids})."""
-    gen, made = uuid4(), {}
-    with psycopg.connect(url) as conn:
-        conn.execute('INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256) VALUES (%s,1,%s,%s)',
-                     (gen, b'synthetic', 'synthetic'))
-        for card in cards:
-            name, number, set_id, set_name, finishes, flags = (*card, {})[:6] if len(card) == 5 else card
-            identity = conn.execute('INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s) RETURNING id',
-                                    (str(uuid4()), name)).fetchone()[0]
-            source_id = str(9000001 + uuid4().int % 1000000000)
-            printing = conn.execute("INSERT INTO catalog_printing(source,source_id,identity_id) VALUES ('tcgcsv',%s,%s) RETURNING id",
-                                    (source_id, identity)).fetchone()[0]
-            conn.execute('''INSERT INTO catalog_generation_printing(generation_id,printing_id,source_id,set_id,set_name,
-                collector_number,display_name,search_name,source_fingerprint,basic_energy,tombstoned)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'synthetic','not_applicable',%s)''',
-                         (gen, printing, source_id, set_id, set_name, number, name, name.lower(), flags.get('tombstoned', False)))
-            ids = []
-            for finish in finishes:
-                descriptor = FINISHES[finish]
-                edition = conn.execute('''INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
-                    VALUES (%s,%s,%s) RETURNING id''', (printing, json.dumps(descriptor, sort_keys=True), json.dumps(descriptor))).fetchone()[0]
-                conn.execute('INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id,active) VALUES (%s,%s,%s,%s)',
-                             (gen, edition, printing, flags.get('active', True)))
-                ids.append(str(edition))
-            made[(name, number)] = {'printing': str(printing), 'editions': ids}
-        if activate:
-            conn.execute('UPDATE catalog_state SET active_generation=%s,revision=revision+1 WHERE singleton', (gen,))
-    return gen, made
 
 
 class Client:
@@ -433,3 +390,243 @@ def test_riftbound_openapi_snapshot(entry):
 
 def test_riftbound_route_table_snapshot(entry):
     assert route_table(entry.app) == json.loads((CONTRACT / 'routes.json').read_text())
+
+
+def test_browser_scenarios_match_the_connected_spec(rb):
+    from riftbound_catalog_seed import scenario
+    with psycopg.connect(rb.url) as conn:
+        assert conn.execute('SELECT count(*) FROM catalog_generation').fetchone()[0] == 0  # freshly wiped
+    scenario(rb.url, 'populated')
+    first = rb.get('/api/catalog/editions').json()
+    assert (first['total'], first['pages'], first['catalog_empty']) == (29, 2, False)
+    assert first['editions'][0]['name'] == 'Alpha Sprite' and len(first['editions']) == 24
+    assert len(rb.get('/api/catalog/editions', page=2).json()['editions']) == 5
+    made = scenario(rb.url, 'unaccepted')['editions']
+    with psycopg.connect(rb.url) as conn:
+        assert conn.execute('SELECT count(*) FROM catalog_generation').fetchone()[0] == 1
+        assert conn.execute('SELECT active_generation FROM catalog_state').fetchone()[0] is None
+    assert len(made) == 28
+    for name in ('unaccepted', 'empty'):
+        if name == 'empty':
+            assert scenario(rb.url, 'empty') == {'editions': {}}
+        page = rb.get('/api/catalog/editions').json()
+        assert (page['catalog_empty'], page['total']) == (True, 0)
+        if name == 'empty':
+            assert rb.get('/api/catalog/sets').json() == []
+    with pytest.raises(ValueError):
+        scenario(rb.url, 'nope')
+
+
+def test_the_seed_command_acts_only_on_the_exact_loopback_database_it_was_told(rb):
+    from contextlib import nullcontext
+    from urllib.parse import quote
+
+    from psycopg.conninfo import conninfo_to_dict
+
+    from riftbound_catalog_seed import checked_url
+    parts = conninfo_to_dict(rb.url)  # the harness hands over a keyword string; the seed takes a URL
+    name = parts['dbname']
+    host = f"[{parts['host']}]" if ':' in parts['host'] else parts['host']  # an IPv6 authority needs brackets
+    authority = f"{quote(parts['user'], safe='')}:{quote(parts['password'], safe='')}@{host}:{parts['port']}"
+    good = f"postgresql://{authority}/{name}"
+    env = {'RIFTBOUND_DATABASE_URL': good}
+    checked = conninfo_to_dict(checked_url(name, env, prefix=''))  # a real connection reports the name
+    assert checked['hostaddr'] in ('127.0.0.1', '::1')  # the checked connection and the writes use one numeric address
+    assert {key: checked[key] for key in ('user', 'password', 'host', 'port', 'dbname')} == {
+        key: parts[key] for key in ('user', 'password', 'host', 'port', 'dbname')}
+    with pytest.raises(SystemExit):  # the pattern alone is not enough: the effective name must be the one given
+        checked_url('tcg_rb_other', env)
+    with pytest.raises(SystemExit):
+        checked_url(name, env)  # the harness database is not a tcg_rb_* database
+    for key in ('PGHOSTADDR', 'PGSERVICE'):  # a libpq variable that redirects the target is refused before connecting
+        with pytest.raises(SystemExit):
+            checked_url(name, {**env, key: 'x'}, prefix='')
+
+    def never(_):
+        raise AssertionError('connected before the URL was refused')
+
+    def reporting(database):  # a connection whose server says it is another database
+        class Result:
+            fetchone = staticmethod(lambda: (database,))
+        return lambda url: nullcontext(type('Conn', (), {'execute': staticmethod(lambda query: Result)}))
+    base = 'postgresql://u:p@127.0.0.1:5432/tcg_rb_x'  # fixed inputs: nothing here depends on the harness host
+    for url in (base + '?dbname=other', base + '?host=db.example.test', base + '?hostaddr=10.0.0.5',
+                'postgresql://u:p@db.example.test:5432/tcg_rb_x', 'postgresql://u:p@10.0.0.5:5432/tcg_rb_x',
+                'postgresql://u:p@127.0.0.1:5432,evil.example:5432/tcg_rb_x', base + '#options=-c%20search_path%3Devil',
+                base + '#host=evil.example', 'postgresql://u:p@127.0.0.1:5432,5433/tcg_rb_x',
+                'postgresql://u:p@127.0.0.1,127.0.0.1:5432/tcg_rb_x', 'postgresql://u:p@[::1]:5432,[::1]:5432/tcg_rb_x',
+                'postgresql://u:p@127.0.0.1:5432/tcg_rb_y'):
+        with pytest.raises(SystemExit):
+            checked_url('tcg_rb_x', {'RIFTBOUND_DATABASE_URL': url}, connect=never)
+    for url, address in ((base, '127.0.0.1'), ('postgresql://u:p@[::1]:5432/tcg_rb_x', '::1')):
+        found = conninfo_to_dict(checked_url('tcg_rb_x', {'RIFTBOUND_DATABASE_URL': url}, reporting('tcg_rb_x')))
+        assert found['hostaddr'] == address and found['dbname'] == 'tcg_rb_x'
+    with pytest.raises(SystemExit):
+        checked_url('tcg_rb_x', {'RIFTBOUND_DATABASE_URL': base}, reporting('postgres'))
+
+    # localhost is looked up once and pinned: every address must be loopback, and the connection gets one numeric one.
+    named = {'RIFTBOUND_DATABASE_URL': 'postgresql://u:p@localhost:5432/tcg_rb_x'}
+
+    def resolving(*addresses):
+        return lambda host, port, **kw: [(2, 1, 6, '', (address, 0)) for address in addresses]
+    pinned = conninfo_to_dict(checked_url('tcg_rb_x', named, reporting('tcg_rb_x'),
+                                        getaddrinfo=resolving('::1', '127.0.0.1'), probe=lambda address, port: None))
+    assert pinned['host'] == 'localhost' and pinned['hostaddr'] == '127.0.0.1'
+    for addresses in (('10.0.0.5',), ('127.0.0.1', '10.0.0.5'), ()):
+        with pytest.raises(SystemExit):
+            checked_url('tcg_rb_x', named, never, getaddrinfo=resolving(*addresses), probe=never)
+
+    def unresolvable(*args, **kwargs):
+        raise OSError('no such host')
+    with pytest.raises(SystemExit):
+        checked_url('tcg_rb_x', named, never, getaddrinfo=unresolvable)
+
+
+# The seed's choice among several loopback addresses. None of these tests needs a database server.
+def _seed_helpers():
+    import errno
+    import socket
+    from contextlib import nullcontext
+
+    from psycopg.conninfo import conninfo_to_dict
+
+    import riftbound_catalog_seed as seed_module
+
+    def resolving(*addresses):
+        return lambda host, port, **kw: [(2, 1, 6, '', (address, 0)) for address in addresses]
+
+    class Recorder:
+        def __init__(self, database='tcg_rb_x', fail=None):
+            self.probed, self.connected, self.database, self.fail = [], [], database, fail
+
+        def probe(self, address, port):
+            self.probed.append((address, port))
+            outcome = self.fail(address) if self.fail else None
+            if outcome:
+                raise outcome
+
+        def connect(self, url):
+            self.connected.append(url)
+
+            class Result:
+                fetchone = staticmethod(lambda: (self.database,))
+            return nullcontext(type('Conn', (), {'execute': staticmethod(lambda query: Result)}))
+    return errno, socket, conninfo_to_dict, seed_module, resolving, Recorder
+
+
+def _closed_loopback_port(family=None):
+    import socket
+    family = family or socket.AF_INET
+    with socket.socket(family) as sock:
+        sock.bind(('::1' if family == socket.AF_INET6 else '127.0.0.1', 0))
+        return sock.getsockname()[1]  # closed again on exit: nothing listens there
+
+
+NAMED = {'RIFTBOUND_DATABASE_URL': 'postgresql://u:SECRETPW@localhost:5433/tcg_rb_x'}
+
+
+def test_the_seed_pins_the_first_loopback_address_that_does_not_refuse():
+    errno, socket, parts, seed_module, resolving, Recorder = _seed_helpers()
+    both = resolving('::1', '127.0.0.1')
+    refuse = ConnectionRefusedError(errno.ECONNREFUSED, 'refused')
+
+    rec = Recorder()  # the first (IPv4) candidate answers: no second probe, no second connection
+    found = parts(seed_module.checked_url('tcg_rb_x', NAMED, rec.connect, getaddrinfo=both, probe=rec.probe))
+    assert (found['hostaddr'], found['port'], rec.probed) == ('127.0.0.1', '5433', [('127.0.0.1', 5433)])
+    assert len(rec.connected) == 1
+
+    rec = Recorder(fail=lambda a: refuse if a == '127.0.0.1' else None)  # IPv4 refused, IPv6 accepted
+    url = seed_module.checked_url('tcg_rb_x', NAMED, rec.connect, getaddrinfo=both, probe=rec.probe)
+    assert parts(url)['hostaddr'] == '::1' and rec.probed == [('127.0.0.1', 5433), ('::1', 5433)]
+    assert rec.connected == [url]  # the one check connection used exactly the returned string
+
+    rec = Recorder(fail=lambda a: OSError(errno.ECONNREFUSED, 'refused'))  # plain OSError carrying ECONNREFUSED counts
+    with pytest.raises(SystemExit) as stop:
+        seed_module.checked_url('tcg_rb_x', NAMED, rec.connect, getaddrinfo=both, probe=rec.probe)
+    assert rec.connected == [] and len(rec.probed) == 2  # all refused
+    assert 'SECRETPW' not in str(stop.value) and 'postgresql://' not in str(stop.value)
+
+
+def test_the_seed_stops_on_any_probe_or_connection_outcome_that_is_not_a_refusal():
+    errno, socket, parts, seed_module, resolving, Recorder = _seed_helpers()
+    both = resolving('::1', '127.0.0.1')
+    for outcome in (socket.timeout('timed out'), OSError(errno.EADDRNOTAVAIL, 'x'), OSError(errno.ENETUNREACH, 'x')):
+        rec = Recorder(fail=lambda a, outcome=outcome: outcome if a == '127.0.0.1' else None)
+        with pytest.raises(SystemExit):
+            seed_module.checked_url('tcg_rb_x', NAMED, rec.connect, getaddrinfo=both, probe=rec.probe)
+        assert rec.probed == [('127.0.0.1', 5433)] and rec.connected == []  # never moves on to ::1
+
+    for failure in (psycopg.OperationalError('password authentication failed for user "u" SECRETPW'),
+                    psycopg.errors.QueryCanceled('timeout'),
+                    psycopg.OperationalError('connection to server at "127.0.0.1", port 5433 failed: Connection refused')):
+        rec = Recorder()
+
+        def broken(url, failure=failure, rec=rec):
+            rec.connected.append(url)
+            raise failure
+        with pytest.raises(SystemExit) as stop:  # includes a refusal that races in after the successful probe
+            seed_module.checked_url('tcg_rb_x', NAMED, broken, getaddrinfo=both, probe=rec.probe)
+        assert len(rec.connected) == 1 and rec.probed == [('127.0.0.1', 5433)]
+        assert 'SECRETPW' not in str(stop.value) and 'u:' not in str(stop.value)
+
+    rec = Recorder(database='postgres')  # answered, but as the wrong database
+    with pytest.raises(SystemExit):
+        seed_module.checked_url('tcg_rb_x', NAMED, rec.connect, getaddrinfo=both, probe=rec.probe)
+    assert len(rec.connected) == 1 and rec.probed == [('127.0.0.1', 5433)]
+
+
+def test_the_seed_probes_nothing_unless_every_address_is_loopback_and_there_are_several():
+    errno, socket, parts, seed_module, resolving, Recorder = _seed_helpers()
+    for addresses in (('127.0.0.1', '10.0.0.5'), ('::1', '2001:db8::1'), ('10.0.0.5',)):
+        rec = Recorder()
+        with pytest.raises(SystemExit):
+            seed_module.checked_url('tcg_rb_x', NAMED, rec.connect, getaddrinfo=resolving(*addresses), probe=rec.probe)
+        assert rec.probed == [] and rec.connected == []
+    rec = Recorder()  # one candidate: connected as before, with no probe
+    url = seed_module.checked_url('tcg_rb_x', NAMED, rec.connect, getaddrinfo=resolving('::1', '::1'), probe=rec.probe)
+    assert parts(url)['hostaddr'] == '::1' and rec.probed == [] and rec.connected == [url]
+
+
+def test_the_seed_probe_and_connection_use_the_same_default_port():
+    errno, socket, parts, seed_module, resolving, Recorder = _seed_helpers()
+    both = resolving('127.0.0.1', '::1')
+    bare = {'RIFTBOUND_DATABASE_URL': 'postgresql://u:p@localhost/tcg_rb_x'}
+    for environ, port in ((bare, '5432'), ({**bare, 'PGPORT': '6543'}, '6543')):
+        rec = Recorder()
+        url = seed_module.checked_url('tcg_rb_x', environ, rec.connect, getaddrinfo=both, probe=rec.probe)
+        assert rec.probed == [('127.0.0.1', int(port))] and parts(url)['port'] == port  # the string names the port
+    for bad in ('0', '99999', '5432,5433', 'x'):
+        with pytest.raises(SystemExit):
+            seed_module.checked_url('tcg_rb_x', {**bare, 'PGPORT': bad}, Recorder().connect, getaddrinfo=both,
+                                    probe=Recorder().probe)
+
+
+def test_the_seed_probe_sees_a_real_refusal_and_a_real_acceptance():
+    errno, socket, parts, seed_module, resolving, Recorder = _seed_helpers()
+    port = _closed_loopback_port()
+    with pytest.raises(ConnectionRefusedError) as refused:
+        seed_module.probe_address('127.0.0.1', port)
+    assert refused.value.errno == errno.ECONNREFUSED
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        seed_module.probe_address('127.0.0.1', listener.getsockname()[1])  # no exception: it accepted
+    # and psycopg itself reports the same refusal only as text, which is why the probe is separate
+    with pytest.raises(psycopg.OperationalError) as text:
+        psycopg.connect(host='localhost', hostaddr='127.0.0.1', port=port, dbname='x', user='u', connect_timeout=3)
+    assert text.value.sqlstate is None and text.value.__cause__ is None
+
+    try:  # a real IPv4 refusal with a real IPv6 listener: ::1 is chosen. Skipped where ::1 is unavailable.
+        probe_socket = socket.socket(socket.AF_INET6)
+        probe_socket.bind(('::1', 0))
+    except OSError:
+        pytest.skip('::1 is not available on this host')
+    with probe_socket:
+        probe_socket.listen()
+        port = probe_socket.getsockname()[1]
+        try:
+            seed_module.probe_address('127.0.0.1', port)
+            pytest.skip('something else listens on 127.0.0.1 at that port')
+        except ConnectionRefusedError:
+            pass
+        assert seed_module.choose_address(['127.0.0.1', '::1'], port) == '::1'

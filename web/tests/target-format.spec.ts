@@ -220,7 +220,7 @@ async function expectMenuInView(page: Page) {
 test.describe("on a desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("the Target Format control changes the Format, opens its result and highlights the lines a card issue names", async ({
+  test("the Target Format control changes the Format, opens its result and highlights the lines a card issue names, and the choice survives a reload", async ({
     page,
   }) => {
     promoteCatalog();
@@ -350,6 +350,20 @@ test.describe("on a desktop", () => {
       formatMenu(page).getByRole("menuitemradio", { checked: true })
     ).toHaveText("Gym Leader Challenge");
     await page.keyboard.press("Escape");
+  });
+
+  test("a Deck List over 60 cards still edits, and the Target Format control still answers with the deck issue", async ({
+    page,
+  }) => {
+    promoteCatalog();
+    await signIn(page);
+    const built = await buildDeck(page);
+    await stubPrices(page, built.deckId);
+    await page.goto(`${ORIGIN}/decks/${built.deckId}`);
+    await chooseFormat(page, "Gym Leader Challenge");
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Gym Leader Challenge"
+    );
 
     // Nothing blocks editing: the Deck List can go over 60, and the control still answers.
     const revision = (await deckRead(page, built.deckId)).deck_list.revision;

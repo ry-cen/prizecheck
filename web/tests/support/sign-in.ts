@@ -1,5 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { Pool } from "pg";
+import { walkFakeSignInSanitized } from "./fake-sign-in-wait";
+import { requireVerificationDatabase } from "./verification-database";
 
 // Browser journeys sign in through the OAuth test fake (auth/testing/oauth-fake), which the gate loads into every stack's
 // gateway: the start route redirects to the fake consent page, which forwards to the real callback with the chosen
@@ -15,7 +17,15 @@ export type FakeSignIn = {
   provider?: "google" | "discord";
   /** Passed to the start route as `next`; the gateway checks it. */
   next?: string;
+  /** The origin to sign in at, for a spec that runs its own gateway (default TEST_ORIGIN). */
+  origin?: string;
+  /** Report a failed walk without the callback URL, code, state or cookies (default false: Playwright's own message). */
+  sanitized?: boolean;
+  /** The database the gateway uses, for clearing its rate limits (default DATABASE_URL). */
+  databaseUrl?: string;
 };
+
+const FAKE_SIGN_IN_DEADLINE_MS = 30_000;
 
 function origin(): string {
   return process.env.TEST_ORIGIN || "http://localhost:5173";
@@ -26,8 +36,13 @@ function origin(): string {
  * which would soon pass the sign-in start limit (60 per hour) and, on a public stack, the creation limits: clear them
  * first, as the email journeys cleared auth_send_event.
  */
-async function prepareFakeSignIn(page: Page) {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+async function prepareFakeSignIn(page: Page, databaseUrl?: string) {
+  // An explicit database (the Riftbound stack's gateway database) must be this worker's verification database; the default
+  // stays the stack's own DATABASE_URL, as before.
+  if (databaseUrl !== undefined) requireVerificationDatabase(databaseUrl);
+  const pool = new Pool({
+    connectionString: databaseUrl ?? process.env.DATABASE_URL,
+  });
   try {
     await pool.query("DELETE FROM auth_rate_event");
   } finally {
@@ -39,19 +54,33 @@ async function prepareFakeSignIn(page: Page) {
 /** Walks start, fake consent and callback in the browser; resolves once the browser has left the fake. */
 export async function fakeSignIn(
   page: Page,
-  { identity = "owner", provider = "google", next }: FakeSignIn = {}
+  {
+    identity = "owner",
+    provider = "google",
+    next,
+    origin: at,
+    sanitized = false,
+    databaseUrl,
+  }: FakeSignIn = {}
 ): Promise<void> {
-  await prepareFakeSignIn(page);
-  const start = new URL(`/auth/sign-in/${provider}`, origin());
+  await prepareFakeSignIn(page, databaseUrl);
+  const start = new URL(`/auth/sign-in/${provider}`, at ?? origin());
   if (next) start.searchParams.set("next", next);
   start.searchParams.set("fake_identity", identity);
-  await page.goto(start.href, { waitUntil: "commit" });
-  await page.waitForURL(
-    (url) =>
-      url.pathname !== "/auth/__fake-oauth/consent" &&
-      !url.pathname.startsWith("/api/auth/") &&
-      !url.pathname.startsWith("/auth/")
-  );
+  const walk = async () => {
+    await page.goto(start.href, { waitUntil: "commit" });
+    await page.waitForURL(
+      (url) =>
+        url.pathname !== "/auth/__fake-oauth/consent" &&
+        !url.pathname.startsWith("/api/auth/") &&
+        !url.pathname.startsWith("/auth/")
+    );
+  };
+  if (!sanitized) return walk();
+  // Playwright's URL waiters log every URL they see and add it to their error, and page.goto's interrupted-navigation
+  // error interpolates the winning document's URL; the runner records either raw message as a step error before any
+  // catch runs. So this path uses neither: see walkFakeSignInSanitized (fake-sign-in-wait.ts).
+  await walkFakeSignInSanitized(page, start.href, FAKE_SIGN_IN_DEADLINE_MS);
 }
 
 /** The old Collection addresses the app rewrites to /collection (web/src/shell/routes.ts canonicalPath). */
