@@ -452,6 +452,12 @@ class StringCallersTest(unittest.TestCase):
             self.assertEqual(len(calls), parsed)
             self.assertEqual(before, again)
             self.assertIn('message-callers: unexpected app.a', before['message-callers'][1])
+            # Replacing one module's text on the same warmed Tree is seen, and only that module is parsed again.
+            tree.text['app.b'] = 'SQL = "SELECT 1 FROM message"\n'
+            replaced = boundaries.run_rule(tree, 'message-callers', data)[1]
+            self.assertIn('message-callers: unexpected app.a, app.b', replaced)
+            self.assertEqual(len(calls), parsed + 1)
+            self.assertEqual(calls[-1], tree.text['app.b'])
         with tempfile.TemporaryDirectory() as directory:
             changed = tree_of(directory, 'SQL = "SELECT 1"\n')
             self.assertNotIn('message-callers: unexpected app.a', boundaries.run_rule(changed, 'message-callers', data)[1])

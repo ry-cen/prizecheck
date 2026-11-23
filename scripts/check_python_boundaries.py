@@ -279,10 +279,12 @@ class Tree:
         self._strings = {}
 
     def strings(self, name):
-        """A module's string constants (docstrings left out), parsed at most once per Tree and only when asked."""
-        if name not in self._strings:
-            self._strings[name] = string_constants(self.text[name])
-        return self._strings[name]
+        """A module's string constants (docstrings left out), parsed only when asked and again only if its text changed."""
+        source = self.text[name]
+        cached = self._strings.get(name)
+        if cached is None or cached[0] != source:
+            cached = self._strings[name] = (source, string_constants(source))
+        return cached[1]
 
     def importers(self, target):
         """The modules with an import that resolves to `target` (or a name under it)."""
