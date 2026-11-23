@@ -433,6 +433,7 @@ function RiftboundComposition({
           onQuery={(query, replace) =>
             navigate({ ...view, collection: query }, replace)
           }
+          hrefFor={(query) => viewHash({ ...view, collection: query })}
           onCatalog={() =>
             navigate({ ...view, section: "catalog", home: false })
           }

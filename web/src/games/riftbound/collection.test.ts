@@ -325,6 +325,7 @@ describe("fixture Collection", () => {
             active,
             query: emptyCollectionQuery,
             onQuery: noop,
+            hrefFor: () => "#",
             onCatalog: noop,
           })
         )

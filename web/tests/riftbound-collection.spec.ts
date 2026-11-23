@@ -67,9 +67,7 @@ for (const width of [1280, 375]) {
             }),
           });
     await tree.getByRole("button", { name: "Binders", exact: true }).click();
-    await tree
-      .getByRole("button", { name: "Blue binder", exact: true })
-      .click();
+    await tree.getByRole("link", { name: "Blue binder", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Blue binder", exact: true })
     ).toBeVisible();
@@ -83,7 +81,7 @@ for (const width of [1280, 375]) {
         .getByRole("button", { name: "Locations", exact: true })
         .click();
       await tree
-        .getByRole("button", { name: "Blue binder", exact: true })
+        .getByRole("link", { name: "Blue binder", exact: true })
         .click();
       await expect(page).toHaveURL(address);
     }
@@ -155,9 +153,7 @@ for (const width of [1280, 375]) {
     await page.getByRole("button", { name: "Clear search" }).click();
     await expect(results.getByRole("listitem")).toHaveCount(24);
     if (width === 1280) {
-      await tree
-        .getByRole("button", { name: "All owned", exact: true })
-        .click();
+      await tree.getByRole("link", { name: "All owned", exact: true }).click();
       await expect(results.getByRole("listitem")).toHaveCount(24);
       await results.getByRole("button").first().click();
       await expect(
@@ -266,14 +262,12 @@ for (const width of [1280, 375]) {
       width === 375
         ? page.getByRole("dialog", { name: "Locations" })
         : page.getByRole("navigation", { name: "Locations", exact: true });
-    await nav.getByRole("button", { name: "Unsorted", exact: true }).click();
+    await nav.getByRole("link", { name: "Unsorted", exact: true }).click();
     if (width === 375)
       await page
         .getByRole("button", { name: "Locations", exact: true })
         .click();
-    await nav
-      .getByRole("button", { name: "Empty binder", exact: true })
-      .click();
+    await nav.getByRole("link", { name: "Empty binder", exact: true }).click();
     await expect(
       page.getByText("No cards in this Location.", { exact: true })
     ).toBeVisible();

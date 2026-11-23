@@ -36,6 +36,7 @@ export function CollectionView({
   active,
   query,
   onQuery,
+  hrefFor,
   onCatalog,
 }: {
   reader: CollectionReader;
@@ -49,6 +50,8 @@ export function CollectionView({
   active: boolean;
   query: CollectionQuery;
   onQuery: (q: CollectionQuery, replace?: boolean) => void;
+  /** The address a Location row opens, so it can open in a new tab. */
+  hrefFor: (q: CollectionQuery) => string;
   onCatalog: () => void;
 }) {
   const actionsRef = useRef<HTMLElement | null>(null);
@@ -179,6 +182,7 @@ export function CollectionView({
             return next;
           });
         }}
+        hrefFor={(location) => hrefFor({ ...query, location, page: 1 })}
         onChoose={choose}
         idPrefix={touch ? "riftbound-drawer" : "riftbound-sidebar"}
         touch={touch}
