@@ -68,7 +68,7 @@ Contract column:
 
 | Pokémon page or feature (route) | Riftbound status | Contract | Gate or note |
 | --- | --- | --- | --- |
-| Catalog browse, search, filters, card detail (`/catalog`) | partial: #670 | fixture-only | Facet shape D4 is undecided. Pokémon smart search and infinite loading are intentional differences for the fixture. The real read API is #661, gated on #534. |
+| Catalog browse, search, filters, card detail (`/catalog`) | partial: #670 | fixture-only in the fixture entry; the dev-only connected entry (`connected/`, #686) reads the real Catalog API as a local proof | Facet shape D4 is undecided. Pokémon smart search and infinite loading are intentional differences. Collection and Locations have no connected entry; only the fixture entry (`local/`) supplies them. Identity propagation stays open (#531). |
 | Catalog Add mode and add queue | partial: single Add from card detail (#672 WP2) | verified semantics, fixture store | Batch add and the add queue are not built (batch Add writes an Undo in core). |
 | Collection gallery, inspector, Locations tree (`/collection`) | partial: #672 WP1 | verified semantics, fixture store | Missing: filters and sort (D4), card size, Names and Prices toggles (no price API), multi-select and marquee. |
 | Move, Remove, Undo | partial: one copy (#672 WP2) | verified semantics, fixture store | Multi-copy and multi-source moves are not built. Commit without Undo and Put away (Deck) are left out. |
@@ -91,7 +91,7 @@ Contract column:
 
 - `workspace/CreateLocationDialog.tsx` calls `createLocation` from `location_generated` directly. If it took an injected `create` function, both games could share the dialog. Left alone for now because the UI hill-climb is actively changing `workspace/*`.
 - `workspace/SelectionBar.tsx`, `InventoryDialogs.tsx` and `UndoToast.tsx` carry Pokémon runtime hooks (galleryModel, useInventoryActions). Riftbound mirrors them locally. Splitting them into presentation-only parts would make one shared component possible.
-- `workspace/LocationNav.tsx` and `locationTree.ts` are already shared through explicit props.
+- `workspace/LocationNav.tsx` and `locationTree.ts` are already shared through explicit props, including `hrefFor`, which Riftbound supplies as a `#riftbound:` address.
 
 ### How to propagate a Pokémon UI change
 
