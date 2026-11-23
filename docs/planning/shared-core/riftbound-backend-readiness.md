@@ -1,5 +1,9 @@
 # Riftbound backend readiness
 
+> **Historical audit (note added 2026-11-23).** This describes `dev` at `3e921b0d` and is kept as a record. Parts have since
+> been overtaken; the code, [ADR 0023](../../adr/0023-split-core-and-games-by-composition.md) with its 2026-11 amendments, and
+> [#683](https://github.com/ry-cen/prizecheck/issues/683) are current. Nothing here approves work.
+
 **Status:** design for owner review, for [#528](https://github.com/ry-cen/prizecheck/issues/528),
 [#529](https://github.com/ry-cen/prizecheck/issues/529) and [#534](https://github.com/ry-cen/prizecheck/issues/534).
 Nothing here is approved. It authorizes no implementation, migration, deployment or Riftbound code, and it adds no
