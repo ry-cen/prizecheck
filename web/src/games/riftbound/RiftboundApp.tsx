@@ -68,8 +68,13 @@ function RiftboundComposition({
   decks?: DeckReader & DeckWriter;
 }) {
   const supports = useMemo(
-    () => ({ facets: reader.facets, collection: !!collection }),
-    [reader.facets, collection]
+    () => ({
+      facets: reader.facets,
+      collection: !!collection,
+      // The Decks view needs the Collection beside it.
+      decks: !!decks && !!collection,
+    }),
+    [reader.facets, collection, decks]
   );
   const [view, setView] = useState(() =>
     supportedView(parseView(location.hash), supports)

@@ -76,11 +76,24 @@ export function viewHash(view: View): string {
   );
 }
 /** What the entry supplies: a view asking for anything else falls back to the Catalog. */
-export type Supports = { facets?: boolean; collection?: boolean };
+export type Supports = {
+  facets?: boolean;
+  collection?: boolean;
+  decks?: boolean;
+};
 export function supportedView(view: View, supports: Supports): View {
   let next = view;
-  if (supports.collection === false && next.section === "collection") {
-    const { section: _s, collection: _c, ...rest } = next;
+  if (
+    (supports.collection === false && next.section === "collection") ||
+    (supports.decks === false && next.section === "decks")
+  ) {
+    const {
+      section: _s,
+      collection: _c,
+      deck: _d,
+      deckTab: _t,
+      ...rest
+    } = next;
     next = rest;
   }
   return supports.facets === false && (next.query.domain || next.query.type)
