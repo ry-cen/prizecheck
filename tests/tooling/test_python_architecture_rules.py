@@ -430,6 +430,32 @@ class StringCallersTest(unittest.TestCase):
                          [f'{rule}: missing app.core.social.counts',
                           f'{rule}: caller pattern for app.core.social.counts must name an allowed matching caller'])
 
+    def test_one_tree_extracts_each_modules_strings_once_across_rules_and_a_new_tree_sees_changes(self):
+        def tree_of(directory, source):
+            (Path(directory) / 'api/app').mkdir(parents=True, exist_ok=True)
+            for name, text in {'__init__': '', 'a': source, 'b': 'X = 1\n'}.items():
+                (Path(directory) / 'api/app' / f'{name}.py').write_text(text)
+            return boundaries.Tree(directory)
+
+        calls = []
+        original = boundaries.string_constants
+        boundaries.string_constants = lambda source: calls.append(source) or original(source)
+        self.addCleanup(setattr, boundaries, 'string_constants', original)
+        with tempfile.TemporaryDirectory() as directory:
+            tree = tree_of(directory, 'SQL = "SELECT 1 FROM message"\n')
+            self.assertEqual(calls, [])  # lazy: nothing is parsed until a caller rule asks
+            data = rules(**{rule: REAL.RULES[rule] for rule in self.CASES})
+            before = {rule: boundaries.run_rule(tree, rule, data) for rule in self.CASES}
+            parsed = len(calls)
+            self.assertEqual(parsed, len(tree.text))
+            again = {rule: boundaries.run_rule(tree, rule, data) for rule in self.CASES}
+            self.assertEqual(len(calls), parsed)
+            self.assertEqual(before, again)
+            self.assertIn('message-callers: unexpected app.a', before['message-callers'][1])
+        with tempfile.TemporaryDirectory() as directory:
+            changed = tree_of(directory, 'SQL = "SELECT 1"\n')
+            self.assertNotIn('message-callers: unexpected app.a', boundaries.run_rule(changed, 'message-callers', data)[1])
+
     def test_a_later_move_updates_only_module_identities_in_rule_data(self):
         def moved(name):
             return name.replace('app.social.', 'app.core.social.').replace('app.trade_list', 'app.core.trading.trade_list')

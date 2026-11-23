@@ -276,6 +276,13 @@ class Tree:
                                  and (self.app.parent.joinpath(*name.split('.')) / '__init__.py').is_file())
         self.text = {name: path.read_text(encoding='utf-8') for name, (path, _) in self.names.items()}
         self._imports = {}
+        self._strings = {}
+
+    def strings(self, name):
+        """A module's string constants (docstrings left out), parsed at most once per Tree and only when asked."""
+        if name not in self._strings:
+            self._strings[name] = string_constants(self.text[name])
+        return self._strings[name]
 
     def importers(self, target):
         """The modules with an import that resolves to `target` (or a name under it)."""
@@ -365,8 +372,7 @@ def rule_several_owners(tree, data, rules):
 
 
 def rule_string_callers(tree, data, rules):
-    matches = {name: [text for text in string_constants(source) if data['pattern'].search(text)]
-               for name, source in tree.text.items()}
+    matches = {name: [text for text in tree.strings(name) if data['pattern'].search(text)] for name in tree.text}
     found = {name for name, texts in matches.items() if texts}
     failures = compare(found, data['callers'], exact=data['exact'])
     if not data['exact'] and data['required'] - found:
