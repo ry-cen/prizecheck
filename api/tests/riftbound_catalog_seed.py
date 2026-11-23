@@ -4,6 +4,7 @@ The seed writes the accepted generation straight into catalog_state.active_gener
 snapshot, not the ingestion acceptance workflow. As a command it acts only on a loopback database named tcg_rb_*.
 """
 import argparse
+import errno
 import ipaddress
 import json
 import os
@@ -80,11 +81,11 @@ def scenario(url: str, name: str) -> dict:
     return {'editions': {f'{card}|{number}': made[(card, number)]['editions'] for card, number in made}}
 
 
-def loopback_address(host: str, getaddrinfo=socket.getaddrinfo) -> str:
-    """One numeric loopback address for `host`, resolved once; SystemExit unless every address it resolves to is loopback.
+def loopback_addresses(host: str, getaddrinfo=socket.getaddrinfo) -> list[str]:
+    """Every numeric address `host` resolves to, resolved once, IPv4 before IPv6; SystemExit unless all are loopback.
 
     A name is looked up again by each connection, so the checked connection and the writes could reach different
-    servers. The caller pins the returned address as `hostaddr`."""
+    servers. The caller pins one of the returned addresses as `hostaddr`."""
     try:
         found = {str(ipaddress.ip_address(host))}
     except ValueError:
@@ -95,19 +96,58 @@ def loopback_address(host: str, getaddrinfo=socket.getaddrinfo) -> str:
             raise SystemExit('refusing: the database host does not resolve to a loopback address') from None
     if not found or not all(ipaddress.ip_address(address).is_loopback for address in found):
         raise SystemExit('refusing: the database host does not resolve to a loopback address')
-    return sorted(found)[0]
+    return sorted(found, key=lambda address: (ipaddress.ip_address(address).version, ipaddress.ip_address(address)))
+
+
+def probe_address(address: str, port: int, timeout: float = 2.0) -> None:
+    """Open and close one TCP connection to (address, port); raises OSError when it cannot be made."""
+    family = socket.AF_INET6 if ':' in address else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        sock.connect((address, port))
+
+
+def libpq_port(params: dict, environ) -> str:
+    """The port libpq will use: the URL's, else PGPORT, else its compiled default; SystemExit unless one number."""
+    port = params.get('port') or environ.get('PGPORT') or next(
+        (option.compiled.decode() for option in psycopg.pq.Conninfo.get_defaults() if option.keyword == b'port'), '5432')
+    if not (port.isascii() and port.isdigit() and 0 < int(port) < 65536):
+        raise SystemExit('refusing: the database URL does not name exactly one port')
+    return port
+
+
+def choose_address(addresses: list[str], port: int, probe=probe_address) -> str:
+    """The address to check. One candidate is used as is. With several, a candidate is skipped only when its probe is
+    refused (ECONNREFUSED); the first one that accepts is chosen, and any other outcome stops."""
+    if len(addresses) == 1:
+        return addresses[0]
+    for address in addresses:
+        try:
+            probe(address, port)
+        except ConnectionRefusedError:
+            continue
+        except OSError as error:
+            if error.errno == errno.ECONNREFUSED:
+                continue
+            raise SystemExit('refusing: a loopback address of the database host neither accepted nor refused '
+                             'a connection') from None
+        return address
+    raise SystemExit('refusing: no loopback address of the database host accepts connections on its port')
 
 
 def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, prefix: str = 'tcg_rb_',
-                getaddrinfo=socket.getaddrinfo) -> str:
+                getaddrinfo=socket.getaddrinfo, probe=probe_address) -> str:
     """A connection string for the one database the stack created, built from libpq's own reading of the URL.
 
     Python's URL parser and libpq's disagree (a comma-separated host list, text after `#`), so the URL is parsed with
     libpq's parser and the effective parameters are checked: only user, password, host, port and dbname, exactly one
     loopback host, at most one numeric port, and a dbname that is exactly `expected`. The connection check and every
-    write then use a string rebuilt from those parameters plus one numeric loopback `hostaddr` (the host is resolved here, once, and
-    every address it resolves to must be loopback), never the original text. The server's own address is not
-    checked: a loopback-published container (the CI service) reports its bridge address, not 127.0.0.1."""
+    write then use a string rebuilt from those parameters plus the effective port and one numeric loopback `hostaddr`
+    (the host is resolved here, once, and every address it resolves to must be loopback), never the original text.
+    When a name resolves to several addresses (`localhost` is often 127.0.0.1 and ::1), a plain TCP probe skips an
+    address only if it refuses the connection; the first that accepts is checked, and nothing after the check connection
+    falls through to another address. The server's own address is not checked: a loopback-published container (the CI
+    service) reports its bridge address, not 127.0.0.1."""
     if not expected.startswith(prefix):
         raise SystemExit('refusing: the expected database is not a tcg_rb_* name')
     if any(environ.get(key) for key in ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE')):
@@ -127,9 +167,14 @@ def checked_url(expected: str, environ=os.environ, connect=psycopg.connect, pref
         raise SystemExit('refusing: the database URL does not name exactly one port')
     if params.get('dbname') != expected:
         raise SystemExit('refusing: the database URL does not name the expected database')
-    checked = make_conninfo(**params, hostaddr=loopback_address(params['host'], getaddrinfo))
-    with connect(checked) as conn:
-        (name,) = conn.execute('SELECT current_database()').fetchone()
+    port = libpq_port(params, environ)
+    addresses = loopback_addresses(params['host'], getaddrinfo)
+    checked = make_conninfo(**{**params, 'port': port}, hostaddr=choose_address(addresses, int(port), probe))
+    try:
+        with connect(checked) as conn:
+            (name,) = conn.execute('SELECT current_database()').fetchone()
+    except psycopg.Error as error:  # its text is not passed on; it names the host and may name the user
+        raise SystemExit(f'refusing: the checked connection failed ({type(error).__name__})') from None
     if name != expected:
         raise SystemExit('refusing: the connection does not reach the expected database')
     return checked
