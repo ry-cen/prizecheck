@@ -66,7 +66,7 @@ for (const width of [1280, 375]) {
     };
     if (!phone)
       await nav()
-        .getByRole("button", { name: "Empty binder", exact: true })
+        .getByRole("link", { name: "Empty binder", exact: true })
         .hover();
     await shot(phone ? "phone-drawer-tools" : "desktop-sidebar-tools");
     const manage = nav().getByRole("button", {
@@ -177,9 +177,7 @@ for (const width of [1280, 375]) {
       )
     ).toBe(true);
     await openNav();
-    await nav()
-      .getByRole("button", { name: "Travel box", exact: true })
-      .click();
+    await nav().getByRole("link", { name: "Travel box", exact: true }).click();
     await expect(
       page.getByRole("region", { name: "Collection results" })
     ).toContainText("No cards in this Location.");
@@ -274,7 +272,7 @@ for (const width of [1280, 375]) {
     if (phone) await page.keyboard.press("Escape");
     await openNav();
     await nav()
-      .getByRole("button", { name: "Empty binder", exact: true })
+      .getByRole("link", { name: "Empty binder", exact: true })
       .click();
     await expect(
       page.getByRole("heading", { name: "Empty binder", exact: true })
@@ -434,9 +432,7 @@ for (const width of [1280, 375])
         .filter({ visible: true });
     await open();
     await nav().getByRole("button", { name: "Binders", exact: true }).click();
-    await nav()
-      .getByRole("button", { name: "Blue binder", exact: true })
-      .click();
+    await nav().getByRole("link", { name: "Blue binder", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Blue binder", exact: true })
     ).toBeVisible();
@@ -476,7 +472,7 @@ for (const width of [1280, 375])
     ).toBe(false);
     await open();
     await nav()
-      .getByRole("button", { name: "Empty binder", exact: true })
+      .getByRole("link", { name: "Empty binder", exact: true })
       .click();
     await expect(
       page.getByRole("heading", { name: "Empty binder", exact: true })
