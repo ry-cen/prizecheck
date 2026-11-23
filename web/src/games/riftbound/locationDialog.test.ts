@@ -4,6 +4,10 @@ import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CollectionError } from "./collection";
 import {
+  LOCATION_RELOAD_FAILED_MESSAGE,
+  LOCATION_REVIEW_MESSAGE,
+} from "./locationDestinations";
+import {
   LocationWriteDialog,
   locationError,
   staleLocationCodes,
@@ -62,6 +66,7 @@ async function mount(scenario: CollectionScenario = "normal", id?: string) {
   // Submit directly: lifecycle guards also apply to invalid requests.
   return {
     root,
+    reader,
     writer,
     originalCreate,
     create,
@@ -410,6 +415,94 @@ it("a create parent that gains cards offers conversion without resending the ref
     expect(f.create).toHaveBeenCalledTimes(2);
     expect(f.create.mock.calls[1][0].conversion).toBe("move_holdings_to_child");
     expect(f.confirmed).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it("never claims a refresh that did not happen, and Retry reads the tree before any command is resent", async () => {
+  const f = await mount("location-stale", "5");
+  const edit = vi.spyOn(f.writer, "editLocation");
+  const read = vi.spyOn(f.reader, "locations");
+  const alert = () => document.querySelector('[role="alert"]')!.textContent;
+  const retry = () =>
+    [...document.querySelectorAll("button")].find(
+      (b) => b.textContent === "Reload and retry"
+    )!;
+  try {
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((b) => b.textContent === "Move")!
+        .click();
+    });
+    await act(async () => {
+      const select = document.querySelector("select")!;
+      select.value = "2";
+      select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    });
+    const down = read.mockRejectedValue(new Error("Network down"));
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    // The refusal went out once; its automatic read failed, so nothing was refreshed.
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(alert()).toBe(LOCATION_RELOAD_FAILED_MESSAGE);
+    expect(alert()).not.toContain("has been refreshed");
+    expect(retry().disabled).toBe(false);
+    // Retry, and Enter in the form, read first; a second read failure sends nothing and stays truthful.
+    await act(async () => {
+      retry().click();
+      await vi.runAllTimersAsync();
+    });
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(alert()).toBe(LOCATION_RELOAD_FAILED_MESSAGE);
+    expect(retry()).toBeDefined();
+    // Once the read works, the tree is re-reviewed and only then is the command sent with a fresh key.
+    down.mockRestore();
+    await act(async () => {
+      retry().click();
+      await vi.runAllTimersAsync();
+    });
+    expect(edit).toHaveBeenCalledTimes(2);
+    expect(edit.mock.calls[1][0]).toMatchObject({
+      version: 1,
+      parentVersion: 2,
+    });
+    expect(edit.mock.calls[0][1].idempotencyKey).not.toBe(
+      edit.mock.calls[1][1].idempotencyKey
+    );
+    expect(f.confirmed).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.cleanup();
+  }
+});
+it("says the list was refreshed only when the refresh worked", async () => {
+  const f = await mount("location-stale", "5");
+  try {
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((b) => b.textContent === "Move")!
+        .click();
+    });
+    await act(async () => {
+      const select = document.querySelector("select")!;
+      select.value = "2";
+      select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    expect(document.querySelector('[role="alert"]')!.textContent).toBe(
+      LOCATION_REVIEW_MESSAGE
+    );
   } finally {
     await f.cleanup();
   }

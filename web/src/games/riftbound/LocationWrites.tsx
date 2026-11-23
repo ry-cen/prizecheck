@@ -2,6 +2,7 @@ import {
   locationParents,
   reviewedLocationParent,
   validLocationDestination,
+  LOCATION_RELOAD_FAILED_MESSAGE,
   LOCATION_REVIEW_MESSAGE,
 } from "./locationDestinations";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -97,6 +98,8 @@ export function LocationWriteDialog({
   const [conversion, setConversion] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [error, setError] = useState<unknown>();
+  // Set by a tree-change refusal: until a fresh tree is read, the refused command must not be sent again.
+  const [reload, setReload] = useState<"" | "needed" | "failed">("");
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const attempt = useRef<{
@@ -126,8 +129,7 @@ export function LocationWriteDialog({
     !(node.copyCount ?? 0) &&
     !nodes.some((n) => n.parent_id === node.id);
   const parents = locationParents(nodes, id, create);
-  const stale =
-    error instanceof CollectionError && staleLocationCodes.has(error.code);
+  const stale = reload !== "";
   function validInput(currentNodes: LocationNode[]) {
     const current = currentNodes.find((n) => n.id === id);
     if (!create && !current) return false;
@@ -161,21 +163,29 @@ export function LocationWriteDialog({
   function begin(next: typeof step) {
     attempt.current = null;
     setError(undefined);
+    setReload("");
     setStep(next);
     setName(node?.name ?? "");
     setParent(next === "move" ? "__choose__" : "");
     setConfirmName("");
   }
-  async function submit(reload = false) {
+  async function submit(forceReload = false) {
+    const mustReload = forceReload || reload !== "";
     const run = lifetime.current;
     if (!run?.alive || lock.current || !validInput(nodes)) return;
     lock.current = true;
     setBusy(true);
     try {
       let currentNodes = nodes;
-      if (reload) {
-        currentNodes = await reader.locations(run.controller.signal);
+      if (mustReload) {
+        try {
+          currentNodes = await reader.locations(run.controller.signal);
+        } catch {
+          if (run.alive) setReload("failed");
+          return;
+        }
         if (!run.alive) return;
+        setReload("needed");
         if (!reviewTree(currentNodes)) return;
       }
       const current = currentNodes.find((n) => n.id === id);
@@ -257,15 +267,16 @@ export function LocationWriteDialog({
           cause instanceof CollectionError &&
           staleLocationCodes.has(cause.code)
         ) {
+          setReload("needed");
           try {
             const updated = await reader.locations(run.controller.signal);
             if (!run.alive) return;
             reviewTree(updated);
           } catch {
-            /* Keep the original refusal; Reload and retry can reload again. */
+            if (!run.alive) return;
+            setReload("failed");
           }
-          if (!run.alive) return;
-        }
+        } else setReload("");
         if (
           cause instanceof CollectionError &&
           !staleLocationCodes.has(cause.code) &&
@@ -312,6 +323,7 @@ export function LocationWriteDialog({
                   setName(n.name);
                   setStep("list");
                   setError(undefined);
+                  setReload("");
                   attempt.current = null;
                 }}
               >
@@ -366,6 +378,7 @@ export function LocationWriteDialog({
               onChange={(e) => {
                 setName(e.target.value);
                 setError(undefined);
+                setReload((r) => (r === "needed" ? "" : r));
               }}
             />
           )}
@@ -378,6 +391,7 @@ export function LocationWriteDialog({
                 setParent(e.target.value);
                 setConversion(false);
                 setError(undefined);
+                setReload((r) => (r === "needed" ? "" : r));
               }}
             >
               <option value="__choose__" disabled>
@@ -431,7 +445,9 @@ export function LocationWriteDialog({
           {error !== undefined && (
             <p role="alert" className="m-0">
               {stale
-                ? LOCATION_REVIEW_MESSAGE
+                ? reload === "failed"
+                  ? LOCATION_RELOAD_FAILED_MESSAGE
+                  : LOCATION_REVIEW_MESSAGE
                 : locationError(
                     error,
                     node?.name ?? name,

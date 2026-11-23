@@ -1,5 +1,7 @@
 import type { LocationNode } from "./collection";
 export const CHOOSE_LOCATION_PARENT = "__choose__";
+export const LOCATION_RELOAD_FAILED_MESSAGE =
+  "Your locations changed in another tab or window, so nothing was changed. The list couldn't be refreshed. Try Reload and retry.";
 export const LOCATION_REVIEW_MESSAGE =
   "Your locations changed in another tab or window, so nothing was changed. The list has been refreshed; review it and try again.";
 export function locationParents(
