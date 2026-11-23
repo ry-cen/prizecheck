@@ -1,6 +1,10 @@
 # Riftbound catalog milestone: scope and source facts
 
-Status: draft for Ryan. Refs #534. Riftbound-specific work lives on `integration/riftbound-backend`, not `dev`.
+Status: draft for Ryan. Refs #534. The decisions below are quoted as made on 2026-11-08 and 2026-11-09.
+
+> **Status note added 2026-11-23.** The branch statements below are the decision as recorded then. Riftbound work has since
+> merged to `dev`, off by default (#650, #678, #682 and #686), and is tracked in
+> [#683](https://github.com/ry-cen/prizecheck/issues/683). The code and [ADR 0023](../../adr/0023-split-core-and-games-by-composition.md) are current.
 
 ## Decided on 2026-11-08: the Riftbound branch
 
@@ -30,7 +34,7 @@ What follows:
 - Administrative owner routes (for example catalog-import review) are deferred, and so is moving user identity out of Pokémon's database.
 - Frontend separation (#532) blocks only client-facing work.
 - Real Riftbound data will be ingested from what TCGCSV provides, without waiting for separate rights clearance.
-- This supersedes the "synthetic only until a data gate passes" framing: #563 D3, #575 H10 and Q-G1, and #563 R13, the "data gate" prerequisite. #563, #564 and #575 are open pull requests into `dev`; they are not edited here.
+- This supersedes the "synthetic only until a data gate passes" framing: #563 D3, #575 H10 and Q-G1, and #563 R13, the "data gate" prerequisite. #563, #564 and #575 were open pull requests into `dev` when this was written; they were not edited for these decisions.
 - Riftbound-specific work stays on `integration/riftbound-backend`, and core modularization can go to `dev` (the 2026-11-09 clarification of the 2026-11-08 branch decision).
 - #563 D4, catalog shape: Riftbound's own database reuses the shared catalog table structure and relationships, with Riftbound-specific write constraints. This is not a separate schema or translation layer. Ryan's words, answering the question of whether to reuse the structure with game-specific constraints:
 
