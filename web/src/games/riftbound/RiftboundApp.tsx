@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, LayoutGrid } from "lucide-react";
 import { Button } from "../../ui/Button";
 import { SearchField } from "../../ui/SearchField";
@@ -27,6 +27,16 @@ import {
 import type { CollectionWriter } from "./collection";
 import { useRead } from "./read";
 
+/** An entry reached without navigate() (first load, a native link, Back to it) carries no game; never replace another game's state. */
+function stampGame(game: string) {
+  const state = history.state;
+  if (state && typeof state === "object" && "game" in state) return;
+  history.replaceState(
+    { ...(state && typeof state === "object" ? state : {}), game },
+    ""
+  );
+}
+
 const place = (e: Edition) => [e.set.code, e.number].filter(Boolean).join(" ");
 
 export function RiftboundApp(props: {
@@ -52,8 +62,12 @@ function RiftboundComposition({
   collection?: CollectionReader;
   writer?: CollectionWriter;
 }) {
+  const supports = useMemo(
+    () => ({ facets: reader.facets, collection: !!collection }),
+    [reader.facets, collection]
+  );
   const [view, setView] = useState(() =>
-    supportedView(parseView(location.hash), reader)
+    supportedView(parseView(location.hash), supports)
   );
   const [revision, setRevision] = useState(1);
   const [adding, setAdding] = useState<string | null>(null);
@@ -81,9 +95,11 @@ function RiftboundComposition({
   }, [view.edition]);
 
   useEffect(() => {
+    stampGame(reader.scope);
     const update = () => {
       pendingDismissal.current = false;
-      setView(supportedView(parseView(location.hash), reader));
+      stampGame(reader.scope);
+      setView(supportedView(parseView(location.hash), supports));
     };
     window.addEventListener("popstate", update);
     window.addEventListener("hashchange", update);
@@ -91,7 +107,7 @@ function RiftboundComposition({
       window.removeEventListener("popstate", update);
       window.removeEventListener("hashchange", update);
     };
-  }, [reader]);
+  }, [reader.scope, supports]);
   function navigate(next: View, replace = false, detail = false) {
     if (viewHash(next) === viewHash(view)) return;
     history[replace ? "replaceState" : "pushState"](

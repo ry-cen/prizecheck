@@ -62,8 +62,15 @@ export function viewHash(view: View): string {
     })
   );
 }
-export function supportedView(view: View, reader: { facets?: boolean }): View {
-  return reader.facets === false && (view.query.domain || view.query.type)
-    ? { ...view, query: { ...view.query, domain: "", type: "" } }
-    : view;
+/** What the entry supplies: a view asking for anything else falls back to the Catalog. */
+export type Supports = { facets?: boolean; collection?: boolean };
+export function supportedView(view: View, supports: Supports): View {
+  let next = view;
+  if (supports.collection === false && next.section === "collection") {
+    const { section: _s, collection: _c, ...rest } = next;
+    next = rest;
+  }
+  return supports.facets === false && (next.query.domain || next.query.type)
+    ? { ...next, query: { ...next.query, domain: "", type: "" } }
+    : next;
 }
