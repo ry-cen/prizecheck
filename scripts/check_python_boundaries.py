@@ -276,6 +276,15 @@ class Tree:
                                  and (self.app.parent.joinpath(*name.split('.')) / '__init__.py').is_file())
         self.text = {name: path.read_text(encoding='utf-8') for name, (path, _) in self.names.items()}
         self._imports = {}
+        self._strings = {}
+
+    def strings(self, name):
+        """A module's string constants (docstrings left out), parsed only when asked and again only if its text changed."""
+        source = self.text[name]
+        cached = self._strings.get(name)
+        if cached is None or cached[0] != source:
+            cached = self._strings[name] = (source, string_constants(source))
+        return cached[1]
 
     def importers(self, target):
         """The modules with an import that resolves to `target` (or a name under it)."""
@@ -364,6 +373,20 @@ def rule_several_owners(tree, data, rules):
     return sorted(found), compare(found, data['readers'], exact=False)
 
 
+def rule_string_callers(tree, data, rules):
+    matches = {name: [text for text in tree.strings(name) if data['pattern'].search(text)] for name in tree.text}
+    found = {name for name, texts in matches.items() if texts}
+    failures = compare(found, data['callers'], exact=data['exact'])
+    if not data['exact'] and data['required'] - found:
+        failures.append('missing ' + ', '.join(sorted(data['required'] - found)))
+    for name, pattern in data.get('caller_patterns', {}).items():
+        if name not in data['callers'] or name not in found:
+            failures.append(f'caller pattern for {name} must name an allowed matching caller')
+        elif any(not pattern.search(text) for text in matches[name]):
+            failures.append(f'{name} must match {pattern.pattern} in every matching string constant')
+    return sorted(found), failures
+
+
 def rule_no_name(tree, data, rules):
     failures = missing_module(tree, data['module'])
     if failures:
@@ -388,6 +411,12 @@ ARCHITECTURE_RULES = {
     'social-allowed-imports': rule_social_imports,
     'friends-of-readers': rule_pattern_readers,
     'several-owners-readers': rule_several_owners,
+    'reserving-picks-callers': rule_string_callers,
+    'discovery-callers': rule_string_callers,
+    'reach-callers': rule_string_callers,
+    'message-callers': rule_string_callers,
+    'listable-callers': rule_string_callers,
+    'for-trade-callers': rule_string_callers,
     'trade-steps-no-friend-ids': rule_no_name,
     'social-area-complete': rule_social_complete,
 }
