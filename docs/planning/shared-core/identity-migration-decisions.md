@@ -1,5 +1,10 @@
 # Identity and migration decisions
 
+> **Historical audit (note added 2026-11-23).** This describes `dev` at `434f5b7a` and is kept as a record. Parts have since
+> been overtaken; the code, [ADR 0023](../../adr/0023-split-core-and-games-by-composition.md) with its 2026-11 amendments, and
+> [#683](https://github.com/ry-cen/prizecheck/issues/683) are current. Nothing here approves work. Some IM items were decided on 2026-11-09, as
+> the ADR records; check it for any item's current state.
+
 **Status:** proposal for owner review, for [#531](https://github.com/ry-cen/prizecheck/issues/531) and
 [#533](https://github.com/ry-cen/prizecheck/issues/533). Nothing here is approved. It authorizes no migration, security
 change, cutover or deployment, and it adds no accepted ADR. Every recommendation is an input to Ryan's decision. Revised
