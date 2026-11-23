@@ -1,5 +1,9 @@
 # Backend readiness plan
 
+> **Historical audit (note added 2026-11-23).** This describes `dev` at `434f5b7a` and is kept as a record. Parts have since
+> been overtaken; the code, [ADR 0023](../../adr/0023-split-core-and-games-by-composition.md) with its 2026-11 amendments, and
+> [#683](https://github.com/ry-cen/prizecheck/issues/683) are current. Nothing here approves work.
+
 **Status:** audit of `dev` at `434f5b7a` on 2026-11-07, for [#528](https://github.com/ry-cen/prizecheck/issues/528), [#529](https://github.com/ry-cen/prizecheck/issues/529), [#531](https://github.com/ry-cen/prizecheck/issues/531), [#533](https://github.com/ry-cen/prizecheck/issues/533) and [#534](https://github.com/ry-cen/prizecheck/issues/534). It authorizes no implementation, migration or deployment. Line references are to that commit.
 
 **Measured against:** [ADR 0023](../../adr/0023-split-core-and-games-by-composition.md), the [catalog data contract](catalog-data-contract.md) and `scripts/python_module_owners.txt`. The tree is the evidence. Open pull requests #549 to #560 were superseded by #562 and are not counted. The Riftbound spec (`git show origin/riftbound:docs/planning/riftbound/spec.md`) gives constraints only. Where it asks for a `GAME` setting, a registry or interfaces that a game implements, ADR 0023 wins.

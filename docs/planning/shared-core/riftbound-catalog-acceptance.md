@@ -1,5 +1,10 @@
 # Riftbound catalog compatibility acceptance
 
+> **Historical audit (note added 2026-11-23).** This describes `dev` at `434f5b7a` and is kept as a record. Parts have since
+> been overtaken; the code, [ADR 0023](../../adr/0023-split-core-and-games-by-composition.md) with its 2026-11 amendments, and
+> [#683](https://github.com/ry-cen/prizecheck/issues/683) are current. Nothing here approves work. The cases were proposed against that
+> tree, and their data gate was superseded by the 2026-11-09 decisions recorded for #534.
+
 **Status:** proposed 2026-11-07, from `dev` at `434f5b7a`, for [#534](https://github.com/ry-cen/prizecheck/issues/534). Specification only. It contains no fixture data, ingestion code, migrations or real card data, and it authorizes none of them. Companion to the [backend readiness plan](backend-readiness.md), where running these cases is items R12a and R12c.
 
 **Purpose.** Before any real ingestion, show on synthetic records that Riftbound-shaped catalog data can meet what shared SQL and inventory require. A failure here costs a schema decision. The same failure after ingestion could cost collectors' Holdings.
