@@ -5,7 +5,7 @@ Frozen visual reference: Pokémon M7 `ed1231d521dc1210e2ab4ca558e5b2fb9952b1d1`;
 | Surface | Pokémon source (base path) and M7 screenshot | Riftbound file (under web/src/games/riftbound/) | Status | Re-check when Pokémon changes |
 | --- | --- | --- | --- | --- |
 | Desktop top nav | shell/Shell.tsx; B/desktop-collection.png | RiftboundApp.tsx | mirrored-locally | Nav order, active marker, header spacing |
-| Locations heading, All owned, tree read order | workspace/LocationNav.tsx, workspace/locationTree.ts; B/desktop-collection.png | CollectionView.tsx | shared-primitive | Tree ordering, disclosure and current state; folders disclose; leaves choose |
+| Locations heading, All owned, tree read order | workspace/LocationNav.tsx, workspace/locationTree.ts; B/desktop-collection.png | CollectionView.tsx | shared-primitive | Tree ordering, disclosure and current state; folders disclose; leaves are links (`hrefFor`, #669) that choose on a plain click and open in a new tab otherwise |
 | Organization-level listing | workspace/LocationNav.tsx; B/desktop-collection.png | local/collectionFixtures.ts | omitted (folders disclose only, matching Pokémon) | Revisit only if Pokémon makes organization listing reachable |
 | Page heading and copies/Edition totals | workspace/Workspace.tsx; B/desktop-collection.png | CollectionView.tsx | mirrored-locally | PageHeader and lowercase pluralized totals share a baseline row; subtle tabular meta and mb-5 spacing |
 | Search | workspace/GalleryControls.tsx; B/desktop-collection.png | CollectionView.tsx | shared-primitive | 420 px search cap, “Search your cards…” placeholder; fixture substring behavior remains explicit |
