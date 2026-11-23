@@ -1042,7 +1042,7 @@ same way as WP-B3, before `social/` and `trade_list` move.
   are preserved. Planted-violation tests in `tests/tooling` cover all six rules.
 - The API test copies remain unchanged until a later reviewed change removes them.
   No module relocation or privacy-policy change is part of this guard-harness port.
-- Against dev `792e363b5cf8b590518786d45b5eb595f1bdca74`, each scan's pattern, flags, exact or subset semantics and
+- Against dev `cb06a0d8e7bb381ea531e4a2e0ff6ba91d1f8c68`, each scan's pattern, flags, exact or subset semantics and
   caller set equals `test_social_contract.py`'s after path-to-module normalization. A per-caller constraint must name an
   allowed module that still has a matching string, so a stale key fails instead of passing quietly.
 
