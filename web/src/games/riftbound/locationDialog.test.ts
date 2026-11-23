@@ -1,8 +1,9 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CollectionError } from "./collection";
+import { editions } from "./local/fixtures";
 import {
   LOCATION_RELOAD_FAILED_MESSAGE,
   LOCATION_REVIEW_MESSAGE,
@@ -29,7 +30,11 @@ beforeEach(() => {
   resetCollectionFixtures();
 });
 afterEach(() => vi.useRealTimers());
-async function mount(scenario: CollectionScenario = "normal", id?: string) {
+async function mount(
+  scenario: CollectionScenario = "normal",
+  id?: string,
+  prepare?: (store: ReturnType<typeof collectionFixtureStore>) => void
+) {
   const dom = new JSDOM('<div id="root"></div>');
   vi.stubGlobal("window", dom.window);
   vi.stubGlobal("document", dom.window.document);
@@ -38,13 +43,14 @@ async function mount(scenario: CollectionScenario = "normal", id?: string) {
   const writer = collectionFixtureWriter("a", scenario);
   const reader = collectionFixtureReader("a", scenario);
   const store = collectionFixtureStore("a", scenario);
+  prepare?.(store);
   const confirmed = vi.fn();
   const originalCreate = writer.createLocation;
   const create = vi.spyOn(writer, "createLocation");
   const render = () =>
     createElement(LocationWriteDialog, {
       action: { mode: id ? "settings" : "create", id, viewKey: "all" },
-      nodes: store.locations,
+      nodes: structuredClone(store.locations),
       reader,
       writer,
       returnFocus: { current: null },
@@ -506,4 +512,169 @@ it("says the list was refreshed only when the refresh worked", async () => {
   } finally {
     await f.cleanup();
   }
+});
+
+type Store = ReturnType<typeof collectionFixtureStore>;
+const shownChanges: [string, (store: Store, round?: number) => void][] = [
+  [
+    "the destination's parent is renamed",
+    (store, round = 1) => {
+      store.locations.find((n) => n.id === "6")!.name = `Archive ${round}`;
+    },
+  ],
+  [
+    "the destination's parent is moved",
+    (store) => {
+      store.locations.find((n) => n.id === "6")!.parent_id = "2";
+    },
+  ],
+  [
+    "the Location itself is renamed",
+    (store) => {
+      store.locations.find((n) => n.id === "5")!.name = "Spare binder";
+    },
+  ],
+  [
+    "the Location's contents change",
+    (store) => {
+      store.rows.push({
+        edition: editions[0],
+        locationId: "5",
+        quantity: 1,
+        version: store.revision,
+      });
+    },
+  ],
+];
+/** An Archive folder holding an empty Shelf, so a destination has an ancestor that can change. */
+const withArchive = (store: Store) => {
+  const base = store.locations.find((n) => n.id === "3")!;
+  store.locations.push(
+    {
+      ...base,
+      id: "6",
+      name: "Archive",
+      parent_id: null,
+      kind: "organization",
+      depth: 1,
+    },
+    {
+      ...base,
+      id: "7",
+      name: "Shelf",
+      parent_id: "6",
+      kind: "storage_leaf",
+      depth: 2,
+    }
+  );
+};
+async function openMove(destination: string) {
+  const f = await mount("location-stale", "5", withArchive);
+  await act(async () => {
+    [...document.querySelectorAll("button")]
+      .find((b) => b.textContent === "Move")!
+      .click();
+  });
+  await act(async () => {
+    const select = document.querySelector("select")!;
+    select.value = destination;
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+  return f;
+}
+const retryButton = () =>
+  [...document.querySelectorAll("button")].find(
+    (b) => b.textContent === "Reload and retry"
+  )!;
+const press = (how: "retry" | "enter", f: { submit: () => void }) =>
+  act(async () => {
+    if (how === "retry") retryButton().click();
+    else f.submit();
+    await vi.runAllTimersAsync();
+  });
+describe.each([
+  ["the first reload succeeded", false],
+  ["the first reload failed", true],
+] as const)("when %s", (_label, firstReadFails) => {
+  it.each(
+    shownChanges.flatMap(([change, apply]) =>
+      (["retry", "enter"] as const).map((how) => [change, apply, how] as const)
+    )
+  )(
+    "sends nothing when %s until the collector confirms again (%s)",
+    async (_change, apply, how) => {
+      const f = await openMove("7");
+      const edit = vi.spyOn(f.writer, "editLocation");
+      const read = vi.spyOn(f.reader, "locations");
+      if (firstReadFails) read.mockRejectedValueOnce(new Error("down"));
+      try {
+        await act(async () => {
+          f.submit();
+          await vi.runAllTimersAsync();
+        });
+        expect(edit).toHaveBeenCalledTimes(1);
+        apply(f.store);
+        await press(how, f);
+        // The refreshed Locations are shown, and nothing was sent.
+        expect(edit).toHaveBeenCalledTimes(1);
+        expect(f.confirmed).not.toHaveBeenCalled();
+        expect(document.querySelector('[role="alert"]')!.textContent).toBe(
+          LOCATION_REVIEW_MESSAGE
+        );
+        // Confirming what is now on screen sends once, with a fresh key and the current versions.
+        await press(how, f);
+        expect(edit).toHaveBeenCalledTimes(2);
+        expect(edit.mock.calls[0][1].idempotencyKey).not.toBe(
+          edit.mock.calls[1][1].idempotencyKey
+        );
+        expect(f.confirmed).toHaveBeenCalledTimes(1);
+      } finally {
+        await f.cleanup();
+      }
+    }
+  );
+  it("catches a second change between the display and the confirmation", async () => {
+    const f = await openMove("7");
+    const edit = vi.spyOn(f.writer, "editLocation");
+    const read = vi.spyOn(f.reader, "locations");
+    if (firstReadFails) read.mockRejectedValueOnce(new Error("down"));
+    try {
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      shownChanges[0][1](f.store, 1);
+      await press("retry", f);
+      shownChanges[0][1](f.store, 2);
+      await press("retry", f);
+      expect(edit).toHaveBeenCalledTimes(1);
+      expect(f.confirmed).not.toHaveBeenCalled();
+      await press("retry", f);
+      expect(edit).toHaveBeenCalledTimes(2);
+      expect(f.confirmed).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("still sends once with a fresh key when nothing shown changed", async () => {
+    const f = await openMove("2");
+    const edit = vi.spyOn(f.writer, "editLocation");
+    const read = vi.spyOn(f.reader, "locations");
+    if (firstReadFails) read.mockRejectedValueOnce(new Error("down"));
+    try {
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      await press("retry", f);
+      expect(edit).toHaveBeenCalledTimes(2);
+      expect(edit.mock.calls[1][0]).toMatchObject({ parentVersion: 2 });
+      expect(edit.mock.calls[0][1].idempotencyKey).not.toBe(
+        edit.mock.calls[1][1].idempotencyKey
+      );
+      expect(f.confirmed).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.cleanup();
+    }
+  });
 });

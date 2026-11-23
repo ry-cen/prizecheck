@@ -130,6 +130,29 @@ export function LocationWriteDialog({
     !nodes.some((n) => n.parent_id === node.id);
   const parents = locationParents(nodes, id, create);
   const stale = reload !== "";
+  /** Every fact this dialog states about the Location and the destination, as the collector sees it in `tree`. */
+  function shownFacts(tree: LocationNode[]) {
+    const where = indexLocations(tree);
+    const target = tree.find((n) => n.id === id);
+    const destination = tree.find((n) => n.id === parentId);
+    return JSON.stringify({
+      step: create ? "create" : step,
+      target: target && {
+        name: target.name,
+        path: where.path(target.id),
+        copies: target.copyCount ?? 0,
+        children: tree.some((n) => n.parent_id === target.id),
+      },
+      destination: parentId
+        ? destination && {
+            path: where.path(destination.id),
+            stocked:
+              destination.kind === "storage_leaf" &&
+              (destination.copyCount ?? 0) > 0,
+          }
+        : "Top level",
+    });
+  }
   function validInput(currentNodes: LocationNode[]) {
     const current = currentNodes.find((n) => n.id === id);
     if (!create && !current) return false;
@@ -177,6 +200,8 @@ export function LocationWriteDialog({
     setBusy(true);
     try {
       let currentNodes = nodes;
+      // What the collector was shown when they pressed the button; a read must not send past a change to it.
+      const shownBefore = shownFacts(nodes);
       if (mustReload) {
         try {
           currentNodes = await reader.locations(run.controller.signal);
@@ -186,7 +211,9 @@ export function LocationWriteDialog({
         }
         if (!run.alive) return;
         setReload("needed");
-        if (!reviewTree(currentNodes)) return;
+        const reviewed = reviewTree(currentNodes);
+        // Show the refreshed Locations first; the next explicit click is compared against what is then on screen.
+        if (!reviewed || shownFacts(currentNodes) !== shownBefore) return;
       }
       const current = currentNodes.find((n) => n.id === id);
       const destination = currentNodes.find((n) => n.id === parentId);
