@@ -1,9 +1,12 @@
 import {
+  changedLocationFacts,
+  locationFacts,
   locationParents,
   reviewedLocationParent,
   validLocationDestination,
   LOCATION_RELOAD_FAILED_MESSAGE,
   LOCATION_REVIEW_MESSAGE,
+  type LocationFactChange,
 } from "./locationDestinations";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "../../ui/Button";
@@ -100,6 +103,9 @@ export function LocationWriteDialog({
   const [error, setError] = useState<unknown>();
   // Set by a tree-change refusal: until a fresh tree is read, the refused command must not be sent again.
   const [reload, setReload] = useState<"" | "needed" | "failed">("");
+  // What changed in the Locations since the collector last saw them; shown in the alert until they edit or confirm.
+  const [changes, setChanges] = useState<LocationFactChange[]>([]);
+  const alertRef = useRef<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const attempt = useRef<{
@@ -120,6 +126,12 @@ export function LocationWriteDialog({
   }, [reader, writer]);
   const index = indexLocations(nodes);
   const create = action.mode === "create";
+  const gone = !create && !node;
+  useEffect(() => {
+    // A pause names what changed, and moves focus there so a repeated Enter cannot confirm it unseen.
+    if (changes.length || (gone && (reload !== "" || error !== undefined)))
+      alertRef.current?.focus();
+  }, [changes, gone, reload, error]);
   const unsorted = node?.name === "Unsorted" && node.parent_id === null;
   const parent = nodes.find((n) => n.id === parentId);
   const stocked =
@@ -130,29 +142,9 @@ export function LocationWriteDialog({
     !nodes.some((n) => n.parent_id === node.id);
   const parents = locationParents(nodes, id, create);
   const stale = reload !== "";
-  /** Every fact this dialog states about the Location and the destination, as the collector sees it in `tree`. */
-  function shownFacts(tree: LocationNode[]) {
-    const where = indexLocations(tree);
-    const target = tree.find((n) => n.id === id);
-    const destination = tree.find((n) => n.id === parentId);
-    return JSON.stringify({
-      step: create ? "create" : step,
-      target: target && {
-        name: target.name,
-        path: where.path(target.id),
-        copies: target.copyCount ?? 0,
-        children: tree.some((n) => n.parent_id === target.id),
-      },
-      destination: parentId
-        ? destination && {
-            path: where.path(destination.id),
-            stocked:
-              destination.kind === "storage_leaf" &&
-              (destination.copyCount ?? 0) > 0,
-          }
-        : "Top level",
-    });
-  }
+  const formStep = create ? "create" : step === "list" ? undefined : step;
+  // Every fact that can pause a retry is on screen, so the collector has seen what a change is measured against.
+  const facts = formStep ? locationFacts(formStep, nodes, id, parentId) : [];
   function validInput(currentNodes: LocationNode[]) {
     const current = currentNodes.find((n) => n.id === id);
     if (!create && !current) return false;
@@ -172,21 +164,27 @@ export function LocationWriteDialog({
       !currentNodes.some((n) => n.parent_id === id)
     );
   }
+  /** Show the refreshed tree and what changed in it; true only when nothing shown changed and the input still stands. */
   function reviewTree(updated: LocationNode[]) {
+    const next =
+      create || step === "move"
+        ? reviewedLocationParent(updated, id, create, parentId)
+        : parentId;
+    const diff = formStep
+      ? changedLocationFacts(facts, locationFacts(formStep, updated, id, next))
+      : [];
     setNodes(updated);
     attempt.current = null;
-    if (create || step === "move") {
-      const next = reviewedLocationParent(updated, id, create, parentId);
-      setParent(next);
-      return next === parentId && validInput(updated);
-    }
-    return validInput(updated);
+    setParent(next);
+    setChanges(diff);
+    return next === parentId && !diff.length && validInput(updated);
   }
 
   function begin(next: typeof step) {
     attempt.current = null;
     setError(undefined);
     setReload("");
+    setChanges([]);
     setStep(next);
     setName(node?.name ?? "");
     setParent(next === "move" ? "__choose__" : "");
@@ -200,8 +198,6 @@ export function LocationWriteDialog({
     setBusy(true);
     try {
       let currentNodes = nodes;
-      // What the collector was shown when they pressed the button; a read must not send past a change to it.
-      const shownBefore = shownFacts(nodes);
       if (mustReload) {
         try {
           currentNodes = await reader.locations(run.controller.signal);
@@ -211,9 +207,8 @@ export function LocationWriteDialog({
         }
         if (!run.alive) return;
         setReload("needed");
-        const reviewed = reviewTree(currentNodes);
-        // Show the refreshed Locations first; the next explicit click is compared against what is then on screen.
-        if (!reviewed || shownFacts(currentNodes) !== shownBefore) return;
+        // The refreshed Locations are shown first; the next explicit click is measured against what is then on screen.
+        if (!reviewTree(currentNodes)) return;
       }
       const current = currentNodes.find((n) => n.id === id);
       const destination = currentNodes.find((n) => n.id === parentId);
@@ -303,7 +298,10 @@ export function LocationWriteDialog({
             if (!run.alive) return;
             setReload("failed");
           }
-        } else setReload("");
+        } else {
+          setReload("");
+          setChanges([]);
+        }
         if (
           cause instanceof CollectionError &&
           !staleLocationCodes.has(cause.code) &&
@@ -337,8 +335,16 @@ export function LocationWriteDialog({
         <p>Unsorted's Locations can't be changed here.</p>
       ) : !create && !node ? (
         <div className="flex flex-col gap-2">
-          {error !== undefined && (
-            <p role="alert">That Location no longer exists.</p>
+          {(stale || error !== undefined) && (
+            <p
+              role="alert"
+              tabIndex={-1}
+              ref={(el) => {
+                alertRef.current = el;
+              }}
+            >
+              That Location no longer exists.
+            </p>
           )}
           {nodes
             .filter((n) => !(n.name === "Unsorted" && n.parent_id === null))
@@ -351,6 +357,7 @@ export function LocationWriteDialog({
                   setStep("list");
                   setError(undefined);
                   setReload("");
+                  setChanges([]);
                   attempt.current = null;
                 }}
               >
@@ -396,6 +403,16 @@ export function LocationWriteDialog({
             void submit();
           }}
         >
+          {facts.length > 0 && (
+            <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-meta">
+              {facts.map((f) => (
+                <div key={f.key} className="contents">
+                  <dt className="text-text-muted">{f.label}</dt>
+                  <dd className="m-0">{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {(create || step === "rename") && (
             <TextField
               label={create ? "Name" : "New name"}
@@ -405,6 +422,7 @@ export function LocationWriteDialog({
               onChange={(e) => {
                 setName(e.target.value);
                 setError(undefined);
+                setChanges([]);
                 setReload((r) => (r === "needed" ? "" : r));
               }}
             />
@@ -418,6 +436,7 @@ export function LocationWriteDialog({
                 setParent(e.target.value);
                 setConversion(false);
                 setError(undefined);
+                setChanges([]);
                 setReload((r) => (r === "needed" ? "" : r));
               }}
             >
@@ -465,24 +484,45 @@ export function LocationWriteDialog({
                 label="Location name"
                 value={confirmName}
                 disabled={frozen || !empty}
-                onChange={(e) => setConfirmName(e.target.value)}
+                onChange={(e) => {
+                  setConfirmName(e.target.value);
+                  setChanges([]);
+                }}
               />
             </>
           )}
-          {error !== undefined && (
-            <p role="alert" className="m-0">
-              {stale
-                ? reload === "failed"
-                  ? LOCATION_RELOAD_FAILED_MESSAGE
-                  : LOCATION_REVIEW_MESSAGE
-                : locationError(
-                    error,
-                    node?.name ?? name,
-                    create,
-                    step === "move",
-                    parent ? index.path(parent.id) : "Top level"
-                  )}
-            </p>
+          {(stale || error !== undefined) && (
+            <div
+              role="alert"
+              tabIndex={-1}
+              ref={(el) => {
+                alertRef.current = el;
+              }}
+              className="flex flex-col gap-1"
+            >
+              <p className="m-0">
+                {stale
+                  ? reload === "failed"
+                    ? LOCATION_RELOAD_FAILED_MESSAGE
+                    : LOCATION_REVIEW_MESSAGE
+                  : locationError(
+                      error,
+                      node?.name ?? name,
+                      create,
+                      step === "move",
+                      parent ? index.path(parent.id) : "Top level"
+                    )}
+              </p>
+              {stale && changes.length > 0 && (
+                <ul className="m-0 pl-4">
+                  {changes.map((c) => (
+                    <li
+                      key={c.key}
+                    >{`${c.label}: ${c.after} (was ${c.before})`}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
           <div className="flex flex-wrap justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>

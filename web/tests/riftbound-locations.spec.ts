@@ -413,6 +413,60 @@ for (const width of [1280, 375]) {
 }
 
 for (const width of [1280, 375])
+  test(`a Move is paused and the source's change is shown at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 800 });
+    await page.goto(
+      `${entry}?collection=location-stale#riftbound:section=collection`
+    );
+    if (width === 375)
+      await page
+        .getByRole("button", { name: "Locations", exact: true })
+        .click();
+    await page
+      .getByRole("button", { name: "Settings for Empty binder", exact: true })
+      .filter({ visible: true })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Empty binder",
+      exact: true,
+    });
+    await dialog.getByRole("button", { name: "Move", exact: true }).click();
+    await dialog.getByRole("combobox").selectOption("2");
+    await dialog
+      .getByRole("button", { name: "Move location", exact: true })
+      .click();
+    const retry = dialog.getByRole("button", {
+      name: "Reload and retry",
+      exact: true,
+    });
+    await expect(retry).toBeVisible();
+    // The source gains a copy before the collector confirms again.
+    await page.evaluate(async (path) => {
+      const m = await import(path);
+      const store = m.collectionFixtureStore("a", "location-stale");
+      store.rows.push({ ...store.rows[0], locationId: "5", quantity: 1 });
+    }, path);
+    await retry.click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("alert")).toContainText(
+      "Copies: 1 copy (was 0 copies)"
+    );
+    await expect(dialog.getByRole("alert")).toBeFocused();
+    const paused = await inspect(page, "a", "location-stale");
+    expect(
+      paused.locations.find((n: { id: string }) => n.id === "5").parent_id
+    ).toBe(null);
+    await retry.click();
+    await expect(dialog).toHaveCount(0);
+    const moved = await inspect(page, "a", "location-stale");
+    expect(
+      moved.locations.find((n: { id: string }) => n.id === "5").parent_id
+    ).toBe("2");
+  });
+
+for (const width of [1280, 375])
   test(`viewed leaf conversion and move redirect at ${width}`, async ({
     page,
   }) => {

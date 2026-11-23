@@ -1,12 +1,16 @@
+// @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CollectionError } from "./collection";
+import { CollectionError, type LocationNode } from "./collection";
 import { editions } from "./local/fixtures";
 import {
   LOCATION_RELOAD_FAILED_MESSAGE,
   LOCATION_REVIEW_MESSAGE,
+  locationFacts,
+  type LocationFact,
+  type LocationStep,
 } from "./locationDestinations";
 import {
   LocationWriteDialog,
@@ -515,37 +519,42 @@ it("says the list was refreshed only when the refresh worked", async () => {
 });
 
 type Store = ReturnType<typeof collectionFixtureStore>;
-const shownChanges: [string, (store: Store, round?: number) => void][] = [
+const shownChanges: [string, (store: Store, round?: number) => void, string][] =
   [
-    "the destination's parent is renamed",
-    (store, round = 1) => {
-      store.locations.find((n) => n.id === "6")!.name = `Archive ${round}`;
-    },
-  ],
-  [
-    "the destination's parent is moved",
-    (store) => {
-      store.locations.find((n) => n.id === "6")!.parent_id = "2";
-    },
-  ],
-  [
-    "the Location itself is renamed",
-    (store) => {
-      store.locations.find((n) => n.id === "5")!.name = "Spare binder";
-    },
-  ],
-  [
-    "the Location's contents change",
-    (store) => {
-      store.rows.push({
-        edition: editions[0],
-        locationId: "5",
-        quantity: 1,
-        version: store.revision,
-      });
-    },
-  ],
-];
+    [
+      "the destination's parent is renamed",
+      (store, round = 1) => {
+        store.locations.find((n) => n.id === "6")!.name = `Archive ${round}`;
+      },
+      "Moving to: Archive 1 / Shelf (was Archive / Shelf)",
+    ],
+    [
+      "the destination's parent is moved",
+      (store) => {
+        store.locations.find((n) => n.id === "6")!.parent_id = "2";
+      },
+      "Moving to: Binders / Archive / Shelf (was Archive / Shelf)",
+    ],
+    [
+      "the Location itself is renamed",
+      (store) => {
+        store.locations.find((n) => n.id === "5")!.name = "Spare binder";
+      },
+      "Location: Spare binder (was Empty binder)",
+    ],
+    [
+      "the Location's contents change",
+      (store) => {
+        store.rows.push({
+          edition: editions[0],
+          locationId: "5",
+          quantity: 1,
+          version: store.revision,
+        });
+      },
+      "Copies: 1 copy (was 0 copies)",
+    ],
+  ];
 /** An Archive folder holding an empty Shelf, so a destination has an ancestor that can change. */
 const withArchive = (store: Store) => {
   const base = store.locations.find((n) => n.id === "3")!;
@@ -597,12 +606,14 @@ describe.each([
   ["the first reload failed", true],
 ] as const)("when %s", (_label, firstReadFails) => {
   it.each(
-    shownChanges.flatMap(([change, apply]) =>
-      (["retry", "enter"] as const).map((how) => [change, apply, how] as const)
+    shownChanges.flatMap(([change, apply, text]) =>
+      (["retry", "enter"] as const).map(
+        (how) => [change, apply, text, how] as const
+      )
     )
   )(
     "sends nothing when %s until the collector confirms again (%s)",
-    async (_change, apply, how) => {
+    async (_change, apply, text, how) => {
       const f = await openMove("7");
       const edit = vi.spyOn(f.writer, "editLocation");
       const read = vi.spyOn(f.reader, "locations");
@@ -618,9 +629,10 @@ describe.each([
         // The refreshed Locations are shown, and nothing was sent.
         expect(edit).toHaveBeenCalledTimes(1);
         expect(f.confirmed).not.toHaveBeenCalled();
-        expect(document.querySelector('[role="alert"]')!.textContent).toBe(
-          LOCATION_REVIEW_MESSAGE
-        );
+        const alert = document.querySelector<HTMLElement>('[role="alert"]')!;
+        expect(alert.textContent).toContain(LOCATION_REVIEW_MESSAGE);
+        expect(alert.textContent).toContain(text);
+        expect(document.activeElement).toBe(alert);
         // Confirming what is now on screen sends once, with a fresh key and the current versions.
         await press(how, f);
         expect(edit).toHaveBeenCalledTimes(2);
@@ -673,6 +685,435 @@ describe.each([
         edit.mock.calls[1][1].idempotencyKey
       );
       expect(f.confirmed).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.cleanup();
+    }
+  });
+});
+
+// ---- Every fact the form states can pause a reloaded retry, and is on screen to be seen first.
+const setInput = (input: HTMLInputElement, value: string) => {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value"
+  )!.set!;
+  setter.call(input, value);
+  input.dispatchEvent(new window.Event("input", { bubbles: true }));
+};
+const typeInto = (label: string, value: string) =>
+  act(async () => {
+    const input = [...document.querySelectorAll("label")]
+      .find((l) => l.textContent?.startsWith(label))!
+      .querySelector("input")!;
+    setInput(input, value);
+  });
+const choose = (value: string) =>
+  act(async () => {
+    const select = document.querySelector("select")!;
+    select.value = value;
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+  });
+const clickButton = (text: string) =>
+  act(async () => {
+    [...document.querySelectorAll("button")]
+      .find((b) => b.textContent === text)!
+      .click();
+  });
+const addCopy = (store: Store, locationId = "5") =>
+  store.rows.push({
+    edition: editions[0],
+    locationId,
+    quantity: 1,
+    version: store.revision,
+  });
+const dropCopy = (store: Store, locationId = "5") => {
+  const at = store.rows.findIndex((r) => r.locationId === locationId);
+  store.rows.splice(at, 1);
+};
+const addChild = (store: Store) => {
+  const base = store.locations.find((n) => n.id === "3")!;
+  store.locations.push({
+    ...base,
+    id: "8",
+    name: "Pocket",
+    parent_id: "5",
+    kind: "storage_leaf",
+    depth: 2,
+  });
+};
+const renameSource = (store: Store) => {
+  store.locations.find((n) => n.id === "5")!.name = "Spare binder";
+};
+const renameArchive = (store: Store) => {
+  store.locations.find((n) => n.id === "6")!.name = "Archive 1";
+};
+async function open(step: LocationStep) {
+  if (step === "create") {
+    const f = await mount("normal", undefined, withArchive);
+    await choose("6");
+    await typeInto("Name", "New shelf");
+    return f;
+  }
+  const f = await mount("normal", "5", withArchive);
+  await clickButton(
+    step === "rename" ? "Rename" : step === "move" ? "Move" : "Delete"
+  );
+  if (step === "rename") await typeInto("New name", "Renamed binder");
+  if (step === "move") await choose("7");
+  if (step === "delete") await typeInto("Location name", "Empty binder");
+  return f;
+}
+const methodOf = {
+  create: "createLocation",
+  rename: "editLocation",
+  move: "editLocation",
+  delete: "deleteLocation",
+} as const;
+const alertEl = () => document.querySelector<HTMLElement>('[role="alert"]')!;
+const factsText = () => document.querySelector("dl")?.textContent ?? "";
+type Cell = [
+  LocationStep,
+  LocationFact["key"],
+  (store: Store) => void,
+  string,
+  boolean,
+];
+const cells: Cell[] = [
+  [
+    "rename",
+    "path",
+    renameSource,
+    "Location: Spare binder (was Empty binder)",
+    true,
+  ],
+  [
+    "move",
+    "path",
+    renameSource,
+    "Location: Spare binder (was Empty binder)",
+    true,
+  ],
+  ["move", "copies", (s) => addCopy(s), "Copies: 1 copy (was 0 copies)", true],
+  ["move", "inside", addChild, "Locations inside: 1 (was 0)", true],
+  [
+    "move",
+    "parent",
+    renameArchive,
+    "Moving to: Archive 1 / Shelf (was Archive / Shelf)",
+    true,
+  ],
+  [
+    "delete",
+    "path",
+    renameSource,
+    "Location: Spare binder (was Empty binder)",
+    false,
+  ],
+  [
+    "delete",
+    "copies",
+    (s) => addCopy(s),
+    "Copies: 1 copy (was 0 copies)",
+    false,
+  ],
+  ["delete", "inside", addChild, "Locations inside: 1 (was 0)", false],
+  [
+    "create",
+    "parent",
+    renameArchive,
+    "Adding to: Archive 1 (was Archive)",
+    true,
+  ],
+];
+describe.each(cells)(
+  "a changed %s fact: %s",
+  (step, _key, mutate, text, sendsAfter) => {
+    it.each(["retry", "enter"] as const)(
+      "pauses the reloaded retry (%s) and lists the change",
+      async (how) => {
+        const f = await open(step);
+        const send = vi.spyOn(f.writer, methodOf[step]);
+        send.mockRejectedValueOnce(new CollectionError("STALE_LOCATION"));
+        try {
+          await act(async () => {
+            f.submit();
+            await vi.runAllTimersAsync();
+          });
+          expect(send).toHaveBeenCalledTimes(1);
+          const before = factsText();
+          mutate(f.store);
+          await press(how, f);
+          expect(send).toHaveBeenCalledTimes(1);
+          expect(f.confirmed).not.toHaveBeenCalled();
+          expect(factsText()).not.toBe(before);
+          expect(alertEl().textContent).toContain(LOCATION_REVIEW_MESSAGE);
+          expect(alertEl().textContent).toContain(text);
+          expect(document.activeElement).toBe(alertEl());
+          await press(how, f);
+          if (sendsAfter) {
+            expect(send).toHaveBeenCalledTimes(2);
+            expect(f.confirmed).toHaveBeenCalledTimes(1);
+          } else {
+            expect(send).toHaveBeenCalledTimes(1);
+            expect(retryButton().disabled).toBe(true);
+          }
+        } finally {
+          await f.cleanup();
+        }
+      }
+    );
+  }
+);
+it("pauses a create whose parent gains cards to move, and a conversion must then be chosen", async () => {
+  const f = await mount("normal", undefined, withArchive);
+  await choose("5");
+  await typeInto("Name", "New shelf");
+  const create = vi.spyOn(f.writer, "createLocation");
+  create.mockRejectedValueOnce(new CollectionError("STALE_LOCATION"));
+  try {
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    addCopy(f.store);
+    await press("retry", f);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(alertEl().textContent).toContain(
+      "Copies to move: 1 copy (was none)"
+    );
+    expect(retryButton().disabled).toBe(true);
+    expect(factsText()).toContain("Copies to move");
+  } finally {
+    await f.cleanup();
+  }
+});
+it("shows every fact in the form, and the table covers every key locationFacts returns", async () => {
+  const tree = (copies: number): LocationNode[] => {
+    const node = (
+      id: string,
+      parent_id: string | null,
+      kind: string,
+      copyCount = 0
+    ) =>
+      ({
+        id,
+        name: `N${id}`,
+        parent_id,
+        kind,
+        version: 1,
+        depth: parent_id ? 2 : 1,
+        copyCount,
+      }) as LocationNode;
+    return [
+      node("a", null, "organization"),
+      node("b", "a", "storage_leaf", copies),
+      node("c", null, "storage_leaf"),
+    ];
+  };
+  const keysOf = (step: LocationStep) =>
+    new Set(
+      [tree(0), tree(2)].flatMap((t) =>
+        ["", "a", "b", "__choose__"].flatMap((parent) =>
+          ["a", "b", "c", undefined].flatMap((id) =>
+            locationFacts(step, t, id, parent).map((fact) => fact.key)
+          )
+        )
+      )
+    );
+  for (const step of ["create", "rename", "move", "delete"] as const) {
+    const tested = new Set(cells.filter((c) => c[0] === step).map((c) => c[1]));
+    // Copies to move needs a stocked create parent; it has its own test above.
+    if (step === "create") tested.add("stock");
+    expect(tested).toEqual(keysOf(step));
+    const f = await open(step);
+    try {
+      const expected = locationFacts(
+        step,
+        structuredClone(f.store.locations),
+        step === "create" ? undefined : "5",
+        step === "move" ? "7" : step === "create" ? "6" : ""
+      );
+      const dl = document.querySelector("dl")!;
+      expect([...dl.querySelectorAll("dt")].map((t) => t.textContent)).toEqual(
+        expected.map((fact) => fact.label)
+      );
+      expect([...dl.querySelectorAll("dd")].map((d) => d.textContent)).toEqual(
+        expected.map((fact) => fact.value)
+      );
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+describe("moving a Location", () => {
+  async function moveWithRefusal(options?: { failFirstRead?: boolean }) {
+    const f = await open("move");
+    const send = vi.spyOn(f.writer, "editLocation");
+    send.mockRejectedValueOnce(new CollectionError("STALE_LOCATION"));
+    if (options?.failFirstRead)
+      vi.spyOn(f.reader, "locations").mockRejectedValueOnce(new Error("down"));
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    return { f, send };
+  }
+  it("lists a change to the source and the destination together", async () => {
+    const { f, send } = await moveWithRefusal();
+    try {
+      addCopy(f.store);
+      renameArchive(f.store);
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toContain("Copies: 1 copy (was 0 copies)");
+      expect(alertEl().textContent).toContain("Moving to: Archive 1 / Shelf");
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("pauses again for a second change and for a revert of a change that was shown, then sends once", async () => {
+    const { f, send } = await moveWithRefusal();
+    try {
+      addCopy(f.store);
+      await press("retry", f);
+      expect(alertEl().textContent).toContain("Copies: 1 copy (was 0 copies)");
+      addCopy(f.store);
+      await press("retry", f);
+      expect(alertEl().textContent).toContain("Copies: 2 copies (was 1 copy)");
+      dropCopy(f.store);
+      dropCopy(f.store);
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toContain(
+        "Copies: 0 copies (was 2 copies)"
+      );
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(f.confirmed).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("sends when a change was made and undone before it was ever shown", async () => {
+    const { f, send } = await moveWithRefusal();
+    try {
+      addCopy(f.store);
+      dropCopy(f.store);
+      renameArchive(f.store);
+      f.store.locations.find((n) => n.id === "6")!.name = "Archive";
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(f.confirmed).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("diffs against the last facts shown after a failed reload", async () => {
+    const { f, send } = await moveWithRefusal({ failFirstRead: true });
+    try {
+      expect(alertEl().textContent).toContain(LOCATION_RELOAD_FAILED_MESSAGE);
+      addCopy(f.store);
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toContain("Copies: 1 copy (was 0 copies)");
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("still alerts after a failed reload when the collector edits a field and then something changes", async () => {
+    const { f, send } = await moveWithRefusal({ failFirstRead: true });
+    try {
+      await choose("2");
+      await choose("7");
+      addCopy(f.store);
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toContain("Copies: 1 copy (was 0 copies)");
+      expect(document.activeElement).toBe(alertEl());
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("lists a change that arrives in the refusal's own refresh", async () => {
+    const f = await open("move");
+    const send = vi.spyOn(f.writer, "editLocation");
+    send.mockImplementationOnce(async () => {
+      addCopy(f.store);
+      throw new CollectionError("STALE_LOCATION");
+    });
+    try {
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toContain("Copies: 1 copy (was 0 copies)");
+      expect(document.activeElement).toBe(alertEl());
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("offers the picker and focuses the notice when the source is deleted", async () => {
+    const { f, send } = await moveWithRefusal();
+    try {
+      f.store.locations.splice(
+        f.store.locations.findIndex((n) => n.id === "5"),
+        1
+      );
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toBe("That Location no longer exists.");
+      expect(document.activeElement).toBe(alertEl());
+      expect(document.querySelector("form")).toBe(null);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("says the destination is no longer chosen when it is deleted, and disables Retry until one is picked", async () => {
+    const { f, send } = await moveWithRefusal();
+    try {
+      f.store.locations.splice(
+        f.store.locations.findIndex((n) => n.id === "7"),
+        1
+      );
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toContain(
+        "Moving to: Not chosen (was Archive / Shelf)"
+      );
+      expect(retryButton().disabled).toBe(true);
+      await choose("2");
+      const move = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent === "Move location"
+      )!;
+      expect(move.disabled).toBe(false);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("sends on the first Retry when only a version changed", async () => {
+    const { f, send } = await moveWithRefusal();
+    try {
+      f.store.locations.find((n) => n.id === "7")!.version++;
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(f.confirmed).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("lists a changed path when the source itself is moved elsewhere", async () => {
+    const { f, send } = await moveWithRefusal();
+    try {
+      f.store.locations.find((n) => n.id === "5")!.parent_id = "2";
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toContain(
+        "Location: Binders / Empty binder (was Empty binder)"
+      );
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(2);
     } finally {
       await f.cleanup();
     }
