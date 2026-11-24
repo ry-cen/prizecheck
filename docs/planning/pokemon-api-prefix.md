@@ -135,11 +135,10 @@ So old and new paths are served together until a later release removes the old o
 
 ## Recommended rollout
 
-1. Land the Riftbound gateway prefix (`feature/534-riftbound-gateway-prefix`) first. That branch now has local commits and is in its
-   final review round, so a conflict in the same region of `auth/src/server.ts` (the start of the request handler where
-   `path` is computed) is still expected, not observed. This branch rebases on it after it lands: keep one `path`/upstream-URL pair, make the Pokémon helper and the Riftbound one siblings (ideally one
-   per-game prefix table), and keep the rule that an unlisted `/api/<game>/...` answers 404 without an upstream call.
-   Re-run `auth/tests/pokemon-prefix-gateway.test.ts` after the rebase.
+1. The Riftbound gateway prefix (#678) landed on `dev` first. This slice was rebased onto it and the overlap in the start of
+   the request handler in `auth/src/server.ts` was resolved there: one `path`/upstream-URL pair, the `/api/pokemon` decision
+   made first on the raw target (a refused target gets its 404 before any session, limiter or body handling), then the
+   `/api/riftbound` refusal on the upstream path. An unlisted `/api/<game>/...` answers 404 without an upstream call.
 2. Land this slice to `dev`, then release it with the host steps below.
 3. Release host steps: ship the updated `nginx.conf` (the new exact location) with the same release as the gateway, since
    nginx would otherwise cap `/api/pokemon/collection-imports` at 64k while the gateway accepts 5 MiB. Deploy the gateway and
