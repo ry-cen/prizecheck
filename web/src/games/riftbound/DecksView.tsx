@@ -526,6 +526,7 @@ function Editor({
         <DeckCommand
           key={command.kind}
           version={detail.location.version}
+          currentName={detail.location.name}
           reload={async () => {
             const fresh = await reader.deck(
               detail.location.id,
@@ -593,6 +594,7 @@ export function DeckCommand({
   initialName,
   confirmName,
   version,
+  currentName,
   reload,
   send,
   close,
@@ -602,6 +604,8 @@ export function DeckCommand({
   initialName: string;
   confirmName?: string;
   version?: number;
+  /** The Deck's name now, so a version change can be told apart from a rename. */
+  currentName?: string;
   reload?: () => Promise<void>;
   send: (
     name: string,
@@ -632,7 +636,10 @@ export function DeckCommand({
   const [changedMeanwhile, setChangedMeanwhile] = useState(false);
   const guard = useRef(false);
   const currentVersion = useRef(version);
-  const [renamed, setRenamed] = useState(false);
+  const [changed, setChanged] = useState(false);
+  /** The name the collector last saw; a different current name that their own request did not set is a rename. */
+  const seenName = useRef(currentName);
+  const sentName = useRef<string | undefined>(undefined);
   const nameField = useRef<HTMLInputElement>(null);
   const [focusName, requestNameFocus] = useState(0);
   const form = useRef<HTMLFormElement>(null);
@@ -654,7 +661,7 @@ export function DeckCommand({
       setChangedMeanwhile(true);
       return;
     }
-    setRenamed(true);
+    setChanged(true);
     attempt.current = null;
     setError("");
     requestNameFocus((n) => n + 1);
@@ -679,8 +686,10 @@ export function DeckCommand({
     setError("");
     if (!attempt.current) {
       // A new attempt starts without the last one's notes.
-      setRenamed(false);
+      setChanged(false);
       setChangedMeanwhile(false);
+      seenName.current = currentName;
+      sentName.current = name;
     }
     attempt.current ??= {
       name,
@@ -708,7 +717,7 @@ export function DeckCommand({
         else {
           // The version moved on past what this request produced.
           attempt.current = null;
-          setRenamed(true);
+          setChanged(true);
           requestNameFocus((n) => n + 1);
         }
       }
@@ -730,14 +739,14 @@ export function DeckCommand({
           // The Deck changed while this request was in flight and it did not
           // succeed, so the change cannot be attributed to it.
           attempt.current = null;
-          setRenamed(true);
+          setChanged(true);
           setError("");
           requestNameFocus((n) => n + 1);
           return;
         }
         if (e instanceof DeckError && e.code === "STALE_LOCATION") {
           attempt.current = null;
-          setRenamed(true);
+          setChanged(true);
           try {
             await reload?.();
           } catch {
@@ -774,6 +783,12 @@ export function DeckCommand({
       if (lifetime.current.alive) setBusy(false);
     }
   }
+  // Named only when the Deck's name is now different from what the collector saw and their own request did not set it.
+  const renamed =
+    changed &&
+    currentName !== undefined &&
+    currentName !== seenName.current &&
+    currentName.trim() !== sentName.current?.trim();
   return (
     <Dialog open title={title} onClose={close}>
       <form
@@ -784,7 +799,9 @@ export function DeckCommand({
         }}
         className="flex flex-col gap-4"
       >
-        {renamed && <p>This Deck was renamed elsewhere.</p>}
+        {changed && (
+          <p>{renamed ? "This Deck was renamed." : "This Deck changed."}</p>
+        )}
         {changedMeanwhile && attempt.current && (
           <p>This Deck changed. Retry checks your last change first.</p>
         )}

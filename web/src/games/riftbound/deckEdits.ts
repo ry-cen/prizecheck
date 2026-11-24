@@ -30,8 +30,8 @@ export class DeckEdits {
     if (dropped) {
       this.paused = true;
       this.error = refusal
-        ? "That card can't be added any more, and this Deck changed somewhere else, so some changes weren’t saved. Review the Deck List."
-        : "This Deck changed somewhere else, so some changes weren’t saved. Review the Deck List.";
+        ? "That card can't be added any more, and this Deck changed, so some changes weren’t saved. Review the Deck List."
+        : "This Deck changed, so some changes weren’t saved. Review the Deck List.";
     }
     return dropped;
   }
@@ -173,8 +173,8 @@ export class DeckEdits {
           this.attempt = undefined;
           this.paused = unchanged;
           this.error = unchanged
-            ? "This Deck changed somewhere else, so your last change wasn't saved. It's up to date now: try again."
-            : "This Deck changed somewhere else, so your last change wasn't saved. Review the refreshed Deck List.";
+            ? "This Deck changed, so your last change wasn't saved. It's up to date now: try again."
+            : "This Deck changed, so your last change wasn't saved. Review the refreshed Deck List.";
         } catch {
           if (this.alive) {
             this.paused = true;

@@ -300,15 +300,15 @@ it("retains unambiguous stale intent at the new revision and drops intent when q
     edits.reload = async () => fresh;
     edits.adjust(initial.lines[0].edition.id, 1);
     await vi.waitFor(() =>
-      expect(edits.error).toContain("This Deck changed somewhere else")
+      expect(edits.error).toContain("This Deck changed, so")
     );
     expect(edits.detail.listRevision).toBe(2);
     expect(edits.busy).toBe(!concurrent);
     expect(edits.canRetry).toBe(!concurrent);
     expect(edits.error).toBe(
       concurrent
-        ? "This Deck changed somewhere else, so your last change wasn't saved. Review the refreshed Deck List."
-        : "This Deck changed somewhere else, so your last change wasn't saved. It's up to date now: try again."
+        ? "This Deck changed, so your last change wasn't saved. Review the refreshed Deck List."
+        : "This Deck changed, so your last change wasn't saved. It's up to date now: try again."
     );
     if (!concurrent) {
       edits.retry();
@@ -319,6 +319,26 @@ it("retains unambiguous stale intent at the new revision and drops intent when q
   }
 });
 
+it("does not say a Deck changed somewhere else when the collector's own Holding arrival moved its Deck List", async () => {
+  const api = deckFixture("a"),
+    writer = collectionFixtureWriter("a");
+  const initial = (await api.deck("deck-2", signal))!;
+  const edits = new DeckEdits(initial, api, () => {});
+  edits.reload = async () => (await api.deck("deck-2", signal))!;
+  // The collector adds a card to the Deck: the arrival extends the Deck List and advances its revision.
+  await writer.add(
+    { locationId: "deck-2", editionId: "1", quantity: 1 },
+    options()
+  );
+  expect((await api.deck("deck-2", signal))?.listRevision).toBe(2);
+  edits.adjust("1", 1);
+  await vi.waitFor(() => expect(edits.error).toContain("This Deck changed"));
+  expect(edits.error).toBe(
+    "This Deck changed, so your last change wasn't saved. Review the refreshed Deck List."
+  );
+  expect(edits.error).not.toContain("else");
+  edits.dispose();
+});
 describe("Holdings arriving in Decks cover their Deck Lists", () => {
   const item = (
     store: ReturnType<typeof collectionFixtureStore>,
@@ -730,7 +750,7 @@ for (const failed of [false, true])
       expect(edits.error).toContain("Review the Deck List")
     );
     expect(edits.error).toBe(
-      "That card can't be added any more, and this Deck changed somewhere else, so some changes weren’t saved. Review the Deck List."
+      "That card can't be added any more, and this Deck changed, so some changes weren’t saved. Review the Deck List."
     );
     expect(change).toHaveBeenCalledTimes(1);
     expect(edits.canRetry).toBe(true);

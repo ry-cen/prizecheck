@@ -778,9 +778,9 @@ for (const width of [1280, 375]) {
     await page.getByRole("button", { name: "Rename", exact: true }).click();
     dialog = page.getByRole("dialog", { name: "Rename Deck", exact: true });
     await dialog.getByLabel("Deck name").fill("My retained draft");
-    await expect(
-      dialog.getByText("This Deck was renamed elsewhere.")
-    ).toBeVisible({ timeout: 10000 });
+    await expect(dialog.getByText("This Deck was renamed.")).toBeVisible({
+      timeout: 10000,
+    });
     await expect(dialog.getByLabel("Deck name")).toHaveValue(
       "My retained draft"
     );
@@ -931,7 +931,7 @@ for (const width of [1280, 375]) {
       .getByRole("button", { name: "Increase quantity", exact: true })
       .click();
     await expect(page.getByRole("alert")).toHaveText(
-      "That card can't be added any more, and this Deck changed somewhere else, so some changes weren’t saved. Review the Deck List.",
+      "That card can't be added any more, and this Deck changed, so some changes weren’t saved. Review the Deck List.",
       { timeout: 15000 }
     );
   });
@@ -1028,8 +1028,9 @@ for (const width of [1280, 375]) {
     await call("__listRelease");
     await page.waitForFunction(() => (window as unknown as Hooks).__listDone);
     await expect(dialog.getByLabel("Deck name")).toBeDisabled();
+    await expect(dialog.getByText("This Deck was renamed.")).toHaveCount(0);
     await expect(
-      dialog.getByText("This Deck was renamed elsewhere.")
+      dialog.getByText("This Deck changed.", { exact: true })
     ).toHaveCount(0);
     await call("__renameRelease");
     await expect(
@@ -1048,9 +1049,7 @@ for (const width of [1280, 375]) {
     await call("__listRelease");
     await page.waitForFunction(() => (window as unknown as Hooks).__listDone);
     await call("__renameRelease");
-    await expect(
-      dialog.getByText("This Deck was renamed elsewhere.")
-    ).toBeVisible();
+    await expect(dialog.getByText("This Deck was renamed.")).toBeVisible();
     await expect(dialog.getByLabel("Deck name")).toHaveValue(
       "Mid-flight draft"
     );
@@ -1065,9 +1064,9 @@ for (const width of [1280, 375]) {
     });
     void elsewhere(4);
     dialog = await start("Stale draft");
-    await expect(
-      dialog.getByText("This Deck was renamed elsewhere.")
-    ).toBeVisible({ timeout: 15000 });
+    await expect(dialog.getByText("This Deck was renamed.")).toBeVisible({
+      timeout: 15000,
+    });
     await expect(dialog.getByLabel("Deck name")).toHaveValue("Stale draft");
     await expect(dialog.getByLabel("Deck name")).toBeFocused();
   });
@@ -1136,14 +1135,18 @@ for (const width of [1280, 375]) {
     await expect(dialog).toContainText(
       "This Deck changed. Retry checks your last change first."
     );
-    await expect(dialog.getByText("renamed elsewhere")).toHaveCount(0);
-    await expect(dialog.getByText("changed elsewhere")).toHaveCount(0);
+    await expect(
+      dialog.getByText(/renamed elsewhere|changed elsewhere/)
+    ).toHaveCount(0);
+    await expect(dialog.getByText("somewhere else")).toHaveCount(0);
     await dialog.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Lost response rename", exact: true })
     ).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page.getByText("renamed elsewhere")).toHaveCount(0);
+    await expect(
+      page.getByText(/renamed elsewhere|changed elsewhere|somewhere else/)
+    ).toHaveCount(0);
     const location = await page.evaluate(async () => {
       const path = "/src/games/riftbound/local/deckFixtures.ts";
       return (await import(path))
@@ -1288,7 +1291,7 @@ for (const width of [1280, 375]) {
     sheet = page.getByRole("dialog", { name: "Ember Scout", exact: true });
     await sheet.getByRole("button", { name: "Increase quantity" }).click();
     await expect(page.getByRole("alert")).toContainText(
-      "This Deck changed somewhere else"
+      "This Deck changed, so"
     );
     await expect(
       sheet.getByText("3 on Deck List", { exact: true })

@@ -56,7 +56,7 @@ for (const deletion of [false, true])
       await act(async () => render(3));
       expect(input.value).toBe("My draft");
       expect(input.disabled).toBe(true);
-      expect(document.body.textContent).not.toContain("renamed elsewhere");
+      expect(document.body.textContent).not.toContain("elsewhere");
       expect(document.body.textContent).toContain(
         "Your last change may not have been saved."
       );
@@ -73,7 +73,7 @@ for (const deletion of [false, true])
         send.mock.calls[0][1].idempotencyKey
       );
       expect(send.mock.calls[1][1].version).toBe(1);
-      expect(document.body.textContent).not.toContain("renamed elsewhere");
+      expect(document.body.textContent).not.toContain("elsewhere");
     } finally {
       await act(async () => root.unmount());
       dom.window.close();
@@ -95,13 +95,14 @@ async function harness(
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const root = createRoot(document.getElementById("root")!);
   const done = vi.fn();
-  const render = (version: number) =>
+  const render = (version: number, currentName = "Draft") =>
     root.render(
       createElement(DeckCommand, {
         title: "Rename Deck",
         initialName: "Draft",
         ...props,
         version,
+        currentName,
         send: send as never,
         reload,
         done,
@@ -144,15 +145,15 @@ it("treats a version delivered while the collector's own rename is in flight as 
     await act(async () => h.submit());
     await act(async () => h.render(2));
     expect(h.input().disabled).toBe(true);
-    expect(document.body.textContent).not.toContain("renamed elsewhere");
+    expect(document.body.textContent).not.toContain("elsewhere");
     await act(async () => resolve({ ownerRevision: 2, location: location(2) }));
     expect(h.done).toHaveBeenCalledTimes(1);
-    expect(document.body.textContent).not.toContain("renamed elsewhere");
+    expect(document.body.textContent).not.toContain("elsewhere");
   } finally {
     await h.finish();
   }
 });
-it("reports a rename elsewhere, with a fresh key and restored focus, when the result cannot be attributed to the collector's request", async () => {
+it("reports a changed Deck, with a fresh key and restored focus, when the result cannot be attributed to the collector's request", async () => {
   const send = vi
     .fn()
     .mockResolvedValueOnce({ ownerRevision: 2, location: location(2) })
@@ -171,9 +172,7 @@ it("reports a rename elsewhere, with a fresh key and restored focus, when the re
     await act(async () => h.render(3));
     await act(async () => release());
     expect(h.done).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain(
-      "This Deck was renamed elsewhere."
-    );
+    expect(document.body.textContent).toContain("This Deck changed.");
     expect(h.input().disabled).toBe(false);
     expect(document.activeElement).toBe(h.input());
     await act(async () => h.submit());
@@ -181,6 +180,53 @@ it("reports a rename elsewhere, with a fresh key and restored focus, when the re
     expect(send.mock.calls[1][1].idempotencyKey).not.toBe(
       send.mock.calls[0][1].idempotencyKey
     );
+  } finally {
+    await h.finish();
+  }
+});
+it("says only that the Deck changed when the version moves and the name is the same", async () => {
+  const h = await harness(vi.fn() as never);
+  try {
+    await act(async () => h.render(1));
+    await act(async () => h.render(2));
+    expect(document.body.textContent).toContain("This Deck changed.");
+    expect(document.body.textContent).not.toContain("renamed");
+    expect(document.body.textContent).not.toContain("elsewhere");
+    expect(document.activeElement).toBe(h.input());
+  } finally {
+    await h.finish();
+  }
+});
+it("says the Deck was renamed only when its name is now different, and names no one", async () => {
+  const h = await harness(vi.fn() as never);
+  try {
+    await act(async () => h.render(1));
+    await act(async () => h.render(2, "Spare"));
+    expect(document.body.textContent).toContain("This Deck was renamed.");
+    expect(document.body.textContent).not.toContain("elsewhere");
+  } finally {
+    await h.finish();
+  }
+});
+it("does not call the collector's own rename a rename by someone else when the version then moves again", async () => {
+  let resolve!: (r: { ownerRevision: number; location: Location }) => void;
+  const h = await harness(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+    undefined,
+    { initialName: "Mine" }
+  );
+  try {
+    await act(async () => h.render(1));
+    await act(async () => h.submit());
+    // Their rename lands as version 2 and the name is theirs, then another change moves the version on.
+    await act(async () => h.render(3, "Mine"));
+    await act(async () => resolve({ ownerRevision: 2, location: location(2) }));
+    expect(h.done).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("This Deck changed.");
+    expect(document.body.textContent).not.toContain("renamed");
   } finally {
     await h.finish();
   }
@@ -198,9 +244,7 @@ it("restores focus when an in-flight request is definitively refused after the v
     await act(async () => h.submit());
     await act(async () => h.render(2));
     await act(async () => fail(new DeckError("LOCATION_NAME_CONFLICT")));
-    expect(document.body.textContent).toContain(
-      "This Deck was renamed elsewhere."
-    );
+    expect(document.body.textContent).toContain("This Deck changed.");
     expect(h.input().disabled).toBe(false);
     expect(document.activeElement).toBe(h.input());
   } finally {
@@ -219,9 +263,7 @@ it("keeps the draft, reloads and restores focus after a stale Location", async (
     await act(async () => h.submit());
     expect(reload).toHaveBeenCalledTimes(1);
     expect(h.input().value).toBe("Draft");
-    expect(document.body.textContent).toContain(
-      "This Deck was renamed elsewhere."
-    );
+    expect(document.body.textContent).toContain("This Deck changed.");
     expect(document.activeElement).toBe(h.input());
     await act(async () => h.render(3));
     await act(async () => h.submit());
@@ -287,7 +329,7 @@ for (const deletion of [false, true])
       expect(mutations).toBe(1);
       // A background read observes the version the lost response produced.
       await act(async () => h.render(initial.version + 1));
-      expect(document.body.textContent).not.toContain("renamed elsewhere");
+      expect(document.body.textContent).not.toContain("elsewhere");
       await act(async () => h.submit());
       await vi.waitFor(() => expect(h.done).toHaveBeenCalledTimes(1));
       expect(send.mock.calls[1][1].idempotencyKey).toBe(
@@ -302,7 +344,7 @@ for (const deletion of [false, true])
           name: "Sol rename",
           version: initial.version + 1,
         });
-      expect(document.body.textContent).not.toContain("renamed elsewhere");
+      expect(document.body.textContent).not.toContain("elsewhere");
     } finally {
       await h.finish();
     }
@@ -368,15 +410,13 @@ it("does not carry an earlier attempt's changed-elsewhere note into a new attemp
     );
     expect(document.body.textContent).not.toContain("elsewhere");
     await act(async () => h.submit());
-    expect(document.body.textContent).toContain(
-      "This Deck was renamed elsewhere."
-    );
+    expect(document.body.textContent).toContain("This Deck changed.");
     expect(h.input().disabled).toBe(false);
     await act(async () => h.submit());
     expect(send).toHaveBeenCalledTimes(3);
     expect(document.body.textContent).toContain("may not have been saved");
     expect(document.body.textContent).not.toContain("This Deck changed");
-    expect(document.body.textContent).not.toContain("renamed elsewhere");
+    expect(document.body.textContent).not.toContain("elsewhere");
   } finally {
     await h.finish();
   }
