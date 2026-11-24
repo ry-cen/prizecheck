@@ -5,9 +5,8 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Pool } from "pg";
 import { rawPathOf } from "./pokemonRoutes.js";
-import type { RateLimits } from "./rateLimits.js";
+import type { NativeRateLimits } from "./rateLimits.js";
 import { NativeUnavailable, type NativeStore } from "./nativeStore.js";
 
 // Native iOS sign-in (opt-in, nonprod only; NATIVE_SIGN_IN=on). The app opens /auth/native/start in an
@@ -198,14 +197,14 @@ export type NativeSession = {
 };
 
 export type NativeDeps = {
-  pool: Pool;
   /** PUBLIC_ORIGIN. */
   origin: string;
   internalSecret: string;
   providers: { id: string; name: string }[];
-  rateLimits: Pick<RateLimits, "allowNativeApprove" | "allowNativeToken">;
-  /** Bounded credential operations (auth/src/nativeStore.ts): the bearer lookup and the sign-out. */
-  credentials: NativeStore;
+  /** The per-IP limits, run on the native pool inside an admitted operation. */
+  rateLimits: NativeRateLimits;
+  /** Every native database operation (auth/src/nativeStore.ts): its own pool and admission. Web auth's pool is never used here. */
+  store: NativeStore;
   getSession: (request: IncomingMessage) => Promise<NativeSession | null>;
   clientIp: (request: IncomingMessage) => string;
   now?: () => number;
@@ -228,7 +227,7 @@ export type Native = {
 };
 
 export function createNative(deps: NativeDeps): Native {
-  const { pool, origin, credentials } = deps;
+  const { origin, store } = deps;
   const now = deps.now ?? Date.now;
   const nonceKey = createHmac("sha256", deps.internalSecret)
     .update("native-approve-key")
@@ -280,7 +279,8 @@ export function createNative(deps: NativeDeps): Native {
       request.headers.cookie !== undefined
     )
       return null;
-    const rows = await credentials.rows<{ user_id: string }>(
+    const rows = await store.rows<{ user_id: string }>(
+      "read",
       `SELECT user_id FROM native_credential
        WHERE token_hash=$1 AND scope='collection:read' AND revoked_at IS NULL AND expires_at > now()`,
       [sha256Hex(match[1])]
@@ -349,13 +349,7 @@ export function createNative(deps: NativeDeps): Native {
         403,
         "This request couldn't be verified. Go back to the app and try again."
       );
-    const current = await deps.getSession(request);
-    if (!current)
-      return failure(
-        response,
-        401,
-        "Your sign-in ended. Go back to the app and try again."
-      );
+    // Cheap checks first: the form is read and shaped before the web session is looked up.
     if (!FORM_TYPE.test(request.headers["content-type"] ?? ""))
       return invalidLink(response);
     let form: URLSearchParams;
@@ -380,21 +374,45 @@ export function createNative(deps: NativeDeps): Native {
       !CHALLENGE_OR_STATE.test(state[0])
     )
       return invalidLink(response);
+    const current = await deps.getSession(request);
+    if (!current)
+      return failure(
+        response,
+        401,
+        "Your sign-in ended. Go back to the app and try again."
+      );
     if (!nonceValid(nonces[0], current.session.id, challenge[0], state[0]))
       return failure(
         response,
         403,
         "This request couldn't be verified. Go back to the app and try again."
       );
-    if (!(await deps.rateLimits.allowNativeApprove(deps.clientIp(request))))
-      return failure(response, 429, "Too many attempts. Try again later.");
     const code = random43();
-    await pool.query("DELETE FROM native_grant WHERE expires_at < now()");
-    await pool.query(
-      `INSERT INTO native_grant(code_hash,user_id,challenge,expires_at)
-       VALUES($1,$2,$3, now() + interval '60 seconds')`,
-      [sha256Hex(code), current.user.id, challenge[0]]
-    );
+    let allowed: boolean;
+    try {
+      // One admitted operation on the native pool: the limiter's transaction, then the grant write. Never two connections at once.
+      allowed = await store.run("approve", async (db) => {
+        if (
+          !(await deps.rateLimits.allowNativeApprove(
+            db,
+            deps.clientIp(request)
+          ))
+        )
+          return false;
+        await db.query("DELETE FROM native_grant WHERE expires_at < now()");
+        await db.query(
+          `INSERT INTO native_grant(code_hash,user_id,challenge,expires_at)
+           VALUES($1,$2,$3, now() + interval '60 seconds')`,
+          [sha256Hex(code), current.user.id, challenge[0]]
+        );
+        return true;
+      });
+    } catch (error) {
+      if (!(error instanceof NativeUnavailable)) throw error;
+      return failure(response, 503, "Try again in a moment.");
+    }
+    if (!allowed)
+      return failure(response, 429, "Too many attempts. Try again later.");
     redirect(
       response,
       303,
@@ -432,46 +450,69 @@ export function createNative(deps: NativeDeps): Native {
         return invalid();
       throw error;
     }
-    if (!(await deps.rateLimits.allowNativeToken(deps.clientIp(request)))) {
+    const issued = random43();
+    type Outcome =
+      | { kind: "limited" }
+      | { kind: "invalid_grant" }
+      | { kind: "issued"; expires: Date };
+    let outcome: Outcome;
+    try {
+      // One admitted operation on the native pool: the limiter's transaction, then the single-use swap in one transaction
+      // of its own. The two never hold connections at the same time.
+      outcome = await store.run("exchange", async (db): Promise<Outcome> => {
+        if (
+          !(await deps.rateLimits.allowNativeToken(db, deps.clientIp(request)))
+        )
+          return { kind: "limited" };
+        const client = await db.connect();
+        let failureCause: Error | undefined;
+        try {
+          await client.query("BEGIN");
+          // A wrong verifier matches no row, so it deletes nothing and the code still works with the right one.
+          const grant = await client.query<{ user_id: string }>(
+            `DELETE FROM native_grant WHERE code_hash=$1 AND challenge=$2 AND expires_at > now() RETURNING user_id`,
+            [sha256Hex(code), sha256Base64Url(verifier)]
+          );
+          if (grant.rowCount !== 1) {
+            await client.query("ROLLBACK");
+            return { kind: "invalid_grant" };
+          }
+          // Expired or revoked more than a day ago: nothing reads these rows again.
+          await client.query(
+            `DELETE FROM native_credential
+             WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '1 day'`
+          );
+          const credential = await client.query<{ expires_at: Date }>(
+            `INSERT INTO native_credential(token_hash,user_id,scope,expires_at)
+             VALUES($1,$2,'collection:read', now() + interval '24 hours') RETURNING expires_at`,
+            [sha256Hex(issued), grant.rows[0].user_id]
+          );
+          await client.query("COMMIT");
+          return { kind: "issued", expires: credential.rows[0].expires_at };
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => {});
+          failureCause = error instanceof Error ? error : new Error("failed");
+          throw error;
+        } finally {
+          client.release(failureCause);
+        }
+      });
+    } catch (error) {
+      if (!(error instanceof NativeUnavailable)) throw error;
+      return jsonBody(response, 503, {
+        error: "Service temporarily unavailable",
+      });
+    }
+    if (outcome.kind === "limited") {
       response.setHeader("retry-after", "3600");
       return jsonBody(response, 429, { error: "too_many_requests" });
     }
-    const issued = random43();
-    const client = await pool.connect();
-    let failureCause: Error | undefined;
-    try {
-      await client.query("BEGIN");
-      // A wrong verifier matches no row, so it deletes nothing and the code still works with the right one.
-      const grant = await client.query<{ user_id: string }>(
-        `DELETE FROM native_grant WHERE code_hash=$1 AND challenge=$2 AND expires_at > now() RETURNING user_id`,
-        [sha256Hex(code), sha256Base64Url(verifier)]
-      );
-      if (grant.rowCount !== 1) {
-        await client.query("ROLLBACK");
-        return jsonBody(response, 400, { error: "invalid_grant" });
-      }
-      // Expired or revoked more than a day ago: nothing reads these rows again.
-      await client.query(
-        `DELETE FROM native_credential
-         WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '1 day'`
-      );
-      const credential = await client.query<{ expires_at: Date }>(
-        `INSERT INTO native_credential(token_hash,user_id,scope,expires_at)
-         VALUES($1,$2,'collection:read', now() + interval '24 hours') RETURNING expires_at`,
-        [sha256Hex(issued), grant.rows[0].user_id]
-      );
-      await client.query("COMMIT");
-      jsonBody(response, 200, {
-        token: issued,
-        expires_at: credential.rows[0].expires_at.toISOString(),
-      });
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      failureCause = error instanceof Error ? error : new Error("failed");
-      throw error;
-    } finally {
-      client.release(failureCause);
-    }
+    if (outcome.kind === "invalid_grant")
+      return jsonBody(response, 400, { error: "invalid_grant" });
+    jsonBody(response, 200, {
+      token: issued,
+      expires_at: outcome.expires.toISOString(),
+    });
   }
 
   async function signOut(request: IncomingMessage, response: ServerResponse) {
@@ -483,7 +524,8 @@ export function createNative(deps: NativeDeps): Native {
       request.headers.origin === undefined
     ) {
       try {
-        await credentials.rows(
+        await store.rows(
+          "revoke",
           `UPDATE native_credential SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL`,
           [sha256Hex(match[1])]
         );

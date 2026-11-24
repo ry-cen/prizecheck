@@ -13,8 +13,12 @@ export const STARTS_PER_IP_PER_HOUR = 60;
 export const NATIVE_APPROVES_PER_IP_PER_HOUR = 20;
 export const NATIVE_TOKENS_PER_IP_PER_HOUR = 30;
 const DEFAULT_DAILY_SIGNUP_CAP = 100;
-// Taken: 914701 allowedSend (server.ts), 914702/914703 catalog dispatch/runner, 914705 publications, 914706 public catalog drain.
+// Taken: 914701 allowedSend (server.ts), 914702/914703 catalog dispatch/runner, 914705 publications, 914706 public catalog drain,
+// 914707 format standing, 914710-914714, 914720 and 914790 in the API; 914708 is the native limiter below.
 const RATE_EVENT_LOCK = 914704;
+// The native sign-in limits (NATIVE_SIGN_IN only) serialize on their own key, on their own pool, so a flood of native
+// requests can never queue behind or in front of the web sign-in limits' lock.
+const NATIVE_RATE_EVENT_LOCK = 914708;
 
 /** DAILY_SIGNUP_CAP: app-wide OAuth account creations per rolling day, default 100. Anything else is a startup error. */
 export function dailySignupCap(env: NodeJS.ProcessEnv = process.env): number {
@@ -30,7 +34,9 @@ export function ipKey(ip: string): string {
   return createHash("sha256").update(normalizeIp(ip)).digest("hex");
 }
 
-async function countRefusal(pool: Pool): Promise<void> {
+type Db = Pick<Pool, "query" | "connect">;
+
+async function countRefusal(pool: Db): Promise<void> {
   try {
     await pool.query(
       `INSERT INTO operations_counter(name,count) VALUES('too_many_sign_ups',1)
@@ -42,11 +48,12 @@ async function countRefusal(pool: Pool): Promise<void> {
 }
 
 async function admit(
-  pool: Pool,
+  pool: Db,
   kind: "signup" | "start" | "native_approve" | "native_token",
   ip: string,
   window: "24 hours" | "1 hour",
-  within: (fromIp: number, total: number) => boolean
+  within: (fromIp: number, total: number) => boolean,
+  lock: number = RATE_EVENT_LOCK
 ): Promise<boolean> {
   const key = ipKey(ip);
   const client = await pool.connect();
@@ -54,7 +61,7 @@ async function admit(
   let failure: Error | undefined;
   try {
     await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock($1)", [RATE_EVENT_LOCK]);
+    await client.query("SELECT pg_advisory_xact_lock($1)", [lock]);
     const { rows } = await client.query<{ from_ip: string; total: string }>(
       `SELECT
       (SELECT count(*) FROM auth_rate_event WHERE kind=$1 AND ip_key=$2 AND created_at > now()-$3::interval) AS from_ip,
@@ -91,10 +98,6 @@ export type RateLimits = {
   allowSignup: (ip: string) => Promise<boolean>;
   /** One sign-in or link start from `ip`: at most 60 per IP per rolling hour. */
   allowStart: (ip: string) => Promise<boolean>;
-  /** One native consent approval from `ip`: at most 20 per IP per rolling hour (NATIVE_SIGN_IN only). */
-  allowNativeApprove: (ip: string) => Promise<boolean>;
-  /** One native code exchange from `ip`: at most 30 per IP per rolling hour (NATIVE_SIGN_IN only). */
-  allowNativeToken: (ip: string) => Promise<boolean>;
 };
 
 export function createRateLimits(pool: Pool, dailyCap: number): RateLimits {
@@ -115,21 +118,36 @@ export function createRateLimits(pool: Pool, dailyCap: number): RateLimits {
         "1 hour",
         (fromIp) => fromIp < STARTS_PER_IP_PER_HOUR
       ),
-    allowNativeApprove: (ip) =>
+  };
+}
+
+export type NativeRateLimits = {
+  /** One native consent approval from `ip`: at most 20 per IP per rolling hour. Runs on the db it is given (the native pool). */
+  allowNativeApprove: (db: Db, ip: string) => Promise<boolean>;
+  /** One native code exchange from `ip`: at most 30 per IP per rolling hour. */
+  allowNativeToken: (db: Db, ip: string) => Promise<boolean>;
+};
+
+/** The same persisted per-IP limits as before, in the same table, under the native lock key and on the caller's connection. */
+export function createNativeRateLimits(): NativeRateLimits {
+  return {
+    allowNativeApprove: (db, ip) =>
       admit(
-        pool,
+        db,
         "native_approve",
         ip,
         "1 hour",
-        (fromIp) => fromIp < NATIVE_APPROVES_PER_IP_PER_HOUR
+        (fromIp) => fromIp < NATIVE_APPROVES_PER_IP_PER_HOUR,
+        NATIVE_RATE_EVENT_LOCK
       ),
-    allowNativeToken: (ip) =>
+    allowNativeToken: (db, ip) =>
       admit(
-        pool,
+        db,
         "native_token",
         ip,
         "1 hour",
-        (fromIp) => fromIp < NATIVE_TOKENS_PER_IP_PER_HOUR
+        (fromIp) => fromIp < NATIVE_TOKENS_PER_IP_PER_HOUR,
+        NATIVE_RATE_EVENT_LOCK
       ),
   };
 }

@@ -854,7 +854,13 @@ describe("token", () => {
       Array.from({ length: 6 }, () => exchange(on, { code, verifier }))
     );
     const statuses = responses.map((response) => response.status).sort();
-    expect(statuses).toEqual([200, 400, 400, 400, 400, 400]);
+    // Exactly one credential. The exchange class admits two operations at once (auth/src/nativeStore.ts), so of the six
+    // the others are either refused as a spent code (400) or refused for capacity (503) before any SQL.
+    expect(statuses.filter((status) => status === 200)).toHaveLength(1);
+    for (const status of statuses) expect([200, 400, 503]).toContain(status);
+    expect(statuses.filter((status) => status === 400).length).toBeGreaterThan(
+      0
+    );
     for (const response of responses)
       if (response.status === 200)
         secrets.push(((await response.json()) as { token: string }).token);
@@ -1373,6 +1379,120 @@ describe("Authorization is decided first", () => {
         ])
       ).status
     ).toBe(200);
+  });
+
+  it("keeps every header field however many come before it, so Authorization, a duplicate Authorization, Cookie and Origin are never dropped", async () => {
+    const token = await issueToken(on, "owner");
+    const walk = await walkSignIn(on.base, "/auth/sign-in/google", "owner");
+    const cookie = `Cookie: ${cookieHeader(walk.jar)}`;
+    const bearer = `Authorization: Bearer ${token}`;
+    // 2100 tiny fields: more than Node's default maxHeadersCount of 2000, and still inside the 16 KiB header limit.
+    const filler = Array.from({ length: 2100 }, () => "a:1");
+    const before = untouched();
+    await withSessionsLocked(on, async () => {
+      for (const headers of [
+        // A cookie session, then a bearer past the old cutoff: still Authorization beside a Cookie.
+        [cookie, ...filler, "Authorization: Bearer junk"],
+        [cookie, ...filler, bearer],
+        // A duplicate Authorization past the cutoff.
+        [bearer, ...filler, bearer],
+        [bearer, ...filler, "Authorization: Bearer junk"],
+        // A Cookie past the cutoff.
+        [bearer, ...filler, cookie],
+      ]) {
+        const result = await wire(on, "GET", "/api/collection", headers);
+        expect(result.status).toBe(401);
+      }
+    });
+    expect(untouched()).toEqual(before);
+    // A native route sees the same fields: a sign-out whose Cookie lies past the cutoff revokes nothing.
+    const signOut = await wire(on, "POST", "/auth/native/sign-out", [
+      bearer,
+      ...filler,
+      cookie,
+    ]);
+    expect(signOut.status).toBe(204);
+    expect((await wire(on, "GET", "/api/collection", [bearer])).status).toBe(
+      200
+    );
+  });
+
+  it("runs the consent and the code exchange on the native pool and lock only, and leaves the web limits' lock and pool alone", async () => {
+    // Native lock held: the exchange and the consent answer 503 at once, the web sign-in start is untouched.
+    const issued = await issueCode(on, "owner");
+    const next = pkce();
+    const jar = await webSignIn(on, "owner", next.challenge, next.state);
+    const nonce = await nonceOf(on, jar, next.challenge, next.state);
+    const grantsBefore = await grants(on);
+    const holder = await on.pool.connect();
+    await holder.query("SELECT pg_advisory_lock(914708)");
+    try {
+      const started = Date.now();
+      const exchanged = await exchange(on, {
+        code: issued.code,
+        verifier: issued.verifier,
+      });
+      expect(exchanged.status).toBe(503);
+      expect(exchanged.headers.get("cache-control")).toBe("no-store");
+      expect(await exchanged.json()).toEqual({
+        error: "Service temporarily unavailable",
+      });
+      const approved = await postApprove(on, jar, {
+        challenge: next.challenge,
+        state: next.state,
+        nonce,
+      });
+      expect(approved.status).toBe(503);
+      expect(approved.headers.get("cache-control")).toBe("no-store");
+      expect(await grants(on)).toBe(grantsBefore);
+      expect(Date.now() - started).toBeLessThan(8000);
+      // The web sign-in start takes the web lock and the web pool: not slowed by the native lock.
+      const web = Date.now();
+      const start = await fetch(on.base + "/auth/sign-in/google", {
+        redirect: "manual",
+      });
+      expect([302, 303]).toContain(start.status);
+      expect(Date.now() - web).toBeLessThan(1500);
+    } finally {
+      await holder.query("SELECT pg_advisory_unlock(914708)");
+      holder.release();
+    }
+    // The unburned code still works once the lock is gone.
+    expect(
+      (await exchange(on, { code: issued.code, verifier: issued.verifier }))
+        .status
+    ).toBe(200);
+    // Web lock held: native consent and exchange do not wait for it.
+    const again = pkce();
+    const jar2 = await webSignIn(on, "owner", again.challenge, again.state);
+    const nonce2 = await nonceOf(on, jar2, again.challenge, again.state);
+    const webHolder = await on.pool.connect();
+    await webHolder.query("SELECT pg_advisory_lock(914704)");
+    try {
+      const t = Date.now();
+      const approved = await postApprove(on, jar2, {
+        challenge: again.challenge,
+        state: again.state,
+        nonce: nonce2,
+      });
+      expect(approved.status).toBe(303);
+      const code = callbackFor(approved.headers.get("location")!).code!;
+      secrets.push(code);
+      expect(
+        (await exchange(on, { code, verifier: again.verifier })).status
+      ).toBe(200);
+      expect(Date.now() - t).toBeLessThan(1500);
+    } finally {
+      await webHolder.query("SELECT pg_advisory_unlock(914704)");
+      webHolder.release();
+    }
+    // The native pool never holds more than its two connections.
+    expect(
+      await count(
+        on,
+        "SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name='prizecheck-native'"
+      )
+    ).toBeLessThanOrEqual(2);
   });
 
   it("refuses every method but GET, HEAD included, even for the Collection", async () => {

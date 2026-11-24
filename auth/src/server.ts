@@ -22,6 +22,8 @@ import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { ipContext } from "./ipContext.js";
 import { createNative, nativeSignInEnabled } from "./native.js";
+import { createShutdown } from "./nativeShutdown.js";
+import { createNativeRateLimits } from "./rateLimits.js";
 import {
   createNativePool,
   createNativeStore,
@@ -343,7 +345,7 @@ async function budgetedSession(request: IncomingMessage) {
 // Opt-in native iOS sign-in (auth/src/native.ts): off unless NATIVE_SIGN_IN=on, an invalid value or `on` in production stops
 // the gateway here. While off, no native route exists and Authorization headers are ignored, as before.
 const nativeEnabled = nativeSignInEnabled();
-// Its credential lookups and sign-outs run on their own bounded pool and admission cap (auth/src/nativeStore.ts), closed on shutdown.
+// All of its database work runs on its own small pool, behind its own admission (auth/src/nativeStore.ts), closed on shutdown.
 const nativePool = nativeEnabled
   ? createNativePool(process.env.DATABASE_URL)
   : null;
@@ -351,19 +353,14 @@ if (nativePool) {
   nativePool.on("error", (error) => {
     console.error("Native credential pool failed", error.name);
   });
-  for (const signal of ["SIGTERM", "SIGINT"] as const)
-    process.once(signal, () => {
-      nativePool.end().finally(() => process.exit(0));
-    });
 }
 const native = nativePool
   ? createNative({
-      pool,
-      credentials: createNativeStore(nativePool),
+      store: createNativeStore(nativePool),
       origin,
       internalSecret,
       providers,
-      rateLimits,
+      rateLimits: createNativeRateLimits(),
       getSession: session,
       clientIp: trustedClientIp,
     })
@@ -941,6 +938,8 @@ const server = createServer(async (request, response) => {
     }
     if (error instanceof BudgetExceeded)
       return json(response, 504, { detail: { code: "PRICE_DEADLINE" } });
+    if (error instanceof NativeUnavailable)
+      return json(response, 503, { error: "Service temporarily unavailable" });
     if (error instanceof PayloadTooLarge) {
       response.setHeader("connection", "close");
       return json(response, 413, { error: "Payload too large" });
@@ -952,6 +951,20 @@ const server = createServer(async (request, response) => {
     json(response, 503, { error: "Service temporarily unavailable" });
   }
 });
+
+if (nativePool) {
+  // Node's default maxHeadersCount (2000) silently drops header fields past it, which could hide an Authorization, or a
+  // duplicate Authorization, Cookie or Origin, from every check above. The parser's byte limit (16 KiB) still bounds how
+  // many fit, and with it nothing is dropped. Off, the server keeps its default.
+  server.maxHeadersCount = 0;
+  const shutdown = createShutdown({
+    server,
+    pool: nativePool,
+    exit: (code) => process.exit(code),
+  });
+  for (const signal of ["SIGTERM", "SIGINT"] as const)
+    process.on(signal, () => void shutdown());
+}
 
 server.listen(
   Number(process.env.AUTH_PORT || 3001),
