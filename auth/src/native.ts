@@ -6,7 +6,7 @@ import {
 } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { rawPathOf } from "./pokemonRoutes.js";
-import type { NativeRateLimits } from "./rateLimits.js";
+import type { NativeRateLimits } from "./nativeRateLimits.js";
 import { NativeUnavailable, type NativeStore } from "./nativeStore.js";
 
 // Native iOS sign-in (opt-in, nonprod only; NATIVE_SIGN_IN=on). The app opens /auth/native/start in an
@@ -391,7 +391,7 @@ export function createNative(deps: NativeDeps): Native {
     let allowed: boolean;
     try {
       // One admitted operation on the native pool: the limiter's transaction, then the grant write. Never two connections at once.
-      allowed = await store.run("approve", async (db) => {
+      allowed = await store.run("approve", async (db, commitPoint) => {
         if (
           !(await deps.rateLimits.allowNativeApprove(
             db,
@@ -400,6 +400,7 @@ export function createNative(deps: NativeDeps): Native {
         )
           return false;
         await db.query("DELETE FROM native_grant WHERE expires_at < now()");
+        commitPoint();
         await db.query(
           `INSERT INTO native_grant(code_hash,user_id,challenge,expires_at)
            VALUES($1,$2,$3, now() + interval '60 seconds')`,
@@ -459,44 +460,51 @@ export function createNative(deps: NativeDeps): Native {
     try {
       // One admitted operation on the native pool: the limiter's transaction, then the single-use swap in one transaction
       // of its own. The two never hold connections at the same time.
-      outcome = await store.run("exchange", async (db): Promise<Outcome> => {
-        if (
-          !(await deps.rateLimits.allowNativeToken(db, deps.clientIp(request)))
-        )
-          return { kind: "limited" };
-        const client = await db.connect();
-        let failureCause: Error | undefined;
-        try {
-          await client.query("BEGIN");
-          // A wrong verifier matches no row, so it deletes nothing and the code still works with the right one.
-          const grant = await client.query<{ user_id: string }>(
-            `DELETE FROM native_grant WHERE code_hash=$1 AND challenge=$2 AND expires_at > now() RETURNING user_id`,
-            [sha256Hex(code), sha256Base64Url(verifier)]
-          );
-          if (grant.rowCount !== 1) {
-            await client.query("ROLLBACK");
-            return { kind: "invalid_grant" };
-          }
-          // Expired or revoked more than a day ago: nothing reads these rows again.
-          await client.query(
-            `DELETE FROM native_credential
+      outcome = await store.run(
+        "exchange",
+        async (db, commitPoint): Promise<Outcome> => {
+          if (
+            !(await deps.rateLimits.allowNativeToken(
+              db,
+              deps.clientIp(request)
+            ))
+          )
+            return { kind: "limited" };
+          const client = await db.connect();
+          let failureCause: Error | undefined;
+          try {
+            await client.query("BEGIN");
+            // A wrong verifier matches no row, so it deletes nothing and the code still works with the right one.
+            const grant = await client.query<{ user_id: string }>(
+              `DELETE FROM native_grant WHERE code_hash=$1 AND challenge=$2 AND expires_at > now() RETURNING user_id`,
+              [sha256Hex(code), sha256Base64Url(verifier)]
+            );
+            if (grant.rowCount !== 1) {
+              await client.query("ROLLBACK");
+              return { kind: "invalid_grant" };
+            }
+            // Expired or revoked more than a day ago: nothing reads these rows again.
+            await client.query(
+              `DELETE FROM native_credential
              WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '1 day'`
-          );
-          const credential = await client.query<{ expires_at: Date }>(
-            `INSERT INTO native_credential(token_hash,user_id,scope,expires_at)
+            );
+            const credential = await client.query<{ expires_at: Date }>(
+              `INSERT INTO native_credential(token_hash,user_id,scope,expires_at)
              VALUES($1,$2,'collection:read', now() + interval '24 hours') RETURNING expires_at`,
-            [sha256Hex(issued), grant.rows[0].user_id]
-          );
-          await client.query("COMMIT");
-          return { kind: "issued", expires: credential.rows[0].expires_at };
-        } catch (error) {
-          await client.query("ROLLBACK").catch(() => {});
-          failureCause = error instanceof Error ? error : new Error("failed");
-          throw error;
-        } finally {
-          client.release(failureCause);
+              [sha256Hex(issued), grant.rows[0].user_id]
+            );
+            commitPoint();
+            await client.query("COMMIT");
+            return { kind: "issued", expires: credential.rows[0].expires_at };
+          } catch (error) {
+            await client.query("ROLLBACK").catch(() => {});
+            failureCause = error instanceof Error ? error : new Error("failed");
+            throw error;
+          } finally {
+            client.release(failureCause);
+          }
         }
-      });
+      );
     } catch (error) {
       if (!(error instanceof NativeUnavailable)) throw error;
       return jsonBody(response, 503, {
@@ -515,31 +523,32 @@ export function createNative(deps: NativeDeps): Native {
     });
   }
 
+  /**
+   * 204: this token cannot be used any more (revoked now or earlier, expired, or never issued). Idempotent. Never 401.
+   * 400 invalid_request: the request does not name exactly one well-formed token, or carries a cookie or an Origin. 503:
+   * unconfirmed, send it again.
+   */
   async function signOut(request: IncomingMessage, response: ServerResponse) {
     const fields = authorizationFields(request);
     const match = fields.length === 1 ? BEARER.exec(fields[0]) : null;
     if (
-      match &&
-      request.headers.cookie === undefined &&
-      request.headers.origin === undefined
-    ) {
-      try {
-        await store.rows(
-          "revoke",
-          `UPDATE native_credential SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL`,
-          [sha256Hex(match[1])]
-        );
-      } catch (error) {
-        // A busy or slow credential database: say so, so the app does not take the credential for revoked.
-        if (!(error instanceof NativeUnavailable)) throw error;
-        response.writeHead(503, {
-          "content-type": "application/json",
-          "cache-control": "no-store",
-        });
-        return void response.end(
-          JSON.stringify({ error: "Service temporarily unavailable" })
-        );
-      }
+      !match ||
+      request.headers.cookie !== undefined ||
+      request.headers.origin !== undefined
+    )
+      return jsonBody(response, 400, { error: "invalid_request" });
+    try {
+      await store.rows(
+        "revoke",
+        `UPDATE native_credential SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL`,
+        [sha256Hex(match[1])]
+      );
+    } catch (error) {
+      // A busy or slow credential database: say so, so the app does not take the credential for revoked.
+      if (!(error instanceof NativeUnavailable)) throw error;
+      return jsonBody(response, 503, {
+        error: "Service temporarily unavailable",
+      });
     }
     response.writeHead(204, { "cache-control": "no-store" });
     response.end();

@@ -69,9 +69,9 @@ afterAll(async () => {
 }, 30_000);
 // Every request comes from one address, so the tests would share the hourly limits; the limit tests seed their own.
 beforeEach(async () => {
-  await on.pool.query(
-    "DELETE FROM auth_rate_event WHERE kind IN ('native_approve','native_token')"
-  );
+  await on.pool.query("DELETE FROM native_rate_event");
+  // The web sign-in starts the tests make count against the same address's hourly start limit (60).
+  await on.pool.query("DELETE FROM auth_rate_event WHERE kind='start'");
 });
 
 const b64 = (bytes: Buffer) => bytes.toString("base64url");
@@ -213,6 +213,22 @@ const count = async (
 ) => (await gateway.pool.query(sql, values)).rows[0].n as number;
 const grants = (gateway: TestGateway) =>
   count(gateway, "SELECT count(*)::int AS n FROM native_grant");
+
+/** Native backends of this gateway's database waiting on a lock in a statement like `query`. */
+const nativeWaiting = (gateway: TestGateway, query: string) =>
+  count(
+    gateway,
+    `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database()
+     AND application_name='prizecheck-native' AND state='active' AND wait_event_type='Lock' AND query LIKE $1`,
+    [query]
+  );
+async function until(check: () => Promise<boolean>, ms: number, what: string) {
+  const end = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > end) throw new Error(`timed out: ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
 
 /** Sends the request line as written, so a fragment reaches the gateway as a client could send it. */
 function rawGet(gateway: TestGateway, target: string): Promise<number> {
@@ -746,17 +762,15 @@ describe("approve", () => {
   });
 
   it("limits approvals to 20 per trusted IP per hour, durably", async () => {
-    await on.pool.query(
-      "DELETE FROM auth_rate_event WHERE kind='native_approve'"
-    );
+    await on.pool.query("DELETE FROM native_rate_event WHERE kind='approve'");
     const first = await issueCode(on);
     const key = (
       await on.pool.query(
-        "SELECT ip_key FROM auth_rate_event WHERE kind='native_approve'"
+        "SELECT ip_key FROM native_rate_event WHERE kind='approve'"
       )
     ).rows[0].ip_key as string;
     await on.pool.query(
-      `INSERT INTO auth_rate_event(kind,ip_key) SELECT 'native_approve',$1 FROM generate_series(1,19)`,
+      `INSERT INTO native_rate_event(kind,ip_key) SELECT 'approve',$1 FROM generate_series(1,19)`,
       [key]
     );
     const { challenge, state } = pkce();
@@ -770,9 +784,7 @@ describe("approve", () => {
     expect(refused.status).toBe(429);
     expect(refused.headers.get("location")).toBeNull();
     expect(await grants(on)).toBe(before);
-    await on.pool.query(
-      "DELETE FROM auth_rate_event WHERE kind='native_approve'"
-    );
+    await on.pool.query("DELETE FROM native_rate_event WHERE kind='approve'");
   });
 });
 
@@ -844,29 +856,57 @@ describe("token", () => {
     expect(await present(issued)).toBe(1);
   });
 
-  it("gives exactly one of several concurrent exchanges the credential", async () => {
+  it("lets two overlapping exchanges of one code reach the database, and gives exactly one the credential", async () => {
     const { code, verifier } = await issueCode(on);
-    const before = await count(
-      on,
-      "SELECT count(*)::int AS n FROM native_credential"
-    );
-    const responses = await Promise.all(
-      Array.from({ length: 6 }, () => exchange(on, { code, verifier }))
-    );
-    const statuses = responses.map((response) => response.status).sort();
-    // Exactly one credential. The exchange class admits two operations at once (auth/src/nativeStore.ts), so of the six
-    // the others are either refused as a spent code (400) or refused for capacity (503) before any SQL.
-    expect(statuses.filter((status) => status === 200)).toHaveLength(1);
-    for (const status of statuses) expect([200, 400, 503]).toContain(status);
-    expect(statuses.filter((status) => status === 400).length).toBeGreaterThan(
-      0
-    );
-    for (const response of responses)
-      if (response.status === 200)
-        secrets.push(((await response.json()) as { token: string }).token);
+    const credentials = () =>
+      count(on, "SELECT count(*)::int AS n FROM native_credential");
+    const before = await credentials();
+    const codeHash = sha(code).toString("hex");
+    const holder = await on.pool.connect();
+    let responses: Response[] = [];
+    try {
+      await holder.query("BEGIN");
+      await holder.query(
+        "SELECT 1 FROM native_grant WHERE code_hash=$1 FOR UPDATE",
+        [codeHash]
+      );
+      const both = [
+        exchange(on, { code, verifier }),
+        exchange(on, { code, verifier }),
+      ];
+      // Both are in PostgreSQL at the same time, each waiting on the row lock; below the 2 s lock timeout.
+      await until(
+        async () =>
+          (await nativeWaiting(
+            on,
+            "DELETE FROM native_grant WHERE code_hash%"
+          )) === 2,
+        1500,
+        "two exchanges waiting on the grant row (1500 ms)"
+      );
+      await holder.query("ROLLBACK");
+      responses = await Promise.all(both);
+    } finally {
+      await holder.query("ROLLBACK").catch(() => {});
+      holder.release();
+    }
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      200, 400,
+    ]);
+    const winner = responses.find((response) => response.status === 200)!;
+    const loser = responses.find((response) => response.status === 400)!;
+    expect(await loser.json()).toEqual({ error: "invalid_grant" });
+    const issued = ((await winner.json()) as { token: string }).token;
+    secrets.push(issued);
+    expect(await credentials()).toBe(before + 1);
     expect(
-      await count(on, "SELECT count(*)::int AS n FROM native_credential")
-    ).toBe(before + 1);
+      await count(
+        on,
+        "SELECT count(*)::int AS n FROM native_grant WHERE code_hash=$1",
+        [codeHash]
+      )
+    ).toBe(0);
+    expect((await bearerGet(on, "/api/collection", issued)).status).toBe(200);
   });
 
   it("does not burn the code on a wrong verifier", async () => {
@@ -946,18 +986,16 @@ describe("token", () => {
   });
 
   it("limits exchanges to 30 per trusted IP per hour, durably", async () => {
-    await on.pool.query(
-      "DELETE FROM auth_rate_event WHERE kind='native_token'"
-    );
+    await on.pool.query("DELETE FROM native_rate_event WHERE kind='token'");
     const { code, verifier } = await issueCode(on);
     expect((await exchange(on, { code, verifier })).status).toBe(200);
     const key = (
       await on.pool.query(
-        "SELECT ip_key FROM auth_rate_event WHERE kind='native_token'"
+        "SELECT ip_key FROM native_rate_event WHERE kind='token'"
       )
     ).rows[0].ip_key as string;
     await on.pool.query(
-      `INSERT INTO auth_rate_event(kind,ip_key) SELECT 'native_token',$1 FROM generate_series(1,29)`,
+      `INSERT INTO native_rate_event(kind,ip_key) SELECT 'token',$1 FROM generate_series(1,29)`,
       [key]
     );
     const next = await issueCode(on);
@@ -967,9 +1005,7 @@ describe("token", () => {
     });
     expect(limited.status).toBe(429);
     expect(await grants(on)).toBeGreaterThan(0);
-    await on.pool.query(
-      "DELETE FROM auth_rate_event WHERE kind='native_token'"
-    );
+    await on.pool.query("DELETE FROM native_rate_event WHERE kind='token'");
     expect(
       (await exchange(on, { code: next.code, verifier: next.verifier })).status
     ).toBe(200);
@@ -1379,6 +1415,19 @@ describe("Authorization is decided first", () => {
         ])
       ).status
     ).toBe(200);
+    // The same sign-out, repeated once the lock is gone, now revokes and confirms.
+    const repeated = await fetch(on.base + "/auth/native/sign-out", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(repeated.status).toBe(204);
+    expect(
+      (
+        await wire(on, "GET", "/api/collection", [
+          `Authorization: Bearer ${token}`,
+        ])
+      ).status
+    ).toBe(401);
   });
 
   it("keeps every header field however many come before it, so Authorization, a duplicate Authorization, Cookie and Origin are never dropped", async () => {
@@ -1405,13 +1454,13 @@ describe("Authorization is decided first", () => {
       }
     });
     expect(untouched()).toEqual(before);
-    // A native route sees the same fields: a sign-out whose Cookie lies past the cutoff revokes nothing.
+    // A native route sees the same fields: a sign-out whose Cookie lies past the cutoff is refused and revokes nothing.
     const signOut = await wire(on, "POST", "/auth/native/sign-out", [
       bearer,
       ...filler,
       cookie,
     ]);
-    expect(signOut.status).toBe(204);
+    expect(signOut.status).toBe(400);
     expect((await wire(on, "GET", "/api/collection", [bearer])).status).toBe(
       200
     );
@@ -1493,6 +1542,66 @@ describe("Authorization is decided first", () => {
         "SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name='prizecheck-native'"
       )
     ).toBeLessThanOrEqual(2);
+  });
+
+  it("does not delay web sign-in start while native limiter rows are locked", async () => {
+    await on.pool.query(
+      `INSERT INTO native_rate_event(kind,ip_key,created_at) VALUES('approve','old',now()-interval '3 days')`
+    );
+    const holder = await on.pool.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query(
+        "LOCK TABLE native_rate_event IN ACCESS EXCLUSIVE MODE"
+      );
+      const started = Date.now();
+      const start = await fetch(on.base + "/auth/sign-in/google", {
+        redirect: "manual",
+      });
+      expect([302, 303]).toContain(start.status);
+      expect(Date.now() - started).toBeLessThan(1500);
+    } finally {
+      await holder.query("ROLLBACK").catch(() => {});
+      holder.release();
+    }
+  });
+
+  it("does not wait for locked old web limiter rows, and leaves them", async () => {
+    const next = pkce();
+    const jar = await webSignIn(on, "owner", next.challenge, next.state);
+    const nonce = await nonceOf(on, jar, next.challenge, next.state);
+    // Inserted after the sign-in: a web sign-in start prunes web limiter rows older than two days.
+    const id = (
+      await on.pool.query(
+        `INSERT INTO auth_rate_event(kind,ip_key,created_at) VALUES('start','native-test-old',now()-interval '3 days') RETURNING id`
+      )
+    ).rows[0].id as string;
+    const present = () =>
+      count(on, "SELECT count(*)::int AS n FROM auth_rate_event WHERE id=$1", [
+        id,
+      ]);
+    const holder = await on.pool.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query(
+        "SELECT 1 FROM auth_rate_event WHERE id=$1 FOR UPDATE",
+        [id]
+      );
+      const started = Date.now();
+      const approved = await postApprove(on, jar, {
+        challenge: next.challenge,
+        state: next.state,
+        nonce,
+      });
+      expect(approved.status).toBe(303);
+      secrets.push(callbackFor(approved.headers.get("location")!).code!);
+      expect(Date.now() - started).toBeLessThan(1500);
+    } finally {
+      await holder.query("ROLLBACK").catch(() => {});
+      holder.release();
+    }
+    expect(await present()).toBe(1);
+    await on.pool.query("DELETE FROM auth_rate_event WHERE id=$1", [id]);
   });
 
   it("refuses every method but GET, HEAD included, even for the Collection", async () => {
@@ -1667,45 +1776,162 @@ describe("Authorization is decided first", () => {
   });
 });
 
+describe("a deadline that passes before the commit", () => {
+  /**
+   * Holds the native limiter's lock and the grant table so a request is still waiting in PostgreSQL when the 2.5 s
+   * deadline passes, answers 503, and shows the request committed nothing and left no backend behind.
+   */
+  async function pastDeadline(send: () => Promise<Response>) {
+    const holder1 = await on.pool.connect();
+    const holder2 = await on.pool.connect();
+    let locked1 = false;
+    let locked2 = false;
+    try {
+      await holder1.query("SELECT pg_advisory_lock(914708)");
+      locked1 = true;
+      await holder2.query("BEGIN");
+      await holder2.query("LOCK TABLE native_grant IN SHARE MODE");
+      locked2 = true;
+      const t0 = Date.now();
+      const elapsed = () => `${Date.now() - t0} ms`;
+      const sent = send();
+      sent.catch(() => {});
+      await until(
+        async () =>
+          (await nativeWaiting(on, "SELECT pg_advisory_xact_lock%")) === 1,
+        1000,
+        `one request waiting on the limiter lock (${elapsed()})`
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, t0 + 1500 - Date.now()))
+      );
+      await holder1.query("SELECT pg_advisory_unlock(914708)");
+      locked1 = false;
+      await until(
+        async () =>
+          (await nativeWaiting(on, "DELETE FROM native_grant%")) === 1,
+        900,
+        `one request waiting on the grant table (${elapsed()})`
+      );
+      const response = await sent;
+      expect(response.status, `answered at ${elapsed()}`).toBe(503);
+      // Still waiting: the 503 came from the deadline, not from the 2 s lock timeout (about 3500 ms).
+      expect(
+        await nativeWaiting(on, "DELETE FROM native_grant%"),
+        `waiting after the answer at ${elapsed()}`
+      ).toBe(1);
+      await holder2.query("ROLLBACK");
+      locked2 = false;
+      const busy = () =>
+        count(
+          on,
+          `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database()
+           AND application_name='prizecheck-native' AND state <> 'idle'`
+        );
+      await until(
+        async () => {
+          if ((await busy()) !== 0) return false;
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return (await busy()) === 0;
+        },
+        3000,
+        `no native backend left working (${elapsed()})`
+      );
+    } finally {
+      if (locked1)
+        await holder1
+          .query("SELECT pg_advisory_unlock(914708)")
+          .catch(() => {});
+      if (locked2) await holder2.query("ROLLBACK").catch(() => {});
+      holder1.release();
+      holder2.release();
+    }
+  }
+
+  it("keeps the code and issues nothing", async () => {
+    const { code, verifier } = await issueCode(on);
+    const credentials = () =>
+      count(on, "SELECT count(*)::int AS n FROM native_credential");
+    const before = await credentials();
+    await pastDeadline(() => exchange(on, { code, verifier }));
+    expect(
+      await count(
+        on,
+        "SELECT count(*)::int AS n FROM native_grant WHERE code_hash=$1",
+        [sha(code).toString("hex")]
+      )
+    ).toBe(1);
+    expect(await credentials()).toBe(before);
+    const again = await exchange(on, { code, verifier });
+    expect(again.status).toBe(200);
+    secrets.push(((await again.json()) as { token: string }).token);
+    expect(await credentials()).toBe(before + 1);
+  });
+
+  it("stores no grant", async () => {
+    const next = pkce();
+    const jar = await webSignIn(on, "owner", next.challenge, next.state);
+    const nonce = await nonceOf(on, jar, next.challenge, next.state);
+    const form = { challenge: next.challenge, state: next.state, nonce };
+    await pastDeadline(() => postApprove(on, jar, form));
+    expect(
+      await count(
+        on,
+        "SELECT count(*)::int AS n FROM native_grant WHERE challenge=$1",
+        [next.challenge]
+      )
+    ).toBe(0);
+    const again = await postApprove(on, jar, form);
+    expect(again.status).toBe(303);
+    secrets.push(callbackFor(again.headers.get("location")!).code!);
+  });
+});
+
 describe("sign-out", () => {
-  it("revokes only the credential it names, and always answers 204", async () => {
+  const signOutOf = (headers: Record<string, string>) =>
+    fetch(on.base + "/auth/native/sign-out", { method: "POST", headers });
+
+  it("revokes only the credential it names, and answers 204 for a revoked or unknown token", async () => {
     const first = await issueToken(on, "owner");
     const second = await issueToken(on, "owner");
-    const out = await fetch(on.base + "/auth/native/sign-out", {
-      method: "POST",
-      headers: { authorization: `Bearer ${first}` },
-    });
+    const out = await signOutOf({ authorization: `Bearer ${first}` });
     expect(out.status).toBe(204);
     expect(out.headers.get("cache-control")).toBe("no-store");
     expect((await bearerGet(on, "/api/collection", first)).status).toBe(401);
     expect((await bearerGet(on, "/api/collection", second)).status).toBe(200);
-    // Again, an unknown token, a malformed one and none at all: nothing changes and nothing leaks.
-    for (const headers of [
-      { authorization: `Bearer ${first}` },
-      { authorization: `Bearer ${b64(randomBytes(32))}` },
-      { authorization: "Bearer junk" },
-      {},
-    ]) {
-      const response = await fetch(on.base + "/auth/native/sign-out", {
-        method: "POST",
-        headers,
-      });
-      expect(response.status).toBe(204);
+    // Again, and a token nobody issued: the token is not usable, so 204 and nothing changes.
+    for (const token of [first, b64(randomBytes(32))])
+      expect(
+        (await signOutOf({ authorization: `Bearer ${token}` })).status
+      ).toBe(204);
+    expect((await bearerGet(on, "/api/collection", second)).status).toBe(200);
+    // A request that cannot name exactly one well-formed token is 400, never taken for a revocation.
+    for (const headers of [{ authorization: "Bearer junk" }, {}]) {
+      const response = await signOutOf(headers);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid_request" });
     }
+    const twice = await wire(on, "POST", "/auth/native/sign-out", [
+      `Authorization: Bearer ${second}`,
+      `Authorization: Bearer ${second}`,
+    ]);
+    expect(twice.status).toBe(400);
+    expect(twice.body).toContain('{"error":"invalid_request"}');
     expect((await bearerGet(on, "/api/collection", second)).status).toBe(200);
   });
 
-  it("ignores a request that carries a cookie or an Origin header", async () => {
+  it("refuses a request that carries a cookie or an Origin header with 400, and revokes nothing", async () => {
     const token = await issueToken(on, "owner");
     for (const headers of [
       { cookie: "better-auth.session_token=x" },
       { origin: on.base },
     ]) {
-      const response = await fetch(on.base + "/auth/native/sign-out", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, ...headers },
+      const response = await signOutOf({
+        authorization: `Bearer ${token}`,
+        ...headers,
       });
-      expect(response.status).toBe(204);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid_request" });
     }
     expect((await bearerGet(on, "/api/collection", token)).status).toBe(200);
   });

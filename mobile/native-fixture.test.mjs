@@ -419,7 +419,7 @@ test("a credential expires after its lifetime", async () => {
   }
 });
 
-test("sign-out revokes only that credential and always answers 204", async () => {
+test("sign-out revokes only that credential, answers 204 for a revoked or unknown one, and 400 for a shape that names none", async () => {
   const stub = await boot();
   try {
     const a = await signIn(stub);
@@ -427,22 +427,85 @@ test("sign-out revokes only that credential and always answers 204", async () =>
     const refused = await stub.call("POST", "/auth/native/sign-out", {
       headers: { authorization: `Bearer ${a.token}`, origin: stub.origin },
     });
-    assert.equal(refused.status, 204);
+    assert.equal(refused.status, 400);
+    assert.deepEqual(JSON.parse(refused.text), { error: "invalid_request" });
     assert.equal(
       (await read(stub, a.token)).status,
       200,
       "an Origin voids the request"
     );
+    const cookie = await stub.call("POST", "/auth/native/sign-out", {
+      headers: { authorization: `Bearer ${a.token}`, cookie: "a=b" },
+    });
+    assert.equal(cookie.status, 400);
     const out = await stub.call("POST", "/auth/native/sign-out", {
       headers: { authorization: `Bearer ${a.token}` },
     });
     assert.equal(out.status, 204);
     assert.equal((await read(stub, a.token)).status, 401);
     assert.equal((await read(stub, b.token)).status, 200);
+    // Again, and a token nobody issued: not usable, so 204.
+    for (const token of [a.token, b64url(randomBytes(32))])
+      assert.equal(
+        (
+          await stub.call("POST", "/auth/native/sign-out", {
+            headers: { authorization: `Bearer ${token}` },
+          })
+        ).status,
+        204
+      );
+    assert.equal((await read(stub, b.token)).status, 200);
+    // No header, a malformed one: 400.
     assert.equal(
       (await stub.call("POST", "/auth/native/sign-out")).status,
-      204
+      400
     );
+    assert.equal(
+      (
+        await stub.call("POST", "/auth/native/sign-out", {
+          headers: { authorization: "Bearer junk" },
+        })
+      ).status,
+      400
+    );
+  } finally {
+    await stub.close();
+  }
+});
+
+test("an injected sign-out failure answers 503, keeps the credential, and a later retry revokes it", async () => {
+  const stub = await boot();
+  try {
+    const a = await signIn(stub);
+    const b = await signIn(stub);
+    const state = async (method = "GET", path = "/fixture/state") =>
+      JSON.parse((await stub.call(method, path)).text);
+    assert.deepEqual(await state(), { live: 2, refused: 0, confirmed: 0 });
+    assert.deepEqual(await state("POST", "/fixture/sign-out/fail"), {
+      live: 2,
+      refused: 0,
+      confirmed: 0,
+    });
+    const signOut = (token) =>
+      stub.call("POST", "/auth/native/sign-out", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+    assert.equal((await signOut(a.token)).status, 503);
+    assert.equal((await signOut(b.token)).status, 503);
+    // A bad shape is still 400 while the fault is on, and counts nothing.
+    assert.equal(
+      (await stub.call("POST", "/auth/native/sign-out")).status,
+      400
+    );
+    assert.equal((await read(stub, a.token)).status, 200);
+    assert.deepEqual(await state(), { live: 2, refused: 2, confirmed: 0 });
+    await state("POST", "/fixture/sign-out/ok");
+    assert.equal((await signOut(a.token)).status, 204);
+    assert.equal((await read(stub, a.token)).status, 401);
+    assert.deepEqual(await state(), { live: 1, refused: 2, confirmed: 1 });
+    // A second retry of the same token is 204 and leaves `confirmed` alone.
+    assert.equal((await signOut(a.token)).status, 204);
+    assert.deepEqual(await state(), { live: 1, refused: 2, confirmed: 1 });
   } finally {
     await stub.close();
   }
@@ -563,6 +626,7 @@ test("the stub's stdout carries only allowlisted route lines, never a request va
       ).status,
       204
     );
+    await stub.call("GET", "/fixture/state");
     // Malformed and unknown requests.
     const odd = "/odd-path-SECRETVALUE/" + "x".repeat(3000);
     await stub.call("GET", odd);
@@ -602,7 +666,7 @@ test("the stub's stdout carries only allowlisted route lines, never a request va
     const lines = out.split("\n").filter((line) => line !== "");
     assert.ok(lines.length >= 14, `expected route lines, got ${lines.length}`);
     const allowed =
-      /^native-fixture route=(start|approve_get|approve_post|token|collection|sign_out|other) method=(GET|POST|OTHER) status=\d{3}$/;
+      /^native-fixture route=(start|approve_get|approve_post|token|collection|sign_out|fixture|other) method=(GET|POST|OTHER) status=\d{3}$/;
     for (const line of lines) assert.match(line, allowed);
     assert.ok(lines.some((line) => line.includes("route=other method=OTHER")));
     for (const label of [
@@ -612,6 +676,7 @@ test("the stub's stdout carries only allowlisted route lines, never a request va
       "token",
       "collection",
       "sign_out",
+      "fixture",
     ])
       assert.ok(
         lines.some((line) => line.includes(`route=${label} `)),

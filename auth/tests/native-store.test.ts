@@ -8,7 +8,8 @@ import {
   type NativeDb,
   type NativeLimits,
 } from "../src/nativeStore.js";
-import { createNativeRateLimits, createRateLimits } from "../src/rateLimits.js";
+import { createNativeRateLimits } from "../src/nativeRateLimits.js";
+import { createRateLimits } from "../src/rateLimits.js";
 import { createShutdown } from "../src/nativeShutdown.js";
 
 // The native database operations' admission, deadline and slot accounting, with fake pools: no database is involved.
@@ -164,6 +165,55 @@ describe("admission", () => {
   });
 });
 
+describe("the commit point", () => {
+  it("commits nothing once the deadline has answered", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let committed = false;
+    const store = createNativeStore(fakeDb().db, {
+      limits: limits(1, 1),
+      deadlineMs: 30,
+    });
+    await expect(
+      store.run("exchange", async (_db, commitPoint) => {
+        await gate;
+        commitPoint();
+        committed = true;
+        return 1;
+      })
+    ).rejects.toBeInstanceOf(NativeUnavailable);
+    release();
+    await tick();
+    expect(committed).toBe(false);
+    // The slot is free again.
+    expect(await store.run("exchange", async () => 2)).toBe(2);
+  });
+
+  it("waits for the outcome, past the deadline, once the commit point has passed", async () => {
+    const store = createNativeStore(fakeDb().db, { deadlineMs: 30 });
+    const value = await store.run("exchange", async (_db, commitPoint) => {
+      commitPoint();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return 7;
+    });
+    expect(value).toBe(7);
+  });
+
+  it("answers unavailable when the commit itself fails", async () => {
+    const store = createNativeStore(fakeDb().db, {
+      limits: limits(1, 1),
+      deadlineMs: 30,
+    });
+    await expect(
+      store.run("exchange", async (_db, commitPoint) => {
+        commitPoint();
+        throw new Error("connection lost");
+      })
+    ).rejects.toBeInstanceOf(NativeUnavailable);
+    expect(await store.run("exchange", async () => 3)).toBe(3);
+  });
+});
+
 // A request with the raw header list a real one has.
 function request(
   extra: string[] = [],
@@ -223,8 +273,8 @@ describe("the limiters' locks", () => {
     const client = {
       query: async (text: string, values?: unknown[]) => {
         queries.push({ text, values });
-        if (/FROM auth_rate_event/.test(text))
-          return { rows: [{ from_ip: "0", total: "0" }] };
+        if (/FROM auth_rate_event|FROM native_rate_event/.test(text))
+          return { rows: [{ from_ip: "0", total: "0", n: 0 }] };
         return { rows: [] };
       },
       release: () => {},
@@ -243,12 +293,18 @@ describe("the limiters' locks", () => {
       const { db, queries } = recorder();
       expect(await run(db)).toBe(true);
       expect(lockOf(queries)).toEqual([914708]);
+      // The native limits never name the web limiter's table.
+      expect(queries.some((q) => /auth_rate_event/.test(q.text))).toBe(false);
+      expect(queries.some((q) => /native_rate_event/.test(q.text))).toBe(true);
     }
     const web = recorder();
     expect(
       await createRateLimits(web.db as never, 100).allowStart("1.2.3.4")
     ).toBe(true);
     expect(lockOf(web.queries)).toEqual([914704]);
+    expect(web.queries.some((q) => /native_rate_event/.test(q.text))).toBe(
+      false
+    );
     const signup = recorder();
     expect(
       await createRateLimits(signup.db as never, 100).allowSignup("1.2.3.4")

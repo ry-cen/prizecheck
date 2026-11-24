@@ -140,11 +140,42 @@ final class AuthNativeSignInUITests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        // Fault off first, so a failed run cannot leave the stub refusing sign-outs; then terminate.
+        stub("POST", "/fixture/sign-out/ok")
         app.terminate()
     }
 
-    func testNativeSignInRestoreAndSignOut() {
-        app.launch()
+    private final class Box: @unchecked Sendable { var counts: [String: Int] = [:] }
+
+    /// Asks the loopback stub's control routes; counts only.
+    @discardableResult
+    private func stub(_ method: String, _ path: String) -> [String: Int] {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:4320" + path)!)
+        request.httpMethod = method
+        let box = Box()
+        let done = XCTestExpectation(description: "stub")
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            if let data = data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Int] { box.counts = object }
+            done.fulfill()
+        }.resume()
+        // Not read after a timeout: the callback could still be writing.
+        guard XCTWaiter().wait(for: [done], timeout: 15) == .completed else { return [:] }
+        return box.counts
+    }
+
+    private func waitForStub(_ what: String, _ check: ([String: Int]) -> Bool) {
+        let deadline = Date().addingTimeInterval(20)
+        var last: [String: Int] = [:]
+        while Date() < deadline {
+            last = stub("GET", "/fixture/state")
+            if check(last) { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        }
+        XCTFail("stub \(what): \(last)")
+    }
+
+    /// Taps Sign in, walks the sheet through Allow, and waits for the first card.
+    private func signIn() {
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 45))
         app.buttons["Sign in"].tap()
         // iOS asks before opening the sign-in sheet; an ephemeral session may skip the alert.
@@ -163,11 +194,59 @@ final class AuthNativeSignInUITests: XCTestCase {
         let firstCardAppeared = app.buttons[firstCard].waitForExistence(timeout: 30)
         if !firstCardAppeared { reportFinalState() }
         XCTAssertTrue(firstCardAppeared)
+    }
+
+    func testNativeSignInRestoreAndDurableSignOut() {
+        // 1. Sign in, relaunch: restored.
+        app.launch()
+        signIn()
         app.terminate()
         app.launch()
         XCTAssertTrue(app.buttons[firstCard].waitForExistence(timeout: 30))
+        waitForStub("live 1") { ($0["live"] ?? -1) == 1 }
+
+        // 2. Sign out while the gateway refuses: signed out at once, the credential still live on the server.
+        stub("POST", "/fixture/sign-out/fail")
+        var base = stub("GET", "/fixture/state")["refused"] ?? 0
         app.buttons["Sign out"].tap()
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons[firstCard].exists)
+        waitForStub("refused after sign-out") { ($0["refused"] ?? -1) >= base + 1 && ($0["live"] ?? -1) == 1 }
+
+        // 3. Sign in again with the first token pending: the pending token is retried (the sheet also activates the
+        // app, so this does not isolate which trigger sent it).
+        base = stub("GET", "/fixture/state")["refused"] ?? 0
+        signIn()
+        waitForStub("retry during sign-in") { ($0["refused"] ?? -1) >= base + 1 && ($0["live"] ?? -1) == 2 }
+
+        // 4. Sign out again, fault still on. Not + 2: a pass already running may have sent the first token.
+        base = stub("GET", "/fixture/state")["refused"] ?? 0
+        app.buttons["Sign out"].tap()
+        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 10))
+        waitForStub("refused after second sign-out") { ($0["refused"] ?? -1) >= base + 1 && ($0["live"] ?? -1) == 2 }
+
+        // 5. Relaunch: signed out (a pending token is never a sign-in), and the launch retries both tokens.
+        app.terminate()
+        base = stub("GET", "/fixture/state")["refused"] ?? 0
+        app.launch()
+        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["Sign out"].exists)
+        XCTAssertFalse(app.buttons[firstCard].exists)
+        waitForStub("launch retry of both tokens") { ($0["refused"] ?? -1) >= base + 2 && ($0["live"] ?? -1) == 2 }
+
+        // 6. The gateway recovers; the next activation revokes every pending token.
+        stub("POST", "/fixture/sign-out/ok")
+        XCUIDevice.shared.press(.home)
+        let background = NSPredicate { _, _ in self.app.state != .runningForeground }
+        expectation(for: background, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        app.activate()
+        waitForStub("foreground retry revokes both") { ($0["live"] ?? -1) == 0 && ($0["confirmed"] ?? -1) == 2 }
+
+        // 7. Relaunch: still signed out.
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons[firstCard].exists)
     }
 

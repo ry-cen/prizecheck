@@ -23,7 +23,7 @@ import { callerFor, trustedClientIp } from "./caller.js";
 import { ipContext } from "./ipContext.js";
 import { createNative, nativeSignInEnabled } from "./native.js";
 import { createShutdown } from "./nativeShutdown.js";
-import { createNativeRateLimits } from "./rateLimits.js";
+import { createNativeRateLimits } from "./nativeRateLimits.js";
 import {
   createNativePool,
   createNativeStore,

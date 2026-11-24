@@ -34,6 +34,8 @@ enum NativeStage: String {
     case collectionBodyInvalid = "collection_body_invalid"
     case collectionPage = "collection_page"
     case signoutBegin = "signout_begin"
+    case revokeHTTP = "revoke_http"
+    case revokeTransportFailed = "revoke_transport_failed"
 
     /// The name of the one integer a stage may carry.
     enum Field: String {
@@ -231,6 +233,24 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
 
     @objc override public func load() {
         NativeCredentialStore.purgeLeftoverCredentialsOnFirstLoad()
+        // A pending revocation is retried whenever the app becomes active, cold launch included. The observer covers
+        // activations from here on; the async check covers a plugin that loaded after the app was already active.
+        // While the device is unlocked the Keychain is readable. No timer, no background task.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        DispatchQueue.main.async {
+            if UIApplication.shared.applicationState == .active {
+                self.revokePending()
+            }
+        }
+    }
+
+    @objc private func appDidBecomeActive() {
+        revokePending()
     }
 
     private static let requestTimeout: TimeInterval = 15
@@ -254,6 +274,9 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
 
     // Touched on the main queue only.
     private var signInPending = false
+    /// Bumped by every sign-in start and every sign-out, so an exchange that finishes after a sign-out can tell it is stale.
+    private var signInGeneration = 0
+    private var revocationPassRunning = false
     private var authSession: ASWebAuthenticationSession?
 
     // MARK: Plugin methods
@@ -264,6 +287,7 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
                 call.resolve(["configured": false, "signedIn": false])
                 return
             }
+            // A credential pending revocation is not signed in: `credential()` never returns one.
             call.resolve(["configured": true, "signedIn": self.currentCredential() != nil])
         }
     }
@@ -314,9 +338,9 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
     }
 
     private func currentCredential() -> NativeCredential? {
-        guard let store = store, let credential = store.load() else { return nil }
+        guard let store = store, let credential = store.credential() else { return nil }
         if credential.isExpired() {
-            store.delete()
+            store.drop(ifToken: credential.token)
             return nil
         }
         return credential
@@ -338,6 +362,8 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
             resolveSignIn(call, .error)
             return
         }
+        // A retry of earlier sign-outs; it neither delays nor blocks this sign-in.
+        revokePending()
         let verifier = NativeSignInFormats.base64URL(verifierBytes)
         let state = NativeSignInFormats.base64URL(stateBytes)
         guard var start = URLComponents(url: origin, resolvingAgainstBaseURL: false) else {
@@ -356,12 +382,14 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
             return
         }
         signInPending = true
+        signInGeneration += 1
+        let generation = signInGeneration
         let session = ASWebAuthenticationSession(
             url: startURL,
             callbackURLScheme: NativeSignInFormats.callbackScheme
         ) { [weak self] callbackURL, error in
             DispatchQueue.main.async {
-                self?.finishBrowser(callbackURL: callbackURL, error: error, verifier: verifier, state: state, origin: origin, call: call)
+                self?.finishBrowser(callbackURL: callbackURL, error: error, verifier: verifier, state: state, origin: origin, generation: generation, call: call)
             }
         }
         session.prefersEphemeralWebBrowserSession = true
@@ -381,6 +409,7 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
         verifier: String,
         state: String,
         origin: URL,
+        generation: Int,
         call: CAPPluginCall
     ) {
         authSession = nil
@@ -409,11 +438,11 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
             resolveSignIn(call, .error)
         case .code(let code):
             NativeStage.callbackCode.log()
-            exchange(code: code, verifier: verifier, origin: origin, call: call)
+            exchange(code: code, verifier: verifier, origin: origin, generation: generation, call: call)
         }
     }
 
-    private func exchange(code: String, verifier: String, origin: URL, call: CAPPluginCall) {
+    private func exchange(code: String, verifier: String, origin: URL, generation: Int, call: CAPPluginCall) {
         func finish(_ result: SignInResult) {
             DispatchQueue.main.async {
                 self.signInPending = false
@@ -446,9 +475,28 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
                 return
             }
             DispatchQueue.main.async {
-                let saved = self.store?.save(NativeCredential(token: token, expiresAt: expires)) ?? false
+                let credential = NativeCredential(token: token, expiresAt: expires)
                 self.signInPending = false
-                self.resolveSignIn(call, saved ? .signedIn : .error)
+                if generation != self.signInGeneration {
+                    // A sign-out came first: this credential is never installed. It is queued for revocation, or, if
+                    // the Keychain refuses, revoked once from memory.
+                    let queued = self.store?.queueRevocation(credential) ?? false
+                    if !queued {
+                        self.sendRevocation(token) { _ in }
+                    }
+                    self.revokePending()
+                    self.resolveSignIn(call, .cancelled)
+                    return
+                }
+                let saved = self.store?.replace(with: credential) ?? false
+                if !saved {
+                    self.sendRevocation(token) { _ in }
+                    self.resolveSignIn(call, .error)
+                    return
+                }
+                // A credential this one displaced is now pending revocation.
+                self.revokePending()
+                self.resolveSignIn(call, .signedIn)
             }
         }
     }
@@ -488,7 +536,7 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
                     NativeStage.collectionTransportFailed.log(.nsurl, nsurlCode ?? -1)
                 }
                 if status == 401 {
-                    self.store?.delete(ifToken: credential.token)
+                    self.store?.drop(ifToken: credential.token)
                     call.resolve(["kind": "signed-out"])
                     return
                 }
@@ -507,23 +555,95 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
 
     // MARK: Sign out
 
-    /// The credential is removed on this device first, so sign-out cannot be defeated by a
-    /// slow or unreachable gateway. The server-side revoke is then best effort.
+    /// Sign-out removes the readable credential on this device and records its pending revocation in ONE Keychain
+    /// write, and resolves without waiting for the network; a slow or unreachable gateway cannot hold it up. The
+    /// revocation is then sent, and retried on every app activation (cold launch included), on sign-out and on the next
+    /// sign-in, until the gateway answers 204 or the credential's own expiry has passed. A pending credential is never
+    /// used for a read, never reported as signed in, and never sent to another gateway origin (each origin has its own
+    /// Keychain item). It resolves at once unless the Keychain refused both the update and the delete; then it rejects
+    /// with `KEYCHAIN`, after still starting the revocation from memory. The web layer's existing `catch` ignores that
+    /// rejection and shows signed out.
+    ///
+    /// | Event                                         | Result                                                        |
+    /// | Killed before the Keychain write              | sign-out did not take; still signed in on relaunch            |
+    /// | Killed after the write, before the request    | pending; the next activation sends it                         |
+    /// | Server revoked, 204 lost                      | resent, 204 again, removed                                    |
+    /// | Killed after the 204, before removal          | resent, 204, removed                                          |
+    /// | An exchange finishes after sign-out           | its credential is never installed; it is queued for revocation |
+    /// | Sign-out of A fails, B signs in               | reads use only B; A's token is sent only to sign-out          |
+    /// | Several sign-outs fail                        | each is one entry; one 503 does not stop the others           |
+    /// | App configured for another origin             | that origin's item is not read; retried when used again       |
+    /// | Switch turned off                             | 404; stays pending, removed after an attempt past expiry      |
+    /// | Device clock ahead                            | still attempted at least once before removal                  |
+    ///
+    /// Residual: the app is never opened again, or is deleted or reinstalled (the first-load purge drops pending
+    /// entries); the Keychain refuses the update (one in-memory attempt only, and earlier pending entries are lost with
+    /// the deleted item); the Keychain cannot be read (the item is deleted with no attempt to revoke it or its pending
+    /// entries); the Keychain refuses the delete as well (the credential can reappear as signed in on relaunch, unless
+    /// the in-memory attempt revoked it, in which case the first read is a 401 and removes it); the app stays in the
+    /// foreground after a failed attempt (next try at the next activation, sign-in or sign-out). In each, the server
+    /// credential ends at its 24-hour expiry.
     private func endSession(_ call: CAPPluginCall) {
         NativeStage.signoutBegin.log()
-        let token = store?.load()?.token
-        store?.delete()
-        guard let origin = gateway, let token = token,
-              let url = endpoint(origin, "/auth/native/sign-out", query: nil) else {
+        signInGeneration += 1
+        var retired: (removed: Bool, unqueued: NativeCredential?) = (removed: true, unqueued: nil)
+        if let store = store {
+            retired = store.retire()
+        }
+        if retired.removed {
             call.resolve()
+        } else {
+            call.reject("Sign-out incomplete", "KEYCHAIN")
+        }
+        if let unqueued = retired.unqueued {
+            sendRevocation(unqueued.token) { _ in }
+        }
+        revokePending()
+    }
+
+    /// Sends every pending revocation, at most one pass at a time. Main queue only.
+    private func revokePending() {
+        guard !revocationPassRunning else { return }
+        revocationPassRunning = true
+        revokeNext(attempted: [])
+    }
+
+    /// Each pending token is sent once per pass, one at a time; a token queued during the pass is picked up by it.
+    private func revokeNext(attempted: Set<String>) {
+        guard let next = store?.pendingRevocations().first(where: { !attempted.contains($0.token) }) else {
+            revocationPassRunning = false
+            return
+        }
+        sendRevocation(next.token) { confirmed in
+            if confirmed || next.isExpired() {
+                self.store?.finishRevocation(token: next.token)
+            }
+            self.revokeNext(attempted: attempted.union([next.token]))
+        }
+    }
+
+    /// Posts the sign-out for one token to the configured gateway. Only a 204 confirms: the gateway never answers 401
+    /// here, so a 401, 404 or 3xx comes from an intermediary or a switched-off gateway and the token stays pending until
+    /// its expiry. Always completes on the main queue, never synchronously.
+    private func sendRevocation(_ token: String, completion: @escaping (Bool) -> Void) {
+        guard let origin = gateway,
+              let url = endpoint(origin, "/auth/native/sign-out", query: nil) else {
+            DispatchQueue.main.async {
+                completion(false)
+            }
             return
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-        send(request) { _, _, _ in
+        send(request) { status, _, nsurlCode in
             DispatchQueue.main.async {
-                call.resolve()
+                if let status = status {
+                    NativeStage.revokeHTTP.log(.status, status)
+                } else {
+                    NativeStage.revokeTransportFailed.log(.nsurl, nsurlCode ?? -1)
+                }
+                completion(status == 204)
             }
         }
     }

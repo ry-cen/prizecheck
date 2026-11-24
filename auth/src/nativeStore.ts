@@ -11,6 +11,12 @@ import { Pool } from "pg";
 // deadline: a caller that gives up at RESPONSE_DEADLINE_MS still occupies its slot while its query runs, so abandoned work
 // cannot pile up beyond the cap. The pool's own timeouts (2 s connect, statement, query and lock) bound that work.
 //
+// The deadline and the durable write are decided in one place, `commitPoint`: work calls it immediately before it sends its
+// COMMIT (or its single autocommit write). Too late, it throws and nothing is committed; in time, the deadline is disarmed
+// and the answer waits for the write's outcome. So the deadline is 2.5 s before the commit point; after it, at most 2 s of
+// checkout plus 2 s of query timeout plus 2 s of ROLLBACK wait before an answer. That is an estimate of about 8.5 s from
+// the timer settings (event-loop lag adds to it), under the app's 15 s request timeout.
+//
 // Numbers, for a pool of two connections:
 //   read     (bearer lookup, unauthenticated, high volume)  4 held, 1 running: one connection at most, three wait in memory
 //   revoke   (sign-out)                                      2 held, 2 running
@@ -46,7 +52,10 @@ export type NativeDb = Pick<Pool, "query" | "connect">;
 
 export type NativeStore = {
   /** Runs `work` on the native pool in `kind`'s admission class. `work` takes and releases its own client. */
-  run: <T>(kind: NativeClass, work: (db: NativeDb) => Promise<T>) => Promise<T>;
+  run: <T>(
+    kind: NativeClass,
+    work: (db: NativeDb, commitPoint: () => void) => Promise<T>
+  ) => Promise<T>;
   /** One query in `kind`'s class. */
   rows: <T>(kind: NativeClass, text: string, values: unknown[]) => Promise<T[]>;
 };
@@ -119,16 +128,27 @@ export function createNativeStore(
 
   async function run<T>(
     kind: NativeClass,
-    work: (db: NativeDb) => Promise<T>
+    work: (db: NativeDb, commitPoint: () => void) => Promise<T>
   ): Promise<T> {
     const gate = gates[kind];
     const place = gate.enter();
     let timer: NodeJS.Timeout | undefined;
+    let late = false;
     const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new NativeUnavailable()), deadlineMs);
+      timer = setTimeout(() => {
+        late = true;
+        reject(new NativeUnavailable());
+      }, deadlineMs);
     });
+    // The one decision between the deadline and a durable write. Work calls it immediately before sending its COMMIT (or its
+    // single autocommit write), with no await in between. Too late: it throws, nothing is committed, the caller has its 503.
+    // In time: the deadline is disarmed and the caller waits for the outcome, bounded by the pool's own timeouts.
+    const commitPoint = () => {
+      if (late) throw new NativeUnavailable();
+      clearTimeout(timer);
+    };
     // The work, once it has a place to run. Its slot goes back when it settles, however long that takes.
-    const started = place.ready.then(() => work(db));
+    const started = place.ready.then(() => work(db, commitPoint));
     started.then(
       () => gate.leave(),
       () => gate.leave()

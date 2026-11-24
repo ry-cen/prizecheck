@@ -132,3 +132,7 @@ Fixture-only fix: the simulator stub's native pages now send `referrer-policy: s
 ### Simulator ad-hoc signing (candidate, not run)
 
 Hosted run 44254633525 at `af88637c` logged `keychain_save status=-34018` and the UI showed "Unable to sign in": the unsigned build (`CODE_SIGNING_ALLOWED=NO`) cannot use the Keychain. The workflow build and `validate-simulator.sh` test invocation now pass `CODE_SIGN_IDENTITY=-` (ad-hoc, no team, certificate, account or secret) instead, and the script prints the app's signature and entitlements after `simctl install`. No hosted or simulator run of this change has happened yet, so this records no pass.
+
+### Durable sign-out (candidate, not run)
+
+A local-only candidate makes native sign-out durable on the phone (`NativeCredentialStore.swift`, `NativeSignInPlugin.swift`) and extends the simulator test to `AuthNativeSignInUITests.testNativeSignInRestoreAndDurableSignOut`, driven by the stub's `/fixture/*` control routes. **The Swift is not compiled** (it cannot be on Linux), **and the simulator test has not run: Swift is NOT compiled and NOT verified until a hosted "iOS prototype simulator" run is recorded here.** Linux checks cover the gateway contract and the stub (`auth/tests/native-sign-in.test.ts`, `native-store.test.ts`, `mobile/native-fixture.test.mjs`) and say nothing about the Swift.

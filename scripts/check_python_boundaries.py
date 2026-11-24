@@ -35,7 +35,7 @@ ALLOWLIST = ROOT / 'scripts/python_boundary_allowlist.txt'
 ARCHITECTURE = ROOT / 'scripts/python_architecture_rules.py'
 CLASSES = ('core', 'mixed', 'pokemon', 'root')
 SQL_EXEMPT = 'identity_store.py'
-SQL = re.compile(r'(?i)\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+("user"|session|account|verification|auth_send_event|auth_rate_event|owner_binding|released_handle|native_grant|native_credential)(?![\w"])')
+SQL = re.compile(r'(?i)\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+("user"|session|account|verification|auth_send_event|auth_rate_event|native_rate_event|owner_binding|released_handle|native_grant|native_credential)(?![\w"])')
 HEADER = """# Forbidden Python imports and identity-table SQL that exist today, as found by scripts/check_python_boundaries.py.
 # Each Now package removes its own lines. Never add a line to get a change through: split the module instead.
 # Regenerate (only to record a removal) with: .venv/bin/python scripts/check_python_boundaries.py --write-baseline

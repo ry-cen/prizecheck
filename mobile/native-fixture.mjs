@@ -79,6 +79,12 @@ function routeLabel(path, method) {
   if (path === "/auth/native/token" && method === "POST") return "token";
   if (path === "/auth/native/sign-out" && method === "POST") return "sign_out";
   if (path === "/api/collection") return "collection";
+  if (
+    (path === "/fixture/state" && method === "GET") ||
+    (path === "/fixture/sign-out/fail" && method === "POST") ||
+    (path === "/fixture/sign-out/ok" && method === "POST")
+  )
+    return "fixture";
   return "other";
 }
 
@@ -108,6 +114,11 @@ export function nativeFixture({
   const events = { native_approve: new Map(), native_token: new Map() };
   const LIMITS = { native_approve: 20, native_token: 30 };
   let origin = `http://127.0.0.1:${PORT}`;
+  // Sign-out test control (loopback stub only; the gateway has no such route): while `failSignOut` is on, sign-out answers
+  // 503 and revokes nothing. `refused` counts those 503s, `confirmed` the 204s that revoked a live credential.
+  let failSignOut = false;
+  let refused = 0;
+  let confirmed = 0;
 
   function limited(kind, request) {
     const ip = request.socket.remoteAddress ?? "unknown";
@@ -365,16 +376,42 @@ export function nativeFixture({
     if (cursor === NATIVE_SECOND_CURSOR) return json(response, 200, PAGES[1]);
     json(response, 400, { error: "Invalid cursor" });
   }
+  /** The same rules and order as the gateway: 400 for a bad shape, then 503 while the fault is on, else 204. */
   function signOut(request, response) {
+    const fields = [];
+    for (let at = 0; at + 1 < request.rawHeaders.length; at += 2)
+      if (request.rawHeaders[at].toLowerCase() === "authorization")
+        fields.push(request.rawHeaders[at + 1]);
+    const match =
+      fields.length === 1
+        ? /^Bearer ([A-Za-z0-9_-]{43})$/.exec(fields[0])
+        : null;
     if (
-      request.headers.cookie === undefined &&
-      request.headers.origin === undefined
-    ) {
-      const credential = credentialFor(bearer(request));
-      if (credential) credential.revoked = true;
+      !match ||
+      request.headers.cookie !== undefined ||
+      request.headers.origin !== undefined
+    )
+      return json(response, 400, { error: "invalid_request" });
+    if (failSignOut) {
+      refused += 1;
+      return json(response, 503, { error: "Service temporarily unavailable" });
+    }
+    const credential = credentialFor(sha256(match[1]).toString("hex"));
+    if (credential) {
+      credential.revoked = true;
+      confirmed += 1;
     }
     response.writeHead(204, { "cache-control": "no-store" });
     response.end();
+  }
+  /** Counts only: live is the number of unrevoked, unexpired credentials. */
+  function control(path, response) {
+    if (path === "/fixture/sign-out/fail") failSignOut = true;
+    if (path === "/fixture/sign-out/ok") failSignOut = false;
+    let live = 0;
+    for (const credential of credentials.values())
+      if (!credential.revoked && credential.expires > now()) live += 1;
+    json(response, 200, { live, refused, confirmed });
   }
 
   const server = createServer((request, response) => {
@@ -406,6 +443,7 @@ export function nativeFixture({
       return void tokenPost(request, response);
     if (path === "/auth/native/sign-out" && method === "POST")
       return signOut(request, response);
+    if (label === "fixture") return control(path, response);
     // The gateway proxy answers every other /api path with 401 here: the bearer is scoped.
     if (path === "/api/collection") return collection(request, url, response);
     if (path.startsWith("/api/"))
