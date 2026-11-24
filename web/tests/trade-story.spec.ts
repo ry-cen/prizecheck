@@ -172,7 +172,7 @@ async function story(
   const attach = async (who: Page, secretOf: string[]) => {
     const audit = await auditPage(
       who,
-      (url) => /\/api\/(social\/)?trade/.test(url),
+      (url) => /\/api\/(pokemon\/)?(social\/)?trade/.test(url),
       (response) => {
         if (/\/api\/trades\/[0-9a-f-]{36}$/.test(response.url()))
           readTrade.add(secretOf[0]);

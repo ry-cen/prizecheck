@@ -186,7 +186,7 @@ async function story(
       contextOptions,
       beforeSignIn: async (who) => {
         audit = await auditPage(who, (url) =>
-          /\/api\/(social\/)?trade/.test(url)
+          /\/api\/(pokemon\/)?(social\/)?trade/.test(url)
         );
       },
     });

@@ -306,7 +306,7 @@ test("a Deck List change on another device refreshes pending Loans at focus with
   await expect(lines).toContainText("Asked Misty W for 3");
 
   let wantReads = 0;
-  const wantRead = /\/api\/want-list\?deck=/;
+  const wantRead = /\/api(?:\/pokemon)?\/want-list\?deck=/;
   await page.route(wantRead, (route) => {
     wantReads++;
     return route.continue();

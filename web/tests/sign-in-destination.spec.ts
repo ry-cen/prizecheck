@@ -24,7 +24,9 @@ async function mockEmailSignIn(page: Page) {
   });
   await page.route("**/api/**", (route) =>
     route.fulfill({
-      status: new URL(route.request().url()).pathname.startsWith("/api/admin")
+      status: /^\/api\/(pokemon\/)?admin/.test(
+        new URL(route.request().url()).pathname
+      )
         ? 403
         : 200,
       json: { locations: [], nodes: [], owner_revision: 1 },

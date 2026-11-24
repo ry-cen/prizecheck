@@ -105,7 +105,10 @@ async function sessionFixture(
                   }
                 : { locations: [], nodes: [], owner_revision: 1 };
     await route.fulfill({
-      status: path.startsWith("/api/admin") ? 403 : 200,
+      status:
+        path.startsWith("/api/admin") || path.startsWith("/api/pokemon/admin")
+          ? 403
+          : 200,
       json,
     });
   });
