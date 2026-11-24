@@ -142,11 +142,30 @@ export function LocationWriteDialog({
   const index = indexLocations(nodes);
   const create = action.mode === "create";
   const gone = !create && !node;
+  // The alert takes focus once for each set of changes it newly names, never again as a read starts or ends.
+  const focusedChanges = useRef<LocationFactChange[]>([]);
   useEffect(() => {
     // A pause names what changed, and moves focus there so a repeated Enter cannot confirm it unseen.
-    if (changes.length || (gone && (reload !== "" || error !== undefined)))
+    const fresh = changes.length > 0 && changes !== focusedChanges.current;
+    if (changes.length) focusedChanges.current = changes;
+    if (
+      fresh ||
+      (gone && error !== undefined) ||
+      (gone && reload !== "" && reload !== "refreshing")
+    )
       alertRef.current?.focus();
   }, [changes, gone, reload, error]);
+  // A command or read that ends without sending leaves its alert up; if focus fell out of the dialog meanwhile
+  // (a disabled button or a removed alert drops it to the page), it goes to the alert rather than staying lost.
+  const [settled, setSettled] = useState(0);
+  useEffect(() => {
+    if (!settled) return;
+    const alert = alertRef.current;
+    const active = document.activeElement;
+    const box = alert?.closest("dialog, [role='dialog']");
+    if (alert && box && (!active || !box.contains(active) || active === box))
+      alert.focus();
+  }, [settled]);
   const unsorted = node?.name === "Unsorted" && node.parent_id === null;
   const parent = nodes.find((n) => n.id === parentId);
   const stocked =
@@ -212,6 +231,7 @@ export function LocationWriteDialog({
     if (!attempt.current && !validInput(nodes)) return;
     lock.current = true;
     setBusy(true);
+    let unsent = false;
     try {
       if (!attempt.current) {
         let currentNodes = nodes;
@@ -222,12 +242,14 @@ export function LocationWriteDialog({
             currentNodes = await reader.locations(run.controller.signal);
           } catch {
             if (run.alive) setReload("failed");
+            unsent = true;
             return;
           }
           if (!run.alive) return;
           // The refreshed Locations are shown first; the next explicit submit is measured against what is then on screen.
           if (!reviewTree(currentNodes)) {
             setReload("needed");
+            unsent = true;
             return;
           }
           // No read message stays up while the write is in flight.
@@ -301,6 +323,7 @@ export function LocationWriteDialog({
       onConfirmed(result, sent.message);
       onClose();
     } catch (cause) {
+      unsent = true;
       if (run.alive) {
         const code = cause instanceof CollectionError ? cause.code : "";
         if (staleLocationCodes.has(code)) {
@@ -333,6 +356,7 @@ export function LocationWriteDialog({
       if (run.alive) {
         lock.current = false;
         setBusy(false);
+        if (unsent) setSettled((n) => n + 1);
       }
     }
   }

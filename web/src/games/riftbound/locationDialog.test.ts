@@ -1055,6 +1055,59 @@ describe("moving a Location", () => {
       await f.cleanup();
     }
   });
+  describe.each([
+    [
+      "a definitive refusal",
+      () => new CollectionError("LOCATION_NAME_CONFLICT"),
+    ],
+    ["an uncertain failure", () => new Error("network down")],
+  ] as const)("after a reviewed change and then %s", (_label, failure) => {
+    it("keeps focus off the old alert as the read starts and inside the dialog once the write fails", async () => {
+      const { f, send } = await moveWithRefusal();
+      const dialog = () => document.querySelector("[role='dialog']")!;
+      const inside = () => {
+        const active = document.activeElement;
+        expect(active).not.toBe(document.body);
+        expect(dialog().contains(active)).toBe(true);
+      };
+      try {
+        addCopy(f.store);
+        await press("retry", f);
+        expect(document.activeElement).toBe(alertEl());
+        // The collector tabs to Reload and retry and presses it with nothing changed since.
+        const button = retryButton();
+        button.focus();
+        let release!: () => void;
+        const read = vi.spyOn(f.reader, "locations");
+        const real =
+          read.getMockImplementation() ?? f.reader.locations.bind(f.reader);
+        read.mockImplementationOnce(
+          (signal) =>
+            new Promise((resolve) => {
+              release = () => resolve(real(signal));
+            })
+        );
+        send.mockRejectedValueOnce(failure());
+        await act(async () => {
+          button.click();
+        });
+        expect(alertEl().textContent).toContain(LOCATION_REFRESHING_MESSAGE);
+        // The read starting does not pull focus back to the old alert.
+        expect(document.activeElement).not.toBe(alertEl());
+        inside();
+        await act(async () => {
+          release();
+          await vi.runAllTimersAsync();
+        });
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(f.confirmed).not.toHaveBeenCalled();
+        expect(alertEl()).not.toBe(null);
+        inside();
+      } finally {
+        await f.cleanup();
+      }
+    });
+  });
   it("offers the picker and focuses the notice when the source is deleted", async () => {
     const { f, send } = await moveWithRefusal();
     try {

@@ -13,7 +13,9 @@ export type CollectionScenario =
   | "stale"
   | "location-failure"
   | "location-slow"
-  | "location-stale";
+  | "location-stale"
+  | "location-stale-refused"
+  | "location-stale-failed";
 export type FixtureStore = {
   locations: TreeNode[];
   rows: HoldingRow[];
@@ -226,6 +228,7 @@ export function collectionFixtureWriter(
   const replay = new Map<string, { payload: string; result: unknown }>();
   let failed = false;
   let stale = false;
+  let edits = 0;
   const row = (location: string, edition: string) =>
     store.rows.find(
       (r) => r.locationId === location && r.edition.id === edition
@@ -309,7 +312,18 @@ export function collectionFixtureWriter(
       stale = true;
       throw new CollectionError("STALE_HOLDING");
     }
-    if (scenario === "location-stale" && !stale && action === "editLocation") {
+    const staleThen =
+      scenario === "location-stale-refused" ||
+      scenario === "location-stale-failed";
+    if (staleThen && action === "editLocation" && ++edits === 2)
+      throw scenario === "location-stale-refused"
+        ? new CollectionError("LOCATION_NAME_CONFLICT")
+        : new Error("Synthetic write failure");
+    if (
+      (scenario === "location-stale" || staleThen) &&
+      !stale &&
+      action === "editLocation"
+    ) {
       stale = true;
       const edit = input as { id: string; parentId?: string | null };
       const target = store.locations.find(

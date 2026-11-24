@@ -534,6 +534,72 @@ for (const width of [1280, 375])
     ).toBe("2");
   });
 
+for (const [scenario, message] of [
+  [
+    "location-stale-refused",
+    "Binders already has a Location named Empty binder.",
+  ],
+  ["location-stale-failed", "Unable to save this change. Please retry."],
+] as const)
+  test(`focus stays in the dialog when a retried Move is read unchanged and then fails (${scenario})`, async ({
+    page,
+  }) => {
+    await page.goto(
+      `${entry}?collection=${scenario}#riftbound:section=collection`
+    );
+    await page
+      .getByRole("button", { name: "Settings for Empty binder", exact: true })
+      .filter({ visible: true })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Empty binder",
+      exact: true,
+    });
+    const inDialog = () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        return (
+          !!active &&
+          active !== document.body &&
+          !!active.closest("dialog[open]")
+        );
+      });
+    await dialog.getByRole("button", { name: "Move", exact: true }).click();
+    await dialog.getByRole("combobox").selectOption("2");
+    await dialog
+      .getByRole("button", { name: "Move location", exact: true })
+      .click();
+    const retry = dialog.getByRole("button", {
+      name: "Reload and retry",
+      exact: true,
+    });
+    await expect(retry).toBeEnabled();
+    await expect(dialog.getByRole("combobox")).toBeEnabled();
+    // A copy arrives, so the first Reload and retry stops on a list of changes.
+    await page.evaluate(
+      async ({ path, scenario }) => {
+        const m = await import(path);
+        const store = m.collectionFixtureStore("a", scenario);
+        store.rows.push({ ...store.rows[0], locationId: "5", quantity: 1 });
+      },
+      { path, scenario }
+    );
+    await dialog.getByRole("combobox").focus();
+    await tabTo(page, retry);
+    await page.keyboard.press("Enter");
+    await expect(dialog.getByRole("alert")).toContainText(
+      "Copies: 1 copy (was 0 copies)"
+    );
+    await expect(dialog.getByRole("alert")).toBeFocused();
+    // Nothing changes before the second Reload and retry: the read is unchanged, the alert goes, the write is sent and fails.
+    await expect(retry).toBeEnabled();
+    await tabTo(page, retry);
+    await page.keyboard.press("Enter");
+    await expect(dialog.getByRole("alert")).toContainText(message);
+    await expect(dialog).toBeVisible();
+    await expect.poll(inDialog).toBe(true);
+  });
+
 for (const width of [1280, 375])
   test(`viewed leaf conversion and move redirect at ${width}`, async ({
     page,
