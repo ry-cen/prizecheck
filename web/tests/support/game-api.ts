@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 
 /**
  * Counts every request to a game-scoped API path in both URL forms, `/api/pokemon/<path>` and the retained
@@ -13,13 +13,23 @@ export function watchGameApi(page: Page, path: string) {
     bodies: [] as unknown[],
     /** The pathname of each request, in request order. */
     paths: [] as string[],
-    /** Forgets what was seen so far, keeping the same arrays. */
+    /** Requests sent but not yet finished or failed, in either URL form. */
+    inFlight: 0,
+    /** The most requests in flight at once since the watch began or the last `clear()`. */
+    peak: 0,
+    /**
+     * Forgets what was seen so far, keeping the same arrays. Requests already in flight stay counted until they
+     * settle (so none is decremented twice or below zero); the peak restarts from the current in-flight count.
+     */
     clear() {
       watch.batches.length = 0;
       watch.bodies.length = 0;
       watch.paths.length = 0;
+      watch.peak = watch.inFlight;
     },
   };
+  // Keyed per Request, so a request that both finishes and is reported failed is only released once.
+  const open = new Set<Request>();
   const escaped = path
     .split("*")
     .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
@@ -32,6 +42,14 @@ export function watchGameApi(page: Page, path: string) {
     watch.paths.push(pathname);
     watch.bodies.push(body);
     watch.batches.push(body?.edition_ids ?? []);
+    open.add(request);
+    watch.inFlight = open.size;
+    watch.peak = Math.max(watch.peak, watch.inFlight);
   });
+  const settle = (request: Request) => {
+    if (open.delete(request)) watch.inFlight = open.size;
+  };
+  page.on("requestfinished", settle);
+  page.on("requestfailed", settle);
   return watch;
 }

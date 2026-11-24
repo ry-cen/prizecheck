@@ -473,16 +473,12 @@ test(
       ids.unspecified,
     ]);
     await page.reload();
-    const seen = watchGameApi(page, "prices/editions").batches;
-    let live = 0;
-    let peak = 0;
+    const watch = watchGameApi(page, "prices/editions");
+    const seen = watch.batches;
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => (release = resolve));
     await page.route("**/api/pokemon/prices/editions", async (route) => {
-      live += 1;
-      peak = Math.max(peak, live);
       await gate;
-      live -= 1;
       await route.continue().catch(() => undefined);
     });
     await openHeld(page, held);
@@ -494,7 +490,7 @@ test(
     // flake-exempt wait-for-timeout (quiet): while two batches are held, a third must not start.
     await page.waitForTimeout(800);
     expect(seen).toHaveLength(2);
-    expect(peak).toBe(2);
+    expect(watch.peak).toBe(2);
     release();
     // The gallery mounts only rows near the viewport (a tile mounted again asks again): walk down the page until
     // every Edition has been asked for.
@@ -509,7 +505,7 @@ test(
     // flake-exempt wait-for-timeout (quiet): once the queue has drained, nothing is polled or retried.
     await page.waitForTimeout(1_000);
     expect(seen).toHaveLength(asked);
-    expect(peak).toBeLessThanOrEqual(2);
+    expect(watch.peak).toBeLessThanOrEqual(2);
     expect(seen.every((batch) => batch.length <= 64)).toBe(true);
   }
 );

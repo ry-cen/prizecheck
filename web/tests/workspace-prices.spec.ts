@@ -153,27 +153,9 @@ const tile = (page: Page, prefix: string) =>
   });
 const REPORT = "Report a problem with this card's data";
 
-/** Records every price request's Edition ids and the peak number in flight. */
+/** Records every price request's Edition ids and the peak number in flight, in both URL forms. */
 async function recordPrices(page: Page) {
-  // Counted in both URL forms, so a request to the retained /api/prices/editions is seen too.
-  const seen = {
-    batches: watchGameApi(page, "prices/editions").batches,
-    live: 0,
-    peak: 0,
-  };
-  await page.route("**/api/pokemon/prices/editions", async (route) => {
-    seen.live += 1;
-    seen.peak = Math.max(seen.peak, seen.live);
-    try {
-      const response = await route.fetch();
-      await route.fulfill({ response });
-    } catch {
-      /* The page navigated away mid-request. */
-    } finally {
-      seen.live -= 1;
-    }
-  });
-  return seen;
+  return watchGameApi(page, "prices/editions");
 }
 
 test.afterEach(async () => {
@@ -476,6 +458,8 @@ test.describe("desktop, short window", () => {
     await expect(cards(page)).not.toContainText("$0.00");
     for (const id of furret) expect(seen.batches.flat()).toContain(id);
     expect(seen.batches.every((batch) => batch.length <= 64)).toBe(true);
+    // At least one request was in flight, so a peak of 0 (nothing measured) cannot pass.
+    expect(seen.peak).toBeGreaterThanOrEqual(1);
     expect(seen.peak).toBeLessThanOrEqual(2);
 
     // No price sort, price filter or value total.
