@@ -101,15 +101,25 @@ export function LocationWriteDialog({
   const [conversion, setConversion] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [error, setError] = useState<unknown>();
-  // Set by a tree-change refusal: until a fresh tree is read, the refused command must not be sent again.
+  // What the alert says about a tree-change refusal. Editing clears it; it does not decide whether a read is due.
   const [reload, setReload] = useState<"" | "needed" | "failed">("");
+  // Set by any tree-change refusal, failed read or reused key, and only the write that succeeds ends it. Until
+  // then every new command is preceded by a fresh read; edits, other choices and later errors never clear it.
+  const mustRead = useRef(false);
+  const [readDue, setReadDue] = useState(false);
+  const requireRead = () => {
+    mustRead.current = true;
+    setReadDue(true);
+  };
   // What changed in the Locations since the collector last saw them; shown in the alert until they edit or confirm.
   const [changes, setChanges] = useState<LocationFactChange[]>([]);
   const alertRef = useRef<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
+  // The one command whose outcome is unknown: its exact input and key are what a retry sends.
   const attempt = useRef<{
     key: string;
+    message: string;
     send: (signal: AbortSignal, key: string) => Promise<WriteResult>;
   } | null>(null);
   const lifetime = useRef<{
@@ -174,14 +184,14 @@ export function LocationWriteDialog({
       ? changedLocationFacts(facts, locationFacts(formStep, updated, id, next))
       : [];
     setNodes(updated);
-    attempt.current = null;
     setParent(next);
     setChanges(diff);
     return next === parentId && !diff.length && validInput(updated);
   }
 
   function begin(next: typeof step) {
-    attempt.current = null;
+    // A sent command whose outcome is unknown stays the only thing that can be retried.
+    if (attempt.current || lock.current) return;
     setError(undefined);
     setReload("");
     setChanges([]);
@@ -190,29 +200,32 @@ export function LocationWriteDialog({
     setParent(next === "move" ? "__choose__" : "");
     setConfirmName("");
   }
-  async function submit(forceReload = false) {
-    const mustReload = forceReload || reload !== "";
+  async function submit() {
     const run = lifetime.current;
-    if (!run?.alive || lock.current || !validInput(nodes)) return;
+    if (!run?.alive || lock.current) return;
+    // A command with an unknown outcome is retried as it was, before any other check or read.
+    if (!attempt.current && !validInput(nodes)) return;
     lock.current = true;
     setBusy(true);
     try {
-      let currentNodes = nodes;
-      if (mustReload) {
-        try {
-          currentNodes = await reader.locations(run.controller.signal);
-        } catch {
-          if (run.alive) setReload("failed");
-          return;
-        }
-        if (!run.alive) return;
-        setReload("needed");
-        // The refreshed Locations are shown first; the next explicit click is measured against what is then on screen.
-        if (!reviewTree(currentNodes)) return;
-      }
-      const current = currentNodes.find((n) => n.id === id);
-      const destination = currentNodes.find((n) => n.id === parentId);
       if (!attempt.current) {
+        let currentNodes = nodes;
+        if (mustRead.current) {
+          try {
+            currentNodes = await reader.locations(run.controller.signal);
+          } catch {
+            if (run.alive) setReload("failed");
+            return;
+          }
+          if (!run.alive) return;
+          // The refreshed Locations are shown first; the next explicit submit is measured against what is then on screen.
+          if (!reviewTree(currentNodes)) {
+            setReload("needed");
+            return;
+          }
+        }
+        const current = currentNodes.find((n) => n.id === id);
+        const destination = currentNodes.find((n) => n.id === parentId);
         const key = crypto.randomUUID();
         if (create) {
           const input = {
@@ -230,6 +243,7 @@ export function LocationWriteDialog({
           };
           attempt.current = {
             key,
+            message: `Created ${name.trim()}.`,
             send: (signal, idempotencyKey) =>
               writer.createLocation(input, { signal, idempotencyKey }),
           };
@@ -243,6 +257,7 @@ export function LocationWriteDialog({
             };
             attempt.current = {
               key,
+              message: `Deleted ${current.name}.`,
               send: (signal, idempotencyKey) =>
                 writer.deleteLocation(input, { signal, idempotencyKey }),
             };
@@ -261,34 +276,28 @@ export function LocationWriteDialog({
             };
             attempt.current = {
               key,
+              message:
+                step === "rename"
+                  ? `Renamed ${current.name} to ${name.trim()}.`
+                  : `Moved ${current.name}.`,
               send: (signal, idempotencyKey) =>
                 writer.editLocation(input, { signal, idempotencyKey }),
             };
           }
         }
       }
-      const result = await attempt.current.send(
-        run.controller.signal,
-        attempt.current.key
-      );
+      const sent = attempt.current;
+      const result = await sent.send(run.controller.signal, sent.key);
       if (!run.alive) return;
-      onConfirmed(
-        result,
-        create
-          ? `Created ${name.trim()}.`
-          : step === "rename"
-            ? `Renamed ${node?.name} to ${name.trim()}.`
-            : step === "move"
-              ? `Moved ${node?.name}.`
-              : `Deleted ${node?.name}.`
-      );
+      onConfirmed(result, sent.message);
       onClose();
     } catch (cause) {
       if (run.alive) {
-        if (
-          cause instanceof CollectionError &&
-          staleLocationCodes.has(cause.code)
-        ) {
+        const code = cause instanceof CollectionError ? cause.code : "";
+        if (staleLocationCodes.has(code)) {
+          // Refused for good: drop the command and owe a read before anything is sent, even if the read below fails.
+          attempt.current = null;
+          requireRead();
           setReload("needed");
           try {
             const updated = await reader.locations(run.controller.signal);
@@ -301,13 +310,11 @@ export function LocationWriteDialog({
         } else {
           setReload("");
           setChanges([]);
+          // A refusal is final for this command. A reused key is spent too: it is never replayed, and the
+          // next command is an explicit choice made after a fresh read.
+          if (cause instanceof CollectionError) attempt.current = null;
+          if (code === "IDEMPOTENCY_KEY_REUSED") requireRead();
         }
-        if (
-          cause instanceof CollectionError &&
-          !staleLocationCodes.has(cause.code) &&
-          cause.code !== "IDEMPOTENCY_KEY_REUSED"
-        )
-          attempt.current = null;
         setError(cause);
       }
     } finally {
@@ -352,13 +359,13 @@ export function LocationWriteDialog({
               <Button
                 key={n.id}
                 onClick={() => {
+                  if (attempt.current || lock.current) return;
                   setId(n.id);
                   setName(n.name);
                   setStep("list");
                   setError(undefined);
                   setReload("");
                   setChanges([]);
-                  attempt.current = null;
                 }}
               >
                 {index.path(n.id)}
@@ -516,9 +523,9 @@ export function LocationWriteDialog({
               {stale && changes.length > 0 && (
                 <ul className="m-0 pl-4">
                   {changes.map((c) => (
-                    <li
-                      key={c.key}
-                    >{`${c.label}: ${c.after} (was ${c.before})`}</li>
+                    <li key={c.key}>
+                      {c.note ?? `${c.label}: ${c.after} (was ${c.before})`}
+                    </li>
                   ))}
                 </ul>
               )}
@@ -526,18 +533,15 @@ export function LocationWriteDialog({
           )}
           <div className="flex flex-wrap justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
-            {stale ? (
-              <Button
-                disabled={busy || !validInput(nodes)}
-                onClick={() => void submit(true)}
-              >
+            {readDue && !attempt.current ? (
+              <Button type="submit" disabled={busy || !validInput(nodes)}>
                 Reload and retry
               </Button>
             ) : (
               <Button
                 type="submit"
                 variant={step === "delete" ? "danger" : "primary"}
-                disabled={busy || !validInput(nodes)}
+                disabled={busy || (!attempt.current && !validInput(nodes))}
               >
                 {busy
                   ? "Saving…"

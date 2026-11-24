@@ -448,17 +448,26 @@ for (const width of [1280, 375])
       const store = m.collectionFixtureStore("a", "location-stale");
       store.rows.push({ ...store.rows[0], locationId: "5", quantity: 1 });
     }, path);
-    await retry.click();
+    // Real keys only: Tab to the submit button and press Enter, as a keyboard collector would.
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(retry).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("alert")).toContainText(
       "Copies: 1 copy (was 0 copies)"
     );
+    // The pause moves focus to what changed, so a repeated Enter confirms nothing unseen.
     await expect(dialog.getByRole("alert")).toBeFocused();
+    await page.keyboard.press("Enter");
     const paused = await inspect(page, "a", "location-stale");
     expect(
       paused.locations.find((n: { id: string }) => n.id === "5").parent_id
     ).toBe(null);
-    await retry.click();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Tab");
+    await expect(retry).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     const moved = await inspect(page, "a", "location-stale");
     expect(

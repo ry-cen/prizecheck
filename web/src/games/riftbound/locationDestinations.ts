@@ -23,14 +23,36 @@ export type LocationStep = "create" | "rename" | "move" | "delete";
 export type LocationFact = {
   key: "path" | "copies" | "inside" | "parent" | "stock";
   label: string;
+  /** What the collector reads. Two different Locations can show the same text. */
   value: string;
+  /** What is compared: the ancestor chain of [id, name] pairs, or the value for a count. Never shown. */
+  identity: string;
+  /** Which kind of destination a parent fact states; a Location may be named "Not chosen" or "Top level". */
+  choice?: "top" | "chosen" | "unchosen";
 };
 export type LocationFactChange = {
   key: LocationFact["key"];
   label: string;
   before: string;
   after: string;
+  /** Plain words for a change the displayed text alone would hide. */
+  note?: string;
 };
+/** The [id, name] pairs from the top level down to this Location, stopping if a cycle repeats one. */
+function lineage(nodes: LocationNode[], id: string): string {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const chain: [string, string][] = [];
+  const seen = new Set<string>();
+  for (
+    let at = byId.get(id);
+    at && !seen.has(at.id);
+    at = at.parent_id ? byId.get(at.parent_id) : undefined
+  ) {
+    seen.add(at.id);
+    chain.unshift([at.id, at.name]);
+  }
+  return JSON.stringify(chain);
+}
 /** Every fact the write form states about the Location and its destination, in the order it shows them. */
 export function locationFacts(
   step: LocationStep,
@@ -53,6 +75,14 @@ export function locationFacts(
         : parent
           ? where.path(parent.id)
           : "Not chosen",
+      identity: JSON.stringify(
+        !parentId
+          ? ["top"]
+          : parent
+            ? ["chosen", lineage(tree, parent.id)]
+            : ["unchosen"]
+      ),
+      choice: !parentId ? "top" : parent ? "chosen" : "unchosen",
     });
     return parent;
   };
@@ -63,12 +93,18 @@ export function locationFacts(
         key: "stock",
         label: "Copies to move",
         value: plural(parent.copyCount ?? 0, "copy", "copies"),
+        identity: plural(parent.copyCount ?? 0, "copy", "copies"),
       });
     return facts;
   }
   const target = tree.find((n) => n.id === id);
   if (!target) return [];
-  facts.push({ key: "path", label: "Location", value: where.path(target.id) });
+  facts.push({
+    key: "path",
+    label: "Location",
+    value: where.path(target.id),
+    identity: lineage(tree, target.id),
+  });
   if (step === "rename") return facts;
   const branch = locationBranch(tree, target.id);
   const copies = tree
@@ -80,13 +116,35 @@ export function locationFacts(
       key: "copies",
       label: inside ? "Copies, including Locations inside" : "Copies",
       value: plural(copies, "copy", "copies"),
+      identity: plural(copies, "copy", "copies"),
     },
-    { key: "inside", label: "Locations inside", value: String(inside) }
+    {
+      key: "inside",
+      label: "Locations inside",
+      value: String(inside),
+      identity: String(inside),
+    }
   );
   if (step === "move") parentFact("Moving to");
   return facts;
 }
-/** What differs between two renderings of the same form; a fact missing on one side reads as "none". */
+const describeChoice = (f: LocationFact) =>
+  f.choice === "unchosen"
+    ? "no parent chosen"
+    : f.choice === "top"
+      ? "Top level"
+      : `the Location “${f.value}”`;
+/** Why two facts that read the same differ, in words that need no ids. */
+function sameTextNote(was: LocationFact, now: LocationFact): string {
+  if (now.key !== "parent")
+    return `The Location changed. Its displayed path is still ${now.value}.`;
+  if (was.choice === now.choice)
+    return `The parent Location changed. Its displayed path is still ${now.value}.`;
+  if (now.choice === "unchosen")
+    return `Previously selected “${was.value}”. Choose a parent Location.`;
+  return `The parent changed from ${describeChoice(was)} to ${describeChoice(now)}.`;
+}
+/** What differs between two renderings of the same form. A fact missing on one side is compared by presence, never by its text. */
 export function changedLocationFacts(
   before: LocationFact[],
   after: LocationFact[]
@@ -97,16 +155,24 @@ export function changedLocationFacts(
   return keys.flatMap((key) => {
     const was = before.find((f) => f.key === key);
     const now = after.find((f) => f.key === key);
-    return (was?.value ?? "none") === (now?.value ?? "none")
-      ? []
-      : [
-          {
-            key,
-            label: (now ?? was)!.label,
-            before: was?.value ?? "none",
-            after: now?.value ?? "none",
-          },
-        ];
+    if (!was && !now) return [];
+    if (was && now && was.identity === now.identity) return [];
+    return [
+      {
+        key,
+        label: (now ?? was)!.label,
+        before: was?.value ?? "none",
+        after: now?.value ?? "none",
+        ...((was?.value ?? "none") === (now?.value ?? "none")
+          ? {
+              note:
+                was && now
+                  ? sameTextNote(was, now)
+                  : `The ${(now ?? was)!.label.toLowerCase()} changed.`,
+            }
+          : {}),
+      },
+    ];
   });
 }
 export function locationParents(

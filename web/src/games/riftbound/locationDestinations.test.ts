@@ -5,6 +5,7 @@ import {
   locationFacts,
   reviewedLocationParent,
   validLocationDestination,
+  type LocationFact,
 } from "./locationDestinations";
 import type { LocationNode } from "./collection";
 const source: LocationNode = {
@@ -157,4 +158,72 @@ it("reports changed, appearing and disappearing facts, using the after label", (
     ["copies", "Copies, including Locations inside"],
     ["inside", "Locations inside"],
   ]);
+});
+
+const fact = (
+  key: LocationFact["key"],
+  value: string,
+  identity: string,
+  choice?: LocationFact["choice"]
+): LocationFact => ({ key, label: key, value, identity, choice });
+it("tells two trees with the same displayed path apart, without ids in the words", () => {
+  const first = [
+    node("a1", "A", null, { kind: "organization" }),
+    node("s1", "Shelf", "a1"),
+  ];
+  const second = [
+    node("a2", "A", null, { kind: "organization" }),
+    node("s2", "Shelf", "a2"),
+  ];
+  const changes = changedLocationFacts(
+    locationFacts("create", first, undefined, "s1"),
+    locationFacts("create", second, undefined, "s2")
+  );
+  expect(changes).toHaveLength(1);
+  expect(changes[0].note).toBe(
+    "The parent Location changed. Its displayed path is still A / Shelf."
+  );
+  expect(changes[0].note).not.toMatch(/[12]/);
+  const renamedAbove = first.map((n) =>
+    n.id === "a1" ? { ...n, name: "B" } : n
+  );
+  expect(
+    changedLocationFacts(
+      locationFacts("rename", first, "s1", ""),
+      locationFacts("rename", [...first, node("x", "Y", null)], "s1", "")
+    )
+  ).toEqual([]);
+  expect(
+    changedLocationFacts(
+      locationFacts("create", first, undefined, "s1"),
+      locationFacts("create", renamedAbove, undefined, "s1")
+    )[0].note
+  ).toBeUndefined();
+});
+it("keeps a Location named Not chosen, Top level or none apart from a missing choice or fact", () => {
+  const named = [node("n", "Not chosen", null), node("t", "Top level", null)];
+  const chosen = locationFacts("create", named, undefined, "n");
+  const unchosen = locationFacts("create", named, undefined, "__choose__");
+  expect(chosen[0].value).toBe(unchosen[0].value);
+  expect(changedLocationFacts(chosen, unchosen)[0].note).toBe(
+    "Previously selected “Not chosen”. Choose a parent Location."
+  );
+  expect(changedLocationFacts(unchosen, chosen)[0].note).toBe(
+    "The parent changed from no parent chosen to the Location “Not chosen”."
+  );
+  const top = locationFacts("create", named, undefined, "");
+  const alsoTop = locationFacts("create", named, undefined, "t");
+  expect(changedLocationFacts(top, alsoTop)[0].note).toBe(
+    "The parent changed from Top level to the Location “Top level”."
+  );
+  const none = fact("parent", "none", '["chosen","x"]', "chosen");
+  expect(changedLocationFacts([], [none])).toHaveLength(1);
+  expect(changedLocationFacts([], [none])[0].note).toBe("The parent changed.");
+  expect(changedLocationFacts([none], [])).toHaveLength(1);
+  expect(changedLocationFacts([], [])).toEqual([]);
+});
+it("walks ancestors once when Locations loop", () => {
+  const loop = [node("x", "X", "y"), node("y", "Y", "x")];
+  const facts = locationFacts("rename", loop, "x", "");
+  expect(facts[0].identity).toBe('[["y","Y"],["x","X"]]');
 });

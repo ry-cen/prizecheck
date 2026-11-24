@@ -1084,10 +1084,13 @@ describe("moving a Location", () => {
       );
       expect(retryButton().disabled).toBe(true);
       await choose("2");
-      const move = [...document.querySelectorAll("button")].find(
-        (b) => b.textContent === "Move location"
-      )!;
-      expect(move.disabled).toBe(false);
+      // The read is still owed: the button stays Reload and retry, now enabled.
+      expect(retryButton().disabled).toBe(false);
+      expect(
+        [...document.querySelectorAll("button")].some(
+          (b) => b.textContent === "Move location"
+        )
+      ).toBe(false);
     } finally {
       await f.cleanup();
     }
@@ -1117,5 +1120,216 @@ describe("moving a Location", () => {
     } finally {
       await f.cleanup();
     }
+  });
+
+  describe("a fresh read stays owed until the write succeeds", () => {
+    const keyOf = (send: { mock: { calls: unknown[][] } }, n: number) =>
+      (send.mock.calls[n][1] as { idempotencyKey: string }).idempotencyKey;
+    it("reads again after another parent is chosen, so a second change to the source is seen", async () => {
+      const { f, send } = await moveWithRefusal();
+      const read = vi.spyOn(f.reader, "locations");
+      try {
+        f.store.locations.splice(
+          f.store.locations.findIndex((n) => n.id === "7"),
+          1
+        );
+        await press("enter", f);
+        expect(retryButton().disabled).toBe(true);
+        await choose("2");
+        addCopy(f.store);
+        const reads = read.mock.calls.length;
+        await press("enter", f);
+        expect(read.mock.calls.length).toBe(reads + 1);
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(alertEl().textContent).toContain(
+          "Copies: 1 copy (was 0 copies)"
+        );
+        await press("enter", f);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(send.mock.calls[1][0]).toMatchObject({
+          parentId: "2",
+          parentVersion: 1,
+        });
+      } finally {
+        await f.cleanup();
+      }
+    });
+    it("reads again after the name is edited, so a change to the Location is seen", async () => {
+      const f = await open("rename");
+      const send = vi.spyOn(f.writer, "editLocation");
+      send.mockRejectedValueOnce(new CollectionError("STALE_LOCATION"));
+      try {
+        await act(async () => {
+          f.submit();
+          await vi.runAllTimersAsync();
+        });
+        expect(send).toHaveBeenCalledTimes(1);
+        await typeInto("New name", "Another name");
+        renameSource(f.store);
+        await press("enter", f);
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(alertEl().textContent).toContain(
+          "Location: Spare binder (was Empty binder)"
+        );
+        await press("enter", f);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(send.mock.calls[1][0]).toMatchObject({ name: "Another name" });
+      } finally {
+        await f.cleanup();
+      }
+    });
+    it("reads again after another Location is picked and a new step begun", async () => {
+      const { f, send } = await moveWithRefusal();
+      try {
+        f.store.locations.splice(
+          f.store.locations.findIndex((n) => n.id === "5"),
+          1
+        );
+        await press("enter", f);
+        expect(document.querySelector("form")).toBe(null);
+        await clickButton("Binders");
+        await clickButton("Rename");
+        await typeInto("New name", "Folders");
+        // The Location is renamed elsewhere before the collector confirms.
+        f.store.locations.find((n) => n.id === "2")!.name = "Albums";
+        const read = vi.spyOn(f.reader, "locations");
+        await press("enter", f);
+        expect(read).toHaveBeenCalledTimes(1);
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(alertEl().textContent).toContain("Location: Albums");
+        await press("enter", f);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(send.mock.calls[1][0]).toMatchObject({
+          id: "2",
+          name: "Folders",
+        });
+      } finally {
+        await f.cleanup();
+      }
+    });
+    it("still reads first after a later error that is not a tree change", async () => {
+      const { f, send } = await moveWithRefusal();
+      const read = vi.spyOn(f.reader, "locations");
+      try {
+        send.mockRejectedValueOnce(
+          new CollectionError("LOCATION_NAME_CONFLICT")
+        );
+        await press("enter", f);
+        expect(send).toHaveBeenCalledTimes(2);
+        const reads = read.mock.calls.length;
+        await press("enter", f);
+        expect(read.mock.calls.length).toBe(reads + 1);
+        expect(send).toHaveBeenCalledTimes(3);
+        expect(keyOf(send, 2)).not.toBe(keyOf(send, 1));
+      } finally {
+        await f.cleanup();
+      }
+    });
+    it("sends nothing from a refused attempt when the refresh fails, and reads before a new key", async () => {
+      const { f, send } = await moveWithRefusal({ failFirstRead: true });
+      const read = vi.spyOn(f.reader, "locations");
+      try {
+        expect(alertEl().textContent).toBe(LOCATION_RELOAD_FAILED_MESSAGE);
+        const reads = read.mock.calls.length;
+        await press("enter", f);
+        expect(read.mock.calls.length).toBe(reads + 1);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(keyOf(send, 1)).not.toBe(keyOf(send, 0));
+      } finally {
+        await f.cleanup();
+      }
+    });
+    it("retries a command whose answer was lost with its own key and no read in between", async () => {
+      const { f, send } = await moveWithRefusal();
+      const read = vi.spyOn(f.reader, "locations");
+      try {
+        shownChanges[0][1](f.store, 1);
+        await press("enter", f);
+        // A changed read is shown and nothing is sent.
+        expect(send).toHaveBeenCalledTimes(1);
+        send.mockRejectedValueOnce(new Error("connection lost"));
+        await press("enter", f);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(f.confirmed).not.toHaveBeenCalled();
+        const reads = read.mock.calls.length;
+        // Choices cannot change what is retried.
+        expect(document.querySelector("select")!.disabled).toBe(true);
+        await press("enter", f);
+        expect(read.mock.calls.length).toBe(reads);
+        expect(send).toHaveBeenCalledTimes(3);
+        expect(send.mock.calls[2][0]).toEqual(send.mock.calls[1][0]);
+        expect(keyOf(send, 2)).toBe(keyOf(send, 1));
+        expect(send.mock.calls[1][0]).toMatchObject({ parentVersion: 1 });
+        expect(f.confirmed).toHaveBeenCalledTimes(1);
+        expect(f.confirmed.mock.calls[0][1]).toBe("Moved Empty binder.");
+      } finally {
+        await f.cleanup();
+      }
+    });
+    it("never replays a reused key, and the next explicit submit reads first and takes a new key", async () => {
+      const f = await open("rename");
+      const send = vi.spyOn(f.writer, "editLocation");
+      const read = vi.spyOn(f.reader, "locations");
+      send.mockRejectedValueOnce(new CollectionError("IDEMPOTENCY_KEY_REUSED"));
+      try {
+        await act(async () => {
+          f.submit();
+          await vi.runAllTimersAsync();
+        });
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(read).toHaveBeenCalledTimes(0);
+        expect(alertEl().textContent).toBe(
+          locationError(new CollectionError("IDEMPOTENCY_KEY_REUSED"), "")
+        );
+        await press("enter", f);
+        expect(read).toHaveBeenCalledTimes(1);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(keyOf(send, 1)).not.toBe(keyOf(send, 0));
+      } finally {
+        await f.cleanup();
+      }
+    });
+    it("pauses when a destination is replaced by another Location with the same displayed path", async () => {
+      const { f, send } = await moveWithRefusal();
+      try {
+        // The Archive is replaced by another Location with the same name.
+        f.store.locations.find((n) => n.id === "6")!.id = "10";
+        f.store.locations.find((n) => n.id === "7")!.parent_id = "10";
+        await press("enter", f);
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(alertEl().textContent).toContain(
+          "The parent Location changed. Its displayed path is still Archive / Shelf."
+        );
+        expect(alertEl().textContent).not.toMatch(/\b10\b/);
+      } finally {
+        await f.cleanup();
+      }
+    });
+    it("says a cleared choice differs from a Location named Not chosen", async () => {
+      const f = await mount("normal", "5", (store) => {
+        store.locations.find((n) => n.id === "2")!.name = "Not chosen";
+      });
+      const send = vi.spyOn(f.writer, "editLocation");
+      send.mockRejectedValueOnce(new CollectionError("STALE_LOCATION"));
+      try {
+        await clickButton("Move");
+        await choose("2");
+        await act(async () => {
+          f.submit();
+          await vi.runAllTimersAsync();
+        });
+        f.store.locations.splice(
+          f.store.locations.findIndex((n) => n.id === "2"),
+          1
+        );
+        await press("enter", f);
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(alertEl().textContent).toContain(
+          "Previously selected “Not chosen”. Choose a parent Location."
+        );
+      } finally {
+        await f.cleanup();
+      }
+    });
   });
 });
