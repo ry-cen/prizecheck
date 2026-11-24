@@ -412,6 +412,55 @@ for (const width of [1280, 375]) {
     });
 }
 
+test("Enter in the Rename field saves once, and sends nothing for an unchanged name", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`${entry}#riftbound:section=collection`);
+  await page
+    .getByRole("button", { name: "Settings for Empty binder", exact: true })
+    .filter({ visible: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Empty binder",
+    exact: true,
+  });
+  await page.evaluate(async (path) => {
+    const m = await import(path);
+    const writer = m.collectionFixtureWriter("a", "normal");
+    const edit = writer.editLocation;
+    const names: string[] = [];
+    writer.editLocation = (input: { name: string }, options: unknown) => {
+      names.push(input.name);
+      return edit(input, options);
+    };
+    document.addEventListener("wp3-requests", () => {
+      document.body.dataset.locationRequests = JSON.stringify(names);
+    });
+  }, path);
+  const written = () =>
+    page.evaluate(() => {
+      document.dispatchEvent(new Event("wp3-requests"));
+      return JSON.parse(document.body.dataset.locationRequests || "[]");
+    });
+  await dialog.getByRole("button", { name: "Rename", exact: true }).click();
+  const field = dialog.getByRole("textbox", { name: "New name" });
+  await expect(field).toBeEnabled();
+  await field.focus();
+  await expect(field).toBeFocused();
+  // Unchanged name: the real Enter key must not send a write.
+  await page.keyboard.press("Enter");
+  await expect(field).toBeVisible();
+  expect(await written()).toEqual([]);
+  await field.fill("Renamed binder");
+  await field.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  expect(await written()).toEqual(["Renamed binder"]);
+  expect((await inspect(page)).revision).toBe(2);
+});
+
 /** Press Tab until the target has focus, as a keyboard collector would. */
 async function tabTo(page: Page, target: Locator) {
   for (let i = 0; i < 8; i++) {
@@ -451,6 +500,9 @@ for (const width of [1280, 375])
       exact: true,
     });
     await expect(retry).toBeVisible();
+    // The refusal's read is still running while the controls are disabled; wait for them before using the keys.
+    await expect(retry).toBeEnabled();
+    await expect(dialog.getByRole("combobox")).toBeEnabled();
     // The source gains a copy before the collector confirms again.
     await page.evaluate(async (path) => {
       const m = await import(path);
@@ -472,6 +524,7 @@ for (const width of [1280, 375])
     expect(
       paused.locations.find((n: { id: string }) => n.id === "5").parent_id
     ).toBe(null);
+    await expect(retry).toBeEnabled();
     await tabTo(page, retry);
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);

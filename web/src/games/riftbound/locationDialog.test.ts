@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CollectionError, type LocationNode } from "./collection";
 import { editions } from "./local/fixtures";
 import {
+  LOCATION_REFRESHING_MESSAGE,
   LOCATION_RELOAD_FAILED_MESSAGE,
+  LOCATION_RETRY_RELOAD_FAILED_MESSAGE,
   LOCATION_REVIEW_MESSAGE,
   locationFacts,
   type LocationFact,
@@ -1331,5 +1333,56 @@ describe("moving a Location", () => {
         await f.cleanup();
       }
     });
+  });
+});
+
+describe("what the alert says in each state", () => {
+  it("says the list is refreshing while the read is pending, then that it was refreshed", async () => {
+    const f = await mount("location-stale", "5");
+    try {
+      await clickButton("Move");
+      await choose("2");
+      let finish!: () => void;
+      const real = f.reader.locations.bind(f.reader);
+      vi.spyOn(f.reader, "locations").mockImplementation(
+        (signal) =>
+          new Promise((resolve, reject) => {
+            finish = () => real(signal).then(resolve, reject);
+          })
+      );
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toBe(LOCATION_REFRESHING_MESSAGE);
+      expect(alertEl().textContent).not.toContain("has been refreshed");
+      await act(async () => {
+        finish();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toBe(LOCATION_REVIEW_MESSAGE);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("after a reused key, never blames another tab or says to close, even when the read fails", async () => {
+    const f = await open("rename");
+    const send = vi.spyOn(f.writer, "editLocation");
+    send.mockRejectedValueOnce(new CollectionError("IDEMPOTENCY_KEY_REUSED"));
+    try {
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toContain("Reload and retry");
+      expect(alertEl().textContent).not.toMatch(/close|another tab/i);
+      vi.spyOn(f.reader, "locations").mockRejectedValue(new Error("down"));
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toBe(LOCATION_RETRY_RELOAD_FAILED_MESSAGE);
+      expect(alertEl().textContent).not.toMatch(/close|another tab/i);
+    } finally {
+      await f.cleanup();
+    }
   });
 });

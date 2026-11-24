@@ -4,7 +4,9 @@ import {
   locationParents,
   reviewedLocationParent,
   validLocationDestination,
+  LOCATION_REFRESHING_MESSAGE,
   LOCATION_RELOAD_FAILED_MESSAGE,
+  LOCATION_RETRY_RELOAD_FAILED_MESSAGE,
   LOCATION_REVIEW_MESSAGE,
   type LocationFactChange,
 } from "./locationDestinations";
@@ -56,7 +58,7 @@ export function locationError(
     LOCATION_CYCLE: "Choose a Location outside this Location and its children.",
     DECK_CANNOT_HAVE_CHILDREN: "A Deck cannot contain Locations.",
     IDEMPOTENCY_KEY_REUSED:
-      "This request couldn't be confirmed. Close and try again.",
+      "This change couldn't be confirmed. Use Reload and retry to check the list, then try again.",
   };
   return messages[code] ?? "Unable to save this change. Please retry.";
 }
@@ -102,7 +104,12 @@ export function LocationWriteDialog({
   const [confirmName, setConfirmName] = useState("");
   const [error, setError] = useState<unknown>();
   // What the alert says about a tree-change refusal. Editing clears it; it does not decide whether a read is due.
-  const [reload, setReload] = useState<"" | "needed" | "failed">("");
+  // "refreshing" is the automatic read in flight, "needed" a read that worked and is waiting to be reviewed.
+  const [reload, setReload] = useState<"" | "refreshing" | "needed" | "failed">(
+    ""
+  );
+  // True once the Locations are known to have changed elsewhere; a reused key alone does not say so.
+  const [elsewhere, setElsewhere] = useState(false);
   // Set by any tree-change refusal, failed read or reused key, and only the write that succeeds ends it. Until
   // then every new command is preceded by a fresh read; edits, other choices and later errors never clear it.
   const mustRead = useRef(false);
@@ -220,6 +227,7 @@ export function LocationWriteDialog({
           if (!run.alive) return;
           // The refreshed Locations are shown first; the next explicit submit is measured against what is then on screen.
           if (!reviewTree(currentNodes)) {
+            setElsewhere(true);
             setReload("needed");
             return;
           }
@@ -298,11 +306,13 @@ export function LocationWriteDialog({
           // Refused for good: drop the command and owe a read before anything is sent, even if the read below fails.
           attempt.current = null;
           requireRead();
-          setReload("needed");
+          setElsewhere(true);
+          setReload("refreshing");
           try {
             const updated = await reader.locations(run.controller.signal);
             if (!run.alive) return;
             reviewTree(updated);
+            setReload("needed");
           } catch {
             if (!run.alive) return;
             setReload("failed");
@@ -313,7 +323,10 @@ export function LocationWriteDialog({
           // A refusal is final for this command. A reused key is spent too: it is never replayed, and the
           // next command is an explicit choice made after a fresh read.
           if (cause instanceof CollectionError) attempt.current = null;
-          if (code === "IDEMPOTENCY_KEY_REUSED") requireRead();
+          if (code === "IDEMPOTENCY_KEY_REUSED") {
+            requireRead();
+            setElsewhere(false);
+          }
         }
         setError(cause);
       }
@@ -509,9 +522,13 @@ export function LocationWriteDialog({
             >
               <p className="m-0">
                 {stale
-                  ? reload === "failed"
-                    ? LOCATION_RELOAD_FAILED_MESSAGE
-                    : LOCATION_REVIEW_MESSAGE
+                  ? reload === "refreshing"
+                    ? LOCATION_REFRESHING_MESSAGE
+                    : reload === "failed"
+                      ? elsewhere
+                        ? LOCATION_RELOAD_FAILED_MESSAGE
+                        : LOCATION_RETRY_RELOAD_FAILED_MESSAGE
+                      : LOCATION_REVIEW_MESSAGE
                   : locationError(
                       error,
                       node?.name ?? name,
