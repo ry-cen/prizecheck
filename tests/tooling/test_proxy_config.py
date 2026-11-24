@@ -217,6 +217,19 @@ class ProxyConfigTest(unittest.TestCase):
             if file.is_file():
                 self.assertNotIn('RIFTBOUND_API_ORIGIN', file.read_text(errors='ignore'), str(file))
 
+    def test_an_authorization_header_reaches_the_gateway_through_every_location_that_proxies_to_it(self):
+        # Native iOS sign-in (auth/src/native.ts) sends its credential as Authorization on GET /api/collection and the
+        # gateway decides it first. nginx passes request headers on unless a location blanks or sets one, or turns the
+        # pass-through off, so none of them may, and the regex location must take /api/collection and the /api/pokemon
+        # aliases.
+        self.assertNotRegex(CONFIG, r'(?i)proxy_pass_request_headers')
+        self.assertNotRegex(CONFIG, r'(?i)\bauthorization\b')
+        pattern = re.fullmatch(r'location ~ (\S+) \{', GATEWAY).group(1)
+        for target in ('/api/collection', '/api/pokemon/want-list', '/api/pokemon/collection-imports/1/changes'):
+            self.assertRegex(target, pattern)
+        for opening in (GATEWAY, *STARTS, *CRAWLER_FILES):
+            self.assertNotIn('Authorization', [value.split()[0] for name, value in block(opening) if name == 'proxy_set_header'])
+
 
 if __name__ == '__main__':
     unittest.main()
