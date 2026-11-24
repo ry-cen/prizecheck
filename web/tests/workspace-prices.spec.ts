@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
+import { watchGameApi } from "./support/game-api";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -152,23 +153,9 @@ const tile = (page: Page, prefix: string) =>
   });
 const REPORT = "Report a problem with this card's data";
 
-/** Records every price request's Edition ids and the peak number in flight. */
+/** Records every price request's Edition ids and the peak number in flight, in both URL forms. */
 async function recordPrices(page: Page) {
-  const seen = { batches: [] as string[][], live: 0, peak: 0 };
-  await page.route("**/api/prices/editions", async (route) => {
-    seen.batches.push(route.request().postDataJSON().edition_ids);
-    seen.live += 1;
-    seen.peak = Math.max(seen.peak, seen.live);
-    try {
-      const response = await route.fetch();
-      await route.fulfill({ response });
-    } catch {
-      /* The page navigated away mid-request. */
-    } finally {
-      seen.live -= 1;
-    }
-  });
-  return seen;
+  return watchGameApi(page, "prices/editions");
 }
 
 test.afterEach(async () => {
@@ -307,7 +294,7 @@ test.describe("desktop", () => {
         updated: ago(2),
       },
     ]);
-    await page.route("**/api/prices/editions", async (route) => {
+    await page.route("**/api/pokemon/prices/editions", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
       for (const row of body.prices)
@@ -338,7 +325,7 @@ test.describe("desktop", () => {
     await hold(await createLeaf(page, `Late ${randomUUID().slice(0, 6)}`), [
       ids.normal,
     ]);
-    await page.route("**/api/prices/editions", (route) =>
+    await page.route("**/api/pokemon/prices/editions", (route) =>
       route.fulfill({
         status: 504,
         contentType: "application/json",
@@ -471,6 +458,8 @@ test.describe("desktop, short window", () => {
     await expect(cards(page)).not.toContainText("$0.00");
     for (const id of furret) expect(seen.batches.flat()).toContain(id);
     expect(seen.batches.every((batch) => batch.length <= 64)).toBe(true);
+    // At least one request was in flight, so a peak of 0 (nothing measured) cannot pass.
+    expect(seen.peak).toBeGreaterThanOrEqual(1);
     expect(seen.peak).toBeLessThanOrEqual(2);
 
     // No price sort, price filter or value total.

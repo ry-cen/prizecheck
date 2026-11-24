@@ -286,7 +286,8 @@ test("a Deck List change on another device refreshes pending Loans at focus with
   await request(page, misty, iono, 3, deck);
   await page.clock.install();
   const initialCost = page.waitForResponse(
-    (response) => new URL(response.url()).pathname === "/api/want-list/cost"
+    (response) =>
+      new URL(response.url()).pathname === "/api/pokemon/want-list/cost"
   );
   await openScoped(page, deck);
   await (await initialCost).finished();
@@ -305,7 +306,7 @@ test("a Deck List change on another device refreshes pending Loans at focus with
   await expect(lines).toContainText("Asked Misty W for 3");
 
   let wantReads = 0;
-  const wantRead = /\/api\/want-list\?deck=/;
+  const wantRead = /\/api(?:\/pokemon)?\/want-list\?deck=/;
   await page.route(wantRead, (route) => {
     wantReads++;
     return route.continue();

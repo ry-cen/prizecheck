@@ -102,7 +102,7 @@ for (const viewport of [
         .getByRole("button", { name: "Add 1 card", exact: true })
         .click();
       await expect(main).toContainText("Press Add again to check safely");
-      await page.route("**/api/catalog/editions?*", (route) =>
+      await page.route("**/api/pokemon/catalog/editions?*", (route) =>
         new URL(route.request().url()).searchParams.has("printing_id")
           ? route.abort()
           : route.continue()
@@ -113,7 +113,7 @@ for (const viewport of [
         .getByRole("button", { name: "Discard queue", exact: true })
         .click();
       await expect(main).toContainText("Your earlier add may have finished.");
-      await page.unroute("**/api/catalog/editions?*");
+      await page.unroute("**/api/pokemon/catalog/editions?*");
       await page.unroute("**/api/holdings/batch");
       await main
         .getByRole("button", { name: /^One more Rare Candy/ })
@@ -246,14 +246,16 @@ for (const viewport of [
       });
       await search.fill("no-card-review-xyz");
       await expect(main).toContainText("No cards match this search.");
-      await page.route("**/api/catalog/editions?*", (route) => route.abort());
+      await page.route("**/api/pokemon/catalog/editions?*", (route) =>
+        route.abort()
+      );
       await search.fill("Pikachu");
       await expect(main).toContainText(
         "Catalog search is temporarily unavailable"
       );
       await expect(main).not.toContainText("No cards match this search.");
       await expect(main).not.toContainText("no-card-review-xyz");
-      await page.unroute("**/api/catalog/editions?*");
+      await page.unroute("**/api/pokemon/catalog/editions?*");
       await main.getByRole("button", { name: "Retry", exact: true }).click();
       await expect(main).not.toContainText(
         "Catalog search is temporarily unavailable"

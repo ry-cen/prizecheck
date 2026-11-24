@@ -350,7 +350,7 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
   // Wait for the refresh to answer, so the second report lands after the evidence the maintainer is shown.
   const refresh = page.waitForRequest(
     (request) =>
-      request.url().includes("/api/admin/catalog-metadata/queue") &&
+      request.url().includes("/api/pokemon/admin/catalog-metadata/queue") &&
       request.method() === "GET"
   );
   await review.getByRole("button", { name: "Refresh queue" }).click();

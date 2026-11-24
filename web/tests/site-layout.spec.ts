@@ -59,7 +59,7 @@ for (const viewport of [
       await page.route("**/api/social/trade-card-matches?*", (route) =>
         route.fulfill({ json: { has_friends: true, offers: [friend] } })
       );
-      await page.route("**/api/catalog/editions**", async (route) => {
+      await page.route("**/api/pokemon/catalog/editions**", async (route) => {
         const response = await route.fetch();
         const body = await response.json();
         if (Array.isArray(body.editions)) {

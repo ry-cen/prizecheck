@@ -336,7 +336,7 @@ test.describe("on a desktop", () => {
       const refreshStarted = new Promise<void>((resolve) => {
         started = resolve;
       });
-      await page.route(/\/api\/want-list\?deck=/, async (route) => {
+      await page.route(/\/api\/pokemon\/want-list\?deck=/, async (route) => {
         started();
         await held;
         await route.continue();
@@ -367,7 +367,7 @@ test.describe("on a desktop", () => {
     const { name, deck } = await lastGap(page, ids);
     // The first read of this Deck's Want List fails; later ones go through.
     let failures = 1;
-    await page.route(/\/api\/want-list\?deck=/, (route) => {
+    await page.route(/\/api\/pokemon\/want-list\?deck=/, (route) => {
       if (failures-- > 0) return route.fulfill({ status: 500, body: "{}" });
       return route.continue();
     });

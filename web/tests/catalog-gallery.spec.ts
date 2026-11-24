@@ -7,6 +7,7 @@
 // the dialogs open as well as closed. The collector flows that predate the gallery are in catalog-search.spec.ts.
 import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
+import { watchGameApi } from "./support/game-api";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -88,7 +89,7 @@ const tile = (page: Page, start: string): Locator =>
     name: new RegExp(`^${start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   });
 const isBrowse = (url: string) =>
-  new URL(url).pathname === "/api/catalog/editions";
+  new URL(url).pathname === "/api/pokemon/catalog/editions";
 const filters = (page: Page) => page.getByRole("group", { name: "Filters" });
 const chip = (page: Page, name: string) =>
   filters(page).getByRole("button", { name, exact: true });
@@ -539,11 +540,8 @@ test.describe("desktop", () => {
     await page.clock.install();
     seedGallery();
     await signIn(page);
-    let reads = 0;
-    await page.route("**/api/catalog/sets", (route) => {
-      reads += 1;
-      return route.continue();
-    });
+    // Counted in both URL forms, so a read of the retained /api/catalog/sets is seen too.
+    const setReads = watchGameApi(page, "catalog/sets").paths;
     const picker = page.getByRole("dialog", { name: "Choose a set" });
     const open = async () => {
       await chip(page, "Any set").click();
@@ -554,15 +552,15 @@ test.describe("desktop", () => {
       await expect(picker).toBeHidden();
     };
     await open();
-    expect(reads).toBe(1);
+    expect(setReads.length).toBe(1);
     // Reopened at once, the list is fresh and is not read again.
     await open();
-    expect(reads).toBe(1);
+    expect(setReads.length).toBe(1);
     // Long after, opening shows the list it has and reads it again.
     await page.clock.fastForward("10:00");
     await chip(page, "Any set").click();
     await expect(picker.getByRole("button").first()).toBeVisible();
-    await expect.poll(() => reads).toBe(2);
+    await expect.poll(() => setReads.length).toBe(2);
   });
 
   test("before the first import the status line says the catalog is unavailable", async ({

@@ -271,7 +271,7 @@ async function stubPrices(page: Page, built: Built) {
     })
   );
   const professor = built.editions["Professor's Research"];
-  await page.route("**/api/prices/editions", async (route) => {
+  await page.route("**/api/pokemon/prices/editions", async (route) => {
     const ids = (route.request().postDataJSON() as { edition_ids: string[] })
       .edition_ids;
     await route.fulfill({

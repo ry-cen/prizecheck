@@ -493,3 +493,101 @@ describe("Riftbound prefix, origin setting", () => {
     }
   });
 });
+
+describe("Riftbound and Pokémon prefixes together", () => {
+  // /api/pokemon (Pokémon routes under their per-game prefix) and /api/riftbound are separate namespaces. Neither may be
+  // used to reach the other's upstream, whichever way the target is spelled and whether or not Riftbound is on.
+  const pokemonRefused = [
+    "/api/pokemon/riftbound/catalog/editions",
+    "/api/pokemon/%2e%2e/riftbound/catalog/editions",
+    "/api/pokemon/../riftbound/catalog/editions",
+    "/api/pokemon/catalog/%2e%2e/%2e%2e/riftbound/x",
+    "/api/pokemon\\..\\riftbound\\x",
+    "/api\\pokemon\\catalog\\editions",
+    "/api/pokemon/catalog%2f..%2friftbound",
+  ];
+  for (const setting of ["on", "unset"] as const) {
+    it(`never serves a /api/pokemon target that names or climbs to Riftbound (Riftbound ${setting})`, async () => {
+      const base = await start(setting);
+      for (const target of pokemonRefused) {
+        const response = await rawRequest(base, target);
+        expect([target, response.status]).toEqual([target, 404]);
+      }
+      expect(lookups()).toBe(0);
+      expect(pokemonSeen).toEqual([]);
+      expect(riftboundSeen).toEqual([]);
+    });
+  }
+
+  it("serves a moved Pokémon route to the Pokémon upstream only, and the old path the same way, with Riftbound on", async () => {
+    const base = await start("on");
+    for (const target of [
+      "/api/pokemon/catalog/editions?q=1",
+      "/api/catalog/editions?q=1",
+    ]) {
+      pokemonSeen.length = 0;
+      const response = await rawRequest(base, target);
+      expect([target, response.status]).toEqual([target, 200]);
+      expect(pokemonSeen.map((r) => r.url)).toEqual([
+        "/api/catalog/editions?q=1",
+      ]);
+    }
+    expect(riftboundSeen).toEqual([]);
+  });
+
+  it("sends /api/riftbound/pokemon/<rest> to the Riftbound upstream as a Riftbound path, never to the Pokémon one", async () => {
+    const base = await start("on");
+    const response = await rawRequest(
+      base,
+      "/api/riftbound/pokemon/catalog/editions"
+    );
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ from: "riftbound" });
+    expect(riftboundSeen.map((r) => r.url)).toEqual([
+      "/api/pokemon/catalog/editions",
+    ]);
+    expect(pokemonSeen).toEqual([]);
+  });
+
+  it("answers 404 for /api/riftbound/pokemon/<rest> with Riftbound off, and for every climbing spelling with it on", async () => {
+    let base = await start("unset");
+    expect(
+      (await rawRequest(base, "/api/riftbound/pokemon/catalog/editions")).status
+    ).toBe(404);
+    expect(lookups()).toBe(0);
+    expect(pokemonSeen).toEqual([]);
+    await stopAll();
+    base = await start("on");
+    for (const target of [
+      "/api/riftbound/%2e%2e/pokemon/catalog/editions",
+      "/api/riftbound/../pokemon/catalog/editions",
+      "/api/riftbound\\pokemon\\catalog\\editions",
+      "/api/riftbound/pokemon%2fcatalog",
+      "/api/pokemon/%2e%2e/riftbound/catalog/sets",
+    ]) {
+      const response = await rawRequest(base, target);
+      expect([target, response.status]).toEqual([target, 404]);
+    }
+    expect(lookups()).toBe(0);
+    expect(pokemonSeen).toEqual([]);
+    expect(riftboundSeen).toEqual([]);
+  });
+
+  it("applies each upstream's own body cap: 16 KiB through /api/riftbound and through a budgeted /api/pokemon route", async () => {
+    const base = await start("on");
+    const post = (target: string, body: string) =>
+      rawRequest(base, target, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body,
+      });
+    expect((await post("/api/riftbound/x", "a".repeat(16_385))).status).toBe(
+      413
+    );
+    expect(riftboundSeen).toEqual([]);
+    expect(
+      (await post("/api/pokemon/trades/value", "a".repeat(16_385))).status
+    ).toBe(413);
+    expect(pokemonSeen).toEqual([]);
+  });
+});

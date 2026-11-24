@@ -644,7 +644,7 @@ test("a dismissal refresh wins over an in-flight next page", async ({
 }) => {
   seedLikelyReprints();
   await signInAsOwner(page);
-  const endpoint = "**/api/admin/card-identities/likely-reprints";
+  const endpoint = "**/api/pokemon/admin/card-identities/likely-reprints";
   await page.route(endpoint, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -700,7 +700,7 @@ for (const action of ["dismiss", "undo"] as const) {
     ).toBeVisible();
     // Change the next list response so the test proves a new row/evidence was read.
     await page.route(
-      "**/api/admin/card-identities/likely-reprints",
+      "**/api/pokemon/admin/card-identities/likely-reprints",
       async (route) => {
         const response = await route.fetch();
         const body = await response.json();
@@ -720,7 +720,7 @@ for (const action of ["dismiss", "undo"] as const) {
     if (action === "undo") {
       // Keep the real candidate available to represent a superseding decision.
       await page.route(
-        "**/api/admin/card-identities/likely-reprints/dismiss",
+        "**/api/pokemon/admin/card-identities/likely-reprints/dismiss",
         (route) => route.fulfill({ json: { id: "superseded" } })
       );
       await likely.getByRole("button", { name: "Not reprints" }).click();
@@ -730,8 +730,8 @@ for (const action of ["dismiss", "undo"] as const) {
     }
     await page.route(
       action === "dismiss"
-        ? "**/api/admin/card-identities/likely-reprints/dismiss"
-        : "**/api/admin/card-identities/likely-reprints/*/undo",
+        ? "**/api/pokemon/admin/card-identities/likely-reprints/dismiss"
+        : "**/api/pokemon/admin/card-identities/likely-reprints/*/undo",
       (route) =>
         route.fulfill({ status: 409, json: { detail: { code: "STALE" } } })
     );
@@ -764,14 +764,14 @@ test("a conflict whose refresh fails hides the stale rows until Try again reads 
   await expect(likely.getByRole("heading", { name: "Psyduck" })).toBeVisible();
   let failList = true;
   await page.route(
-    "**/api/admin/card-identities/likely-reprints",
+    "**/api/pokemon/admin/card-identities/likely-reprints",
     async (route) => {
       if (failList) await route.fulfill({ status: 500, json: {} });
       else await route.fallback();
     }
   );
   await page.route(
-    "**/api/admin/card-identities/likely-reprints/dismiss",
+    "**/api/pokemon/admin/card-identities/likely-reprints/dismiss",
     (route) =>
       route.fulfill({ status: 409, json: { detail: { code: "STALE" } } })
   );

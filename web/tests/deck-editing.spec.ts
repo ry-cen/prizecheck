@@ -321,31 +321,34 @@ async function manyVariants(page: Page, current: string) {
           String(100 + index)
         )
   );
-  await page.route("**/api/catalog/editions?*reprints_of=*", (route) => {
-    const second_page = new URL(route.request().url()).searchParams.has(
-      "cursor"
-    );
-    return route.fulfill({
-      json: {
-        available: true,
-        catalog_revision: 1,
-        owner_revision: 1,
-        last_success: null,
-        search: {
-          mode: "all",
-          text: "",
-          set_id: null,
-          set_name: null,
-          set_code: null,
-          number: null,
+  await page.route(
+    "**/api/pokemon/catalog/editions?*reprints_of=*",
+    (route) => {
+      const second_page = new URL(route.request().url()).searchParams.has(
+        "cursor"
+      );
+      return route.fulfill({
+        json: {
+          available: true,
+          catalog_revision: 1,
+          owner_revision: 1,
+          last_success: null,
+          search: {
+            mode: "all",
+            text: "",
+            set_id: null,
+            set_name: null,
+            set_code: null,
+            number: null,
+          },
+          editions: second_page ? second : first,
+          next_cursor: second_page ? null : "page-2",
+          printings: null,
+          matches: null,
         },
-        editions: second_page ? second : first,
-        next_cursor: second_page ? null : "page-2",
-        printings: null,
-        matches: null,
-      },
-    });
-  });
+      });
+    }
+  );
 }
 
 /** Scrolls the copy sheet to Show more, takes it, and checks the Current row stays single and cannot be chosen. */

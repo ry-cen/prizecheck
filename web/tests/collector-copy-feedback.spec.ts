@@ -56,7 +56,7 @@ for (const [label, size] of [
       const pending = new Promise<void>((resolve) => {
         release = resolve;
       });
-      await page.route(`${ORIGIN}/api/catalog/sets`, async (route) => {
+      await page.route(`${ORIGIN}/api/pokemon/catalog/sets`, async (route) => {
         await pending;
         await route.continue();
       });
@@ -66,10 +66,12 @@ for (const [label, size] of [
       ).toBeVisible();
       await page.keyboard.press("Escape");
       await expectClosedQuiet(page);
-      const setsRead = page.waitForResponse(`${ORIGIN}/api/catalog/sets`);
+      const setsRead = page.waitForResponse(
+        `${ORIGIN}/api/pokemon/catalog/sets`
+      );
       release();
       await setsRead;
-      await page.unroute(`${ORIGIN}/api/catalog/sets`);
+      await page.unroute(`${ORIGIN}/api/pokemon/catalog/sets`);
       await page
         .getByRole("navigation", { name: "Main views" })
         .filter({ visible: true })

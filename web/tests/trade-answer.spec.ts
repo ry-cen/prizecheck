@@ -222,7 +222,9 @@ async function story(
   }[] = [];
   const attach = async (who: Page, secretOf: string[]) => {
     audits.push({
-      audit: await auditPage(who, (url) => /\/api\/(social\/)?trade/.test(url)),
+      audit: await auditPage(who, (url) =>
+        /\/api\/(pokemon\/)?(social\/)?trade/.test(url)
+      ),
       secretOf,
     });
   };

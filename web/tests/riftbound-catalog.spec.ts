@@ -345,7 +345,7 @@ for (const width of [1280, 390]) {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      await page.route("**/api/catalog/editions**", async (route) => {
+      await page.route("**/api/pokemon/catalog/editions**", async (route) => {
         if (state === "loading") {
           await gate;
           await route.continue();

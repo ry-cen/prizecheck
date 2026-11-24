@@ -20,7 +20,7 @@ async function sessionFixture(
   });
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/catalog/editions") {
+    if (path === "/api/pokemon/catalog/editions") {
       // The deck builder's library (#177) reads the browse route: an empty catalog.
       await route.fulfill({
         json: {
@@ -83,11 +83,11 @@ async function sessionFixture(
       return;
     }
     const json =
-      path === "/api/catalog/status"
+      path === "/api/pokemon/catalog/status"
         ? { available: false, revision: 0, last_success: null }
         : path === "/api/decks"
           ? { decks: [], owner_revision: 1, next_cursor: null }
-          : path === "/api/catalog/edition-replacements"
+          : path === "/api/pokemon/catalog/edition-replacements"
             ? []
             : path.startsWith("/api/holdings/")
               ? {
@@ -105,7 +105,10 @@ async function sessionFixture(
                   }
                 : { locations: [], nodes: [], owner_revision: 1 };
     await route.fulfill({
-      status: path.startsWith("/api/admin") ? 403 : 200,
+      status:
+        path.startsWith("/api/admin") || path.startsWith("/api/pokemon/admin")
+          ? 403
+          : 200,
       json,
     });
   });

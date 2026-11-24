@@ -21,7 +21,7 @@ const SETS = Array.from({ length: 120 }, (_, index) => {
 
 /** Signs in as a new owner at /catalog with a 120-set list standing in for the API's, and opens the set picker. */
 async function openSetPicker(page: Page) {
-  await page.route("**/api/catalog/sets", (route) =>
+  await page.route("**/api/pokemon/catalog/sets", (route) =>
     route.fulfill({
       json: { available: true, catalog_revision: 1, sets: SETS },
     })

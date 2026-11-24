@@ -12,6 +12,7 @@ An emitter for another app may also define ``load_openapi()``; ``write_or_check`
 the shared one.
 """
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,9 +99,40 @@ def header(script, source=True):
     return f"// Generated {origin}by scripts/{script}.py. Do not edit."
 
 
+# Pokémon-only routes the gateway also serves under /api/pokemon/ (auth/src/pokemonRoutes.ts). The OpenAPI document, and
+# every emitter's assertion on it, keep the upstream /api/<route> path; only the path an emitted client calls moves. The
+# old paths stay served during the transition (docs/planning/pokemon-api-prefix.md). Trees move with everything below
+# them; the exact routes are single routes and move alone.
+POKEMON_TREES = (
+    "catalog", "collection-imports", "want-list", "missing-card-reports", "admin/missing-card-reports",
+    "admin/catalog-reviews", "admin/catalog-metadata", "admin/card-attributes", "admin/card-identities",
+)
+POKEMON_EXACT = (
+    "prices/editions", "trades/value", "holdings/reassign", "admin/catalog-runs", "admin/catalog-rules",
+    "admin/reprint-groups/decisions",
+)
+POKEMON_ROUTES = POKEMON_TREES + POKEMON_EXACT
+
+
+def _alternatives(routes):
+    return "|".join(map(re.escape, routes))
+
+
+# A path inside a string literal: an opening quote or backtick before it; after it the end of the literal, a query, a
+# template substitution (`${`), and for a tree also a further segment.
+_POKEMON_LITERAL = re.compile(
+    r"""(?<=['"`])/api/(?:(%s)(?=[/?'"`$])|(%s)(?=[?'"`$]))""" % (_alternatives(POKEMON_TREES), _alternatives(POKEMON_EXACT)))
+
+
+def pokemon_paths(text):
+    """``text`` with each quoted ``/api/<moved route>`` rewritten to ``/api/pokemon/<moved route>``."""
+    return _POKEMON_LITERAL.sub(lambda match: "/api/pokemon/" + (match.group(1) or match.group(2)), text)
+
+
 def assemble(lines, trailing=""):
-    """The file text: lines joined by newlines. The last line is the body, which carries its own final newline."""
-    return "\n".join(lines) + trailing
+    """The file text: lines joined by newlines, with the moved routes' paths public. The last line is the body, which
+    carries its own final newline."""
+    return pokemon_paths("\n".join(lines) + trailing)
 
 
 # Transport text. The error constructor is always (status, code, ...extra); a domain adds what its API's refusals carry.
