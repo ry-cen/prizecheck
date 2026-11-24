@@ -363,7 +363,10 @@ it("does not carry an earlier attempt's changed-elsewhere note into a new attemp
     await act(async () => h.render(1));
     await act(async () => h.submit());
     await act(async () => h.render(2));
-    expect(document.body.textContent).toContain("This Deck changed elsewhere.");
+    expect(document.body.textContent).toContain(
+      "This Deck changed. Retry checks your last change first."
+    );
+    expect(document.body.textContent).not.toContain("elsewhere");
     await act(async () => h.submit());
     expect(document.body.textContent).toContain(
       "This Deck was renamed elsewhere."
@@ -372,7 +375,7 @@ it("does not carry an earlier attempt's changed-elsewhere note into a new attemp
     await act(async () => h.submit());
     expect(send).toHaveBeenCalledTimes(3);
     expect(document.body.textContent).toContain("may not have been saved");
-    expect(document.body.textContent).not.toContain("changed elsewhere");
+    expect(document.body.textContent).not.toContain("This Deck changed");
     expect(document.body.textContent).not.toContain("renamed elsewhere");
   } finally {
     await h.finish();

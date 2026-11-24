@@ -1132,7 +1132,12 @@ for (const width of [1280, 375]) {
     );
     await page.evaluate(() => (window as unknown as Lost).__lostRelease());
     await expect(dialog).toContainText("may not have been saved");
+    // The version moved because of the collector's own rename, so the note names no source for it.
+    await expect(dialog).toContainText(
+      "This Deck changed. Retry checks your last change first."
+    );
     await expect(dialog.getByText("renamed elsewhere")).toHaveCount(0);
+    await expect(dialog.getByText("changed elsewhere")).toHaveCount(0);
     await dialog.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Lost response rename", exact: true })

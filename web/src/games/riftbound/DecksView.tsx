@@ -650,7 +650,7 @@ export function DeckCommand({
     // this change came from it or from elsewhere.
     if (guard.current) return;
     if (attempt.current?.uncertain) {
-      // The first attempt may have applied: only its replay can say.
+      // The first attempt may have applied: only its replay can say, so the note names no source for the change.
       setChangedMeanwhile(true);
       return;
     }
@@ -786,9 +786,7 @@ export function DeckCommand({
       >
         {renamed && <p>This Deck was renamed elsewhere.</p>}
         {changedMeanwhile && attempt.current && (
-          <p>
-            This Deck changed elsewhere. Retry checks your last change first.
-          </p>
+          <p>This Deck changed. Retry checks your last change first.</p>
         )}
         {confirmName && (
           <p>
