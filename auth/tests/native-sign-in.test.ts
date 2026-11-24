@@ -1177,6 +1177,285 @@ describe("bearer", () => {
   });
 });
 
+/** One HTTP/1.1 request exactly as written (header lines in order, duplicates kept), for targets and headers fetch would refuse. */
+function wire(
+  gateway: TestGateway,
+  method: string,
+  target: string,
+  headers: string[] = []
+): Promise<{ status: number; body: string }> {
+  const url = new URL(gateway.base);
+  return new Promise((resolve, reject) => {
+    const socket = connect(Number(url.port), url.hostname, () =>
+      socket.write(
+        `${method} ${target} HTTP/1.1\r\nHost: ${url.host}\r\n${headers.map((line) => line + "\r\n").join("")}Connection: close\r\n\r\n`
+      )
+    );
+    let text = "";
+    socket.on("data", (chunk) => (text += chunk));
+    socket.on("error", reject);
+    socket.on("close", () =>
+      resolve({
+        status: Number(text.split(" ")[1]),
+        body: text.split("\r\n\r\n").slice(1).join("\r\n\r\n"),
+      })
+    );
+  });
+}
+
+/** Holds the session table locked while `run` executes: any session lookup would wait, so a prompt answer shows there was none. */
+async function withSessionsLocked<T>(
+  gateway: TestGateway,
+  run: () => Promise<T>
+): Promise<T> {
+  const client = await gateway.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("LOCK TABLE session IN ACCESS EXCLUSIVE MODE");
+    return await run();
+  } finally {
+    await client.query("ROLLBACK").catch(() => {});
+    client.release();
+  }
+}
+
+describe("Authorization is decided first", () => {
+  const untouched = () => ({
+    api: on.apiRequests.length,
+    riftbound: riftboundSeen.length,
+  });
+
+  it("refuses a valid credential on any target but the Collection read, before the Pokémon 404, the alias, the Riftbound refusal, any session lookup or any upstream", async () => {
+    const token = await issueToken(on, "owner");
+    const bearer = `Authorization: Bearer ${token}`;
+    const before = untouched();
+    const targets = [
+      // Not the Collection: the Pokémon prefix (an unknown route, a moved route, a catalog tree, dot segments, encoded and
+      // backslash separators), Riftbound (a normal and a refused target), the bare prefixes.
+      "/api/pokemon/collection",
+      "/api/pokemon/want-list",
+      "/api/pokemon/catalog/cards",
+      "/api/pokemon/prices/editions",
+      "/api/pokemon",
+      "/api/pokemon/",
+      "/api/pokemon/%2e%2e/collection",
+      "/api/pokemon/../collection",
+      "/api/pokemon/%2Fcollection",
+      "/api/pokemon%2fcollection",
+      "/api/pokemon\\collection",
+      "/api\\pokemon/want-list",
+      "/api/riftbound/collection",
+      "/api/riftbound/cards?q=a",
+      "/api/riftbound/%2e%2e/collection",
+      "/api/riftbound\\cards",
+      "/api/riftbound",
+      "/api/",
+      "/api",
+      // Absolute-form, and the Collection reached by normalisation rather than as written.
+      `${on.base}/api/collection`,
+      `${on.base}/api/pokemon/want-list`,
+      "/api/%2e%2e/api/collection",
+      "/api/x/../collection",
+      "/x/../api/collection",
+      "/api/./collection",
+      "/api//collection",
+      "/api/collection/",
+      "/api\\collection",
+      "/%61pi/collection",
+      // The Collection with a query the app never sends, a bare "?" included.
+      "/api/collection?",
+      "/api/collection?cursor=",
+      "/api/collection?cursor=a&cursor=b",
+      "/api/collection?cursor=a&x=1",
+      "/api/collection?x=1",
+      "/api/collection?cursor=a/b",
+      "/api/collection?cursor=%zz",
+      "/api/collection?cursor=a#f",
+    ];
+    await withSessionsLocked(on, async () => {
+      for (const target of targets) {
+        const result = await wire(on, "GET", target, [bearer]);
+        expect(result.status, target).toBe(401);
+        expect(result.body, target).toContain(
+          '"error":"Authentication required"'
+        );
+      }
+    });
+    expect(untouched()).toEqual(before);
+  });
+
+  it("refuses every method but GET, HEAD included, even for the Collection", async () => {
+    const token = await issueToken(on, "owner");
+    const before = untouched();
+    await withSessionsLocked(on, async () => {
+      for (const method of [
+        "HEAD",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "OPTIONS",
+      ]) {
+        const result = await wire(on, method, "/api/collection", [
+          `Authorization: Bearer ${token}`,
+        ]);
+        expect(result.status, method).toBe(401);
+      }
+    });
+    expect(untouched()).toEqual(before);
+  });
+
+  it("refuses a duplicated Authorization field in either order, whichever one is valid", async () => {
+    const token = await issueToken(on, "owner");
+    const valid = `Authorization: Bearer ${token}`;
+    const junk = `Authorization: Bearer ${b64(randomBytes(32))}`;
+    const before = untouched();
+    await withSessionsLocked(on, async () => {
+      for (const target of [
+        "/api/collection",
+        "/api/pokemon/want-list",
+        "/api/riftbound/cards",
+      ])
+        for (const headers of [
+          [valid, valid],
+          [valid, junk],
+          [junk, valid],
+          [valid, "authorization: " + token],
+          ["AUTHORIZATION: Bearer " + token, valid],
+        ]) {
+          const result = await wire(on, "GET", target, headers);
+          expect(result.status, `${target} ${headers.length}`).toBe(401);
+        }
+    });
+    expect(untouched()).toEqual(before);
+  });
+
+  it("refuses a valid credential beside a Cookie, and an invalid one beside a valid session, with no session lookup and no upstream", async () => {
+    const token = await issueToken(on, "owner");
+    const walk = await walkSignIn(on.base, "/auth/sign-in/google", "owner");
+    const cookie = `Cookie: ${cookieHeader(walk.jar)}`;
+    const junk = `Authorization: Bearer ${b64(randomBytes(32))}`;
+    const before = untouched();
+    await withSessionsLocked(on, async () => {
+      for (const target of [
+        "/api/collection",
+        "/api/pokemon/want-list",
+        "/api/pokemon/collection",
+        "/api/riftbound/cards",
+      ]) {
+        for (const headers of [
+          [`Authorization: Bearer ${token}`, cookie],
+          [cookie, `Authorization: Bearer ${token}`],
+          [`Authorization: Bearer ${token}`, "Cookie: "],
+          [junk, cookie],
+          ["Authorization: ", cookie],
+          ["Authorization: Bearer", cookie],
+        ]) {
+          const result = await wire(on, "GET", target, headers);
+          expect(result.status, `${target} ${headers.join(" | ")}`).toBe(401);
+        }
+      }
+    });
+    expect(untouched()).toEqual(before);
+  });
+
+  it("still serves the canonical read, with and without the app's cursor, and sends no Authorization upstream", async () => {
+    const token = await issueToken(on, "owner");
+    for (const target of [
+      "/api/collection",
+      "/api/collection?cursor=abc",
+      "/api/collection?cursor=a%2Fb%3D-._~",
+    ]) {
+      const before = on.apiRequests.length;
+      const result = await wire(on, "GET", target, [
+        `Authorization: Bearer ${token}`,
+      ]);
+      expect(result.status, target).toBe(200);
+      const forwarded = on.apiRequests.slice(before);
+      expect(forwarded, target).toHaveLength(1);
+      expect(forwarded[0].url).toBe(target);
+      expect(forwarded[0].headers.authorization).toBeUndefined();
+      expect(forwarded[0].headers.cookie).toBeUndefined();
+    }
+  });
+
+  it("only accepts a credential of the collection scope", async () => {
+    const token = await issueToken(on, "owner");
+    await on.pool.query(
+      "ALTER TABLE native_credential DROP CONSTRAINT native_credential_scope_check"
+    );
+    try {
+      await on.pool.query(
+        "UPDATE native_credential SET scope='other' WHERE token_hash=$1",
+        [createHash("sha256").update(token).digest("hex")]
+      );
+      const result = await wire(on, "GET", "/api/collection", [
+        `Authorization: Bearer ${token}`,
+      ]);
+      expect(result.status).toBe(401);
+    } finally {
+      await on.pool.query(
+        "UPDATE native_credential SET scope='collection:read' WHERE scope='other'"
+      );
+      await on.pool.query(
+        "ALTER TABLE native_credential ADD CONSTRAINT native_credential_scope_check CHECK (scope = 'collection:read')"
+      );
+    }
+  });
+
+  it("leaves a request without Authorization exactly as it was: the alias, the 404s and the Riftbound refusal", async () => {
+    const walk = await walkSignIn(on.base, "/auth/sign-in/google", "owner");
+    const cookie = `Cookie: ${cookieHeader(walk.jar)}`;
+    const before = on.apiRequests.length;
+    const alias = await wire(on, "GET", "/api/pokemon/want-list", [cookie]);
+    expect(alias.status).toBe(200);
+    expect(on.apiRequests.slice(before).map((seen) => seen.url)).toEqual([
+      "/api/want-list",
+    ]);
+    const after = untouched();
+    for (const target of [
+      "/api/pokemon/collection",
+      "/api/pokemon/%2e%2e/loans",
+      "/api/pokemon\\want-list",
+      "/api/riftbound/%2e%2e/loans",
+      `${on.base}/api/riftbound/cards`,
+    ]) {
+      const result = await wire(on, "GET", target, [cookie]);
+      expect(result.status, target).toBe(404);
+    }
+    expect(untouched()).toEqual(after);
+    // An unauthenticated read of a protected route is the usual 401, not a native decision.
+    expect((await wire(on, "GET", "/api/locations")).status).toBe(401);
+  });
+
+  it("leaves everything as dev has it while the switch is off, whatever Authorization says", async () => {
+    const jar = (await walkSignIn(off.base, "/auth/sign-in/google", "owner"))
+      .jar;
+    const cookie = `Cookie: ${cookieHeader(jar)}`;
+    const junk = "Authorization: Bearer junk";
+    const before = off.apiRequests.length;
+    expect(
+      (await wire(off, "GET", "/api/pokemon/collection", [junk])).status
+    ).toBe(404);
+    expect(
+      (await wire(off, "GET", "/api/pokemon/want-list", [junk, junk, cookie]))
+        .status
+    ).toBe(200);
+    expect(
+      (await wire(off, "GET", "/api/collection", [junk, cookie])).status
+    ).toBe(200);
+    expect((await wire(off, "GET", "/api/collection", [junk])).status).toBe(
+      401
+    );
+    expect(off.apiRequests.slice(before).map((seen) => seen.url)).toEqual([
+      "/api/want-list",
+      "/api/collection",
+    ]);
+    for (const seen of off.apiRequests.slice(before))
+      expect(seen.headers.authorization).toBeUndefined();
+  });
+});
+
 describe("sign-out", () => {
   it("revokes only the credential it names, and always answers 204", async () => {
     const first = await issueToken(on, "owner");

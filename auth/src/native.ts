@@ -22,6 +22,44 @@ export const NATIVE_CALLBACK = "prizecheck-native://auth/callback";
 export const NATIVE_APPROVE_PATH = "/auth/native/approve";
 export const NATIVE_START_PATH = "/auth/native/start";
 export const NATIVE_COLLECTION_PATH = "/api/collection";
+// The only query the app sends on that read (NativeSignInPlugin.readCollection): one `cursor`, percent-encoded from the
+// unreserved set, at most 2048 characters before encoding. Anything else, a bare `?` included, is refused.
+const COLLECTION_TARGET =
+  /^\/api\/collection(?:\?cursor=(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2}){1,6144})?$/;
+const API_NAMESPACE = /^\/api(?:\/|$)/i;
+const ABSOLUTE_FORM = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*/;
+
+/** The Authorization header fields a request carries, counted on the raw header list (`headers` hides a duplicate). */
+export function authorizationFields(request: IncomingMessage): string[] {
+  const fields: string[] = [];
+  const raw = request.rawHeaders;
+  for (let at = 0; at + 1 < raw.length; at += 2)
+    if (raw[at].toLowerCase() === "authorization") fields.push(raw[at + 1]);
+  if (fields.length === 0 && request.headers.authorization !== undefined)
+    fields.push(request.headers.authorization);
+  return fields;
+}
+
+/**
+ * Whether a request target is in the API namespace, read both ways: on the raw target (an absolute-form authority cut
+ * away, a backslash read as the slash it is parsed as, percent-encoding undone) and on the pathname the gateway would
+ * dispatch (after URL normalisation, which resolves dot segments). Either reading is enough, and a target that cannot be
+ * read counts as in the namespace.
+ */
+export function inApiNamespace(target: string, origin: string): boolean {
+  const authority = ABSOLUTE_FORM.exec(target);
+  const raw = (authority ? target.slice(authority[0].length) : target)
+    .split(/[?#]/, 1)[0]
+    .replace(/\\/g, "/");
+  if (API_NAMESPACE.test(raw)) return true;
+  try {
+    if (API_NAMESPACE.test(decodeURIComponent(raw).replace(/\\/g, "/")))
+      return true;
+    return API_NAMESPACE.test(new URL(target, origin).pathname);
+  } catch {
+    return true;
+  }
+}
 
 const CHALLENGE_OR_STATE = /^[A-Za-z0-9_-]{43}$/;
 const VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
@@ -180,14 +218,13 @@ export type Native = {
     response: ServerResponse,
     path: string
   ) => Promise<boolean>;
-  /** Whether the request carries an Authorization header at all. */
-  hasAuthorization: (request: IncomingMessage) => boolean;
-  /** The collector a native credential may read the Collection as, or null when the request is not an accepted one. */
-  bearerUser: (
-    request: IncomingMessage,
-    method: string,
-    path: string
-  ) => Promise<string | null>;
+  /** Whether the request is in the API namespace (read both ways, see inApiNamespace) and carries an Authorization header. */
+  apiAuthorization: (request: IncomingMessage, dispatched?: string) => boolean;
+  /**
+   * The collector a native credential may read the Collection as, or null when the request is not an accepted one:
+   * GET of exactly the Collection target, no Cookie, one Authorization field holding a live credential of that scope.
+   */
+  bearerUser: (request: IncomingMessage) => Promise<string | null>;
 };
 
 export function createNative(deps: NativeDeps): Native {
@@ -228,31 +265,30 @@ export function createNative(deps: NativeDeps): Native {
     return valid;
   }
 
-  const hasAuthorization = (request: IncomingMessage) =>
-    request.headers.authorization !== undefined;
+  const apiAuthorization = (request: IncomingMessage, dispatched?: string) =>
+    authorizationFields(request).length > 0 &&
+    (inApiNamespace(request.url || "/", origin) ||
+      (dispatched !== undefined && API_NAMESPACE.test(dispatched)));
 
   function bearerOf(request: IncomingMessage): string | null {
     const match = BEARER.exec(request.headers.authorization ?? "");
     return match ? match[1] : null;
   }
 
-  async function bearerUser(
-    request: IncomingMessage,
-    method: string,
-    path: string
-  ): Promise<string | null> {
-    const token = bearerOf(request);
+  async function bearerUser(request: IncomingMessage): Promise<string | null> {
+    const fields = authorizationFields(request);
+    const match = fields.length === 1 ? BEARER.exec(fields[0]) : null;
     if (
-      !token ||
-      method !== "GET" ||
-      path !== NATIVE_COLLECTION_PATH ||
+      !match ||
+      request.method !== "GET" ||
+      !COLLECTION_TARGET.test(request.url || "") ||
       request.headers.cookie !== undefined
     )
       return null;
     const { rows } = await pool.query<{ user_id: string }>(
       `SELECT user_id FROM native_credential
-       WHERE token_hash=$1 AND revoked_at IS NULL AND expires_at > now()`,
-      [sha256Hex(token)]
+       WHERE token_hash=$1 AND scope='collection:read' AND revoked_at IS NULL AND expires_at > now()`,
+      [sha256Hex(match[1])]
     );
     return rows[0]?.user_id ?? null;
   }
@@ -478,5 +514,5 @@ export function createNative(deps: NativeDeps): Native {
     return true;
   }
 
-  return { handle, hasAuthorization, bearerUser };
+  return { handle, apiAuthorization, bearerUser };
 }

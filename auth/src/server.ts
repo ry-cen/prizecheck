@@ -353,6 +353,31 @@ const native = nativeEnabled
 const server = createServer(async (request, response) => {
   // Monotonic receipt time, before any body read or session lookup: budgeted routes spend their three seconds from here.
   const received = performance.now();
+  // Native sign-in only (auth/src/native.ts), and first of all: with the switch on, a request in the API namespace that
+  // carries Authorization is either the one Collection read a native credential allows or a 401, decided before the
+  // Pokémon target check, the alias rewrite, the Riftbound refusal, any session lookup, limiter or Origin check, and any
+  // upstream contact. There is never a fallback to the cookie, and Authorization is never forwarded. The namespace is read
+  // on the raw target and on the path the gateway would dispatch. Switch off, or no Authorization: nothing here runs.
+  let nativeUser: string | null = null;
+  if (native) {
+    try {
+      const dispatched = pokemonUpstream(request.url || "/", request.method);
+      const dispatchedPath = dispatched
+        ? new URL(dispatched, origin).pathname
+        : undefined;
+      if (native.apiAuthorization(request, dispatchedPath)) {
+        nativeUser = await native.bearerUser(request);
+        if (!nativeUser)
+          return json(response, 401, { error: "Authentication required" });
+      }
+    } catch (error) {
+      console.error(
+        "Gateway request failed",
+        error instanceof Error ? error.name : "unknown"
+      );
+      return json(response, 503, { error: "Service temporarily unavailable" });
+    }
+  }
   // /api/pokemon is decided on the raw request target (auth/src/pokemonRoutes.ts), which never throws: a moved route is
   // handled below as its old /api twin, anything else under the prefix is a 404 before any session lookup, limiter or
   // upstream call, and before the target is parsed again.
@@ -637,11 +662,6 @@ const server = createServer(async (request, response) => {
         path === "/api/riftbound/"
       )
         return json(response, 404, { error: "Not found" });
-      // With the native switch on, an Authorization header on any /api/* path is native-or-401, never a cookie
-      // fallback; a native credential reads only the Collection, so it is never accepted here. Refused before the
-      // Origin check, any session lookup or upstream contact.
-      if (native?.hasAuthorization(request))
-        return json(response, 401, { error: "Authentication required" });
       if (
         request.method !== "GET" &&
         request.method !== "HEAD" &&
@@ -684,18 +704,6 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (path.startsWith("/api/")) {
-      // A native credential (auth/src/native.ts) reads the Collection only. With the switch on, any request that carries an
-      // Authorization header is either exactly that read or refused; there is never a fallback to the cookie.
-      let nativeUser: string | null = null;
-      if (native?.hasAuthorization(request)) {
-        nativeUser = await native.bearerUser(
-          request,
-          request.method || "",
-          path
-        );
-        if (!nativeUser)
-          return json(response, 401, { error: "Authentication required" });
-      }
       if (
         request.method !== "GET" &&
         request.method !== "HEAD" &&
