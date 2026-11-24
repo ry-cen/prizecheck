@@ -138,7 +138,7 @@ So old and new paths are served together until a later release removes the old o
 1. The Riftbound gateway prefix (#678) landed on `dev` first. This slice was rebased onto it and the overlap in the start of
    the request handler in `auth/src/server.ts` was resolved there: one `path`/upstream-URL pair, the `/api/pokemon` decision
    made first on the raw target (a refused target gets its 404 before any session, limiter or body handling), then the
-   `/api/riftbound` refusal on the upstream path. An unlisted `/api/<game>/...` answers 404 without an upstream call.
+   `/api/riftbound` refusal on the upstream path. An unlisted `/api/pokemon/...` path answers 404 without an upstream call; the Riftbound namespace is a separate decision (an enabled one forwards authenticated paths).
 2. Land this slice to `dev`, then release it with the host steps below.
 3. Release host steps: ship the updated `nginx.conf` (the new exact location) with the same release as the gateway, since
    nginx would otherwise cap `/api/pokemon/collection-imports` at 64k while the gateway accepts 5 MiB. Deploy the gateway and
