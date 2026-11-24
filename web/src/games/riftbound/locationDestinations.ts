@@ -1,14 +1,12 @@
 import { plural, type LocationNode } from "./collection";
 import { indexLocations } from "../../workspace/locationTree";
 export const CHOOSE_LOCATION_PARENT = "__choose__";
+// These describe only the read of the Locations, never what happened to a change or who made one.
+export const LOCATION_REFRESHING_MESSAGE = "Refreshing the list…";
 export const LOCATION_RELOAD_FAILED_MESSAGE =
-  "Your locations changed in another tab or window, so nothing was changed. The list couldn't be refreshed. Try Reload and retry.";
-export const LOCATION_REFRESHING_MESSAGE =
-  "Your locations changed in another tab or window, so nothing was changed. Refreshing the list…";
-export const LOCATION_RETRY_RELOAD_FAILED_MESSAGE =
-  "The list couldn't be refreshed, so nothing was sent. Try Reload and retry.";
+  "The list couldn't be refreshed. Try Reload and retry.";
 export const LOCATION_REVIEW_MESSAGE =
-  "Your locations changed in another tab or window, so nothing was changed. The list has been refreshed; review it and try again.";
+  "The list has been refreshed. Review it and try again.";
 /** A Location and everything inside it, found without following a cycle twice. */
 export function locationBranch(
   nodes: LocationNode[],

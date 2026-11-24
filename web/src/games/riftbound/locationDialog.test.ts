@@ -8,7 +8,6 @@ import { editions } from "./local/fixtures";
 import {
   LOCATION_REFRESHING_MESSAGE,
   LOCATION_RELOAD_FAILED_MESSAGE,
-  LOCATION_RETRY_RELOAD_FAILED_MESSAGE,
   LOCATION_REVIEW_MESSAGE,
   locationFacts,
   type LocationFact,
@@ -335,7 +334,7 @@ it.each([
       await expect(edit.mock.results[0].value).rejects.toMatchObject({ code });
       expect(document.querySelector("select")!.value).toBe("__choose__");
       expect(document.querySelector('[role="alert"]')!.textContent).toContain(
-        "Your locations changed in another tab or window"
+        LOCATION_REVIEW_MESSAGE
       );
       const retry = [...document.querySelectorAll("button")].find(
         (b) => b.textContent === "Reload and retry"
@@ -1379,8 +1378,137 @@ describe("what the alert says in each state", () => {
       vi.spyOn(f.reader, "locations").mockRejectedValue(new Error("down"));
       await press("retry", f);
       expect(send).toHaveBeenCalledTimes(1);
-      expect(alertEl().textContent).toBe(LOCATION_RETRY_RELOAD_FAILED_MESSAGE);
-      expect(alertEl().textContent).not.toMatch(/close|another tab/i);
+      expect(alertEl().textContent).toBe(LOCATION_RELOAD_FAILED_MESSAGE);
+      expect(alertEl().textContent).not.toMatch(/close|another tab|sent/i);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  const claims = /another tab|elsewhere|nothing was|not applied|applied|sent/i;
+  /** Holds the next Move write open so the alert can be read while it is in flight. */
+  function holdNextWrite(f: Awaited<ReturnType<typeof open>>) {
+    const real = f.writer.editLocation.bind(f.writer);
+    const send = vi.spyOn(f.writer, "editLocation");
+    let release!: () => void;
+    send.mockImplementationOnce(
+      (...args) =>
+        new Promise((resolve, reject) => {
+          release = () => real(...args).then(resolve, reject);
+        })
+    );
+    return { send, release: () => release() };
+  }
+  const noAlert = () =>
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  it("describes only the current read: a refusal, a reused key, an edit and a failed read, then a read that works while the write is pending", async () => {
+    const f = await open("move");
+    const realRead = f.reader.locations.bind(f.reader);
+    const send = vi.spyOn(f.writer, "editLocation");
+    const read = vi.spyOn(f.reader, "locations");
+    send.mockRejectedValueOnce(new CollectionError("STALE_LOCATION"));
+    try {
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toBe(LOCATION_REVIEW_MESSAGE);
+      // The retried command meets a reused key: its own text, with no claim about the write.
+      send.mockRejectedValueOnce(new CollectionError("IDEMPOTENCY_KEY_REUSED"));
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(alertEl().textContent).toBe(
+        locationError(new CollectionError("IDEMPOTENCY_KEY_REUSED"), "")
+      );
+      expect(alertEl().textContent).not.toMatch(claims);
+      await choose("2");
+      await choose("7");
+      read.mockRejectedValueOnce(new Error("down"));
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(alertEl().textContent).toBe(LOCATION_RELOAD_FAILED_MESSAGE);
+      expect(retryButton().disabled).toBe(false);
+      // A manual read in flight says so, and a write that follows it shows no read message.
+      const held = holdNextWrite(f);
+      let release!: () => void;
+      read.mockImplementationOnce(
+        (signal) =>
+          new Promise((resolve, reject) => {
+            release = () => realRead(signal).then(resolve, reject);
+          })
+      );
+      await act(async () => {
+        retryButton().click();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toBe(LOCATION_REFRESHING_MESSAGE);
+      await act(async () => {
+        release();
+        await vi.runAllTimersAsync();
+      });
+      // The read worked and nothing differs: the write is in flight and no read message is up.
+      expect(held.send).toHaveBeenCalledTimes(3);
+      noAlert();
+      await act(async () => {
+        held.release();
+        await vi.runAllTimersAsync();
+      });
+      expect(f.confirmed).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.cleanup();
+    }
+  });
+  it("describes only the current read in the reverse order: a reused key, a failed read, then a refusal", async () => {
+    const f = await open("move");
+    const realRead = f.reader.locations.bind(f.reader);
+    const send = vi.spyOn(f.writer, "editLocation");
+    const read = vi.spyOn(f.reader, "locations");
+    send.mockRejectedValueOnce(new CollectionError("IDEMPOTENCY_KEY_REUSED"));
+    try {
+      await act(async () => {
+        f.submit();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toBe(
+        locationError(new CollectionError("IDEMPOTENCY_KEY_REUSED"), "")
+      );
+      read.mockRejectedValueOnce(new Error("down"));
+      await press("retry", f);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(alertEl().textContent).toBe(LOCATION_RELOAD_FAILED_MESSAGE);
+      expect(alertEl().textContent).not.toMatch(claims);
+      // The read works, the write is pending and no read message is up; then it is refused and the list is read.
+      let refuse!: () => void;
+      send.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            refuse = () => reject(new CollectionError("STALE_LOCATION"));
+          })
+      );
+      await act(async () => {
+        retryButton().click();
+        await vi.runAllTimersAsync();
+      });
+      expect(send).toHaveBeenCalledTimes(2);
+      noAlert();
+      let finish!: () => void;
+      read.mockImplementationOnce(
+        (signal) =>
+          new Promise((resolve, reject) => {
+            finish = () => realRead(signal).then(resolve, reject);
+          })
+      );
+      await act(async () => {
+        refuse();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toBe(LOCATION_REFRESHING_MESSAGE);
+      await act(async () => {
+        finish();
+        await vi.runAllTimersAsync();
+      });
+      expect(alertEl().textContent).toBe(LOCATION_REVIEW_MESSAGE);
+      expect(alertEl().textContent).not.toMatch(claims);
+      expect(f.confirmed).not.toHaveBeenCalled();
     } finally {
       await f.cleanup();
     }

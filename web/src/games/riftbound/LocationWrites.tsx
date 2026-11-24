@@ -6,7 +6,6 @@ import {
   validLocationDestination,
   LOCATION_REFRESHING_MESSAGE,
   LOCATION_RELOAD_FAILED_MESSAGE,
-  LOCATION_RETRY_RELOAD_FAILED_MESSAGE,
   LOCATION_REVIEW_MESSAGE,
   type LocationFactChange,
 } from "./locationDestinations";
@@ -103,13 +102,12 @@ export function LocationWriteDialog({
   const [conversion, setConversion] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [error, setError] = useState<unknown>();
-  // What the alert says about a tree-change refusal. Editing clears it; it does not decide whether a read is due.
-  // "refreshing" is the automatic read in flight, "needed" a read that worked and is waiting to be reviewed.
+  // What the alert says about the latest read of the Locations, and nothing about any change. Editing clears it; it
+  // does not decide whether a read is due. "refreshing" is a read in flight, "needed" one that worked and is waiting
+  // to be reviewed, "failed" one that did not.
   const [reload, setReload] = useState<"" | "refreshing" | "needed" | "failed">(
     ""
   );
-  // True once the Locations are known to have changed elsewhere; a reused key alone does not say so.
-  const [elsewhere, setElsewhere] = useState(false);
   // Set by any tree-change refusal, failed read or reused key, and only the write that succeeds ends it. Until
   // then every new command is preceded by a fresh read; edits, other choices and later errors never clear it.
   const mustRead = useRef(false);
@@ -218,6 +216,8 @@ export function LocationWriteDialog({
       if (!attempt.current) {
         let currentNodes = nodes;
         if (mustRead.current) {
+          setError(undefined);
+          setReload("refreshing");
           try {
             currentNodes = await reader.locations(run.controller.signal);
           } catch {
@@ -227,10 +227,11 @@ export function LocationWriteDialog({
           if (!run.alive) return;
           // The refreshed Locations are shown first; the next explicit submit is measured against what is then on screen.
           if (!reviewTree(currentNodes)) {
-            setElsewhere(true);
             setReload("needed");
             return;
           }
+          // No read message stays up while the write is in flight.
+          setReload("");
         }
         const current = currentNodes.find((n) => n.id === id);
         const destination = currentNodes.find((n) => n.id === parentId);
@@ -306,7 +307,6 @@ export function LocationWriteDialog({
           // Refused for good: drop the command and owe a read before anything is sent, even if the read below fails.
           attempt.current = null;
           requireRead();
-          setElsewhere(true);
           setReload("refreshing");
           try {
             const updated = await reader.locations(run.controller.signal);
@@ -325,7 +325,6 @@ export function LocationWriteDialog({
           if (cause instanceof CollectionError) attempt.current = null;
           if (code === "IDEMPOTENCY_KEY_REUSED") {
             requireRead();
-            setElsewhere(false);
           }
         }
         setError(cause);
@@ -525,9 +524,7 @@ export function LocationWriteDialog({
                   ? reload === "refreshing"
                     ? LOCATION_REFRESHING_MESSAGE
                     : reload === "failed"
-                      ? elsewhere
-                        ? LOCATION_RELOAD_FAILED_MESSAGE
-                        : LOCATION_RETRY_RELOAD_FAILED_MESSAGE
+                      ? LOCATION_RELOAD_FAILED_MESSAGE
                       : LOCATION_REVIEW_MESSAGE
                   : locationError(
                       error,
