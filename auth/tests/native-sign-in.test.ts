@@ -1284,6 +1284,97 @@ describe("Authorization is decided first", () => {
     expect(untouched()).toEqual(before);
   });
 
+  it("refuses a raw /api target that dispatches outside the namespace, and the reverse, whatever its shape", async () => {
+    const token = await issueToken(on, "owner");
+    const host = new URL(on.base).host;
+    const before = untouched();
+    await withSessionsLocked(on, async () => {
+      for (const target of [
+        // Raw path inside /api, dispatched outside it.
+        `http://${host}/api/../health`,
+        `http://${host}/api/pokemon/../../health`,
+        "/api/../health",
+        "/api/pokemon/../../health",
+        "/api\\..\\health",
+        // Raw path outside /api, dispatched inside it, but not the exact Collection target.
+        `http://${host}/x/../api/pokemon/want-list`,
+        `http://${host}/x/../api/collection`,
+        "/x/../api/pokemon/want-list",
+        "/x\\..\\api\\collection",
+      ]) {
+        const result = await wire(on, "GET", target, [
+          `Authorization: Bearer ${token}`,
+        ]);
+        expect(result.status, target).toBe(401);
+      }
+    });
+    expect(untouched()).toEqual(before);
+  });
+
+  it("answers 503, not a cookie fallback, when the credential database is stuck, refuses the excess at once, and leaves the web path alone", async () => {
+    const token = await issueToken(on, "owner");
+    const walk = await walkSignIn(on.base, "/auth/sign-in/google", "owner");
+    const client = await on.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "LOCK TABLE native_credential IN ACCESS EXCLUSIVE MODE"
+      );
+      const before = on.apiRequests.length;
+      const started = Date.now();
+      const results = await Promise.all(
+        Array.from({ length: 16 }, () =>
+          wire(on, "GET", "/api/collection", [`Authorization: Bearer ${token}`])
+        )
+      );
+      for (const result of results) {
+        expect(result.status).toBe(503);
+        expect(result.body).toContain("Service temporarily unavailable");
+        expect(result.body).not.toMatch(/native_credential|timeout|lock/i);
+      }
+      // Bounded by the 2 s query timeout, not by the lock.
+      expect(Date.now() - started).toBeLessThan(6000);
+      // A bearer that is malformed or beside a Cookie never reaches the database.
+      const t = Date.now();
+      expect(
+        (await wire(on, "GET", "/api/collection", ["Authorization: Bearer x"]))
+          .status
+      ).toBe(401);
+      expect(
+        (
+          await wire(on, "GET", "/api/collection", [
+            `Authorization: Bearer ${token}`,
+            `Cookie: ${cookieHeader(walk.jar)}`,
+          ])
+        ).status
+      ).toBe(401);
+      expect(Date.now() - t).toBeLessThan(1500);
+      // Sign-out says so too, rather than 204.
+      const signOut = await fetch(on.base + "/auth/native/sign-out", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(signOut.status).toBe(503);
+      // The web session path (the shared pool) still works while the credential table is locked.
+      const web = await fetch(on.base + "/api/collection", {
+        headers: { cookie: cookieHeader(walk.jar) },
+      });
+      expect(web.status).toBe(200);
+      expect(on.apiRequests.length).toBe(before + 1);
+    } finally {
+      await client.query("ROLLBACK").catch(() => {});
+      client.release();
+    }
+    // The slots were released: the credential works again.
+    expect(
+      (
+        await wire(on, "GET", "/api/collection", [
+          `Authorization: Bearer ${token}`,
+        ])
+      ).status
+    ).toBe(200);
+  });
+
   it("refuses every method but GET, HEAD included, even for the Collection", async () => {
     const token = await issueToken(on, "owner");
     const before = untouched();

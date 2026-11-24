@@ -22,6 +22,11 @@ import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { ipContext } from "./ipContext.js";
 import { createNative, nativeSignInEnabled } from "./native.js";
+import {
+  createNativePool,
+  createNativeStore,
+  NativeUnavailable,
+} from "./nativeStore.js";
 import { safeNext } from "./nextPath.js";
 import { pokemonUpstream } from "./pokemonRoutes.js";
 import { PublicReadLimiter } from "./publicReads.js";
@@ -338,9 +343,23 @@ async function budgetedSession(request: IncomingMessage) {
 // Opt-in native iOS sign-in (auth/src/native.ts): off unless NATIVE_SIGN_IN=on, an invalid value or `on` in production stops
 // the gateway here. While off, no native route exists and Authorization headers are ignored, as before.
 const nativeEnabled = nativeSignInEnabled();
-const native = nativeEnabled
+// Its credential lookups and sign-outs run on their own bounded pool and admission cap (auth/src/nativeStore.ts), closed on shutdown.
+const nativePool = nativeEnabled
+  ? createNativePool(process.env.DATABASE_URL)
+  : null;
+if (nativePool) {
+  nativePool.on("error", (error) => {
+    console.error("Native credential pool failed", error.name);
+  });
+  for (const signal of ["SIGTERM", "SIGINT"] as const)
+    process.once(signal, () => {
+      nativePool.end().finally(() => process.exit(0));
+    });
+}
+const native = nativePool
   ? createNative({
       pool,
+      credentials: createNativeStore(nativePool),
       origin,
       internalSecret,
       providers,
@@ -371,10 +390,12 @@ const server = createServer(async (request, response) => {
           return json(response, 401, { error: "Authentication required" });
       }
     } catch (error) {
-      console.error(
-        "Gateway request failed",
-        error instanceof Error ? error.name : "unknown"
-      );
+      // A busy or slow credential database is a 503, never a cookie fallback, and says nothing more.
+      if (!(error instanceof NativeUnavailable))
+        console.error(
+          "Gateway request failed",
+          error instanceof Error ? error.name : "unknown"
+        );
       return json(response, 503, { error: "Service temporarily unavailable" });
     }
   }

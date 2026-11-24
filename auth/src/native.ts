@@ -6,7 +6,9 @@ import {
 } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Pool } from "pg";
+import { rawPathOf } from "./pokemonRoutes.js";
 import type { RateLimits } from "./rateLimits.js";
+import { NativeUnavailable, type NativeStore } from "./nativeStore.js";
 
 // Native iOS sign-in (opt-in, nonprod only; NATIVE_SIGN_IN=on). The app opens /auth/native/start in an
 // ASWebAuthenticationSession with a PKCE challenge and a state it made on the device. The collector signs in through the
@@ -27,8 +29,6 @@ export const NATIVE_COLLECTION_PATH = "/api/collection";
 const COLLECTION_TARGET =
   /^\/api\/collection(?:\?cursor=(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2}){1,6144})?$/;
 const API_NAMESPACE = /^\/api(?:\/|$)/i;
-const ABSOLUTE_FORM = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*/;
-
 /** The Authorization header fields a request carries, counted on the raw header list (`headers` hides a duplicate). */
 export function authorizationFields(request: IncomingMessage): string[] {
   const fields: string[] = [];
@@ -47,10 +47,8 @@ export function authorizationFields(request: IncomingMessage): string[] {
  * read counts as in the namespace.
  */
 export function inApiNamespace(target: string, origin: string): boolean {
-  const authority = ABSOLUTE_FORM.exec(target);
-  const raw = (authority ? target.slice(authority[0].length) : target)
-    .split(/[?#]/, 1)[0]
-    .replace(/\\/g, "/");
+  // The same raw reading as the Pokémon namespace (pokemonRoutes.ts): an absolute-form authority ends at `/`, `\`, `?` or `#`.
+  const raw = rawPathOf(target).replace(/\\/g, "/");
   if (API_NAMESPACE.test(raw)) return true;
   try {
     if (API_NAMESPACE.test(decodeURIComponent(raw).replace(/\\/g, "/")))
@@ -206,6 +204,8 @@ export type NativeDeps = {
   internalSecret: string;
   providers: { id: string; name: string }[];
   rateLimits: Pick<RateLimits, "allowNativeApprove" | "allowNativeToken">;
+  /** Bounded credential operations (auth/src/nativeStore.ts): the bearer lookup and the sign-out. */
+  credentials: NativeStore;
   getSession: (request: IncomingMessage) => Promise<NativeSession | null>;
   clientIp: (request: IncomingMessage) => string;
   now?: () => number;
@@ -228,7 +228,7 @@ export type Native = {
 };
 
 export function createNative(deps: NativeDeps): Native {
-  const { pool, origin } = deps;
+  const { pool, origin, credentials } = deps;
   const now = deps.now ?? Date.now;
   const nonceKey = createHmac("sha256", deps.internalSecret)
     .update("native-approve-key")
@@ -270,11 +270,6 @@ export function createNative(deps: NativeDeps): Native {
     (inApiNamespace(request.url || "/", origin) ||
       (dispatched !== undefined && API_NAMESPACE.test(dispatched)));
 
-  function bearerOf(request: IncomingMessage): string | null {
-    const match = BEARER.exec(request.headers.authorization ?? "");
-    return match ? match[1] : null;
-  }
-
   async function bearerUser(request: IncomingMessage): Promise<string | null> {
     const fields = authorizationFields(request);
     const match = fields.length === 1 ? BEARER.exec(fields[0]) : null;
@@ -285,7 +280,7 @@ export function createNative(deps: NativeDeps): Native {
       request.headers.cookie !== undefined
     )
       return null;
-    const { rows } = await pool.query<{ user_id: string }>(
+    const rows = await credentials.rows<{ user_id: string }>(
       `SELECT user_id FROM native_credential
        WHERE token_hash=$1 AND scope='collection:read' AND revoked_at IS NULL AND expires_at > now()`,
       [sha256Hex(match[1])]
@@ -480,16 +475,30 @@ export function createNative(deps: NativeDeps): Native {
   }
 
   async function signOut(request: IncomingMessage, response: ServerResponse) {
-    const bearer = bearerOf(request);
+    const fields = authorizationFields(request);
+    const match = fields.length === 1 ? BEARER.exec(fields[0]) : null;
     if (
-      bearer &&
+      match &&
       request.headers.cookie === undefined &&
       request.headers.origin === undefined
-    )
-      await pool.query(
-        `UPDATE native_credential SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL`,
-        [sha256Hex(bearer)]
-      );
+    ) {
+      try {
+        await credentials.rows(
+          `UPDATE native_credential SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL`,
+          [sha256Hex(match[1])]
+        );
+      } catch (error) {
+        // A busy or slow credential database: say so, so the app does not take the credential for revoked.
+        if (!(error instanceof NativeUnavailable)) throw error;
+        response.writeHead(503, {
+          "content-type": "application/json",
+          "cache-control": "no-store",
+        });
+        return void response.end(
+          JSON.stringify({ error: "Service temporarily unavailable" })
+        );
+      }
+    }
     response.writeHead(204, { "cache-control": "no-store" });
     response.end();
   }
