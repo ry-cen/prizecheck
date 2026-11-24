@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
+import { watchGameApi } from "./support/game-api";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -438,11 +439,11 @@ test.describe("desktop", () => {
     const abra = await editionOf("card-1");
     await addCopies(page, alpha, abra, 3);
     // A reviewed correction for Abra, stubbed: the review pipeline is covered by catalog-reconciliation.spec.ts.
-    let reads = 0;
+    // Reads are counted in both URL forms, so one of the retained /api/catalog/edition-replacements is seen too.
+    const watched = watchGameApi(page, "catalog/edition-replacements");
     await page.route(
       "**/api/pokemon/catalog/edition-replacements",
       async (route) => {
-        reads += 1;
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -468,7 +469,7 @@ test.describe("desktop", () => {
     await createLocation(page, `Elsewhere ${s}`, null);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(banner(page)).toHaveText(STALE);
-    reads = 0;
+    watched.clear();
     const relisted = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === "/api/collection/holdings"
@@ -479,11 +480,11 @@ test.describe("desktop", () => {
     await expect(tiles(page)).toHaveCount(3);
     await expect(amount).toHaveValue("2");
     // The corrections read for the new revision runs in an effect after the holdings render, so wait for it.
-    await expect.poll(() => reads).toBe(1);
+    await expect.poll(() => watched.paths.length).toBe(1);
     // flake-exempt wait-for-timeout (quiet): any late extra read lands before counting: one read for the new
     // revision, none while the gallery reloaded.
     await page.waitForTimeout(300);
-    expect(reads).toBe(1);
+    expect(watched.paths).toHaveLength(1);
   });
 });
 

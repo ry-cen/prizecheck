@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
+import { watchGameApi } from "./support/game-api";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -154,9 +155,13 @@ const REPORT = "Report a problem with this card's data";
 
 /** Records every price request's Edition ids and the peak number in flight. */
 async function recordPrices(page: Page) {
-  const seen = { batches: [] as string[][], live: 0, peak: 0 };
+  // Counted in both URL forms, so a request to the retained /api/prices/editions is seen too.
+  const seen = {
+    batches: watchGameApi(page, "prices/editions").batches,
+    live: 0,
+    peak: 0,
+  };
   await page.route("**/api/pokemon/prices/editions", async (route) => {
-    seen.batches.push(route.request().postDataJSON().edition_ids);
     seen.live += 1;
     seen.peak = Math.max(seen.peak, seen.live);
     try {

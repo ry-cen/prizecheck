@@ -6,6 +6,7 @@
 // and at 375×812 (the side column above the list, 44 px targets, no horizontal scroll). The catalog is
 // api/tests/test_collection_import.py seed_import_catalog.
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { watchGameApi } from "./support/game-api";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -292,13 +293,15 @@ test.describe("desktop", () => {
     const add = save(page).getByRole("button", { name: /^Add / });
     await expect(add).toBeEnabled();
     // The next change is held at the gate until it is released, and later ones go through.
-    const sent: { changes: Record<string, unknown>[] }[] = [];
+    // Counted in both URL forms, so a change sent to the retained /api/collection-imports/<id>/changes is seen too.
+    const sent = watchGameApi(page, "collection-imports/*/changes").bodies as {
+      changes: Record<string, unknown>[];
+    }[];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     await page.route(
       "**/api/pokemon/collection-imports/*/changes",
       async (route) => {
-        sent.push(route.request().postDataJSON());
         if (sent.length === 1) await gate;
         await route.continue();
       }

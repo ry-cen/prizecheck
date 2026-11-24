@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
+import { watchGameApi } from "./support/game-api";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -211,10 +212,10 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
 
   // Once the tile price settles, selection reuses it synchronously: the inspector never shows the checking
   // label and asks for no price.
-  const priced: string[][] = [];
+  // Counted in both URL forms, so a request to the retained /api/prices/editions would show here too.
+  const priced = watchGameApi(page, "prices/editions").batches;
   await page.route("**/api/pokemon/prices/editions", async (route) => {
     const ids: string[] = route.request().postDataJSON().edition_ids;
-    priced.push(ids);
     await route.fulfill({
       json: {
         withheld: false,

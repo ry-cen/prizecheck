@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
+import { watchGameApi } from "./support/game-api";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -267,11 +268,7 @@ test("a Deck's Holdings and All owned price each tile's exact Edition, including
       updated: ago(5),
     },
   ]);
-  const requested: string[][] = [];
-  await page.route("**/api/pokemon/prices/editions", async (route) => {
-    requested.push(route.request().postDataJSON().edition_ids);
-    await route.continue();
-  });
+  const requested = watchGameApi(page, "prices/editions").batches;
   await signIn(page);
   const everything = [
     ...ids.pagers,
@@ -429,12 +426,15 @@ test("no refresh outcome adds a label or changes the cached price shown", async 
   await signIn(page);
   const held = await hold(page, [ids.normal]);
   for (const [refresh, failedAt] of REFRESH_OUTCOMES) {
+    // Each outcome must reach the page: the cached $0.25 is also the unmutated answer, so the amount alone proves nothing.
+    let mutated = 0;
     await page.route("**/api/pokemon/prices/editions", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
       for (const row of body.prices) {
         row.refresh = refresh;
         row.refresh_failed_at = failedAt;
+        mutated += 1;
       }
       await route.fulfill({ response, json: body });
     });
@@ -452,6 +452,7 @@ test("no refresh outcome adds a label or changes the cached price shown", async 
       .locator(".edition-price");
     await expect(slot).toHaveText("$0.25");
     await expect(slot.getByRole("button")).toHaveCount(0);
+    expect(mutated, `stub served the ${refresh} outcome`).toBeGreaterThan(0);
     await page.unroute("**/api/pokemon/prices/editions");
   }
 });
@@ -472,13 +473,12 @@ test(
       ids.unspecified,
     ]);
     await page.reload();
-    const seen: string[][] = [];
+    const seen = watchGameApi(page, "prices/editions").batches;
     let live = 0;
     let peak = 0;
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => (release = resolve));
     await page.route("**/api/pokemon/prices/editions", async (route) => {
-      seen.push(route.request().postDataJSON().edition_ids);
       live += 1;
       peak = Math.max(peak, live);
       await gate;
@@ -525,11 +525,7 @@ test("following a link does not prefetch prices for unrendered cards", async ({
   ]);
   const held = await hold(page, [ids.normal]);
   await page.reload();
-  const seen: string[][] = [];
-  await page.route("**/api/pokemon/prices/editions", async (route) => {
-    seen.push(route.request().postDataJSON().edition_ids);
-    await route.continue();
-  });
+  const seen = watchGameApi(page, "prices/editions").batches;
   const panel = await openHeld(page, held);
   await expect(panel.locator(".edition-price").first()).not.toContainText(
     "Checking prices"
@@ -566,11 +562,7 @@ test("price slots ask only once they come near the viewport, and each Edition on
   // A short window: the near area ends well above the last of the Deck's 55 tiles.
   await page.setViewportSize({ width: 1280, height: 300 });
   await page.reload();
-  const requested: string[][] = [];
-  await page.route("**/api/pokemon/prices/editions", async (route) => {
-    requested.push(route.request().postDataJSON().edition_ids);
-    await route.continue();
-  });
+  const requested = watchGameApi(page, "prices/editions").batches;
   const panel = await openHeld(page, held);
   const rows = panel.getByRole("button");
   await expect(rows.first().locator(".edition-price")).not.toContainText(
@@ -607,11 +599,7 @@ test("without IntersectionObserver every rendered slot asks at once", async ({
   ]);
   await page.setViewportSize({ width: 1280, height: 300 });
   await page.reload();
-  const requested: string[][] = [];
-  await page.route("**/api/pokemon/prices/editions", async (route) => {
-    requested.push(route.request().postDataJSON().edition_ids);
-    await route.continue();
-  });
+  const requested = watchGameApi(page, "prices/editions").batches;
   const panel = await openHeld(page, held);
   const rows = panel.getByRole("button");
   await expect(rows.last().locator(".edition-price")).not.toContainText(
