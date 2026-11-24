@@ -45,10 +45,17 @@ class MockClient extends EventEmitter {
 function dbOf(...clients: MockClient[]) {
   const queue = [...clients];
   const db = {
-    connect: async () => {
+    // The callback form pg-pool offers: (error, client, done), called once, synchronously here.
+    connect: (
+      callback: (
+        error: Error | undefined,
+        client: MockClient | undefined,
+        done: (error?: Error) => void
+      ) => void
+    ) => {
       const next = queue.shift();
-      if (!next) throw new Error("no more clients");
-      return next;
+      if (!next) callback(new Error("no more clients"), undefined, () => {});
+      else callback(undefined, next, (error) => next.release(error));
     },
     query: async () => ({ rows: [] }),
   } as unknown as NativeDb;
@@ -132,13 +139,77 @@ describe("withNativeClient", () => {
 
   it("takes no listener and releases nothing when the checkout itself fails", async () => {
     const db = {
-      connect: async () => {
-        throw new Error("no connection");
-      },
+      connect: (callback: (error: Error) => void) =>
+        callback(new Error("no connection")),
     } as unknown as NativeDb;
     await expect(withNativeClient(db, async () => 1)).rejects.toThrow(
       "no connection"
     );
+  });
+
+  it("listens already inside the pool's callback, so an error in that same tick is handled and the work never runs", async () => {
+    const client = new MockClient(() => ({ rows: [] }));
+    const lost = new Error("terminated at handoff");
+    let listenersAtHandoff = -1;
+    let ran = false;
+    const db = {
+      connect: (
+        callback: (
+          error: Error | undefined,
+          client: MockClient,
+          done: (error?: Error) => void
+        ) => void
+      ) => {
+        callback(undefined, client, (error) => client.release(error));
+        // Synchronously after the pool handed the client over, before any awaiting code resumes.
+        listenersAtHandoff = client.listenerCount("error");
+        client.lose(lost);
+      },
+    } as unknown as NativeDb;
+    await expect(
+      withNativeClient(db, async () => {
+        ran = true;
+      })
+    ).rejects.toBe(lost);
+    expect(listenersAtHandoff).toBe(1);
+    expect(ran).toBe(false);
+    expect(client.unhandled).toEqual([]);
+    expect(client.releases).toEqual([lost]);
+    expect(client.listenerCount("error")).toBe(0);
+  });
+
+  it("handles an error that lands in a microtask after the callback and before the awaiting code resumes", async () => {
+    const client = new MockClient(() => ({ rows: [] }));
+    const lost = new Error("terminated in the gap");
+    const db = {
+      connect: (
+        callback: (
+          error: undefined,
+          client: MockClient,
+          done: (error?: Error) => void
+        ) => void
+      ) => {
+        callback(undefined, client, (error) => client.release(error));
+        queueMicrotask(() => client.lose(lost));
+      },
+    } as unknown as NativeDb;
+    await expect(withNativeClient(db, async () => 1)).rejects.toBe(lost);
+    expect(client.unhandled).toEqual([]);
+    expect(client.releases).toEqual([lost]);
+    expect(client.listenerCount("error")).toBe(0);
+  });
+
+  it("does not release when the pool's callback reports an error, and leaves no listener", async () => {
+    const client = new MockClient(() => ({ rows: [] }));
+    const db = {
+      connect: (callback: (error: Error, client: MockClient) => void) =>
+        callback(new Error("timeout exceeded"), client),
+    } as unknown as NativeDb;
+    await expect(withNativeClient(db, async () => 1)).rejects.toThrow(
+      "timeout exceeded"
+    );
+    expect(client.releases).toEqual([]);
+    expect(client.listenerCount("error")).toBe(0);
   });
 });
 

@@ -32,9 +32,8 @@ function fakeDb() {
         })
       );
     },
-    connect: async () => {
-      throw new Error("no client in this fake");
-    },
+    connect: (callback: (error: Error) => void) =>
+      callback(new Error("no client in this fake")),
   } as unknown as NativeDb;
   return { db, calls, pending };
 }
@@ -281,7 +280,20 @@ describe("the limiters' locks", () => {
       on: () => {},
       removeListener: () => {},
     };
-    const db = { connect: async () => client, query: client.query };
+    // Both forms of pg's connect: the web limiter awaits it, the native checkout passes a callback.
+    const db = {
+      connect: (
+        callback?: (
+          error: undefined,
+          client: typeof client,
+          done: () => void
+        ) => void
+      ) =>
+        callback
+          ? callback(undefined, client, client.release)
+          : Promise.resolve(client),
+      query: client.query,
+    };
     return { db: db as never, queries };
   }
   const lockOf = (queries: { text: string; values?: unknown[] }[]) =>

@@ -50,34 +50,89 @@ export class NativeUnavailable extends Error {
 
 export type NativeDb = Pick<Pool, "query" | "connect">;
 
+type Checkout = {
+  client: PoolClient;
+  release: (error?: Error) => void;
+  /** The first connection error seen since the client was handed over. */
+  lost: () => Error | undefined;
+  detach: () => void;
+};
+
+/**
+ * Checks a client out in the callback form of `connect`. pg-pool takes its own idle 'error' listener off the client just
+ * before it calls back, so the listener goes on inside the callback itself: no event can arrive between the pool letting go
+ * and this code listening, which an `await` on the promise form would allow (the continuation runs a microtask later).
+ */
+function checkout(db: NativeDb): Promise<Checkout> {
+  return new Promise((resolve, reject) => {
+    const connect = db.connect as unknown as (
+      callback: (
+        error: Error | undefined,
+        client: PoolClient | undefined,
+        done: (error?: Error) => void
+      ) => void
+    ) => void;
+    connect.call(db, (error, client, done) => {
+      if (error || !client) {
+        reject(error ?? new Error("native database returned no client"));
+        return;
+      }
+      let lost: Error | undefined;
+      const onError = (reported: Error) => {
+        lost ??=
+          reported instanceof Error ? reported : new Error(String(reported));
+      };
+      try {
+        client.on("error", onError);
+        resolve({
+          client,
+          release: done,
+          lost: () => lost,
+          detach: () => client.removeListener("error", onError),
+        });
+      } catch (thrown) {
+        // Nothing can be done with this client: hand it back as broken so the pool discards it.
+        const failure =
+          thrown instanceof Error ? thrown : new Error(String(thrown));
+        try {
+          client.removeListener("error", onError);
+          done(failure);
+        } finally {
+          reject(failure);
+        }
+      }
+    });
+  });
+}
+
 /**
  * Checks a client out of the native pool for `work`, with an 'error' listener on it for the whole checkout (a pooled client
- * has none while it is checked out, so a lost connection would otherwise be an unhandled event). The client goes back to the
- * pool, and the listener comes off, exactly once. A client whose work failed, or that reported a connection error at any
- * point, is released with that error, so the pool discards it. `work`'s own failure is what the caller sees; a connection
- * error never replaces it, and one that arrives while `work` still succeeds only retires the client.
+ * has none while it is checked out, so a lost connection would otherwise be an unhandled event). The listener is attached
+ * synchronously when the pool hands the client over. The client goes back to the pool, and the listener comes off, exactly
+ * once; the pool's own idle listener goes back on during the release, so the client is never without one. A client whose
+ * work failed, or that reported a connection error at any point, is released with that error, so the pool discards it. A
+ * connection error that arrives before `work` starts means `work` never runs on that client. `work`'s own failure is what
+ * the caller sees; a connection error never replaces it, and one that arrives while `work` still succeeds only retires the
+ * client.
  */
 export async function withNativeClient<T>(
   db: NativeDb,
   work: (client: PoolClient) => Promise<T>
 ): Promise<T> {
-  const client = await db.connect();
-  let lost: Error | undefined;
-  const onError = (error: Error) => {
-    lost ??= error instanceof Error ? error : new Error(String(error));
-  };
-  client.on("error", onError);
+  const held = await checkout(db);
   let failure: Error | undefined;
   try {
-    return await work(client);
+    const early = held.lost();
+    if (early) throw early;
+    return await work(held.client);
   } catch (error) {
     failure = error instanceof Error ? error : new Error(String(error));
     throw error;
   } finally {
     try {
-      client.release(failure ?? lost);
+      held.release(failure ?? held.lost());
     } finally {
-      client.removeListener("error", onError);
+      held.detach();
     }
   }
 }
