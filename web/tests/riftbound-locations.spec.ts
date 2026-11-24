@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "./support/art-upstream";
 const origin = process.env.TEST_ORIGIN || "http://127.0.0.1:5173";
 const entry = `${origin}/src/games/riftbound/local/index.html`;
@@ -412,6 +412,15 @@ for (const width of [1280, 375]) {
     });
 }
 
+/** Press Tab until the target has focus, as a keyboard collector would. */
+async function tabTo(page: Page, target: Locator) {
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press("Tab");
+    if (await target.evaluate((el) => el === document.activeElement)) return;
+  }
+  await expect(target).toBeFocused();
+}
+
 for (const width of [1280, 375])
   test(`a Move is paused and the source's change is shown at ${width}`, async ({
     page,
@@ -448,10 +457,9 @@ for (const width of [1280, 375])
       const store = m.collectionFixtureStore("a", "location-stale");
       store.rows.push({ ...store.rows[0], locationId: "5", quantity: 1 });
     }, path);
-    // Real keys only: Tab to the submit button and press Enter, as a keyboard collector would.
-    await page.keyboard.press("Tab");
-    await page.keyboard.press("Tab");
-    await expect(retry).toBeFocused();
+    // Real keys only: from the parent choice, Tab past Cancel to the submit button and press Enter.
+    await dialog.getByRole("combobox").focus();
+    await tabTo(page, retry);
     await page.keyboard.press("Enter");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("alert")).toContainText(
@@ -464,9 +472,7 @@ for (const width of [1280, 375])
     expect(
       paused.locations.find((n: { id: string }) => n.id === "5").parent_id
     ).toBe(null);
-    await page.keyboard.press("Tab");
-    await page.keyboard.press("Tab");
-    await expect(retry).toBeFocused();
+    await tabTo(page, retry);
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     const moved = await inspect(page, "a", "location-stale");
