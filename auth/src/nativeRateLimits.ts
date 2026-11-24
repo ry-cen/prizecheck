@@ -1,5 +1,5 @@
 import { ipKey } from "./rateLimits.js";
-import type { NativeDb } from "./nativeStore.js";
+import { withNativeClient, type NativeDb } from "./nativeStore.js";
 
 // The native sign-in limits (NATIVE_SIGN_IN only): consents and code exchanges per trusted IP, persisted as sha256 keys in
 // their own table, native_rate_event, and serialized under their own advisory lock, on the native pool. Nothing here shares
@@ -29,37 +29,33 @@ async function admit(
   max: number
 ): Promise<boolean> {
   const key = ipKey(ip);
-  const client = await db.connect();
   let permitted = false;
-  let failure: Error | undefined;
-  try {
-    await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock($1)", [
-      NATIVE_RATE_EVENT_LOCK,
-    ]);
-    const { rows } = await client.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM native_rate_event WHERE kind=$1 AND ip_key=$2 AND created_at > now()-interval '1 hour'`,
-      [kind, key]
-    );
-    permitted = rows[0].n < max;
-    if (permitted) {
-      await client.query(
-        "INSERT INTO native_rate_event(kind,ip_key) VALUES($1,$2)",
+  await withNativeClient(db, async (client) => {
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock($1)", [
+        NATIVE_RATE_EVENT_LOCK,
+      ]);
+      const { rows } = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM native_rate_event WHERE kind=$1 AND ip_key=$2 AND created_at > now()-interval '1 hour'`,
         [kind, key]
       );
-      await client.query(
-        "DELETE FROM native_rate_event WHERE created_at < now()-interval '2 days'"
-      );
+      permitted = rows[0].n < max;
+      if (permitted) {
+        await client.query(
+          "INSERT INTO native_rate_event(kind,ip_key) VALUES($1,$2)",
+          [kind, key]
+        );
+        await client.query(
+          "DELETE FROM native_rate_event WHERE created_at < now()-interval '2 days'"
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
     }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    failure = error instanceof Error ? error : new Error(String(error));
-    throw error;
-  } finally {
-    // A failed connection is destroyed rather than returned to the pool.
-    client.release(failure);
-  }
+  });
   return permitted;
 }
 

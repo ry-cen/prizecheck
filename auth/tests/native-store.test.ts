@@ -278,6 +278,8 @@ describe("the limiters' locks", () => {
         return { rows: [] };
       },
       release: () => {},
+      on: () => {},
+      removeListener: () => {},
     };
     const db = { connect: async () => client, query: client.query };
     return { db: db as never, queries };

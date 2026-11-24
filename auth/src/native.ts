@@ -7,7 +7,11 @@ import {
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { rawPathOf } from "./pokemonRoutes.js";
 import type { NativeRateLimits } from "./nativeRateLimits.js";
-import { NativeUnavailable, type NativeStore } from "./nativeStore.js";
+import {
+  NativeUnavailable,
+  withNativeClient,
+  type NativeStore,
+} from "./nativeStore.js";
 
 // Native iOS sign-in (opt-in, nonprod only; NATIVE_SIGN_IN=on). The app opens /auth/native/start in an
 // ASWebAuthenticationSession with a PKCE challenge and a state it made on the device. The collector signs in through the
@@ -470,39 +474,36 @@ export function createNative(deps: NativeDeps): Native {
             ))
           )
             return { kind: "limited" };
-          const client = await db.connect();
-          let failureCause: Error | undefined;
-          try {
-            await client.query("BEGIN");
-            // A wrong verifier matches no row, so it deletes nothing and the code still works with the right one.
-            const grant = await client.query<{ user_id: string }>(
-              `DELETE FROM native_grant WHERE code_hash=$1 AND challenge=$2 AND expires_at > now() RETURNING user_id`,
-              [sha256Hex(code), sha256Base64Url(verifier)]
-            );
-            if (grant.rowCount !== 1) {
-              await client.query("ROLLBACK");
-              return { kind: "invalid_grant" };
-            }
-            // Expired or revoked more than a day ago: nothing reads these rows again.
-            await client.query(
-              `DELETE FROM native_credential
+          return withNativeClient(db, async (client): Promise<Outcome> => {
+            try {
+              await client.query("BEGIN");
+              // A wrong verifier matches no row, so it deletes nothing and the code still works with the right one.
+              const grant = await client.query<{ user_id: string }>(
+                `DELETE FROM native_grant WHERE code_hash=$1 AND challenge=$2 AND expires_at > now() RETURNING user_id`,
+                [sha256Hex(code), sha256Base64Url(verifier)]
+              );
+              if (grant.rowCount !== 1) {
+                await client.query("ROLLBACK");
+                return { kind: "invalid_grant" };
+              }
+              // Expired or revoked more than a day ago: nothing reads these rows again.
+              await client.query(
+                `DELETE FROM native_credential
              WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '1 day'`
-            );
-            const credential = await client.query<{ expires_at: Date }>(
-              `INSERT INTO native_credential(token_hash,user_id,scope,expires_at)
+              );
+              const credential = await client.query<{ expires_at: Date }>(
+                `INSERT INTO native_credential(token_hash,user_id,scope,expires_at)
              VALUES($1,$2,'collection:read', now() + interval '24 hours') RETURNING expires_at`,
-              [sha256Hex(issued), grant.rows[0].user_id]
-            );
-            commitPoint();
-            await client.query("COMMIT");
-            return { kind: "issued", expires: credential.rows[0].expires_at };
-          } catch (error) {
-            await client.query("ROLLBACK").catch(() => {});
-            failureCause = error instanceof Error ? error : new Error("failed");
-            throw error;
-          } finally {
-            client.release(failureCause);
-          }
+                [sha256Hex(issued), grant.rows[0].user_id]
+              );
+              commitPoint();
+              await client.query("COMMIT");
+              return { kind: "issued", expires: credential.rows[0].expires_at };
+            } catch (error) {
+              await client.query("ROLLBACK").catch(() => {});
+              throw error;
+            }
+          });
         }
       );
     } catch (error) {

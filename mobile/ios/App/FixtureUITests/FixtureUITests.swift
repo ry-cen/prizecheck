@@ -140,8 +140,9 @@ final class AuthNativeSignInUITests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        // Fault off first, so a failed run cannot leave the stub refusing sign-outs; then terminate.
+        // Fault off and hold released first, so a failed run cannot leave the stub refusing or parking sign-outs; then terminate.
         stub("POST", "/fixture/sign-out/ok")
+        stub("POST", "/fixture/sign-out/release")
         app.terminate()
     }
 
@@ -172,6 +173,16 @@ final class AuthNativeSignInUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         }
         XCTFail("stub \(what): \(last)")
+    }
+
+    /// Sends the app to the background and back, a real activation, which is one trigger for the sign-out retry.
+    private func backgroundAndActivate() {
+        XCUIDevice.shared.press(.home)
+        let background = NSPredicate { _, _ in self.app.state != .runningForeground }
+        expectation(for: background, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
     }
 
     /// Taps Sign in, walks the sheet through Allow, and waits for the first card.
@@ -234,14 +245,23 @@ final class AuthNativeSignInUITests: XCTestCase {
         XCTAssertFalse(app.buttons[firstCard].exists)
         waitForStub("launch retry of both tokens") { ($0["refused"] ?? -1) >= base + 2 && ($0["live"] ?? -1) == 2 }
 
-        // 6. The gateway recovers; the next activation revokes every pending token.
+        // 6. A trigger that arrives while a pass runs queues one follow-up pass. The stub parks sign-outs, so the overlap
+        // is made, not raced: the refusal counter moves only when the stub answers, after the app can see the answer.
+        stub("POST", "/fixture/sign-out/hold")
+        base = stub("GET", "/fixture/state")["refused"] ?? 0
+        backgroundAndActivate()
+        waitForStub("a pass parked on its first token") { ($0["held"] ?? -1) == 1 }
+        // Parked: nothing was answered or counted, and both tokens are still live.
+        let parked = stub("GET", "/fixture/state")
+        XCTAssertEqual(parked["refused"], base)
+        XCTAssertEqual(parked["live"], 2)
+        // The overlapping trigger. The gateway then recovers, but the parked answer was decided as a refusal.
+        backgroundAndActivate()
         stub("POST", "/fixture/sign-out/ok")
-        XCUIDevice.shared.press(.home)
-        let background = NSPredicate { _, _ in self.app.state != .runningForeground }
-        expectation(for: background, evaluatedWith: app)
-        waitForExpectations(timeout: 10)
-        app.activate()
-        waitForStub("foreground retry revokes both") { ($0["live"] ?? -1) == 0 && ($0["confirmed"] ?? -1) == 2 }
+        stub("POST", "/fixture/sign-out/release")
+        // The running pass ends with the first token refused and the second revoked; only the queued pass can revoke the
+        // first, with no further trigger from the test.
+        waitForStub("queued pass revokes both") { ($0["live"] ?? -1) == 0 && ($0["confirmed"] ?? -1) == 2 && ($0["refused"] ?? -1) == base + 1 }
 
         // 7. Relaunch: still signed out.
         app.terminate()

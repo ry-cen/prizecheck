@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 
 // Every database operation of native sign-in runs here, on its own small pool and behind admission, so an unauthenticated
 // flood of native requests can neither queue SQL on the web sign-in pool (auth.ts), nor wait on the web limiter's global
@@ -49,6 +49,38 @@ export class NativeUnavailable extends Error {
 }
 
 export type NativeDb = Pick<Pool, "query" | "connect">;
+
+/**
+ * Checks a client out of the native pool for `work`, with an 'error' listener on it for the whole checkout (a pooled client
+ * has none while it is checked out, so a lost connection would otherwise be an unhandled event). The client goes back to the
+ * pool, and the listener comes off, exactly once. A client whose work failed, or that reported a connection error at any
+ * point, is released with that error, so the pool discards it. `work`'s own failure is what the caller sees; a connection
+ * error never replaces it, and one that arrives while `work` still succeeds only retires the client.
+ */
+export async function withNativeClient<T>(
+  db: NativeDb,
+  work: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await db.connect();
+  let lost: Error | undefined;
+  const onError = (error: Error) => {
+    lost ??= error instanceof Error ? error : new Error(String(error));
+  };
+  client.on("error", onError);
+  let failure: Error | undefined;
+  try {
+    return await work(client);
+  } catch (error) {
+    failure = error instanceof Error ? error : new Error(String(error));
+    throw error;
+  } finally {
+    try {
+      client.release(failure ?? lost);
+    } finally {
+      client.removeListener("error", onError);
+    }
+  }
+}
 
 export type NativeStore = {
   /** Runs `work` on the native pool in `kind`'s admission class. `work` takes and releases its own client. */

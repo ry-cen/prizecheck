@@ -277,6 +277,8 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
     /// Bumped by every sign-in start and every sign-out, so an exchange that finishes after a sign-out can tell it is stale.
     private var signInGeneration = 0
     private var revocationPassRunning = false
+    /// Set by a trigger that arrives while a pass runs; the pass that ends then is followed by exactly one more.
+    private var revocationFollowUpQueued = false
     private var authSession: ASWebAuthenticationSession?
 
     // MARK: Plugin methods
@@ -601,9 +603,15 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
         revokePending()
     }
 
-    /// Sends every pending revocation, at most one pass at a time. Main queue only.
+    /// Sends every pending revocation, at most one pass at a time. A trigger that arrives while a pass runs (an
+    /// activation, a sign-in or a sign-out) is not lost: it queues exactly one follow-up pass, however many such
+    /// triggers arrive, and that pass starts when the running one ends. A follow-up is queued only by a trigger, never by
+    /// a failed attempt, so a gateway that keeps failing costs one pass per trigger and never loops. Main queue only.
     private func revokePending() {
-        guard !revocationPassRunning else { return }
+        guard !revocationPassRunning else {
+            revocationFollowUpQueued = true
+            return
+        }
         revocationPassRunning = true
         revokeNext(attempted: [])
     }
@@ -612,6 +620,10 @@ public final class NativeSignInPlugin: CAPInstancePlugin, CAPBridgedPlugin {
     private func revokeNext(attempted: Set<String>) {
         guard let next = store?.pendingRevocations().first(where: { !attempted.contains($0.token) }) else {
             revocationPassRunning = false
+            if revocationFollowUpQueued {
+                revocationFollowUpQueued = false
+                revokePending()
+            }
             return
         }
         sendRevocation(next.token) { confirmed in

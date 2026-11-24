@@ -82,7 +82,9 @@ function routeLabel(path, method) {
   if (
     (path === "/fixture/state" && method === "GET") ||
     (path === "/fixture/sign-out/fail" && method === "POST") ||
-    (path === "/fixture/sign-out/ok" && method === "POST")
+    (path === "/fixture/sign-out/ok" && method === "POST") ||
+    (path === "/fixture/sign-out/hold" && method === "POST") ||
+    (path === "/fixture/sign-out/release" && method === "POST")
   )
     return "fixture";
   return "other";
@@ -115,10 +117,16 @@ export function nativeFixture({
   const LIMITS = { native_approve: 20, native_token: 30 };
   let origin = `http://127.0.0.1:${PORT}`;
   // Sign-out test control (loopback stub only; the gateway has no such route): while `failSignOut` is on, sign-out answers
-  // 503 and revokes nothing. `refused` counts those 503s, `confirmed` the 204s that revoked a live credential.
+  // 503 and revokes nothing. `refused` counts those 503s, `confirmed` the 204s that revoked a live credential, `held` the sign-outs parked by
+  // /fixture/sign-out/hold and not yet answered.
   let failSignOut = false;
   let refused = 0;
   let confirmed = 0;
+  // While `holdSignOut` is on, a well-formed sign-out is parked: its answer is decided on arrival (503 if the fault is on
+  // then, else 204) but sent, and counted in `refused` or `confirmed` and applied to the credential, only on release. A test
+  // can then create an overlap with a running sign-out pass, and see the counters move only when the app can see the answer.
+  let holdSignOut = false;
+  const parked = [];
 
   function limited(kind, request) {
     const ip = request.socket.remoteAddress ?? "unknown";
@@ -392,11 +400,24 @@ export function nativeFixture({
       request.headers.origin !== undefined
     )
       return json(response, 400, { error: "invalid_request" });
-    if (failSignOut) {
+    const answer = { response, fail: failSignOut, token: match[1] };
+    if (holdSignOut) {
+      parked.push(answer);
+      // A caller that gives up before the release takes its request out of the queue; nothing is counted for it.
+      response.on("close", () => {
+        const at = parked.indexOf(answer);
+        if (at >= 0) parked.splice(at, 1);
+      });
+      return;
+    }
+    answerSignOut(answer);
+  }
+  function answerSignOut({ response, fail, token }) {
+    if (fail) {
       refused += 1;
       return json(response, 503, { error: "Service temporarily unavailable" });
     }
-    const credential = credentialFor(sha256(match[1]).toString("hex"));
+    const credential = credentialFor(sha256(token).toString("hex"));
     if (credential) {
       credential.revoked = true;
       confirmed += 1;
@@ -408,10 +429,15 @@ export function nativeFixture({
   function control(path, response) {
     if (path === "/fixture/sign-out/fail") failSignOut = true;
     if (path === "/fixture/sign-out/ok") failSignOut = false;
+    if (path === "/fixture/sign-out/hold") holdSignOut = true;
+    if (path === "/fixture/sign-out/release") {
+      holdSignOut = false;
+      for (const answer of parked.splice(0)) answerSignOut(answer);
+    }
     let live = 0;
     for (const credential of credentials.values())
       if (!credential.revoked && credential.expires > now()) live += 1;
-    json(response, 200, { live, refused, confirmed });
+    json(response, 200, { live, refused, confirmed, held: parked.length });
   }
 
   const server = createServer((request, response) => {

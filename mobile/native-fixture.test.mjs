@@ -480,11 +480,17 @@ test("an injected sign-out failure answers 503, keeps the credential, and a late
     const b = await signIn(stub);
     const state = async (method = "GET", path = "/fixture/state") =>
       JSON.parse((await stub.call(method, path)).text);
-    assert.deepEqual(await state(), { live: 2, refused: 0, confirmed: 0 });
+    assert.deepEqual(await state(), {
+      live: 2,
+      refused: 0,
+      confirmed: 0,
+      held: 0,
+    });
     assert.deepEqual(await state("POST", "/fixture/sign-out/fail"), {
       live: 2,
       refused: 0,
       confirmed: 0,
+      held: 0,
     });
     const signOut = (token) =>
       stub.call("POST", "/auth/native/sign-out", {
@@ -498,14 +504,127 @@ test("an injected sign-out failure answers 503, keeps the credential, and a late
       400
     );
     assert.equal((await read(stub, a.token)).status, 200);
-    assert.deepEqual(await state(), { live: 2, refused: 2, confirmed: 0 });
+    assert.deepEqual(await state(), {
+      live: 2,
+      refused: 2,
+      confirmed: 0,
+      held: 0,
+    });
     await state("POST", "/fixture/sign-out/ok");
     assert.equal((await signOut(a.token)).status, 204);
     assert.equal((await read(stub, a.token)).status, 401);
-    assert.deepEqual(await state(), { live: 1, refused: 2, confirmed: 1 });
+    assert.deepEqual(await state(), {
+      live: 1,
+      refused: 2,
+      confirmed: 1,
+      held: 0,
+    });
     // A second retry of the same token is 204 and leaves `confirmed` alone.
     assert.equal((await signOut(a.token)).status, 204);
-    assert.deepEqual(await state(), { live: 1, refused: 2, confirmed: 1 });
+    assert.deepEqual(await state(), {
+      live: 1,
+      refused: 2,
+      confirmed: 1,
+      held: 0,
+    });
+  } finally {
+    await stub.close();
+  }
+});
+
+test("a held sign-out is answered, counted and applied only on release, with the answer decided on arrival", async () => {
+  const stub = await boot();
+  try {
+    const a = await signIn(stub);
+    const b = await signIn(stub);
+    const state = async (method = "GET", path = "/fixture/state") =>
+      JSON.parse((await stub.call(method, path)).text);
+    const signOut = (token) =>
+      stub.call("POST", "/auth/native/sign-out", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+    const settled = (promise) =>
+      Promise.race([
+        promise.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 100)),
+      ]);
+    await state("POST", "/fixture/sign-out/fail");
+    await state("POST", "/fixture/sign-out/hold");
+    const first = signOut(a.token);
+    // Parked: nothing is answered, counted or revoked yet.
+    for (let at = 0; at < 50 && (await state()).held < 1; at++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(await state(), {
+      live: 2,
+      refused: 0,
+      confirmed: 0,
+      held: 1,
+    });
+    assert.equal(await settled(first), false);
+    // The gateway recovers while the first request is parked: its answer was decided on arrival and stays 503.
+    await state("POST", "/fixture/sign-out/ok");
+    const second = signOut(b.token);
+    for (let at = 0; at < 50 && (await state()).held < 2; at++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(await state(), {
+      live: 2,
+      refused: 0,
+      confirmed: 0,
+      held: 2,
+    });
+    assert.equal(await settled(second), false);
+    // A bad shape is refused at once, even while holding, and is not parked.
+    assert.equal(
+      (await stub.call("POST", "/auth/native/sign-out")).status,
+      400
+    );
+    // Release answers both and moves the counters, and later sign-outs are not held.
+    assert.deepEqual(await state("POST", "/fixture/sign-out/release"), {
+      live: 1,
+      refused: 1,
+      confirmed: 1,
+      held: 0,
+    });
+    assert.equal((await first).status, 503);
+    assert.equal((await second).status, 204);
+    assert.equal((await signOut(a.token)).status, 204);
+    assert.deepEqual(await state(), {
+      live: 0,
+      refused: 1,
+      confirmed: 2,
+      held: 0,
+    });
+  } finally {
+    await stub.close();
+  }
+});
+
+test("a held sign-out whose caller gives up is dropped from the queue and counts nothing", async () => {
+  const stub = await boot();
+  try {
+    const a = await signIn(stub);
+    const state = async (method = "GET", path = "/fixture/state") =>
+      JSON.parse((await stub.call(method, path)).text);
+    await state("POST", "/fixture/sign-out/hold");
+    const controller = new AbortController();
+    const abandoned = fetch(stub.origin + "/auth/native/sign-out", {
+      method: "POST",
+      headers: { authorization: `Bearer ${a.token}` },
+      signal: controller.signal,
+    }).catch(() => "aborted");
+    for (let at = 0; at < 50 && (await state()).held < 1; at++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal((await state()).held, 1);
+    controller.abort();
+    assert.equal(await abandoned, "aborted");
+    for (let at = 0; at < 50 && (await state()).held > 0; at++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(await state("POST", "/fixture/sign-out/release"), {
+      live: 1,
+      refused: 0,
+      confirmed: 0,
+      held: 0,
+    });
   } finally {
     await stub.close();
   }
