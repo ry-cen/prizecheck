@@ -244,6 +244,10 @@ export function Workspace({
   // a nesting move, another tab), falls back to All owned; the gallery can't list a folder.
   const current = chosen && !isFolder(chosen) ? chosen : undefined;
   const heading = current?.name ?? "All owned";
+  // A Location link the tree hasn't shown yet (the first read is out or failed, or a missing id waits on the second
+  // read that confirms it): Add cards waits, so it opens set to that Location rather than with the picker. A Location
+  // that is really gone falls back to All owned, where Add cards opens with the picker as usual.
+  const locationUnresolved = view !== "all" && !current;
   const galleryView: WorkspaceView = current ? view : "all";
   // Typing settles for 250 ms before the gallery reloads. The selection scope ignores `sort`, so
   // sorting keeps the selection and search or filter changes clear it.
@@ -841,6 +845,7 @@ export function Workspace({
               <Button
                 ref={addOpener}
                 aria-haspopup="dialog"
+                disabled={locationUnresolved}
                 onClick={() => setAdding({ fixed: current?.id ?? null })}
               >
                 Add cards
