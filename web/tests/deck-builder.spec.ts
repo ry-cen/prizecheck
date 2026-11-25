@@ -523,13 +523,20 @@ test.describe("on a desktop", () => {
     // The region's accessible name is "Pokémon , 5 cards": Chromium pads the hidden ", " span with a space, so match
     // the group title only, as the heading check above covers the count.
     const line = page.getByRole("region", { name: /^Pokémon\b/ });
-    await expect(line.getByRole("button")).toHaveCount(5);
-    await expect(line.getByRole("button").first()).toHaveAccessibleName(
-      /^Charmander, /
-    );
-    await expect(line.getByRole("button").last()).toHaveAccessibleName(
-      /^Hisuian Growlithe, /
-    );
+    // The line's hover − / + pairs are buttons too, so count the card tiles by their "copy N of M" names and check
+    // the whole order: Charmander's two copies first, then the single copies by name.
+    const tiles = line.getByRole("button", { name: /, copy \d+ of \d+: / });
+    await expect(tiles).toHaveCount(5);
+    const order = [
+      /^Charmander, Alpha Set · 4 · Normal, copy 1 of 2: /,
+      /^Charmander, Alpha Set · 4 · Normal, copy 2 of 2: /,
+      /^Charizard ex, Alpha Set · 6 · Normal, copy 1 of 1: /,
+      /^Hisuian Arcanine, Alpha Set · 71 · Normal, copy 1 of 1: /,
+      /^Hisuian Growlithe, Alpha Set · 70 · Normal, copy 1 of 1: /,
+    ];
+    for (const [index, name] of order.entries()) {
+      await expect(tiles.nth(index)).toHaveAccessibleName(name);
+    }
   });
 
   test("an address for no Deck shows Deck not found, with a way back to every Deck", async ({
