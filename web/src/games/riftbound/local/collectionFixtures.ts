@@ -1,6 +1,7 @@
 import type { TreeNode } from "../../../location_generated";
 import type { CollectionReader, HoldingRow } from "../collection";
 import { expandCopies, pageHoldings } from "../collection";
+import { locationCommands } from "./locationCommands";
 import { editions } from "./fixtures";
 export type CollectionScenario =
   | "normal"
@@ -9,12 +10,29 @@ export type CollectionScenario =
   | "slow"
   | "write-failure"
   | "write-slow"
-  | "stale";
+  | "stale"
+  | "location-failure"
+  | "location-slow"
+  | "location-stale"
+  | "location-stale-refused"
+  | "location-stale-failed";
 export type FixtureStore = {
   locations: TreeNode[];
   rows: HoldingRow[];
   revision: number;
 };
+export type LocationFixtureChange =
+  | { kind: "stock" | "delete"; id: string }
+  | { kind: "cycle"; id: string; parentId: string };
+const pendingLocationChanges = new Map<string, LocationFixtureChange>();
+/** Test-only concurrent-edit hook, consumed immediately before the next Location command. */
+export function queueLocationFixtureChange(
+  owner: "a" | "b",
+  change: LocationFixtureChange,
+  scenario: CollectionScenario = "normal"
+) {
+  pendingLocationChanges.set(storeKey(owner, scenario), change);
+}
 const stores = new Map<string, FixtureStore>();
 const storeKey = (owner: string, scenario: CollectionScenario) =>
   JSON.stringify([owner, scenario]);
@@ -116,7 +134,16 @@ export function collectionFixtureReader(
     scope: "riftbound",
     owner,
     locations: (signal) =>
-      read(structuredClone(store.locations), signal, "locations"),
+      read(
+        store.locations.map((n) => ({
+          ...n,
+          copyCount: store.rows
+            .filter((r) => r.locationId === n.id)
+            .reduce((sum, r) => sum + r.quantity, 0),
+        })),
+        signal,
+        "locations"
+      ),
     holdings: (id, signal) =>
       read(
         store.rows.filter((r) => r.edition.id === id),
@@ -169,6 +196,7 @@ export function collectionFixtureStore(
 }
 export function resetCollectionFixtures() {
   stores.clear();
+  pendingLocationChanges.clear();
   writers.clear();
 }
 
@@ -200,6 +228,7 @@ export function collectionFixtureWriter(
   const replay = new Map<string, { payload: string; result: unknown }>();
   let failed = false;
   let stale = false;
+  let edits = 0;
   const row = (location: string, edition: string) =>
     store.rows.find(
       (r) => r.locationId === location && r.edition.id === edition
@@ -242,7 +271,10 @@ export function collectionFixtureWriter(
           options.signal.removeEventListener("abort", abort);
           resolve();
         },
-        scenario === "write-slow" ? 1600 : 120
+        scenario === "write-slow" ||
+          (scenario === "location-slow" && action.endsWith("Location"))
+          ? 1600
+          : 120
       );
       if (options.signal.aborted) abort();
       else options.signal.addEventListener("abort", abort, { once: true });
@@ -264,7 +296,11 @@ export function collectionFixtureWriter(
         throw new CollectionError("IDEMPOTENCY_KEY_REUSED");
       return structuredClone(previous.result) as T;
     }
-    if (scenario === "write-failure" && !failed) {
+    if (
+      (scenario === "write-failure" ||
+        (scenario === "location-failure" && action.endsWith("Location"))) &&
+      !failed
+    ) {
       failed = true;
       throw new Error("Synthetic write failure");
     }
@@ -275,6 +311,64 @@ export function collectionFixtureWriter(
     ) {
       stale = true;
       throw new CollectionError("STALE_HOLDING");
+    }
+    const staleThen =
+      scenario === "location-stale-refused" ||
+      scenario === "location-stale-failed";
+    if (staleThen && action === "editLocation" && ++edits === 2)
+      throw scenario === "location-stale-refused"
+        ? new CollectionError("LOCATION_NAME_CONFLICT")
+        : new Error("Synthetic write failure");
+    if (
+      (scenario === "location-stale" || staleThen) &&
+      !stale &&
+      action === "editLocation"
+    ) {
+      stale = true;
+      const edit = input as { id: string; parentId?: string | null };
+      const target = store.locations.find(
+        (n) => n.id === (edit.parentId ?? edit.id)
+      );
+      if (target) target.version++;
+      throw new CollectionError("STALE_LOCATION");
+    }
+    const concurrent = action.endsWith("Location")
+      ? pendingLocationChanges.get(key)
+      : undefined;
+    if (concurrent) {
+      pendingLocationChanges.delete(key);
+      if (concurrent.kind === "stock")
+        store.rows.push({
+          edition: editions[0],
+          locationId: concurrent.id,
+          quantity: 1,
+          version: store.revision,
+        });
+      else if (concurrent.kind === "cycle") {
+        const node = store.locations.find((n) => n.id === concurrent.id)!;
+        node.parent_id = concurrent.parentId;
+        store.locations.find((n) => n.id === concurrent.parentId)!.kind =
+          "organization";
+        for (const descendant of store.locations) {
+          let above = descendant.parent_id;
+          descendant.depth = 1;
+          while (above) {
+            descendant.depth++;
+            above = store.locations.find((n) => n.id === above)!.parent_id;
+          }
+        }
+      } else {
+        const removed = new Set([concurrent.id]);
+        let count = -1;
+        while (count !== removed.size) {
+          count = removed.size;
+          for (const node of store.locations)
+            if (node.parent_id && removed.has(node.parent_id))
+              removed.add(node.id);
+        }
+        store.locations = store.locations.filter((n) => !removed.has(n.id));
+        store.rows = store.rows.filter((r) => !removed.has(r.locationId));
+      }
     }
     const result = apply();
     replay.set(requestKey, {
@@ -320,6 +414,7 @@ export function collectionFixtureWriter(
       }
   }
   const writer: CollectionWriter = {
+    ...locationCommands(store, command),
     owner,
     add: (input, options) =>
       command("add", input, options, () => {
