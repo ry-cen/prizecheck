@@ -523,9 +523,10 @@ test.describe("on a desktop", () => {
     // The region's accessible name is "Pokémon , 5 cards": Chromium pads the hidden ", " span with a space, so match
     // the group title only, as the heading check above covers the count.
     const line = page.getByRole("region", { name: /^Pokémon\b/ });
-    // The line's hover − / + pairs are buttons too, so count the card tiles by their "copy N of M" names and check
-    // the whole order: Charmander's two copies first, then the single copies by name.
-    const tiles = line.getByRole("button", { name: /, copy \d+ of \d+: / });
+    // The line's hover − / + pairs are buttons too, so find the card tiles by the data-edition-id only they carry
+    // (not by their names, which the order below checks) and check the whole order: Charmander's two copies first,
+    // then the single copies by name.
+    const tiles = line.locator("button[data-edition-id]");
     await expect(tiles).toHaveCount(5);
     const order = [
       /^Charmander, Alpha Set · 4 · Normal, copy 1 of 2: /,
@@ -536,6 +537,20 @@ test.describe("on a desktop", () => {
     ];
     for (const [index, name] of order.entries()) {
       await expect(tiles.nth(index)).toHaveAccessibleName(name);
+    }
+    // Each of the four lines keeps its − and + pair, in the page's accessible tree though unhovered.
+    for (const card of [
+      "Charmander",
+      "Charizard ex",
+      "Hisuian Arcanine",
+      "Hisuian Growlithe",
+    ]) {
+      await expect(
+        line.getByRole("button", { name: `Remove one ${card}`, exact: true })
+      ).toHaveCount(1);
+      await expect(
+        line.getByRole("button", { name: `Add one ${card}`, exact: true })
+      ).toHaveCount(1);
     }
   });
 
