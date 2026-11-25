@@ -41,7 +41,15 @@ print(json.dumps(page_world(sys.argv[1], sys.argv[2])))`,
       owner,
       prefix,
     ],
-    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+    {
+      env: {
+        ...process.env,
+        PYTHONPATH: "api:api/tests",
+        // Saving a deck queues a background fetch of its card art; the process would wait for it to finish on exit
+        // (seconds against the real art host), though the browser stubs that host. The API tests turn it off too.
+        ART_WARM_UP: "0",
+      },
+    }
   );
   return {
     prefix,
@@ -340,9 +348,17 @@ for (const viewport of [
       await expect(bar).toContainText(
         "Hidden from Discover: not legal in Standard"
       );
+    });
+
+    test("signed in, the owner revokes an orphan Published Deck in two steps and Open Deck goes to the deck builder", async ({
+      page,
+    }) => {
+      const owner = await signIn(page);
+      const world = pageWorld(owner);
+      const bar = page.getByRole("region", { name: /^Your Published Deck/ });
 
       // An orphan: its Deck is gone, so there is no Open Deck. Revoke takes two steps.
-      await page.goto(`${ORIGIN}/published/${world.tokens.Orphan}`);
+      await open(page, world.tokens.Orphan);
       await expect(heading(page)).toHaveText(`${world.prefix} Orphan`);
       await expect(bar.getByRole("heading", { level: 2 })).toHaveText(
         "Your Published Deck · Unlisted · v1"

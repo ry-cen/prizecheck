@@ -33,7 +33,15 @@ from test_discover_listing import listing_world
 print(json.dumps(listing_world(sys.argv[1])))`,
       prefix,
     ],
-    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+    {
+      env: {
+        ...process.env,
+        PYTHONPATH: "api:api/tests",
+        // Saving a deck queues a background fetch of its card art; the process would wait for it to finish on exit
+        // (seconds against the real art host), though the browser stubs that host. The API tests turn it off too.
+        ART_WARM_UP: "0",
+      },
+    }
   );
   return {
     prefix,
