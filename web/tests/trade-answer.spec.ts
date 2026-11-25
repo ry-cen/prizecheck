@@ -220,13 +220,51 @@ async function story(
     audit: Awaited<ReturnType<typeof auditPage>>;
     secretOf: string[];
   }[] = [];
+  // A proposed Trade on screen reads its estimated value once, a moment after it is drawn. Leaving the page, or a step
+  // that ends the proposal, while that answer is still arriving cuts a body the audit must read, so each such view
+  // waits until its value read has ended: its body read by the audit in full, or the request failed.
+  const VALUE_PATH = "/api/pokemon/trades/value";
+  const valueReads = new Map<Page, { sent: number; ended: number }>();
+  const reads = (who: Page) => {
+    if (!valueReads.has(who)) valueReads.set(who, { sent: 0, ended: 0 });
+    return valueReads.get(who)!;
+  };
+  const isValue = (url: string) => new URL(url).pathname === VALUE_PATH;
   const attach = async (who: Page, secretOf: string[]) => {
+    who.on("request", (request) => {
+      if (isValue(request.url())) reads(who).sent += 1;
+    });
+    who.on("requestfailed", (request) => {
+      if (isValue(request.url())) reads(who).ended += 1;
+    });
     audits.push({
-      audit: await auditPage(who, (url) =>
-        /\/api\/(pokemon\/)?(social\/)?trade/.test(url)
+      audit: await auditPage(
+        who,
+        (url) => /\/api\/(pokemon\/)?(social\/)?trade/.test(url),
+        (response) => {
+          if (isValue(response.url())) reads(who).ended += 1;
+        }
       ),
       secretOf,
     });
+  };
+  /** Armed before the step that shows a proposed Trade, so earlier views' reads can't satisfy it. The returned wait,
+   * called once that Trade is drawn, passes when the view's value read was sent and then ended. */
+  const valueRead = (who: Page) => {
+    const { sent, ended } = reads(who);
+    return async () => {
+      await expect
+        .poll(() => reads(who).sent, {
+          message: "the proposed Trade asks for its value",
+        })
+        .toBeGreaterThan(sent);
+      await expect
+        .poll(() => reads(who).ended, {
+          message:
+            "the proposed Trade's value read ended, its body read by the audit",
+        })
+        .toBeGreaterThan(ended);
+    };
   };
   try {
     // Await durable capture before either signed-in shell can mount its kept lists.
@@ -258,6 +296,7 @@ async function story(
     const withdrawn = await propose(page, ashId, [[iono, 1]], []);
 
     // A: Ash opens the proposal and can accept immediately; Decline is tested on the other gift below.
+    const swapValue = valueRead(ash.page);
     await ash.page.goto(`${ORIGIN}/trades/${swap}`);
     await expect(heading(ash.page)).toHaveText(
       "Misty W sent you a Trade Proposal"
@@ -272,6 +311,7 @@ async function story(
     });
 
     // Accepting asks nothing: the proposal becomes a Trade, and Ash's Arven leaves both reads of his Trade List.
+    await swapValue();
     await ashMain.getByRole("button", { name: "Accept" }).click();
     await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
     await expect(heading(ash.page)).toBeFocused();
@@ -291,6 +331,7 @@ async function story(
     await expectOwnCopies(page, "Iono", "");
 
     // B: the ask for both Arven can't be accepted now: one is promised to the swap.
+    const askBothValue = valueRead(ash.page);
     await ash.page.goto(`${ORIGIN}/trades/${askBoth}`);
     await ashMain.getByRole("button", { name: "Accept" }).click();
     await expect(ashMain.getByRole("alert")).toHaveText(
@@ -300,9 +341,15 @@ async function story(
       "Misty W sent you a Trade Proposal"
     );
     expect((await tradeState(ash.page, askBoth)).state).toBe("proposed");
+    await askBothValue();
 
     // Ash declines one of the gifts, and Misty's Iono comes back to her Trade List and to his read of it.
+    const declinedValue = valueRead(ash.page);
     await ash.page.goto(`${ORIGIN}/trades/${declined}`);
+    await expect(heading(ash.page)).toHaveText(
+      "Misty W wants to give you 1 card"
+    );
+    await declinedValue();
     await ashMain.getByRole("button", { name: "Decline" }).focus();
     await ash.page.keyboard.press("Enter");
     const sure = ashMain.getByRole("group", { name: "Decline" });
@@ -340,11 +387,15 @@ async function story(
     await expectOnlyReport(page);
 
     // C: Withdraw asks once inline, while Ash has the gift open. Keep it leaves the proposal open.
+    const ashWithdrawnValue = valueRead(ash.page);
     await ash.page.goto(`${ORIGIN}/trades/${withdrawn}`);
     await expect(heading(ash.page)).toHaveText(
       "Misty W wants to give you 1 card"
     );
+    const mistyWithdrawnValue = valueRead(page);
     await page.goto(`${ORIGIN}/trades/${withdrawn}`);
+    await expect(more(page)).toBeVisible();
+    await mistyWithdrawnValue();
     const mistyMain = page.getByRole("main");
     let withdrawals = 0;
     const countWithdrawal = (request: import("@playwright/test").Request) => {
@@ -380,6 +431,7 @@ async function story(
     page.off("request", countWithdrawal);
     await expect(heading(page)).toBeFocused();
     // Ash's screen still shows the proposal he opened: his accept finds it changed, and the screen reads it again.
+    await ashWithdrawnValue();
     await ashMain.getByRole("button", { name: "Accept" }).click();
     await expect(ashMain.getByRole("alert")).toHaveText(
       "The offer changed. Review the current cards and cash before trying again."
