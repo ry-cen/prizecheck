@@ -1751,3 +1751,166 @@ for (const viewport of [
     });
   }
 }
+
+// #689: on a Location link, Add cards waits for the tree to show that Location. Clicked before the first tree read
+// answered, it used to open with the picker on Unsorted; the token recovery tests above reopen it right after a reload.
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 812 },
+]) {
+  test.describe(`Add cards before the tree loads ${viewport.width}`, () => {
+    test.use({ viewport, hasTouch: viewport.width === 375 });
+    const addCards = (page: Page) =>
+      page.getByRole("button", { name: "Add cards", exact: true });
+    /** Holds every Location tree read until `release`; `fail` answers them with an error instead. */
+    async function holdTree(page: Page) {
+      let release!: () => void;
+      let arrived!: () => void;
+      const gate = new Promise<void>((done) => {
+        release = done;
+      });
+      const waiting = new Promise<void>((done) => {
+        arrived = done;
+      });
+      const state = { fail: false };
+      await page.route(
+        (url) => url.pathname === "/api/location-tree",
+        async (route) => {
+          if (route.request().method() !== "GET") return route.continue();
+          arrived();
+          await gate;
+          if (state.fail)
+            await route.fulfill({
+              status: 503,
+              contentType: "application/json",
+              body: JSON.stringify({ detail: "unavailable" }),
+            });
+          else await route.continue();
+        }
+      );
+      return { release, waiting, state };
+    }
+    /** Real pointer and keyboard input on the held button opens nothing. */
+    async function expectUnavailable(page: Page) {
+      await expect(addCards(page)).toBeDisabled();
+      const box = (await addCards(page).boundingBox())!;
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      // Tabbing back from the next button skips it, and it can't take focus to be pressed.
+      await page
+        .getByRole("main")
+        .getByRole("button", { name: "Scan cards", exact: true })
+        .focus();
+      await page.keyboard.press("Shift+Tab");
+      await expect(addCards(page)).not.toBeFocused();
+      await page.evaluate(() =>
+        (document.activeElement as HTMLElement | null)?.blur()
+      );
+      await addCards(page).evaluate((button) => button.focus());
+      await expect(addCards(page)).not.toBeFocused();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Space");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    }
+
+    test("opens set to the Location once the held first read answers", async ({
+      page,
+    }) => {
+      await signIn(page);
+      const location = await createLocation(page, "Early box");
+      const tree = await holdTree(page);
+      await page.goto(
+        `${ORIGIN}/collection?location=${encodeURIComponent(location)}`
+      );
+      await tree.waiting;
+      await expectUnavailable(page);
+      tree.release();
+      await expect(addCards(page)).toBeEnabled();
+      await addCards(page).click();
+      await expect(
+        page.getByRole("dialog", { name: "Add cards to Early box" })
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(addCards(page)).toBeFocused();
+    });
+
+    test("after a failed first read, Retry brings back the Location", async ({
+      page,
+    }) => {
+      await signIn(page);
+      const location = await createLocation(page, "Retry box");
+      const tree = await holdTree(page);
+      tree.state.fail = true;
+      tree.release();
+      await page.goto(
+        `${ORIGIN}/collection?location=${encodeURIComponent(location)}`
+      );
+      await tree.waiting;
+      await expect(addCards(page)).toBeDisabled();
+      tree.state.fail = false;
+      let scope: Page | Locator = page.getByRole("complementary", {
+        name: "Sidebar",
+      });
+      if (viewport.width === 375) {
+        await page.getByRole("button", { name: "Open locations" }).tap();
+        scope = page.getByRole("dialog");
+      }
+      const retry = scope.getByRole("button", { name: "Retry", exact: true });
+      if (viewport.width === 375) await expectTouchTarget(retry);
+      await retry.click();
+      if (viewport.width === 375) {
+        await expect(
+          scope.getByRole("link", { name: "Retry box", exact: true })
+        ).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+      }
+      await expect(addCards(page)).toBeEnabled();
+      await addCards(page).click();
+      await expect(
+        page.getByRole("dialog", { name: "Add cards to Retry box" })
+      ).toBeVisible();
+    });
+
+    test("Add N cards into a Location the tree hasn't shown yet leaves focus on the heading", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      const loaded = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/location-tree" &&
+          response.request().method() === "GET"
+      );
+      await page.goto(`${ORIGIN}/collection`);
+      await loaded;
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "All owned"
+      );
+      // Made in another tab: Collection's tree doesn't have it, Add cards' own picker reads it.
+      await createLocation(page, "Other tab box");
+      await addCards(page).focus();
+      await page.keyboard.press("Enter");
+      const add = page.getByRole("dialog", { name: "Add cards", exact: true });
+      await more(add, CANDY).click();
+      await addBar(add)
+        .getByRole("combobox", { name: "Location to add to" })
+        .selectOption({ label: "Other tab box" });
+      // Collection's own tree read after the add is held, so Add cards is still disabled as the dialog closes.
+      const tree = await holdTree(page);
+      await addBar(add).getByRole("button", { name: "Add 1 card" }).focus();
+      await page.keyboard.press("Enter");
+      await expect(add).toHaveCount(0);
+      await tree.waiting;
+      await expect(addCards(page)).toBeDisabled();
+      await expect(page.locator("#ws-heading")).toBeFocused();
+      tree.release();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "Other tab box"
+      );
+      await expect(addCards(page)).toBeEnabled();
+      await expect(page.locator("#ws-heading")).toBeFocused();
+      await expect(toast(page)).toHaveText("Added 1 card to Other tab box.");
+    });
+  });
+}
