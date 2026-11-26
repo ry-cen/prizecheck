@@ -140,7 +140,8 @@ export function CardPopup({
       onClose={onClose}
       title={title}
       closeLabel={closeLabel}
-      size="card"
+      // Stepping keeps the phone sheet full height, so › stays under the finger while the next card loads.
+      size={position ? "card-steps" : "card"}
       returnFocus={returnFocus}
       headerActions={
         position && (

@@ -2,7 +2,7 @@
 import { act, createElement as h, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, afterEach, test, expect, vi } from "vitest";
-import { CardArt } from "./CardPopup";
+import { CardArt, CardPopup } from "./CardPopup";
 import { useLargeArt } from "./largeArt";
 vi.mock("./ScrollArea", () => ({
   ScrollArea: ({ children }: { children: ReactNode }) =>
@@ -134,4 +134,27 @@ test("a breakpoint flip while the image is enlarged clears it for good", async (
   expect(host.querySelector("dialog[open]")).toBeNull();
   await flip(true);
   expect(host.querySelector("dialog[open]")).toBeNull();
+});
+test("a popup that steps keeps its phone sheet full height; one opened on its own fits its content", async () => {
+  const popup = (position: { index: number; total: number } | null) =>
+    h(CardPopup, {
+      open: true,
+      onClose: vi.fn(),
+      title: "Bulbasaur",
+      position,
+      canPrevious: false,
+      canNext: true,
+      onPrevious: vi.fn(),
+      onNext: vi.fn(),
+      cardKey: "edition-1",
+      art: null,
+      children: h("p", null, "Loading card details…"),
+    });
+  const classes = () => host.querySelector("dialog")!.className.split(" ");
+  await act(async () => root.render(popup({ index: 0, total: 70 })));
+  // A sheet hangs from the bottom: one sized to its content would move › each time a stepped-to card loads.
+  expect(classes()).toContain("phone:h-[92dvh]");
+  await act(async () => root.render(popup(null)));
+  expect(classes()).not.toContain("phone:h-[92dvh]");
+  expect(classes()).toContain("phone:max-h-[92dvh]");
 });
