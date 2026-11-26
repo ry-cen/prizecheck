@@ -42,7 +42,7 @@ const EXACT = new Map(Object.entries(POKEMON_EXACT));
  * normalised to `/api/loans`, so deciding afterwards would let it out of the namespace. The authority of an absolute-form
  * target ends at `/`, `\`, `?` or `#`, as WHATWG URL parsing ends it.
  */
-function rawPathOf(target: string): string {
+export function rawPathOf(target: string): string {
   const absolute = /^[a-z][a-z0-9+.-]*:\/\/[^/\\?#]*/i.exec(target);
   const path = absolute ? target.slice(absolute[0].length) : target;
   return path.split(/[?#]/, 1)[0];

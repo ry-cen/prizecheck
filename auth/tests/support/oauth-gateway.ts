@@ -3,7 +3,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer as createHttpServer, type Server } from "node:http";
+import {
+  createServer as createHttpServer,
+  type IncomingHttpHeaders,
+  type Server,
+} from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,6 +68,8 @@ export type TestGateway = {
   pool: Pool;
   /** Paths the gateway forwarded to the FastAPI stand-in. */
   apiPaths: string[];
+  /** The same forwarded requests with their method and headers (signed identity headers included). */
+  apiRequests: { method: string; url: string; headers: IncomingHttpHeaders }[];
   mailFile: string;
   logs: () => string;
   stop: () => Promise<void>;
@@ -106,8 +112,14 @@ export async function startGateway(
   }
   const pool = new Pool({ connectionString: connection.toString() });
   const apiPaths: string[] = [];
+  const apiRequests: TestGateway["apiRequests"] = [];
   const api: Server = createHttpServer((request, response) => {
     apiPaths.push(request.url || "");
+    apiRequests.push({
+      method: request.method || "",
+      url: request.url || "",
+      headers: request.headers,
+    });
     response.writeHead(200, { "content-type": "application/json" });
     response.end("{}");
   });
@@ -175,6 +187,7 @@ export async function startGateway(
       databaseUrl: connection.toString(),
       pool,
       apiPaths,
+      apiRequests,
       mailFile,
       logs: () => output,
       stop,

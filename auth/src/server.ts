@@ -21,6 +21,14 @@ import { betterRequest, relay } from "./betterRelay.js";
 import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { ipContext } from "./ipContext.js";
+import { createNative, nativeSignInEnabled } from "./native.js";
+import { createShutdown } from "./nativeShutdown.js";
+import { createNativeRateLimits } from "./nativeRateLimits.js";
+import {
+  createNativePool,
+  createNativeStore,
+  NativeUnavailable,
+} from "./nativeStore.js";
 import { safeNext } from "./nextPath.js";
 import { pokemonUpstream } from "./pokemonRoutes.js";
 import { PublicReadLimiter } from "./publicReads.js";
@@ -334,9 +342,60 @@ async function budgetedSession(request: IncomingMessage) {
   });
 }
 
+// Opt-in native iOS sign-in (auth/src/native.ts): off unless NATIVE_SIGN_IN=on, an invalid value or `on` in production stops
+// the gateway here. While off, no native route exists and Authorization headers are ignored, as before.
+const nativeEnabled = nativeSignInEnabled();
+// All of its database work runs on its own small pool, behind its own admission (auth/src/nativeStore.ts), closed on shutdown.
+const nativePool = nativeEnabled
+  ? createNativePool(process.env.DATABASE_URL)
+  : null;
+if (nativePool) {
+  nativePool.on("error", (error) => {
+    console.error("Native credential pool failed", error.name);
+  });
+}
+const native = nativePool
+  ? createNative({
+      store: createNativeStore(nativePool),
+      origin,
+      internalSecret,
+      providers,
+      rateLimits: createNativeRateLimits(),
+      getSession: session,
+      clientIp: trustedClientIp,
+    })
+  : null;
+
 const server = createServer(async (request, response) => {
   // Monotonic receipt time, before any body read or session lookup: budgeted routes spend their three seconds from here.
   const received = performance.now();
+  // Native sign-in only (auth/src/native.ts), and first of all: with the switch on, a request in the API namespace that
+  // carries Authorization is either the one Collection read a native credential allows or a 401, decided before the
+  // Pokémon target check, the alias rewrite, the Riftbound refusal, any session lookup, limiter or Origin check, and any
+  // upstream contact. There is never a fallback to the cookie, and Authorization is never forwarded. The namespace is read
+  // on the raw target and on the path the gateway would dispatch. Switch off, or no Authorization: nothing here runs.
+  let nativeUser: string | null = null;
+  if (native) {
+    try {
+      const dispatched = pokemonUpstream(request.url || "/", request.method);
+      const dispatchedPath = dispatched
+        ? new URL(dispatched, origin).pathname
+        : undefined;
+      if (native.apiAuthorization(request, dispatchedPath)) {
+        nativeUser = await native.bearerUser(request);
+        if (!nativeUser)
+          return json(response, 401, { error: "Authentication required" });
+      }
+    } catch (error) {
+      // A busy or slow credential database is a 503, never a cookie fallback, and says nothing more.
+      if (!(error instanceof NativeUnavailable))
+        console.error(
+          "Gateway request failed",
+          error instanceof Error ? error.name : "unknown"
+        );
+      return json(response, 503, { error: "Service temporarily unavailable" });
+    }
+  }
   // /api/pokemon is decided on the raw request target (auth/src/pokemonRoutes.ts), which never throws: a moved route is
   // handled below as its old /api twin, anything else under the prefix is a 404 before any session lookup, limiter or
   // upstream call, and before the target is parsed again.
@@ -444,7 +503,8 @@ const server = createServer(async (request, response) => {
             `${SIGN_IN_PAGE}?provider=${provider.id}&error=too_many_sign_ups`
           );
         const next = safeNext(
-          new URL(request.url || "/", origin).searchParams.get("next")
+          new URL(request.url || "/", origin).searchParams.get("next"),
+          nativeEnabled
         );
         const started = await auth.handler(
           betterRequest(
@@ -605,6 +665,9 @@ const server = createServer(async (request, response) => {
       );
       return relay(response, result);
     }
+    if (native && path.startsWith("/auth/native/")) {
+      if (await native.handle(request, response, path)) return;
+    }
     // Riftbound's own public prefix (ADR 0023, 2026-11-16 amendment). Handled before the generic /api/ branch so a
     // /api/riftbound path can never reach the Pokémon upstream; riftboundTargetRefused above has already refused any
     // target whose raw and normalised readings disagree about the namespace.
@@ -690,8 +753,9 @@ const server = createServer(async (request, response) => {
       );
       const left = () =>
         BUDGET_MS - RESPONSE_MARGIN_MS - (performance.now() - received);
-      const current =
-        publicPath || path === "/api/health"
+      const current = nativeUser
+        ? { user: { id: nativeUser } }
+        : publicPath || path === "/api/health"
           ? null
           : budgeted
             ? await withinBudget(budgetedSession(request), left())
@@ -874,6 +938,8 @@ const server = createServer(async (request, response) => {
     }
     if (error instanceof BudgetExceeded)
       return json(response, 504, { detail: { code: "PRICE_DEADLINE" } });
+    if (error instanceof NativeUnavailable)
+      return json(response, 503, { error: "Service temporarily unavailable" });
     if (error instanceof PayloadTooLarge) {
       response.setHeader("connection", "close");
       return json(response, 413, { error: "Payload too large" });
@@ -885,6 +951,20 @@ const server = createServer(async (request, response) => {
     json(response, 503, { error: "Service temporarily unavailable" });
   }
 });
+
+if (nativePool) {
+  // Node's default maxHeadersCount (2000) silently drops header fields past it, which could hide an Authorization, or a
+  // duplicate Authorization, Cookie or Origin, from every check above. The parser's byte limit (16 KiB) still bounds how
+  // many fit, and with it nothing is dropped. Off, the server keeps its default.
+  server.maxHeadersCount = 0;
+  const shutdown = createShutdown({
+    server,
+    pool: nativePool,
+    exit: (code) => process.exit(code),
+  });
+  for (const signal of ["SIGTERM", "SIGINT"] as const)
+    process.on(signal, () => void shutdown());
+}
 
 server.listen(
   Number(process.env.AUTH_PORT || 3001),
