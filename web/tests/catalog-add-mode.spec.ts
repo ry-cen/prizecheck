@@ -1871,5 +1871,46 @@ for (const viewport of [
         page.getByRole("dialog", { name: "Add cards to Retry box" })
       ).toBeVisible();
     });
+
+    test("Add N cards into a Location the tree hasn't shown yet leaves focus on the heading", async ({
+      page,
+    }) => {
+      seedPopup();
+      await signIn(page);
+      const loaded = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/location-tree" &&
+          response.request().method() === "GET"
+      );
+      await page.goto(`${ORIGIN}/collection`);
+      await loaded;
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "All owned"
+      );
+      // Made in another tab: Collection's tree doesn't have it, Add cards' own picker reads it.
+      await createLocation(page, "Other tab box");
+      await addCards(page).focus();
+      await page.keyboard.press("Enter");
+      const add = page.getByRole("dialog", { name: "Add cards", exact: true });
+      await more(add, CANDY).click();
+      await addBar(add)
+        .getByRole("combobox", { name: "Location to add to" })
+        .selectOption({ label: "Other tab box" });
+      // Collection's own tree read after the add is held, so Add cards is still disabled as the dialog closes.
+      const tree = await holdTree(page);
+      await addBar(add).getByRole("button", { name: "Add 1 card" }).focus();
+      await page.keyboard.press("Enter");
+      await expect(add).toHaveCount(0);
+      await tree.waiting;
+      await expect(addCards(page)).toBeDisabled();
+      await expect(page.locator("#ws-heading")).toBeFocused();
+      tree.release();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "Other tab box"
+      );
+      await expect(addCards(page)).toBeEnabled();
+      await expect(page.locator("#ws-heading")).toBeFocused();
+      await expect(toast(page)).toHaveText("Added 1 card to Other tab box.");
+    });
   });
 }

@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 // #689: Add cards on a Location link waits for the tree to show that Location, so it opens set to it rather than
 // with the picker preselecting Unsorted.
-import { act, createElement as h } from "react";
+import {
+  act,
+  createElement as h,
+  useLayoutEffect,
+  type RefObject,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useRoute } from "../shell/useRoute";
@@ -45,18 +50,32 @@ vi.mock("../location_generated", async (original) => ({
     }),
 }));
 // Add cards itself is the catalog gallery; here it shows only whether it is open and what it adds to.
+// Like Dialog, it takes focus while open and gives it back to `returnFocus` as it closes, inside React's commit.
 const adding = vi.hoisted(() => ({
   onTargetGone: (() => {}) as () => void,
+  onClose: (() => {}) as () => void,
 }));
 vi.mock("./AddCardsGallery", () => ({
   AddCardsGallery: (props: {
     open: boolean;
     target: { label: string } | null;
     onTargetGone: () => void;
+    onClose: () => void;
+    returnFocus?: RefObject<HTMLElement | null>;
   }) => {
     adding.onTargetGone = props.onTargetGone;
+    adding.onClose = props.onClose;
+    useLayoutEffect(() => {
+      if (!props.open) return;
+      document.querySelector<HTMLElement>('[data-testid="adding"]')?.focus();
+      return () => props.returnFocus?.current?.focus();
+    }, [props.open]);
     return props.open
-      ? h("div", { "data-testid": "adding" }, props.target?.label ?? "picker")
+      ? h(
+          "div",
+          { "data-testid": "adding", tabIndex: -1 },
+          props.target?.label ?? "picker"
+        )
       : null;
   },
 }));
@@ -197,6 +216,14 @@ it("stays unavailable through the second read and opens set to a Location it fin
   expect(addCards().disabled).toBe(false);
   await press(addCards());
   expect(dialog()?.textContent).toBe("A");
+  // A later read that misses A is confirmed again before the address falls back.
+  await act(async () => adding.onTargetGone());
+  await answer(2, ["B"]);
+  expect(tree.reads).toHaveLength(4);
+  expect(window.location.search).toBe("?location=A");
+  await answer(3, ["A", "B"]);
+  expect(window.location.search).toBe("?location=A");
+  expect(addCards().disabled).toBe(false);
 });
 
 it("stays unavailable when the second read fails, and Retry brings back the fixed Location", async () => {
@@ -250,6 +277,43 @@ it("never disables Add cards while a resolved Location's tree is read again", as
   expect(addCards().disabled).toBe(false);
   await answer(1, ["A"]);
   expect(addCards().disabled).toBe(false);
+});
+
+it("moves focus to the heading when a tree read disables a focused Add cards", async () => {
+  await open("/collection?location=A");
+  await answer(0, ["A"]);
+  await act(async () => addCards().focus());
+  expect(document.activeElement).toBe(addCards());
+  await act(async () => adding.onTargetGone());
+  await answer(1, ["B"]);
+  expect(addCards().disabled).toBe(true);
+  expect(document.activeElement).toBe(host.querySelector("#ws-heading"));
+  await answer(2, ["A", "B"]);
+  expect(addCards().disabled).toBe(false);
+  expect(document.activeElement).toBe(host.querySelector("#ws-heading"));
+});
+
+it("moves focus to the heading when a tree read disables Add cards that Add cards gave focus back to", async () => {
+  await open("/collection?location=A");
+  await answer(0, ["A"]);
+  await act(async () => addCards().focus());
+  await press(addCards());
+  expect(document.activeElement).toBe(dialog());
+  await act(async () => adding.onClose());
+  expect(document.activeElement).toBe(addCards());
+  await act(async () => adding.onTargetGone());
+  await answer(1, ["B"]);
+  expect(addCards().disabled).toBe(true);
+  expect(document.activeElement).toBe(host.querySelector("#ws-heading"));
+});
+
+it("keeps focus on Add cards while a resolved Location's tree is read again", async () => {
+  await open("/collection?location=A");
+  await answer(0, ["A"]);
+  await act(async () => addCards().focus());
+  await act(async () => adding.onTargetGone());
+  await answer(1, ["A"]);
+  expect(document.activeElement).toBe(addCards());
 });
 
 it("keeps Add cards available on All owned before the tree answers", async () => {

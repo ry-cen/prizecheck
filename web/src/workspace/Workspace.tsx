@@ -468,6 +468,29 @@ export function Workspace({
     if (adding?.fixed && current?.id !== adding.fixed)
       setAdding({ fixed: null });
   }, [adding, current]);
+  // Add cards is disabled while its Location link is unresolved, and a disabled button can't hold focus. Closing Add
+  // cards into a Location the tree hasn't shown yet (one the dialog's own picker found, made in another tab), or a
+  // tree read that disables Add cards while it has focus, would leave focus on the page itself; it goes to the
+  // heading instead. An enabled Add cards gets focus back from the dialog as usual.
+  const addingOpen = active && adding !== null;
+  const addingWasOpen = useRef(false);
+  const addOpenerFocused = useRef(false);
+  useLayoutEffect(() => {
+    const closed = addingWasOpen.current && !addingOpen;
+    addingWasOpen.current = addingOpen;
+    const opener = addOpener.current;
+    if (active && !addingOpen) {
+      const focus = document.activeElement;
+      const lost =
+        !focus ||
+        focus === document.body ||
+        (focus === opener && opener.disabled);
+      if (lost && (closed || (addOpenerFocused.current && opener?.disabled)))
+        focusWorkspaceHeading();
+    }
+    // React dispatches no focus events during a commit, so a focus the dialog gave back as it closed is read here.
+    addOpenerFocused.current = !!opener && document.activeElement === opener;
+  }, [active, addingOpen, locationUnresolved]);
   const locationPath = useCallback(
     (id: string) => (index.byId.has(id) ? index.path(id) : undefined),
     [index]
@@ -499,9 +522,13 @@ export function Workspace({
       added.from === "popup" ? popupAddToast : undefined
     );
   };
+  // The Location whose miss is being confirmed by a second tree read. It is kept through a failed read, so Retry
+  // finishes the same check, and cleared once that Location shows or the address moves to another view, so every
+  // later miss is confirmed again before the address falls back to All owned.
   const linkReloaded = useRef<string | null>(null);
   // Expand ancestors after a deep link loads; an unavailable Location stays safe and explains the fallback.
   useEffect(() => {
+    if (linkReloaded.current !== view) linkReloaded.current = null;
     if (!active || treeState !== "ready" || view === "all") return;
     const node = index.byId.get(view);
     if (!node && linkReloaded.current !== view) {
@@ -514,6 +541,7 @@ export function Workspace({
       onNavigate(collectionHref("all", query), { replace: true });
       return;
     }
+    linkReloaded.current = null;
     setExpanded((previous) => new Set([...previous, ...index.ancestors(view)]));
   }, [active, index, treeState, view]);
 
@@ -846,6 +874,14 @@ export function Workspace({
                 ref={addOpener}
                 aria-haspopup="dialog"
                 disabled={locationUnresolved}
+                onFocus={() => {
+                  addOpenerFocused.current = true;
+                }}
+                onBlur={(event) => {
+                  // A blur from being disabled still counts as holding focus; the effect above moves it on.
+                  if (!event.currentTarget.disabled)
+                    addOpenerFocused.current = false;
+                }}
                 onClick={() => setAdding({ fixed: current?.id ?? null })}
               >
                 Add cards
