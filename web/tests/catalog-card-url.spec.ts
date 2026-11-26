@@ -233,6 +233,38 @@ for (const viewport of [
         await expect.poll(() => next.boundingBox()).toEqual(loaded);
       });
 
+    // A name that wraps makes the header taller; › keeps to the top of it rather than to its middle.
+    if (viewport.width === 375)
+      test("› stays put when the next card's name wraps", async ({ page }) => {
+        seedPopup();
+        await signIn(page);
+        await press(tile(page, "Switch"));
+        const card = page.getByRole("dialog", { name: "Switch" });
+        const next = page
+          .getByRole("dialog")
+          .getByRole("button", { name: "Next card" });
+        await expect(card.getByText("Loading card details…")).toHaveCount(0);
+        const short = await next.boundingBox();
+
+        await press(next);
+        const long = page.getByRole("dialog", {
+          name: /^Professor's Research/,
+        });
+        await expect(long.getByText("Loading card details…")).toHaveCount(0);
+        // The name takes more than one line beside the controls, or this proves nothing.
+        await expect
+          .poll(() =>
+            long.getByRole("heading", { level: 2 }).evaluate((heading) => {
+              const text = document.createRange();
+              text.selectNodeContents(heading);
+              return new Set([...text.getClientRects()].map((line) => line.top))
+                .size;
+            })
+          )
+          .toBeGreaterThan(1);
+        await expect.poll(() => next.boundingBox()).toEqual(short);
+      });
+
     test("picking an Edition and stepping replace the address", async ({
       page,
     }) => {

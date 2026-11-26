@@ -193,8 +193,15 @@ export function Dialog({
       }}
     >
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between gap-2 border-b border-border py-2 pl-4 pr-2">
-          <h2 id={titleId} className="m-0 text-heading font-semibold">
+        {/* A stepping card's controls keep to the top of a phone header, so a name that wraps grows it downward and
+            leaves ‹ › where they were; the title keeps the controls' height, so one line still sits level with them. */}
+        <div
+          className={`flex items-center justify-between gap-2 border-b border-border py-2 pl-4 pr-2 ${size === "card-steps" ? "phone:items-start" : ""}`}
+        >
+          <h2
+            id={titleId}
+            className={`m-0 text-heading font-semibold ${size === "card-steps" ? "phone:flex phone:min-h-tap phone:items-center" : ""}`}
+          >
             {title}
           </h2>
           <div className="flex shrink-0 items-center gap-1">

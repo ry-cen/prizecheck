@@ -150,11 +150,23 @@ test("a popup that steps keeps its phone sheet full height; one opened on its ow
       art: null,
       children: h("p", null, "Loading card details…"),
     });
-  const classes = () => host.querySelector("dialog")!.className.split(" ");
+  const classes = (selector = "dialog") =>
+    host.querySelector(selector)!.className.split(" ");
+  const header = "dialog h2";
   await act(async () => root.render(popup({ index: 0, total: 70 })));
   // A sheet hangs from the bottom: one sized to its content would move › each time a stepped-to card loads.
   expect(classes()).toContain("phone:h-[92dvh]");
+  // A name that wraps grows the header downward: the controls keep to its top.
+  expect(classes(header)).toContain("phone:min-h-tap");
+  expect(
+    host.querySelector(header)!.parentElement!.className.split(" ")
+  ).toContain("phone:items-start");
+  expect(host.querySelector(header)!.textContent).toBe("Bulbasaur");
   await act(async () => root.render(popup(null)));
   expect(classes()).not.toContain("phone:h-[92dvh]");
   expect(classes()).toContain("phone:max-h-[92dvh]");
+  expect(classes(header)).not.toContain("phone:min-h-tap");
+  expect(
+    host.querySelector(header)!.parentElement!.className.split(" ")
+  ).not.toContain("phone:items-start");
 });
