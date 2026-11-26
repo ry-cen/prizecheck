@@ -34,6 +34,13 @@ for (const width of [1280, 375]) {
       )
     );
     await page.goto(entry);
+    // Let the Catalog render its tiles first, so they sit hidden behind the Decks view every run.
+    await expect(
+      page
+        .getByRole("region", { name: "Catalog results" })
+        .getByText("Artwork unavailable")
+        .first()
+    ).toBeVisible();
     const nav = page.getByRole("navigation", {
       name: width === 375 ? "Mobile navigation" : "Main navigation",
       exact: true,
@@ -55,7 +62,13 @@ for (const width of [1280, 375]) {
     await expect(
       page.getByRole("heading", { name: "First Light", exact: true })
     ).toBeVisible();
-    await expect(page.getByText("Artwork unavailable").first()).toBeVisible();
+    // The Catalog stays mounted, hidden, ahead of the Decks view; a page-wide match can land on its tiles once they load.
+    await expect(
+      page
+        .getByRole("tabpanel", { name: /^Deck / })
+        .getByText("Artwork unavailable")
+        .first()
+    ).toBeVisible();
     await shot(`deck-editor-${width}.png`);
     await page.getByRole("tab", { name: "Library", exact: true }).click();
     await expect(page.getByRole("tabpanel", { name: "Library" })).toBeVisible();
