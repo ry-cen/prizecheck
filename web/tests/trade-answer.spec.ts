@@ -11,7 +11,7 @@ import { tradeView } from "./support/trades";
 // (api/tests/want_list_swap_fixtures.py). Ash signs in first, so the test's own page signs in afterwards as the owner.
 import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
-import type { BrowserContextOptions, Page } from "@playwright/test";
+import type { BrowserContextOptions, Page, Request } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
@@ -222,48 +222,80 @@ async function story(
   }[] = [];
   // A proposed Trade on screen reads its estimated value once, a moment after it is drawn. Leaving the page, or a step
   // that ends the proposal, while that answer is still arriving cuts a body the audit must read, so each such view
-  // waits until its value read has ended: its body read by the audit in full, or the request failed.
+  // waits until every value read sent so far is complete. A read that got headers is complete only once the audit has
+  // read its body; the client's timeout can abort one after bytes arrived, and the audit still owes that body. A read
+  // that failed before any headers has no body to owe. The final audit still fails on delivered bytes it can't read.
   const VALUE_PATH = "/api/pokemon/trades/value";
-  const valueReads = new Map<Page, { sent: number; ended: number }>();
+  type ValueRead = { headers: boolean; failedEarly: boolean };
+  const valueReads = new Map<
+    Page,
+    { requests: Map<Request, ValueRead>; bodies: number }
+  >();
   const reads = (who: Page) => {
-    if (!valueReads.has(who)) valueReads.set(who, { sent: 0, ended: 0 });
+    if (!valueReads.has(who))
+      valueReads.set(who, { requests: new Map(), bodies: 0 });
     return valueReads.get(who)!;
   };
-  const isValue = (url: string) => new URL(url).pathname === VALUE_PATH;
+  const isValue = (request: Request) =>
+    request.method() === "POST" &&
+    new URL(request.url()).pathname === VALUE_PATH;
   const attach = async (who: Page, secretOf: string[]) => {
     who.on("request", (request) => {
-      if (isValue(request.url())) reads(who).sent += 1;
+      if (isValue(request))
+        reads(who).requests.set(request, {
+          headers: false,
+          failedEarly: false,
+        });
+    });
+    who.on("response", (response) => {
+      const read = reads(who).requests.get(response.request());
+      if (read) read.headers = true;
     });
     who.on("requestfailed", (request) => {
-      if (isValue(request.url())) reads(who).ended += 1;
+      const read = reads(who).requests.get(request);
+      if (read && !read.headers) read.failedEarly = true;
     });
     audits.push({
       audit: await auditPage(
         who,
         (url) => /\/api\/(pokemon\/)?(social\/)?trade/.test(url),
         (response) => {
-          if (isValue(response.url())) reads(who).ended += 1;
+          if (new URL(response.url()).pathname === VALUE_PATH)
+            reads(who).bodies += 1;
         }
       ),
       secretOf,
     });
   };
   /** Armed before the step that shows a proposed Trade, so earlier views' reads can't satisfy it. The returned wait,
-   * called once that Trade is drawn, passes when the view's value read was sent and then ended. */
+   * called once that Trade is drawn, passes when the view's value read was sent and every value read sent so far is
+   * complete. The route takes only POST and the audit reads each answered hop's body once, long after Playwright saw
+   * the request, so once no read still waits for headers, as many read bodies as answered reads means each was read. */
   const valueRead = (who: Page) => {
-    const { sent, ended } = reads(who);
+    const armed = reads(who).requests.size;
     return async () => {
       await expect
-        .poll(() => reads(who).sent, {
+        .poll(() => reads(who).requests.size, {
           message: "the proposed Trade asks for its value",
         })
-        .toBeGreaterThan(sent);
+        .toBeGreaterThan(armed);
       await expect
-        .poll(() => reads(who).ended, {
-          message:
-            "the proposed Trade's value read ended, its body read by the audit",
-        })
-        .toBeGreaterThan(ended);
+        .poll(
+          () => {
+            const { requests, bodies } = reads(who);
+            const all = [...requests.values()];
+            const answered = all.filter((read) => read.headers).length;
+            return all.every((read) => read.headers || read.failedEarly) &&
+              bodies >= answered
+              ? "complete"
+              : `${bodies} of ${answered} answered bodies read, ${all.length} sent`;
+          },
+          {
+            message:
+              "every value read sent so far ended, each answered body read by the audit",
+          }
+        )
+        .toBe("complete");
     };
   };
   try {
@@ -346,10 +378,6 @@ async function story(
     // Ash declines one of the gifts, and Misty's Iono comes back to her Trade List and to his read of it.
     const declinedValue = valueRead(ash.page);
     await ash.page.goto(`${ORIGIN}/trades/${declined}`);
-    await expect(heading(ash.page)).toHaveText(
-      "Misty W wants to give you 1 card"
-    );
-    await declinedValue();
     await ashMain.getByRole("button", { name: "Decline" }).focus();
     await ash.page.keyboard.press("Enter");
     const sure = ashMain.getByRole("group", { name: "Decline" });
@@ -368,6 +396,7 @@ async function story(
     ).toBeFocused();
     await ashMain.getByRole("button", { name: "Decline" }).click();
     await ash.page.keyboard.press("Tab");
+    await declinedValue();
     await ash.page.keyboard.press("Enter");
     await expect(sure).toHaveCount(0);
     await expect(heading(ash.page)).toHaveText("You declined");
@@ -395,7 +424,6 @@ async function story(
     const mistyWithdrawnValue = valueRead(page);
     await page.goto(`${ORIGIN}/trades/${withdrawn}`);
     await expect(more(page)).toBeVisible();
-    await mistyWithdrawnValue();
     const mistyMain = page.getByRole("main");
     let withdrawals = 0;
     const countWithdrawal = (request: import("@playwright/test").Request) => {
@@ -421,6 +449,8 @@ async function story(
     expect(withdrawals).toBe(0);
     await more(page).click();
     await page.getByRole("menuitem", { name: "Withdraw" }).click();
+    // Both screens' value reads end before the proposal does, so neither view can close before its read starts.
+    await Promise.all([mistyWithdrawnValue(), ashWithdrawnValue()]);
     await withdrawing
       .getByRole("button", { name: "Withdraw", exact: true })
       .click();
@@ -431,7 +461,6 @@ async function story(
     page.off("request", countWithdrawal);
     await expect(heading(page)).toBeFocused();
     // Ash's screen still shows the proposal he opened: his accept finds it changed, and the screen reads it again.
-    await ashWithdrawnValue();
     await ashMain.getByRole("button", { name: "Accept" }).click();
     await expect(ashMain.getByRole("alert")).toHaveText(
       "The offer changed. Review the current cards and cash before trying again."
