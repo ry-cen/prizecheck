@@ -197,6 +197,74 @@ for (const viewport of [
       await expect(stepped).not.toBeInViewport();
     });
 
+    // The phone sheet hangs from the bottom of the screen. Sized to its content, it was short while a stepped-to card
+    // loaded and grew when the details came, so › jumped up the screen and a tap as they landed missed it.
+    if (viewport.width === 375)
+      test("› stays under the finger while the stepped-to card loads", async ({
+        page,
+      }) => {
+        seedGallery();
+        await signIn(page);
+        await expect(results(page).getByRole("listitem")).toHaveCount(60);
+        await press(
+          results(page).getByRole("listitem").nth(0).getByRole("button")
+        );
+        const card = page.getByRole("dialog");
+        const loading = card.getByText("Loading card details…");
+        const next = card.getByRole("button", { name: "Next card" });
+        await expect(next).toBeVisible();
+        await expect(loading).toHaveCount(0);
+        const loaded = await next.boundingBox();
+
+        let release = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+        await page.route("**/catalog/printings/*", async (route) => {
+          await held;
+          await route.continue();
+        });
+        const before = here(page);
+        await press(next);
+        await expect.poll(() => here(page)).not.toBe(before);
+        // Held, the details can't land, so the box polled here is the loading sheet's.
+        await expect(loading).toBeVisible();
+        await expect.poll(() => next.boundingBox()).toEqual(loaded);
+        release();
+        await expect(loading).toHaveCount(0);
+        await expect.poll(() => next.boundingBox()).toEqual(loaded);
+      });
+
+    // A name that wraps makes the header taller; › keeps to the top of it rather than to its middle.
+    if (viewport.width === 375)
+      test("› stays put when the next card's name wraps", async ({ page }) => {
+        seedPopup();
+        await signIn(page);
+        await press(tile(page, "Switch"));
+        const card = page.getByRole("dialog", { name: "Switch" });
+        const next = page
+          .getByRole("dialog")
+          .getByRole("button", { name: "Next card" });
+        await expect(card.getByText("Loading card details…")).toHaveCount(0);
+        const short = await next.boundingBox();
+
+        await press(next);
+        const long = page.getByRole("dialog", {
+          name: /^Professor's Research/,
+        });
+        await expect(long.getByText("Loading card details…")).toHaveCount(0);
+        // The name takes more than one line beside the controls, or this proves nothing.
+        await expect
+          .poll(() =>
+            long.getByRole("heading", { level: 2 }).evaluate((heading) => {
+              const text = document.createRange();
+              text.selectNodeContents(heading);
+              return new Set([...text.getClientRects()].map((line) => line.top))
+                .size;
+            })
+          )
+          .toBeGreaterThan(1);
+        await expect.poll(() => next.boundingBox()).toEqual(short);
+      });
+
     test("picking an Edition and stepping replace the address", async ({
       page,
     }) => {

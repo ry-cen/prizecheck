@@ -20,8 +20,10 @@ type Props = {
   side?: "left" | "right";
   /** "wide": a centred panel up to 760 px wide on desktop that fills the screen on a phone, for a dialog
    * that holds a long list (Manage locations). "card": the same centred panel on desktop, but a bottom sheet
-   * on a phone, as a plain Dialog is (CardPopup, #174). Ignored with `side`. */
-  size?: "wide" | "card";
+   * on a phone, as a plain Dialog is (CardPopup, #174). "card-steps": "card", but the phone sheet keeps its full
+   * height whatever it holds, so header controls pressed again and again (CardPopup's ‹ ›) never move while the
+   * content beneath them loads or changes length. Ignored with `side`. */
+  size?: "wide" | "card" | "card-steps";
   /** Controls drawn in the header just before the close button, such as CardPopup's "‹ N / M ›" (#174). */
   headerActions?: ReactNode;
   /** The scrolling content box, for a dialog that scrolls it itself (a drag that scrolls near its edges). */
@@ -54,6 +56,9 @@ const WIDE =
 // WIDE on desktop, CENTRED's bottom sheet on a phone, a little taller so a card's details fit.
 const CARD =
   "inset-0 m-auto h-fit max-h-[min(860px,calc(100dvh-var(--space-8)-var(--space-8)))] w-[min(760px,calc(100vw-var(--space-6)-var(--space-6)))] max-w-none rounded-dialog border border-border-strong phone:inset-x-0 phone:top-[100dvh] phone:bottom-auto phone:m-0 phone:-translate-y-full phone:max-h-[92dvh] phone:w-full phone:rounded-b-none phone:border-x-0 phone:border-b-0";
+// CARD whose phone sheet is always its tallest: a sheet hangs from the bottom, so one sized to its content moves its
+// header each time the content changes length, and a step's tap could land after › had jumped away.
+const CARD_STEPS = `${CARD} phone:h-[92dvh]`;
 
 // Modal siblings can close in either order (Back or a breakpoint can remove the lower sheet).
 // Capture the original overflow once, and restore it only after the last modal releases its lock.
@@ -160,7 +165,7 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      className={`${FRAME} ${side === "left" ? LEFT : side === "right" ? RIGHT : size === "wide" ? WIDE : size === "card" ? CARD : CENTRED}`}
+      className={`${FRAME} ${side === "left" ? LEFT : side === "right" ? RIGHT : size === "wide" ? WIDE : size === "card" ? CARD : size === "card-steps" ? CARD_STEPS : CENTRED}`}
       onKeyDown={onKeyDown}
       onCancel={(event) => {
         // React passes a nested dialog's cancel and close events up to this one (a card popup over Collection's Add
@@ -188,8 +193,15 @@ export function Dialog({
       }}
     >
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between gap-2 border-b border-border py-2 pl-4 pr-2">
-          <h2 id={titleId} className="m-0 text-heading font-semibold">
+        {/* A stepping card's controls keep to the top of a phone header, so a name that wraps grows it downward and
+            leaves ‹ › where they were; the title keeps the controls' height, so one line still sits level with them. */}
+        <div
+          className={`flex items-center justify-between gap-2 border-b border-border py-2 pl-4 pr-2 ${size === "card-steps" ? "phone:items-start" : ""}`}
+        >
+          <h2
+            id={titleId}
+            className={`m-0 text-heading font-semibold ${size === "card-steps" ? "phone:flex phone:min-h-tap phone:items-center" : ""}`}
+          >
             {title}
           </h2>
           <div className="flex shrink-0 items-center gap-1">
@@ -198,7 +210,9 @@ export function Dialog({
               type="button"
               aria-label={closeLabel}
               // A card popup opens with focus on ✕, not on its first step button.
-              data-autofocus={size === "card" ? "" : undefined}
+              data-autofocus={
+                size === "card" || size === "card-steps" ? "" : undefined
+              }
               onClick={onClose}
               className="inline-flex size-control cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
             >
