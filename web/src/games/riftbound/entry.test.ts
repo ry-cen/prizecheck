@@ -4,10 +4,14 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { RiftboundApp } from "./RiftboundApp";
 import { collectionFixtureReader } from "./local/collectionFixtures";
+import { deckFixture } from "./local/deckFixtures";
 import { fixtureReader } from "./local/fixtures";
 
 const collectionHash =
   "#riftbound:section=collection&location=all&collectionSearch=&collectionPage=1&view=catalog&edition=&page=1";
+const decksHash =
+  "#riftbound:section=decks&deck=&deckTab=deck&location=all&collectionSearch=&collectionPage=1&view=catalog&edition=&page=1";
+const decksContent = () => document.querySelector("[data-decks-content]");
 const catalogSearch = () =>
   document.querySelector('[aria-label="Search cards"]');
 const collectionResults = () =>
@@ -116,6 +120,100 @@ describe("entry sections follow the adapters supplied", () => {
       await popTo(m, collectionHash);
       await settle();
       expect(collectionResults()).not.toBeNull();
+    } finally {
+      await m.unmount();
+    }
+  });
+});
+
+describe("the Decks section follows the adapters supplied", () => {
+  const catalogOnly = () => ({ reader: fixtureReader() });
+  const withoutDecks = () => ({
+    reader: fixtureReader(),
+    collection: collectionFixtureReader("a"),
+  });
+  const withDecks = () => ({
+    ...withoutDecks(),
+    decks: deckFixture("a", "normal", "normal"),
+  });
+  it.each([
+    ["no adapters", catalogOnly],
+    ["a Collection but no Decks adapter", withoutDecks],
+  ])("shows the Catalog for a Decks address with %s", async (_name, props) => {
+    const direct = await mount(decksHash, props());
+    try {
+      await loaded(catalogLoaded);
+      expect(catalogLoaded()).toBe(true);
+      expect(decksContent()).toBeNull();
+    } finally {
+      await direct.unmount();
+    }
+    const back = await mount("#riftbound:view=catalog", props());
+    try {
+      await settle();
+      await popTo(back, decksHash);
+      await loaded(catalogLoaded);
+      expect(catalogLoaded()).toBe(true);
+      expect(decksContent()).toBeNull();
+    } finally {
+      await back.unmount();
+    }
+  });
+  it("keeps Decks when both adapters are supplied", async () => {
+    const m = await mount(decksHash, withDecks());
+    try {
+      await settle();
+      expect(decksContent()).not.toBeNull();
+      await popTo(m, "#riftbound:view=catalog");
+      await popTo(m, decksHash);
+      await settle();
+      expect(decksContent()).not.toBeNull();
+    } finally {
+      await m.unmount();
+    }
+  });
+});
+
+describe("the Decks controls follow the same adapters as the route", () => {
+  const decksButtons = () =>
+    ["Main navigation", "Mobile navigation"].map((name) =>
+      [...document.querySelectorAll(`nav[aria-label="${name}"] button`)].some(
+        (b) => b.textContent?.trim() === "Decks"
+      )
+    );
+  it("offers no Decks control with a Decks adapter but no Collection adapter", async () => {
+    const m = await mount("#riftbound:view=catalog", {
+      reader: fixtureReader(),
+      decks: deckFixture("a", "normal", "normal"),
+    });
+    try {
+      await settle();
+      expect(decksButtons()).toEqual([false, false]);
+    } finally {
+      await m.unmount();
+    }
+  });
+  it("offers no Decks control without a Decks adapter", async () => {
+    const m = await mount("#riftbound:view=catalog", {
+      reader: fixtureReader(),
+      collection: collectionFixtureReader("a"),
+    });
+    try {
+      await settle();
+      expect(decksButtons()).toEqual([false, false]);
+    } finally {
+      await m.unmount();
+    }
+  });
+  it("offers the Decks controls, desktop and mobile, when both adapters are supplied", async () => {
+    const m = await mount("#riftbound:view=catalog", {
+      reader: fixtureReader(),
+      collection: collectionFixtureReader("a"),
+      decks: deckFixture("a", "normal", "normal"),
+    });
+    try {
+      await settle();
+      expect(decksButtons()).toEqual([true, true]);
     } finally {
       await m.unmount();
     }

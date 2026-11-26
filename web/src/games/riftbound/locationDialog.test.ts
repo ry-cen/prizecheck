@@ -1567,3 +1567,23 @@ describe("what the alert says in each state", () => {
     }
   });
 });
+it("does not claim a Location refresh when the refusal reload fails", async () => {
+  const f = await mount();
+  try {
+    f.create.mockRejectedValue(new CollectionError("LOCATION_NOT_FOUND"));
+    vi.spyOn(f.reader, "locations").mockRejectedValue(new Error("offline"));
+    await act(async () => {
+      f.submit();
+      await vi.runAllTimersAsync();
+    });
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+      LOCATION_RELOAD_FAILED_MESSAGE
+    );
+    expect(document.body.textContent).not.toContain(
+      "The list has been refreshed"
+    );
+    expect(f.confirmed).not.toHaveBeenCalled();
+  } finally {
+    await f.cleanup();
+  }
+});

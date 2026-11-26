@@ -166,6 +166,7 @@ export function LocationWriteDialog({
     if (alert && box && (!active || !box.contains(active) || active === box))
       alert.focus();
   }, [settled]);
+  const deck = node?.kind === "deck";
   const unsorted = node?.name === "Unsorted" && node.parent_id === null;
   const parent = nodes.find((n) => n.id === parentId);
   const stocked =
@@ -374,7 +375,9 @@ export function LocationWriteDialog({
       onClose={onClose}
       returnFocus={returnFocus}
     >
-      {unsorted ? (
+      {deck ? (
+        <p>Manage this Deck from Decks.</p>
+      ) : unsorted ? (
         <p>Unsorted's Locations can't be changed here.</p>
       ) : !create && !node ? (
         <div className="flex flex-col gap-2">
@@ -390,7 +393,11 @@ export function LocationWriteDialog({
             </p>
           )}
           {nodes
-            .filter((n) => !(n.name === "Unsorted" && n.parent_id === null))
+            .filter(
+              (n) =>
+                n.kind !== "deck" &&
+                !(n.name === "Unsorted" && n.parent_id === null)
+            )
             .map((n) => (
               <Button
                 key={n.id}
